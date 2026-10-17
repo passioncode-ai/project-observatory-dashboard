@@ -28,17 +28,22 @@ counted, never guessed onto an agent whose name looks similar. A port two descri
 ambiguous: its declarations are attributed to neither, counted, and named in `degraded`.
 
 WHAT IS NEVER WRITTEN. Nothing of `auth`: not the token, not where the token file lives — the
-location is not a fact about the agent and the file is a credential. Every string the document
-carries passes ONE sanitiser (`_text`): any URL in it — with `//`, one slash, a backslash or none,
-since a browser finds the user-info in each — loses its user-info, query, `;params` and fragment,
-as `scan_mcp.safe_url` does for MCP targets, and the row's `key_in_url` says the origin or the
-repository had one. `problems()` refuses the same token shape, so a harmless `?lang=en` in a
-summary is rewritten rather than left to turn the validator red and stop the tick. The emit runs
-the sanitiser again over the whole document, so a scan written by an older collector is cleaned too.
-Values a descriptor quotes back into a problem are dropped, not echoed. Commands are listed by
-name (`doctor`, `update`), never their argument vectors. A path under the home directory is
-written `~/…` wherever it occurs in a string (either separator, so a Windows home too). Every string is bounded and encodable
-as UTF-8. No process id and no instant: the document changes when the estate changes, not on
+location is not a fact about the agent and the file is a credential.
+
+URLS FAIL CLOSED; NOTHING IS HALF-CLEANED. Three rounds of review found a credential that a URL
+parser missed, so no URL is parsed and repaired. `origin` and `source.repository` are kept only when
+they are strictly `scheme://host[:port][/path]` (`strict_url`: no `@ ? # ; \\`, exactly two
+slashes, a known scheme, a port in 1..65535); anything else is null, `key_in_url` says whether it
+carried `@` or `?`, and `degraded` says "origin unreadable" without the value. Host, port and the
+MCP join come only from that parse. Every other string (`_text`) is bounded, NFC-normalised, its
+home directory written `~` (a whole path segment, either separator, case-insensitive on macOS and
+Windows), then split on whitespace: a token that is a strict URL is kept, a token with `@`, with
+`:/` or `:\\`, or with `?` or `#` after a `scheme:` is replaced WHOLE by `[url]`, and every other
+token is kept. The sanitiser is a fixed point, and `problems()` applies the same rule, so it can
+only fire on a document the sanitiser never touched; the emit runs it over the whole document, so
+a scan written by an older collector is cleaned too. A problem's text stops at its first quote and
+a command key it names is dropped. Commands are listed by name (`doctor`, `update`), never their
+argument vectors. No regular expression here can backtrack over unbounded input. No process id and no instant: the document changes when the estate changes, not on
 every tick, so the registry is not committed every thirty minutes for nothing.
 
 WHAT IS NEVER TRUSTED. A descriptor or manifest is opened without blocking, must be a regular
@@ -77,6 +82,7 @@ It starts nothing and signals nothing: `launchctl list` is the only command, run
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import os
 import pathlib
@@ -84,8 +90,10 @@ import re
 import stat
 import subprocess
 import sys
+import hashlib
+import string
+import unicodedata
 from datetime import datetime, timezone
-from urllib.parse import urlsplit, urlunsplit
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -98,7 +106,7 @@ MCP_SOURCE_ID = "SRC-0017"
 LAUNCHD_ENV = "OBSERVATORY_AGENTS_LAUNCHD"
 SUPERVISOR_STATES = ("running", "loaded", "not-loaded", "not-measured", "platform", "unsupervised")
 MANIFEST_STATES = ("pinned", "absent", "unreadable")
-LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+LOOPBACK = {"127.0.0.1", "localhost", "[::1]"}
 #: A scan older than this is stale: the tick's interval (1800 s) plus its own ceiling (1500 s),
 #: so a collector that ran in the previous tick is still fresh at the end of this one.
 STALE_SECONDS = 1800 + 1500
@@ -114,33 +122,60 @@ _ID = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _INSTANCE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 #: `agent:<id>.<instance>`, or `agent:file:<name>` for a descriptor whose own id is unusable.
 AGENT_ID = re.compile(r"^agent:([a-z][a-z0-9-]{1,62}\.[a-z][a-z0-9-]{0,31}|file:[A-Za-z0-9._-]{1,160})$")
-#: A URL-shaped token: a scheme of two or more characters (so `C:\…` is a drive, not a scheme),
-#: then anything up to whitespace or a quote.
-_TOKEN = re.compile(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]+):([^\s'\"<>]*)")
-#: After the scheme: an authority (`//` with either slash), or user-info with no slashes at all —
-#: `https:u:S@h/`, `http:/u:S@h/` and `http:\\u:S@h/` all reach a host in a WHATWG parser.
-_AUTHORITY = re.compile(r"^[\\/]{2}|^[\\/]*[^\s/\\?#@]*@")
-_QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
-#: `fabric_service.validate_descriptor` names a command key unquoted; the key is the descriptor's.
-_COMMAND_NAME = re.compile(r"\b(unknown command|command) \S+")
+#: THE ONE URL SHAPE THIS DOCUMENT KEEPS: `scheme://host[:port][/path]` and nothing else — no
+#: user-info, query, fragment, `;params`, backslash, or any count of slashes but two. Each class
+#: excludes the character that ends it, so `fullmatch` never backtracks.
+_STRICT_URL = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)"
+                         r"(?::([0-9]{1,5}))?(/[^\s@?#;\\]*)?")
+ORIGIN_SCHEMES = frozenset({"http", "https", "ws", "wss"})
+REPOSITORY_SCHEMES = frozenset({"http", "https", "ssh", "git"})
+TEXT_SCHEMES = ORIGIN_SCHEMES | REPOSITORY_SCHEMES
+_SCHEME_CHARS = frozenset(string.ascii_letters + string.digits + "+.-")
+_WHITESPACE = re.compile(r"(\s+)")
+#: A string holding none of these cannot carry a URL-shaped token (`_fix`'s fast path).
+_URL_CHARS = re.compile(r"[:@?#\\]")
+#: What replaces a URL-shaped token that is not a strict URL: the whole token, never a part of it.
+URL_MARK = "[url]"
+
+
+class StrictURL:
+    __slots__ = ("scheme", "host", "port", "path")
+
+    def __init__(self, scheme: str, host: str, port: int | None, path: str):
+        self.scheme, self.host, self.port, self.path = scheme, host, port, path
+
+    @property
+    def text(self) -> str:
+        return f"{self.scheme}://{self.host}" + (f":{self.port}" if self.port else "") + self.path
 
 
 # --- small helpers -------------------------------------------------------------
 
 def _home() -> str:
-    return str(pathlib.Path.home()).rstrip("/\\")
+    return unicodedata.normalize("NFC", str(pathlib.Path.home())).rstrip("/\\")
 
 
-def _home_pattern() -> re.Pattern:
-    """The home directory wherever it appears: as a prefix, mid-string, or at the end."""
-    return re.compile(re.escape(_home()) + r"(?=[/\\]|$|[\s'\"])")
+def _home_pattern() -> re.Pattern | None:
+    """The home directory as a whole path segment: after the start, whitespace, a quote, `=`, `:`
+    or `(`; before anything but a name character; either separator; case-insensitive where the
+    file system is (macOS, Windows). A literal with fixed-width boundaries: no backtracking."""
+    home = _home()
+    return _home_regex(home, sys.platform) if home else None
+
+
+@functools.lru_cache(maxsize=8)
+def _home_regex(home: str, platform: str) -> re.Pattern:
+    body = r"[/\\]".join(re.escape(part) for part in re.split(r"[/\\]", home))
+    flags = re.IGNORECASE if platform in ("darwin", "win32") else 0
+    return re.compile(r"(?:^|(?<=[\s'\"=:(]))" + body + r"(?![A-Za-z0-9_.-])", flags)
 
 
 def tilde(value):
-    """A string with the home directory written `~` wherever it occurs, either separator."""
-    if not isinstance(value, str) or not _home():
+    """A string with the home directory written `~` wherever `_home_pattern` finds it."""
+    if not isinstance(value, str):
         return value
-    return _home_pattern().sub("~", value)
+    home = _home_pattern()
+    return home.sub("~", value) if home else value
 
 
 def _clean(value: str) -> str:
@@ -148,81 +183,95 @@ def _clean(value: str) -> str:
     return value.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
-def _normal_url(url: str) -> str:
-    """`scheme:<anything>` as `scheme://<authority>…`: backslashes become slashes and a missing or
-    single slash is made double, so `urlsplit` sees the authority a browser would."""
-    scheme, _, rest = url.partition(":")
-    rest = rest.replace("\\", "/")
-    if rest.startswith("//"):
-        return f"{scheme}:{rest}"                       # already an authority; `file:///…` stays a path
-    return f"{scheme}://{rest.lstrip('/')}"
-
-
-def safe_url(url: str) -> tuple[str, bool]:
-    """(url without user-info, query, `;params` and fragment, whether user-info or a query was
-    there) — `scan_mcp.safe_url`'s rule, after `_normal_url`, with the host lowercased so an
-    uppercase origin still joins."""
-    if ":" in url and _AUTHORITY.match(url.partition(":")[2]):
-        url = _normal_url(url)
-    try:
-        s = urlsplit(url)
-        host = s.hostname or ""                         # `hostname` is already lowercase
-    except ValueError:
-        scheme = url.split(":", 1)[0] if ":" in url else ""
-        return (scheme + "://…" if scheme.isalpha() else "…"), True
-    port = _port(s)
-    netloc = f"[{host}]" if ":" in host else host
-    if port:
-        netloc += f":{port}"
-    keyed = bool(s.query) or s.username is not None or s.password is not None
-    return urlunsplit((s.scheme.lower(), netloc, s.path.split(";", 1)[0], "", "")), keyed
-
-
-def _port(parts) -> int | None:
-    """The URL's port, or None when it has none or an unusable one. `urlsplit().port` raises
-    ValueError above 65535 and returns 0 for `:0`; neither is a port anything answers on, and
-    neither is a credential, so the port is dropped and the URL is not counted as keyed."""
-    try:
-        port = parts.port
-    except ValueError:
+def strict_url(value, schemes=TEXT_SCHEMES) -> StrictURL | None:
+    """The strict parse, or None. Refused whole: any of `@ ? # ; \\`, a scheme outside `schemes`,
+    a count of slashes other than two, anything after the host but `:port` and a `/path`, and a
+    port outside 1..65535. The scheme and host come back lowercase."""
+    if not isinstance(value, str):
         return None
-    return port or None
+    m = _STRICT_URL.fullmatch(value)            # its classes exclude `@ ? # ; \\` and whitespace
+    if not m or m.group(1).lower() not in schemes:
+        return None
+    port = int(m.group(3)) if m.group(3) else None
+    if port is not None and not 1 <= port <= 65535:
+        return None
+    return StrictURL(m.group(1).lower(), m.group(2).lower(), port, m.group(4) or "")
 
 
-def _url_tokens(text: str):
-    """Each URL-shaped token in `text` that reaches an authority: (match, its safe form, keyed)."""
-    for m in _TOKEN.finditer(text):
-        if _AUTHORITY.match(m.group(2)):
-            shown, keyed = safe_url(m.group(0))
-            yield m, shown, keyed
+def _suspect(token: str) -> bool:
+    """A token that is URL-shaped but not a strict URL: `@` anywhere; `:/` or `:\\`; or `?` or `#`
+    after a `scheme:` (a run of `[A-Za-z0-9+.-]` holding a letter, then `:`). One linear pass."""
+    if "@" in token or ":/" in token or ":\\" in token:
+        return True
+    letter = scheme = False
+    for c in token:
+        if c in "?#":
+            if scheme:
+                return True
+            letter = False
+        elif c == ":":
+            scheme = scheme or letter
+            letter = False
+        elif c in _SCHEME_CHARS:
+            letter = letter or c.isalpha()
+        else:
+            letter = False
+    return False
 
 
-def _scrub(text: str) -> str:
-    """Every URL in `text` made safe; every other character kept."""
-    out, last = [], 0
-    for m, shown, _keyed in _url_tokens(text):
-        out.append(text[last:m.start()])
-        out.append(shown)
-        last = m.end()
-    out.append(text[last:])
-    return "".join(out)
+def _token(token: str) -> str:
+    """A whitespace-free token: kept, kept as its strict URL, or replaced whole by `[url]`."""
+    url = strict_url(token)
+    if url is not None:
+        return url.text
+    return URL_MARK if _suspect(token) else token
+
+
+def _fix(value: str) -> str:
+    """NFC, the home directory as `~`, then every token through `_token`. A fixed point: applying
+    it to its own output changes nothing, which is what lets `problems()` use it as its rule."""
+    if value.isascii() and not _URL_CHARS.search(value):
+        return tilde(value)                     # no `: @ ? # \\`: no token can be URL-shaped
+    value = unicodedata.normalize("NFC", _clean(value))
+    value = tilde(value)
+    parts = _WHITESPACE.split(value)
+    return "".join(_token(part) if i % 2 == 0 else part for i, part in enumerate(parts))
 
 
 def _text(value, limit: str = "default") -> str | None:
-    """THE one sanitiser for every string this document carries: UTF-8-safe, every URL without
-    user-info, query or params, the home directory written `~` wherever it occurs, then bounded.
-    None for anything that is not a string."""
+    """THE one sanitiser for every string this document carries: bounded first (`4 × limit`), then
+    `_fix`, then cut to the limit and fixed again (a cut can leave half a URL, which the second pass
+    replaces whole). None for anything that is not a string."""
     if not isinstance(value, str):
         return None
     cap = LIMITS[limit]
-    value = tilde(_scrub(_clean(value)))
-    return value if len(value) <= cap else value[:cap - 1] + "…"
+    if len(value) > 4 * cap:
+        # The first bound may cut a token in half, and half a keyed token (`u:SECR` of `u:SECRET@h`)
+        # no longer looks keyed: the partial last token goes, never a piece of it.
+        head = value[:4 * cap]
+        ws = max(head.rfind(c) for c in " \t\n\r\f\v")
+        value = (head[:ws].rstrip() + " …") if ws > 0 else "…"
+    value = _fix(value)
+    for _ in range(8):
+        if len(value) <= cap:
+            return value
+        value = _fix(value[:cap - 1] + "…")
+    return "…"
 
 
 def _safe_problem(text) -> str:
-    """A problem's message without the values it quoted back (or a command key it names bare)."""
-    text = _QUOTED.sub("…", _clean(str(text)))
-    return _text(_COMMAND_NAME.sub(lambda m: m.group(1) + " …", text), "problem")
+    """A problem's message without what it quotes back: the text stops at the first quote, and a
+    command key `fabric_service.validate_descriptor` names bare is dropped. String operations only."""
+    text = str(text)[:4 * LIMITS["problem"]]
+    for prefix in ("unknown command ", "command "):
+        if text.startswith(prefix):
+            _key, sep, tail = text[len(prefix):].rpartition(" must ")
+            text = prefix + "…" + (sep + tail if sep else "")
+            break
+    cuts = [i for i in (text.find("'"), text.find('"')) if i >= 0]
+    if cuts:
+        text = text[:min(cuts)].rstrip() + " …"
+    return _text(text, "problem")
 
 
 def _sanitise(node):
@@ -247,8 +296,25 @@ def _is_file(path: pathlib.Path) -> bool:
         return False
 
 
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
 def _day(scanned_at) -> str | None:
-    return scanned_at[:10] if isinstance(scanned_at, str) and len(scanned_at) >= 10 else None
+    """`YYYY-MM-DD` of a scan instant, or None when it does not start with a date."""
+    day = scanned_at[:10] if isinstance(scanned_at, str) else ""
+    return day if _DATE.fullmatch(day) else None
+
+
+DEGRADED_SOURCES = ("fabric-services", "fabric-manifest", "launchd", "mcp-inventory")
+
+
+def _degraded_entry(d: dict) -> dict:
+    """A degraded line in the schema's shape, whatever an older scan wrote."""
+    entry = {"source": d.get("source") if d.get("source") in DEGRADED_SOURCES else "fabric-services",
+             "reason": d.get("reason") if isinstance(d.get("reason"), str) else "an unreadable degraded line"}
+    if isinstance(d.get("agent"), str) and AGENT_ID.match(d["agent"]):
+        entry["agent"] = d["agent"]
+    return entry
 
 
 def _instant(scanned_at) -> datetime | None:
@@ -321,16 +387,16 @@ def read_launchd() -> dict[str, dict] | None:
 
 # --- one descriptor --------------------------------------------------------------
 
-def _origin(origin) -> tuple[str | None, str | None, int | None, bool]:
-    """(safe origin, lowercase host, port, key_in_url). A port outside 1..65535 is None."""
-    if not isinstance(origin, str):
-        return None, None, None, False
-    shown, keyed = safe_url(origin)
-    try:
-        parts = urlsplit(_normal_url(origin) if ":" in origin else origin)
-    except ValueError:
-        return _text(shown), None, None, keyed
-    return _text(shown), _text(parts.hostname or None), _port(parts), keyed
+def _strict_field(value, schemes) -> tuple[StrictURL | None, bool, bool]:
+    """(the strict parse, key_in_url, refused). Refused when a value is there and is not a strict
+    URL; then nothing of it is kept, and key_in_url says it carried `@` (user-info) or `?`."""
+    if value is None:
+        return None, False, False
+    url = strict_url(unicodedata.normalize("NFC", value), schemes) if isinstance(value, str) else None
+    if url is not None:
+        return url, False, False
+    keyed = isinstance(value, str) and ("@" in value or "?" in value)
+    return None, keyed, True
 
 
 def _manifest(declared, degraded: list, agent_id: str) -> dict:
@@ -388,7 +454,14 @@ def _supervisor(life, placement: str, launchd: dict | None, launchd_state: str) 
 
 
 def _file_id(name: str) -> str:
-    return "agent:file:" + (re.sub(r"[^A-Za-z0-9._-]+", "-", pathlib.Path(name).stem)[:160] or "unnamed")
+    """`agent:file:<stem>`; a stem that had to be rewritten or cut gets a short hash of the original
+    name, so `my agent.json`, `my-agent.json` and `my+agent.json` stay three rows."""
+    stem = pathlib.Path(name).stem
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", stem)
+    if safe == stem and 0 < len(safe) <= 160:
+        return "agent:file:" + safe
+    digest = hashlib.sha256(name.encode("utf-8", "surrogateescape")).hexdigest()[:8]
+    return "agent:file:" + (safe[:150] or "unnamed") + "-" + digest
 
 
 def _row(path: pathlib.Path, doc: dict, launchd: dict | None, launchd_state: str,
@@ -406,19 +479,27 @@ def _row(path: pathlib.Path, doc: dict, launchd: dict | None, launchd_state: str
     if len(raw) > MAX_PROBLEMS:
         problems.append(f"and {len(raw) - MAX_PROBLEMS} more")
     placement = "remote" if doc.get("placement") == "remote" else "local"
-    origin, host, port, origin_keyed = _origin(doc.get("origin"))
+    origin, origin_keyed, origin_refused = _strict_field(doc.get("origin"), ORIGIN_SCHEMES)
+    if origin_refused:
+        degraded.append({"source": "fabric-services", "agent": agent_id,
+                         "reason": "origin unreadable — not a strict scheme://host[:port] URL; nothing of it "
+                                   "is kept"})
     source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
-    repository, repo_keyed = (safe_url(source["repository"]) if isinstance(source.get("repository"), str)
-                              else (None, False))
+    repository, repo_keyed, repo_refused = _strict_field(source.get("repository"), REPOSITORY_SCHEMES)
+    if repo_refused:
+        degraded.append({"source": "fabric-services", "agent": agent_id,
+                         "reason": "source repository unreadable — not a strict scheme://host[:port]/path "
+                                   "URL; nothing of it is kept"})
     commands = doc.get("commands") if isinstance(doc.get("commands"), dict) else {}
     return {"id": agent_id, "service_id": service_id, "instance": instance,
             "name": _text(doc.get("name"), "name"),
             "summary": _text(doc.get("summary"), "summary"),
-            "placement": placement, "origin": origin, "host": host, "port": port,
+            "placement": placement, "origin": origin.text if origin else None,
+            "host": origin.host if origin else None, "port": origin.port if origin else None,
             "protocol": _text(doc.get("protocol")),
             "descriptor": _text(path.name, "file"),
             "installed_at": _text(doc.get("installedAt")),
-            "source_repository": _text(repository),
+            "source_repository": repository.text if repository else None,
             "key_in_url": bool(origin_keyed or repo_keyed),
             "commands": sorted(k for k in commands if k in ("doctor", "update")),
             "supervisor": _supervisor(doc.get("lifecycle"), placement, launchd, launchd_state),
@@ -543,18 +624,11 @@ def collect(directory: pathlib.Path, *, launchd: dict | None = None, platform: s
 
 def _mcp_key(target) -> tuple[str, int] | None:
     """(host, port) an HTTP(S) declaration reaches; None for anything else (a command basename)."""
-    if not isinstance(target, str):
+    url = strict_url(target, {"http", "https"})
+    if url is None:
         return None
-    try:
-        parts = urlsplit(target)
-    except ValueError:
-        return None
-    port = _port(parts)
-    host = parts.hostname or ""                         # already lowercase
-    if not host or parts.scheme.lower() not in ("http", "https"):
-        return None
-    port = port or (443 if parts.scheme.lower() == "https" else 80)
-    return ("loopback" if host in LOOPBACK else host), port
+    port = url.port or (443 if url.scheme == "https" else 80)
+    return ("loopback" if url.host in LOOPBACK else url.host), port
 
 
 def _agent_key(row: dict) -> tuple[str, int] | None:
@@ -613,8 +687,18 @@ def _join_mcp(rows: list[dict], mcp_scan: dict | None, degraded: list) -> dict |
 def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date: str,
              now: datetime | None = None) -> dict:
     """`registry/agents.json` from the collector's scan, the MCP inventory and the last document."""
+    if not isinstance(scan, dict):
+        raise TypeError("the agents scan is not a JSON object")
     now = now or datetime.now(timezone.utc)
-    degraded = [dict(d) for d in scan.get("degraded") or []]
+    degraded = [_degraded_entry(d) for d in scan.get("degraded") or [] if isinstance(d, dict)]
+    if previous is not None and not isinstance(previous, dict):
+        degraded.append({"source": "fabric-services",
+                         "reason": "the previous agents document is not a JSON object; first-seen dates "
+                                   "start again from this scan"})
+        previous = None
+    if mcp_scan is not None and not isinstance(mcp_scan, dict):
+        degraded.append({"source": "mcp-inventory", "reason": "store/raw/mcp.json is not a JSON object"})
+        mcp_scan = None
     scan_day = _day(scan.get("scanned_at")) or obs_date
     scanned = _instant(scan.get("scanned_at"))
     skew = scanned is not None and (scanned - now).total_seconds() > CLOCK_SKEW_SECONDS
@@ -628,7 +712,8 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
                          "reason": _text(f"the agents scan is from {scan.get('scanned_at') or 'an unknown time'}, "
                                          f"older than one tick; nothing in this document is dated after it",
                                          "problem")})
-    previous_rows = {r.get("id"): r for r in (previous or {}).get("agents") or [] if isinstance(r, dict)}
+    previous_rows = {r["id"]: r for r in (previous or {}).get("agents") or []
+                     if isinstance(r, dict) and isinstance(r.get("id"), str) and AGENT_ID.match(r["id"])}
     dir_state = ((scan.get("sources") or {}).get("fabric_services") or {}).get("state")
     if dir_state == "unreadable":
         rows = []
@@ -641,6 +726,10 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
     else:
         rows = []
         for r in scan.get("services") or []:
+            if not isinstance(r, dict) or not isinstance(r.get("id"), str) or not AGENT_ID.match(r["id"]):
+                degraded.append({"source": "fabric-services",
+                                 "reason": "a scan row without a valid agent id was dropped"})
+                continue
             row = copy.deepcopy(r)
             row["carried"] = False
             before = previous_rows.get(row["id"]) or {}
@@ -742,12 +831,25 @@ def problems(doc) -> list[str]:
                             ("provider_revision", int), ("path", str)):
             if field in manifest and (not isinstance(manifest[field], kind) or isinstance(manifest[field], bool)):
                 out.append(f"{rid} manifest.{field} is not a {kind.__name__}")
-    strings = list(_strings(doc))
-    home = _home_pattern() if _home() else None
-    if home and any(home.search(s) for s in strings):
+    scanned_on = doc.get("scanned_on")
+    if scanned_on is not None and not (isinstance(scanned_on, str) and _DATE.fullmatch(scanned_on)):
+        out.append("agents.json scanned_on is not a YYYY-MM-DD date")
+    if any(not (isinstance(r, str) and AGENT_ID.match(r)) for r in doc.get("removed") or []):
+        out.append("agents.json removed holds something that is not an agent id")
+    if any(not isinstance(d, dict) or d.get("source") not in DEGRADED_SOURCES or not isinstance(d.get("reason"), str)
+           for d in doc.get("degraded") or []):
+        out.append("agents.json degraded holds a line without a known source and a text reason")
+    # THE SANITISER'S OWN RULE: a string `_fix` would change is one it never touched. Sanitised
+    # output is a fixed point of `_fix`, so these can only fire on a document that bypassed it.
+    dirty = [s for s in _strings(doc) if _fix(s) != s]
+    home = _home_pattern()
+    if home and any(home.search(s) for s in dirty):
         out.append("agents.json holds an absolute home path; paths under home are written ~/")
-    if any(keyed for s in strings for _m, _shown, keyed in _url_tokens(s)):
-        out.append("agents.json holds a URL with user-info or a query: a credential's shape, never kept")
+    if any(_token(t) != t for s in dirty for t in _WHITESPACE.split(s)):
+        out.append("agents.json holds a URL-shaped token the sanitiser replaces (user-info or a query: a "
+                   "credential's shape), never kept")
+    elif dirty and not (home and any(home.search(s) for s in dirty)):
+        out.append("agents.json holds text the sanitiser would change (unnormalised Unicode or an escape)")
     if (doc.get("totals") or {}).get("agents") != len(doc["agents"]):
         out.append("agents.json totals disagree with the list")
     if SOURCE_ID not in (doc.get("source_refs") or []):

@@ -226,8 +226,10 @@ wrote it; `scanned_on`, `first_seen_on` and `last_seen_running_on` are the scan'
 Rows kept from an unreadable services directory carry `carried_since` and are left out of the supervisor
 totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents claim), `unattributed_http`, `stdio`
 (declarations whose transport is stdio) and `other` (neither stdio nor an HTTP(S) origin, such as `ws://` or a
-malformed target). Every string passes one sanitiser: URLs in any slash form lose user-info, query, `;params`
-and fragment, and the home directory is written `~` wherever it occurs. A scan dated after the emit is stale
+malformed target). URLs fail closed: `origin` and `source_repository` are
+kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with "origin unreadable" in
+`degraded`); in every other string a URL-shaped token that is not strict (`@`, `:/`, `:\`, or `?`/`#` after a
+`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. A scan dated after the emit is stale
 (`clock-skew` in `degraded`). The wiki projection
 mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.
