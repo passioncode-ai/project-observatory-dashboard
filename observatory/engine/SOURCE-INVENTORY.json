@@ -127,8 +127,8 @@
     {
       "path": "collectors/emit_registry.py",
       "source_sha256": "ff8edc591196dd1278b0766ea8216973f5cc3951ff702b417bdb053305e8170d",
-      "export_sha256": "1a51b4e2390017bfec5d14a59ceca307cbda5e4b23bb9f5c156e896f712320d4",
-      "bytes": 58137,
+      "export_sha256": "01f3cf4c1f78f0c6b70f24c9e96b311f1125c237b17442ccba9c5ca4ff3f2bc4",
+      "bytes": 58337,
       "python_comments_removed": 213,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "33098305d25ae79fcb44cfa09726262c7ccbf6b16db00fb7f9b27406366b548b",
-      "bytes": 37713
+      "export_sha256": "a934cdaa18690ec05099763b9d0a64a607ee90cbc9ca93c79a1fab7b6da6aae2",
+      "bytes": 43703
     },
     {
       "path": "collectors/scan_bitbucket.py",
@@ -828,22 +828,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "6b73eb1156c68336dca9a0fc8b1d954c44439e8528808642fc6e56b8dea138e0",
-      "bytes": 23110,
+      "export_sha256": "f620b2e962f9e8f2085a3b383c0471653fc41ad66db06292bdaac46ad8c1cfd8",
+      "bytes": 23320,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "53f94840142626f6e170487fd4b2f91ed942c6343c59201e53d180584d073a75",
-      "bytes": 104576,
+      "export_sha256": "8a65e5d61f011eb3447a3c87996e3082e0572c0b9d458892cf196800cc428bc1",
+      "bytes": 104704,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "1a81c757d04e41b6b2b7b485190d39e929ec115a0067bc9d29856a93b8a4157c",
-      "bytes": 85796,
+      "export_sha256": "353e222d50504b13b647b99491ed5e162326ac63a0a305bc6e616f02a586c0c0",
+      "bytes": 86105,
       "upstream_modified": true
     },
     {
@@ -3723,8 +3723,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56d4c6b4bb9e500dca46d896f8abefec539b19c67006b6828cccc31b1fce25aa",
-      "bytes": 52215
+      "export_sha256": "d3e500e083dfb46440a3fd90e28d0410fabf78c0c329373f7cfe2524e3979dc5",
+      "bytes": 66483
     },
     {
       "path": "tests/test_scan_ids.py",

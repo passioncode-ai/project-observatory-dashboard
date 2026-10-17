@@ -510,18 +510,19 @@ AGENTS_SRC = paths.SCRATCH / "agents.json"
 if AGENTS_SRC.is_file():
     import scan_agents
     try:
-        _ascan = json.loads(AGENTS_SRC.read_text(encoding="utf-8"))
+        _ascan = json.loads(AGENTS_SRC.read_text(encoding="utf-8"))  # not an object: document() refuses it
         _amcp = json.loads(MCP_SRC.read_text(encoding="utf-8")) if MCP_SRC.is_file() else None
-    except (OSError, ValueError) as _aexc:
-        # The registry keeps its last good document; a scan this cannot read is said, not guessed.
-        print(f"  degraded agents.json: the scan could not be read ({type(_aexc).__name__}); "
-              f"registry/agents.json keeps its last version")
-    else:
         try:
             _aprev = json.loads((INV / "agents.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             _aprev = None
         _adoc = scan_agents.document(_ascan, _amcp, _aprev, OBS)
+    except Exception as _aexc:                                         # noqa: BLE001 — never the tick
+        # The registry keeps its last good document; a scan this cannot read is said, not guessed,
+        # and an emit that stopped here would stop the whole tick (validate, findings, the page).
+        print(f"  degraded agents.json: the scan could not be used ({type(_aexc).__name__}); "
+              f"registry/agents.json keeps its last version")
+    else:
         _stamped("agents.json", _adoc)
         _at = _adoc["totals"]
         print(f"agents.json: {_at['agents']} agent(s), {_at['local']} local, {_at['remote']} remote, "

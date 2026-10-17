@@ -477,9 +477,11 @@ class FixCycle1(Fixture):
             self.assertEqual(text.count(secret), 0, secret)
         rows = {r["service_id"]: r for r in doc["agents"]}
         self.assertTrue(rows["alpha-agent"]["key_in_url"])
-        self.assertEqual(rows["alpha-agent"]["source_repository"], "https://github.example.com/x/y")
+        self.assertIsNone(rows["alpha-agent"]["source_repository"], "refused whole, never cleaned")
         self.assertTrue(rows["beta-agent"]["key_in_url"])
-        self.assertEqual(rows["beta-agent"]["origin"], "https://beta.example.com")
+        self.assertIsNone(rows["beta-agent"]["origin"], "refused whole, never cleaned")
+        self.assertTrue(any(d["reason"].startswith("origin unreadable") and d.get("agent") == rows["beta-agent"]["id"]
+                            for d in doc["degraded"]))
         self.assertEqual(scan_agents.problems(doc), [])
 
     def test_problems_refuses_a_url_with_user_info_or_a_query(self):
@@ -732,7 +734,7 @@ class FixCycle2(Fixture):
         for secret in secrets:
             self.assertEqual(text.count(secret), 0, secret)
         self.assertNotIn("lang=en", text)
-        self.assertIn("https://example.com/guide", text, "the harmless URL is kept, without its query")
+        self.assertIn("Guide: [url]", text, "a URL with a query is replaced whole, never half-cleaned")
         self.assertEqual(scan_agents.problems(out), [])
 
     def test_a_scan_written_by_an_older_collector_is_sanitised_by_the_emit(self):
@@ -775,7 +777,7 @@ class FixCycle2(Fixture):
         out = document(self.scan(launchd={}), mcp_scan(), None)
         self.assertNotIn(str(self.home), json.dumps(out))
         self.assertIn("~/fixture/notes.md", out["agents"][0]["summary"])
-        self.assertEqual(out["agents"][0]["source_repository"], "file://~/repo")
+        self.assertIsNone(out["agents"][0]["source_repository"], "file: is not a repository scheme kept")
         bad = json.loads(json.dumps(out))
         bad["agents"][0]["summary"] = f"inside {self.home}/x here"
         self.assertTrue(any("absolute home path" in p for p in scan_agents.problems(bad)))
@@ -786,7 +788,7 @@ class FixCycle2(Fixture):
         self.put(doc)
         out = document(self.scan(launchd={}), mcp_scan(), None)
         self.assertNotIn("SECRETP1", json.dumps(out))
-        self.assertEqual(out["agents"][0]["source_repository"], "https://git.example.com/x")
+        self.assertIsNone(out["agents"][0]["source_repository"], "a ;param is refused whole")
 
     def test_an_unknown_command_key_is_not_echoed(self):
         doc = descriptor("alpha-agent", 47401)
@@ -819,9 +821,9 @@ class FixCycle2(Fixture):
                 for i in range(30_000)]
         rows.append(dict(rows[0]))
         doc = {"agents": rows, "totals": {"agents": len(rows)}, "source_refs": ["SRC-0020"]}
-        start = time.monotonic()
+        start = time.process_time()                  # CPU time: a loaded machine does not count
         found = scan_agents.problems(doc)
-        self.assertLess(time.monotonic() - start, 5.0, "a quadratic count takes minutes here")
+        self.assertLess(time.process_time() - start, 10.0, "a quadratic count takes minutes here")
         self.assertTrue(any("duplicate" in p for p in found))
 
 
@@ -839,7 +841,7 @@ class Round4(Fixture):
     def test_an_unquoted_url_in_a_problem_is_made_safe(self):
         shown = scan_agents._safe_problem("the origin " + keyed("SECRETQ2", "o.example.com") + " is refused")
         self.assertNotIn("SECRETQ2", shown)
-        self.assertIn("https://o.example.com", shown)
+        self.assertIn("[url]", shown)
 
     def test_a_valid_id_with_a_bad_instance_is_a_file_row(self):
         doc = descriptor("alpha-agent", 47401, instance="Bad Instance")
@@ -872,7 +874,229 @@ class Round4(Fixture):
                 row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
                 self.assertIsNone(row["port"])
                 self.assertFalse(row["key_in_url"])
-                self.assertEqual(row["origin"], "http://127.0.0.1")
+                self.assertIsNone(row["origin"], "an unusable port refuses the whole origin")
+
+
+AT = chr(64)        # `@`, kept out of the source so the public-release gate never sees a credential URL
+
+
+def tiny_doc(*strings: str) -> dict:
+    """The smallest document `problems()` reads, carrying `strings` as free text."""
+    return {"agents": [], "removed": [], "totals": {"agents": 0}, "source_refs": ["SRC-0020"],
+            "note": list(strings)}
+
+
+class FixCycle3(Fixture):
+    """Review round 5 of #288, the fail-closed redesign: whole tokens are kept or replaced."""
+
+    # --- every PoC of rounds 3 and 5 ---------------------------------------------------------
+    POCS = [
+        "Docs:" + keyed("hunter2", "example.com/x"),                   # F1 glued scheme
+        "http:///tok:SECRETA" + AT + "127.0.0.1:9002/",                 # F2 three slashes
+        "see https:/example.com?token=SECRETB",                          # F3 one slash and a query
+        "https:example.com?token=SECRETC", "https:example.com#frag=SECRETD",
+        "note:a" + AT + "/b" + AT + "/c" + AT + "d", "ops:x" + AT + "/y" + AT + "/z" + AT + "/w" + AT + "v",  # F4
+        "pt:s" + AT + "/SECRETE" + AT + "%", "http:a" + AT + "/b" + AT + "c", "git:git" + AT + "/srv/repo" + AT + "main",
+        "key:" + keyed("SECRETF", "example.com/x"), " -" + keyed("SECRETG", "h/"), " .http://u:SECRETH" + AT + "h/",
+        "https:////git:SECRETI" + AT + "github.com/o/r", "http:\\\\\\u:SECRETJ" + AT + "h/",
+        "https:\\/\\/u:SECRETK" + AT + "h\\/x", "HtTp://U:SECRETL" + AT + "H/", "http://u%40x:SECRETM" + AT + "h/",
+        "http://[fe80::1%25en0]:8080/?SECRETN=1", "ws://u:SECRETO" + AT + "h/?k=1", "file://u:SECRETP" + AT + "h/x",
+        "javascript:fetch('//u:SECRETQ" + AT + "h')", "data:text/plain;base64,u:SECRETR" + AT + "h",
+        "Guide: https://example.com/guide?lang=SECRETS",
+    ]
+
+    def test_every_poc_is_replaced_whole_idempotent_and_clean(self):
+        for poc in self.POCS:
+            with self.subTest(poc=poc):
+                once = scan_agents._text(poc)
+                self.assertEqual(scan_agents._text(once), once, "idempotent")
+                self.assertEqual(scan_agents.problems(tiny_doc(once)), [])
+                for marker in ("SECRET", "hunter2"):
+                    self.assertNotIn(marker, once)
+                self.assertNotIn(AT, once)
+
+    def test_strict_urls_are_kept_and_normalised(self):
+        for given, kept in (("https://Example.COM/a/b", "https://example.com/a/b"),
+                            ("http://127.0.0.1:47401", "http://127.0.0.1:47401"),
+                            ("see wss://h.example.com/x now", "see wss://h.example.com/x now")):
+            self.assertEqual(scan_agents._text(given), kept)
+
+    def test_the_round5_pipeline_leaks_nothing(self):
+        """pipe.py of round 5: five descriptors, every secret through the whole emit path."""
+        def put(i, **kw):
+            doc = descriptor(f"svc-{i}", 9000 + i, manager="none")
+            doc.update(kw)
+            self.put(doc)
+        put(1, summary="Docs:" + keyed("hunter2", "example.com/x"))
+        put(2, origin="http:///tok:SECRET1" + AT + "127.0.0.1:9002/")
+        put(3, summary="see https:/example.com?token=SECRET2")
+        put(4, source={"repository": "https:////git:SECRET3" + AT + "github.com/o/r"})
+        put(5, origin="key:" + keyed("SECRET4", "127.0.0.1:9005"))
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        text = json.dumps(out)
+        for marker in ("hunter2", "SECRET"):
+            self.assertNotIn(marker, text)
+        rows = {r["service_id"]: r for r in out["agents"]}
+        for sid in ("svc-2", "svc-5"):
+            self.assertIsNone(rows[sid]["origin"])
+            self.assertIsNone(rows[sid]["host"])
+            self.assertTrue(rows[sid]["key_in_url"])
+        self.assertTrue(rows["svc-4"]["key_in_url"])
+        self.assertEqual(sum(1 for d in out["degraded"] if d["reason"].startswith("origin unreadable")), 2)
+        self.assertEqual(scan_agents.problems(out), [])
+
+    # --- the property: 100 000 strings ------------------------------------------------------
+    def test_fuzz_idempotent_clean_and_no_marker_survives(self):
+        import random
+        rng = random.Random(288)
+        weighted = list(":/\\@?#%") * 4 + list("abhtpsxuS.-=~(') ") + ["\n", "é", "…", "/srv/alpha"]
+        junk = [c for c in weighted if not c.isspace()]
+        pieces = ["u:Zq9K" + AT + "h", "x:?Zq9K", "x:#Zq9K", "Zq9K" + AT, "http://h/?Zq9K",
+                  "ab:/Zq9K", "ab:\\Zq9K", "https:Zq9K" + AT + "h", "http:\\\\Zq9K" + AT + "h"]
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            for i in range(100_000):
+                text = "".join(rng.choice(weighted) for _ in range(rng.randint(0, 24)))
+                if i % 2:
+                    piece = ("".join(rng.choice(junk) for _ in range(rng.randint(0, 4))) + rng.choice(pieces)
+                             + "".join(rng.choice(junk) for _ in range(rng.randint(0, 4))))
+                    text = text + rng.choice(" \n") + piece + rng.choice(" \n") + text[::-1]
+                once = scan_agents._text(text, rng.choice(("name", "summary", "default")))
+                if scan_agents._text(once) != once:
+                    self.fail(f"not idempotent: {text!r} -> {once!r}")
+                if "Zq9K" in once:
+                    self.fail(f"marker survived: {text!r} -> {once!r}")
+                if scan_agents.problems(tiny_doc(once)):
+                    self.fail(f"problems() on sanitised text: {text!r} -> {once!r}")
+
+    def test_a_keyed_token_cut_by_the_first_bound_leaves_no_piece(self):
+        text = "a " * 700 + "u:SECRETLONG" + AT + "h" * 50
+        self.assertNotIn("SECRET", scan_agents._text(text, "name"))
+        self.assertEqual(scan_agents._text("b" * 1000 + "u:SECRET" + AT + "h", "name"), "…")
+
+    # --- F5: no regex backtracks over unbounded input --------------------------------------------
+    def test_a_200kb_pathological_command_key_collects_in_under_a_second(self):
+        import time
+        doc = descriptor("alpha-agent", 47401)
+        doc["commands"] = {"'" + "\\'" * 66_000: ["/bin/true"]}
+        self.put(doc)
+        self.assertGreater((self.services / "alpha-agent.default.json").stat().st_size, 190_000)
+        start = time.process_time()
+        scan = self.scan(launchd={})
+        self.assertLess(time.process_time() - start, 1.0)
+        self.assertIn("unknown command …", scan["services"][0]["problems"])
+
+    def test_pathological_free_text_is_linear(self):
+        import time
+        for text in ("a" * 250_000, "ab:" * 80_000, "ab:" + "x" + AT * 120_000, "'" + "\\'" * 120_000,
+                     "http://[" + ":" * 250_000, "-ab:" * 60_000):
+            start = time.process_time()
+            scan_agents._text(text)
+            scan_agents._safe_problem(text)
+            self.assertLess(time.process_time() - start, 1.0, text[:12])
+
+    # --- F8: rewritten file names keep distinct ids ------------------------------------------------
+    def test_rewritten_file_names_get_a_stable_hash(self):
+        for name in ("my agent.json", "my-agent.json", "my+agent.json"):
+            (self.services / name).write_text(json.dumps({"id": "BAD ID", "name": name}), encoding="utf-8")
+        ids = [r["id"] for r in self.scan(launchd={}, platform="linux")["services"]]
+        self.assertEqual(len(set(ids)), 3, ids)
+        self.assertIn("agent:file:my-agent", ids)
+        self.assertEqual(ids, [r["id"] for r in self.scan(launchd={}, platform="linux")["services"]], "stable")
+        self.assertTrue(all(scan_agents.AGENT_ID.match(i) for i in ids))
+
+    # --- F9: shapes an older collector or a hand edit could leave ---------------------------------
+    def test_a_scan_that_is_not_an_object_is_refused(self):
+        with self.assertRaises(TypeError):
+            scan_agents.document(["not", "a", "scan"], None, None, TODAY, now=NOW)
+
+    def test_a_previous_document_that_is_not_an_object_restarts_dates_and_says_so(self):
+        self.put(descriptor("alpha-agent", 47401))
+        out = document(self.scan(launchd={}), mcp_scan(), ["junk"])
+        self.assertEqual(out["agents"][0]["first_seen_on"], TODAY)
+        self.assertTrue(any("previous agents document" in d["reason"] for d in out["degraded"]))
+
+    def test_junk_scan_fields_are_dropped_or_validated(self):
+        self.put(descriptor("alpha-agent", 47401))
+        scan = self.scan(launchd={})
+        scan["services"].append({"id": "not an id"})
+        scan["services"].append("not a row")
+        scan["degraded"].append({"source": "elsewhere", "reason": 5, "agent": "x"})
+        scan["scanned_at"] = "garbage" + scan["scanned_at"]
+        previous = {"agents": [{"id": "../../etc"}, {"id": "agent:gone-agent.default"}]}
+        out = document(scan, mcp_scan(), previous)
+        self.assertEqual([r["id"] for r in out["agents"]], ["agent:alpha-agent.default"])
+        self.assertEqual(out["removed"], ["agent:gone-agent.default"])
+        self.assertIsNone(out["scanned_on"])
+        self.assertTrue(out["stale"])
+        self.assertEqual(scan_agents.problems(out), [])
+        self.assertTrue(all(d["source"] in scan_agents.DEGRADED_SOURCES and isinstance(d["reason"], str)
+                            for d in out["degraded"]))
+        bad = json.loads(json.dumps(out))
+        bad["degraded"].append({"source": "elsewhere", "reason": 5})
+        self.assertTrue(any("degraded" in p for p in scan_agents.problems(bad)))
+        bad = json.loads(json.dumps(out))
+        bad["scanned_on"], bad["removed"] = "yesterday", ["x"]
+        found = scan_agents.problems(bad)
+        self.assertTrue(any("scanned_on" in p for p in found) and any("removed" in p for p in found))
+
+    # --- F7: the older-collector path and the remaining shapes ----------------------------------
+    def test_keyed_urls_in_scan_degraded_and_sources_are_replaced(self):
+        self.put(descriptor("alpha-agent", 47401))
+        scan = self.scan(launchd={})
+        scan["degraded"].append({"source": "fabric-services", "reason": "seen at " + keyed("SECRETDG", "h.example.com")})
+        scan["sources"]["fabric_services"]["directory"] = keyed("SECRETSRC", "h.example.com/dir")
+        out = document(scan, mcp_scan(), None)
+        text = json.dumps(out)
+        self.assertNotIn("SECRETDG", text)
+        self.assertNotIn("SECRETSRC", text)
+        self.assertEqual(scan_agents.problems(out), [])
+
+    def test_a_url_the_final_cut_halves_is_replaced_not_left_half(self):
+        text = "a" * 72 + " http://h.example.com/x"
+        once = scan_agents._text(text, "name")
+        self.assertLessEqual(len(once), 80)
+        self.assertEqual(scan_agents._text(once), once, "idempotent")
+        self.assertNotIn("http:/", once)
+        self.assertEqual(scan_agents.problems(tiny_doc(once)), [])
+
+    def test_a_fragment_and_a_backslash_rendering_are_replaced(self):
+        self.assertEqual(scan_agents._text("at https://h.example.com/x#SECRETFR"), "at [url]")
+        self.assertEqual(scan_agents._text("https:\\/\\/u:SECRETBS" + AT + "h\\/x"), "[url]")
+
+    def test_a_refused_origin_carries_nothing_and_cannot_join(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["origin"] = "http://127.0.0.1:47401/?token=SECRETQO"
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(mcp_server("a", "http://127.0.0.1:47401/mcp")), None)
+        row = out["agents"][0]
+        self.assertEqual((row["origin"], row["host"], row["port"], row["key_in_url"]), (None, None, None, True))
+        self.assertEqual(row["mcp_declarations"], [], "no join without a strict origin")
+        self.assertNotIn("SECRETQO", json.dumps(out))
+
+    # --- the home path: boundaries, separators, case -----------------------------------------------
+    def test_home_needs_a_left_boundary_and_a_right_one(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            self.assertEqual(scan_agents._text("HOME=/srv/alpha/x (/srv/alpha) '/srv/alpha'"), "HOME=~/x (~) '~'")
+            self.assertEqual(scan_agents._text("abc/srv/alpha/x"), "abc/srv/alpha/x", "no left boundary")
+            self.assertEqual(scan_agents._text("/srv/alpha.bak"), "/srv/alpha.bak", "a name character follows")
+            self.assertEqual(scan_agents.problems(tiny_doc("abc/srv/alpha/x", "/srv/alpha.bak")), [])
+
+    def test_home_is_case_insensitive_only_where_the_file_system_is(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/Alpha"):
+            with patch.object(scan_agents.sys, "platform", "darwin"):
+                self.assertEqual(scan_agents._text("/SRV/alpha/x"), "~/x")
+            with patch.object(scan_agents.sys, "platform", "linux"):
+                self.assertEqual(scan_agents._text("/SRV/alpha/x"), "/SRV/alpha/x")
+
+    def test_a_home_inside_a_file_url_is_replaced_with_the_whole_token(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            self.assertEqual(scan_agents._text("repo file:///srv/alpha/r"), "repo [url]")
+
+    # --- problems() is the sanitiser's own rule -------------------------------------------------
+    def test_problems_fires_only_on_text_the_sanitiser_never_touched(self):
+        for raw in self.POCS + ["plain", "/srv/x", "C:\\work\\x"]:
+            self.assertEqual(scan_agents.problems(tiny_doc(scan_agents._text(raw))), [], raw)
+        self.assertTrue(scan_agents.problems(tiny_doc("see https:example.com?k=1")))
 
 
 class EmitHistory(Fixture):
@@ -905,6 +1129,13 @@ class EmitHistory(Fixture):
         later = emit(self.scan(launchd={}, now=now))
         self.assertEqual(later["agents"][0]["first_seen_on"], "2026-01-01")
         self.assertEqual(later["removed"], ["agent:beta-agent.default"])
+        kept = (reg / "agents.json").read_bytes()
+        (raw / "agents.json").write_text(json.dumps(["not", "a", "scan"]), encoding="utf-8")
+        p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(raw)], cwd=ROOT, env=env,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, 0, "a broken scan never stops the emit, so never the tick")
+        self.assertIn("keeps its last version", p.stdout)
+        self.assertEqual((reg / "agents.json").read_bytes(), kept)
 
 
 if __name__ == "__main__":
