@@ -490,11 +490,15 @@ def act_rotate_key(body: dict) -> dict:
         raise ValueError("a key name is required")
     audit("rotate-key", name, {})
     try:
-        return {"ok": True, **_door().rotate_one(name)}
+        result = _door().rotate_one(name)
     except LookupError as exc:
         raise LookupError(str(exc)) from None
     except RuntimeError as exc:
         raise LookupError(f"the provider refused: {exc}") from None
+    if not result.get("replaced"):
+        # Never "ok" for a run that replaced nothing (J-11 round 6, R6-1).
+        raise LookupError("an earlier rotation was finished; the current value was not replaced — run rotate again")
+    return {"ok": True, **result}
 
 
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,

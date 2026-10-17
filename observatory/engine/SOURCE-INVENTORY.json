@@ -427,8 +427,8 @@
       "path": "collectors/scan_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fc9b7b3b61ad9e4ec047fe37855249b905bf0cfccdcfeb94d803c046bced8eb1",
-      "bytes": 30744
+      "export_sha256": "b3b6a377ecf90a115af41987007c761da540146f6dbeb08e4c38f6fcf098374c",
+      "bytes": 31308
     },
     {
       "path": "collectors/scan_vault.py",
@@ -835,8 +835,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "d24bb14c2bdaeed020b8950c1811ae221f32c90f56bc4dc16efba86f41df448c",
-      "bytes": 81777,
+      "export_sha256": "0994675a1a193949e6e2bff08d00f0c1e2e69de3e8e6704ad086d125a311a06a",
+      "bytes": 82298,
       "upstream_modified": true
     },
     {
@@ -2894,8 +2894,8 @@
       "path": "tests/test_keyserver.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "322c6916c1ce002960d67c6eca9960e264630774cb444e5adde37a6b43a90583",
-      "bytes": 21885
+      "export_sha256": "3a886a5071e038cbce7fe02059848f9fbdf7b531a8c2fc7a73e9435e32694f13",
+      "bytes": 21923
     },
     {
       "path": "tests/test_keyserver_boundary.py",
@@ -3642,8 +3642,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a4717ae5eec3d3a01f3cbc7ffca11cac430b6f4d023ce1545d8618f79f7d5175",
-      "bytes": 104383
+      "export_sha256": "d6d973c679025c3e73f3919ba4ccb935f8ebbc6dde6c35733e16bb979566dec0",
+      "bytes": 135501
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -4339,8 +4339,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "d755479ca778394eee1dada36bd5e2e8ea0e49eeedc4bb5b2d0d760ce1ea819d",
-      "bytes": 41666,
+      "export_sha256": "0b74bc9917c8ef8755f4bda4853bf636c9892008745169bd610fabd70d86d9a6",
+      "bytes": 41915,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
@@ -4414,8 +4414,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "c92f611f555fa29a2d867ed7af2327d7b910f1e3f729dc267d4e2587fa89f6b8",
-      "bytes": 110482,
+      "export_sha256": "63522bdb164a8624e0efc1d5913c32596d1a90fcefd4772842a9e362e10539f0",
+      "bytes": 116084,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -4609,8 +4609,8 @@
     {
       "path": "tools/sign_credential.py",
       "source_sha256": "02fb7640fd7b03d01d167f410b0b7b3972ab6bb671c05b1cfc3b8058e21a5ffc",
-      "export_sha256": "f2140ecd867930ee663e420096dd5f8799deaef4b45988d58cd79d985e555171",
-      "bytes": 9985,
+      "export_sha256": "b27427d760d6a5264c67538e25b8ff0dd450dfb2d699b6ae79a3bd0c7b3c0e4c",
+      "bytes": 11178,
       "python_comments_removed": 8,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,

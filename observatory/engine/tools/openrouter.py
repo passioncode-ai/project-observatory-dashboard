@@ -405,7 +405,8 @@ def _retire(doc: dict, name: str, rec: dict, key_hash: str | None, reason: str,
     cutoff = now - datetime.timedelta(days=RETIRED_KEEP_DAYS)
 
     def keep(r) -> bool:
-        if not isinstance(r, dict):
+        if not isinstance(r, dict) or r.get("deleted", True) is not True:
+            # A key not known to be deleted may still spend; the scan follows it while it is kept (round 6, R6-3).
             return True
         try:
             return datetime.date.fromisoformat(str(r.get("retired_on") or "")[:10]) >= cutoff
@@ -484,7 +485,8 @@ def usage_snapshot(admin: str, key_hash: str | None) -> dict:
 
     def total(first: datetime.date) -> float:
         return sum(u for d, u in by_day.items() if first.isoformat() <= d < today.isoformat())
-    reached = max(by_day) if by_day else ""
+    completed = [d for d in by_day if d < today.isoformat()]
+    reached = max(completed) if completed else ""
     checked_from = min(month_start, monday).isoformat()
     recent = [(today - datetime.timedelta(days=n)).isoformat() for n in range(1, REPORT_LAG_DAYS + 1)]
     covered = all(d >= checked_from or d <= reached for d in recent)
@@ -494,7 +496,7 @@ def usage_snapshot(admin: str, key_hash: str | None) -> dict:
                   and covered)
     snap = {"usage": "read", "read_at": read_at.isoformat(), "reconciled": reconciled,
             "usage_daily": daily, "usage_weekly": weekly, "usage_monthly": monthly,
-            "activity_through": max(by_day) if by_day else None}
+            "activity_through": reached or None}
     if reconciled:
         by_day[today.isoformat()] = daily
     snap["usage_by_day"] = {d: round(u, 9) for d, u in sorted(by_day.items()) if d <= today.isoformat()}
@@ -1413,6 +1415,31 @@ def _delivery_failed(admin: str, row: dict) -> None:
     raise RuntimeError("Delivery failed; successor deleted. Predecessor was not revoked") from None
 
 
+def _alive(admin: str, key_hash: str) -> bool:
+    """Whether the provider still holds a key, by its hash: a 404 is gone; any other failure raises."""
+    try:
+        return bool(_request(f"/keys/{key_hash}", admin).get("data"))
+    except RuntimeError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
+        return False
+
+
+def _gone_snapshot(why: str) -> dict:
+    return {"usage": "unread", "usage_error": why,
+            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+
+
+#: A row a failure left part done: the rotation it belongs to is finished before a new one starts.
+PART_DONE = ("successor-minted-delivery-pending", "successor-delivered-predecessor-pending",
+             "predecessor-retired-rename-pending")
+
+
+def _part_done(rec: dict) -> bool:
+    return bool(rec.get("predecessor_hash") or rec.get("successor_pending")
+                or rec.get("rotation_status") in PART_DONE)
+
+
 def _retire_predecessor(doc: dict, name: str, rec: dict, predecessor: str | None, snapshot: dict) -> None:
     """The predecessor of a rotation is gone at the provider: its tombstone, and the row's bookkeeping.
 
@@ -1432,35 +1459,49 @@ def _retire_predecessor(doc: dict, name: str, rec: dict, predecessor: str | None
     rec["rotation_status"] = "predecessor-retired-rename-pending"
 
 
-def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) -> dict:
-    """Finish a rotation an earlier run left part done, rather than mint another successor (round 5, R5-3/R5-9).
+def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) -> None:
+    """Finish the rotation an earlier run left part done (round 5, R5-3/R5-9). `rotate_one` then rotates afresh:
+    finishing an old rotation never replaces the current value, and a caller who asked to rotate gets a new one
+    (round 6, R6-1).
 
-    The successor is already delivered (the row's hash). A predecessor still on the row is asked by its hash: live
-    (the earlier DELETE failed) is snapshotted, deleted and retired; gone (404: the DELETE went through and its
-    answer was lost) is retired with the snapshot kept on the row before that DELETE (`predecessor_snapshot`).
-    Then the successor gets the row's name and the rotation is complete."""
+    - A successor minted whose delivery was never recorded (`successor_pending`): whether the slot holds it is
+      unknown, so it is not deleted here. It is kept on the row as a stale successor, read by the spend scan like
+      a live key, and deleted by the fresh rotation once a newer successor is delivered (round 6, R6-6).
+    - A predecessor still on the row is asked by its hash: live (the earlier DELETE failed) is snapshotted, the
+      snapshot written to the row, deleted and retired; gone (404: the DELETE went through and its answer was
+      lost) is retired with the snapshot kept on the row before that DELETE (`predecessor_snapshot`).
+    - The successor gets the row's name, and the rotation is complete.
+
+    A row whose `predecessor_hash` is its own live hash is refused before any request (R6-2): following it would
+    delete the key the consumer holds."""
     predecessor = rec.get("predecessor_hash")
+    if predecessor and predecessor == rec.get("hash"):
+        raise ValueError(f"{name!r}: the ledger row names its own live key as the predecessor of a rotation, so "
+                         f"finishing that rotation would delete the key its consumer holds; nothing was done. "
+                         f"Repair the row in the door's ledger: remove `predecessor_hash`, `predecessor_snapshot` and "
+                         f"`rotation_status`, then `rotate {name}` again")
     try:
+        pending = rec.pop("successor_pending", None)
+        if pending:
+            stale = rec.get("stale_successors") if isinstance(rec.get("stale_successors"), list) else []
+            if pending not in [e.get("hash") for e in stale if isinstance(e, dict)]:
+                stale.append({"hash": pending})
+            rec["stale_successors"] = stale
+            save_ledger(doc)
+        renamed_needed = bool(predecessor) or rec.get("rotation_status") in (
+            "successor-delivered-predecessor-pending", "predecessor-retired-rename-pending")
         if predecessor:
-            try:
-                alive = bool(_request(f"/keys/{predecessor}", admin).get("data"))
-            except RuntimeError as exc:
-                if "HTTP 404" not in str(exc):
-                    raise
-                alive = False
-            if alive:
+            if _alive(admin, predecessor):
                 snapshot = usage_snapshot(admin, predecessor)
                 rec["predecessor_snapshot"] = snapshot
                 save_ledger(doc)
                 _request(f"/keys/{predecessor}", admin, method="DELETE")
             else:
                 kept = rec.get("predecessor_snapshot")
-                snapshot = kept if isinstance(kept, dict) else {
-                    "usage": "unread", "usage_error": "the predecessor was gone at the provider",
-                    "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+                snapshot = kept if isinstance(kept, dict) else _gone_snapshot("the predecessor was gone at the provider")
             _retire_predecessor(doc, name, rec, predecessor, snapshot)
             save_ledger(doc)
-        if rec.get("hash"):
+        if renamed_needed and rec.get("hash"):
             _request(f"/keys/{rec['hash']}", admin, {"name": name}, method="PATCH")
         rec["rotation_status"] = "complete"
         save_ledger(doc)
@@ -1468,14 +1509,116 @@ def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) ->
         _journal("rotation-partial", f"openrouter/{label}/{name}", status="resume-failed")
         raise RuntimeError("Partial failure: the earlier rotation could not be finished; inspect provider keys "
                            "and ledger before retrying") from None
-    _journal("rotate", f"openrouter/{label}/{name}", to=rec.get("destination"), resumed=True)
-    return {"name": name, "delivered_to": rec.get("delivered_to"), "rotations": rec.get("rotations"),
-            "rotated_on": rec.get("rotated_on"), "resumed": True}
+    _journal("rotation-resumed", f"openrouter/{label}/{name}", to=rec.get("destination"))
+
+
+def _retire_stale_successors(doc: dict, name: str, rec: dict, admin: str) -> None:
+    """Delete and retire the successors an interrupted rotation minted and never recorded as delivered, now that
+    a newer successor holds the slot. Each one's spend is snapshotted and written to the row before its DELETE,
+    as for a predecessor."""
+    for entry in list(rec.get("stale_successors") or []):
+        key_hash = entry.get("hash") if isinstance(entry, dict) else None
+        if not key_hash:
+            continue
+        snapshot = entry.get("snapshot")
+        if not isinstance(snapshot, dict):
+            if _alive(admin, key_hash):
+                snapshot = usage_snapshot(admin, key_hash)
+                entry["snapshot"] = snapshot
+                save_ledger(doc)
+            else:
+                snapshot = _gone_snapshot("the stale successor was gone at the provider")
+        try:
+            _request(f"/keys/{key_hash}", admin, method="DELETE")
+        except RuntimeError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+        rec["stale_successors"] = [e for e in rec.get("stale_successors") or [] if e is not entry]
+        if not rec["stale_successors"]:
+            rec.pop("stale_successors")
+        _retire(doc, name, rec, key_hash, "stale-successor", snapshot, row_state=False)
+        save_ledger(doc)
+
+
+def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> dict:
+    """Mint a successor, record it, deliver it, then retire the predecessor: the current value is replaced."""
+    rotations = rec.get("rotations", 0)
+    limit = rec.get("limit_usd") or 10
+    previous_hash = rec.get("hash")
+    previous_rotated_on = rec.get("rotated_on")
+    previous_status = rec.get("rotation_status")
+    old = find_key(admin, name)
+    d = _request("/keys", admin,
+                 {"name": f"{name}-next", "limit": limit,
+                  "limit_reset": rec.get("limit_reset") or "monthly"})
+    value = d.get("key") or (d.get("data") or {}).get("key")
+    new_row = d.get("data") or d
+    if not value:
+        _delivery_failed(admin, new_row)
+    # The minted successor is on the row before its delivery (round 6, R6-6): a failure between the delivery and
+    # the next write used to leave it live and unknown, and a retry minted a second one.
+    if new_row.get("hash"):
+        rec["successor_pending"] = new_row["hash"]
+        rec["rotation_status"] = "successor-minted-delivery-pending"
+        try:
+            save_ledger(doc)
+        except (OSError, ValueError, RuntimeError):
+            _delivery_failed(admin, new_row)
+
+    def undo() -> None:
+        rec.pop("successor_pending", None)
+        rec["rotation_status"] = previous_status
+        try:
+            save_ledger(doc)
+        except (OSError, ValueError, RuntimeError):
+            pass
+    try:
+        place = deliver(value, rec["destination"], rotate=True)
+    except (OSError, ValueError, RuntimeError):
+        try:
+            _delivery_failed(admin, new_row)
+        except RuntimeError as failure:
+            if "successor deleted" in str(failure):
+                undo()
+            raise
+    rec.pop("successor_pending", None)
+    rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
+                "rotated_on": today(), "rotations": rotations + 1,
+                "rotation_status": "successor-delivered-predecessor-pending",
+                "predecessor_hash": old.get("hash") if old else None,
+                "predecessor_rotated_on": previous_rotated_on})
+    predecessor = (old or {}).get("hash") or previous_hash
+    try:
+        save_ledger(doc)
+        _retire_stale_successors(doc, name, rec, admin)
+        # What the predecessor spent, read while it still exists (the provider keeps no history of a deleted key),
+        # and kept on the row BEFORE the DELETE: a failure after the DELETE must not lose it (round 4, P5).
+        snapshot = usage_snapshot(admin, predecessor) if old else _gone_snapshot(
+            "the predecessor was not found at the provider")
+        rec["predecessor_snapshot"] = snapshot
+        save_ledger(doc)
+        if old:
+            _request(f"/keys/{old['hash']}", admin, method="DELETE")
+        # The predecessor is gone: its tombstone now, before the rename, so a failed PATCH keeps it (J-11).
+        _retire_predecessor(doc, name, rec, predecessor, snapshot)
+        save_ledger(doc)
+        _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
+        rec["rotation_status"] = "complete"
+        save_ledger(doc)
+    except (OSError, ValueError, RuntimeError):
+        _journal("rotation-partial", f"openrouter/{label}/{name}",
+                 status="successor-delivered-provider-or-ledger-finalization-failed")
+        raise RuntimeError("Partial failure: successor delivered, but provider or ledger finalization failed; inspect provider keys and ledger before retrying") from None
+    _journal("rotate", f"openrouter/{label}/{name}", to=rec["destination"])
+    return {"name": name, "delivered_to": place, "rotations": rec["rotations"],
+            "rotated_on": rec["rotated_on"], "replaced": True}
 
 
 @_locked
 def rotate_one(name: str, doc: dict | None = None) -> dict:
-    """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
+    """Replace the key's value: deliver and verify a successor before revoking the predecessor, keeping recovery
+    metadata. A row a failure left part done is finished first (`_resume_rotation`), then rotated afresh, so the
+    result always names a new value (`replaced`) and says whether an earlier rotation was finished (`resumed`)."""
     # Without a caller's own `doc`, the ledger is read here, under the ledger lock: a copy read before the lock
     # may be stale (two rotations at once). A caller that passes `doc` owns it and writes it back through us.
     doc = doc if doc is not None else ledger()
@@ -1493,54 +1636,12 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         raise ValueError("A finite positive ceiling is required")
     private_io.check(LEDGER)
     label, admin = read_admin(rec["account"])
-    if rec.get("predecessor_hash") or rec.get("rotation_status") in (
-            "successor-delivered-predecessor-pending", "predecessor-retired-rename-pending"):
-        return _resume_rotation(doc, name, rec, label, admin)
-    previous_hash = rec.get("hash")
-    previous_rotated_on = rec.get("rotated_on")
-    old = find_key(admin, name)
-    d = _request("/keys", admin,
-                 {"name": f"{name}-next", "limit": limit,
-                  "limit_reset": rec.get("limit_reset") or "monthly"})
-    value = d.get("key") or (d.get("data") or {}).get("key")
-    new_row = d.get("data") or d
-    if not value:
-        _delivery_failed(admin, new_row)
-    try:
-        place = deliver(value, rec["destination"], rotate=True)
-    except (OSError, ValueError, RuntimeError):
-        _delivery_failed(admin, new_row)
-    rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
-                "rotated_on": today(), "rotations": rotations + 1,
-                "rotation_status": "successor-delivered-predecessor-pending",
-                "predecessor_hash": old.get("hash") if old else None,
-                "predecessor_rotated_on": previous_rotated_on})
-    predecessor = (old or {}).get("hash") or previous_hash
-    try:
-        # What the predecessor spent, read while it still exists (the provider keeps no history of a deleted key),
-        # and kept on the row BEFORE the DELETE: a failure after the DELETE must not lose it (round 4, P5).
-        snapshot = usage_snapshot(admin, predecessor) if old else {
-            "usage": "unread", "usage_error": "the predecessor was not found at the provider",
-            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-        rec["predecessor_snapshot"] = snapshot
-        save_ledger(doc)
-        if old:
-            _request(f"/keys/{old['hash']}", admin, method="DELETE")
-        # The predecessor is gone: its tombstone now, before the rename, so a failed PATCH keeps it (J-11).
-        # `tombstoned_rotations` counts the rotations that left one; a row rotated before this change has
-        # fewer than `rotations`, and `tombstones_since` bounds when those older rotations happened.
-        _retire_predecessor(doc, name, rec, predecessor, snapshot)
-        save_ledger(doc)
-        _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
-        rec["rotation_status"] = "complete"
-        save_ledger(doc)
-    except (OSError, ValueError, RuntimeError):
-        _journal("rotation-partial", f"openrouter/{label}/{name}",
-                 status="successor-delivered-provider-or-ledger-finalization-failed")
-        raise RuntimeError("Partial failure: successor delivered, but provider or ledger finalization failed; inspect provider keys and ledger before retrying") from None
-    _journal("rotate", f"openrouter/{label}/{name}", to=rec["destination"])
-    return {"name": name, "delivered_to": place, "rotations": rec["rotations"],
-            "rotated_on": rec["rotated_on"]}
+    resumed = _part_done(rec)
+    if resumed:
+        _resume_rotation(doc, name, rec, label, admin)
+    result = _rotate_fresh(doc, name, rec, label, admin)
+    result["resumed"] = resumed
+    return result
 
 
 def cmd_rotate(name: str | None, leaked: bool) -> int:
@@ -1562,7 +1663,14 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
     for n in targets:
         try:
             r = rotate_one(n)               # re-read under the lock: `doc` above was read before it
-            print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted")
+            if not r.get("replaced"):
+                # Never "rotated" for a run that replaced nothing (round 6, R6-1).
+                print(f"  {n}: an earlier rotation was finished; the current value was not replaced — "
+                      f"run rotate again", file=sys.stderr)
+                bad += 1
+                continue
+            print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted"
+                  + ("; an earlier rotation left part done was finished first" if r.get("resumed") else ""))
         except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
             bad += 1
@@ -1763,6 +1871,9 @@ def revoke_key(name_or_label: str) -> dict:
         except (OSError, ValueError) as exc:
             if isinstance(exc, ValueError) and "reading right now" in str(exc):
                 raise
+    if rec.get("successor_pending") or rec.get("stale_successors"):
+        raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; `rotate {name}` "
+                         f"finishes it (and deletes that successor once a new one holds the slot), then revoke")
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     key_hash = rec.get("hash") or (row or {}).get("hash")

@@ -28,7 +28,9 @@ while the major version is 0, a minor release may change behaviour and says so h
       The month window stays null until the month ends. The counter difference is not booked for the gap.
     - It is written to the ledger before the DELETE, so a failure after the DELETE keeps it for the retry. A
       rotation's tombstone is written before the successor's rename.
-    - A `rotate` of a row a failure left part done finishes that rotation instead of minting another. A predecessor
+    - A `rotate` of a row a failure left part done finishes that rotation, then rotates afresh, so a rotate always
+      replaces the value (`--leaked` and the key page say "rotated" only then). A minted successor is written to the
+      row before its delivery, read by the scan, and deleted once a newer successor holds the slot. A predecessor
       still live is snapshotted, deleted and retired; one already gone is retired with the snapshot kept before its
       DELETE.
     - A tombstone carries its row's untracked rotation and pending predecessor, from the one rule the scan uses

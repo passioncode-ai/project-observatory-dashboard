@@ -209,6 +209,19 @@ def windows_from(day: str, month: str, start: str) -> list[str]:
     return [w for w, first in (("month", f"{month}-01"), ("last30", start)) if day >= first]
 
 
+def row_hashes(rec: dict) -> list[str]:
+    """Every key a live ledger row holds, each read by its hash: its own, a pending rotation's predecessor, and a
+    successor minted whose delivery was never recorded (`successor_pending`, `stale_successors`: live, maybe in
+    the slot, deleted by the next rotation; round 6, R6-6)."""
+    out = [rec.get("hash"), rec.get("predecessor_hash"), rec.get("successor_pending")]
+    out += [e.get("hash") for e in rec.get("stale_successors") or [] if isinstance(e, dict)]
+    seen: list[str] = []
+    for h in out:
+        if h and isinstance(h, str) and h not in seen:
+            seen.append(h)
+    return seen
+
+
 def untracked_rotation(rec: dict) -> str | None:
     """The latest day an untracked rotation of this live key can have happened on, or None: the door's
     `openrouter.untracked_through`, the one rule for live rows and tombstones alike (a pending rotation,
@@ -329,7 +342,7 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
     # A hash two entries hold would be counted once and read as 0 for the other: neither is trusted.
     holders: dict[str, int] = {}
     for _name, rec in rows:
-        for h in {rec.get("hash"), rec.get("predecessor_hash")} - {None, ""}:
+        for h in set(row_hashes(rec)):
             holders[h] = holders.get(h, 0) + 1
     for tomb in stones:
         if tomb.get("hash"):
@@ -356,7 +369,7 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             attribution(f"spend:openrouter:key:{name}", "no provider hash to read by")
             not_whole(rec.get("account"))
             continue
-        hashes = [h for h in (rec.get("hash"), rec.get("predecessor_hash")) if h]
+        hashes = row_hashes(rec)
         if any(h in shared for h in hashes):
             doubled(name, bucket, rec.get("account"))
             continue
