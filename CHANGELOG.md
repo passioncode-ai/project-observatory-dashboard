@@ -40,8 +40,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   `authorized_keys` under `sh` whatever the login shell; `--verify` logs in with no config and the
   new key alone and passes only when the server names its fingerprint), each with a receipt in the
   key movements journal. Ten findings reach the board (no passphrase, weak, readable by others and an
-  open `~/.ssh` by `osprivacy`, a private key saved as `.pub`, unused, a GitHub key no disk holds, a
-  key registered nowhere visible, no public half, a missing `IdentityFile`). Only a private key's
+  open `~/.ssh` by `osprivacy`, a private key saved as `.pub`, unused, a GitHub key not found here (information only), a
+  key registered nowhere visible, no public half, a missing `IdentityFile`). Observatory never advises
+  deleting a GitHub key: a key GitHub accepts that it did not find is reported as information, naming
+  where it looked and what it could not read, with no command. Only a private key's
   clear header is read (the cipher name and the public key), never its private section. The read-only MCP tool `observatory_ssh_keys` gives agents the same inventory and
   one key's public line. The private key is never shown or moved; tests plant one and search every
   output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
