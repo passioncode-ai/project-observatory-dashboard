@@ -138,6 +138,16 @@ BOUNDARY += ('memory_eval',)
 BOUNDARY += ('textkeys',)
 # The header door: a vault value for one MCP server's headersHelper, and its binding.
 BOUNDARY += ('secret_header',)
+# The agent-network node's foundation (RM-21 P5, OBS-107): RFC 8785, ES256, fabric-relay/0.1 over the contract vectors.
+BOUNDARY += ('node_foundation',)
+# The node's relay session (OBS-108): a stdlib WebSocket and RelaySession against a loopback relay stub.
+BOUNDARY += ('node_session',)
+# The node's estate record, passkey assertions, revocation delta and heartbeat (OBS-109).
+BOUNDARY += ('node_estate', 'node_revocation')
+# The node's sealed secret envelope (OBS-113).
+BOUNDARY += ('node_envelope',)
+# `project-observatory full node`: this machine's device keys from a terminal (OBS-114).
+BOUNDARY += ('node_cli',)
 # PB-163: the machine's SSH keys; the private key is never shown or moved.
 BOUNDARY += ('ssh_keys',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
@@ -202,7 +212,7 @@ HELPERS += (
 )
 # task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
 HELPERS += ('lesson_emitter_fixture.json',)
-RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
+RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
@@ -257,6 +267,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
+    selected.add(ROOT / 'fabric/node-vectors/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -269,7 +280,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):
