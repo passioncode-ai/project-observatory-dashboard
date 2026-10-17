@@ -354,6 +354,8 @@ FEATURE_STEPS = {
     # features.auto_cleanup is ALSO true; with it off, the step writes the plan.
     "machine": "machine_watch", "git-hygiene": "machine_watch", "cleanup": "machine_watch",
     "lifecycle": "machine_watch",
+    # The agents registry reads the same Fabric descriptors the lifecycle watch reads (OBS-83).
+    "scan-agents": "machine_watch",
 }
 
 

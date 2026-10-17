@@ -102,6 +102,7 @@ NEW_SOURCES = [
     ("SRC-0017", "The MCP declarations in each agent's own config (~/.claude.json with its project scopes, ~/.cursor/mcp.json, ~/.config/opencode/opencode.json, ~/.codex/config.toml, ~/.gemini/settings.json, ~/.kiro/settings/mcp.json) plus what `claude mcp list` reports for plugins and claude.ai connectors — read for names, transports, targets without query strings and the PRESENCE of a key, never a value. Answers WHICH MCP SERVERS THE AGENTS ARE TOLD TO REACH and whether Claude reached them.", ["registry:mcp-servers.json"]),
     ("SRC-0018", "Heroku\'s config-vars endpoint through the same CLI session token, read by collectors/scan_remote_env.py: the endpoint answers with names AND values in one object and has no names-only form, so the values are TRANSIT — classified, fingerprinted with the machine-local salt collectors/scan_env.py uses, and dropped. The fingerprints stay in the gitignored scan beside the vault\'s own retired-value fingerprints; the document built from them carries only the verdict. Answers WHAT PRODUCTION IS CONFIGURED WITH, whether it matches this machine, and whether a value the vault has already rotated away is still deployed.", ["registry:remote-env.json"]),
     ("SRC-0019", "Google Analytics Admin and Data APIs, and Search Console, through the service accounts in the machine\'s secret store: every account and property the credential can see, each property\'s own declared web hosts and app bundle ids, thirty days of active users, sessions and views, and the Search Console sites. The credential signs a JWT and never leaves the collector; what is recorded is the account\'s public `client_email`. Answers WHICH PRODUCTS PEOPLE ACTUALLY USE, and joins each property to a project by what the property declares about itself rather than by a hand-written map.", ["registry:google-properties.json"]),
+    ("SRC-0020", "The Fabric service descriptors (fabric-service/0.1) in the services directory `fabric_service.services_dir()` resolves, each one's Fabric manifest for its contract pins, and launchd's own job list (`launchctl list`), read by collectors/scan_agents.py; joined at emit time to the MCP inventory by the origin both name. Never anything of a descriptor's `auth`. Answers WHICH AGENTS ARE INSTALLED ON THIS MACHINE, where each answers, what contract it pins, who supervises it and which MCP declarations reach it.", ["registry:agents.json"]),
     ("SRC-0011", "Public DNS through `dig`, HTTP reachability through `curl`, and registrar records through RDAP at rdap.org. Answers whether a host resolves and answers, and what a registry says about a domain — measured, never transcribed.", ["registry:domain-liveness.json"]),
 ]
 SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
@@ -110,7 +111,7 @@ SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
     "SRC-0013": SP / "heroku.json", "SRC-0014": SP / "openrouter.json",
     "SRC-0015": SP / "env.json", "SRC-0016": SP / "cloudflare_zones.json",
     "SRC-0017": SP / "mcp.json", "SRC-0018": SP / "remote-env.json",
-    "SRC-0019": SP / "google.json"}
+    "SRC-0019": SP / "google.json", "SRC-0020": SP / "agents.json"}
 def source_available(sid):
     path = SOURCE_INPUTS.get(sid)
     return bool(path and (path.is_file() or (path.is_dir() and any(p.is_file() and not p.name.startswith("_") for p in path.glob("*.json")))))
@@ -500,6 +501,41 @@ if MCP_SRC.is_file():
     print(f"mcp-servers.json: {_mt['declarations']} declaration(s), {_mt['distinct_servers']} "
           f"server(s), " + ", ".join(f"{k} {v}" for k, v in sorted(_mt['by_liveness'].items()))
           + (f", {_mt['key_in_url']} with a key in the URL" if _mt['key_in_url'] else ""))
+# THE AGENTS ON THIS MACHINE (OBS-83): one row per Fabric service descriptor, joined here
+# rather than in the collector because the tick runs its collectors in rotation and only the
+# emit is sure to come after `scan-mcp`. Two inputs named for the derivation that reads this
+# script's source: `store/raw/agents.json` and the previous `registry/agents.json`, read for the
+# first-seen and last-running dates it carries forward.
+AGENTS_SRC = paths.SCRATCH / "agents.json"
+if AGENTS_SRC.is_file() or (INV / "agents.json").is_file():
+    import scan_agents
+    # The previous document. An unreadable one never reaches this line: `configuration.
+    # validate_registries` refuses every registry/*.json before the emit runs, so the
+    # fallback below is a guard, not a path a workspace takes.
+    try:
+        _aprev = json.loads((INV / "agents.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _aprev = None
+    try:
+        if not AGENTS_SRC.is_file():
+            raise FileNotFoundError("store/raw/agents.json")
+        _ascan = json.loads(AGENTS_SRC.read_text(encoding="utf-8"))  # not an object: document() refuses it
+        _amcp = json.loads(MCP_SRC.read_text(encoding="utf-8")) if MCP_SRC.is_file() else None
+        _adoc = scan_agents.document(_ascan, _amcp, _aprev, OBS)
+    except Exception as _aexc:                                         # noqa: BLE001 — never the tick
+        # A scan this cannot use is said, never hidden: the last document is rewritten stale with
+        # the reason, and the emit goes on (stopping here would stop validate, findings, the page).
+        _adoc = scan_agents.unusable(_aprev, type(_aexc).__name__, OBS)
+        print(f"  degraded agents.json: {scan_agents.UNUSABLE} ({type(_aexc).__name__}); "
+              + ("the last rows are kept, marked stale" if _adoc else "there is no earlier document"))
+    if _adoc is not None:
+        _stamped("agents.json", _adoc)
+        _at = _adoc["totals"]
+        print(f"agents.json: {_at['agents']} agent(s), {_at['local']} local, {_at['remote']} remote, "
+              f"{_at['invalid']} with an invalid descriptor, "
+              + ", ".join(f"{k} {v}" for k, v in _at["by_supervisor_state"].items()))
+        for _dg in _adoc["degraded"]:
+            print(f"  degraded agents.json: {_dg['source']}: {_dg['reason'][:110]}")
 _pdoc, _pedges, _perrors = estate_surfaces.products_document(out_projs, _domains_now, OBS)
 if _perrors:
     # A curated file with a wrong project id or an unknown role is refused

@@ -212,3 +212,30 @@ used to be followed by SQLite's message, which is no longer copied anywhere.
 On a busy machine the first tick or two may stop at the step's deadline and raise
 `secret.leak_scan_partial` until the marks catch up. Nothing is removed; older readers ignore
 the new keys.
+
+## Registry: agents (OBS-83)
+
+New file `registry/agents.json` (schema_version 1, `observatory/engine/schemas/agents.schema.json`),
+written by the emit from `store/raw/agents.json` (new, collector `collectors/scan_agents.py`, tick step
+`scan-agents`, run with `features.machine_watch`) and `store/raw/mcp.json`, and validated by
+`validate`. It declares a new source, `SRC-0020`. Rows are `agent:<service-id>.<instance>`, one per
+fabric-service/0.1 descriptor (`agent:file:<name>` when a descriptor's own id is unusable), and carry no
+`auth` field, no absolute home path and no URL user-info or query (`key_in_url` says one was dropped). The
+document's `stale` is true when the collector's scan is older than one tick. `updated_on` is the day the emit
+wrote it; `scanned_on`, `first_seen_on` and `last_seen_running_on` are the scan's.
+Rows kept from an unreadable services directory carry `carried_since` and are left out of the supervisor
+totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents claim), `unattributed_http`, `stdio`
+(declarations whose transport is stdio) and `other` (neither stdio nor an HTTP(S) origin, such as `ws://` or a
+malformed target). URLs fail closed: `origin` and `source_repository` are
+kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with "origin unreadable" in
+`degraded`); in every other string a URL-shaped token that is not strict (`@`, `:/`, `:\`, or `?`/`#` after a
+`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. This
+covers scheme URLs with user-info, a query or a fragment; a schemeless `token=…`, a bare `?key=…` or a
+percent-encoded form is not recognised as a URL. A Windows drive path outside the home (`C:\work\x`) holds
+`:\` and is written `[url]` too. When the scan is missing or cannot be used, the previous document is kept
+with `stale: true` and a degraded line naming the error and the day its rows are from; a descriptor file whose
+name is shaped like a URL is not read. A scan dated after the emit is stale
+(`clock-skew` in `degraded`). The wiki projection
+mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
+file on its first tick with the feature on. Until then it is absent, and no reader requires it.
+

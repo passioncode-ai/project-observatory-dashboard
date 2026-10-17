@@ -805,6 +805,20 @@ same summary.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
+- **Agents**: `registry/agents.json`, one row per Fabric service installed here
+  (each `<id>.<instance>.json` descriptor in the services directory): where it answers,
+  the contract its manifest pins, who supervises it and whether launchd has it loaded or
+  running, and which MCP declarations reach it by its origin. The wiki projection mirrors it
+  to `inventory/agents.json`. Nothing of a descriptor's `auth` is copied, and no row is guessed
+  from a name. A descriptor, manifest or launchd answer that could not be read is listed under
+  `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
+  `mcp_declarations` is `null`, not empty. URLs fail closed: an origin or repository that is
+  not a strict `scheme://host[:port][/path]` is written as null, and in any other text a scheme URL with
+  user-info, a query or a fragment is replaced whole by `[url]`, never partly cleaned (a schemeless
+  `token=…` is not recognised; a Windows drive path such as `C:\work\x` becomes `[url]`). If the scan is
+  missing or broken, the last rows are kept, marked `stale`, with the reason in `degraded`. With `features.machine_watch` off the document is marked
+  `stale`. Its top-level `updated_on` is the day the emit last wrote it; `scanned_on`, `first_seen_on` and
+  `last_seen_running_on` come from the scan, never from that day. A scan dated in the future is stale too.
 
 With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean
