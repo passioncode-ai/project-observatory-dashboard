@@ -148,6 +148,8 @@ BOUNDARY += ('node_estate', 'node_revocation')
 BOUNDARY += ('node_envelope',)
 # `project-observatory full node`: this machine's device keys from a terminal (OBS-114).
 BOUNDARY += ('node_cli',)
+# enroll-token/1, the headless join (DEC-0084): verify, single-use redemption, the token read only from stdin or a file.
+BOUNDARY += ('node_enroll', 'node_pairing')
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.

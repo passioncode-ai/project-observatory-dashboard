@@ -1099,8 +1099,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bae2d1d858d013c3f481e013b7b4e281913322f61a5791acdbf04dc697e68062",
-      "bytes": 1644
+      "export_sha256": "e1d9a20d64eb358691fc4b4dde12e2700df2a5fce3f4ee8c71a01eea6433e6a5",
+      "bytes": 2355
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1108,6 +1108,13 @@
       "upstream_modified": true,
       "export_sha256": "e63411c0e1b615773d20c8c82b34a0c5ef7fc367fffc04d106b537c2628e5663",
       "bytes": 14561
+    },
+    {
+      "path": "fabric/node-vectors/enroll-token.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "475e8e54cb47ceeb8b7b478327b7f8b9e89cf8293521986c65a9f3ad437bbc71",
+      "bytes": 84725
     },
     {
       "path": "fabric/node-vectors/estate-record.json",
@@ -1131,11 +1138,18 @@
       "bytes": 5481
     },
     {
+      "path": "fabric/node-vectors/pairing.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c5d99e2a54ba210a06b94350bebda635369bf50b470981c6d10aedbf914c498b",
+      "bytes": 156268
+    },
+    {
       "path": "fabric/node-vectors/relay.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6242729104e3fb4f08e144194a94af40b9bb3df15045bba733cf985de281fb3f",
-      "bytes": 193112
+      "export_sha256": "47563a359dc876500bb0405689eaa8c43bd9e148ab09c77c1a0f74e5850d42bb",
+      "bytes": 224568
     },
     {
       "path": "fabric/node-vectors/revocation-delta.json",
@@ -1150,6 +1164,181 @@
       "upstream_modified": true,
       "export_sha256": "446776b8a49a69d1b772265450cf3b6bdb1e7a0e9da7945e154b710d857c5ead",
       "bytes": 109989
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-kid-revoked-new-key-listed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4cc3ffd26b6759c405208be00d052d2fb7347c63f54c972c5cf392b1cbd4ead7",
+      "bytes": 6222
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-not-canonical.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "cb178d5fd3ea9127a5e07c76972d610b994a4c6518ad38694908d47f34971c1f",
+      "bytes": 5756
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-ref-malformed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7c20622266e7b8fc742e41a3ea8beec68d7f94a02d6c34dd22ef05dcdf1ee575",
+      "bytes": 5955
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-ref-still-listed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "26feb9dcc8485c2c9465b67c60c57d3d20ef66e37ced2a9c275cfb4a2ce06502",
+      "bytes": 5910
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-key-replaced-kid-other-machine.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "35e6622736217825e9689933a0f883909068ce68104a1ba8e5c6cfec823c32da",
+      "bytes": 6224
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-digest-mismatch.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "43149f33d204c00cc9f0116237c8bec003cbf9af5bf98796a78420cce918c2f1",
+      "bytes": 5670
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-ends-before-issued.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8100beacc17504ddf3e2418d18cecc4475569a0bc93f9346666b03c994a11478",
+      "bytes": 5648
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "58bb5b75435e2a5846f75a4fcc18294d79c8d8bc0b716fa047e82ae2b588101d",
+      "bytes": 5623
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-too-long-lived.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0c1e6ce3122a089a08788ff55c95f8a9d07f201d02b5996e1d512ebc2c6a11f0",
+      "bytes": 5692
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-drops-revocation.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f01fac7aa535287e5b499cde577cdd1f273d2791c559866b6eeb8a5ec4eaf2ee",
+      "bytes": 10252
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-hub-key-changed-same-kid.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5ecd023f5701b5f89112b363b003ddc6bff15c593667f4ed312524144acfac24",
+      "bytes": 12073
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-hub-key-recertified.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6e714b041c24e67cc3bd8ca879ebf6e4a5463715742488a84683c0bbe1652124",
+      "bytes": 12152
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-issued-before-parent.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6ba9a0ce63dad3009269a7f82790ceab5f5f6176f30b8b1a6d884bc7804c3623",
+      "bytes": 11118
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-kem-dropped-kid-revoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8b5068d80dffb924f7494b246a8c2daba78f30918f75683929fdabdab605063f",
+      "bytes": 11966
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-kem-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "01dcba201da3f3185106f4c238862b21e05d499ab6614f8e1cbe0370773bb901",
+      "bytes": 12284
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ca96c3c7e808007420bf1d41c006ae0db9008a0563efa5671b69ff87a02db693",
+      "bytes": 12554
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5be3dcaced51a351673a2ad76e8e4f05f3bf4815e65e527fa49cb2dd46cbcafa",
+      "bytes": 12082
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-machine-id-changed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b1872654cb3f88f9b59b697a9af4cf10b5c66fff5c68626692f6bdbe39f0b29d",
+      "bytes": 12187
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c42a7c7e841d88063ea91a7f94d212e05e862856a08e6df914ca51345e535b07",
+      "bytes": 11134
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-other-estate.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "064e842da7c37cf7e10dcc36f5f906d90dbb7546ad1f9456364a5ff0d9a89a7d",
+      "bytes": 11110
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-parent-mismatch.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7cef05987841237cf8a78a120e72153ed71b86a1d4a565a82ae621f9d707b5f9",
+      "bytes": 11141
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-hub-machine-hub-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "080eeb4d32751f94d332e4d08a0eaed7d6693f128da48dc5e4822db81099064b",
+      "bytes": 10671
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-hub-machine-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1f98c30f7c9bd7976c3be726ef0de63912ac6623b25744f8897fdacbbde0891e",
+      "bytes": 10796
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-machine-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0b55b3cbb9ddde0158fdd6fd6e69ec26e69af308c5fe46717054f29821bff3eb",
+      "bytes": 11030
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-skips.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7ff3f2e200287bb31a6f69492b5824f3a93309b2c9c71c40d31a457754da528f",
+      "bytes": 11152
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -1472,18 +1661,25 @@
       "bytes": 2393
     },
     {
+      "path": "node/enroll_token.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f2e1a9a73c6505522eb387d1a46ef07f254a138aa260c563b7859bf2bec9246d",
+      "bytes": 16777
+    },
+    {
       "path": "node/envelope.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ba18ff5711b58142ad7242e2a8ae103d0073819fcd9a10cb20005c170db4073d",
-      "bytes": 17429
+      "export_sha256": "de7a3300f33e84bdeb8f2f5645f051c6db978cb39943e080991ce13e92e31a1b",
+      "bytes": 18651
     },
     {
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "92d04701861f163ea7b9b4f09c9b7881c98723b3cc90ed36867bc17d7e994d69",
-      "bytes": 24137
+      "export_sha256": "c590b4f57f4a0e741718dfe8f74e42cb01fc150b4292fed7cf535702098d4232",
+      "bytes": 29734
     },
     {
       "path": "node/identifiers.py",
@@ -1507,11 +1703,18 @@
       "bytes": 6906
     },
     {
+      "path": "node/pairing.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "55f9d305a7381b48e54166214032524485e9516e6c4e2284cd2f3895419952df",
+      "bytes": 14371
+    },
+    {
       "path": "node/relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2582d23e74fd0cb6e8615c433667b3a029dabd108c682b14ce3294b381deaa98",
-      "bytes": 22487
+      "export_sha256": "d09fb8fd0567d51dda9727543248912f3f6fe6ef635f555a3806dba67424cb8b",
+      "bytes": 24503
     },
     {
       "path": "node/revocation.py",
@@ -1531,8 +1734,8 @@
       "path": "node/webauthn.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "67b97033004aed00034f55f3aa0fbeda1f79c90da8ec617c9d213e8984147d98",
-      "bytes": 10617
+      "export_sha256": "74c75c77bfa71006a44a8bd63691e5830933b80e4832c97ea1492fc5843fb76e",
+      "bytes": 12839
     },
     {
       "path": "node/ws.py",
@@ -2258,8 +2461,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "65575123ce3a61acf381b226c967337aa15e5232e90056d1c04b389520f880aa",
-      "bytes": 27081,
+      "export_sha256": "2ec22d72d9ba032bbebc42a4355a65e507ed0b69f498548f9799eaebcf80ba7d",
+      "bytes": 27246,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3302,11 +3505,18 @@
       "bytes": 3490
     },
     {
+      "path": "tests/test_node_enroll.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2a85f127c2b074adaf51f9d0f09cc756f2702e3a8861dd3215d0156700c91c6f",
+      "bytes": 11970
+    },
+    {
       "path": "tests/test_node_envelope.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aabcaf8607150f88351422e6bb325fc4816b8601219d905bc7ad42a5f67ef19b",
-      "bytes": 7467
+      "export_sha256": "d3884f2dcccf5fe218402f051e1df09583413aa8a437778f0439d0f053976c33",
+      "bytes": 9391
     },
     {
       "path": "tests/test_node_estate.py",
@@ -3319,8 +3529,15 @@
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8d75de56b8fa5094809284f3a4fb7d1985fc6504e18445ea4a782c8a0d0c134d",
-      "bytes": 34590
+      "export_sha256": "c92ad81f6dd510c7c60bce1d7ddb8dd9b670b0dfcd7a30c6950ead0b68ba7a7c",
+      "bytes": 36323
+    },
+    {
+      "path": "tests/test_node_pairing.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fbb17162d47472366c4c079a167b30f66d8a28cbadfb0388b31d53c4b0994dca",
+      "bytes": 13763
     },
     {
       "path": "tests/test_node_revocation.py",
@@ -5004,7 +5221,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 651,
+  "file_count": 682,
   "excluded": [
     "git-history",
     "operator-registries",

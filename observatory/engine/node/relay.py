@@ -9,6 +9,7 @@ refusal codes, so a node and the contract kit give one answer for one body.
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import re
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -373,7 +374,13 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
     """The `#sig` keys of a verified estate record's machines, minus revoked machines and keys (the record's own and
     those of verified revocation deltas), minus every key that could never verify a relay signature, which `excluded`
     names. The contract's `relayAdmissionSet` over a held record: a node answers `sender_key` from it, and refuses every
-    sender once the record's window has ended (`expired`) until a newer verified revision arrives."""
+    sender once the record's window has ended (`expired`) until a newer verified revision arrives.
+
+    A `device-key` revocation names a kid or one key by its key reference (`<kid>@sha256:<hex>`, DEC-0084): a delta
+    that revokes a replaced key leaves the next key under the same kid admitted. A delta's `device-key` ref that holds
+    `@` but is no key reference revokes nothing a reader can name, and `unread` reports it with its index."""
+    from .estate import KEY_REFERENCE, device_key_ref  # estate imports this module
+
     if not record:
         return {'ok': False, 'refusal': 'no-record'}
     start, until = strict_time(record.get('issuedAt')), strict_time(record.get('validUntil'))
@@ -385,39 +392,60 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
     def entries(value: Any) -> list:
         return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
 
-    revocations = entries(record.get('revocations')) + entries(list(extra_revocations))
+    extra = list(extra_revocations) if isinstance(extra_revocations, (list, tuple)) else []
+    unread = [{'index': index, 'ref': entry['ref']} for index, entry in enumerate(extra)
+              if isinstance(entry, dict) and entry.get('kind') == 'device-key' and isinstance(entry.get('ref'), str)
+              and '@' in entry['ref'] and not KEY_REFERENCE.fullmatch(entry['ref'])]
+    revocations = entries(record.get('revocations')) + entries(extra)
     # Only string references count: an object or an array names nothing and cannot be hashed.
     machines = {entry.get('ref') for entry in revocations if entry.get('kind') == 'machine' and isinstance(entry.get('ref'), str)}
     keys = {entry.get('ref') for entry in revocations if entry.get('kind') == 'device-key' and isinstance(entry.get('ref'), str)}
-    admitted, excluded, claimed = {}, [], set()
+    # F7 (DEC-0084): a `#sig` key is admitted only under its own machine's kid, and a kid listed twice for neither, as
+    # FAC-SEM-073 says of a record; a node checks it again before it believes a key. Kids are counted before anything
+    # is excluded, revoked machines included.
+    counts: dict = {}
     for machine in entries(record.get('machines')):
-        if not isinstance(machine.get('id'), str) or machine['id'] in machines:
+        for key in entries(machine.get('deviceKeys')):
+            if key.get('use') == 'sig' and isinstance(key.get('kid'), str):
+                counts[key['kid']] = counts.get(key['kid'], 0) + 1
+    admitted, excluded = {}, []
+    for machine in entries(record.get('machines')):
+        machine_id = machine.get('id')
+        if isinstance(machine_id, str) and machine_id in machines:
             continue
         for key in entries(machine.get('deviceKeys')):
             kid, public = key.get('kid'), key.get('publicKey')
             if key.get('use') != 'sig' or not isinstance(kid, str) or not kid.endswith('#sig') \
-                    or not isinstance(public, str) or kid in keys:
+                    or not isinstance(public, str) or kid in keys or (device_key_ref(key) or kid) in keys:
                 continue
             octets = _base64(public)
-            if kid in claimed:
-                # A kid named twice speaks for nobody: neither of its keys is believed, and it is excluded once.
-                # Whatever the earlier listings were excluded for, the kid is now excluded once, as bad-key.
-                admitted.pop(kid, None)
-                excluded[:] = [entry for entry in excluded if entry['kid'] != kid]
+            if not isinstance(machine_id, str) or kid != machine_id + '#sig' or counts.get(kid) != 1:
                 excluded.append({'kid': kid, 'reason': 'bad-key'})
             elif p256.is_ed25519_key(octets):
                 excluded.append({'kid': kid, 'reason': 'unsupported-alg'})
-            elif p256.key_refusal(octets) is not None or kid != machine['id'] + '#sig':
-                # A kid is bound to the machine that lists it (FAC-SEM-073 holds this for a verified record; a node
-                # checks it again before it believes a key).
+            elif p256.key_refusal(octets) is not None:
                 excluded.append({'kid': kid, 'reason': 'bad-key'})
             else:
                 admitted[kid] = octets
-            claimed.add(kid)
     revoked_kids = sorted(keys | {machine['id'] + '#sig' for machine in entries(record.get('machines'))
                                   if isinstance(machine.get('id'), str) and machine['id'] in machines})
     return {'ok': True, 'revision': record.get('revision'), 'keys': admitted, 'excluded': excluded,
-            'revoked': revoked_kids}
+            'revoked': revoked_kids, 'unread': unread}
+
+
+def session_stands(session: Mapping[str, Any], admission: Mapping[str, Any]) -> dict:
+    """Whether an open session still stands under the current admission set (`peer_keys`), the contract's
+    `sessionStands` (DEC-0066, amended by DEC-0084): only while its kid maps to the same key octets it was proven under.
+    A key replacement keeps the kid, so a kid alone would keep a session proven under the old key open; the octets close
+    it. `expired` when the held record's window ended, `not-admitted` for every other refusal and for a kid that left
+    the set or now names another key. Both close the session (4403)."""
+    if not admission.get('ok'):
+        return {'ok': False, 'code': 'expired' if admission.get('refusal') == 'expired' else 'not-admitted'}
+    kid, octets = session.get('kid'), session.get('key')
+    held = admission.get('keys', {}).get(kid) if isinstance(kid, str) else None
+    if held is not None and isinstance(octets, (bytes, bytearray)) and hmac.compare_digest(bytes(held), bytes(octets)):
+        return {'ok': True}
+    return {'ok': False, 'code': 'not-admitted'}
 
 
 _STRICT_B64 = re.compile(r'[A-Za-z0-9+/]*={0,2}')

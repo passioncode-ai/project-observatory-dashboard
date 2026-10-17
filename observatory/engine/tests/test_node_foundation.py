@@ -266,8 +266,32 @@ class PeerKeys(unittest.TestCase):
                     self.assertEqual(answer['revision'], case['expect']['revision'])
                     self.assertEqual(sorted(answer['keys']), case['expect']['kids'])
                     self.assertEqual(answer['excluded'], case['expect']['excluded'])
+                    self.assertEqual(answer['unread'], case['expect'].get('unread', []))
                 else:
                     self.assertEqual(answer, {'ok': False, 'refusal': case['expect']['refusal']})
+
+    def test_session_cases(self):
+        group = vectors('relay')['session']['cases']
+        self.assertEqual(len(group), 8)
+        for case in group:
+            with self.subTest(case['name']):
+                admission = relay.peer_keys(case.get('held'), ms(case['at']), case.get('extraRevocations', []))
+                session = {'kid': case['session']['kid'], 'key': base64.b64decode(case['session']['key'])}
+                self.assertEqual(relay.session_stands(session, admission), case['expect'])
+
+    def test_admission_set_group_is_whole(self):
+        self.assertEqual(len(vectors('relay')['admissionSet']['cases']), 16)
+
+    def test_a_session_key_of_another_type_never_stands(self):
+        good = p256.point(vectors('relay')['machineKey'])
+        admission = {'ok': True, 'keys': {'m-a#sig': good}}
+        self.assertEqual(relay.session_stands({'kid': 'm-a#sig', 'key': good}, admission), {'ok': True})
+        for session in ({'kid': 'm-a#sig', 'key': base64.b64encode(good).decode()}, {'kid': ['m-a#sig'], 'key': good},
+                        {'kid': 'm-a#sig', 'key': good[:-1]}, {}):
+            self.assertEqual(relay.session_stands(session, admission), {'ok': False, 'code': 'not-admitted'})
+        for refusal, code in (('expired', 'expired'), ('no-record', 'not-admitted'), ('not-yet-valid', 'not-admitted')):
+            self.assertEqual(relay.session_stands({'kid': 'm-a#sig', 'key': good}, {'ok': False, 'refusal': refusal}),
+                             {'ok': False, 'code': code})
 
 
 @needs_crypto
@@ -387,7 +411,7 @@ class AdversarialRound(unittest.TestCase):
             {'id': 'm-f', 'deviceKeys': [{'kid': 'm-f#sig', 'use': 'sig', 'publicKey': good}]}]}
         answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
         self.assertEqual(sorted(answer['keys']), ['m-f#sig'])
-        self.assertEqual(sorted(e['kid'] for e in answer['excluded']), ['m-a#sig', 'm-d#sig', 'm-e#sig', 'm-x#sig'])
+        self.assertEqual(sorted(e['kid'] for e in answer['excluded']), ['m-a#sig', 'm-a#sig', 'm-d#sig', 'm-e#sig', 'm-x#sig'])
 
     @needs_crypto
     def test_a_blob_request_no_relay_accepts_is_never_signed(self):
@@ -439,14 +463,15 @@ class ConfirmingRound(unittest.TestCase):
                 relay.parse_json(text)
         self.assertEqual(relay.parse_json(b'{"a":1e300}'), {'a': 1e300})
 
-    def test_a_kid_listed_with_mixed_reasons_is_excluded_once(self):
+    def test_a_kid_listed_with_mixed_reasons_is_bad_key_each_time(self):
         good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
         ed = base64.b64encode(bytes(range(1, 33))).decode()
         record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z', 'machines': [
             {'id': 'm-a', 'deviceKeys': [{'kid': 'm-a#sig', 'use': 'sig', 'publicKey': ed},
                                          {'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}]}]}
         answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
-        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}]))
+        # F7 (DEC-0084): each listing of a kid named twice is bad-key, before its own alg is read.
+        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}] * 2))
 
     @needs_crypto
     def test_identifiers_of_another_type_never_match(self):
@@ -470,13 +495,13 @@ class ConfirmingRound(unittest.TestCase):
     def test_a_lone_surrogate_header_is_malformed(self):
         self.assertEqual(relay.parse_relay_request('\ud800'), {'ok': False, 'status': 400, 'code': 'malformed'})
 
-    def test_a_kid_named_three_times_is_excluded_once(self):
+    def test_a_kid_named_three_times_is_bad_key_each_time(self):
         good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
         key = {'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}
         record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z',
                   'machines': [{'id': 'm-a', 'deviceKeys': [key, key, key]}]}
         answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
-        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}]))
+        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}] * 3))
 
     def test_no_bare_module_name_the_privacy_gate_denies(self):
         source = (ROOT / 'node' / 'p256.py').read_text(encoding='utf-8')
