@@ -438,8 +438,9 @@ class Session(unittest.TestCase):
 
     def test_a_relay_naming_another_origin_gets_no_signature(self):
         self.relay.hello_relay = 'https://other-relay.example'
-        with self.assertRaises(RelayRefused):
+        with self.assertRaises(RelayRefused) as caught:
             RelaySession(self.relay.origin, self.a, ESTATE, self.peers.get, on_message=print).open()
+        self.assertEqual(caught.exception.code, 'wrong-origin')
         self.assertEqual(self.relay.auths, [])
 
     def test_a_revoked_machine_is_closed_4403(self):
@@ -1097,6 +1098,23 @@ class ScopedRound(unittest.TestCase):
         self.assertEqual(states[0], ('closed', {'error': 'KeyError'}))
         self.assertEqual(len(calls), 2)
 
+    def test_a_hello_of_another_protocol_is_retried_not_believed(self):
+        for hello in ({'type': 'welcome'}, {'type': 'hello', 'protocol': 'other/1'}):
+            with self.subTest(hello):
+                server = RawServer(lambda conn, srv, h=hello: conn.send(dict({'v': 1, 'id': 'h', 'relay': 'x',
+                                                                             'nonce': 'n'}, **h)) or time.sleep(1))
+                origin = 'http://' + server.url[5:-11]
+                states, stop = [], threading.Event()
+                thread = threading.Thread(target=keep_connected, args=(
+                    lambda replay: RelaySession(origin, self.b, ESTATE, {}.get, on_message=print), stop),
+                    kwargs={'on_state': lambda s, d: states.append((s, d)), 'min_backoff': 0.01}, daemon=True)
+                thread.start()
+                self.assertTrue(eventually(lambda: [s for s, _ in states].count('retry') >= 1))
+                stop.set()
+                thread.join(5)
+                self.assertNotIn('stopped', [s for s, _ in states])
+                self.assertEqual(states[0], ('closed', {'refusal': 'malformed-hello'}))
+
     def test_a_squatter_on_the_port_is_retried_not_believed(self):
         origin = self.hello_with('\ud800')
         states, stop = [], threading.Event()
@@ -1113,7 +1131,13 @@ class ScopedRound(unittest.TestCase):
         states, stop = [], threading.Event()
         make = lambda replay: RelaySession(self.relay.origin, self.b, '\ud800', {}.get, on_message=print)
         with self.assertLogs('observatory.node.session', 'ERROR') as logs:
-            keep_connected(make, stop, on_state=lambda s, d: states.append((s, d)), min_backoff=0.01)
+            thread = threading.Thread(target=keep_connected, args=(make, stop),
+                                      kwargs={'on_state': lambda s, d: states.append((s, d)), 'min_backoff': 0.01},
+                                      daemon=True)
+            thread.start()
+            thread.join(10)                              # a regression retries forever: fail, don't hang
+            stop.set()
+        self.assertFalse(thread.is_alive(), 'a local fault was retried')
         self.assertEqual(states[-1], ('stopped', {'refusal': 'local-fault'}))
         self.assertTrue(any('relay.auth.local-fault' in line for line in logs.output))
 

@@ -249,6 +249,11 @@ def _depth_ok(text: str) -> bool:
     return True
 
 
+def json_depth_ok(text: str) -> bool:
+    """Whether JSON text nests at most `MAX_JSON_DEPTH` deep, counted before it is parsed (strings skipped)."""
+    return _depth_ok(text)
+
+
 def parse_json(raw: bytes):
     """JSON from a relay or a peer: no NaN or Infinity, at most `MAX_FRAME_BYTES` and `MAX_JSON_DEPTH` deep, UTF-8;
     ValueError otherwise (never RecursionError or MemoryError). The session parses every relay frame with it."""

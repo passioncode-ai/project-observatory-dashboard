@@ -22,6 +22,7 @@ import re
 from typing import Any, Mapping, Optional, Sequence
 
 from . import ed25519, jcs, p256
+from .relay import json_depth_ok
 
 ASSERTION_ALGORITHMS = ('ES256', 'EdDSA')
 FLAGS = {'UP': 0x01, 'UV': 0x04, 'BE': 0x08, 'BS': 0x10, 'AT': 0x40, 'ED': 0x80}
@@ -117,8 +118,10 @@ def verify_assertion(assertion: Any, credential: Mapping[str, Any], challenge: b
 
         def no_constants(name):
             raise ValueError(name)
+        if not json_depth_ok(text):                    # the node's one depth bound (relay.MAX_JSON_DEPTH)
+            return _fail('malformed')
         client = json.loads(text, parse_constant=no_constants)
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
         return _fail('malformed')
     if not isinstance(client, dict):
         return _fail('malformed')
