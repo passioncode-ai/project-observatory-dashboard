@@ -507,22 +507,28 @@ if MCP_SRC.is_file():
 # script's source: `store/raw/agents.json` and the previous `registry/agents.json`, read for the
 # first-seen and last-running dates it carries forward.
 AGENTS_SRC = paths.SCRATCH / "agents.json"
-if AGENTS_SRC.is_file():
+if AGENTS_SRC.is_file() or (INV / "agents.json").is_file():
     import scan_agents
+    # The previous document. An unreadable one never reaches this line: `configuration.
+    # validate_registries` refuses every registry/*.json before the emit runs, so the
+    # fallback below is a guard, not a path a workspace takes.
     try:
+        _aprev = json.loads((INV / "agents.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _aprev = None
+    try:
+        if not AGENTS_SRC.is_file():
+            raise FileNotFoundError("store/raw/agents.json")
         _ascan = json.loads(AGENTS_SRC.read_text(encoding="utf-8"))  # not an object: document() refuses it
         _amcp = json.loads(MCP_SRC.read_text(encoding="utf-8")) if MCP_SRC.is_file() else None
-        try:
-            _aprev = json.loads((INV / "agents.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            _aprev = None
         _adoc = scan_agents.document(_ascan, _amcp, _aprev, OBS)
     except Exception as _aexc:                                         # noqa: BLE001 — never the tick
-        # The registry keeps its last good document; a scan this cannot read is said, not guessed,
-        # and an emit that stopped here would stop the whole tick (validate, findings, the page).
-        print(f"  degraded agents.json: the scan could not be used ({type(_aexc).__name__}); "
-              f"registry/agents.json keeps its last version")
-    else:
+        # A scan this cannot use is said, never hidden: the last document is rewritten stale with
+        # the reason, and the emit goes on (stopping here would stop validate, findings, the page).
+        _adoc = scan_agents.unusable(_aprev, type(_aexc).__name__, OBS)
+        print(f"  degraded agents.json: {scan_agents.UNUSABLE} ({type(_aexc).__name__}); "
+              + ("the last rows are kept, marked stale" if _adoc else "there is no earlier document"))
+    if _adoc is not None:
         _stamped("agents.json", _adoc)
         _at = _adoc["totals"]
         print(f"agents.json: {_at['agents']} agent(s), {_at['local']} local, {_at['remote']} remote, "

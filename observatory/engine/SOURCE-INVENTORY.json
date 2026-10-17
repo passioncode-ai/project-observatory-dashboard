@@ -127,8 +127,8 @@
     {
       "path": "collectors/emit_registry.py",
       "source_sha256": "ff8edc591196dd1278b0766ea8216973f5cc3951ff702b417bdb053305e8170d",
-      "export_sha256": "8c8871d54b99acb757b71a80f81096ebbf297637e11760b14377d4e6b5198dab",
-      "bytes": 58301,
+      "export_sha256": "f35d1c9c2cdd2c68b978cfbf9b183e3a2cb76d4c27b7fa4781c457b13d1e0f96",
+      "bytes": 58781,
       "python_comments_removed": 213,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a934cdaa18690ec05099763b9d0a64a607ee90cbc9ca93c79a1fab7b6da6aae2",
-      "bytes": 43703
+      "export_sha256": "fd2ddac114f5e08303971fe83cbf6da2c48318f12b1e069a97339b1a95acb446",
+      "bytes": 45874
     },
     {
       "path": "collectors/scan_bitbucket.py",
@@ -828,15 +828,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "f620b2e962f9e8f2085a3b383c0471653fc41ad66db06292bdaac46ad8c1cfd8",
-      "bytes": 23320,
+      "export_sha256": "639aec39aee6788ddceb0b45b8cd0abef7d849b418ac97b45bb87f2a394e9555",
+      "bytes": 23796,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "89078080d9e24a7adf70ad000601aeedbfd94577a0fea4ebde1a3b30f3798b45",
-      "bytes": 103326,
+      "export_sha256": "09fc662456f278d74b1ba0d68fcbacde5b42372c73ba93e5df4d3749005ea7ca",
+      "bytes": 103551,
       "upstream_modified": true
     },
     {
@@ -3723,8 +3723,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d3e500e083dfb46440a3fd90e28d0410fabf78c0c329373f7cfe2524e3979dc5",
-      "bytes": 66483
+      "export_sha256": "f80d4c317728e9f079299615cebc2e34eb7cc0dc6651d96c79832ca199119b56",
+      "bytes": 70672
     },
     {
       "path": "tests/test_scan_ids.py",
