@@ -693,6 +693,11 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     # PAGES_MAX the name check could not see it, so the next run minted a second. The row names the
     # key, its slot and its ceiling, and gets the hash the moment the provider answers.
     old_row = doc["issued"].get(name)
+    if isinstance(old_row, dict) and (old_row.get("successor_pending") or old_row.get("stale_successors")):
+        # Writing the pending row would drop a successor a rotation minted and may have delivered: a live key,
+        # maybe the one the slot holds, would leave the ledger (round 7). As for revoke: finish it first.
+        raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; run `rotate {name}` to "
+                         f"finish it first, then issue")
     if isinstance(old_row, dict) and old_row.get("hash"):
         # The provider has no key by this name (the check above), so the row's key is gone or renamed; its hash
         # would be lost with the row. Asked by hash: gone (404) is a tombstone `deleted: True` with the snapshot
@@ -1515,19 +1520,23 @@ def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) ->
 def _retire_stale_successors(doc: dict, name: str, rec: dict, admin: str) -> None:
     """Delete and retire the successors an interrupted rotation minted and never recorded as delivered, now that
     a newer successor holds the slot. Each one's spend is snapshotted and written to the row before its DELETE,
-    as for a predecessor."""
+    as for a predecessor.
+
+    A snapshot kept from an earlier run is used only when the key is gone (404): while it is alive it may have
+    spent since, so it is read again and the new snapshot written before the DELETE (round 7: a kept day-1 snapshot
+    of a key that spent on day 2 read whole and short)."""
     for entry in list(rec.get("stale_successors") or []):
         key_hash = entry.get("hash") if isinstance(entry, dict) else None
         if not key_hash:
             continue
-        snapshot = entry.get("snapshot")
-        if not isinstance(snapshot, dict):
-            if _alive(admin, key_hash):
-                snapshot = usage_snapshot(admin, key_hash)
-                entry["snapshot"] = snapshot
-                save_ledger(doc)
-            else:
-                snapshot = _gone_snapshot("the stale successor was gone at the provider")
+        if _alive(admin, key_hash):
+            snapshot = usage_snapshot(admin, key_hash)
+            entry["snapshot"] = snapshot
+            save_ledger(doc)
+        else:
+            kept = entry.get("snapshot")
+            snapshot = kept if isinstance(kept, dict) else _gone_snapshot(
+                "the stale successor was gone at the provider")
         try:
             _request(f"/keys/{key_hash}", admin, method="DELETE")
         except RuntimeError as exc:

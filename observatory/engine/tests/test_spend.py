@@ -2247,6 +2247,231 @@ class RoundSixCrashEachStep(unittest.TestCase):
                 self.assertEqual(stones.count("h-old"), 1)
 
 
+import openrouter as OR7  # noqa: E402
+import scan_spend  # noqa: E402
+
+
+class Crash7(BaseException):
+    """A kill: nothing in the door catches it."""
+
+
+class World7:
+    """A fake provider + a fake slot: the slot holds a VALUE; each value maps to the hash the provider minted."""
+
+    def __init__(self, keys, today="2026-10-14"):
+        self.fake = Fake(keys, today)
+        self.value_hash = {"VALUE-OLD": "h-old"}
+        self.slot = "VALUE-OLD"
+        self.faults = {}          # ("call", i) | ("save", i) | ("deliver", i) -> mode
+        self.ncall = 0
+        self.nsave = 0
+        self.ndeliver = 0
+        self.events = []
+
+    def provider(self, path, key, payload=None, method=None):
+        i = self.ncall
+        self.ncall += 1
+        mode = self.faults.get(("call", i))
+        if mode == "crash-before":
+            raise Crash7(f"call {i} {method} {path}")
+        if mode == "5xx-before":
+            raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+        out = self.fake(path, key, payload, method)
+        if path == "/keys" and payload:
+            self.value_hash[out["key"]] = out["data"]["hash"]
+        self.events.append((method or ("POST" if payload else "GET"), path))
+        if mode == "crash-after":
+            raise Crash7(f"after call {i} {method} {path}")
+        if mode == "lost-after":
+            raise RuntimeError("openrouter request failed: TimeoutError")
+        return out
+
+    def deliver(self, value, to, **o):
+        i = self.ndeliver
+        self.ndeliver += 1
+        mode = self.faults.get(("deliver", i))
+        if mode == "crash-before":
+            raise Crash7("deliver before")
+        if mode == "refuse":
+            raise RuntimeError("Vault refused credential delivery; child output withheld")
+        self.slot = value
+        if mode == "crash-after":
+            raise Crash7("deliver after write")
+        if mode == "fail-after-write":
+            raise RuntimeError("Vault refused credential delivery; child output withheld")
+        return "slot"
+
+    def slot_hash(self):
+        return self.value_hash.get(self.slot)
+
+
+def with_door7(world, issued, fn, when=AT):
+    with tempfile.TemporaryDirectory() as tmp, patch.object(OR7, "datetime", clock(when)):
+        door = Door(tmp, issued, world.provider)
+        real_save = OR7.save_ledger
+
+        def save(doc):
+            i = world.nsave
+            world.nsave += 1
+            mode = world.faults.get(("save", i))
+            if mode == "crash-before":
+                raise Crash7(f"save {i}")
+            if mode == "oserror":
+                raise OSError(28, "No space left on device")
+            real_save(doc)
+            if mode == "crash-after":
+                raise Crash7(f"after save {i}")
+        ps = [patch.object(OR7, "deliver", world.deliver), patch.object(OR7, "save_ledger", save)]
+        for p in ps:
+            p.start()
+        try:
+            return fn(door)
+        finally:
+            for p in ps:
+                p.stop()
+            door.close()
+
+
+def run_rotate7(world, ledger_doc, when=AT):
+    """Run rotate_one on `ledger_doc`; return (result-or-exception, ledger after)."""
+    def fn(door):
+        try:
+            out = OR7.rotate_one("k1")
+        except BaseException as exc:  # noqa: BLE001
+            out = exc
+        return out, door.ledger()
+    return with_door7(world, ledger_doc, fn, when)
+
+
+def live_untracked7(world, doc):
+    """Live keys at the fake provider that no ledger row nor undeleted tombstone tracks."""
+    tracked = set()
+    for rec in doc.get("issued", {}).values():
+        tracked.update(scan_spend.row_hashes(rec))
+    for st in doc.get("retired", []):
+        if st.get("deleted", True) is not True and st.get("hash"):
+            tracked.add(st["hash"])
+    return sorted(h for h, k in world.fake.keys.items() if not k["deleted"] and h not in tracked)
+
+
+class RoundSevenStaleSnapshotReusedWhileAlive(unittest.TestCase):
+    """R6-6 retire path: a stale successor whose DELETE failed (5xx) keeps the snapshot written on day 1. It is
+    still live and spends (a consumer cached it). The next rotate (day 3) reuses the day-1 snapshot without
+    re-reading, DELETEs, and writes a reconciled tombstone: its day-2 spend is lost while the project reads
+    whole."""
+
+    def test(self):
+        world = World7({"h-old": {"name": "k1", "rows": [("2026-10-05", 1.0)], "daily": 0.0, "deleted": False}})
+        doc = {"issued": {"k1": ledger_row("acct-a", "h-old", "alpha-web")}}
+        # run 1: killed right after the vault wrote the successor
+        world.faults = {("deliver", 0): "crash-after"}
+        out1, doc = run_rotate7(world, doc)
+        s1 = world.slot_hash()
+        # run 2 (same day): the stale successor's DELETE answers 502
+        world.ncall = world.nsave = world.ndeliver = 0
+        world.faults = {}
+        orig = world.provider
+        state = {"fail": True}
+
+        def prov(path, key, payload=None, method=None):
+            if method == "DELETE" and path == f"/keys/{s1}" and state["fail"]:
+                state["fail"] = False
+                raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+            return orig(path, key, payload, method)
+        world.provider = prov
+        out2, doc = run_rotate7(world, doc)
+        rec2 = doc["issued"]["k1"]
+        # day 2: the stale successor spends (a consumer still holds its value)
+        world.fake.keys[s1]["rows"].append(("2026-10-15", 2.0))
+        world.fake.today = "2026-10-16"
+        world.provider = orig
+        world.ncall = world.nsave = world.ndeliver = 0
+        out3, doc = run_rotate7(world, doc, when=utc(2026, 10, 16, 12))
+        stones = {s["hash"]: s for s in doc["retired"]}
+        account = [{"date": "2026-10-05", "usage": 1.0}, {"date": "2026-10-15", "usage": 2.0}]
+        res = ProjectSpend().scan_at(utc(2026, 10, 17, 12), ledger=doc,
+                                       keys={h: (404 if k["deleted"] else [{"date": d + " 00:00:00", "usage": u}
+                                                                            for d, u in k["rows"]])
+                                             for h, k in world.fake.keys.items()}, account=account)
+        alpha = res["projects"]["alpha-web"]
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 3.0) < 1e-6,
+                        f"whole and lower: alpha month {alpha['month_usd']} (true 3.0)")
+
+
+class RoundSevenIssueOverRowWithStaleSuccessor(unittest.TestCase):
+    """A rotation killed after delivery leaves S1 (in the slot) as successor_pending/stale. The old key is then
+    deleted at the dashboard. `issue k1` sees no key called k1, retires the row by its hash only, and the row's
+    stale successor (live, in use, spending) leaves the ledger."""
+
+    def test(self):
+        world = World7({"h-old": {"name": "k1", "rows": [("2026-10-05", 1.0)], "daily": 0.0, "deleted": False}})
+        doc = {"issued": {"k1": ledger_row("acct-a", "h-old", "alpha-web")}}
+        world.faults = {("deliver", 0): "crash-after"}
+        _out, doc = run_rotate7(world, doc)
+        s1 = world.slot_hash()
+        world.fake.keys[s1]["rows"].append(("2026-10-06", 2.0))
+        world.fake.keys["h-old"]["deleted"] = True          # the operator deletes the old key at the dashboard
+        world.faults = {}
+
+        def fn(door):
+            try:
+                with patch.object(OR7, "vault_destination", lambda to: to), \
+                        patch.object(OR7, "_all_keys", lambda admin, include_disabled=True: [
+                            {"name": k["name"], "hash": h} for h, k in world.fake.keys.items() if not k["deleted"]]):
+                    out = OR7.issue_key("k1", 10, "acct-a", "vault:x/prod/K", "alpha-web")
+            except BaseException as exc:  # noqa: BLE001
+                out = exc
+            return out, door.ledger()
+        out, doc = with_door7(world, doc, fn)
+        self.assertIsInstance(out, ValueError)
+        self.assertIn("run `rotate k1` to finish it first", str(out))
+        res = ProjectSpend().scan_at(utc(2026, 10, 16, 12), ledger=doc,
+                                       keys={h: (404 if k["deleted"] else [{"date": d + " 00:00:00", "usage": u}
+                                                                            for d, u in k["rows"]])
+                                             for h, k in world.fake.keys.items()},
+                                       account=[{"date": "2026-10-05", "usage": 1.0},
+                                                {"date": "2026-10-06", "usage": 2.0}])
+        alpha = res["projects"]["alpha-web"]
+        world.fake.keys[s1]["rows"].append(("2026-12-10", 5.0))
+        new_hash = doc["issued"]["k1"]["hash"]
+        later = ProjectSpend().scan_at(utc(2026, 12, 20, 12), ledger=doc,
+                                         keys={h: (404 if k["deleted"] else [{"date": d + " 00:00:00", "usage": u}
+                                                                              for d, u in k["rows"]])
+                                               for h, k in world.fake.keys.items()},
+                                         account=[{"date": "2026-12-10", "usage": 5.0}])
+        a2 = later["projects"]["alpha-web"]
+        self.assertEqual(live_untracked7(world, doc), [], "a live key left the ledger untracked")
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 3.0) < 1e-6,
+                        f"whole and lower: {alpha['month_usd']}")
+
+class RoundSevenGaps(unittest.TestCase):
+    """The test gaps of verification round 7 (M1, M11)."""
+
+    def test_a_refused_fresh_delivery_leaves_the_stale_successor_alive(self):
+        """M1: stale successors are retired only after a newer one is delivered; a delivery that fails leaves the
+        stale one, possibly the slot's key, alive."""
+        world = World7({"h-old": {"name": "k1", "rows": [], "daily": 0.0, "deleted": False}})
+        doc = {"issued": {"k1": ledger_row("acct-a", "h-old", "alpha-web")}}
+        world.faults = {("deliver", 0): "crash-after"}
+        _out, doc = run_rotate7(world, doc)
+        s1 = world.slot_hash()
+        world.ncall = world.nsave = world.ndeliver = 0
+        world.faults = {("deliver", 0): "refuse"}
+        out, doc = run_rotate7(world, doc)
+        self.assertIsInstance(out, RuntimeError)
+        self.assertFalse(world.fake.keys[s1]["deleted"])
+        self.assertEqual(world.slot_hash(), s1)
+        self.assertIn(s1, scan_spend.row_hashes(doc["issued"]["k1"]))
+
+    def test_the_scan_reads_a_stale_successor(self):
+        """M11."""
+        led = {"issued": {"k1": ledger_row("acct-a", "h-cur", "alpha-web", stale_successors=[{"hash": "h-st"}])}}
+        doc = ProjectSpend().scan(ledger=led, keys={"h-cur": [row("2026-10-05", 1.0)], "h-st": [row("2026-10-06", 2.0)]},
+                                  account=[row("2026-10-05", 1.0), row("2026-10-06", 2.0)])
+        self.assertIn("h-st", doc["_asked"])
+        self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["unattributed"]["month_usd"]), (3.0, 0.0))
+
+
 class ProjectCommand(unittest.TestCase):
     """`tools/spend.py project [P] --json`: the launcher's recentSpendUsd input, read from the scan."""
 
