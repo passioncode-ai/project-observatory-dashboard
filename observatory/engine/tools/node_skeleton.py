@@ -122,7 +122,8 @@ def run(source: Path, keep: bool) -> dict:
         sessions = {}
         for name, keys in machines.items():
             session = RelaySession(origin, keys, TEST_ESTATE, sender_key,
-                                   on_message=lambda m, n=name: inbox[n].append(m))
+                                   on_message=lambda m, n=name: inbox[n].append(m),
+                                   revoked=set(peers['revoked']).__contains__)
             sessions[name] = session
             welcome = session.open()
             receipt['steps']['admitted:' + name] = welcome.estate_revision == 1

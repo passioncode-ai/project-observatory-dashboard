@@ -311,7 +311,10 @@ def verify_message_body(body: Any, expect: Mapping[str, str], sender_key: Callab
         return _refuse(verdict)
     if verdict is not True:
         return _refuse('bad-signature')
-    if payload['from'] != expect['from'] or payload['to'] != expect['to'] or payload['msgId'] != expect['msgId']:
+    # JavaScript's `!==`: a value of another type is never equal, so `["x"]` is no `"x"` and no `["x"]` either.
+    same = lambda value, wanted: isinstance(value, str) and isinstance(wanted, str) and value == wanted
+    if not (same(payload['from'], expect['from']) and same(payload['to'], expect['to'])
+            and same(payload['msgId'], expect['msgId'])):
         return _refuse('mismatch')
     if iat - now_ms > CLOCK_SKEW_SECONDS * 1000:
         return _refuse('not-yet-valid')
@@ -406,7 +409,10 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
             else:
                 admitted[kid] = octets
             claimed.add(kid)
-    return {'ok': True, 'revision': record.get('revision'), 'keys': admitted, 'excluded': excluded}
+    revoked_kids = sorted(keys | {machine['id'] + '#sig' for machine in entries(record.get('machines'))
+                                  if isinstance(machine.get('id'), str) and machine['id'] in machines})
+    return {'ok': True, 'revision': record.get('revision'), 'keys': admitted, 'excluded': excluded,
+            'revoked': revoked_kids}
 
 
 _STRICT_B64 = re.compile(r'[A-Za-z0-9+/]*={0,2}')

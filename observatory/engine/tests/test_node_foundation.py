@@ -448,6 +448,25 @@ class ConfirmingRound(unittest.TestCase):
         answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
         self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}]))
 
+    @needs_crypto
+    def test_identifiers_of_another_type_never_match(self):
+        keys = DeviceKeys.generate()
+        header = p256.b64url_encode(jcs.canonical_bytes({'alg': 'ES256', 'kid': keys.sig_kid, 'typ': relay.MESSAGE_TYP}))
+        payload = p256.b64url_encode(jcs.canonical_bytes({
+            'type': relay.MESSAGE_TYPE, 'from': keys.sig_kid, 'to': 'm-b#sig', 'msgId': ['x'],
+            'iat': '2026-10-12T00:00:00Z', 'exp': '2026-10-12T01:00:00Z', 'payload': None}))
+        body = header + '.' + payload + '.' + keys.sign(header + '.' + payload)
+        answer = relay.verify_message_body(body, {'from': keys.sig_kid, 'to': 'm-b#sig', 'msgId': ['x']},
+                                           {keys.sig_kid: keys.sig_public}.get, ms('2026-10-12T00:10:00Z'))
+        self.assertEqual(answer, {'ok': False, 'reason': 'mismatch'})
+
+    def test_peer_keys_name_the_revoked(self):
+        good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
+        record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z',
+                  'revocations': [{'kind': 'machine', 'ref': 'm-gone'}, {'kind': 'device-key', 'ref': 'm-old#sig'}],
+                  'machines': [{'id': 'm-gone', 'deviceKeys': [{'kid': 'm-gone#sig', 'use': 'sig', 'publicKey': good}]}]}
+        self.assertEqual(relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))['revoked'], ['m-gone#sig', 'm-old#sig'])
+
     def test_a_lone_surrogate_header_is_malformed(self):
         self.assertEqual(relay.parse_relay_request('\ud800'), {'ok': False, 'status': 400, 'code': 'malformed'})
 

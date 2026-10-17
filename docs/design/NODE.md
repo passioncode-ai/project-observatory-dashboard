@@ -136,6 +136,18 @@ It also answers each close as RFC 6455 §7 says:
 - a reason that is not UTF-8 is 1007;
 - 1005, 1006 and 1015 are never echoed.
 
+**Whose fault a refusal is.**
+- A hello that is not this protocol's (another program squatting a loopback port, a malformed nonce, another origin)
+  is retried with backoff, never terminal: only the relay's own refusal of `auth` says this machine is not admitted.
+- An `auth` frame this node cannot sign (its own estate, kid or keys) is a `local-fault`: logged, terminal, because
+  no retry changes it.
+- A deliver frame whose `from`, `msgId` or `seq` has the wrong type is `malformed` before any lookup. Signed
+  identifiers compare as JavaScript's `!==` does, a value of another type never being equal.
+- A sender the applied record revokes is `revoked-sender`, final and acknowledged, unlike one not listed yet.
+  `relay.peer_keys` names the revoked kids.
+
+`keep_connected` closes each session on every exit and logs a listener that raises without letting it end the loop.
+
 **What is acknowledged.** A body refused for a fault in it (`malformed`, `bad-signature`, `mismatch`, `bad-key`,
 `unsupported-alg`, `lifetime-too-long`, `expired`, `replay`) is acknowledged. A body refused as `unknown-sender` or
 `not-yet-valid` is reported and left unacknowledged: a newer estate revision may list the sender, and a clock may catch

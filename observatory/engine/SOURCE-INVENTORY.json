@@ -1510,8 +1510,8 @@
       "path": "node/relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "04162ae8d6fe2b9638659485eb2278a968a091afc141ee870aa64b4a7544e63e",
-      "bytes": 21815
+      "export_sha256": "2705f9a96c0e9d7b21532353e585df271b827707422f14709c169fdfeec709b2",
+      "bytes": 22308
     },
     {
       "path": "node/revocation.py",
@@ -1524,8 +1524,8 @@
       "path": "node/session.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c00d041078861b8195610f481cf9662eb22ca22ce59ae9fd96ac94d31c2a8c68",
-      "bytes": 24233
+      "export_sha256": "cc3f0495a1a6687542ed0197c1ffcc10cab82ec71b3415c9eb34bfd5deeb9b4d",
+      "bytes": 25632
     },
     {
       "path": "node/webauthn.py",
@@ -3319,8 +3319,8 @@
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ab70c3f77509451e6d9a69a3b43d5495e795b760d06599394ba122ca7740dc5b",
-      "bytes": 33159
+      "export_sha256": "8d75de56b8fa5094809284f3a4fb7d1985fc6504e18445ea4a782c8a0d0c134d",
+      "bytes": 34590
     },
     {
       "path": "tests/test_node_revocation.py",
@@ -3333,8 +3333,8 @@
       "path": "tests/test_node_session.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "809b780b352a57e6c8b8cb9d012b88afc80a0a3a5b1c4684133b43f7ab9523fa",
-      "bytes": 57308
+      "export_sha256": "a54861e6119ccf5088add69a419bf38cad306b06ed005628a7b134cf9919cccd",
+      "bytes": 64062
     },
     {
       "path": "tests/test_notification.py",
@@ -4608,8 +4608,8 @@
       "path": "tools/node_skeleton.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e1c1c44a0ad4784f1d23e030b1a97139f829db6643bf00ae0220c5c4a8071bae",
-      "bytes": 9210
+      "export_sha256": "efbe3891787f0792e2458befce0c197ce1e06f9826d80b85a5a1fecd83d767a5",
+      "bytes": 9289
     },
     {
       "path": "tools/notify_findings.py",
