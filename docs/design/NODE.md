@@ -252,6 +252,34 @@ nothing and prints the same. `--show` prints it without creating anything, and e
 A machine's identity is not moved by copying the folder: a new machine runs `--init` and is added to the estate by its
 own ceremony (DEC-0084).
 
+## The walking skeleton
+
+`python observatory/engine/tools/node_skeleton.py --relay-source PATH` runs the whole path on one machine:
+- it starts the relay's portable build from a relay checkout (with `npm ci` done) on `127.0.0.1`, with a temporary data
+  folder;
+- it gives the relay a test estate whose revision 1 lists two machines' device keys;
+- it opens one `RelaySession` per machine, sends a signed message each way, asks for presence, and puts and fetches a
+  blob.
+
+It prints one `node-skeleton/1` receipt with one step per stage. **The estate is a test estate, not the real
+ceremony.** Its revision is signed by the contract vectors' published EdDSA test passkey, which nothing real trusts.
+It lives only in the temporary folder.
+
+First run, 2026-10-17, against relay `897be7d`:
+
+| Step | Result |
+|---|---|
+| record verified | passed |
+| both machines admitted | passed |
+| a message laptop→desk | passed |
+| a message desk→laptop | passed |
+| blob put and get | passed |
+| presence | failed |
+
+Presence fails because that relay pins the contract at `51719e4`, before DEC-0066. It answers `presence-query` with
+bare `presence` frames instead of one `presence-result` carrying `replyTo`, which the node (contract `bf3fd6b`)
+waits for. The fix is the relay's contract bump.
+
 ## What comes next
 
 | Slice | What |

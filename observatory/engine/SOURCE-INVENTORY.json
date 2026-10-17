@@ -4605,6 +4605,13 @@
       "bytes": 3353
     },
     {
+      "path": "tools/node_skeleton.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e1c1c44a0ad4784f1d23e030b1a97139f829db6643bf00ae0220c5c4a8071bae",
+      "bytes": 9210
+    },
+    {
       "path": "tools/notify_findings.py",
       "source_sha256": "cea75d7eea0721eed447653ac3c80ed1e02964cc2ffbc79d9b2638934de27e2b",
       "export_sha256": "7e82eed69a85955dbf750e490cc2f7652669a64c25c0d135007ef3c8f18cf762",
@@ -4997,7 +5004,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 650,
+  "file_count": 651,
   "excluded": [
     "git-history",
     "operator-registries",
