@@ -697,9 +697,13 @@ def _join_mcp(rows: list[dict], mcp_scan: dict | None, degraded: list) -> dict |
 def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date: str,
              now: datetime | None = None) -> dict:
     """`registry/agents.json` from the collector's scan, the MCP inventory and the last document."""
-    if (not isinstance(scan, dict) or not isinstance(scan.get("services", []), list)
-            or not isinstance(scan.get("sources", {}), dict)):
-        raise TypeError("the agents scan is not a JSON object with a services list")
+    fabric = (scan.get("sources") or {}).get("fabric_services") if isinstance(scan, dict) and isinstance(
+        scan.get("sources"), dict) else None
+    if (not isinstance(scan, dict) or not isinstance(scan.get("services"), list)
+            or not isinstance(fabric, dict) or fabric.get("state") not in ("read", "absent", "unreadable")):
+        # A scan without its services list or its fabric_services source is not a scan of an empty
+        # machine: read as one, it would list every agent as removed and reset first-seen dates.
+        raise TypeError("the agents scan lacks its services list or its fabric_services source")
     now = now or datetime.now(timezone.utc)
     degraded = [_degraded_entry(d) for d in scan.get("degraded") or [] if isinstance(d, dict)]
     if previous is not None and not isinstance(previous, dict):
@@ -808,11 +812,11 @@ def unusable(previous, why: str, obs_date: str) -> dict | None:
     again changes nothing but `updated_on`. None when there is no usable previous document."""
     if not isinstance(previous, dict) or not isinstance(previous.get("agents"), list):
         return None
-    doc = copy.deepcopy(previous)
+    doc = _sanitise(copy.deepcopy(previous))        # an older, dirtier document heals rather than turns validate red
     doc["updated_on"] = obs_date
     doc["stale"] = True
-    kept = [d for d in doc.get("degraded") or []
-            if not (isinstance(d, dict) and str(d.get("reason", "")).startswith(UNUSABLE))]
+    lines = doc.get("degraded") if isinstance(doc.get("degraded"), list) else []
+    kept = [d for d in lines if isinstance(d, dict) and not str(d.get("reason", "")).startswith(UNUSABLE)]
     day = doc.get("scanned_on") if isinstance(doc.get("scanned_on"), str) else None
     kept.append({"source": "fabric-services",
                  "reason": _text(f"{UNUSABLE} ({why}); rows are from {day or 'an unknown day'}", "problem")})
