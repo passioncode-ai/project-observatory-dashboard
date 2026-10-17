@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -427,6 +428,93 @@ class AdversarialRound(unittest.TestCase):
     def test_device_ids_end_where_they_end(self):
         with self.assertRaises(ValueError):
             DeviceKeys('m-1234\n', None, None, '')
+
+
+class ConfirmingRound(unittest.TestCase):
+    """The #291 confirming round's LOW findings, and the checks its mutants showed untested."""
+
+    def test_a_lone_surrogate_header_is_malformed(self):
+        self.assertEqual(relay.parse_relay_request('\ud800'), {'ok': False, 'status': 400, 'code': 'malformed'})
+
+    def test_a_kid_named_three_times_is_excluded_once(self):
+        good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
+        key = {'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}
+        record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z',
+                  'machines': [{'id': 'm-a', 'deviceKeys': [key, key, key]}]}
+        answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
+        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}]))
+
+    def test_no_bare_module_name_the_privacy_gate_denies(self):
+        source = (ROOT / 'node' / 'p256.py').read_text(encoding='utf-8')
+        self.assertNotRegex(source, r'import [^\n]*\butils\b|\butils\.')
+
+    def test_offsets_past_23_59_are_no_time(self):
+        for text in ('2026-10-12T00:00:00+24:00', '2026-10-12T00:00:00+12:60', '2026-10-12T00:00:00-99:00'):
+            self.assertIsNone(relay.strict_time(text))
+        self.assertEqual(relay.strict_time('2026-10-12T23:59:00+23:59'), ms('2026-10-12T00:00:00Z'))
+
+    def test_the_signer_and_the_parser_share_one_depth(self):
+        for depth in (64, 65):
+            text = '[' * depth + ']' * depth
+            parsed = relay._depth_ok(text)
+            try:
+                jcs.rfc8785(json.loads(text))
+                signed = True
+            except jcs.CanonicalError:
+                signed = False
+            self.assertEqual((parsed, signed), (depth == 64, depth == 64), depth)
+
+    def test_the_depth_count_skips_strings_and_their_escapes(self):
+        self.assertTrue(relay._depth_ok('"' + '[' * 100 + '"'))
+        # an escaped quote does not end the string, so the brackets after it are still inside it
+        self.assertTrue(relay._depth_ok('["a\\"' + '[' * 100 + '"]'))
+        # an escaped backslash does end its escape, so the string ends at the next quote
+        self.assertFalse(relay._depth_ok('["a\\\\"' + '[' * 65 + ']' * 65 + ']'))
+
+    def test_the_parser_bounds_size_depth_and_recursion(self):
+        with self.assertRaises(ValueError):
+            relay.parse_json(b' ' * (relay.MAX_FRAME_BYTES + 1))
+        with self.assertRaises(ValueError):
+            relay.parse_json(('[' * 65 + ']' * 65).encode())
+        with mock.patch.object(relay, 'MAX_JSON_DEPTH', 10 ** 9):    # past the pre-check, the parser's own limit
+            with self.assertRaises(ValueError):
+                relay.parse_json(('[' * 200_000 + ']' * 200_000).encode())
+
+    def test_device_key_base64_has_one_spelling(self):
+        good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
+        self.assertEqual(len(relay._base64(good)), 65)
+        for bad in (good[:-1], good + '=', good[:-2] + 'B=', '!' + good[1:], good[:40] + '=' + good[41:]):
+            self.assertEqual(relay._base64(bad), b'', bad)
+
+    @needs_crypto
+    def test_a_key_file_is_never_replaced(self):
+        from node import device_keys
+        folder = Path(tmpdir.mkdtemp()).resolve()
+        (folder / 'sig.pem').write_text('existing')
+        os.chmod(folder / 'sig.pem', 0o600)
+        with self.assertRaises(FileExistsError):
+            device_keys._write_exclusive(folder / 'sig.pem', 'new')
+        self.assertEqual((folder / 'sig.pem').read_text(), 'existing')
+        self.assertEqual([p.name for p in folder.iterdir()], ['sig.pem'])
+
+    @needs_crypto
+    def test_a_folder_others_may_write_is_refused_before_the_lock(self):
+        folder = Path(tmpdir.mkdtemp()).resolve() / 'device'
+        DeviceKeys.load_or_create(folder)
+        os.chmod(folder, 0o777)
+        with self.assertRaises(RuntimeError):
+            DeviceKeys.load_or_create(folder)
+        self.assertEqual(stat.S_IMODE(os.stat(folder).st_mode), 0o777)   # refused, not silently tightened
+
+    @needs_crypto
+    def test_a_writer_killed_between_write_and_link_leaves_nothing_behind(self):
+        folder = Path(tmpdir.mkdtemp()).resolve() / 'device'
+        folder.mkdir(mode=0o700)
+        orphan = folder / '.device-key-abc123'
+        orphan.write_text('a stale temporary key file')
+        keys = DeviceKeys.load_or_create(folder)
+        self.assertFalse(orphan.exists())
+        self.assertEqual(DeviceKeys.load(folder).device_id, keys.device_id)
 
 
 # ---- The relay's checks, in the reference's order, as a cross-check of what the node signs -------------------------

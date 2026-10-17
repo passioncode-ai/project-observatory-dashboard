@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-108`
+**Next free ID:** `OBS-114`
 
 This board is canonical for OBS rows: engine execution, closed by a pull request and a release.
 Product packages, priorities and operator gates are on the organization's board, cited here as
