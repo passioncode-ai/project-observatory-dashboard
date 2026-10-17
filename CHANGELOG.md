@@ -5,6 +5,22 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **The agent-network node's foundation** (OBS-107, RM-21). `observatory/engine/node/` holds what one machine
+  signs to join a relay and to send a message or a blob, and how it checks what the relay delivers: RFC 8785,
+  P-256 key validation, low-S ES256 and fabric-relay/0.1, ported from the contract kit and run over the contract's
+  own vectors (vendored in `observatory/engine/fabric/node-vectors/`). A device-key store keeps the machine's `#sig`
+  and `#kem` keys owner-only and never replaces them. Nothing runs yet: the relay session client, the estate record
+  and the node service are the next slices ([NODE.md](docs/design/NODE.md)).
+- **The node's relay session** (OBS-108). `node/ws.py` is a WebSocket client on the standard library and
+  `node/session.py` holds one machine's connection to a relay: it signs `auth` only for the origin it dialled, sends
+  signed messages, and acts on a delivered one only after checking its signature, its recipient (this machine) and
+  the replay window, acknowledging it after the handler took it. `node/blobs.py` puts and fetches blobs by digest
+  and refuses fetched bytes that are not the named blob.
+  A relay's hello is checked before anything is signed (its origin, a 32-byte nonce), and nothing a relay sends
+  ends the reconnect loop. NODE.md states the stage-1 threat model.
+
 ### Changed
 
 - **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
@@ -33,15 +49,22 @@ while the major version is 0, a minor release may change behaviour and says so h
       `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
       git ignores it, has its text in what those calls wrote.
 
-    A second revision of the same record then links the file (`file:<path>`, `anchor` = the newest
-    heading or ledger line), and its `why` stays empty.
+    The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
+    not scan a Bash command longer than 64 KB. `sed -i` is read by splitting a command on `;`, `|`,
+    `&` and newlines, so the scan is linear in the command's length. A second revision of the same
+    record then links the file (`file:<path>`, `anchor` = the newest heading or ledger line), and its
+    `why` stays empty. Every later revision of that record carries the link forward, so the record
+    stays explained, with no request and no extra revision, after the register is committed and
+    pushed and after the write scrolls out of the transcript.
 
     The turn is asked about in every other case:
     - another session's edit in the same checkout;
     - a file the session only read or grepped;
     - a pull-request body that shares a heading;
-    - a write by a tool the pass does not know;
-    - a subagent's edit (subagents keep their own transcripts);
+    - a write by a tool the pass does not know (`cp`, a script, `perl -i`);
+    - a relative path written after a `cd` in the same command;
+    - a path whose letter case differs from the file's on a case-insensitive volume;
+    - a subagent's edit, a failed call, or a command longer than 64 KB;
     - no transcript;
     - a pass that runs out of its 2 seconds.
   - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
