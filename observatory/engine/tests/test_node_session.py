@@ -1077,7 +1077,7 @@ class ScopedRound(unittest.TestCase):
                 origin = self.hello_with(nonce)
                 with self.assertRaises(RelayRefused) as caught:
                     RelaySession(origin, self.b, ESTATE, {}.get, on_message=print).open()
-                self.assertEqual(caught.exception.code, 'protocol-unsupported')
+                self.assertEqual(caught.exception.code, 'malformed-hello')     # retried: maybe not the relay
 
     def test_any_failure_is_reported_and_retried(self):
         states, stop, calls = [], threading.Event(), []
@@ -1096,6 +1096,136 @@ class ScopedRound(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(states[0], ('closed', {'error': 'KeyError'}))
         self.assertEqual(len(calls), 2)
+
+    def test_a_squatter_on_the_port_is_retried_not_believed(self):
+        origin = self.hello_with('\ud800')
+        states, stop = [], threading.Event()
+        thread = threading.Thread(target=keep_connected, args=(
+            lambda replay: RelaySession(origin, self.b, ESTATE, {}.get, on_message=print), stop),
+            kwargs={'on_state': lambda s, d: states.append((s, d)), 'min_backoff': 0.01}, daemon=True)
+        thread.start()
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('retry') >= 1))
+        stop.set()
+        thread.join(5)
+        self.assertNotIn('stopped', [s for s, _ in states])
+
+    def test_a_local_signing_fault_is_terminal_and_logged(self):
+        states, stop = [], threading.Event()
+        make = lambda replay: RelaySession(self.relay.origin, self.b, '\ud800', {}.get, on_message=print)
+        with self.assertLogs('observatory.node.session', 'ERROR') as logs:
+            keep_connected(make, stop, on_state=lambda s, d: states.append((s, d)), min_backoff=0.01)
+        self.assertEqual(states[-1], ('stopped', {'refusal': 'local-fault'}))
+        self.assertTrue(any('relay.auth.local-fault' in line for line in logs.output))
+
+    def test_a_listener_that_raises_leaks_no_session(self):
+        opened, heard, stop = [], [], threading.Event()
+
+        def make(replay):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print)
+            opened.append(session)
+            return session
+
+        def listener(state, detail):
+            heard.append(state)
+            raise RuntimeError('listener')
+        thread = threading.Thread(target=keep_connected, args=(make, stop),
+                                  kwargs={'on_state': listener, 'min_backoff': 0.01}, daemon=True)
+        with self.assertLogs('observatory.node.session', 'ERROR'):
+            thread.start()
+            self.assertTrue(eventually(lambda: 'open' in heard))
+            self.assertFalse(opened[0].wait_closed(0.3))   # the listener's fault did not end the healthy session
+            stop.set()
+            thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(all(session.wait_closed(5) for session in opened))
+
+    def test_a_session_is_closed_whatever_ends_its_turn(self):
+        opened, stop = [], threading.Event()
+
+        def make(replay):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print)
+            real_open = session.open
+
+            def open_then_lose_the_welcome():
+                real_open()
+                session.welcome = None                   # a fault after opening, before the loop reads it
+            session.open = open_then_lose_the_welcome
+            opened.append(session)
+            if len(opened) == 2:
+                stop.set()
+            return session
+        with self.assertLogs('observatory.node.session', 'ERROR'):
+            keep_connected(make, stop, min_backoff=0.01)
+        self.assertTrue(all(session.wait_closed(5) for session in opened))
+
+    def test_a_refused_openings_retry_after_is_honoured(self):
+        def refusing(replay):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print)
+            session.open = mock.Mock(side_effect=RelayRefused('rate-limited', 'slow down', 0.3))
+            return session
+        states, stop = [], threading.Event()
+        thread = threading.Thread(target=keep_connected, args=(refusing, stop),
+                                  kwargs={'on_state': lambda s, d: states.append((s, d)), 'min_backoff': 0.01},
+                                  daemon=True)
+        thread.start()
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('retry') >= 1))
+        stop.set()
+        thread.join(5)
+        self.assertEqual([d for s, d in states if s == 'retry'][0], {'seconds': 0.3})
+
+    def test_pings_go_on_after_an_error_answer(self):
+        calls = []
+
+        def ping():
+            calls.append(1)
+            raise RelayError('rate-limited')
+        with mock.patch.object(session_module, 'PING_SECONDS', 0.05):
+            b = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print)
+            b.open()
+            with mock.patch.object(b, 'ping', side_effect=ping):
+                self.assertTrue(eventually(lambda: len(calls) >= 4, timeout=3))
+            b.close()
+
+    def test_an_unexpected_failure_is_logged(self):
+        stop = threading.Event()
+
+        def make(replay):
+            stop.set()
+            raise KeyError('bug')
+        with self.assertLogs('observatory.node.session', 'ERROR') as logs:
+            keep_connected(make, stop, min_backoff=0.01)
+        self.assertTrue(any('relay.keep-connected.failed' in line for line in logs.output))
+
+    def test_a_frame_of_the_wrong_shape_is_malformed_not_a_local_failure(self):
+        refused = []
+        b = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print,
+                         on_refused=lambda reason, frame: refused.append(reason))
+        b.open()
+        a = DeviceKeys.generate()
+        now = int(time.time()) * 1000
+        body = relay.message_body(a.sign, sender=a.sig_kid, to=self.b.sig_kid, msg_id='x', iat=relay.rfc3339(now),
+                                  exp=relay.rfc3339(now + 60_000), payload=None)
+        self.relay.send_to(self.b.sig_kid, {'v': 1, 'type': 'deliver', 'id': 'd', 'from': a.sig_kid, 'msgId': ['x'],
+                                            'seq': 9, 'body': p256.b64url_encode(body.encode()),
+                                            'sentAt': '2026-10-15T00:00:00Z'})
+        self.assertTrue(eventually(lambda: refused == ['malformed']))
+        self.assertFalse(b.wait_closed(0.2))
+        b.close()
+
+    def test_a_revoked_sender_is_final_and_acknowledged(self):
+        a = DeviceKeys.generate()
+        refused = []
+        b = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print,
+                         on_refused=lambda reason, frame: refused.append(reason), revoked={a.sig_kid}.__contains__)
+        b.open()
+        now = int(time.time()) * 1000
+        body = relay.message_body(a.sign, sender=a.sig_kid, to=self.b.sig_kid, msg_id='r-1', iat=relay.rfc3339(now),
+                                  exp=relay.rfc3339(now + 60_000), payload=None)
+        seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': a.sig_kid, 'msgId': 'r-1',
+                                                        'body': p256.b64url_encode(body.encode())})
+        self.assertTrue(eventually(lambda: refused == ['revoked-sender']))
+        self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
+        b.close()
 
     def test_retry_after_is_a_finite_wait_or_none(self):
         for value, expected in ((5, 5.0), (0.25, 0.25), (-3, 0.0), (1e12, 60.0), (float('inf'), 0.0),

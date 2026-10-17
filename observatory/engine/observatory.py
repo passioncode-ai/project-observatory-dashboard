@@ -111,6 +111,7 @@ STEPS = {
     "scan-spend": [PY, "collectors/scan_spend.py", "store/raw/spend.json"],
     "harness":   [PY, "tools/harness.py"],
     "grant":     [PY, "tools/grant.py"],
+    "node":      [PY, "tools/node.py"],
     "openrouter": [PY, "collectors/scan_openrouter.py", "store/raw/openrouter.json"],
     "env":       [PY, "collectors/scan_env.py", "store/raw/env.json"],
     # Gated to once a day inside the scan itself: every run pulls every
@@ -588,6 +589,8 @@ STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = 
                 "--force": (None, None, "ignore each plugin's age gate")},
     "harness": {"--accept": ("KEY", HARNESS_KEY, "record a changed skill's current digest as reviewed"),
                 "--accept-all": (None, None, "the same for every changed skill")},
+    "node": {"--init": (None, None, "create this machine's device keys if absent, then show them"),
+             "--show": (None, None, "show the device id and public keys")},
     "grant": {"--status": (None, None, "the month, the keys and open reservations"),
               "--check": (None, None, "one grant check; the token on stdin"),
               "--amount": ("USD", USD, "--check: the amount to reserve"),

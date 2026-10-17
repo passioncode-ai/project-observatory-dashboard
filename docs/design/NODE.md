@@ -136,6 +136,18 @@ It also answers each close as RFC 6455 §7 says:
 - a reason that is not UTF-8 is 1007;
 - 1005, 1006 and 1015 are never echoed.
 
+**Whose fault a refusal is.**
+- A hello that is not this protocol's (another program squatting a loopback port, a malformed nonce, another origin)
+  is retried with backoff, never terminal: only the relay's own refusal of `auth` says this machine is not admitted.
+- An `auth` frame this node cannot sign (its own estate, kid or keys) is a `local-fault`: logged, terminal, because
+  no retry changes it.
+- A deliver frame whose `from`, `msgId` or `seq` has the wrong type is `malformed` before any lookup. Signed
+  identifiers compare as JavaScript's `!==` does, a value of another type never being equal.
+- A sender the applied record revokes is `revoked-sender`, final and acknowledged, unlike one not listed yet.
+  `relay.peer_keys` names the revoked kids.
+
+`keep_connected` closes each session on every exit and logs a listener that raises without letting it end the loop.
+
 **What is acknowledged.** A body refused for a fault in it (`malformed`, `bad-signature`, `mismatch`, `bad-key`,
 `unsupported-alg`, `lifetime-too-long`, `expired`, `replay`) is acknowledged. A body refused as `unknown-sender` or
 `not-yet-valid` is reported and left unacknowledged: a newer estate revision may list the sender, and a clock may catch
@@ -177,11 +189,112 @@ sendable. Among them:
 - blob redirects followed through either opener; an unbounded blob read, error body or total time; no size or digest
   check; an error body of another shape crashing the client.
 
+## The estate record and its freshness (OBS-109, slice 3)
+
+| Module | What it does | Reference |
+|---|---|---|
+| `observatory/engine/node/identifiers.py` | identifier equality by normal form (RFC 3986 §6.2.2, RFC 8141 §3.1) | `src/identifiers.ts`, `identifiers.json` |
+| `observatory/engine/node/ed25519.py` | Ed25519 verification that refuses small-order keys first | `src/ed25519.ts` |
+| `observatory/engine/node/webauthn.py` | offline passkey assertions (WebAuthn Level 3 §7.2) and the register of passkey-signed statements: a dedicated `sign.<domain>` RP, origins pinned within it | `src/webauthn.ts`, `src/signing-challenges.ts` |
+| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111 | `src/estate-record-rules.ts`, `estate-record.json` |
+| `observatory/engine/node/revocation.py` | the signed revocation delta, the heartbeat and freshness: `current`, `behind`, `stale` (no heartbeat for 72 hours) or `broken` (two signed histories); only `current` accepts what other machines send | `src/revocation-delta.ts`, `revocation-delta.json` |
+
+A node believes a peer's `#sig` key only from a revision `verify_estate_record` accepted (`relay.peer_keys` reads it),
+minus what the delta revokes (`revocation.effective_revocations`). `tests/test_node_estate.py` also re-signs revisions
+with the vectors' EdDSA test passkey to hold each rule: two signing keys on one machine, a key named for another
+machine, an off-curve device key, a small-order hub key, an unpinned publisher key, a credential-shaped secret slot, a
+grant listed twice, a share grant in the personal context, an organization instance without its grant, a pinned origin
+outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+
+Planted defects that failed the suites:
+- estate:
+  - a dropped revocation allowed;
+  - a revoked passkey signing;
+  - a 61-second skew;
+  - no secret detector;
+  - a sign-in RP allowed;
+  - BS without BE;
+  - `topOrigin` ignored;
+- delta:
+  - no `prev` check;
+  - no revoked-signer check;
+  - the 72-hour bound off by one;
+  - a small-order signer;
+  - reconciliation skipping a kind;
+  - no fork detection;
+  - a 61-second skew.
+
+## The secret envelope (OBS-113, slice 4)
+
+`observatory/engine/node/envelope.py` ports `src/secret-envelope.ts` (DEC-0047 item 7, DEC-0066). A secret is sealed by
+HPKE base mode (RFC 9180; DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM; info `fabric-secret-envelope/1`) to the
+target's `#kem` key. The header is the AEAD's additional data, and the sealer signs `{header, ct}` with its `#sig` key.
+
+`open_envelope` checks in the reference's order:
+1. shape;
+2. algorithm;
+3. recipient;
+4. keys (SEC 1);
+5. signature (low-S);
+6. that the estate record lets the sender hold the slot;
+7. the placement run;
+8. the anti-rollback mark: an equal sequence passes only for the same envelope;
+9. the times;
+10. that it opens.
+
+On success it returns the mark the target writes with the secret in one transaction. `estate_envelope_context` derives
+the sender's key, who may hold a slot and the current placement from the applied revisions. It reads only personal
+secret placements: an envelope names no context.
+
+Sealing with RFC 9180 §A.3.1's ephemeral key reproduces the contract vector's header and ciphertext byte for byte. Six
+planted defects fail `tests/test_node_envelope.py`:
+- no sequence-reuse check;
+- a placement ahead of the applied revision;
+- another info string;
+- no signature check;
+- reading an organization's placement;
+- ignoring a mark ahead of the run.
+
+## This machine's identity from a terminal (OBS-114, slice 6, first part)
+
+`project-observatory full node --init` creates the device keys if this machine has none, in the workspace's
+`node/device/` (or `OBSERVATORY_NODE`/device), and prints a `node-identity/1` document: the device id, when it was
+created, and the `deviceKeys` an enrollment and the estate record list (public keys only). Running it again changes
+nothing and prints the same. `--show` prints it without creating anything, and exits 1 when there are no keys yet.
+A machine's identity is not moved by copying the folder: a new machine runs `--init` and is added to the estate by its
+own ceremony (DEC-0084).
+
+## The walking skeleton
+
+`python observatory/engine/tools/node_skeleton.py --relay-source PATH` runs the whole path on one machine:
+- it starts the relay's portable build from a relay checkout (with `npm ci` done) on `127.0.0.1`, with a temporary data
+  folder;
+- it gives the relay a test estate whose revision 1 lists two machines' device keys;
+- it opens one `RelaySession` per machine, sends a signed message each way, asks for presence, and puts and fetches a
+  blob.
+
+It prints one `node-skeleton/1` receipt with one step per stage. **The estate is a test estate, not the real
+ceremony.** Its revision is signed by the contract vectors' published EdDSA test passkey, which nothing real trusts.
+It lives only in the temporary folder.
+
+First run, 2026-10-17, against relay `897be7d`:
+
+| Step | Result |
+|---|---|
+| record verified | passed |
+| both machines admitted | passed |
+| a message laptop→desk | passed |
+| a message desk→laptop | passed |
+| blob put and get | passed |
+| presence | failed |
+
+Presence fails because that relay pins the contract at `51719e4`, before DEC-0066. It answers `presence-query` with
+bare `presence` frames instead of one `presence-result` carrying `replyTo`, which the node (contract `bf3fd6b`)
+waits for. The fix is the relay's contract bump.
+
 ## What comes next
 
 | Slice | What |
 |---|---|
-| 3 | estate-record verification, revocation deltas and the heartbeat, with the 72-hour freshness rule |
-| 4 | sealed envelopes (HPKE, suite 16/1/1, info `fabric-secret-envelope/1`) to a peer's `#kem` |
 | 5 | the enrollment client, once the contract's machine ceremonies are decided |
-| 6 | the node service and its CLI |
+| 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5 |

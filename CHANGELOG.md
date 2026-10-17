@@ -20,6 +20,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   and refuses fetched bytes that are not the named blob.
   A relay's hello is checked before anything is signed (its origin, a 32-byte nonce), and nothing a relay sends
   ends the reconnect loop. NODE.md states the stage-1 threat model.
+- **The node's estate record** (OBS-109). A node verifies a revision of the person's estate record offline — its
+  digest, its chain to the parent, the passkey assertion over its challenge and the record's own rules — before it
+  believes any machine the record lists, and follows the signed revocation delta and heartbeat: after 72 hours
+  without a fresh heartbeat it refuses what other machines send.
+- **The node's secret envelope** (OBS-113). A machine seals a secret to another machine's key-agreement key (HPKE,
+  RFC 9180) and signs it; the target opens it only when the estate record lets the sender hold that slot and the
+  envelope is not older than the last one it opened.
+- **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
+  and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
+  their owner-only files, and a key is never replaced.
 
 ### Changed
 
@@ -50,21 +60,29 @@ while the major version is 0, a minor release may change behaviour and says so h
       git ignores it, has its text in what those calls wrote.
 
     The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
-    not scan a Bash command longer than 64 KB. `sed -i` is read by splitting a command on `;`, `|`,
+    not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
     `&` and newlines, so the scan is linear in the command's length. A second revision of the same
     record then links the file (`file:<path>`, `anchor` = the newest heading or ledger line), and its
-    `why` stays empty. Every later revision of that record carries the link forward, so the record
-    stays explained, with no request and no extra revision, after the register is committed and
-    pushed and after the write scrolls out of the transcript.
+    `why` stays empty. The link records the repository's id. A later revision carries the link
+    forward only while it is still true: this hook wrote it, it names the current repository, the
+    file still exists in the checkout, and a bounded read of the file (256 KB from each end) still
+    contains the link's anchor. So the record stays explained, with no request and no extra
+    revision, after the register is committed and pushed and after the write scrolls out of the
+    transcript. A register deleted, reverted, checked out or rewritten, or a session that moved to
+    another repository, drops the link and is attributed afresh, and asked about when nothing is
+    found. A turn that touches a register is attributed again, and a newer decision replaces the
+    anchor. The attribution's `git diff` gets only the time left in the 2 seconds.
 
     The turn is asked about in every other case:
     - another session's edit in the same checkout;
     - a file the session only read or grepped;
     - a pull-request body that shares a heading;
     - a write by a tool the pass does not know (`cp`, a script, `perl -i`);
+    - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script containing `|`
+      or `;`;
     - a relative path written after a `cd` in the same command;
     - a path whose letter case differs from the file's on a case-insensitive volume;
-    - a subagent's edit, a failed call, or a command longer than 64 KB;
+    - a subagent's edit, a failed call, or a command longer than 65,536 characters;
     - no transcript;
     - a pass that runs out of its 2 seconds.
   - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
