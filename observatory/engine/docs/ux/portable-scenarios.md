@@ -235,8 +235,13 @@ Funnel:
    the findings board reads the same measurement.
 
 Failure paths:
-- No `~/.ssh`, or no keys in it: "No SSH keys yet" and the create command (exit 0). An empty list
-  never hides an unread source.
+- No `~/.ssh`, or no keys in it, and nothing went unseen: "No SSH keys yet" and the create command
+  (exit 0). When something went unseen (an agent the config names that is not running, a linked
+  key, a host-dependent `IdentityFile`): "No SSH keys found where Observatory could look", with the
+  list of what was not seen. An empty list never hides an unread source.
+- `IdentityAgent` sockets (1Password, Secretive) are read like the ssh-agent; one that cannot be
+  read is in `degraded`. Every key an `IdentityFile` names is listed, at any depth and outside
+  `~/.ssh` too, with `${VAR}`, `%d` and `%u` expanded as ssh does.
 - ssh-agent not running, `gh` missing, not signed in, or without the read scopes: the listing
   continues and `degraded` names the source and its command (`gh auth refresh -h github.com -s
   read:public_key,read:ssh_signing_key`). Unread GitHub is "not read", never "not registered".
@@ -367,8 +372,8 @@ Rows, each with the command that fixes it: a key with no passphrase (info for a 
 needs the security key); a weak key (DSA, RSA under 3072 bits); a private key others can read, and a
 `~/.ssh` others can read or write, both by `osprivacy` (never Windows' raw mode bits); a private key
 saved as `.pub`; a key not used for a long time (estimated from the file's access time, so it says
-"estimated"); a key GitHub accepts that this machine does not hold (info, with no delete command,
-while any local private key's fingerprint is unknown); a key no visible place uses (not on GitHub, in no Host
+"estimated"); a key GitHub accepts that this machine does not hold (a warning with the delete command only when nothing went unseen; otherwise info,
+naming what was not seen, with no delete); a key no visible place uses (not on GitHub, in no Host
 block, not loaded); a private key without its public half; an `IdentityFile` that names a missing
 file.
 

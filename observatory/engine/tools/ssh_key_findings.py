@@ -153,10 +153,18 @@ def findings(doc: dict | None) -> list[dict]:
                         "action": "point the IdentityFile at an existing key, or remove the line",
                         "evidence": EVIDENCE})
     if github_read:
-        # A private key whose fingerprint is unknown (a PEM key without its .pub) may be the very
-        # key GitHub holds: then nothing is proven foreign, and no delete command is offered.
-        unknown = sorted(k.get("name") for k in doc.get("keys") or []
-                         if k.get("private") and not k.get("fingerprint"))
+        # A GITHUB KEY IS FOREIGN ONLY WHEN EVERYTHING WAS SEEN. A key this machine holds can live
+        # in an agent the config names (1Password, Secretive), behind a linked file, in an
+        # IdentityFile deep or outside ~/.ssh, or at a host-dependent path; the inventory lists
+        # what it could not see (`unseen`). Any such gap, or a local key of unknown fingerprint,
+        # makes the row info with no delete command. An inventory without `unseen` predates the
+        # check and proves nothing.
+        unknown = list(doc["unseen"]) if isinstance(doc.get("unseen"), list) else \
+            ["this inventory predates the coverage check: run `ssh-keys list` again"]
+        unknown += [k.get("path") or k.get("name") for k in doc.get("keys") or []
+                    if (k.get("private") or k.get("link")) and not k.get("fingerprint")
+                    and not any(str(k.get("path") or "") in u for u in unknown)]
+        unknown = sorted(set(unknown))
         for g in doc["github"].get("keys") or []:
             if g.get("on_machine") is not False:
                 continue
@@ -169,10 +177,11 @@ def findings(doc: dict | None) -> list[dict]:
                    "evidence": EVIDENCE}
             if unknown:
                 row.update(severity="info",
-                           detail=row["detail"] + f" Not proven: the fingerprint of {', '.join(unknown)} on "
-                                                  f"this machine is unknown, and it may be this key.",
-                           action=f"recreate the public half of {', '.join(unknown)} (`ssh-keygen -y -f "
-                                  f"~/.ssh/NAME > ~/.ssh/NAME.pub`), then `{CMD} list` again")
+                           detail=row["detail"] + " Not proven: this machine may hold it where Observatory "
+                                                  "could not see: " + "; ".join(unknown) + ".",
+                           action=f"make those visible (start the agent, recreate a missing .pub with "
+                                  f"`ssh-keygen -y -f KEY`), then `{CMD} list` again; delete nothing at "
+                                  f"GitHub until this row is a warning")
             out.append(row)
     return out
 

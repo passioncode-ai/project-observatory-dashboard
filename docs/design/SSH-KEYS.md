@@ -35,8 +35,8 @@ makes "copy the part you paste" one step.
 | `~/.ssh` | the folder's own entries, and one level of subfolders; links are reported, not followed | key pairs: `NAME` and `NAME.pub`; a private key without `.pub`; a `.pub` without a private file (a key held by an agent or a token) |
 | A private key file | `open(O_NOFOLLOW)`; the BEGIN line one byte at a time (at most 64), then only as many bytes as the next field needs, see below | the format (`openssh`, `pem`, `pkcs8`), the passphrase state, and for the OpenSSH format the public key, so the fingerprint is known even without `.pub`; the file's access time is put back afterwards |
 | `NAME.pub` | `ssh-keygen -l -E sha256 -f NAME.pub`, on the public file only; a link is not followed | type, bits, `SHA256:` fingerprint, comment; a `.pub` that is not the private key's own public half is marked (`mismatch`) and refused by `copy` and `send`; a `.pub` whose first line is a private-key header is a finding (`ssh.private_in_pub`) |
-| `~/.ssh/config` and its `Include`s | parsed as text: `Host` and `Match` blocks, `IdentityFile` (with `~` and `%d` expanded), depth 3; only a regular file of at most 1 MiB, opened non-blocking (a FIFO is named in `degraded`, never waited on) | which Host blocks use which key; an `IdentityFile` that names a missing file, spelled as the config wrote it (`%u` is not expanded into the saved inventory) |
-| ssh-agent | `ssh-add -l -E sha256` | which keys are loaded; keys loaded but on no disk |
+| `~/.ssh/config` and its `Include`s | parsed as text: `Host` and `Match` blocks, `IdentityFile` and `IdentityAgent` (with `~`, `%d`, `%u` and `${VAR}` expanded as ssh does; `%h` and the other host tokens left unresolved), depth 3; only a regular file of at most 1 MiB, opened non-blocking (a FIFO is named in `degraded`, never waited on) | which Host blocks use which key; every key an `IdentityFile` names is inventoried at any depth, in `~/.ssh` or not, and a linked one becomes a row (not followed); an `IdentityFile` that names a missing file, spelled as the config wrote it (`%u` and variables other than `HOME` are not expanded into the saved inventory) |
+| ssh-agent | `ssh-add -l -E sha256`, for `SSH_AUTH_SOCK` and for every other socket an `IdentityAgent` names (1Password, Secretive) | which keys are loaded; keys loaded but on no disk; an agent that could not be read is a `degraded` row |
 | GitHub | `gh api user/keys` and `gh api user/ssh_signing_keys`, one page of 100 each | which keys GitHub accepts for sign-in and for signing, by fingerprint; GitHub keys this machine does not hold |
 
 `gh api` rather than `gh ssh-key list`: the list command has no JSON output and prints signing and
@@ -64,6 +64,14 @@ base64 character, for ed25519, RSA-4096, an encrypted key and a FIDO key.
 time on file systems that keep one. That is the only local trace, so the inventory reports it as
 `last_access` and the finding calls it an estimate. Reading the header changes that time too, so
 the door puts it back (`os.utime` with the measured access and modification times).
+
+**What was not seen (`unseen`).** A key this machine uses can live where the inventory cannot read
+it: in an agent the config names that is not running, behind a linked key file, at an `IdentityFile`
+whose path depends on the host (`~/keys/%h`) or on an unset variable, in a file that does not parse
+as a key, or in a private key whose fingerprint is unknown. Each such gap is a line of `unseen`. While
+it is not empty, no GitHub key is called foreign: the orphan row is info and names the gaps, with no
+delete command (round 2 found five ways a key in use was offered for deletion), and an empty listing
+says "No SSH keys found where Observatory could look", never "No SSH keys yet".
 
 `list` saves the inventory to `store/raw/ssh-keys.json`, owner-only, with paths spelled from `~`.
 The board reads that file; the MCP tool measures the local sources live.
@@ -179,7 +187,7 @@ the board, and `full ssh-keys findings` prints them.
 | `ssh.folder_permissions` | warning | `osprivacy.private` says `~/.ssh` is not owner-only |
 | `ssh.private_in_pub` | critical | a `.pub` file's first line is a private-key header, read from that line alone |
 | `ssh.key_unused` | info | not loaded in the agent and last accessed over 180 days ago (estimated) |
-| `ssh.github_orphan` | warning, with `gh ssh-key delete ID`; info and no delete command while any private key here has an unknown fingerprint (a PEM key without `.pub`), naming those keys | GitHub accepts a key this machine neither holds nor has loaded |
+| `ssh.github_orphan` | warning, with `gh ssh-key delete ID`, only when the inventory saw everything (`unseen` is empty); otherwise info, naming what was not seen, with no delete command | GitHub accepts a key this machine neither holds nor has loaded |
 | `ssh.key_unregistered` | info | GitHub was read, and the key is not on GitHub, in no Host block and not loaded |
 | `ssh.public_missing` | info | a private key without its `.pub` |
 | `ssh.identity_missing` | warning | an `IdentityFile` names a file that does not exist |

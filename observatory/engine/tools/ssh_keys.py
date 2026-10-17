@@ -78,8 +78,18 @@ OPENSSH_MAGIC = b"openssh-key-v1\0"
 FIRST_LINE_MAX = 64
 #: An OpenSSH header field (cipher, kdf, kdf options) longer than this is not a key we read.
 FIELD_MAX = 64
-#: A public key in the OpenSSH header longer than this (RSA-16384 is about 2 KB) is not read.
-PUBLIC_BLOB_MAX = 4096
+#: The longest public key of each type, in bytes, as the OpenSSH header stores it. The key's
+#: type is read first and its length field is held to this cap BEFORE the key is read, so a
+#: length field that lies cannot carry the read into the private section. ed25519 is exact (51);
+#: RSA allows a 16384-bit modulus; DSA keys are 1024-bit in OpenSSH; security keys allow a
+#: 255-byte application string.
+PUBLIC_BLOB_MAX = {
+    "ssh-ed25519": 51, "sk-ssh-ed25519@openssh.com": 325,
+    "ecdsa-sha2-nistp256": 104, "ecdsa-sha2-nistp384": 136, "ecdsa-sha2-nistp521": 172,
+    "sk-ecdsa-sha2-nistp256@openssh.com": 378, "ssh-rsa": 2100, "ssh-dss": 450,
+}
+#: The longest key type name, "sk-ecdsa-sha2-nistp256@openssh.com" (34).
+TYPE_NAME_MAX = 40
 PROC_TYPE = b"Proc-Type:"
 PUB_MAX_BYTES = 16384
 CONFIG_MAX_BYTES = 1 << 20
@@ -350,11 +360,17 @@ def _openssh_header(fd: int) -> dict:
         fields.append(data[at + 4:at + 4 + n])
         at += 4 + n
     out = {"format": "openssh", "passphrase": "no" if fields[0] == b"none" else "yes"}
-    data = r.bytes(at + 8)                   # the key count, then the public key's length
+    data = r.bytes(at + 12)                  # the key count, the public key's length, its type's length
     if data is None or _u32(data, at) != 1:
         return out
-    length = _u32(data, at + 4)
-    if not 0 < length <= PUBLIC_BLOB_MAX:
+    length, type_length = _u32(data, at + 4), _u32(data, at + 8)
+    if not 0 < type_length <= TYPE_NAME_MAX:
+        return out
+    data = r.bytes(at + 12 + type_length)    # the type name, then the cap for that type
+    if data is None:
+        return out
+    named = data[at + 12:at + 12 + type_length].decode("ascii", "replace")
+    if not 0 < length <= PUBLIC_BLOB_MAX.get(named, 0):
         return out
     data = r.bytes(at + 8 + length)
     if data is None:
@@ -423,15 +439,26 @@ def holds_private_key(path: pathlib.Path) -> bool:
 CONFIG_LINE = re.compile(r"^\s*(\S+?)\s*(?:=\s*|\s+)(.*?)\s*$")
 
 
+ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def _expand(value: str) -> tuple[pathlib.Path | None, str]:
-    """(the path ssh would open, the spelling to show). The spelling keeps the config's own
-    tokens (`%d` shown as `~`, `%u` as written), so neither the home path nor the account name
-    reaches a saved inventory."""
+    """(the path ssh would open, the spelling to show), or (None, spelling) when the path depends
+    on the host (`%h`, `%r`, …) or on an unset `${VAR}`. ssh expands `${VAR}` from the environment
+    and `%d`/`%u` itself, so they are expanded here too: an unexpanded `${HOME}/keys/x` read as
+    a missing file. The spelling keeps the config's own tokens (`%d` and `${HOME}` shown as `~`,
+    `%u` and other variables as written), so neither the home path nor the account name reaches
+    a saved inventory."""
     value = value.strip().strip('"')
-    spelled = value.replace("%d", "~")
-    expanded = value.replace("%d", str(home())).replace("%u", os.environ.get("USER", ""))
+    spelled = value.replace("%d", "~").replace("${HOME}", "~")
+    unset = [m.group(1) for m in ENV_REF.finditer(value) if os.environ.get(m.group(1)) is None]
+    if unset:
+        return None, spelled
+    expanded = ENV_REF.sub(lambda m: os.environ[m.group(1)], value)
+    expanded = expanded.replace("%%", "\0").replace("%d", str(home())).replace("%u", os.environ.get("USER", ""))
     if "%" in expanded:
         return None, spelled
+    expanded = expanded.replace("\0", "%")
     if expanded.startswith("~/"):
         return home() / expanded[2:], spelled
     path = pathlib.Path(expanded)
@@ -478,8 +505,9 @@ def read_config_file(path: pathlib.Path, degraded: list[dict]) -> str | None:
     return b"".join(chunks).decode("utf-8", "replace")
 
 
-def read_config(degraded: list[dict]) -> list[dict]:
-    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config and its Includes."""
+def read_config(degraded: list[dict], agents: list[dict] | None = None) -> list[dict]:
+    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config and its Includes; every
+    IdentityAgent goes to `agents` as {hosts, value}."""
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -515,9 +543,11 @@ def read_config(degraded: list[dict]) -> list[dict]:
                         walk(pathlib.Path(found), depth + 1)
             elif key == "identityfile":
                 target, spelled = _expand(value)
-                if target is not None and "%u" not in value:
+                if target is not None and "%u" not in value and "${" not in value.replace("${HOME}", ""):
                     spelled = tilde(target)
                 out.append({"hosts": list(hosts), "path": target, "spelled": spelled})
+            elif key == "identityagent" and agents is not None:
+                agents.append({"hosts": list(hosts), "value": value.strip().strip('"')})
 
     walk(ssh_dir() / "config", 0)
     return out
@@ -535,18 +565,23 @@ def config_hosts() -> set[str]:
 
 # ── the agent and GitHub ──────────────────────────────────────────────────────
 
-def agent_fingerprints(degraded: list[dict]) -> list[dict] | None:
+def agent_fingerprints(degraded: list[dict], sock: str | None = None, label: str = "ssh-agent") -> list[dict] | None:
+    """The keys an agent holds, by fingerprint: the one SSH_AUTH_SOCK names, or the one at `sock`
+    (an IdentityAgent of the config: 1Password, Secretive). None when it could not be read."""
+    env = None if sock is None else dict(os.environ, SSH_AUTH_SOCK=sock)
     try:
-        p = run([tool("ssh-add"), "-l", "-E", "sha256"], timeout=15)
+        p = run([tool("ssh-add"), "-l", "-E", "sha256"], timeout=15, env=env)
     except (OSError, subprocess.SubprocessError) as exc:
-        degraded.append({"source": "ssh-agent", "reason": f"ssh-add could not run ({type(exc).__name__})",
+        degraded.append({"source": label, "reason": f"ssh-add could not run ({type(exc).__name__})",
                          "fix": "install OpenSSH"})
         return None
     if p.returncode == 1:
         return []
     if p.returncode != 0:
-        degraded.append({"source": "ssh-agent", "reason": "not running or not reachable: " + said(p.stderr, 120),
-                         "fix": "start ssh-agent (eval \"$(ssh-agent -s)\"), or check SSH_AUTH_SOCK"})
+        fix = ("start ssh-agent (eval \"$(ssh-agent -s)\"), or check SSH_AUTH_SOCK" if sock is None else
+               "start the application that provides this agent, then list again")
+        degraded.append({"source": label, "reason": "not running or not reachable: " + said(p.stderr, 120),
+                         "fix": fix})
         return None
     out = []
     for line in p.stdout.splitlines():
@@ -651,12 +686,13 @@ def inventory(github: bool = True) -> dict:
         degraded.append({"source": "ssh-keygen", "reason": "not found; fingerprints computed by Observatory "
                                                            "from the public files", "fix": "install OpenSSH"})
     files, pubs, links = _candidates(folder) if doc["folder"]["exists"] else ([], [], [])
-    config = read_config(degraded)
-    for entry in config:   # keys named by the config outside ~/.ssh are keys too
+    agent_config: list[dict] = []
+    config = read_config(degraded, agent_config)
+    for entry in config:   # every key the config names is a key, at any depth, in ~/.ssh or not
         p = entry["path"]
-        if p is not None and p.is_file() and not p.is_symlink() and folder not in p.parents and p not in files:
+        if p is not None and p.is_file() and not p.is_symlink() and p not in files:
             files.append(p)
-            if pathlib.Path(str(p) + ".pub").is_file():
+            if pathlib.Path(str(p) + ".pub").is_file() and pathlib.Path(str(p) + ".pub") not in pubs:
                 pubs.append(pathlib.Path(str(p) + ".pub"))
     rows: dict[str, dict] = {}
 
@@ -718,6 +754,10 @@ def inventory(github: bool = True) -> dict:
         if r["private"] and not r["public"] and "hint" not in r:
             r["hint"] = (f"no public half: `ssh-keygen -y -f {r['path']} > {r['path']}.pub` recreates it "
                          f"(it asks for the passphrase)")
+    for entry in config:   # a key the config names through a link: a row, never followed
+        p = entry["path"]
+        if p is not None and p.is_symlink():
+            row(p).update(link=True)
     by_path = {str(pathlib.Path(k)): r for k, r in rows.items()}
     identity_files = []
     for entry in config:
@@ -730,17 +770,65 @@ def inventory(github: bool = True) -> dict:
                 if h != "*" and h not in r["hosts"]:
                     r["hosts"].append(h)
     agent = agent_fingerprints(degraded)
+    # WHAT THIS INVENTORY COULD NOT SEE. A GitHub key is called foreign (and a delete offered)
+    # only when every place a key of this machine can live was read: the agent, every other
+    # agent the config names, every IdentityFile, every linked key. Round 2 found five ways a
+    # key in use stayed invisible and was offered for deletion.
+    unseen: list[str] = []
+    if agent is None:
+        unseen.append("the ssh-agent")
+    other_agents: list[dict] = []
+    seen_socks: set[str] = set()
+    for a in agent_config:
+        value = a["value"]
+        if value.lower() == "none" or value == "SSH_AUTH_SOCK":
+            continue
+        where = " ".join(a["hosts"])
+        if value.startswith("$") and not value.startswith("${"):
+            path = os.environ.get(value[1:])
+            spelled = value
+        else:
+            target, spelled = _expand(value)
+            path = str(target) if target is not None else None
+            if target is not None:
+                spelled = tilde(target)
+        label = f"agent {spelled} (IdentityAgent, Host {where})"
+        if path is None:
+            degraded.append({"source": "identity-agent", "reason": f"{label}: its path depends on the host or an "
+                                                                    f"unset variable; not read"})
+            unseen.append(label)
+            continue
+        if path == os.environ.get("SSH_AUTH_SOCK") or path in seen_socks:
+            continue
+        seen_socks.add(path)
+        held = agent_fingerprints(degraded, sock=path, label=f"identity-agent {spelled}")
+        if held is None:
+            unseen.append(label)
+        else:
+            other_agents += [dict(k, agent=spelled) for k in held]
+    agent_keys = (agent or []) + other_agents
     disk = {r["fingerprint"] for r in rows.values() if r["fingerprint"]}
-    if agent is not None:
-        loaded = {a["fingerprint"] for a in agent}
+    if agent is not None or other_agents:
+        loaded = {a["fingerprint"] for a in agent_keys}
         for r in rows.values():
             r["in_agent"] = bool(r["fingerprint"]) and r["fingerprint"] in loaded
-    doc["agent_only"] = [a for a in (agent or []) if a["fingerprint"] not in disk]
+    doc["agent_only"] = [a for a in agent_keys if a["fingerprint"] not in disk]
+    for entry in config:
+        p = entry["path"]
+        if p is None:
+            unseen.append(f"IdentityFile {entry['spelled']} (Host {' '.join(entry['hosts'])}): the path "
+                          f"depends on the host or an unset variable")
+        elif p.exists() and not p.is_symlink() and str(p) not in by_path:
+            unseen.append(f"IdentityFile {entry['spelled']}: not readable as a key")
+    for r in rows.values():
+        if not r["fingerprint"] and (r["private"] or r["link"]):
+            unseen.append(f"{r['path']}" + (" (a link, not followed)" if r["link"] else " (fingerprint unknown)"))
+    doc["unseen"] = sorted(set(unseen))
     doc["github"] = None
     if github:
         gh, gh_degraded = github_keys()
         degraded += gh_degraded
-        held = disk | {a["fingerprint"] for a in (agent or [])}
+        held = disk | {a["fingerprint"] for a in agent_keys}
         if any(v is not None for v in gh.values()):
             keys = [dict(k, on_machine=k["fingerprint"] in held) for v in gh.values() if v for k in v]
             doc["github"] = {"read": {u: v is not None for u, v in gh.items()}, "keys": keys}
@@ -839,7 +927,10 @@ def cmd_list(args) -> int:
 def print_listing(doc: dict) -> None:
     """The terminal listing. Every value from a file name or the config goes through `shown`."""
     keys = doc["keys"]
-    if not keys and not doc["agent_only"]:
+    if not keys and not doc["agent_only"] and doc.get("unseen"):
+        print("No SSH keys found where Observatory could look. Not seen: "
+              + "; ".join(shown(u) for u in doc["unseen"]))
+    elif not keys and not doc["agent_only"]:
         print("No SSH keys yet. Create one: " + f"{CMD} create NAME")
     else:
         print(f"SSH keys in ~/.ssh: {len(keys)}, measured {doc['measured_at']}\n")
@@ -863,6 +954,10 @@ def print_listing(doc: dict) -> None:
     for f in doc["identity_files"]:
         if f["exists"] is False:
             print(f"  Host {shown(f['host'])}: IdentityFile {shown(f['path'])} does not exist")
+    if doc.get("unseen") and (keys or doc["agent_only"]):
+        print("\nKeys this machine may hold that were not seen (no GitHub key is called foreign until they are):")
+        for u in doc["unseen"]:
+            print(f"  - {shown(u)}")
     if doc["degraded"]:
         print("\nNot read:")
         for d in doc["degraded"]:

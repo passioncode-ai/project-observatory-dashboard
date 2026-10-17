@@ -148,7 +148,11 @@ FAKE_AGENT = r'''
 import json, os, pathlib, sys
 log = pathlib.Path(os.environ["FAKE_LOG"]); a = sys.argv[1:]
 with log.open("a") as f: f.write(json.dumps({"tool": "ssh-add", "argv": a}) + "\n")
-state = os.environ.get("FAKE_AGENT", "")
+sock = os.environ.get("SSH_AUTH_SOCK", "")
+if sock == os.environ.get("FAKE_DEFAULT_SOCK"):
+    state = os.environ.get("FAKE_AGENT", "")
+else:   # an agent the config names (IdentityAgent): its state, or not running
+    state = json.loads(os.environ.get("FAKE_AGENT_SOCKS", "{}")).get(sock, "down")
 if "--apple-use-keychain" in a:
     sys.exit(1 if os.environ.get("FAKE_KEYCHAIN_FAIL") else 0)
 if state == "down":
@@ -230,14 +234,24 @@ if os.environ.get("FAKE_SSH_PASSWORD_ONLY") and "BatchMode=yes" in opts:
 if os.environ.get("FAKE_SSH_UNREACHABLE"):
     print(f"ssh: connect to host {host} port 22: Connection refused", file=sys.stderr); sys.exit(255)
 if command == ["true"]:
+    o = dict(x.split("=", 1) for x in opts if "=" in x and not x.startswith("F="))
+    # The verify must keep the user's host-key policy and known-hosts file (M18).
+    if o.get("StrictHostKeyChecking", "ask") != "ask" or "known_hosts" not in o.get("UserKnownHostsFile", "known_hosts"):
+        print("fake ssh: host-key checking was changed", file=sys.stderr); sys.exit(97)
+    if "PreferredAuthentications" in o and "publickey" not in o["PreferredAuthentications"].split(","):
+        print(f"{host}: Permission denied (publickey).", file=sys.stderr); sys.exit(255)
     if "F=none" not in opts or os.environ.get("FAKE_SSH_IGNORE_F"):
         identities += blocks().get(host, {}).get("identityfile", [])   # OpenSSH accumulates them
+    if o.get("IdentityAgent", "") != "none" and o.get("IdentitiesOnly") != "yes":
+        identities += [x for x in os.environ.get("FAKE_AGENT_IDENTS", "").split(":") if x]
     ak = remote / ".ssh" / "authorized_keys"
     allowed = ak.read_text().split() if ak.is_file() else []
     for ident in identities:
         b64 = pathlib.Path(ident + ".pub").read_text().split()[1]
+        fp = "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(b64)).digest()).decode().rstrip("=")
+        if verbose:
+            print(f"debug1: Offering public key: {ident} ED25519 {fp} explicit", file=sys.stderr)
         if b64 in allowed:
-            fp = "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(b64)).digest()).decode().rstrip("=")
             if verbose and not os.environ.get("FAKE_SSH_NO_ACCEPT_LINE"):
                 print(f"debug1: Server accepts key: {ident} ED25519 {fp} explicit", file=sys.stderr)
             sys.exit(0)
@@ -300,6 +314,8 @@ class Door(unittest.TestCase):
             "FAKE_LOG": str(self.log), "FAKE_CLIP": str(self.clip), "FAKE_GH_STATE": str(self.gh_state),
             "FAKE_REMOTE_HOME": str(self.remote), "FAKE_MARKER": MARKER.decode(),
             "FAKE_AGENT": "",
+            "SSH_AUTH_SOCK": str(self.root / "default-agent.sock"),
+            "FAKE_DEFAULT_SOCK": str(self.root / "default-agent.sock"),
         })
 
     def tearDown(self):
@@ -478,6 +494,98 @@ class Inventory(Door):
         self.assertEqual([r for r in rows if r["type"] == "ssh.github_orphan"], [])
         self.assertNotIn("gh ssh-key delete 42", json.dumps(rows))
 
+    def orphan_rows(self) -> list[dict]:
+        import ssh_key_findings
+        return [r for r in ssh_key_findings.from_file(self.scratch / "ssh-keys.json")
+                if r["type"] == "ssh.github_orphan"]
+
+    def github_holds(self, blob: bytes, key_id: int = 42):
+        self.gh_state.write_text(json.dumps({"authentication": [
+            {"id": key_id, "title": "in use", "key": pub_line(blob), "created_at": "2026-01-01T00:00:00Z"}],
+            "signing": []}))
+
+    def assert_no_delete(self, key_id: int = 42) -> dict:
+        rows = self.orphan_rows()
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["severity"], "info")
+        self.assertNotIn(f"gh ssh-key delete {key_id}", json.dumps(rows))
+        return rows[0]
+
+    def test_a_key_in_an_agent_the_config_names_is_not_offered_for_deletion(self):
+        """(a) `Host *` + IdentityAgent (1Password, Secretive): the key lives only in that agent."""
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text("Host *\n  IdentityAgent ~/agent-app.sock\n")
+        self.github_holds(ed25519_blob("in the app"))
+        p = self.door("list")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("No SSH keys yet", p.stdout)
+        self.assertIn("~/agent-app.sock", p.stdout)
+        doc = json.loads((self.scratch / "ssh-keys.json").read_text())
+        self.assertTrue(any(d["source"].startswith("identity-agent") for d in doc["degraded"]), doc["degraded"])
+        self.assertIn("~/agent-app.sock", self.assert_no_delete()["detail"])
+
+    def test_a_key_the_named_agent_holds_is_on_the_machine(self):
+        """(a), read: the named agent answers and holds the GitHub key, so it is not an orphan."""
+        held = ed25519_blob("in the app")
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text("Host *\n  IdentityAgent ~/agent-app.sock\n")
+        self.github_holds(held)
+        socks = {str(self.home / "agent-app.sock"): f"256 {fingerprint(held)} app key (ED25519)"}
+        self.assertEqual(self.door("list", env={"FAKE_AGENT_SOCKS": json.dumps(socks)}).returncode, 0)
+        self.assertEqual(self.orphan_rows(), [])
+
+    def test_a_linked_key_is_not_offered_for_deletion(self):
+        """(b) id_ed25519 and its .pub are links into a dotfiles folder: fingerprint unknown."""
+        blob = ed25519_blob("dotfiles")
+        dots = self.root / "dotfiles"
+        dots.mkdir()
+        (dots / "id_ed25519").write_text(private_text("none", blob))
+        (dots / "id_ed25519.pub").write_text(pub_line(blob, "dots") + "\n")
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "id_ed25519").symlink_to(dots / "id_ed25519")
+        (self.ssh / "id_ed25519.pub").symlink_to(dots / "id_ed25519.pub")
+        self.github_holds(blob)
+        self.assertEqual(self.door("list").returncode, 0)
+        self.assertIn("a link", self.assert_no_delete()["detail"])
+
+    def test_a_key_two_folders_deep_is_inventoried(self):
+        """(c) IdentityFile ~/.ssh/keys/work/deep_k: read, fingerprinted, not an orphan."""
+        blob = ed25519_blob("deep")
+        deep = self.ssh / "keys" / "work"
+        deep.mkdir(parents=True)
+        (deep / "deep_k").write_text(private_text("none", blob))
+        (deep / "deep_k").chmod(0o600)
+        (self.ssh / "config").write_text("Host work\n  IdentityFile ~/.ssh/keys/work/deep_k\n")
+        self.github_holds(blob)
+        doc = self.listing()
+        self.assertEqual(self.key(doc, "keys/work/deep_k")["fingerprint"], fingerprint(blob))
+        self.assertEqual(self.orphan_rows(), [])
+
+    def test_a_host_dependent_identity_file_is_not_offered_for_deletion(self):
+        """(d) IdentityFile ~/keys/%h outside ~/.ssh: which file depends on the host."""
+        self.ssh.mkdir(mode=0o700)
+        (self.home / "keys").mkdir()
+        (self.home / "keys" / "box.example.invalid").write_text(private_text("none", ed25519_blob("h")))
+        (self.ssh / "config").write_text("Host box\n  HostName box.example.invalid\n  IdentityFile ~/keys/%h\n")
+        self.github_holds(ed25519_blob("h"))
+        self.assertEqual(self.door("list").returncode, 0)
+        self.assertIn("~/keys/%h", self.assert_no_delete()["detail"])
+
+    def test_an_identity_file_with_an_environment_variable_is_read(self):
+        """(e) IdentityFile ${HOME}/keys/gh: expanded, inventoried, not a missing file, not an orphan."""
+        blob = ed25519_blob("env")
+        (self.home / "keys").mkdir()
+        (self.home / "keys" / "gh").write_text(private_text("none", blob))
+        (self.home / "keys" / "gh").chmod(0o600)
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text("Host github.com\n  IdentityFile ${HOME}/keys/gh\n")
+        self.github_holds(blob)
+        doc = self.listing()
+        self.assertEqual([f for f in doc["identity_files"] if f["exists"] is False], [])
+        self.assertIn(fingerprint(blob), {k["fingerprint"] for k in doc["keys"]})
+        self.assertEqual(self.orphan_rows(), [])
+        self.assertNotIn(str(self.home), (self.scratch / "ssh-keys.json").read_text())
+
     def test_github_unreadable_is_degraded_with_scope_command(self):
         self.plant("id_alpha")
         self.gh_state.write_text(json.dumps({"authentication": [], "signing": [],
@@ -525,6 +633,15 @@ class Inventory(Door):
         p = self.door("list", "--no-github")
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertNotIn("\x1b", p.stdout + p.stderr)
+
+    def test_an_escape_sequence_in_a_file_name_never_reaches_the_terminal(self):
+        """M12: a key file named with an escape sequence; `list` and `findings` print its name."""
+        self.plant("id_\x1b]0;owned\x07x", mode=0o640)
+        for args in (("list", "--no-github"), ("findings",)):
+            p = self.door(*args)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertNotIn("\x1b", p.stdout + p.stderr, args)
+            self.assertNotIn("\x07", p.stdout + p.stderr, args)
 
     @unittest.skipUnless(shutil.which("ssh-keygen"), "the system's ssh-keygen is not installed")
     def test_the_real_ssh_keygen_agrees(self):
@@ -576,6 +693,23 @@ class HeaderReadIsBounded(Door):
             self.assertLessEqual(n, marker_file_offset(text, blob, cipher),
                             f"{n} bytes read reach the private section ({cipher}, {len(blob)}-byte key)")
             self.assertLessEqual(n, len(BEGIN + OPENSSH) + 1 + 4 * ((160 + len(blob)) // 3 + 1) + 16)
+
+    def test_a_lying_public_key_length_does_not_carry_the_read_further(self):
+        """M23: the header says the public key is 4000 bytes; an ed25519 key is 51. The read stops
+        at the honest ed25519 bound and gives no fingerprint."""
+        blob = ed25519_blob("liar")
+        honest = private_text("none", blob)
+        body = bytearray(openssh_body(blob))
+        at = body.index(blob) - 4
+        body[at:at + 4] = (4000).to_bytes(4, "big")
+        encoded = base64.b64encode(bytes(body)).decode()
+        self.ssh.mkdir(mode=0o700)
+        path = self.ssh / "id_liar"
+        path.write_text(BEGIN + OPENSSH + "\n" + "\n".join(encoded[i:i + 70] for i in range(0, len(encoded), 70))
+                        + "\n" + END + OPENSSH + "\n")
+        header, n = self.read_bytes(path)
+        self.assertNotIn("fingerprint", header)
+        self.assertLessEqual(n, marker_file_offset(honest, blob))
 
     def test_a_pem_key_reads_only_the_header_line_and_the_next_ten_bytes(self):
         self.ssh.mkdir(mode=0o700)
@@ -689,7 +823,7 @@ class Create(Door):
     def test_reserved_names_are_refused(self):
         """F7: a private key written over config, rc or authorized_keys, and hidden from the inventory."""
         for name in ("config", "rc", "environment", "authorized_keys", "authorized_keys2", "known_hosts",
-                     "known_hosts.old", "id_alpha-cert"):
+                     "known_hosts2", "known_hosts.old", "id_alpha-cert"):
             p = self.door("create", name, "--no-passphrase")
             self.assertEqual(p.returncode, 2, name)
         self.assertEqual(self.calls("ssh-keygen"), [])
@@ -1006,12 +1140,35 @@ class SendServer(Door):
                       env={"FAKE_SSH_SWALLOW": "1", "FAKE_SSH_IGNORE_F": "1"})
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertIn(fingerprint(ed25519_blob("id_old")), p.stderr)
+        self.assertNotIn("Verified", p.stdout)
+        self.assertEqual(self.receipts()[-1]["event"], "ssh.verify_failed")
 
     def test_verify_without_the_servers_word_on_the_key_is_not_verified(self):
         self.plant("id_alpha")
         p = self.door("send", "id_alpha", "--to", "server:alpha", "--verify", env={"FAKE_SSH_NO_ACCEPT_LINE": "1"})
         self.assertEqual(p.returncode, 1)
         self.assertEqual(self.receipts()[-1]["event"], "ssh.verify_failed")
+
+    def test_a_jump_host_keeps_its_user_and_port(self):
+        """M22: ProxyJump jumper@hop:2200 reaches ssh as exactly that."""
+        self.plant("id_alpha")
+        (self.ssh / "config").write_text("Host box\n  HostName box.example.invalid\n"
+                                          "  ProxyJump jumper@hop.example.invalid:2200\n")
+        p = self.door("send", "id_alpha", "--to", "server:box", "--verify")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        verify = self.calls("ssh")[-1]
+        self.assertEqual(verify[verify.index("-J") + 1], "jumper@hop.example.invalid:2200")
+
+    def test_an_agent_key_is_not_offered_during_verify(self):
+        """The agent holds the old key the server accepts; verify of the new key must fail."""
+        self.plant("id_old")
+        self.plant("id_new")
+        (self.remote / ".ssh").mkdir(mode=0o700)
+        (self.remote / ".ssh" / "authorized_keys").write_text(pub_line(ed25519_blob("id_old"), "old") + "\n")
+        p = self.door("send", "id_new", "--to", "server:box", "--verify",
+                      env={"FAKE_SSH_SWALLOW": "1", "FAKE_AGENT_IDENTS": str(self.ssh / "id_old")})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertNotIn("Verified", p.stdout)
 
     def test_a_proxy_command_host_is_not_verified_blind(self):
         self.plant("id_alpha")
@@ -1079,7 +1236,7 @@ class Findings(Door):
                     {**base, "name": "id_lonely", "path": "~/.ssh/id_lonely", "public": False,
                      "type": "ED25519", "bits": 256, "fingerprint": "SHA256:lonely", "hosts": ["delta"],
                      "in_agent": None, "github": None}],
-                "agent_only": [], "misplaced": [],
+                "agent_only": [], "misplaced": [], "unseen": [],
                 "identity_files": [{"host": "gamma", "path": "~/.ssh/id_gone", "exists": False}],
                 "github": {"read": {"authentication": True, "signing": True},
                            "keys": [{"id": 9, "title": "old laptop", "use": "authentication",
