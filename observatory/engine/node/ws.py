@@ -14,6 +14,7 @@ import socket
 import ssl
 import struct
 import threading
+import time
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -168,11 +169,17 @@ class WebSocket:
         except OSError:
             pass
 
-    def recv_text(self) -> str:
+    def recv_text(self, deadline: Optional[float] = None) -> str:
         """The next text message; answers pings, raises `Closed` on a close and `WebSocketError` on a binary message,
         an unknown opcode, a message over 1 MiB or `MAX_FRAGMENTS` frames, or text that is not UTF-8."""
         parts, opcode, total = [], None, 0
         while True:
+            if deadline is not None:
+                # One limit over the whole wait (a peer that keeps pinging cannot hold it open), `time.monotonic()`.
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout('no message before the deadline')
+                self._sock.settimeout(remaining)
             fin, op, payload = self._frame()
             if op == OP_PING:
                 self._send_frame(OP_PONG, payload)

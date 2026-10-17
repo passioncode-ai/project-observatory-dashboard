@@ -23,6 +23,10 @@ from . import relay
 
 MAX_BLOB_BYTES = 33_554_432
 TIMEOUT_SECONDS = 60.0
+#: The whole exchange, however the bytes trickle in: a relay that sends one byte a minute never times out per read.
+DEADLINE_SECONDS = 300.0
+#: The most of an error body read: its code and message are small.
+MAX_ERROR_BYTES = 65_536
 _DIGEST = re.compile(r'^sha256:[0-9a-f]{64}$')
 
 
@@ -60,11 +64,12 @@ def _request(origin: str, method: str, digest: str, header: str, data: Optional[
         request.add_header('Content-Type', 'application/octet-stream')
     try:
         opener = _LOCAL_OPENER if origin.startswith('http://') else _OPENER
+        deadline = time.monotonic() + DEADLINE_SECONDS
         with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
-            return response.status, response.read(MAX_BLOB_BYTES + 1)
+            return response.status, _read_bounded(response, MAX_BLOB_BYTES + 1, deadline)
     except urllib.error.HTTPError as error:
         try:
-            document = json.loads(error.read(65536))
+            document = json.loads(_read_bounded(error, MAX_ERROR_BYTES, time.monotonic() + TIMEOUT_SECONDS))
             refusal = document.get('error') if isinstance(document, dict) else None
         except (ValueError, UnicodeDecodeError, RecursionError):
             refusal = None
@@ -73,6 +78,21 @@ def _request(origin: str, method: str, digest: str, header: str, data: Optional[
         if not isinstance(refusal, dict):                  # the documented shape, or no code at all
             refusal = {}
         raise BlobRefused(error.code, str(refusal.get('code', 'unknown')), str(refusal.get('message', ''))) from None
+
+
+def _read_bounded(response, limit: int, deadline: float) -> bytes:
+    """At most `limit` bytes, and nothing after `deadline` (`time.monotonic()`): a refusal past it."""
+    chunks, total = [], 0
+    while total < limit:
+        if time.monotonic() > deadline:
+            raise BlobRefused(getattr(response, 'status', 0) or 0, 'timeout', 'the relay sent the body too slowly')
+        read = getattr(response, 'read1', None) or response.read      # an HTTPError's body has no read1
+        chunk = read(min(65_536, limit - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b''.join(chunks)
 
 
 def put_blob(origin: str, keys, data: bytes, recipients: Sequence[str], *,

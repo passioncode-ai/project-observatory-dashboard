@@ -120,6 +120,18 @@ It also answers each close as RFC 6455 §7 says:
 - a reason that is not UTF-8 is 1007;
 - 1005, 1006 and 1015 are never echoed.
 
+**What is acknowledged.** A body refused for a fault in it (`malformed`, `bad-signature`, `mismatch`, `bad-key`,
+`unsupported-alg`, `lifetime-too-long`, `expired`, `replay`) is acknowledged. A body refused as `unknown-sender` or
+`not-yet-valid` is reported and left unacknowledged: a newer estate revision may list the sender, and a clock may catch
+up, so the relay delivers it again on the next connection until its `ttl`. When the node's own lookup or replay store
+fails while it checks a body, the body may be authentic: it stays unacknowledged and the session closes, so the next
+connection delivers it again.
+
+`keep_connected` gives every session it opens one `ReplayStore`, so a message handled just before a link dropped, and
+delivered again after it, is acted on once. The opening (`hello`, `auth`, `welcome`) has one 10-second deadline, so a
+relay that keeps pinging cannot hold it open. A blob exchange has a 300-second total deadline, and an error body is read
+up to 64 KiB.
+
 The replay window is in memory. A node that restarts within a message's life may act on one redelivery again, and the
 payload's own idempotency key absorbs that. Logs carry event names, kids, codes and counts, never a body.
 
@@ -130,25 +142,24 @@ deletes only what is acknowledged. It can also misbehave the way a relay may:
 - deliver a forged, misdirected or repeated body, even asserting a `to` that matches it;
 - close a revoked session with 4403.
 
-34 planted defects were run against `tests/test_node_session.py` (raw loopback servers drive the RFC 6455 cases), and
-every one fails it except one equivalent mutant: 1005 is never sendable, so it is never echoed either
-way. Among them:
+49 planted defects were run against `tests/test_node_session.py` (raw loopback servers drive the RFC 6455 cases), and
+48 fail it. The last is equivalent: a close without a code is answered without one either way, because 1005 is never
+sendable. Among them:
 - masking: a constant or non-CSPRNG mask, a missing mask bit;
-- every size, fragment, UTF-8, control-frame, RSV and opcode check removed;
+- every size, fragment, UTF-8, control-frame, RSV and opcode check removed, and a new message inside a fragmented one;
 - the `Sec-WebSocket-Accept`, subprotocol and TLS certificate checks removed;
-- no pong;
-- the close-code rules;
-- no hello timeout;
-- no origin check;
-- acknowledging before the handler;
-- no replay check;
+- no pong; the close-code rules, the sendable-code filter included;
+- no hello deadline, or one per read instead of one for the whole opening; no 75-second receive timeout;
+- no origin check; acknowledging before the handler, or calling `on_refused` before the acknowledgement;
+- no replay check, or a fresh replay store for each reconnect;
 - trusting the relay's `to`;
+- a local lookup failure taken for a malformed body; a transient refusal acknowledged;
 - either catch-all removed, or the callbacks unguarded;
 - the dead link never closed;
-- reconnecting that never stops, or stops on every close;
-- blob redirects followed through either opener;
-- an unbounded blob read, or no size or digest check;
-- an error body of another shape crashing the client.
+- reconnecting that never stops, stops on every close, retries a refused `auth` or a 4403 during opening, never
+  doubles its backoff, has no jitter or ignores `retryAfter`;
+- blob redirects followed through either opener; an unbounded blob read, error body or total time; no size or digest
+  check; an error body of another shape crashing the client.
 
 ## What comes next
 

@@ -397,7 +397,11 @@ class Session(unittest.TestCase):
         self.assertTrue(eventually(lambda: len(refused) == 3))
         self.assertEqual(refused, ['bad-signature', 'mismatch', 'unknown-sender'])
         self.assertEqual(received, [])
-        self.assertTrue(eventually(lambda: all((self.b.sig_kid, s) in self.relay.acks for s in seqs)))
+        # A forged or misdirected body is acknowledged; a sender the record does not list yet is left in the mailbox,
+        # because a newer revision may list it.
+        self.assertTrue(eventually(lambda: all((self.b.sig_kid, s) in self.relay.acks for s in seqs[:2])))
+        time.sleep(0.2)
+        self.assertNotIn((self.b.sig_kid, seqs[2]), self.relay.acks)
 
     def test_a_repeated_body_is_acted_on_once(self):
         received, refused = [], []
@@ -555,6 +559,61 @@ class Blobs(unittest.TestCase):
             self.assertIsInstance(errors[0], BlobRefused)
             self.assertEqual(errors[0].code, 'too-large')
 
+    def slow_server(self, status_line, body_stream):
+        server = socket.socket()
+        server.bind(('127.0.0.1', 0))
+        server.listen()
+        self.addCleanup(server.close)
+
+        def serve():
+            sock, _ = server.accept()
+            sock.recv(65536)
+            sock.sendall(status_line)
+            try:
+                for chunk in body_stream():
+                    sock.sendall(chunk)
+            except OSError:
+                pass
+            sock.close()
+        threading.Thread(target=serve, daemon=True).start()
+        return 'http://127.0.0.1:%d' % server.getsockname()[1]
+
+    def fetch_within(self, origin, seconds):
+        from node import blobs
+        errors = []
+
+        def fetch():
+            try:
+                get_blob(origin, self.b, 'sha256:' + 'ab' * 32, [self.b.sig_kid])
+            except Exception as error:
+                errors.append(error)
+        with mock.patch.multiple(blobs, DEADLINE_SECONDS=0.5, TIMEOUT_SECONDS=2):
+            reader = threading.Thread(target=fetch, daemon=True)
+            reader.start()
+            reader.join(seconds)
+        self.assertFalse(reader.is_alive(), 'the read has no total limit')
+        return errors[0]
+
+    def test_a_trickled_blob_hits_the_deadline(self):
+        def trickle():
+            for _ in range(100):
+                time.sleep(0.05)
+                yield b'z'
+        origin = self.slow_server(b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n', trickle)
+        error = self.fetch_within(origin, 4)
+        self.assertEqual(error.code, 'timeout')
+
+    def test_an_endless_error_body_is_read_no_further_than_needed(self):
+        def endless():
+            yield b'{"error": {"code": "not-admitted", "message": "' + b'x' * 70_000
+            while True:
+                time.sleep(0.01)
+                yield b'x' * 4096
+        origin = self.slow_server(b'HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n', endless)
+        error = self.fetch_within(origin, 6)
+        self.assertIsInstance(error, BlobRefused)
+        self.assertEqual(error.status, 403)
+
     def test_arguments_are_checked_before_anything_is_sent(self):
         for call in (lambda: get_blob(self.relay.origin, self.b, 'sha256:XYZ', [self.b.sig_kid]),
                      lambda: put_blob('http://localhost:1', self.a, b'x', [self.b.sig_kid]),
@@ -658,6 +717,7 @@ class Frames(unittest.TestCase):
             'a reserved bit': header(0xC1, 1) + b'x',
             'an unknown opcode': header(0x83, 1) + b'x',
             'an unknown opcode in a message': header(0x01, 1) + b'x' + header(0x83, 1) + b'y',
+            'a new message inside a fragmented one': header(0x01, 1) + b'x' + header(0x81, 1) + b'y',
             'a binary message': header(0x82, 1) + b'x',
             'a masked server frame': bytes([0x81, 0x81]) + b'\0\0\0\0x',
         }
@@ -683,7 +743,9 @@ class Frames(unittest.TestCase):
         for payload, code, echoed in ((b'\x03', 1002, struct.pack('!H', 1002)),
                                       (struct.pack('!H', 1000) + b'\xff', 1007, struct.pack('!H', 1007)),
                                       (b'', 1005, b''),
-                                      (struct.pack('!H', 4403) + b'gone', 4403, struct.pack('!H', 4403))):
+                                      (struct.pack('!H', 4403) + b'gone', 4403, struct.pack('!H', 4403)),
+                                      (struct.pack('!H', 1006), 1006, b''),           # never sendable: not echoed
+                                      (struct.pack('!H', 2999), 2999, b'')):
             got = []
 
             def script(conn, server, payload=payload):
@@ -786,20 +848,45 @@ class Hardening(unittest.TestCase):
         self.assertTrue(eventually(lambda: all((self.b.sig_kid, s) in self.relay.acks for s in seqs)))
         b.ping()                                            # the reader is alive
 
-    def test_a_check_that_raises_refuses_the_body(self):
-        refused = []
+    def test_a_local_failure_leaves_the_body_for_the_next_connection(self):
+        refused, received, calls = [], [], []
 
-        def broken_lookup(kid):
-            raise RuntimeError('lookup')
-        b = RelaySession(self.relay.origin, self.b, ESTATE, broken_lookup, on_message=print,
-                         on_refused=lambda reason, frame: refused.append(reason))
-        b.open()
-        self.sessions.append(b)
+        def flaky_lookup(kid):
+            calls.append(kid)
+            if len(calls) == 1:
+                raise OSError('the record store is busy')
+            return self.peers.get(kid)
+        first = RelaySession(self.relay.origin, self.b, ESTATE, flaky_lookup, on_message=received.append,
+                             on_refused=lambda reason, frame: refused.append(reason))
+        first.open()
+        self.sessions.append(first)
         seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'p-1',
                                                         'body': p256.b64url_encode(self.body().encode())})
-        self.assertTrue(eventually(lambda: refused == ['malformed']))
+        self.assertTrue(first.wait_closed(5))                # the node could not check it: it does not pretend to
+        self.assertEqual((refused, received), ([], []))
+        self.assertNotIn((self.b.sig_kid, seq), self.relay.acks)
+        second = RelaySession(self.relay.origin, self.b, ESTATE, flaky_lookup, on_message=received.append)
+        second.open()
+        self.sessions.append(second)
+        self.assertTrue(eventually(lambda: len(received) == 1))
+        self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
+
+    def test_a_check_that_raises_on_the_relays_input_refuses_the_body(self):
+        refused = []
+        b = self.open(self.b, on_refused=lambda reason, frame: refused.append(reason))
+        with mock.patch.object(session_module.relay, 'verify_message_body', side_effect=RuntimeError('parser')):
+            seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'p-1',
+                                                            'body': p256.b64url_encode(self.body().encode())})
+            self.assertTrue(eventually(lambda: refused == ['malformed']))
         self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
         b.ping()
+
+    def test_a_refused_body_is_acknowledged_before_its_callback_runs(self):
+        holder = {}
+        b = self.open(self.b, on_refused=lambda reason, frame: holder['session'].close())
+        holder['session'] = b
+        seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'x', 'body': 'AAAA'})
+        self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
 
     def test_an_unexpected_failure_closes_the_session_with_its_reason(self):
         class Broken(session_module.ReplayStore):
@@ -857,7 +944,8 @@ class Hardening(unittest.TestCase):
     def test_keep_connected_reopens_and_stops_on_4403(self):
         states, stop = [], threading.Event()
         thread = threading.Thread(target=keep_connected, args=(
-            lambda: RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print), stop),
+            lambda replay: RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print,
+                                        replay=replay), stop),
             kwargs={'on_state': lambda state, detail: states.append((state, detail)), 'min_backoff': 0.05},
             daemon=True)
         thread.start()
@@ -869,6 +957,101 @@ class Hardening(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(states[-1], ('stopped', {'code': 4403}))
         stop.set()
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class Reconnects(unittest.TestCase):
+    """The #293 adversarial round: what survives a dropped link, and how the node waits before trying again."""
+
+    def setUp(self):
+        self.a, self.b = DeviceKeys.generate(), DeviceKeys.generate()
+        self.relay = RelayStub({self.a.sig_kid: self.a.sig_public, self.b.sig_kid: self.b.sig_public})
+        self.peers = {self.a.sig_kid: self.a.sig_public, self.b.sig_kid: self.b.sig_public}
+
+    def tearDown(self):
+        self.relay.stop()
+
+    def run_loop(self, make, **kw):
+        states, stop = [], threading.Event()
+        thread = threading.Thread(target=keep_connected, args=(make, stop),
+                                  kwargs=dict({'on_state': lambda state, detail: states.append((state, detail)),
+                                               'min_backoff': 0.05}, **kw), daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (stop.set(), thread.join(5)))
+        return states, stop, thread
+
+    def test_a_message_handled_before_the_link_dropped_is_acted_on_once(self):
+        handled = []
+
+        def handler(message):
+            handled.append(message['msgId'])
+            if len(handled) == 1:
+                self.relay.shutdown(self.b.sig_kid, 1001)   # the link drops before the ack leaves
+        make = lambda replay: RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=handler,
+                                           replay=replay)
+        states, stop, thread = self.run_loop(make)
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('open') == 1))
+        now = int(time.time()) * 1000
+        body = relay.message_body(self.a.sign, sender=self.a.sig_kid, to=self.b.sig_kid, msg_id='once',
+                                  iat=relay.rfc3339(now), exp=relay.rfc3339(now + 60_000), payload=None)
+        self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'once',
+                                                  'body': p256.b64url_encode(body.encode())})
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('open') >= 2))
+        self.assertTrue(eventually(lambda: self.relay.mailbox.get(self.b.sig_kid) == []))
+        self.assertEqual(handled, ['once'])
+
+    def test_refusals_no_retry_can_change_stop_the_loop(self):
+        stranger = DeviceKeys.generate()
+        states, stop, thread = self.run_loop(
+            lambda replay: RelaySession(self.relay.origin, stranger, ESTATE, self.peers.get, on_message=print))
+        thread.join(5)
+        self.assertEqual(states[-1], ('stopped', {'refusal': 'unauthenticated'}))
+        self.assertEqual([s for s, _ in states].count('retry'), 0)
+
+    def test_a_4403_during_open_is_terminal(self):
+        def refuse_open(replay):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print)
+            session.open = mock.Mock(side_effect=RelayRefused('not-admitted'))
+            return session
+        states, stop, thread = self.run_loop(refuse_open)
+        thread.join(5)
+        self.assertEqual(states[-1], ('stopped', {'refusal': 'not-admitted'}))
+
+    def test_backoff_doubles_with_jitter_and_honours_retry_after(self):
+        attempts = []
+
+        def failing(replay):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print)
+            error = RelayError('rate-limited', retry_after=0.4) if len(attempts) == 2 else OSError('down')
+            attempts.append(error)
+            session.open = mock.Mock(side_effect=error)
+            return session
+        with mock.patch.object(session_module.random, 'random', return_value=1.0):
+            states, stop, thread = self.run_loop(failing, min_backoff=0.01, max_backoff=10)
+            self.assertTrue(eventually(lambda: [s for s, _ in states].count('retry') >= 4, timeout=10))
+        waits = [d['seconds'] for s, d in states if s == 'retry'][:4]
+        self.assertEqual(waits[:2], [0.01, 0.02])            # doubling, from the minimum
+        self.assertEqual(waits[2], 0.4)                       # the relay's retryAfter outranks the backoff
+        with mock.patch.object(session_module.random, 'random', return_value=0.0):
+            states2, stop2, thread2 = self.run_loop(failing, min_backoff=0.2, max_backoff=10)
+            self.assertTrue(eventually(lambda: [s for s, _ in states2].count('retry') >= 1))
+        self.assertEqual([d['seconds'] for s, d in states2 if s == 'retry'][0], 0.1)   # jitter: half the backoff
+
+    def test_seventy_five_seconds_of_silence_close_the_link(self):
+        with mock.patch.multiple(session_module, RECV_TIMEOUT_SECONDS=0.3, PING_SECONDS=60):
+            session = RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print)
+            session.open()
+            self.assertTrue(session.wait_closed(5))
+        self.assertEqual(session.close_reason, 'relay.session.dead')
+
+    def test_one_deadline_covers_the_whole_opening(self):
+        server = RawServer(lambda conn, srv: [conn.raw(0x9, b'p') or time.sleep(0.1) for _ in range(40)])
+        origin = server.url[len('ws://'):-len('/v1/connect')]
+        with mock.patch.object(session_module, 'HELLO_TIMEOUT_SECONDS', 0.5):
+            started = time.monotonic()
+            with self.assertRaises(socket.timeout):
+                RelaySession('http://' + origin, self.b, ESTATE, self.peers.get, on_message=print).open()
+        self.assertLess(time.monotonic() - started, 2.0)     # pings every 0.1 s did not hold it open
 
 
 class Redirects(unittest.TestCase):
