@@ -1544,8 +1544,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "4c2650c47187c961f9347442395a887673fbcd221d7d58501ef2357436f5120e",
-      "bytes": 84594,
+      "export_sha256": "48c3c88415bfc892cc4ddd8101ce5e6eed0bfcfbf6f0293eacbeb632fa5a3bda",
+      "bytes": 84810,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -2258,8 +2258,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "3e7a6d7e2d135053fe28c7a506b1a15aa1918acf9e4502c538c600b3620b127a",
-      "bytes": 26966,
+      "export_sha256": "65575123ce3a61acf381b226c967337aa15e5232e90056d1c04b389520f880aa",
+      "bytes": 27081,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3293,6 +3293,13 @@
       "upstream_modified": true,
       "export_sha256": "db939ea762352d81e4aef79e8bb95c814046f8fd89fcc4ee92f53d841cea1991",
       "bytes": 12632
+    },
+    {
+      "path": "tests/test_node_cli.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5faded6d6372484611e80daf2c10569bc4fe32ac5c5f08ac2c206cb7aaee5ee4",
+      "bytes": 3490
     },
     {
       "path": "tests/test_node_envelope.py",
@@ -4591,6 +4598,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/node.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2c17434115c0ec03129cbd7bf5325a9500412afb98cd7f0ee4907df667368269",
+      "bytes": 3353
+    },
+    {
       "path": "tools/notify_findings.py",
       "source_sha256": "cea75d7eea0721eed447653ac3c80ed1e02964cc2ffbc79d9b2638934de27e2b",
       "export_sha256": "7e82eed69a85955dbf750e490cc2f7652669a64c25c0d135007ef3c8f18cf762",
@@ -4983,7 +4997,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 648,
+  "file_count": 650,
   "excluded": [
     "git-history",
     "operator-registries",

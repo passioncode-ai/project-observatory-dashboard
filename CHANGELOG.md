@@ -25,6 +25,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **The node's secret envelope** (OBS-113). A machine seals a secret to another machine's key-agreement key (HPKE,
   RFC 9180) and signs it; the target opens it only when the estate record lets the sender hold that slot and the
   envelope is not older than the last one it opened.
+- **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
+  and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
+  their owner-only files, and a key is never replaced.
 
 ### Documentation
 

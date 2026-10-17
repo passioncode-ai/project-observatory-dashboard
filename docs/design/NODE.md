@@ -227,9 +227,18 @@ planted defects fail `tests/test_node_envelope.py`:
 - reading an organization's placement;
 - ignoring a mark ahead of the run.
 
+## This machine's identity from a terminal (OBS-114, slice 6, first part)
+
+`project-observatory full node --init` creates the device keys if this machine has none, in the workspace's
+`node/device/` (or `OBSERVATORY_NODE`/device), and prints a `node-identity/1` document: the device id, when it was
+created, and the `deviceKeys` an enrollment and the estate record list (public keys only). Running it again changes
+nothing and prints the same. `--show` prints it without creating anything, and exits 1 when there are no keys yet.
+A machine's identity is not moved by copying the folder: a new machine runs `--init` and is added to the estate by its
+own ceremony (DEC-0084).
+
 ## What comes next
 
 | Slice | What |
 |---|---|
 | 5 | the enrollment client, once the contract's machine ceremonies are decided |
-| 6 | the node service and its CLI |
+| 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5 |
