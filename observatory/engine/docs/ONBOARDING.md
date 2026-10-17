@@ -606,12 +606,27 @@ block a turn or a prompt:
     read, including when git ignores the file, and the line's text must be in what
     those calls wrote.
 
-  The turn is asked about in every other case: another session's edit in the same
-  checkout, a file the session only read or grepped, a pull-request body that
-  shares a heading, a write by a tool the pass does not know (a copy, a script), a
-  subagent's edit (subagents keep their own transcripts), no transcript, or a pass
-  that runs out of its 2 seconds. When the rationale counts, a second revision of
-  the same record links that file in its evidence instead of asking for a copy.
+  The pass skips calls whose result was an error, and subagent (`isSidechain`)
+  lines. It does not scan a Bash command longer than 64 KB.
+
+  The turn is asked about in every other case:
+  - another session's edit in the same checkout;
+  - a file the session only read or grepped;
+  - a pull-request body that shares a heading;
+  - a write by a tool the pass does not know (a copy, a script, `perl -i`);
+  - a relative path written after a `cd` in the same command;
+  - a path whose letter case differs from the file's on a case-insensitive volume;
+  - a subagent's edit;
+  - a failed call;
+  - a command longer than 64 KB;
+  - no transcript;
+  - a pass that runs out of its 2 seconds.
+
+  When the rationale counts, a second revision of the same record links that file
+  in its evidence instead of asking for a copy. Every later revision of that
+  record carries the link forward, so the record stays explained after the
+  register is committed and pushed and after the write scrolls out of the
+  transcript, without another revision just for the link.
 - **UserPromptSubmit** hands that request to the model with the session's next
   prompt, as context, once. It records the delivery and prints nothing when no
   request is pending. The context is capped at 4,000 characters. A request that

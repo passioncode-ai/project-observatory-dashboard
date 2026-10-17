@@ -92,15 +92,23 @@ class Fixture:
         return self.transcripts / f"{session}.jsonl"
 
     def wrote(self, text: str, *, session: str = "sess-1", tool: str = "Edit",
-              rel: str = "docs/DECISIONS.md") -> None:
-        """Record in the session's transcript that ITS tool wrote `text`."""
+              rel: str = "docs/DECISIONS.md", use_id: str = "toolu_fixture",
+              sidechain: bool = False, failed: bool = False) -> None:
+        """Record in the session's transcript that ITS tool wrote `text` — or, with
+        `sidechain`, that a subagent did; with `failed`, that the call errored."""
         key = {"Edit": "new_string", "Write": "content", "Bash": "command"}[tool]
         inp = {key: text} if tool == "Bash" else {"file_path": str(self.repo / rel), key: text}
         rec = {"type": "assistant", "sessionId": session, "message": {
-            "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fixture",
+            "role": "assistant", "content": [{"type": "tool_use", "id": use_id,
                                               "name": tool, "input": inp}]}}
+        if sidechain:
+            rec["isSidechain"] = True
         with self.transcript(session).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
+            if failed:
+                fh.write(json.dumps({"type": "user", "sessionId": session, "message": {
+                    "role": "user", "content": [{"type": "tool_result", "tool_use_id": use_id,
+                                                 "is_error": True, "content": "refused"}]}}) + "\n")
 
     def bash(self, command: str, *, session: str = "sess-1") -> None:
         """Record that the session ran `command` through its Bash tool."""
@@ -316,6 +324,68 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         self.assertTrue([e for e in json.loads(revs[1]["evidence_json"]) if e.get("kind") == "rationale"])
         self.assertEqual(fx.receipt()["revision"], 2)
 
+    def test_a_register_with_several_headings_anchors_on_the_newest(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all()
+        added = "## DEC-0002 the first new one\n\nWhy.\n\n## DEC-0003 the newest one\n\nWhy too.\n"
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n" + added)
+        fx.change()
+        fx.wrote("## DEC-0003 the newest one")       # only the newest heading is in the call
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+        self.assertIn("DEC-0003", fx.receipt()["rationale"]["anchor"])
+
+    def test_the_link_survives_a_commit_and_push_and_a_later_turn(self):
+        fx = Fixture()
+        bare = fx.work / "origin.git"
+        _git(fx.work, "init", "-q", "--bare", str(bare))
+        _git(fx.repo, "remote", "add", "upstream-fixture", str(bare))
+        _git(fx.repo, "push", "-q", "-u", "upstream-fixture", "HEAD:refs/heads/main")
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
+        fx.commit_all("decisions")
+        _git(fx.repo, "push", "-q", "upstream-fixture", "HEAD:refs/heads/main")
+        fx.change("later.py")
+        fx.stop()
+        self.assertEqual(fx.journal(), [], "the record stays explained")
+        ev = json.loads(fx.ledger("SELECT evidence_json FROM ledger WHERE kind='session'"
+                                  " ORDER BY revision DESC")[0][0])
+        self.assertTrue([e for e in ev if e.get("uri") == "file:docs/DECISIONS.md"
+                         and e.get("kind") == "rationale"], ev)
+        self.assertEqual(fx.context(fx.prompt()), "")
+
+    def test_the_link_survives_the_write_scrolling_out_of_the_tail(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        fx.stop()
+        fx.filler(6)                                   # past the 4 MB tail
+        fx.change("later.py")
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+        self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
+
+    def test_one_revision_per_changed_turn_once_linked(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        fx.stop()
+        self.assertEqual(len(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'")), 2)
+        for name in ("b.py", "c.py"):
+            fx.change(name)
+            fx.stop()
+        self.assertEqual(len(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'")), 4,
+                         "2, then one per later changed turn (not 2, 4, 6)")
+
     def test_an_adr_in_an_unpushed_commit_counts_too(self):
         fx = Fixture()
         (fx.repo / "docs/adr").mkdir(parents=True)
@@ -493,6 +563,47 @@ class NotARationale(unittest.TestCase):
         fx.wrote("fixed a typo here")
         self.asked(fx)
 
+    def test_a_failed_write_to_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write", use_id="toolu_failed", failed=True)
+        fx.change()
+        self.asked(fx)
+
+    def test_a_subagents_write_to_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write", sidechain=True)
+        fx.change()
+        self.asked(fx)
+
+    def test_a_ledger_line_found_only_in_a_call_that_wrote_elsewhere(self):
+        # This session wrote the ledger (a note) AND, in another call, wrote the
+        # stage line's text into a different file. Only ledger-writing calls count.
+        fx = Fixture()
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        (fx.repo / ".task-pipeline/run.md").write_text(
+            "# run\n\n- stage: plan approved by the reviewer\n", encoding="utf-8")
+        fx.change()
+        fx.bash("echo '- note: picked up' >> .task-pipeline/run.md")
+        fx.bash("echo 'plan approved by the reviewer' > notes.txt")
+        self.asked(fx)
+
+    def test_a_register_write_older_than_the_transcript_tail(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        fx.filler(5)                                     # the real 4 MB tail, passed
+        facts = record_turn.diff_facts(fx.repo)
+        self.assertIsNone(record_turn.rationale_of(fx.repo, facts, str(fx.transcript("sess-1"))),
+                          "only the tail is read")
+
     def test_no_transcript_means_no_attribution(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -540,6 +651,34 @@ class WithinTheBudget(unittest.TestCase):
         self.assertTrue(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'"), "the record exists")
         self.assertEqual(len(fx.journal()), 1, "no stage line was this session's: asked")
 
+    def test_a_long_single_line_command_dense_with_sed(self):
+        # Round 5: a one-line printf runbook mentioning `sed` thousands of times made
+        # the old `sed -i` pattern quadratic — 30 s for 231 KB. Now linear, and a
+        # command longer than COMMAND_SCAN_BYTES is not scanned at all.
+        fx = Fixture()
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        (fx.repo / ".task-pipeline/run.md").write_text("# run\n- stage: intake done here\n",
+                                                       encoding="utf-8")
+        para = "Step: run sed with -E to rewrite the header, check sed output, then commit.\\n"
+        fx.bash("printf '# Runbook\\n\\n" + para * 3200 + "' > docs/runbook.md")
+        fx.bash("echo " + "sed " * 60000)
+        fx.change()
+        took = fx.timed_stop(limit=60)
+        self.assertLess(took, self.LIMIT, f"the Stop took {took:.1f} s")
+        self.assertTrue(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'"))
+
+    def test_shell_targets_is_linear_and_bounded(self):
+        import record_turn, time as _t
+        t0 = _t.monotonic()
+        self.assertEqual(record_turn._shell_targets("echo " + "sed -i " * 9000 + "x"), [])
+        self.assertLess(_t.monotonic() - t0, 1.0)
+        self.assertIsNone(record_turn._shell_targets("x" * (record_turn.COMMAND_SCAN_BYTES + 1)))
+        self.assertEqual(record_turn._shell_targets("sed -i 's/a/b/' docs/DECISIONS.md"),
+                         ["docs/DECISIONS.md"])
+        self.assertEqual(record_turn._shell_targets("grep -i x docs/DECISIONS.md"), [])
+
     def test_the_transcript_pass_itself_stops_at_the_deadline(self):
         import record_turn
         fx = Fixture()
@@ -549,6 +688,27 @@ class WithinTheBudget(unittest.TestCase):
             record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=0.0)
         self.assertTrue(record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo,
                                                    deadline=float("inf")))
+
+    def test_a_transcript_with_no_tool_calls_still_stops_at_the_deadline(self):
+        # The line loop has its own deadline check: a large transcript of ordinary
+        # messages, with no tool call to reach the per-call check, must stop too.
+        import record_turn
+        fx = Fixture()
+        fx.filler(2)
+        with self.assertRaises(record_turn._OutOfTime):
+            record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=0.0)
+
+    def test_the_deadline_also_stops_the_per_call_work(self):
+        # A deadline that passes AFTER the line scan (a short transcript, one check at
+        # line 0) and during the per-call extraction must still stop the pass.
+        import record_turn
+        fx = Fixture()
+        for i in range(3):
+            fx.bash(f"echo step {i} > out{i}.txt")
+        clock = iter([0.0] + [100.0] * 50)
+        with mock.patch.object(record_turn.time, "monotonic", lambda: next(clock)):
+            with self.assertRaises(record_turn._OutOfTime):
+                record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=50.0)
 
     def test_out_of_time_asks_and_the_record_stands(self):
         import record_turn

@@ -338,7 +338,12 @@ FILE_TOOLS = {"Edit": ("file_path", ("new_string",)),
 #: before it must start a word.
 _REDIRECT = re.compile(r"(?:^|[\s;|&(])(?:\d|&)?>>?\s*([\"']?)([^\s'\";|&<>()]+)\1")
 _TEE = re.compile(r"\btee\s+(?:-\S+\s+)*([\"']?)([^\s'\";|&<>()]+)\1")
-_SED_INPLACE = re.compile(r"\bsed\b[^;|&\n]*?\s(?:-i\S*|--in-place\S*)\s[^;|&\n]*")
+#: Command separators: a shell command is split on these into segments, once.
+_SEGMENT = re.compile(r"[;|&\n]")
+#: The most of one command that is scanned. A longer command (a pasted runbook on one
+#: line) is not attributed — the turn is asked about — so no command can cost more
+#: than a linear pass over this many bytes.
+COMMAND_SCAN_BYTES = 64 * 1024
 #: task-pipeline's own ledger writer, which names no file on its command line.
 _LEDGER_WRITER = re.compile(r"\bstage_checkpoint\.py\b")
 def _is_register(rel: str) -> bool:
@@ -393,17 +398,29 @@ def _check(deadline: float) -> None:
         raise _OutOfTime()
 
 
-def _shell_targets(command: str) -> list[str]:
+def _shell_targets(command: str) -> list[str] | None:
     """The files a shell command WRITES: redirections, `tee`, `sed -i`. A command that
-    only reads (`grep 'x' docs/DECISIONS.md`) writes nothing."""
+    only reads (`grep 'x' docs/DECISIONS.md`) writes nothing.
+
+    Linear in the command: the redirection and `tee` patterns run once over it, and
+    `sed -i` is read by splitting the command into segments on `; | & newline` and
+    tokenizing only segments whose first word is `sed`. A command longer than
+    `COMMAND_SCAN_BYTES` returns None — not scanned — and the caller asks.
+    """
+    if len(command) > COMMAND_SCAN_BYTES:
+        return None
     out = [m.group(2) for m in _REDIRECT.finditer(command)]
     out += [m.group(2) for m in _TEE.finditer(command)]
-    for m in _SED_INPLACE.finditer(command):
+    for segment in _SEGMENT.split(command):
+        head = segment.lstrip()
+        if not head.startswith("sed ") and not head.startswith("sed\t"):
+            continue
         try:
-            words = shlex.split(m.group(0))
+            words = shlex.split(head)
         except ValueError:
-            words = m.group(0).split()
-        if words and not words[-1].startswith("-"):
+            words = head.split()
+        if any(w == "-i" or w.startswith("-i") or w.startswith("--in-place") for w in words[1:]) \
+                and len(words) > 2 and not words[-1].startswith("-"):
             out.append(words[-1])
     return out
 
@@ -437,46 +454,66 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
         return []
     ledger = os.path.realpath(str(top / RUN_LEDGER))
     calls: list[dict] = []
+    failed: set[str] = set()
+    uses: list[tuple[str, dict, str | None]] = []
     for n, line in enumerate(data.split(b"\n")):
         if n % 256 == 0:
             _check(deadline)
-        if b'"tool_use"' not in line:
+        if b'"tool_use"' not in line and b'"is_error"' not in line:
             continue
         try:
             rec = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(rec, dict) or rec.get("type") != "assistant":
+        # A subagent's line (`isSidechain`) is another context's work; it does not
+        # count for this session, so a subagent's edit is asked about.
+        if not isinstance(rec, dict) or rec.get("isSidechain"):
             continue
         content = (rec.get("message") or {}).get("content")
+        if rec.get("type") == "user":
+            # A call whose result is an error wrote nothing.
+            for item in content if isinstance(content, list) else ():
+                if isinstance(item, dict) and item.get("type") == "tool_result" \
+                        and item.get("is_error") and isinstance(item.get("tool_use_id"), str):
+                    failed.add(item["tool_use_id"])
+            continue
+        if rec.get("type") != "assistant":
+            continue
         cwd = rec.get("cwd") if isinstance(rec.get("cwd"), str) else None
         for item in content if isinstance(content, list) else ():
-            if not isinstance(item, dict) or item.get("type") != "tool_use":
+            if isinstance(item, dict) and item.get("type") == "tool_use":
+                uses.append((str(item.get("id") or ""), item, cwd))
+    for use_id, item, cwd in uses:
+        _check(deadline)
+        if use_id and use_id in failed:
+            continue
+        name, inp = item.get("name"), item.get("input")
+        if not isinstance(inp, dict):
+            continue
+        if name in FILE_TOOLS:
+            key, fields = FILE_TOOLS[name]
+            target = inp.get(key)
+            if not isinstance(target, str):
                 continue
-            name, inp = item.get("name"), item.get("input")
-            if not isinstance(inp, dict):
-                continue
-            if name in FILE_TOOLS:
-                key, fields = FILE_TOOLS[name]
-                target = inp.get(key)
-                if not isinstance(target, str):
-                    continue
-                parts = []
-                for f in fields:
-                    v = inp.get(f)
-                    if isinstance(v, list):          # MultiEdit's edits
-                        parts += [e.get("new_string", "") for e in v if isinstance(e, dict)]
-                    elif isinstance(v, str):
-                        parts.append(v)
-                targets = {_resolve(target, cwd, top)}
-                calls.append({"targets": targets, "text": "\n".join(p for p in parts if isinstance(p, str)),
-                              "ledger": ledger in targets})
-            elif name == "Bash" and isinstance(inp.get("command"), str):
-                cmd = inp["command"]
-                targets = {_resolve(t, cwd, top) for t in _shell_targets(cmd)}
-                writes_ledger = ledger in targets or bool(_LEDGER_WRITER.search(cmd))
-                if targets or writes_ledger:
-                    calls.append({"targets": targets, "text": cmd, "ledger": writes_ledger})
+            parts = []
+            for f in fields:
+                v = inp.get(f)
+                if isinstance(v, list):          # MultiEdit's edits
+                    parts += [e.get("new_string", "") for e in v if isinstance(e, dict)]
+                elif isinstance(v, str):
+                    parts.append(v)
+            targets = {_resolve(target, cwd, top)}
+            calls.append({"targets": targets, "text": "\n".join(p for p in parts if isinstance(p, str)),
+                          "ledger": ledger in targets})
+        elif name == "Bash" and isinstance(inp.get("command"), str):
+            cmd = inp["command"]
+            found = _shell_targets(cmd)
+            if found is None:
+                continue                          # too long to scan: not attributed
+            targets = {_resolve(t, cwd, top) for t in found}
+            writes_ledger = ledger in targets or bool(_LEDGER_WRITER.search(cmd))
+            if targets or writes_ledger:
+                calls.append({"targets": targets, "text": cmd, "ledger": writes_ledger})
     return calls
 
 
@@ -574,6 +611,18 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
     return None
 
 
+def _rationale_links(prior) -> list[dict]:
+    """The rationale links the record's latest revision carries (`kind: rationale`)."""
+    if prior is None:
+        return []
+    try:
+        ev = json.loads(prior["evidence_json"] or "[]")
+    except (ValueError, TypeError, IndexError, KeyError):
+        return []
+    return [e for e in ev if isinstance(e, dict) and e.get("kind") == "rationale"
+            and str(e.get("uri") or "").startswith("file:")]
+
+
 def _why_asks(conn) -> dict | None:
     """The ask's answer rate for the receipt; None (and a line on stderr) when it
     cannot be measured — a measurement must never cost the turn its record."""
@@ -661,7 +710,8 @@ def main() -> int:
             # would report `recorded: false` for the rest of the session; with
             # it the turn starts a fresh record, which is what an erasure means.
             row = conn.execute(
-                "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id"
+                "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id,"
+                " l.evidence_json"
                 " FROM ledger l JOIN (SELECT memory_id, MAX(revision) r FROM ledger"
                 "   WHERE session_id = ? AND kind = 'session' GROUP BY memory_id) m"
                 "  ON m.memory_id = l.memory_id AND m.r = l.revision"
@@ -702,6 +752,13 @@ def main() -> int:
                         "memoryId": prior["memory_id"], "revision": prior["revision"],
                         "hasWhy": bool(prior["why"]), "project": project_id},
                        {"whyAsks": _why_asks(conn)})
+        # THE LINK IS CARRIED FORWARD. Once a revision of this record links the
+        # rationale this session wrote, every later revision keeps that link and the
+        # record stays explained — after the register is committed and pushed, and
+        # after the write scrolls out of the transcript's tail.
+        carried = _rationale_links(prior)
+        if carried:
+            evidence = evidence + [e for e in carried if e not in evidence]
         result = L.append(
             conn, owner=OWNER, kind="session", statement=statement,
             why=prior["why"] if prior else None,
@@ -727,10 +784,16 @@ def main() -> int:
         # killed at its timeout with nothing written. Now a slow or failed
         # attribution only means the turn is asked about.
         rationale = None
-        if not has_why:
+        if carried:
+            first = carried[-1]
+            rationale = {"source": "carried", "ref": first["uri"][len("file:"):],
+                         **({"anchor": first["anchor"]} if first.get("anchor") else {})}
+        elif not has_why:
             rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
                                      time.monotonic() + ATTRIBUTION_SECONDS)
-        if rationale:
+        # The follow-up revision only when the link is NEW: a carried link is already
+        # in the revision just written, so a changed turn adds one revision, not two.
+        if rationale and rationale["source"] != "carried":
             try:
                 # A follow-up revision of the SAME record that links the rationale.
                 result = L.append(

@@ -55,7 +55,9 @@ session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
 `>>`, `tee`, `sed -i`) that targeted a `decisions.md` or an `adr/` `.md`,
 `.markdown` or `.txt` file (outside vendored trees) with that file's newest
 added heading or most of its added lines, or that wrote a `decision:` /
-`stage:` line into `.task-pipeline/run.md`. The record then links that file.
+`stage:` line into `.task-pipeline/run.md`. Failed calls, subagent calls and
+Bash commands over 64 KB are not counted. The record then links that file,
+and keeps the link in every later revision.
 Correct that record rather than creating a second one:
 
 ```

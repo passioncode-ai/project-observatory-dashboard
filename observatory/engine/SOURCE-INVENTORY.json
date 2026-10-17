@@ -828,15 +828,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "9513e2dff619b62b782e06fc9e637f86a9b9e30934a280c6b90f52da9b8321c7",
-      "bytes": 106175,
+      "export_sha256": "ad9f286ea41c3577f797f71b01d2a54321d91639bcb95498fc90f5217f2204cb",
+      "bytes": 106740,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "3c334e452b44011733b0964c1838350d70f2b6b6b9896f05fe5f9da919a5f0aa",
-      "bytes": 81067,
+      "export_sha256": "aa545617a19d271ecc107e7ca6df46519468efd1bb8e1074a9661b5647d33e6b",
+      "bytes": 81887,
       "upstream_modified": true
     },
     {
@@ -1713,8 +1713,8 @@
     {
       "path": "skill/plugins/observatory-log/hooks/hooks.json",
       "source_sha256": "abbecfad0a4188bcb07636a38f410490f0ce7278c55c61a25541b8e590dc874f",
-      "export_sha256": "09a02ff0f4d8ad38984a6519a4c2a0bdfef30949cbdfe19a4648626bc0356f98",
-      "bytes": 2070,
+      "export_sha256": "9c8f1e38929857549f2684c584c544e596d3b96d33e6200fe6039fcd1a35ea8a",
+      "bytes": 2208,
       "upstream_modified": true
     },
     {
@@ -1743,8 +1743,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "99e3307eee46ada0a55c13352c62f0b7d47494ac0854966c656dea37700720fe",
-      "bytes": 5968,
+      "export_sha256": "dbaf8e638de379155de6b0b835dbed109e9d0e70d9a983a3d0e19d9fefd8b640",
+      "bytes": 6087,
       "upstream_modified": true
     },
     {
@@ -2258,8 +2258,8 @@
       "path": "tests/test_ask_why.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d4eb4bf0f03da13c64d4351c95a8daca7d3b2735e059e9b7cb176c16211954ce",
-      "bytes": 43586
+      "export_sha256": "f0643bedf0c7180a707e34468922fa91bdc4e2e58d2d29843e88cf5896ce96c5",
+      "bytes": 51851
     },
     {
       "path": "tests/test_ask_why_reach.py",
@@ -4483,8 +4483,8 @@
     {
       "path": "tools/record_turn.py",
       "source_sha256": "424602905763c916d14026733edd68dcbda519ac41d469344b30d2d1f770df24",
-      "export_sha256": "9f260e7ed534694bdfbbf625d810ec95bcc55322c8efc35709c99e5ebdc2353d",
-      "bytes": 41589,
+      "export_sha256": "4cda93c7ac849c0ba050bda1517f7ef91925136af67fe31737df8ff63c4d54a8",
+      "bytes": 44817,
       "python_comments_removed": 119,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
