@@ -503,7 +503,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                --plan reads only; erasing needs a terminal
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
   scan-spend                   this month's provider spend across every account the doors hold, for the
-                               L0 limit and its 80 % warning (integration openrouter)
+                               L0 limit and its 80 % warning, and each project's month and last 30 days
+                               by key hash (tools/spend.py project; integration openrouter)
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's

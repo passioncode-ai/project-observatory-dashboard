@@ -28,6 +28,7 @@ by this tool: a re-issue replaces it and leaves `purpose` and `owner` standing.
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -38,6 +39,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                       # noqa: E402
 import credential_shape                                             # noqa: E402
+import oslocks                                                      # noqa: E402
+import osprivacy                                                    # noqa: E402
 import paths                                                        # noqa: E402
 
 #: Redirectable for the same reason every other artefact here is: a test that
@@ -85,6 +88,24 @@ def board_ids() -> dict[str, dict]:
     return {c["id"]: c for c in doc.get("credentials", [])}
 
 
+@contextlib.contextmanager
+def _write_lock():
+    """One writer of the annotations file at a time, across processes and threads: an exclusive lock on a file
+    beside it, held from `load()` through the atomic write. The key server answers each request on its own
+    thread (J-11 round 5), so two annotations at once each read the file before the other wrote it, and the
+    second write dropped the first one's row (round 6, R6-5). Blocking: an annotation is a few milliseconds."""
+    FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd = osprivacy.open(FILE.parent / ".credential_annotations.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        oslocks.flock(fd, oslocks.LOCK_EX)
+        try:
+            yield
+        finally:
+            oslocks.flock(fd, oslocks.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def write(cred_id: str, fields: dict, *, by: str = "operator") -> dict:
     """THE ONE WRITER. The CLI, the keyserver route and the page all land here,
     so a refusal cannot be true of one path and not another.
@@ -127,6 +148,11 @@ def write(cred_id: str, fields: dict, *, by: str = "operator") -> dict:
         if days < 1:
             raise ValueError("--rotation-days must be at least 1; a policy of zero "
                              "is a finding every day and a decision never")
+    with _write_lock():
+        return _write_row(cred_id, fields, purpose, evidence, days, by)
+
+
+def _write_row(cred_id: str, fields: dict, purpose: str, evidence: str, days, by: str) -> dict:
     doc = load()
     row = dict(doc.setdefault("annotations", {}).get(cred_id) or {})
     row.update({"purpose": purpose, "evidence": evidence, "signed_on": today(),
