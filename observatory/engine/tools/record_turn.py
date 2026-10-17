@@ -375,16 +375,28 @@ def _read_bounded(path: pathlib.Path) -> list[str]:
         return []
 
 
-def _added_lines(top: pathlib.Path, rel: str, facts: dict) -> list[str]:
+def _added_lines(top: pathlib.Path, rel: str, facts: dict,
+                 deadline: float | None = None) -> list[str]:
     """The non-blank lines this work added to `rel`: the whole file when git does not
     track it, else what `git diff <base>` adds — the uncommitted change and the
     unpushed commits together — ignoring whitespace, so re-indenting a register
-    adds nothing."""
+    adds nothing. The diff gets only the time left before `deadline`; a diff that
+    needs longer (a register of megabytes) raises `_OutOfTime`, and the turn is
+    asked about."""
     if rel in facts.get("untracked", ()):
         lines = _read_bounded(top / rel)
     else:
-        diff = git(top, "diff", "--ignore-all-space", "--ignore-blank-lines",
-                   facts.get("base") or "HEAD", "--", rel)
+        left = 20.0 if deadline is None else deadline - time.monotonic()
+        if left <= 0:
+            raise _OutOfTime()
+        try:
+            p = safe_git.run(["diff", "--ignore-all-space", "--ignore-blank-lines",
+                              facts.get("base") or "HEAD", "--", rel], repo=top, timeout=left)
+        except subprocess.TimeoutExpired:
+            raise _OutOfTime() from None
+        except Exception:                                                          # noqa: BLE001
+            return []
+        diff = p.stdout if p.returncode == 0 else ""
         lines = [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
     return [l for l in lines if l.strip()]
 
@@ -463,8 +475,8 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
             continue
         try:
             rec = json.loads(line)
-        except ValueError:
-            continue
+        except (ValueError, RecursionError):
+            continue                     # a torn or absurdly nested line: not a call
         # A subagent's line (`isSidechain`) is another context's work; it does not
         # count for this session, so a subagent's edit is asked about.
         if not isinstance(rec, dict) or rec.get("isSidechain"):
@@ -577,7 +589,7 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
             text = "\n".join(c["text"] for c in calls if real in c["targets"])
             if not text:
                 continue
-            added = _added_lines(top, rel, facts)
+            added = _added_lines(top, rel, facts, deadline)
             if not added or not _register_written(added, text):
                 continue
             # The LAST heading added: a register grows at its end, and a new
@@ -590,7 +602,7 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
         if ledger_text and ledger_file.is_file():
             _check(deadline)
             tracked_change = RUN_LEDGER in touched and RUN_LEDGER not in (facts.get("untracked") or ())
-            lines = (_added_lines(top, RUN_LEDGER, facts) if tracked_change
+            lines = (_added_lines(top, RUN_LEDGER, facts, deadline) if tracked_change
                      else _tail_lines(ledger_file, LEDGER_TAIL))
             tried = 0
             for line in reversed(lines):
@@ -611,16 +623,50 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
     return None
 
 
-def _rationale_links(prior) -> list[dict]:
-    """The rationale links the record's latest revision carries (`kind: rationale`)."""
+def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
+    """The rationale links of the record's latest revision that are STILL TRUE.
+
+    A link is carried only when this hook wrote it — the revision's provenance is
+    `observatory-log/Stop` with a `rationale` key, so a link another writer put in
+    the evidence is never carried — when it names this repository, when the linked
+    file still exists inside the checkout, and when a bounded read of that file
+    still contains the link's anchor. A register deleted, reverted, checked out or
+    rewritten, or a session that moved to another repository, drops the link, and
+    the turn is attributed afresh (and asked about when that finds nothing).
+    """
     if prior is None:
         return []
     try:
         ev = json.loads(prior["evidence_json"] or "[]")
+        prov = json.loads(prior["provenance_json"] or "[]")
     except (ValueError, TypeError, IndexError, KeyError):
         return []
-    return [e for e in ev if isinstance(e, dict) and e.get("kind") == "rationale"
-            and str(e.get("uri") or "").startswith("file:")]
+    if not any(isinstance(x, dict) and x.get("source") == "observatory-log/Stop"
+               and x.get("rationale") for x in prov if isinstance(prov, list)):
+        return []
+    out = []
+    for e in ev if isinstance(ev, list) else ():
+        if not isinstance(e, dict) or e.get("kind") != "rationale" or e.get("repo") != repo_id:
+            continue
+        uri, anchor = str(e.get("uri") or ""), e.get("anchor")
+        if not uri.startswith("file:") or not isinstance(anchor, str) or not anchor.strip():
+            continue
+        try:
+            root = top.resolve()
+            path = (root / uri[len("file:"):]).resolve()
+            if root not in path.parents or not path.is_file():
+                continue
+            size = path.stat().st_size
+            with path.open("rb") as fh:
+                head = fh.read(READ_LIMIT)
+                fh.seek(max(0, size - READ_LIMIT))
+                tail = fh.read(READ_LIMIT)
+        except OSError:
+            continue
+        text = (head + b"\n" + tail).decode("utf-8", errors="replace")
+        if anchor in text:
+            out.append(e)
+    return out
 
 
 def _why_asks(conn) -> dict | None:
@@ -711,7 +757,7 @@ def main() -> int:
             # it the turn starts a fresh record, which is what an erasure means.
             row = conn.execute(
                 "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id,"
-                " l.evidence_json"
+                " l.evidence_json, l.provenance_json"
                 " FROM ledger l JOIN (SELECT memory_id, MAX(revision) r FROM ledger"
                 "   WHERE session_id = ? AND kind = 'session' GROUP BY memory_id) m"
                 "  ON m.memory_id = l.memory_id AND m.r = l.revision"
@@ -756,7 +802,8 @@ def main() -> int:
         # rationale this session wrote, every later revision keeps that link and the
         # record stays explained — after the register is committed and pushed, and
         # after the write scrolls out of the transcript's tail.
-        carried = _rationale_links(prior)
+        carried = _rationale_links(prior, repo_id, pathlib.Path(top or cwd))
+        base_evidence = list(evidence)
         if carried:
             evidence = evidence + [e for e in carried if e not in evidence]
         result = L.append(
@@ -776,6 +823,7 @@ def main() -> int:
             # honest third answer: THIS IS NOT A JUDGEMENT.
             confidence=None, evidence=evidence,
             provenance=[{"source": "observatory-log/Stop", "measured": True,
+                         **({"rationale": "carried"} if carried else {}),
                          **({"continues": continues} if continues else {})}])
         has_why = bool(prior and prior["why"])
         # THE RECORD FIRST, the attribution after it. Reading the session's transcript
@@ -784,13 +832,24 @@ def main() -> int:
         # killed at its timeout with nothing written. Now a slow or failed
         # attribution only means the turn is asked about.
         rationale = None
-        if carried:
+        # A FRESH LINK WINS. When this turn touched a register (or the run ledger),
+        # it is attributed again, so a new decision replaces an older anchor; the
+        # carried link stands only when nothing fresh is found.
+        touched_register = any(_is_register(r) for r in
+                               set(facts.get("files") or ()) | set(facts.get("committed") or ())
+                               | set(facts.get("untracked") or ())) \
+            or (pathlib.Path(top or cwd) / RUN_LEDGER).is_file()
+        if not has_why and (not carried or touched_register):
+            rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
+                                     time.monotonic() + ATTRIBUTION_SECONDS)
+        if rationale is not None and carried and any(
+                c["uri"] == f"file:{rationale['ref']}" and c.get("anchor") == rationale.get("anchor")
+                for c in carried):
+            rationale = None          # the same link, found again: carried, no new revision
+        if rationale is None and carried:
             first = carried[-1]
             rationale = {"source": "carried", "ref": first["uri"][len("file:"):],
                          **({"anchor": first["anchor"]} if first.get("anchor") else {})}
-        elif not has_why:
-            rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
-                                     time.monotonic() + ATTRIBUTION_SECONDS)
         # The follow-up revision only when the link is NEW: a carried link is already
         # in the revision just written, so a changed turn adds one revision, not two.
         if rationale and rationale["source"] != "carried":
@@ -802,9 +861,10 @@ def main() -> int:
                     project_id=project_id, session_id=args.session_id or None,
                     workflow_id=workflow_id, function="episodic", scope="project",
                     state="proposed", confidence=None,
-                    evidence=evidence + [{"uri": f"file:{rationale['ref']}", "kind": "rationale",
-                                          **({"anchor": rationale["anchor"]}
-                                             if rationale.get("anchor") else {})}],
+                    evidence=base_evidence + [{"uri": f"file:{rationale['ref']}", "kind": "rationale",
+                                               "repo": repo_id,
+                                               **({"anchor": rationale["anchor"]}
+                                                  if rationale.get("anchor") else {})}],
                     provenance=[{"source": "observatory-log/Stop", "measured": True,
                                  "rationale": rationale["source"],
                                  **({"continues": continues} if continues else {})}])

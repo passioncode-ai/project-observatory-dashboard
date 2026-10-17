@@ -56,8 +56,8 @@ session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
 `.markdown` or `.txt` file (outside vendored trees) with that file's newest
 added heading or most of its added lines, or that wrote a `decision:` /
 `stage:` line into `.task-pipeline/run.md`. Failed calls, subagent calls and
-Bash commands over 64 KB are not counted. The record then links that file,
-and keeps the link in every later revision.
+Bash commands over 65,536 characters are not counted. The record then links
+that file, and keeps the link while the file still holds the linked text.
 Correct that record rather than creating a second one:
 
 ```

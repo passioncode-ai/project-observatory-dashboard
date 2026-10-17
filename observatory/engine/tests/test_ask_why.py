@@ -105,10 +105,11 @@ class Fixture:
             rec["isSidechain"] = True
         with self.transcript(session).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
-            if failed:
-                fh.write(json.dumps({"type": "user", "sessionId": session, "message": {
-                    "role": "user", "content": [{"type": "tool_result", "tool_use_id": use_id,
-                                                 "is_error": True, "content": "refused"}]}}) + "\n")
+            # Every call gets its result, as in a real transcript: an error, or success.
+            fh.write(json.dumps({"type": "user", "sessionId": session, "message": {
+                "role": "user", "content": [{"type": "tool_result", "tool_use_id": use_id,
+                                             "is_error": bool(failed),
+                                             "content": "refused" if failed else "ok"}]}}) + "\n")
 
     def bash(self, command: str, *, session: str = "sess-1") -> None:
         """Record that the session ran `command` through its Bash tool."""
@@ -373,6 +374,15 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         self.assertEqual(fx.journal(), [])
         self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
 
+    def test_sed_in_place_on_a_later_line_of_the_command(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.bash("git status\nsed -i 's/x/y/' docs/DECISIONS.md\n# " + REGISTER.replace("\n", " "))
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+        self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
+
     def test_one_revision_per_changed_turn_once_linked(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -443,6 +453,141 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         (fx.repo / "artifacts/decisions.md").write_text("## D1 keep the receipt\n", encoding="utf-8")
         fx.wrote("## D1 keep the receipt", tool="Write", rel="artifacts/decisions.md")
         fx.stop()
+        self.assertEqual(fx.journal(), [])
+
+
+class TheCarriedLinkIsRechecked(unittest.TestCase):
+    """Round 6: a carried link stays only while it is still true."""
+
+    def linked(self, fx: Fixture) -> None:
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
+        self.assertEqual(fx.journal(), [])
+
+    def asked_next(self, fx: Fixture, name: str = "later.py") -> None:
+        fx.change(name)
+        fx.stop()
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
+        self.assertEqual(len(fx.journal()), 1, "the link is no longer true: asked")
+
+    def tracked_fixture(self) -> tuple[Fixture, str]:
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all("register")
+        add = "\n## DEC-0002 choose the store per workspace\n\nBecause tenants.\n"
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write(add)
+        fx.wrote(add)
+        return fx, add
+
+    def test_the_register_deleted(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        self.linked(fx)
+        (fx.repo / "docs/DECISIONS.md").unlink()
+        self.asked_next(fx)
+
+    def test_the_addition_checked_out(self):
+        fx, _ = self.tracked_fixture()
+        self.linked(fx)
+        _git(fx.repo, "checkout", "--", "docs/DECISIONS.md")
+        self.asked_next(fx)
+
+    def test_the_heading_rewritten_by_another_writer(self):
+        fx, _ = self.tracked_fixture()
+        self.linked(fx)
+        p = fx.repo / "docs/DECISIONS.md"
+        p.write_text(p.read_text(encoding="utf-8").replace(
+            "DEC-0002 choose the store per workspace", "DEC-0002 WITHDRAWN"), encoding="utf-8")
+        self.asked_next(fx)
+
+    def test_committed_then_reverted(self):
+        fx, _ = self.tracked_fixture()
+        self.linked(fx)
+        fx.commit_all("dec 2")
+        _git(fx.repo, "revert", "--no-edit", "HEAD")
+        self.asked_next(fx)
+
+    def test_the_same_session_in_another_repository(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        self.linked(fx)
+        # A second watched repository, registered beside the first; same session.
+        other = fx.work / "other"
+        other.mkdir()
+        _git(other, "init", "-q", "-b", "main")
+        _git(other, "config", "user.email", "fixture@example.invalid")
+        _git(other, "config", "user.name", "Fixture")
+        (other / "README.md").write_text("other\n", encoding="utf-8")
+        _git(other, "add", "-A")
+        _git(other, "commit", "-qm", "first")
+        (other / "work.py").write_text("x = 1\n", encoding="utf-8")
+        reg = pathlib.Path(fx.env["OBSERVATORY_REGISTRY"])
+        repos = json.loads((reg / "repositories.json").read_text())
+        repos["repositories"].append({"id": "repository:fixture/other", "name_with_owner": "fixture/other",
+                                      "host": "github", "local": {"path": _git(other, "rev-parse", "--show-toplevel").strip()}})
+        (reg / "repositories.json").write_text(json.dumps(repos))
+        projects = json.loads((reg / "projects.json").read_text())
+        projects["projects"].append(dict(projects["projects"][0], id="project:other", name="other"))
+        (reg / "projects.json").write_text(json.dumps(projects))
+        rels = json.loads((reg / "relations.json").read_text())
+        rels["relations"].append({"id": "relation:other", "type": "implemented_by",
+                                  "from": "project:other", "to": "repository:fixture/other", "source_refs": []})
+        (reg / "relations.json").write_text(json.dumps(rels))
+        fx.repo = other
+        fx.stop()
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
+        self.assertEqual(len(fx.journal()), 1)
+
+    def test_a_link_another_writer_put_in_the_evidence_is_not_carried(self):
+        # An `observatory_record` revision (no Stop-hook provenance) whose evidence
+        # claims `kind: rationale` is not this hook's link and is never carried.
+        fx = Fixture()
+        fx.stop()
+        fx.prompt()
+        mid = fx.journal()[0]["memoryId"]
+        code = ("import sys, json; sys.path.insert(0, '.')\n"
+                "from store import db, ledger as L\n"
+                "c = db.connect()\n"
+                "r = c.execute(\"SELECT revision, statement, evidence_json FROM ledger WHERE memory_id=? "
+                "ORDER BY revision DESC LIMIT 1\", (sys.argv[1],)).fetchone()\n"
+                "ev = json.loads(r[2]) + [{'uri': 'file:README.md', 'kind': 'rationale', 'repo': 'repository:fixture/watched', 'anchor': 'a watched project'}]\n"
+                "L.append(c, owner='agent:claude-code', kind='session', memory_id=sys.argv[1],"
+                " expected_revision=r[0], statement=r[1], evidence=ev, session_id='sess-1', state='proposed')\n"
+                "c.commit()\n")
+        p = subprocess.run([PY, "-c", code, mid], cwd=ROOT, env=fx.env, capture_output=True,
+                           text=True, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        fx.change("later.py")
+        fx.stop()
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
+
+    def test_a_new_decision_replaces_a_stale_anchor(self):
+        fx, _ = self.tracked_fixture()
+        self.linked(fx)
+        self.assertIn("DEC-0002", fx.receipt()["rationale"]["anchor"])
+        add = "\n## DEC-0003 a newer decision\n\nBecause it changed.\n"
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write(add)
+        fx.wrote(add, use_id="toolu_second")
+        fx.stop()
+        self.assertIn("DEC-0003", fx.receipt()["rationale"]["anchor"])
+        self.assertEqual(fx.receipt()["rationale"]["source"], "decision-register")
+
+    def test_a_link_still_true_is_carried(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        self.linked(fx)
+        fx.change("later.py")
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["source"], "carried")
         self.assertEqual(fx.journal(), [])
 
 
@@ -604,6 +749,22 @@ class NotARationale(unittest.TestCase):
         self.assertIsNone(record_turn.rationale_of(fx.repo, facts, str(fx.transcript("sess-1"))),
                           "only the tail is read")
 
+    def test_a_read_only_sed_of_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.change()
+        fx.bash("sed -n '1,40p' docs/DECISIONS.md && echo '" + REGISTER.replace("'", "") + "'")
+        self.asked(fx)
+
+    def test_a_heredoc_over_the_scan_limit_into_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        body = REGISTER + "x" * 65536            # the documented limit, not the constant
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.bash("cat > docs/DECISIONS.md <<'EOF'\n" + body + "\nEOF")
+        self.asked(fx)
+
     def test_no_transcript_means_no_attribution(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -674,7 +835,8 @@ class WithinTheBudget(unittest.TestCase):
         t0 = _t.monotonic()
         self.assertEqual(record_turn._shell_targets("echo " + "sed -i " * 9000 + "x"), [])
         self.assertLess(_t.monotonic() - t0, 1.0)
-        self.assertIsNone(record_turn._shell_targets("x" * (record_turn.COMMAND_SCAN_BYTES + 1)))
+        self.assertEqual(record_turn.COMMAND_SCAN_BYTES, 65536, "the documented limit")
+        self.assertIsNone(record_turn._shell_targets("x" * 65537))
         self.assertEqual(record_turn._shell_targets("sed -i 's/a/b/' docs/DECISIONS.md"),
                          ["docs/DECISIONS.md"])
         self.assertEqual(record_turn._shell_targets("grep -i x docs/DECISIONS.md"), [])
@@ -697,6 +859,33 @@ class WithinTheBudget(unittest.TestCase):
         fx.filler(2)
         with self.assertRaises(record_turn._OutOfTime):
             record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=0.0)
+
+    def test_the_diff_gets_only_the_time_left(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all("register")
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("## DEC-0002 x\n")
+        facts = record_turn.diff_facts(fx.repo)
+        with self.assertRaises(record_turn._OutOfTime):
+            record_turn._added_lines(fx.repo, "docs/DECISIONS.md", facts, deadline=record_turn.time.monotonic() - 1)
+        import subprocess as sp
+        with mock.patch.object(record_turn.safe_git, "run",
+                               side_effect=sp.TimeoutExpired(["git"], 0.1)):
+            with self.assertRaises(record_turn._OutOfTime):
+                record_turn._added_lines(fx.repo, "docs/DECISIONS.md", facts,
+                                         deadline=record_turn.time.monotonic() + 5)
+
+    def test_a_deeply_nested_line_does_not_abort_the_pass(self):
+        import record_turn
+        fx = Fixture()
+        with fx.transcript("sess-1").open("a", encoding="utf-8") as fh:
+            fh.write('{"type": "assistant", "x": "tool_use", "y": ' + "[" * 100000 + "]" * 100000 + "}\n")
+        fx.wrote(REGISTER, tool="Write")
+        calls = record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=float("inf"))
+        self.assertEqual(len(calls), 1, "the nested line is skipped; the real call is kept")
 
     def test_the_deadline_also_stops_the_per_call_work(self):
         # A deadline that passes AFTER the line scan (a short transcript, one check at

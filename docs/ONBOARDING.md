@@ -607,26 +607,36 @@ block a turn or a prompt:
     those calls wrote.
 
   The pass skips calls whose result was an error, and subagent (`isSidechain`)
-  lines. It does not scan a Bash command longer than 64 KB.
+  lines. It does not scan a Bash command longer than 65,536 characters. The `git
+  diff` it reads gets only the time left in the 2 seconds; a diff that needs longer
+  (a register of megabytes) is asked about.
 
   The turn is asked about in every other case:
   - another session's edit in the same checkout;
   - a file the session only read or grepped;
   - a pull-request body that shares a heading;
   - a write by a tool the pass does not know (a copy, a script, `perl -i`);
+  - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script
+    containing `|` or `;` (the command is split there);
   - a relative path written after a `cd` in the same command;
   - a path whose letter case differs from the file's on a case-insensitive volume;
   - a subagent's edit;
   - a failed call;
-  - a command longer than 64 KB;
+  - a command longer than 65,536 characters;
   - no transcript;
   - a pass that runs out of its 2 seconds.
 
   When the rationale counts, a second revision of the same record links that file
-  in its evidence instead of asking for a copy. Every later revision of that
-  record carries the link forward, so the record stays explained after the
-  register is committed and pushed and after the write scrolls out of the
-  transcript, without another revision just for the link.
+  in its evidence (with the repository's id) instead of asking for a copy. Later
+  revisions carry the link forward only while it is still true: the link was
+  written by this hook, it names the current repository, the file still exists in
+  the checkout, and a bounded read of it (256 KB from each end) still contains the
+  link's anchor. So the record stays explained after the register is committed and
+  pushed and after the write scrolls out of the transcript, without another
+  revision just for the link. A register deleted, reverted, checked out or
+  rewritten, or a session that moved to another repository, drops the link and is
+  attributed afresh, and asked about when nothing is found. A turn that touches a
+  register is attributed again, and a new decision replaces the older anchor.
 - **UserPromptSubmit** hands that request to the model with the session's next
   prompt, as context, once. It records the delivery and prints nothing when no
   request is pending. The context is capped at 4,000 characters. A request that
