@@ -433,6 +433,21 @@ class AdversarialRound(unittest.TestCase):
 class ConfirmingRound(unittest.TestCase):
     """The #291 confirming round's LOW findings, and the checks its mutants showed untested."""
 
+    def test_a_number_json_cannot_carry_is_refused(self):
+        for text in (b'{"a":1e400}', b'[-1e400]'):
+            with self.assertRaises(ValueError):
+                relay.parse_json(text)
+        self.assertEqual(relay.parse_json(b'{"a":1e300}'), {'a': 1e300})
+
+    def test_a_kid_listed_with_mixed_reasons_is_excluded_once(self):
+        good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
+        ed = base64.b64encode(bytes(range(1, 33))).decode()
+        record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z', 'machines': [
+            {'id': 'm-a', 'deviceKeys': [{'kid': 'm-a#sig', 'use': 'sig', 'publicKey': ed},
+                                         {'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}]}]}
+        answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
+        self.assertEqual((answer['keys'], answer['excluded']), ({}, [{'kid': 'm-a#sig', 'reason': 'bad-key'}]))
+
     def test_a_lone_surrogate_header_is_malformed(self):
         self.assertEqual(relay.parse_relay_request('\ud800'), {'ok': False, 'status': 400, 'code': 'malformed'})
 

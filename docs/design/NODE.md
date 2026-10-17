@@ -11,6 +11,22 @@ The relay is a router, not a party to trust. A delivered body is believed only w
 - its signed recipient is this machine's own kid, never a value the relay asserts;
 - its signed `exp` has not passed, and it bounds the body's life and the replay window.
 
+## Threat model (stage 1)
+
+Stage 1 connects one person's own machines through the person's own relay: every admitted machine and the relay are
+the operator's. In scope, and blocking for the node's code:
+- a stranger's input (anyone who is not an admitted machine, and anything a relay forwards from one);
+- forgery and impersonation of an admitted machine;
+- an input that crashes or wedges the node, or ends its reconnect loop;
+- the loss of an authentic message.
+
+Out of scope until stage 3 (shared networks, a relay that is not the operator's own), recorded as rows:
+- availability attacks that need a hostile relay: a frame, an upgrade or a blob trickled to stretch a deadline
+  ([OBS-115](../backlog.md));
+- an admitted machine filling another's mailbox with bodies dated ahead or from a sender not listed yet
+  ([OBS-116](../backlog.md));
+- the remaining hardening of the review rounds ([OBS-117](../backlog.md)).
+
 ## What is built (OBS-107, slice 1: the foundation)
 
 | Module | What it does | Reference it is held to |
