@@ -696,8 +696,8 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     if isinstance(old_row, dict) and (old_row.get("successor_pending") or old_row.get("stale_successors")):
         # Writing the pending row would drop a successor a rotation minted and may have delivered: a live key,
         # maybe the one the slot holds, would leave the ledger (round 7). As for revoke: finish it first.
-        raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; run `rotate {name}` to "
-                         f"finish it first, then issue")
+        raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; run `rotate {name}` "
+                         f"first, then issue (`revoke` refuses such a row too until OBS-119 adds a way out)")
     if isinstance(old_row, dict) and old_row.get("hash"):
         # The provider has no key by this name (the check above), so the row's key is gone or renamed; its hash
         # would be lost with the row. Asked by hash: gone (404) is a tombstone `deleted: True` with the snapshot
