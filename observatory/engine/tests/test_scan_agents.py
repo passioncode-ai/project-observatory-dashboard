@@ -1160,6 +1160,81 @@ class FixCycle4(Fixture):
         self.assertIsNone(row["origin"])
 
 
+class FixCycle5(Fixture):
+    """Review round 7 of #288."""
+
+    def test_a_scan_without_services_or_its_source_is_refused(self):
+        now = NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
+        for scan in ({"schema_version": 1, "scanned_at": now},
+                     {"scanned_at": now, "services": []},
+                     {"scanned_at": now, "services": [], "sources": {}},
+                     {"scanned_at": now, "services": [], "sources": {"fabric_services": {"state": "guessed"}}}):
+            with self.subTest(scan=sorted(scan)), self.assertRaises(TypeError):
+                scan_agents.document(scan, None, None, TODAY, now=NOW)
+
+    def test_an_empty_scan_through_the_emit_keeps_the_previous_rows_stale(self):
+        import workspace
+        from emitter_fixture import environment, seed
+        root = self.base / "estate"
+        root.mkdir()
+        seed(root)
+        workspace.initialize(root / "home", identities=False)
+        raw, reg = root / "raw", root / "registry"
+        env = {**environment(root), "OBSERVATORY_HOME": str(root / "home")}
+        now = datetime.now(timezone.utc)
+
+        def emit():
+            p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(raw)], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, p.stderr[-400:])
+            return json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+        self.put(descriptor("alpha-agent", 47401))
+        (raw / "agents.json").write_text(json.dumps(self.scan(launchd={}, now=now)), encoding="utf-8")
+        good = emit()
+        (raw / "agents.json").write_text(json.dumps({"schema_version": 1,
+                                                     "scanned_at": now.strftime("%Y-%m-%dT%H:%M:%SZ")}),
+                                         encoding="utf-8")
+        after = emit()
+        self.assertTrue(after["stale"])
+        self.assertEqual(after["agents"], good["agents"])
+        self.assertEqual(after["removed"], [])
+        self.assertEqual(scan_agents.problems(after), [])
+
+    def test_unusable_heals_a_dirty_previous_document(self):
+        self.put(descriptor("alpha-agent", 47401))
+        prev = document(self.scan(launchd={}), mcp_scan(), None)
+        prev["agents"][0]["summary"] = "see " + keyed("SECRETPV", "h.example.com")
+        prev["degraded"] = "not a list"
+        out = scan_agents.unusable(prev, "TypeError", TODAY)
+        self.assertNotIn("SECRETPV", json.dumps(out))
+        self.assertEqual(len(out["degraded"]), 1)
+        self.assertEqual(scan_agents.problems(out), [])
+
+    def test_unusable_sanitises_the_reason_it_writes(self):
+        out = scan_agents.unusable({"agents": [], "scanned_on": "2026-10-01"},
+                                   "see " + keyed("SECRETWY", "h"), TODAY)
+        self.assertNotIn("SECRETWY", json.dumps(out))
+
+    def test_a_name_only_the_whole_stem_rule_flags_is_not_read(self):
+        """`a: ?k=SECRET` holds a `scheme:` and a later `?` across a space: no single token is URL-shaped,
+        so `_fix` leaves it, but the whole-stem `_suspect` refuses it."""
+        name = "a: ?k=SECRETWS.json"
+        (self.services / name).write_text(json.dumps(descriptor("alpha-agent", 47401)), encoding="utf-8")
+        out = document(self.scan(launchd={}, platform="linux"), mcp_scan(), None)
+        self.assertEqual(out["agents"], [])
+        self.assertNotIn("SECRETWS", json.dumps(out))
+
+    def test_a_name_the_sanitiser_would_change_is_not_read(self):
+        """`_fix` changes an NFD name (it normalises to NFC) while `_suspect` does not flag it; such a
+        name is not read today (the message wording is a filed row)."""
+        nfd = "cafe\u0301-agent.json"
+        (self.services / nfd).write_text(json.dumps(descriptor("alpha-agent", 47401)), encoding="utf-8")
+        if not any(p.name == nfd for p in self.services.iterdir()):
+            self.skipTest("this file system normalises names")
+        out = document(self.scan(launchd={}, platform="linux"), mcp_scan(), None)
+        self.assertEqual(out["agents"], [])
+
+
 class EmitHistory(Fixture):
     """The emit reads the previous registry document, so dates and removals persist across ticks."""
 
