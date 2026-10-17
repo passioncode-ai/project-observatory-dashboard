@@ -1657,6 +1657,10 @@ def collect() -> list[dict]:
     # (collectors/scan_lifecycle.py). Silent when the collector has never run.
     import lifecycle_findings
     out.extend(lifecycle_findings.from_file(paths.SCRATCH / "lifecycle.json"))
+    # THE MACHINE'S SSH KEYS: no passphrase, weak, readable, unused, registered nowhere or only on
+    # GitHub (tools/ssh_key_findings.py). Silent until `full ssh-keys list` saved an inventory.
+    import ssh_key_findings
+    out.extend(ssh_key_findings.from_file(paths.SCRATCH / "ssh-keys.json"))
     import organizations
     _pj = paths.REGISTRY / "projects.json"
     out.extend(google_findings.organization_findings(

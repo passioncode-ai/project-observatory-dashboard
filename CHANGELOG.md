@@ -30,6 +30,22 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
   and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
   their owner-only files, and a key is never replaced.
+- **SSH keys on this machine** (OBS-110, PB-163). `project-observatory full ssh-keys` lists the machine's
+  SSH keys (fingerprint from `ssh-keygen -l` on the `.pub`, whether it has a passphrase from the private
+  file's header alone, the Host blocks and agent that use it, where GitHub accepts it for sign-in and
+  signing), `create` makes an ed25519 key that never overwrites a file (modes 0600/0644, the passphrase
+  typed into ssh-keygen and kept in the macOS Keychain, which also loads the key into the agent),
+  `copy` puts the public line on the clipboard,
+  and `send` registers it on GitHub (`gh ssh-key add`) or on a server (one line appended to
+  `authorized_keys` under `sh` whatever the login shell; `--verify` logs in with no config and the
+  new key alone and passes only when the server names its fingerprint), each with a receipt in the
+  key movements journal. Ten findings reach the board (no passphrase, weak, readable by others and an
+  open `~/.ssh` by `osprivacy`, a private key saved as `.pub`, unused, a GitHub key no disk holds, a
+  key registered nowhere visible, no public half, a missing `IdentityFile`). Only a private key's
+  clear header is read (the cipher name and the public key), never its private section. The read-only MCP tool `observatory_ssh_keys` gives agents the same inventory and
+  one key's public line. The private key is never shown or moved; tests plant one and search every
+  output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
+  [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
 ### Documentation
 
