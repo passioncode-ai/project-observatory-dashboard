@@ -217,6 +217,10 @@ ALLOWLIST: dict[str, str] = {
         "a planted service-account file whose private-key header was written out "
         "once (b78147b) over a body that is plainly not key material; the tree "
         "composes the header now, so this covers the history hit only",
+    "fabric/node-vectors/secret-envelope.json":
+        "the contract's secret-envelope vector, vendored byte for byte with its digest "
+        "checked (fabric/node-vectors/README.md): its sealed `secret` is the placeholder "
+        "'example-secret-value-not-real' and its keys are RFC 9180 A.3.1's published test keys",
 }
 
 #: Paths never scanned, with the reason (listed in AGENT-SECRETS's table). The

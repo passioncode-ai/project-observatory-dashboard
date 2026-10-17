@@ -54,6 +54,29 @@ while the major version is 0, a minor release may change behaviour and says so h
   - The top-level `partial` stays about the estate total; `attribution_partial` covers the projects, each `degraded`
     entry carries its `scope`, and `spend.estate_month` names only the accounts not read.
   - No finding fires yet. A project's limit is enforced once a recorded spend policy is readable (J-11F).
+- **The agent-network node's foundation** (OBS-107, RM-21). `observatory/engine/node/` holds what one machine
+  signs to join a relay and to send a message or a blob, and how it checks what the relay delivers: RFC 8785,
+  P-256 key validation, low-S ES256 and fabric-relay/0.1, ported from the contract kit and run over the contract's
+  own vectors (vendored in `observatory/engine/fabric/node-vectors/`). A device-key store keeps the machine's `#sig`
+  and `#kem` keys owner-only and never replaces them. Nothing runs yet: the relay session client, the estate record
+  and the node service are the next slices ([NODE.md](docs/design/NODE.md)).
+- **The node's relay session** (OBS-108). `node/ws.py` is a WebSocket client on the standard library and
+  `node/session.py` holds one machine's connection to a relay: it signs `auth` only for the origin it dialled, sends
+  signed messages, and acts on a delivered one only after checking its signature, its recipient (this machine) and
+  the replay window, acknowledging it after the handler took it. `node/blobs.py` puts and fetches blobs by digest
+  and refuses fetched bytes that are not the named blob.
+  A relay's hello is checked before anything is signed (its origin, a 32-byte nonce), and nothing a relay sends
+  ends the reconnect loop. NODE.md states the stage-1 threat model.
+- **The node's estate record** (OBS-109). A node verifies a revision of the person's estate record offline — its
+  digest, its chain to the parent, the passkey assertion over its challenge and the record's own rules — before it
+  believes any machine the record lists, and follows the signed revocation delta and heartbeat: after 72 hours
+  without a fresh heartbeat it refuses what other machines send.
+- **The node's secret envelope** (OBS-113). A machine seals a secret to another machine's key-agreement key (HPKE,
+  RFC 9180) and signs it; the target opens it only when the estate record lets the sender hold that slot and the
+  envelope is not older than the last one it opened.
+- **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
+  and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
+  their owner-only files, and a key is never replaced.
 
 ### Documentation
 

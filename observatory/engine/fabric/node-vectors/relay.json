@@ -1,0 +1,4395 @@
+{
+  "about": "fabric-relay/0.1 (DEC-0047, DEC-0066): written by tools/vectors/relay-crypto.ts, never by hand. Keys are test keys derived from published labels (anyone can derive them; nothing trusts them); signatures are deterministic ES256 (RFC 6979), low-S. The legacy members (machineKey, machineKeyOctets, auth, message, ed25519) keep their shapes; the case groups (admit, messageBody, blobRequest, ...) are data a port runs through src/relay-vectors.ts: one complete context per case, a key as a JWK or base64 SEC 1 octets, and `expect` exactly what the reference returns.",
+  "machineKey": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+    "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+  },
+  "machineKeyOctets": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4=",
+  "auth": {
+    "context": {
+      "relay": "https://relay.example",
+      "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "now": "2026-10-12T00:00:30Z"
+    },
+    "signingInput": "{\"alg\":\"ES256\",\"estate\":\"urn:fabric:estate:example\",\"iat\":\"2026-10-12T00:00:00Z\",\"kid\":\"urn:fabric:machine:example-laptop#sig\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"relay\":\"https://relay.example\",\"type\":\"relay-auth/1\"}",
+    "sha256": "358f1b0c0e1aca36ccbe83200bdc676274df58cc2fa97f36d0d7cef3459cc84f",
+    "frame": {
+      "v": 1,
+      "type": "auth",
+      "id": "a1",
+      "protocol": "fabric-relay/0.1",
+      "alg": "ES256",
+      "estate": "urn:fabric:estate:example",
+      "kid": "urn:fabric:machine:example-laptop#sig",
+      "iat": "2026-10-12T00:00:00Z",
+      "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+    }
+  },
+  "message": {
+    "frame": {
+      "from": "urn:fabric:machine:example-laptop#sig",
+      "to": "urn:fabric:machine:example-gpu-box#sig",
+      "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+      "ttl": 3600
+    },
+    "self": "urn:fabric:machine:example-gpu-box#sig",
+    "now": "2026-10-12T00:10:00Z",
+    "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw"
+  },
+  "ed25519": {
+    "key": {
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE"
+    },
+    "frame": {
+      "v": 1,
+      "type": "auth",
+      "id": "a1",
+      "protocol": "fabric-relay/0.1",
+      "alg": "EdDSA",
+      "estate": "urn:fabric:estate:example",
+      "kid": "urn:fabric:machine:example-laptop#sig",
+      "iat": "2026-10-12T00:00:00Z",
+      "sig": "lj4Q4cfRwTlq8D52Dc2GFfD8rgJyDxUbUOJOqPIYv5NvuU6xxbMfZBIBTNQ2J2ww1nb9aqK4sqTLNGJ5YfnhDg"
+    },
+    "expect": "unsupported-alg"
+  },
+  "blobRequest": {
+    "about": "Fabric-Relay-Request (DEC-0047 item 8): base64url of RFC 8785 {alg, kid, recipients, iat, sig}; sig is ES256 over relayBlobSigningInput. `admitted` is the relay's current admission set by kid; `stored` the blob's recipients when the relay holds it.",
+    "relay": "https://relay.example",
+    "digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "now": "2026-10-12T12:00:30Z",
+    "cases": [
+      {
+        "name": "a PUT by an admitted machine to admitted recipients",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:a#sig",
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ],
+          "repeat": false
+        }
+      },
+      {
+        "name": "the same PUT again with the same recipients: no change",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:a#sig",
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ],
+          "repeat": true
+        }
+      },
+      {
+        "name": "a PUT of a held blob with another recipient list",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:a#sig",
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 409,
+          "code": "recipients-mismatch"
+        }
+      },
+      {
+        "name": "a GET by a stored recipient with the stored list",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiT0pnZXZzblJraU82TEJMUHdUcHpfU0JyZDlXMVpEdlBqeElrNF9JZVE4RjkxZjlLMEQwMDFua0d4RS1EcXFvb2lBTDFsSEJEZVBHTV80cklldEphN1EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:b#sig",
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ],
+          "repeat": false
+        }
+      },
+      {
+        "name": "a GET by a machine that is not a recipient",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiTElGTDZ0U1lzRVFsUWZTU0dyOFF3dm5EOUlhZmpTckt3eEh2c3dzRkhHWjIxVXh6U0ZBTlYtMlVZYUc2cXF0S3Y4X2JGMGQ0VmF4dk1yWE9WdWRRUWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 403,
+          "code": "not-admitted"
+        }
+      },
+      {
+        "name": "a GET whose signed list differs from the stored one",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoicUFTVURyVWZjZ20zR0ViZXZVMXFjTHhOdG1YeTNPczEzal9ncGhScDdrZ3R3djVZV0xic2lTT1FVS0RxTE5mT3FmZHhoUWdYeGlIdkYyQy1hM3hhTEEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 403,
+          "code": "not-admitted"
+        }
+      },
+      {
+        "name": "a GET by a recipient no longer admitted (revoked)",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiT0pnZXZzblJraU82TEJMUHdUcHpfU0JyZDlXMVpEdlBqeElrNF9JZVE4RjkxZjlLMEQwMDFua0d4RS1EcXFvb2lBTDFsSEJEZVBHTV80cklldEphN1EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a GET of a blob the relay does not hold",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiT0pnZXZzblJraU82TEJMUHdUcHpfU0JyZDlXMVpEdlBqeElrNF9JZVE4RjkxZjlLMEQwMDFua0d4RS1EcXFvb2lBTDFsSEJEZVBHTV80cklldEphN1EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 403,
+          "code": "not-admitted"
+        }
+      },
+      {
+        "name": "a PUT naming a recipient outside the admission set",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 403,
+          "code": "unknown-recipient"
+        }
+      },
+      {
+        "name": "a PUT by a machine outside the admission set",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a signer whose admitted key is Ed25519",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "an admitted signer key off the curve",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged PUT of a held blob with another list",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiblIwRDlGV1I0bnR4X2RwTWQwblliSDRaZGktcTFPLTBycGlBc3RFZTBlTlAzbkZ3UzZXSVVGWHZOUjd3ZjByME1QLWJ5X2xFS2VIQ2k3bmZ6dTNfcUEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:a#sig",
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged PUT of a blob the relay does not hold",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiblIwRDlGV1I0bnR4X2RwTWQwblliSDRaZGktcTFPLTBycGlBc3RFZTBlTlAzbkZ3UzZXSVVGWHZOUjd3ZjByME1QLWJ5X2xFS2VIQ2k3bmZ6dTNfcUEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged GET of a held blob",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiMXpicmkyMTdSQndlSEwwT2tpcGRuNXdtV25sOXY1NVBIYnFhWnRsdkdzQnpyTW55d0VMVUZ4U1VjWjF1c2lkSFdzbGgzT2pyaXRLcXVfZ1Z1d1hwakEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged GET of a blob the relay does not hold",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiMXpicmkyMTdSQndlSEwwT2tpcGRuNXdtV25sOXY1NVBIYnFhWnRsdkdzQnpyTW55d0VMVUZ4U1VjWjF1c2lkSFdzbGgzT2pyaXRLcXVfZ1Z1d1hwakEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged GET by a kid outside the admission set",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmMjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiMXpicmkyMTdSQndlSEwwT2tpcGRuNXdtV25sOXY1NVBIYnFhWnRsdkdzQnpyTW55d0VMVUZ4U1VjWjF1c2lkSFdzbGgzT2pyaXRLcXVfZ1Z1d1hwakEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a forged PUT naming a recipient outside the admission set",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YyNzaWciXSwic2lnIjoiUzcxUDBkNndzREE4aWJUU3FKUVhfTi1NNl9yLXh6Q295MzYtOUU5c2tuVkI3MHlfdDRsemhuUk9XMGw1eW1rMklyOXZmZ2dIa3lSbW03M0d3Vm5TNlEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a kid with a lone surrogate",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoiXHVkODAwI3NpZyIsInJlY2lwaWVudHMiOlsidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIl0sInNpZyI6IkIwNDlYSHo4WkMtNllhYlNIMWVCaTY5QU9CNnlmeF9HNWF4RC1IU2hUWU5tU2VjVV9RdUNvcGk5MDI3SDBxTThQNjhqV2gyZlZNQmM3VHRVQ2pqSm9BIn0",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "alg other than ES256",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFZERTQSIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unsupported-alg"
+        }
+      },
+      {
+        "name": "a signature made for another digest",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiYnNuNXlQV1pJcGFsVnd6WVFtV0hoemUwbjBBTGZ3NWdRTEwxbnFSSlNkTU92dE9IbzRXYjF4VDA5QVB4V3pLVG53bXRfLWNGMkI4SzRqVmJzX2NkcWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a signature made for another relay",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiaWVqMWk5RzBweHRQXzNnajdSRjNNYlJIRWRWMGRqUVBSd05KQXplb0VZZG9RUVZWaGg2eG85SUtBTHZLeFNpVWhXOEgwYlNfelY0NC1TQ1NrVG41eHcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a GET signature used for a PUT",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiTElGTDZ0U1lzRVFsUWZTU0dyOFF3dm5EOUlhZmpTckt3eEh2c3dzRkhHWjIxVXh6U0ZBTlYtMlVZYUc2cXF0S3Y4X2JGMGQ0VmF4dk1yWE9WdWRRUWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a PUT signature used for a GET",
+        "method": "GET",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmIjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiSFNhcmVNaGtnMTMxOHZKYW9VeG1nbHFoNXFnVGhjMXBDb3BKMERhaWYtbE9HenFNNnhEYjBwSHVfUWN3cmloQnhHLVJISGo3bXJDTUdtdy1xOUZLS0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "stored": {
+          "recipients": [
+            "urn:fabric:machine:b#sig"
+          ]
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 61 s old",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTE6NTk6MjlaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiTTdneFl2NnZtYkR2QnM3ektpWmQ2bEZTb3dDWGdSRnAzQVgtREJkenpsa05jbXlGa0JJdlE0TzZnNzByTWVRRWNzWm9JZ2RINGlUTGlxc01Bd2NqekEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 61 s ahead",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDE6MzFaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiR3M1cDFPUlVtalExVHBISmh2N1dEQU41V0VoUW95LUNRNFZhcEhmbG1kTWN1M1JIeEprcXRPdWFxcVFBUEFMa2NXTnlPVEN4Mnk2Sl9VMXFzazdkLWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "not-yet-valid"
+        }
+      },
+      {
+        "name": "high-S: a valid PUT's signature as (r, n - s)",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZT1p0aGpxQXZSOVhtZENMSkU0TFZ6RGZUZlhVNGw0U2NTV3pJOXU4aXBic1EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 401,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 30 February, validly signed",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMDItMzBUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiajJZX2VZOFRsSzNZcUNieDRLenZRMXpZV28zdFNMVGxSZjhJU25FM1h5VXpYZl96aWgzV3E3cmJHRHhOOWNtUjhpRGJaZjM2R1JJRTlKQWp2RWc2U0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "now": "2026-03-02T12:00:30Z",
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "iat that matches the pattern and is no date",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTMtNDVUMjU6NjE6NjFaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoic19TX0lXUkVfX2RuUTlvQjRSeEM0ZHRDNUJuR3hOYlRSNW1VTW9kTXF0NXRvU0VoM3BBcTdobG5FdWh2NnJudk56WDdGd0gwMk9KS0xUaTRIbEVscWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "padding on the base64url",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ=",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "a non-canonical last base64url character",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifR",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "JSON that is not RFC 8785 (members out of order)",
+        "method": "PUT",
+        "header": "eyJzaWciOiJCMDQ5WEh6OFpDLTZZYWJTSDFlQmk2OUFPQjZ5ZnhfRzVheEQtSFNoVFlObVNlY1VfUXVDb3BpOTAyN0gwcU04UDY4aldoMmZWTUJjN1R0VUNqakpvQSIsImFsZyI6IkVTMjU2Iiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwiaWF0IjoiMjAyNi0xMC0xMlQxMjowMDowMFoifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "an extra member",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImV4dHJhIjoieCIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoiQjA0OVhIejhaQy02WWFiU0gxZUJpNjlBT0I2eWZ4X0c1YXhELUhTaFRZTm1TZWNVX1F1Q29waTkwMjdIMHFNOFA2OGpXaDJmVk1CYzdUdFVDampKb0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "no recipients",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6W10sInNpZyI6IkVrWXlJZTdoS2hvQ01ZQTNHQlRZalBqTHNpa3d3SjN5TWpHNWtvbnprZmRSTmhvTDY2LW5uS05jZ1VFVFZDQ3BFVmdWVVRkcGtYNGJFbGF5V1N6TUFRIn0",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "65 recipients",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6bTAjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0xI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTMjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm00I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTYjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm03I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptOCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTkjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0xMCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTExI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMTIjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0xMyNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTE0I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMTUjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0xNiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTE3I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMTgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0xOSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTIwI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMjEjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0yMiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTIzI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMjQjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0yNSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTI2I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMjcjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0yOCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTI5I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMzAjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0zMSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTMyI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMzMjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0zNCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTM1I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMzYjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm0zNyNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTM4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptMzkjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm00MCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTQxI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNDIjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm00MyNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTQ0I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNDUjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm00NiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTQ3I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNDgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm00OSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTUwI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNTEjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm01MiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTUzI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNTQjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm01NSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTU2I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNTcjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm01OCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTU5I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNjAjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm02MSNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6bTYyI3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTptNjMjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOm02NCNzaWciXSwic2lnIjoiQ3ZsTDNVUGhoSUFYNTlvMU5pd3R0RzM5MHFuUHNOTFFmOUg0LTBjZlVxSjJOTjBVS0FNVVN1WEM2ZUs5a210eEFqbGU1elBweEt3Y0VkVEdITnFhNWcifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "the same recipient twice",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6YiNzaWciXSwic2lnIjoibGFBUzg2UWtFWU9VOUdnX1hmRU5zUkhJQWh4Y3JBMl9XQXVJN3JjVzR6VURIdXFZVGJ2c3ZtZ1FaVmZ5cmdRSHJfSzlXaVI3Mjd5T05FNl9BZzBrU0EifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "a recipient that is a #kem key",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6YiNrZW0iXSwic2lnIjoiOW5tR1RrTEZ3aVhYU2NPQklZUThFRlBGTFN4dENSNzQzdWMzRk5mTWdUNXJWeXdpUzZlV0NIYlpRaHpZZmgxZHFBaHBrRW5fbmlfTjFrWnY2dVVKYlEifQ",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      },
+      {
+        "name": "a header over 8192 bytes",
+        "method": "PUT",
+        "header": "eyJhbGciOiJFUzI1NiIsImlhdCI6IjIwMjYtMTAtMTJUMTI6MDA6MDBaIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmEjc2lnIiwicmVjaXBpZW50cyI6WyJ1cm46ZmFicmljOm1hY2hpbmU6MDAwMHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMDF4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDAyeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAwM3h4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMDR4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDA1eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAwNnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMDd4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDA4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAwOXh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMTB4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDExeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAxMnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMTN4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDE0eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAxNXh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMTZ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDE3eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAxOHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMTl4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDIweHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAyMXh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMjJ4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDIzeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAyNHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMjV4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDI2eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAyN3h4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMjh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDI5eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAzMHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMzF4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDMyeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAzM3h4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMzR4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDM1eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAzNnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIiwidXJuOmZhYnJpYzptYWNoaW5lOjAwMzd4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4I3NpZyIsInVybjpmYWJyaWM6bWFjaGluZTowMDM4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eCNzaWciLCJ1cm46ZmFicmljOm1hY2hpbmU6MDAzOXh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgjc2lnIl0sInNpZyI6IjhreWkwczgxMDhCS1EzS2FGNEpQRjYtekFvVC12blNaWDRmMWt3WUY0eUVoUXF6STF5Q3g1aHU5WkpTdkY1UTZDQVhKTWdOclF5UEtTU3NwdXhWZ01nIn0",
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 431,
+          "code": "too-large"
+        }
+      },
+      {
+        "name": "no header at all",
+        "method": "PUT",
+        "header": null,
+        "admitted": {
+          "urn:fabric:machine:a#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "CV9tTbtrrzhVcqr_YvQ7-s79a72RLasXjaI0PLhrWCc",
+            "y": "5BdGIVXPo__Sy02UYP0AibMqu801JFqM3h61gNmte_g"
+          },
+          "urn:fabric:machine:b#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "pkmIbb_DHFjD10VAudmj56XR5WiLGdLwbmUvADCWyn4",
+            "y": "4Vwh2N7sNGrVE88ibZgVaUvulMBjIuVhqxYJwUQAOIg"
+          }
+        },
+        "expect": {
+          "ok": false,
+          "status": 400,
+          "code": "malformed"
+        }
+      }
+    ]
+  },
+  "instant": {
+    "about": "instant(value): RFC 3339 UTC (Z only, at most nine fraction digits) on a day that exists, as an ISO string with milliseconds, or null (DEC-0066).",
+    "cases": [
+      {
+        "name": "a real instant",
+        "value": "2026-10-12T00:00:00Z",
+        "expect": "2026-10-12T00:00:00.000Z"
+      },
+      {
+        "name": "nine fraction digits",
+        "value": "2026-10-12T00:00:00.123456789Z",
+        "expect": "2026-10-12T00:00:00.123Z"
+      },
+      {
+        "name": "ten fraction digits",
+        "value": "2026-10-12T00:00:00.1234567890Z",
+        "expect": null
+      },
+      {
+        "name": "month 13",
+        "value": "2026-13-45T25:61:61Z",
+        "expect": null
+      },
+      {
+        "name": "30 February",
+        "value": "2026-02-30T00:00:00Z",
+        "expect": null
+      },
+      {
+        "name": "31 April",
+        "value": "2026-04-31T12:00:00Z",
+        "expect": null
+      },
+      {
+        "name": "29 February in a common year",
+        "value": "2026-02-29T00:00:00Z",
+        "expect": null
+      },
+      {
+        "name": "29 February in a leap year",
+        "value": "2028-02-29T00:00:00Z",
+        "expect": "2028-02-29T00:00:00.000Z"
+      },
+      {
+        "name": "hour 24",
+        "value": "2026-10-12T24:00:00Z",
+        "expect": null
+      },
+      {
+        "name": "a leap second",
+        "value": "2026-12-31T23:59:60Z",
+        "expect": null
+      },
+      {
+        "name": "an offset",
+        "value": "2026-10-12T00:00:00+02:00",
+        "expect": null
+      },
+      {
+        "name": "a lowercase z",
+        "value": "2026-10-12T00:00:00z",
+        "expect": null
+      },
+      {
+        "name": "a lowercase t",
+        "value": "2026-10-12t00:00:00Z",
+        "expect": null
+      },
+      {
+        "name": "a date only",
+        "value": "2026-10-12",
+        "expect": null
+      },
+      {
+        "name": "not a string",
+        "value": 7,
+        "expect": null
+      },
+      {
+        "name": "null",
+        "value": null,
+        "expect": null
+      }
+    ]
+  },
+  "relayOrigin": {
+    "about": "isRelayOrigin(value): what hello.relay may be (DEC-0066): https, or http on a loopback literal (127.0.0.0/8, [::1]) for a relay on this machine; never a name such as localhost.",
+    "cases": [
+      {
+        "name": "an https origin",
+        "value": "https://relay.example",
+        "expect": true
+      },
+      {
+        "name": "an https origin with a port",
+        "value": "https://relay.example:8443",
+        "expect": true
+      },
+      {
+        "name": "an https origin with port 65535",
+        "value": "https://relay.example:65535",
+        "expect": true
+      },
+      {
+        "name": "https with port 65536",
+        "value": "https://relay.example:65536",
+        "expect": false
+      },
+      {
+        "name": "https with nothing after it",
+        "value": "https://",
+        "expect": false
+      },
+      {
+        "name": "https with a path",
+        "value": "https://x/p",
+        "expect": false
+      },
+      {
+        "name": "https with user information",
+        "value": "https://u@h",
+        "expect": false
+      },
+      {
+        "name": "https followed by a newline",
+        "value": "https://relay.example\nX",
+        "expect": false
+      },
+      {
+        "name": "https on an IPv6 literal",
+        "value": "https://[2001:db8::1]:8443",
+        "expect": true
+      },
+      {
+        "name": "http on 127.0.0.1",
+        "value": "http://127.0.0.1",
+        "expect": true
+      },
+      {
+        "name": "http on 127.0.0.1 with a port",
+        "value": "http://127.0.0.1:8787",
+        "expect": true
+      },
+      {
+        "name": "http on another 127/8 address",
+        "value": "http://127.255.0.9:8787",
+        "expect": true
+      },
+      {
+        "name": "http on [::1] with a port",
+        "value": "http://[::1]:8787",
+        "expect": true
+      },
+      {
+        "name": "http on localhost (a name resolves somewhere a literal cannot)",
+        "value": "http://localhost:8787",
+        "expect": false
+      },
+      {
+        "name": "http on a public name",
+        "value": "http://relay.example",
+        "expect": false
+      },
+      {
+        "name": "http on 128.0.0.1",
+        "value": "http://128.0.0.1:8787",
+        "expect": false
+      },
+      {
+        "name": "http on 127.0.0.256",
+        "value": "http://127.0.0.256",
+        "expect": false
+      },
+      {
+        "name": "http on a name that starts with 127.0.0.1",
+        "value": "http://127.0.0.1.relay.example",
+        "expect": false
+      },
+      {
+        "name": "http on [::2]",
+        "value": "http://[::2]:8787",
+        "expect": false
+      },
+      {
+        "name": "http on 0.0.0.0",
+        "value": "http://0.0.0.0:8787",
+        "expect": false
+      },
+      {
+        "name": "ws on 127.0.0.1",
+        "value": "ws://127.0.0.1:8787",
+        "expect": false
+      },
+      {
+        "name": "http on 127.0.0.1 with a path",
+        "value": "http://127.0.0.1:8787/v1",
+        "expect": false
+      },
+      {
+        "name": "http on 127.0.0.1 with port 99999",
+        "value": "http://127.0.0.1:99999",
+        "expect": false
+      },
+      {
+        "name": "https on [.]",
+        "value": "https://[.]",
+        "expect": false
+      },
+      {
+        "name": "https on [:]",
+        "value": "https://[:]",
+        "expect": false
+      },
+      {
+        "name": "https on [1]",
+        "value": "https://[1]",
+        "expect": false
+      },
+      {
+        "name": "https on [::1]",
+        "value": "https://[::1]",
+        "expect": true
+      },
+      {
+        "name": "https on an IPv6 literal without a port",
+        "value": "https://[2001:db8::1]",
+        "expect": true
+      },
+      {
+        "name": "https on an upper-case IPv6 literal",
+        "value": "https://[2001:DB8::1]",
+        "expect": false
+      },
+      {
+        "name": "https on an IPv6 group with a leading zero",
+        "value": "https://[2001:0db8::1]",
+        "expect": false
+      },
+      {
+        "name": "https on 999.999.999.999",
+        "value": "https://999.999.999.999",
+        "expect": false
+      },
+      {
+        "name": "https on 127.0.0.1",
+        "value": "https://127.0.0.1",
+        "expect": true
+      },
+      {
+        "name": "https on 0x7f.1 (a number a URL parser reads as IPv4)",
+        "value": "https://0x7f.1",
+        "expect": false
+      },
+      {
+        "name": "https on a name whose last label is a number",
+        "value": "https://relay.1",
+        "expect": false
+      },
+      {
+        "name": "https on an upper-case host",
+        "value": "https://Relay.example",
+        "expect": false
+      },
+      {
+        "name": "https with the default port 443",
+        "value": "https://relay.example:443",
+        "expect": false
+      },
+      {
+        "name": "https with port 0",
+        "value": "https://relay.example:0",
+        "expect": false
+      },
+      {
+        "name": "https with a port with a leading zero",
+        "value": "https://relay.example:08443",
+        "expect": false
+      },
+      {
+        "name": "http on 127.0.0.1 with port 0",
+        "value": "http://127.0.0.1:0",
+        "expect": false
+      },
+      {
+        "name": "http on 127.0.0.1 with the default port 80",
+        "value": "http://127.0.0.1:80",
+        "expect": false
+      },
+      {
+        "name": "https on a host of 253 characters",
+        "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.examp",
+        "expect": true
+      },
+      {
+        "name": "https on a host of 254 characters",
+        "value": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.ex",
+        "expect": false
+      }
+    ]
+  },
+  "admissionSet": {
+    "about": "relayAdmissionSet({held, at, extraRevocations}) over a record the relay already verified and holds (no candidate, so no schema check runs): kids is the set's keys, sorted (DEC-0047 item 4, DEC-0066).",
+    "cases": [
+      {
+        "name": "the held record's usable #sig keys, the unusable ones named",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-a#sig",
+            "m-b#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "a machine the record revokes",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": [
+            {
+              "kind": "machine",
+              "ref": "m-a",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            }
+          ]
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-b#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "a key the record revokes",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": [
+            {
+              "kind": "device-key",
+              "ref": "m-b#sig",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            }
+          ]
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-a#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "a machine a verified delta revokes (extraRevocations)",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [
+          {
+            "kind": "machine",
+            "ref": "m-a"
+          }
+        ],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-b#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "a key a verified delta revokes (extraRevocations)",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [
+          {
+            "kind": "device-key",
+            "ref": "m-c#sig"
+          }
+        ],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-a#sig",
+            "m-b#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "60 s before issuedAt, at the clock skew",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-12T08:59:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-a#sig",
+            "m-b#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "61 s before issuedAt",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-12T08:58:59Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": false,
+          "refusal": "not-yet-valid"
+        }
+      },
+      {
+        "name": "at validUntil",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-11-11T09:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": true,
+          "revision": 4,
+          "kids": [
+            "m-a#sig",
+            "m-b#sig",
+            "m-c#sig"
+          ],
+          "excluded": [
+            {
+              "kid": "m-ed#sig",
+              "reason": "unsupported-alg"
+            },
+            {
+              "kid": "m-bad#sig",
+              "reason": "bad-key"
+            }
+          ]
+        }
+      },
+      {
+        "name": "one ms after validUntil",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-11-11T09:00:00.001Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": false,
+          "refusal": "expired"
+        }
+      },
+      {
+        "name": "a held window that is not a real date",
+        "held": {
+          "schema": "estate-record/1",
+          "estate": "urn:fabric:estate:example",
+          "revision": 4,
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-31T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-a",
+              "deviceKeys": [
+                {
+                  "kid": "m-a#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+                }
+              ]
+            },
+            {
+              "id": "m-b",
+              "deviceKeys": [
+                {
+                  "kid": "m-b#sig",
+                  "use": "sig",
+                  "publicKey": "BCYA3QkIU0zqwV6Hr+8GPu7JWe2TTFd14A0q2pnBOgkKUka6mYokNqjyUwPFgPDD5H186lAkDRpfscuOsSuKs1g="
+                }
+              ]
+            },
+            {
+              "id": "m-c",
+              "deviceKeys": [
+                {
+                  "kid": "m-c#sig",
+                  "use": "sig",
+                  "publicKey": "BIMFEyCsajunMxvIj3PISmu6gR4nHhZnvSXzx8rMq1pCo2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c="
+                }
+              ]
+            },
+            {
+              "id": "m-ed",
+              "deviceKeys": [
+                {
+                  "kid": "m-ed#sig",
+                  "use": "sig",
+                  "publicKey": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE="
+                }
+              ]
+            },
+            {
+              "id": "m-bad",
+              "deviceKeys": [
+                {
+                  "kid": "m-bad#sig",
+                  "use": "sig",
+                  "publicKey": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr8="
+                }
+              ]
+            }
+          ],
+          "revocations": []
+        },
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": false,
+          "refusal": "expired"
+        }
+      },
+      {
+        "name": "no record held",
+        "held": null,
+        "at": "2026-10-13T00:00:00Z",
+        "extraRevocations": [],
+        "expect": {
+          "ok": false,
+          "refusal": "no-record"
+        }
+      }
+    ]
+  },
+  "admit": {
+    "about": "admit(frame, context) (DEC-0047 item 4, DEC-0066): context.estate is the estate of the record the context admits from.",
+    "cases": [
+      {
+        "name": "the vector machine, key as a JWK",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:example-laptop#sig"
+        }
+      },
+      {
+        "name": "the vector machine, key as SEC 1 octets",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:example-laptop#sig"
+        }
+      },
+      {
+        "name": "iat exactly 60 s old",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:01:00Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:example-laptop#sig"
+        }
+      },
+      {
+        "name": "iat exactly 60 s ahead",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-11T23:59:00Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:example-laptop#sig"
+        }
+      },
+      {
+        "name": "another protocol",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/9",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "protocol-unsupported"
+        }
+      },
+      {
+        "name": "an alg other than ES256",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "EdDSA",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unsupported-alg"
+        }
+      },
+      {
+        "name": "no alg",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unsupported-alg"
+        }
+      },
+      {
+        "name": "a signature made for another relay",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "q6qMlLNkP4czdMQApL0uyhQwDPLVwfX0poy2XSxXXSp8JDAv931Svv1tRp2A38kXSrFPIUsIBdWg_2En6Dt6Xw"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "another connection's nonce",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "X9wpOayaTftnETaBSChmWktqkQF2NxCy2pX2vgmYUd9JH-Kl8dzGgKrONIcoulZaVXgFS2FQcpcF_rvVnuWMPg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "the nonce used once already",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": true,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "replay"
+        }
+      },
+      {
+        "name": "iat 61 s in the past",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:01:01Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 61 s ahead",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-11T23:58:59Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "not-yet-valid"
+        }
+      },
+      {
+        "name": "iat not RFC 3339",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "yesterday",
+          "sig": "LY757gvSD6s3G47DMzZ-inR0EwJbvYFAKDl_Dz0DcwZtB4pIGwKVJJWb7bOlXN4GShH4-bWKPQywbbGwYaWitg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat month 13",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-13-45T25:61:61Z",
+          "sig": "DdmIz8MYSTuZy86FaQinAbYru5gCyRZzoT_T9UNlDaAv9tKY_FHzO91oXVVv56qPShWM7LSLd4ZOSb7AS2081A"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a kid outside the admission set",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {}
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "an admitted key off the curve",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "an admitted Ed25519 #sig",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "OKP",
+              "crv": "Ed25519",
+              "x": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a claimed estate other than the signed one",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:other",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a signature that is not 64 bytes",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "AAAA"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a 64-byte signature in a non-canonical spelling",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyh"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a signature by another key under the admitted kid",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "dg0ldWhd9VnBlZ1kytu-7DZfV3k7Qil0mXr9mh0tzI51SxZuQePAam_RDKR73Qn-uZpss58OttRcUm87RnqO_Q"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "high-S: the vector signature as (r, n - s)",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNn5_f4lk18185K90-zG7BnPEReAcpj9p4BFJsrX9JRNhw"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 30 February, validly signed",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-02-30T00:00:00Z",
+          "sig": "4755z6pHDOJTmO_MmsVf8kPxsC6tNk8LK7OaZQgEj_d1boLQq5dujs74LITIHIx8_IcmWg4skubFPLYsW8rJlQ"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-03-02T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 31 April, validly signed",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-04-31T12:00:00Z",
+          "sig": "MiWE5YmAUSf4wIvpVmjDQws5MmJ2o5qcCCskqqiDC3Q1THDs6CJEdwFgPDWo61ldKz7L3ZBZ2oZZAXr8R8W9sQ"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-05-01T12:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat T24:00:00, validly signed",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T24:00:00Z",
+          "sig": "zVjvtCuj3imSljKQ-6iiyjg7aDARwCez2SjeMJ3JHv0V9xFJcf23-gF09kQzn3oiZV0FEE_CHzWiYm670N346g"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-13T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat :60 (a leap second), validly signed",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-12-31T23:59:60Z",
+          "sig": "VRr-UG-k5mM9msecRkH408-TXBibiVX_9oNJSLxwGFxuZfTBJ2U-H2L3vlDDoctjShIp7Dp29PpFCPlJNLdXZg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2027-01-01T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "iat 60.000999999 s ahead, read to the millisecond",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:01:00.000999999Z",
+          "sig": "lcYs26aKuedjh5v97w0auFMCqUw6SLLWf-n9iMD9lRwLZzr1qwDtdE-Nou1mYU-nrwI1mWV3vz96hIfsRF991A"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:00Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": true,
+          "kid": "urn:fabric:machine:example-laptop#sig"
+        }
+      },
+      {
+        "name": "iat 60.001 s ahead",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:01:00.001Z",
+          "sig": "0H8dCN0vQ9O_CgTBmEYxPmglmsiiGQXMwJydcKM7XMpQ8qE-d5AuJZdK5qVLq_F5m4HIHvm-0ctq9S19FnKO4g"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:00Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "not-yet-valid"
+        }
+      },
+      {
+        "name": "a kid with a lone surrogate",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "\ud800#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "an estate with a lone surrogate",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:\ud800",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a valid signature over another estate",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:other",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "7wcq2-jF48yl8qoNtLLlzPABUQL4eKv3ok869xmFlp55KpQQ9-0dHAPufF3daVhCT6AeUOeSd7Pa77DLYR0MxA"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": "urn:fabric:estate:example",
+          "admitted": {
+            "urn:fabric:machine:example-laptop#sig": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+              "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+            }
+          }
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      },
+      {
+        "name": "a context that holds no record",
+        "frame": {
+          "v": 1,
+          "type": "auth",
+          "id": "a1",
+          "protocol": "fabric-relay/0.1",
+          "alg": "ES256",
+          "estate": "urn:fabric:estate:example",
+          "kid": "urn:fabric:machine:example-laptop#sig",
+          "iat": "2026-10-12T00:00:00Z",
+          "sig": "RJbXBOyiw81mI0J2SKA1eKL9hkIbqNwrkwBS55NXsNkGAgHZbKDKDW1CLBM5E-Ywq896Ow4Z9wSukv_rB87Xyg"
+        },
+        "context": {
+          "relay": "https://relay.example",
+          "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+          "nonceUsed": false,
+          "now": "2026-10-12T00:00:30Z",
+          "estate": null,
+          "admitted": {}
+        },
+        "expect": {
+          "ok": false,
+          "code": "unauthenticated"
+        }
+      }
+    ]
+  },
+  "messageBody": {
+    "about": "verifyMessageBody(body, {from: frame.from, msgId: frame.msgId, to: self}, senders, now) (DEC-0047 item 5, DEC-0066): `frame` is the deliver frame, `self` the recipient's own #sig.",
+    "cases": [
+      {
+        "name": "the vector body, key as a JWK",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-12T01:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "the vector body, key as SEC 1 octets",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": "BNI1c/ZQwrVmYv0twkTeM2yhRRwjoMmFLOktaK4T2QXstG8aL8I3BpbUyDNjQvJ4WhTSJmLT+TZjBgDAH16lCr4="
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-12T01:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "one ms before the signed exp",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T01:00:04.999Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-12T01:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "at the signed exp",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T01:00:05Z",
+        "expect": {
+          "ok": false,
+          "reason": "expired"
+        }
+      },
+      {
+        "name": "not a JWS (two parts)",
+        "body": "x.y",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a payload that is not JSON",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.!!!.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header that is JSON null",
+        "body": "bnVsbA.e30.AAAA",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a payload that is an array",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.W10.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "typ JWT",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJKV1QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.x2Tsdg-yjOpD1yGipZ70hqXzewzenFMetprZZdFpuE0KAl9hA1oxwROmzh7muaoDWxFmEBVw70C92jseMIhbVA",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "payload type fabric-relay-message/2",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8yIn0.RJ5q8sRLnD41pRcD5s2_0HV81iQkSIFQBWXVO8dCQPQiGIQBUyXtFLMF6KM19LF1aqn9n3_V3LUbLYkAcf-TAw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "alg none",
+        "body": "eyJhbGciOiJub25lIiwia2lkIjoidXJuOmZhYnJpYzptYWNoaW5lOmV4YW1wbGUtbGFwdG9wI3NpZyIsInR5cCI6ImZhYnJpYy1yZWxheS1tZXNzYWdlK2p3dCJ9.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.UEmo_LAC5GNuk3QGXjFm-vOzCLzyod3-_2XijNNptdUqcMLQ-5T4sEY0USqbON0nAgpVHgvUY8z8fjEWwG3Asw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "unsupported-alg"
+        }
+      },
+      {
+        "name": "alg EdDSA",
+        "body": "eyJhbGciOiJFZERTQSIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.krArwryxcpTQLQCjWenzPeUkypDCagvV907Nkq21yjU_gyDB8X4XgF7HiD8bBiXUZTyTuMJa-EELdL7e0aeDqg",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "unsupported-alg"
+        }
+      },
+      {
+        "name": "iat month 13",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMy00NVQyNTo2MTo2MVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0._yuAG1ysB-_f9Yd7Q_FmnLx7JhLWe1DdZg1HKjJimd1zMHVUNfrx70LVCv_fvth23RztF_yCitjdXB4-zEkVag",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "exp null",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOm51bGwsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.w6BlxhkTaIuiVabwF8oB2RWHS7ONagjjZ6z9iSGJstsx48KqA2yuwpFFr2ver-2OrOwqb0RKlLohuB54Xtg4iQ",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "from a number",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOjcsImlhdCI6IjIwMjYtMTAtMTJUMDA6MDA6MDVaIiwibXNnSWQiOiIwYjZmNWYzZS02YTUxLTRkNmUtOWQ1NS00YjhmNmEwZDJjMTEiLCJwYXlsb2FkIjp7ImNvbW1hbmQiOiJydW4uc3RhcnQiLCJydW4iOiJleGFtcGxlIn0sInRvIjoidXJuOmZhYnJpYzptYWNoaW5lOmV4YW1wbGUtZ3B1LWJveCNzaWciLCJ0eXBlIjoiZmFicmljLXJlbGF5LW1lc3NhZ2UvMSJ9.up9YCV393DatulBhQyaT9tJO7uC7JDd7cR_J-4KY0wUpnp5Q9frdLl6JmHZGgT_6oxhnm-zCiXrt_Rvrzxnogg",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a frame naming another sender",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:stranger#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          },
+          "urn:fabric:machine:stranger#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "gwUTIKxqO6czG8iPc8hKa7qBHiceFme9JfPHysyrWkI",
+            "y": "o2Cx8W6NHZti1GaJH4yF4DIC434QFxgKa6HC53FfD4c"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "mismatch"
+        }
+      },
+      {
+        "name": "a recipient other than the signed to",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:other#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "mismatch"
+        }
+      },
+      {
+        "name": "a body signed to another machine, delivered here",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6b3RoZXIjc2lnIiwidHlwZSI6ImZhYnJpYy1yZWxheS1tZXNzYWdlLzEifQ.EWvO2oc3jX51_cvMKJ8EoLpveCcZlDf9Xlf5hvYKn0wbgr0-MTd6NCNtvyiHAX8Iienyw8kHkLeWR9jymLSPZg",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "mismatch"
+        }
+      },
+      {
+        "name": "a frame naming another msgId",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "another",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "mismatch"
+        }
+      },
+      {
+        "name": "a payload changed in transit",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5jYW5jZWwifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "bad-signature"
+        }
+      },
+      {
+        "name": "an exp moved in transit",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTE5VDAwOjAwOjAwWiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "bad-signature"
+        }
+      },
+      {
+        "name": "an unknown sender",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {},
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "unknown-sender"
+        }
+      },
+      {
+        "name": "a sender key off the curve",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "bad-key"
+        }
+      },
+      {
+        "name": "an Ed25519 sender",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "YfRakzBwmwI8lrSJ3wh6R8cmJivoFaKiJX6sEvonkaE"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "unsupported-alg"
+        }
+      },
+      {
+        "name": "iat 60 s ahead",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-11T23:59:05Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-12T01:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "iat 61 s ahead",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-11T23:59:04Z",
+        "expect": {
+          "ok": false,
+          "reason": "not-yet-valid"
+        }
+      },
+      {
+        "name": "exp equal to iat",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAwOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.-dGdvlg79B_PnOVDL90zzTMmyU2AGOKs2asQcmN26dMtjOevfSMNgxkKLDSnqhGegH3gTnaLdbjLwNkOZjl3Eg",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:00:05Z",
+        "expect": {
+          "ok": false,
+          "reason": "lifetime-too-long"
+        }
+      },
+      {
+        "name": "exp at 7 days",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTE5VDAwOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.ad1KzOELcZ1jpte05Cw40cDciVEwCi0j2Kzi_RoC7J1y2JgJN3Y4stODkA5wTnerEkS4egqCBjoS14xS8_AsGw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:00:05Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-19T00:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "exp at 7 days and 1 s",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTE5VDAwOjAwOjA2WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.8q2qK6wD2IVLT9JYnuVfmj-JKCumNP_CBDEoV5sg3HhnGN6gIGEiUC5OhjLOKouw_YbZKvKYp4wJcNffAloObw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:00:05Z",
+        "expect": {
+          "ok": false,
+          "reason": "lifetime-too-long"
+        }
+      },
+      {
+        "name": "a 64-byte signature in a non-canonical spelling",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLx",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "bad-signature"
+        }
+      },
+      {
+        "name": "a header without kid, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImZhYnJpYy1yZWxheS1tZXNzYWdlK2p3dCJ9.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.t2FlfL-ruGPptRz3dCClReqVqRsi4XvCfzWPHyLvCPkoHmtsWiuclGHvM5r5KuMtxZkWwT-1cnMzOCisEfy9-g",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": true,
+          "payload": {
+            "exp": "2026-10-12T01:00:05Z",
+            "from": "urn:fabric:machine:example-laptop#sig",
+            "iat": "2026-10-12T00:00:05Z",
+            "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+            "payload": {
+              "command": "run.start",
+              "run": "example"
+            },
+            "to": "urn:fabric:machine:example-gpu-box#sig",
+            "type": "fabric-relay-message/1"
+          }
+        }
+      },
+      {
+        "name": "high-S: the vector signature as (r, n - s)",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbHSv2XlQtwPcI9o7nA9rW0iSTNk6LoB0LPvpRkw06A_Ig",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "bad-signature"
+        }
+      },
+      {
+        "name": "a header with crit [\"exp\"], validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImNyaXQiOlsiZXhwIl0sImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.kh0SP1y5FLZizZnUxMd-2ZZJe_oSCYPg1raV0Iw1r5x6NBY_KZPmMpSeyGyW4hFAAzaho4PKORhY4rBc_UjMIQ",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header kid that is not the signed from, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpldmlsI3NpZyIsInR5cCI6ImZhYnJpYy1yZWxheS1tZXNzYWdlK2p3dCJ9.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.AYnf-ANgpXnaujFA8wdtZYFNxcBVslw5Zd_AaITt9jRMKiHYEBdYf4DaliXy0VvBV-nSgwxQ4d80mOdlAU8PQw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header with an embedded jwk, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImp3ayI6eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6IjBqVno5bERDdFdaaV9TM0NSTjR6YktGRkhDT2d5WVVzNlMxb3JoUFpCZXciLCJ5IjoidEc4YUw4STNCcGJVeUROalF2SjRXaFRTSm1MVC1UWmpCZ0RBSDE2bENyNCJ9LCJraWQiOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwidHlwIjoiZmFicmljLXJlbGF5LW1lc3NhZ2Urand0In0.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.s0zyUyhrl790aAxXHwcjzZWzGWhxkkiQkzSJ2luDLG1DEUZZZKGUD3Q21SNcY3fU7QGgtVKD7RdglzW0XA9L3A",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header with b64 false and crit [\"b64\"], validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.m9CHH2dz0bNARJ_UqGrFw37TbFvsPH6NpJuqT4JZrCwpqYTy5ZCh5u5jdbQP6RJGiJ91yLeo3tc2Hry2YVu7Qg",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header with an unknown member, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImN0eSI6Impzb24iLCJraWQiOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwidHlwIjoiZmFicmljLXJlbGF5LW1lc3NhZ2Urand0In0.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.G3o6SIFQpvJsZp7F1-EoUOSrK_M1VTJZt-j45TnaJlNk1RlzJ46ESFLON72wbXwBw2dLvOjzvwYCCcQewlhhgw",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "iat 30 February, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTAzLTAyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0wMi0zMFQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.Nryy2WkNZYgydIy64TGsHlgO1QldAgdXWBOCZ9dXctgvYvJ-kRaC6I4HdmVp7JqCcoIjo9tA-pNtbNvnf8RAzQ",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-03-02T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a payload that is not RFC 8785 (pretty-printed), validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.ewogICJleHAiOiAiMjAyNi0xMC0xMlQwMTowMDowNVoiLAogICJmcm9tIjogInVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLAogICJpYXQiOiAiMjAyNi0xMC0xMlQwMDowMDowNVoiLAogICJtc2dJZCI6ICIwYjZmNWYzZS02YTUxLTRkNmUtOWQ1NS00YjhmNmEwZDJjMTEiLAogICJwYXlsb2FkIjogewogICAgImNvbW1hbmQiOiAicnVuLnN0YXJ0IiwKICAgICJydW4iOiAiZXhhbXBsZSIKICB9LAogICJ0byI6ICJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsCiAgInR5cGUiOiAiZmFicmljLXJlbGF5LW1lc3NhZ2UvMSIKfQ.zPruurb7t-q28PJCEXS5-93Q1lnr_Pnc651-re2Zud9zQLFyRRP7FZ5IZS3726UdMzTh_w_nKIqJCL0jqaCprA",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a payload with a duplicate to, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6b3RoZXIjc2lnIiwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.swrK_TNlqoNv4DI6Munhbx_8BENilgf7Ku-8lTQiEqtmNsyGQkO9I0vcrdS8tkvoh5oIh5XJVqNcIWxLObwBmQ",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a payload with an unknown member, validly signed",
+        "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsIm5vdGUiOiJ4IiwicGF5bG9hZCI6eyJjb21tYW5kIjoicnVuLnN0YXJ0IiwicnVuIjoiZXhhbXBsZSJ9LCJ0byI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWdwdS1ib3gjc2lnIiwidHlwZSI6ImZhYnJpYy1yZWxheS1tZXNzYWdlLzEifQ.3IRMA0kDCvo1Gt223bXNXjhsZDydDOoRrh7sm4Hf3xI046DjbkoWW3J3qtt4YBKAPkOQHT6QyFCVrPPv5a5frA",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "a header with a duplicate alg (none, then ES256), validly signed",
+        "body": "eyJhbGciOiJub25lIiwiYWxnIjoiRVMyNTYiLCJraWQiOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwidHlwIjoiZmFicmljLXJlbGF5LW1lc3NhZ2Urand0In0.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.288FkppzEATPrrPy-pnS6UoDelkW5CHcnd_KWuvLxaxhG64a2tdQIoHGYFloBkFXXlDdMBer99mShUasdrDQbQ",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      },
+      {
+        "name": "alg EdDSA and iat month 13 together",
+        "body": "eyJhbGciOiJFZERTQSIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMy00NVQyNTo2MTo2MVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.tKm8nYhIbjVSwGnwjShM8S0o_uSM5Q08LNdmqrWcYdI26nMOGKLPqaZ9WIcARMUIYx8KlYJB623GPbfDJTInew",
+        "frame": {
+          "from": "urn:fabric:machine:example-laptop#sig",
+          "msgId": "0b6f5f3e-6a51-4d6e-9d55-4b8f6a0d2c11",
+          "seq": 1,
+          "sentAt": "2026-10-12T00:00:06Z"
+        },
+        "self": "urn:fabric:machine:example-gpu-box#sig",
+        "senders": {
+          "urn:fabric:machine:example-laptop#sig": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "0jVz9lDCtWZi_S3CRN4zbKFFHCOgyYUs6S1orhPZBew",
+            "y": "tG8aL8I3BpbUyDNjQvJ4WhTSJmLT-TZjBgDAH16lCr4"
+          }
+        },
+        "now": "2026-10-12T00:10:00Z",
+        "expect": {
+          "ok": false,
+          "reason": "malformed"
+        }
+      }
+    ]
+  },
+  "replay": {
+    "about": "checkReplay(seen, payload, now) after verifyMessageBody (DEC-0066): steps run in order against one recipient's store of accepted (from, msgId), which an accepted step adds to.",
+    "cases": [
+      {
+        "name": "a body accepted, then the same body again, then after its exp",
+        "steps": [
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": true
+            }
+          },
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+            "now": "2026-10-12T00:10:01Z",
+            "expect": {
+              "ok": false,
+              "reason": "replay"
+            }
+          },
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+            "now": "2026-10-12T01:00:05Z",
+            "expect": {
+              "ok": false,
+              "reason": "expired"
+            }
+          }
+        ]
+      },
+      {
+        "name": "two msgIds from one sender",
+        "steps": [
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": true
+            }
+          },
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6ImFub3RoZXIiLCJwYXlsb2FkIjp7ImNvbW1hbmQiOiJydW4uc3RhcnQiLCJydW4iOiJleGFtcGxlIn0sInRvIjoidXJuOmZhYnJpYzptYWNoaW5lOmV4YW1wbGUtZ3B1LWJveCNzaWciLCJ0eXBlIjoiZmFicmljLXJlbGF5LW1lc3NhZ2UvMSJ9.X9xq9zIf6ySpxvK_ARxnIkV4TAzpqJ94ISic9Yx6egQFQR-HhRUjsZ7bCDAKHEANdQBi7koK6YvGjWT-8f3vRA",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": true
+            }
+          }
+        ]
+      },
+      {
+        "name": "one msgId from two senders",
+        "steps": [
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.i7Kd7zq74oov7bYsKToFqDv4j2WVIkwH4cBVFpPsfbEtQJoZvSPwkHCXEY_CUpLdc7OVxO0VzdEEFLGSKMLmLw",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": true
+            }
+          },
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpzdHJhbmdlciNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTEwLTEyVDAxOjAwOjA1WiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6c3RyYW5nZXIjc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.298gX9LYAEfeVrSDpuLGF7WzZO9-uUxYK0SAfkpbKxcxElHV0EDKn8NN7gJwwqVcnAeD_0dpQMl7aeK4FWFrIQ",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": true
+            }
+          }
+        ]
+      },
+      {
+        "name": "an exp that is not an instant fails closed as expired",
+        "steps": [
+          {
+            "body": "eyJhbGciOiJFUzI1NiIsImtpZCI6InVybjpmYWJyaWM6bWFjaGluZTpleGFtcGxlLWxhcHRvcCNzaWciLCJ0eXAiOiJmYWJyaWMtcmVsYXktbWVzc2FnZStqd3QifQ.eyJleHAiOiIyMDI2LTAyLTMwVDAwOjAwOjAwWiIsImZyb20iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1sYXB0b3Ajc2lnIiwiaWF0IjoiMjAyNi0xMC0xMlQwMDowMDowNVoiLCJtc2dJZCI6IjBiNmY1ZjNlLTZhNTEtNGQ2ZS05ZDU1LTRiOGY2YTBkMmMxMSIsInBheWxvYWQiOnsiY29tbWFuZCI6InJ1bi5zdGFydCIsInJ1biI6ImV4YW1wbGUifSwidG8iOiJ1cm46ZmFicmljOm1hY2hpbmU6ZXhhbXBsZS1ncHUtYm94I3NpZyIsInR5cGUiOiJmYWJyaWMtcmVsYXktbWVzc2FnZS8xIn0.jS0BMZaDaLAOpznh4voOxGGqi37rqvRbjJ08d95QMXFeTaj5AYFxNBN7o0svhOKn_wtgu1HtaFB0VER7kWp8RA",
+            "now": "2026-10-12T00:10:00Z",
+            "expect": {
+              "ok": false,
+              "reason": "expired"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
