@@ -122,18 +122,19 @@ def to_low_s(raw: bytes) -> bytes:
 def _crypto():
     try:
         from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.asymmetric import ec, utils
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
         from cryptography.exceptions import InvalidSignature
     except ImportError as error:                           # the engine's `full` extra
         raise RuntimeError('ES256 needs the engine full extra (cryptography)') from error
-    return hashes, ec, utils, InvalidSignature
+    return hashes, ec, decode_dss_signature, encode_dss_signature, InvalidSignature
 
 
 def sign_es256(private_key: Any, data: Union[str, bytes]) -> str:
     """ES256 over `data` (a string is UTF-8) by a `cryptography` P-256 private key: raw r ‖ s, low-S, base64url."""
-    hashes, ec, utils, _ = _crypto()
+    hashes, ec, decode_dss_signature, _, _ = _crypto()
     message = data.encode('utf-8') if isinstance(data, str) else data
-    r, s = utils.decode_dss_signature(private_key.sign(message, ec.ECDSA(hashes.SHA256())))
+    r, s = decode_dss_signature(private_key.sign(message, ec.ECDSA(hashes.SHA256())))
     return b64url_encode(to_low_s(r.to_bytes(32, 'big') + s.to_bytes(32, 'big')))
 
 
@@ -147,9 +148,9 @@ def verify_es256(key: Any, data: Union[str, bytes], sig: Any):
     raw = b64url_canonical(sig)
     if raw is None or len(raw) != 64 or not is_low_s(raw):
         return False
-    hashes, ec, utils, InvalidSignature = _crypto()
+    hashes, ec, _, encode_dss_signature, InvalidSignature = _crypto()
     public = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), point(key))
-    der = utils.encode_dss_signature(int.from_bytes(raw[:32], 'big'), int.from_bytes(raw[32:], 'big'))
+    der = encode_dss_signature(int.from_bytes(raw[:32], 'big'), int.from_bytes(raw[32:], 'big'))
     message = data.encode('utf-8') if isinstance(data, str) else data
     try:
         public.verify(der, message, ec.ECDSA(hashes.SHA256()))

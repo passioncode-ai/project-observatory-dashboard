@@ -50,6 +50,16 @@ DEFAULT_TTL_SECONDS = 3600
 #: Close codes after which a node does not reconnect: the relay refused this machine (4401) or it left the estate's
 #: admission set (4403). Reconnecting could only be refused again; the person has to look.
 TERMINAL_CLOSE_CODES = (4401, 4403)
+#: Refusals a relay or an `auth` answer may give that no retry can change until a person acts.
+TERMINAL_REFUSALS = ('unauthenticated', 'protocol-unsupported', 'not-admitted', 'expired')
+#: Refusals of a delivered body that this machine may outgrow: a sender its estate record does not list yet (a newer
+#: revision is on its way) and a body dated ahead of its clock. Such a body is reported and left unacknowledged, so
+#: the relay delivers it again on the next connection, until its ttl.
+TRANSIENT_REFUSALS = ('unknown-sender', 'not-yet-valid')
+
+
+class _LocalFailure(Exception):
+    """This node's own lookup or store failed while it checked a body: the body may be authentic."""
 
 
 class RelayError(Exception):
@@ -143,9 +153,9 @@ class RelaySession:
 
     def open(self) -> Welcome:
         ws = self._connector(connect_url(self.origin), subprotocol=relay.RELAY_SUBPROTOCOL)
+        deadline = time.monotonic() + HELLO_TIMEOUT_SECONDS          # one limit for hello, auth and welcome
         try:
-            ws.settimeout(HELLO_TIMEOUT_SECONDS)
-            hello = self._json(ws.recv_text())
+            hello = self._json(ws.recv_text(deadline))
             if hello.get('type') != 'hello' or hello.get('protocol') != relay.RELAY_PROTOCOL \
                     or not isinstance(hello.get('nonce'), str):
                 raise RelayRefused('protocol-unsupported', 'the relay did not say hello in fabric-relay/0.1')
@@ -156,7 +166,7 @@ class RelaySession:
             frame = relay.auth_frame(self.keys.sign, frame_id=_frame_id(), relay=self.origin, nonce=hello['nonce'],
                                      estate=self.estate, kid=self.keys.sig_kid, iat=relay.rfc3339(now_ms))
             ws.send_text(json.dumps(frame, separators=(',', ':')))
-            answer = self._json(ws.recv_text())
+            answer = self._json(ws.recv_text(deadline))
             if answer.get('type') == 'error':
                 raise RelayRefused(str(answer.get('code')), RelayRefused.ADVICE)
             if answer.get('type') != 'welcome' or not isinstance(answer.get('session'), str):
@@ -165,8 +175,8 @@ class RelaySession:
                                    answer.get('heartbeat'), answer.get('limits') or {})
         except Closed as closed:
             ws.close()
-            raise RelayRefused('unauthenticated' if closed.code == 4401 else 'closed-%d' % closed.code,
-                               RelayRefused.ADVICE) from None
+            code = {4401: 'unauthenticated', 4403: 'not-admitted'}.get(closed.code, 'closed-%d' % closed.code)
+            raise RelayRefused(code, RelayRefused.ADVICE) from None
         except BaseException:
             ws.close()
             raise
@@ -180,7 +190,7 @@ class RelaySession:
     @staticmethod
     def _json(text: str) -> dict:
         try:
-            value = relay._json(text.encode('utf-8'))      # bounded in size and depth
+            value = relay.parse_json(text.encode("utf-8"))   # bounded in size and depth
         except (ValueError, UnicodeError):
             raise RelayError('malformed', 'a frame that is not JSON') from None
         if not isinstance(value, dict) or value.get('v') != 1:
@@ -323,22 +333,39 @@ class RelaySession:
         if not body:
             return {'ok': False, 'reason': 'malformed'}
         expect = {'from': frame.get('from'), 'to': self.keys.sig_kid, 'msgId': frame.get('msgId')}
-        verdict = relay.verify_message_body(body, expect, self.sender_key, now_ms)
+        verdict = relay.verify_message_body(body, expect, self._local(self.sender_key), now_ms)
         if verdict['ok']:
-            verdict = dict(relay.check_replay(self.replay.seen, verdict['payload'], now_ms), payload=verdict['payload'])
+            verdict = dict(relay.check_replay(self._local(self.replay.seen), verdict['payload'], now_ms),
+                           payload=verdict['payload'])
         return verdict
+
+    @staticmethod
+    def _local(function):
+        """This node's own lookup, with its failure told apart from a fault in what the relay sent."""
+        def call(*args):
+            try:
+                return function(*args)
+            except Exception as error:
+                raise _LocalFailure(type(error).__name__) from error
+        return call
 
     def _deliver(self, frame: dict) -> None:
         now_ms = int(self.clock() * 1000)
         try:
             verdict = self._verdict(frame, now_ms)
+        except _LocalFailure:
+            # The node could not check the body; the body may be authentic. It stays unacknowledged and the session
+            # ends, so the relay delivers it again on the next connection.
+            LOG.exception('relay.deliver.local-failure')
+            raise
         except Exception:                                  # a body no check could read is refused, never fatal
             LOG.exception('relay.deliver.unreadable')
             verdict = {'ok': False, 'reason': 'malformed'}
         if not verdict['ok']:
             LOG.warning('relay.deliver.refused', extra={'reason': verdict['reason'], 'from': frame.get('from')})
-            # Acknowledged first: a refused body is never redelivered, whatever its callback does.
-            self._ack(frame.get('seq'))
+            if verdict['reason'] not in TRANSIENT_REFUSALS:
+                # Acknowledged first: a refused body is never redelivered, whatever its callback does.
+                self._ack(frame.get('seq'))
             self._callback('on_refused', verdict['reason'], frame)
             return
         payload = verdict['payload']
@@ -368,19 +395,23 @@ class RelaySession:
                 return
 
 
-def keep_connected(make_session: Callable[[], 'RelaySession'], stop: threading.Event, *,
+def keep_connected(make_session: Callable[[ReplayStore], 'RelaySession'], stop: threading.Event, *,
                    on_state: Callable[[str, dict], None] = lambda state, detail: None,
                    min_backoff: float = 1.0, max_backoff: float = 60.0) -> None:
-    """Holds one relay session open until `stop` is set: opens a session, waits for it to close, and opens another
+    """Holds one relay session open until `stop` is set: opens a session, waits for it to close, and opens another.
+    Every session gets the same `ReplayStore` (`make_session(replay)` passes it to `RelaySession`), so a message
+    handled before a link dropped, and delivered again after it, is acted on once. It opens the next
     after a jittered, doubling backoff (reset by a session that stayed up a minute). A refusal (`RelayRefused`
     unauthenticated) or a close 4401 or 4403 is terminal: `on_state('stopped', ...)` names it and the loop ends,
     because the relay would refuse every retry until a person acts. `on_state` hears `open`, `closed`, `retry` and
     `stopped`, each with a detail dict that carries no secret."""
     backoff = min_backoff
+    replay = ReplayStore()
     while not stop.is_set():
         session = None
+        wait_at_least = 0.0
         try:
-            session = make_session()
+            session = make_session(replay)
             session.open()
             opened = time.monotonic()
             on_state('open', {'revision': session.welcome.estate_revision})
@@ -396,13 +427,19 @@ def keep_connected(make_session: Callable[[], 'RelaySession'], stop: threading.E
             if time.monotonic() - opened >= 60:
                 backoff = min_backoff
         except RelayRefused as refused:
-            if refused.code in ('unauthenticated', 'protocol-unsupported'):
+            if refused.code in TERMINAL_REFUSALS:
                 on_state('stopped', {'refusal': refused.code})
                 return
             on_state('closed', {'refusal': refused.code})
-        except (RelayError, WebSocketError, OSError) as error:
+        except RelayError as error:
+            if error.code in TERMINAL_REFUSALS:
+                on_state('stopped', {'refusal': error.code})
+                return
+            wait_at_least = float(error.retry_after or 0)    # `rate-limited` names how long to wait
+            on_state('closed', {'refusal': error.code})
+        except (WebSocketError, OSError) as error:
             on_state('closed', {'error': type(error).__name__})
-        delay = backoff * (0.5 + random.random() / 2)
+        delay = max(wait_at_least, backoff * (0.5 + random.random() / 2))
         on_state('retry', {'seconds': round(delay, 2)})
         if stop.wait(delay):
             break

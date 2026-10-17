@@ -47,6 +47,14 @@ def _write_exclusive(path: Path, text: str) -> None:
         Path(name).unlink(missing_ok=True)
 
 
+def _sweep_temporaries(folder: Path) -> None:
+    """Removes `.device-key-*` files a killed writer left between its write and its link. Called under the folder's
+    lock, when no writer is running: such a file is never a key the set uses, and it may hold a private key."""
+    for stale in folder.glob('.device-key-*'):
+        if stale.is_file() and not stale.is_symlink():
+            stale.unlink(missing_ok=True)
+
+
 def _private_folder(folder: Path) -> None:
     """Refuses a folder another account owns, or one a group or others may write: either could swap the keys."""
     if not osprivacy.owned_by_me(folder) or osprivacy.others_may_write(folder):
@@ -174,7 +182,11 @@ class DeviceKeys:
         """The folder's keys, or new ones written there. The check, the generation and the writes happen under the
         folder's lock, so two processes starting together end with one key set, the one both return."""
         folder = Path(folder)
+        # Checked before the lock: taking it makes the folder 0700, which would hide a folder others could write.
+        if folder.exists():
+            _private_folder(folder)
         with private_io.lock(folder / _LOCK):
+            _sweep_temporaries(folder)
             if (folder / 'device.json').exists():
                 return cls.load(folder)
             if (folder / 'sig.pem').exists() or (folder / 'kem.pem').exists():
