@@ -2424,7 +2424,8 @@ class RoundSevenIssueOverRowWithStaleSuccessor(unittest.TestCase):
             return out, door.ledger()
         out, doc = with_door7(world, doc, fn)
         self.assertIsInstance(out, ValueError)
-        self.assertIn("run `rotate k1` to finish it first", str(out))
+        self.assertIn("run `rotate k1` first", str(out))
+        self.assertIn("OBS-119", str(out))
         res = ProjectSpend().scan_at(utc(2026, 10, 16, 12), ledger=doc,
                                        keys={h: (404 if k["deleted"] else [{"date": d + " 00:00:00", "usage": u}
                                                                             for d, u in k["rows"]])
