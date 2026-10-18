@@ -550,6 +550,43 @@ redirect, a key left at the old `store/` location is still read, with a note say
 belongs, and is never moved for you. If a key exists in both places, reading refuses and names both
 files, rather than guessing which one is current. Remove the one you no longer use.
 
+## SSH keys on this machine
+
+`project-observatory full ssh-keys` lists the machine's SSH keys, makes a new one, copies the part you
+paste and sends it to GitHub or a server. **The private key is never shown or moved**: Observatory
+reads only a private file's clear header (the cipher name, and the public key the OpenSSH format
+stores in clear), never its private section, and everything it shows, copies or sends is the public
+line of `NAME.pub`, checked to be that key's own. The design is
+[docs/design/SSH-KEYS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/SSH-KEYS.md);
+the scenarios are OSS-62–67.
+
+```sh
+project-observatory full ssh-keys list                    # every key: type, fingerprint, passphrase, where it is used and registered
+project-observatory full ssh-keys create deploy-alpha     # ed25519; ssh-keygen asks for the passphrase; on macOS it goes to the Keychain and the agent
+project-observatory full ssh-keys copy deploy-alpha       # the public line on the clipboard, and printed with its fingerprint
+project-observatory full ssh-keys send deploy-alpha --to github                 # gh ssh-key add, once; --as signing|both
+project-observatory full ssh-keys send deploy-alpha --to server:alpha --verify  # append to authorized_keys once, then prove the server accepts this key and no other
+project-observatory full ssh-keys findings                # no passphrase, weak, readable by others, unused, registered nowhere
+```
+
+- `create` never overwrites: a name already taken is refused before anything runs. `--no-passphrase`
+  makes an unattended key (the findings list it); `--host ALIAS --hostname HOST [--user U] [--port N]`
+  also appends a Host block to `~/.ssh/config`. On macOS the passphrase goes into the login Keychain
+  and the key into the running agent; `--no-keychain` skips that. A passphrase is typed into ssh-keygen's own prompt, so
+  `create` without `--no-passphrase` needs a terminal.
+- `list` asks GitHub through `gh` (scopes `read:public_key` and `read:ssh_signing_key`); `send --to
+  github` needs `admin:public_key` (`admin:ssh_signing_key` for signing). A source it cannot read is
+  named with the command that fixes it, never shown as "not registered". `--no-github` skips it.
+- `send --to server:ALIAS` uses the access that already works; `--interactive` lets you answer a
+  password prompt. It only ever appends one line. `--verify` logs in with no config (`-F none`) and
+  the new key alone, and passes only when ssh's log names the new key's fingerprint, so a Host block
+  that still names the old key cannot make it pass. Clouds have no door yet (OBS-112): the refusal says
+  so and the copied line goes in the provider's console.
+- Every create and send writes a receipt to the key movements journal (`tools/vault.py movements`).
+- `list` saves the inventory to `store/raw/ssh-keys.json`; the findings board reads it. Exit codes:
+  0 done, 1 refused by the provider or the server, 2 refused before anything changed, 3 done without
+  the clipboard, 4 done but the receipt was not written.
+
 ## Connect an agent
 
 The complete MCP server uses stdio. Configure a Python executable from the

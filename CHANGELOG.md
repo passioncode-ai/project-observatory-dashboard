@@ -79,6 +79,24 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
   and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
   their owner-only files, and a key is never replaced.
+- **SSH keys on this machine** (OBS-110, PB-163). `project-observatory full ssh-keys` lists the machine's
+  SSH keys (fingerprint from `ssh-keygen -l` on the `.pub`, whether it has a passphrase from the private
+  file's header alone, the Host blocks and agent that use it, where GitHub accepts it for sign-in and
+  signing), `create` makes an ed25519 key that never overwrites a file (modes 0600/0644, the passphrase
+  typed into ssh-keygen and kept in the macOS Keychain, which also loads the key into the agent),
+  `copy` puts the public line on the clipboard,
+  and `send` registers it on GitHub (`gh ssh-key add`) or on a server (one line appended to
+  `authorized_keys` under `sh` whatever the login shell; `--verify` logs in with no config and the
+  new key alone and passes only when the server names its fingerprint), each with a receipt in the
+  key movements journal. Ten findings reach the board (no passphrase, weak, readable by others and an
+  open `~/.ssh` by `osprivacy`, a private key saved as `.pub`, unused, a GitHub key not found here (information only), a
+  key registered nowhere visible, no public half, a missing `IdentityFile`). Observatory never advises
+  deleting a GitHub key: a key GitHub accepts that it did not find is reported as information, naming
+  where it looked and what it could not read, with no command. Only a private key's
+  clear header is read (the cipher name and the public key), never its private section. The read-only MCP tool `observatory_ssh_keys` gives agents the same inventory and
+  one key's public line. The private key is never shown or moved; tests plant one and search every
+  output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
+  [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
 ### Changed
 
@@ -112,26 +130,30 @@ while the major version is 0, a minor release may change behaviour and says so h
 
     The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
     not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
-    `&` and newlines, so the scan is linear in the command's length. A second revision of the same
-    record then links the file (`file:<path>`, `anchor` = the entry heading or the ledger line), and its
-    `why` stays empty. The link records the repository's id. A later revision carries the link
-    forward only while it is still true: this hook wrote it, it names the current repository, the
-    register is a regular file inside the checkout (not a symbolic link, not under one), and exactly
-    one heading line of it, outside fenced code, still reads the anchor. A struck or WITHDRAWN heading,
-    the anchor left in a comment, a code block or an index line, or a duplicate heading does not
-    count; a register over 8 MB is not re-checked. Headings are read in one linear pass (no regular
-    expression), with the file split on newlines only: a heading has at most three spaces of indent,
-    one to six `#`, then a space or tab; a closing `#` run counts only after a space or tab
-    (`## Use C#` keeps its `#`); fenced code closes only on the same character at least as long, an
-    unclosed fence runs to the end, and multi-line HTML comments are skipped. Every read of a register
-    or the run ledger, fresh or carried, first requires a regular file inside the checkout that is not
-    a symbolic link and not under one. An added block whose heading syntax this pass rejects is asked
-    about, never matched line by line. So the record stays explained, with no request and no extra
-    revision, after the register is committed and pushed and after the write scrolls out of the
-    transcript. A register deleted, reverted, checked out or rewritten, or a session that moved to
-    another repository, drops the link and is attributed afresh, and asked about when nothing is
-    found. A turn that touches a register is attributed again, and a newer decision replaces the
-    anchor. The attribution's `git diff` gets only the time left in the 2 seconds.
+    `&` and newlines, so the scan is linear in the command's length.
+
+    A second revision of the same record then links the file, and its `why` stays empty. The link
+    stores the repository's id, the register's path, the entry heading as `anchor`, the exact raw
+    heading line at full length, and a SHA-256 of the register's bytes from the start of the file to
+    the end of the entry. The entry ends at the next column-0 line with no more `#`, or at the end of
+    the file. A heading over 120 characters is never linked. A later revision carries the link only
+    while it holds by bytes, with no Markdown parsing: this hook wrote it, it names the current
+    repository, the raw line occurs exactly once as a whole line, and the digest is unchanged.
+    Appending a later entry keeps the link. So the record stays explained, with no request and no
+    extra revision, after the register is committed and pushed and after the write scrolls out of the
+    transcript. Any other edit above or inside the entry drops the link: a deleted, reverted,
+    wrapped, struck, commented, fenced, duplicated or retitled entry, a one-character change, or a
+    change of line endings. So does a move to another repository. A dropped link is attributed afresh
+    only from the session's writes after it was made, and asked about when there are none. A turn
+    that touches a register is attributed again, and a newer decision replaces the anchor.
+
+    Every read of a register or the run ledger, fresh or carried, passes one gate: inside the
+    checkout, not a symbolic link and not under one, opened once without following a link or
+    blocking, a regular file with one hard link, read up to its limit plus one byte. A fresh anchor
+    is chosen by a linear Markdown heading scan (newline split only, fences and multi-line comments
+    skipped, `## Use C#` keeps its `#`), and an added block whose heading syntax the scan rejects is
+    asked about, never matched line by line. The attribution's `git diff` gets only the time left in
+    the 2 seconds.
 
     The turn is asked about in every other case:
     - another session's edit in the same checkout;
