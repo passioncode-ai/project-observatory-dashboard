@@ -3838,8 +3838,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "415f3e703e3f63a5e75cf54d4b7984ecadd9f0efdc052e2011c82086ee455dab",
-      "bytes": 146603
+      "export_sha256": "ed0cecfb707d3125ef8befc850811b53ec43cec6408baf304c4d2f57728ecaad",
+      "bytes": 146633
     },
     {
       "path": "tests/test_stale_collapse.py",
