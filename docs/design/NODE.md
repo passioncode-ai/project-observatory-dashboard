@@ -370,6 +370,9 @@ Presence fails because that relay pins the contract at `51719e4`, before DEC-006
 bare `presence` frames instead of one `presence-result` carrying `replyTo`, which the node (contract `bf3fd6b`)
 waits for. The fix is the relay's contract bump.
 
+Second run, 2026-10-18, against relay `00937e0` (relay#11, the contract bump to `bf3fd6b`): every step passed, presence
+included (`"ok": true`).
+
 ## What comes next
 
 | Slice | What |
