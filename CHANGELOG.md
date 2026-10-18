@@ -119,7 +119,14 @@ while the major version is 0, a minor release may change behaviour and says so h
     register is a regular file inside the checkout (not a symbolic link, not under one), and exactly
     one heading line of it, outside fenced code, still reads the anchor. A struck or WITHDRAWN heading,
     the anchor left in a comment, a code block or an index line, or a duplicate heading does not
-    count; a register over 8 MB is not re-checked. So the record stays explained, with no request and no extra
+    count; a register over 8 MB is not re-checked. Headings are read in one linear pass (no regular
+    expression), with the file split on newlines only: a heading has at most three spaces of indent,
+    one to six `#`, then a space or tab; a closing `#` run counts only after a space or tab
+    (`## Use C#` keeps its `#`); fenced code closes only on the same character at least as long, an
+    unclosed fence runs to the end, and multi-line HTML comments are skipped. Every read of a register
+    or the run ledger, fresh or carried, first requires a regular file inside the checkout that is not
+    a symbolic link and not under one. An added block whose heading syntax this pass rejects is asked
+    about, never matched line by line. So the record stays explained, with no request and no extra
     revision, after the register is committed and pushed and after the write scrolls out of the
     transcript. A register deleted, reverted, checked out or rewritten, or a session that moved to
     another repository, drops the link and is attributed afresh, and asked about when nothing is

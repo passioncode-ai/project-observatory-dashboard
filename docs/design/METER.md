@@ -170,7 +170,14 @@ replaced). Finishing it means:
 - the successor gets the row's name.
 
 A row whose `predecessor_hash` is its own live hash is refused before any request, naming the repair. A `revoke` of a
-row holding a stale successor is refused: `rotate` finishes it first. A snapshot that could not be read still lets
+row holding a stale successor is refused: `rotate` finishes it first. So is an `issue` over such a row: writing its
+pending row would drop a successor the slot may hold, a live key leaving the ledger untracked. The refusal says to
+run `rotate NAME` first; `revoke` is no way out today (OBS-119).
+
+A stale successor is retired only after a newer successor is delivered. Its spend is read again whenever the key
+still answers: `usage_snapshot` runs, the snapshot is written to the row, then the key is deleted. A snapshot kept
+on the row from an earlier run is used only when the key answers 404, since a live key may have spent since that
+snapshot was read. A false 404, or spend after a kept snapshot's `read_at` day, is not yet caught (OBS-136). A snapshot that could not be read still lets
 the delete proceed. The tombstone then says `usage: unread`, and the
 windows the key may have spent in are null.
 
