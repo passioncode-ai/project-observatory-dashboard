@@ -453,7 +453,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
-                      "update", "profile", "maintain", "auto-update"}
+                      "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -463,6 +463,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
   configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
   local                        filesystem → registry → events → findings → dashboard
+  track local-folder PATH      declare one exact Git checkout for the next local pass
+  untrack local-folder PATH    remove that declaration and keep SessionStart from restoring it
+  tracked                      list declared and removed local folders with any degradations
   dashboard                    rebuild the dashboard pages only
   open [--serve|--stop]        open the dashboard in a browser (builds it if needed); stop the server
   agent install|status|uninstall  Claude Code plugin; install turns auto-update on
