@@ -1115,7 +1115,7 @@ class FixCycle4(Fixture):
         text = json.dumps(out)
         self.assertNotIn("SECRETF", text)
         self.assertEqual([r["id"] for r in out["agents"]], ["agent:alpha-agent.default"])
-        self.assertEqual(sum(1 for d in out["degraded"] if d["reason"] == "a file name shaped like a URL — not read"), 2)
+        self.assertEqual(sum(1 for d in out["degraded"] if d["reason"] == "a file name shaped like a URL; not read"), 2)
         self.assertEqual(scan_agents.problems(out), [])
 
     def test_unusable_rewrites_the_previous_document_once(self):

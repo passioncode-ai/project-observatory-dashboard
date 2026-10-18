@@ -431,7 +431,7 @@ def _manifest(declared, degraded: list, agent_id: str) -> dict:
             raise Refused("not a JSON object")
     except (OSError, ValueError, Refused) as exc:
         degraded.append({"source": "fabric-manifest", "agent": agent_id,
-                         "reason": _text(f"{shown}: {_why(exc)} — the contract pins of "
+                         "reason": _text(f"{shown}: {_why(exc)}; the contract pins of "
                                          f"{agent_id} were not read", "problem")})
         return {"state": "unreadable", "path": shown}
     provider = doc.get("provider") if isinstance(doc.get("provider"), dict) else {}
@@ -504,13 +504,13 @@ def _row(path: pathlib.Path, doc: dict, launchd: dict | None, launchd_state: str
     origin, origin_keyed, origin_refused = _strict_field(doc.get("origin"), ORIGIN_SCHEMES)
     if origin_refused:
         degraded.append({"source": "fabric-services", "agent": agent_id,
-                         "reason": "origin unreadable — not a strict scheme://host[:port] URL; nothing of it "
+                         "reason": "origin unreadable; not a strict scheme://host[:port] URL; nothing of it "
                                    "is kept"})
     source = doc.get("source") if isinstance(doc.get("source"), dict) else {}
     repository, repo_keyed, repo_refused = _strict_field(source.get("repository"), REPOSITORY_SCHEMES)
     if repo_refused:
         degraded.append({"source": "fabric-services", "agent": agent_id,
-                         "reason": "source repository unreadable — not a strict scheme://host[:port]/path "
+                         "reason": "source repository unreadable; not a strict scheme://host[:port]/path "
                                    "URL; nothing of it is kept"})
     commands = doc.get("commands") if isinstance(doc.get("commands"), dict) else {}
     return {"id": agent_id, "service_id": service_id, "instance": instance,
@@ -542,13 +542,13 @@ def _descriptor_files(directory: pathlib.Path, degraded: list) -> list[pathlib.P
             path.name.encode("utf-8")
         except UnicodeEncodeError:
             degraded.append({"source": "fabric-services",
-                             "reason": _text(f"{_clean(path.name)}: a file name that is not UTF-8 — "
+                             "reason": _text(f"{_clean(path.name)}: a file name that is not UTF-8; "
                                              f"not read", "problem")})
             continue
         if _fix(path.stem) != path.stem or _suspect(path.stem):
             # Its id would carry the name, and the name may carry a credential; no hash of it either.
             degraded.append({"source": "fabric-services",
-                             "reason": "a file name shaped like a URL — not read"})
+                             "reason": "a file name shaped like a URL; not read"})
             continue
         if path.is_symlink():
             try:
@@ -558,7 +558,7 @@ def _descriptor_files(directory: pathlib.Path, degraded: list) -> list[pathlib.P
             if target is None or root not in target.parents:
                 degraded.append({"source": "fabric-services",
                                  "reason": _text(f"{path.name}: a link that does not resolve inside the "
-                                                 f"services directory — not followed", "problem")})
+                                                 f"services directory; not followed", "problem")})
                 continue
         out.append(path)
     return out
@@ -595,7 +595,7 @@ def collect(directory: pathlib.Path, *, launchd: dict | None = None, platform: s
                 raise Refused("not a JSON object")
         except (OSError, ValueError, Refused) as exc:
             degraded.append({"source": "fabric-services",
-                             "reason": _text(f"{path.name}: {_why(exc)} — this descriptor's agent is "
+                             "reason": _text(f"{path.name}: {_why(exc)}; this descriptor's agent is "
                                              f"not listed", "problem")})
             continue
         docs.append((path, doc))
@@ -629,13 +629,13 @@ def collect(directory: pathlib.Path, *, launchd: dict | None = None, platform: s
             row = _row(path, doc, launchd, launchd_state, degraded)
         except Exception as exc:                                    # noqa: BLE001 — one descriptor
             degraded.append({"source": "fabric-services",
-                             "reason": _text(f"{path.name}: {type(exc).__name__} while reading it — "
+                             "reason": _text(f"{path.name}: {type(exc).__name__} while reading it; "
                                              f"this descriptor's agent is not listed", "problem")})
             continue
         if row["id"] in seen:
             degraded.append({"source": "fabric-services",
                              "reason": _text(f"{path.name}: claims {row['id']}, which an earlier "
-                                             f"descriptor already claims — not listed twice", "problem")})
+                                             f"descriptor already claims; not listed twice", "problem")})
             continue
         seen.add(row["id"])
         rows.append(row)
