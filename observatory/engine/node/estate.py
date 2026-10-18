@@ -354,6 +354,16 @@ def package_digest(pkg: dict) -> str:
     return 'sha256:' + hashlib.sha256(jcs.rfc8785(covered).encode('utf-8')).hexdigest()
 
 
+def _same_value(a: Any, b: Any) -> bool:
+    """JavaScript's SameValueZero over parsed JSON: strings, numbers, booleans and null by value (a boolean is never a
+    number), an object or array never equal to anything (each is a distinct value)."""
+    if isinstance(a, (dict, list)) or isinstance(b, (dict, list)):
+        return False
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    return a == b
+
+
 def installation_findings(value: dict) -> list:
     """What a machine checks before it installs a package (`estate-placement`: `{record, machine, package[, context]}`):
     the machine is in the record, the package is the one its digest names and the record places it on this machine in
@@ -384,11 +394,12 @@ def installation_findings(value: dict) -> list:
     elif placement.get('digest') != digest:
         flag074('/package', f"the record places {_show(placement.get('digest'))} of this agent on this machine in this "
                             'context, not this package')
-    declared = {slot.get('name') for slot in _list(pkg.get('secrets'))}
+    # The reference's `Set.has`: a name matches by value; an object or array matches nothing, never raises.
+    declared = [slot.get('name') for slot in _list(pkg.get('secrets'))]
     flag075 = _flagger(findings, 'FAC-SEM-075')
     for secret, index in _indexed(machine.get('secrets')):
         if secret.get('agentRef') == pkg.get('agentRef') and _context_of(secret) == context \
-                and secret.get('slot') not in declared:
+                and not any(_same_value(secret.get('slot'), name) for name in declared):
             flag075(f'/record/machines/{machine_index}/secrets/{index}/slot',
                     f"the package declares no slot {_show(secret.get('slot'))}: a secret goes only where a placed "
                     'package declares it')

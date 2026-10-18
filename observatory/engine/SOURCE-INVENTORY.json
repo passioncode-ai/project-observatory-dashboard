@@ -1986,8 +1986,8 @@
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c465161ee31598c039a98fd1d7434eee3b30db2e355a89907b60e09d907b8170",
-      "bytes": 33094
+      "export_sha256": "744a3c5b63b05e4bef97d6364d07034753cda45e119036dd61a945b362d84f6c",
+      "bytes": 33686
     },
     {
       "path": "node/identifiers.py",
@@ -2042,8 +2042,8 @@
       "path": "node/webauthn.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "74c75c77bfa71006a44a8bd63691e5830933b80e4832c97ea1492fc5843fb76e",
-      "bytes": 12839
+      "export_sha256": "d8f2722e566ad293e74a8a2dec98ac6a5bafc275a1d5475e687d5f1e30f96338",
+      "bytes": 13342
     },
     {
       "path": "node/ws.py",
@@ -3844,8 +3844,8 @@
       "path": "tests/test_node_pairing.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ab454f9a413d62e0b2b0e21b2d4cffa0c20f2018cb61318ff988219f8616a336",
-      "bytes": 15191
+      "export_sha256": "eaaa7c8479ef0f1f65ac9bcf267ca5e71235d388e571187751bcfdb47cc641f9",
+      "bytes": 17647
     },
     {
       "path": "tests/test_node_revocation.py",

@@ -332,6 +332,10 @@ Three changes follow on the relay side:
 - the secret envelope's open context takes the revocation-delta entries like the record's own (`extra_revocations`),
   which closes OBS-118.
 
+An enroll token is a bearer until its first use: whoever holds it first joins as the machine it names. The surface that
+runs the ceremony therefore shows the key fingerprint the token binds before the passkey signs it, and treats a
+`reused` redemption as an alarm, never as a retry.
+
 **Before installing a package** (`installation_findings`, the contract's `estate-placement` kind), a machine checks
 that it is in the record, that the package is the one its digest names, that the record places that package on this
 machine in this context (FAC-SEM-074), that every secret of the agent fills a slot the package declares (FAC-SEM-075),
