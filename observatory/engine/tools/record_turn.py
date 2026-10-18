@@ -310,6 +310,8 @@ ANCHOR_CHARS = 120
 LINK_HEADING_CHARS = ANCHOR_CHARS
 #: The longest raw heading or ledger line, in bytes, that may be linked.
 LINK_LINE_BYTES = 1024
+#: The fields a rationale link stores and a carry re-checks (`_link_fields`).
+LINK_KEYS = ("anchor", "line", "level", "length", "digest", "appendable")
 #: An untracked or ignored ledger or register is read whole, so it is read bounded.
 READ_LIMIT = 256 * 1024
 #: The largest register a carried link is re-checked against, read whole.
@@ -654,7 +656,7 @@ def _fence(line: str) -> tuple[str, int, bool] | None:
     return ch, j - i, bool(info)
 
 
-def _headings(lines: list[str]) -> list[tuple[int, str, int]]:
+def _headings(lines: list[str], deadline: float | None = None) -> list[tuple[int, str, int]]:
     """(level, text, line index) of every ATX heading a Markdown reader would see.
 
     Used only to CHOOSE the anchor of a fresh link; a carried link is checked by
@@ -667,6 +669,8 @@ def _headings(lines: list[str]) -> list[tuple[int, str, int]]:
     fence: tuple[str, int] | None = None
     in_comment = False
     for index, line in enumerate(lines):
+        if deadline is not None and index % 4096 == 0:
+            _check(deadline)
         if fence is not None:
             f = _fence(line)
             if f and f[0] == fence[0] and f[1] >= fence[1] and not f[2]:
@@ -708,54 +712,72 @@ def _entry_heading(added: list[str]) -> str | None:
     return entries[-1]
 
 
-def _raw_level(raw: bytes) -> int:
-    """The `#` count of a raw heading line (up to three spaces of indent), else 0."""
-    i = 0
-    while i < len(raw) and i < 4 and raw[i:i + 1] == b" ":
-        i += 1
-    j = i
-    while j < len(raw) and raw[j:j + 1] == b"#":
-        j += 1
-    level = j - i
-    if i > 3 or not 1 <= level <= 6 or (j < len(raw) and raw[j:j + 1] not in b" \t\r"):
-        return 0
-    return level
+def _closed_at_end(text: list[str], deadline: float | None = None) -> bool:
+    """True when the file ends outside any fenced code block and HTML comment, the
+    same states `_headings` tracks. A link to a file that ends inside one is carried
+    only while the file is byte-identical: an append could not be told apart from
+    more of the open block."""
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    for index, line in enumerate(text):
+        if deadline is not None and index % 4096 == 0:
+            _check(deadline)
+        if fence is not None:
+            f = _fence(line)
+            if f and f[0] == fence[0] and f[1] >= fence[1] and not f[2]:
+                fence = None
+            continue
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        stripped = line.lstrip(" ")
+        if len(line) - len(stripped) <= 3 and stripped.startswith("<!--"):
+            in_comment = "-->" not in stripped[4:]
+            continue
+        f = _fence(line)
+        if f:
+            fence = (f[0], f[1])
+    return fence is None and not in_comment
 
 
-def _entry_digest(lines: list[bytes], index: int) -> str:
-    """sha256 of the register's bytes from the start of the file to the end of the
-    entry at `index`: up to, not including, the next line that starts at column 0
-    with no more `#` than the entry's own heading (or the end of the file). A ledger
-    line (no heading) ends at itself.
-
-    From the START of the file, not the heading: an unclosed fence, a comment or a
-    list item opened above the entry would hide it without touching the entry's own
-    bytes. Appending later entries never changes it; any other edit does, and asks."""
-    level = _raw_level(lines[index])
-    end = index + 1
-    if level:
-        while end < len(lines):
-            k = _raw_level(lines[end])
-            if k and k <= level and lines[end][:1] == b"#":
-                break
-            end += 1
-    return hashlib.sha256(b"\n".join(lines[:end])).hexdigest()
-
-
-def _link_fields(lines: list[bytes], index: int) -> dict | None:
-    """`{line, digest}` for a link to `lines[index]`, or None when it cannot be linked
-    (longer than LINK_LINE_BYTES, or not UTF-8)."""
-    raw = lines[index]
-    if len(raw) > LINK_LINE_BYTES:
+def _link_fields(data: bytes, raw: list[bytes], text: list[str], index: int, level: int,
+                 deadline: float | None = None) -> dict | None:
+    """The fields a link is checked by on every later turn, for the line at `index`
+    of a file whose bytes are `data`: the raw line (at most LINK_LINE_BYTES, UTF-8),
+    the entry's heading level (0 for a ledger line), and the length and SHA-256 of
+    the WHOLE file, plus whether a later entry may be appended (the file ends in a
+    newline, outside any fence and comment, and the entry is a heading). No Markdown
+    boundary is guessed: `_link_holds` compares bytes."""
+    line = raw[index]
+    if len(line) > LINK_LINE_BYTES:
         return None
     try:
-        text = raw.decode("utf-8")
+        decoded = line.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    return {"line": text, "digest": _entry_digest(lines, index)}
+    if deadline is not None:
+        _check(deadline)
+    appendable = bool(level) and data.endswith(b"\n") and _closed_at_end(text, deadline)
+    if deadline is not None:
+        _check(deadline)
+    return {"line": decoded, "level": level, "length": len(data),
+            "digest": hashlib.sha256(data).hexdigest(), "appendable": appendable}
 
 
-def _heading_link(top: pathlib.Path, rel: str, anchor: str) -> dict | None:
+def _split(data: bytes, deadline: float | None) -> tuple[list[bytes], list[str]]:
+    raw = data.split(b"\n")
+    if deadline is not None:
+        _check(deadline)
+    text = [l.decode("utf-8", errors="replace") for l in raw]
+    text = [t[:-1] if t.endswith("\r") else t for t in text]
+    if deadline is not None:
+        _check(deadline)
+    return raw, text
+
+
+def _heading_link(top: pathlib.Path, rel: str, anchor: str,
+                  deadline: float | None = None) -> dict | None:
     """The link fields for the register heading that reads `anchor`, when exactly one
     heading a Markdown reader would see reads it and the heading is short enough to
     link. None otherwise: the turn is asked about."""
@@ -764,36 +786,59 @@ def _heading_link(top: pathlib.Path, rel: str, anchor: str) -> dict | None:
     data = _read_register(top, rel, CARRY_READ_LIMIT)
     if data is None:
         return None
-    raw = data.split(b"\n")
-    text = [l.decode("utf-8", errors="replace") for l in raw]
-    text = [t[:-1] if t.endswith("\r") else t for t in text]
-    hits = [index for _, heading, index in _headings(text) if heading == anchor]
-    return _link_fields(raw, hits[0]) if len(hits) == 1 else None
+    raw, text = _split(data, deadline)
+    hits = [(level, index) for level, heading, index in _headings(text, deadline) if heading == anchor]
+    if len(hits) != 1:
+        return None
+    return _link_fields(data, raw, text, hits[0][1], hits[0][0], deadline)
 
 
-def _ledger_link(top: pathlib.Path, line: str) -> dict | None:
+def _ledger_link(top: pathlib.Path, line: str, deadline: float | None = None) -> dict | None:
     """The link fields for the run-ledger line `line`, when it occurs exactly once."""
     data = _read_register(top, RUN_LEDGER, CARRY_READ_LIMIT)
     if data is None:
         return None
-    raw = data.split(b"\n")
+    raw, text = _split(data, deadline)
     want = line.encode("utf-8")
     hits = [i for i, l in enumerate(raw) if l == want or l == want + b"\r"]
-    return _link_fields(raw, hits[0]) if len(hits) == 1 else None
+    return _link_fields(data, raw, text, hits[0], 0, deadline) if len(hits) == 1 else None
 
 
-def _link_holds(top: pathlib.Path, rel: str, line: str, digest: str) -> bool:
-    """A carried link is still true: by BYTES, no Markdown. The register passes the
-    gate, the stored raw line occurs exactly once as a whole line, and the digest of
-    the file up to the end of that entry (`_entry_digest`) is unchanged. Any edit
-    above or inside the entry asks again; appending a later entry does not."""
+def _appended_entry(rest: bytes, level: int) -> bool:
+    """`rest` (what follows the linked file's bytes) starts, at its first non-blank
+    line, with a column-0 ATX heading of `level` or shallower: a new entry."""
+    for line in rest.split(b"\n"):
+        if not line.strip():
+            continue
+        if not line.startswith(b"#"):
+            return False
+        h = _atx(line.decode("utf-8", errors="replace").rstrip("\r"))
+        return bool(h and h[1]) and h[0] <= level
+    return True
+
+
+def _link_holds(top: pathlib.Path, rel: str, link: dict) -> bool:
+    """A carried link is still true, by BYTES and without guessing where an entry ends.
+
+    The register passes the gate, its stored raw line occurs exactly once as a whole
+    line, and either the file is byte-identical to the linked one, or its first
+    `length` bytes are (same SHA-256) and what follows starts, at its first non-blank
+    line, with a column-0 heading no deeper than the entry's own: a new entry
+    appended after it, allowed only when the linked file ended in a newline outside
+    any fence and comment. Any other change asks again."""
+    length, digest, line = link.get("length"), link.get("digest"), link.get("line")
+    level = link.get("level") if isinstance(link.get("level"), int) else 0
     data = _read_register(top, rel, CARRY_READ_LIMIT)
-    if data is None:
+    if data is None or not isinstance(length, int) or len(data) < length:
         return False
-    raw = data.split(b"\n")
     want = line.encode("utf-8")
-    hits = [i for i, l in enumerate(raw) if l == want]
-    return len(hits) == 1 and hmac.compare_digest(_entry_digest(raw, hits[0]), digest)
+    if sum(1 for l in data.split(b"\n") if l == want) != 1:
+        return False
+    if not hmac.compare_digest(hashlib.sha256(data[:length]).hexdigest(), digest):
+        return False
+    if len(data) == length:
+        return True
+    return bool(link.get("appendable")) and _appended_entry(data[length:], level)
 
 
 def _register_written(added: list[str], text: str) -> bool:
@@ -871,9 +916,10 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
                 continue                    # no heading: nothing a link can hold to
             # The entry is in the register NOW, once, as a heading, and short enough
             # to link; the link stores its raw line and the digest a carry re-checks.
-            fields = _heading_link(top, rel, anchor)
+            fields = _heading_link(top, rel, anchor, deadline)
             if fields is None:
                 continue
+            _check(deadline)
             return {"source": "decision-register", "ref": rel, "anchor": anchor, **fields}
         ledger_text = "\n".join(c["text"] for c in calls if c["ledger"])
         if ledger_text and ledger_file is not None:
@@ -891,9 +937,10 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
                     break
                 said = m.group(1).strip()
                 if len(said) >= MIN_NEEDLE and said in ledger_text:
-                    fields = _ledger_link(top, line)
+                    fields = _ledger_link(top, line, deadline)
                     if fields is None:
                         return None
+                    _check(deadline)
                     return {"source": "task-pipeline", "ref": RUN_LEDGER,
                             "anchor": line.strip()[:ANCHOR_CHARS], **fields}
     except _OutOfTime:
@@ -904,13 +951,15 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
 
 
 def _dropped_since(prior, repo_id: str, top: pathlib.Path, held: list[dict]) -> int:
-    """The transcript offset after which a FRESH attribution may look, when a link of
-    the record's latest revision no longer holds: the offset stored with that link.
+    """The transcript offset after which a FRESH attribution may look: the highest of
+    the offsets stored with links of the latest revision that no longer hold, and of
+    the `rationale-dropped` marks earlier revisions carried forward.
 
     Without this a dropped link came straight back: the session's old write of the
     entry is still in its transcript, so a fresh attribution re-linked an entry that
-    another writer has since withdrawn, wrapped or moved. After a drop only writes
-    the session made after the link count."""
+    another writer has since withdrawn, wrapped or moved. The mark is written forward
+    on every later revision (see `main`), so it holds for every turn after the drop,
+    not only the next one."""
     if prior is None:
         return 0
     try:
@@ -919,7 +968,10 @@ def _dropped_since(prior, repo_id: str, top: pathlib.Path, held: list[dict]) -> 
         return 0
     at = 0
     for e in ev if isinstance(ev, list) else ():
-        if isinstance(e, dict) and e.get("kind") == "rationale" and e not in held:
+        if not isinstance(e, dict):
+            continue
+        kind = e.get("kind")
+        if (kind == "rationale" and e not in held) or kind == "rationale-dropped":
             v = e.get("transcript_at")
             at = max(at, v if isinstance(v, int) and v >= 0 else 1 << 62)
     return at
@@ -931,7 +983,7 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
     A link is carried only when this hook wrote it — the revision's provenance is
     `observatory-log/Stop` with a `rationale` key, so a link another writer put in
     the evidence is never carried — when it names this repository, and when its
-    raw line and digest still hold by bytes (`_link_holds`). A register deleted, reverted, checked out or
+    whole-file bytes still hold (`_link_holds`). A register deleted, reverted, checked out or
     rewritten, or a session that moved to another repository, drops the link, and
     the turn is attributed afresh (and asked about when that finds nothing).
     """
@@ -950,12 +1002,13 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
         if not isinstance(e, dict) or e.get("kind") != "rationale" or e.get("repo") != repo_id:
             continue
         uri, line, digest = str(e.get("uri") or ""), e.get("line"), e.get("digest")
-        # A link without its raw line and digest (written before this check existed)
-        # is not carried: the turn is attributed afresh.
+        # A link without its raw line, whole-file length and digest (written before
+        # this check existed) is not carried: the turn is attributed afresh.
         if not uri.startswith("file:") or not isinstance(line, str) or not line \
-                or not isinstance(digest, str) or len(digest) != 64:
+                or not isinstance(digest, str) or len(digest) != 64 \
+                or not isinstance(e.get("length"), int):
             continue
-        if _link_holds(top, uri[len("file:"):], line, digest):
+        if _link_holds(top, uri[len("file:"):], e):
             out.append(e)
     return out
 
@@ -1101,6 +1154,11 @@ def main() -> int:
         # record stays explained — after the register is committed and pushed, and
         # after the write scrolls out of the transcript's tail.
         carried = _rationale_links(prior, repo_id, pathlib.Path(top or cwd))
+        # THE DROP IS REMEMBERED: the high-water mark goes into this revision too, so
+        # the next turn still refuses to re-link from writes made before the drop.
+        since = _dropped_since(prior, repo_id, pathlib.Path(top or cwd), carried)
+        if since:
+            evidence = evidence + [{"kind": "rationale-dropped", "transcript_at": since}]
         base_evidence = list(evidence)
         if carried:
             evidence = evidence + [e for e in carried if e not in evidence]
@@ -1139,16 +1197,16 @@ def main() -> int:
             or (pathlib.Path(top or cwd) / RUN_LEDGER).is_file()
         if not has_why and (not carried or touched_register):
             rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
-                                     time.monotonic() + ATTRIBUTION_SECONDS,
-                                     _dropped_since(prior, repo_id, pathlib.Path(top or cwd), carried))
+                                     time.monotonic() + ATTRIBUTION_SECONDS, since)
         if rationale is not None and carried and any(
                 c["uri"] == f"file:{rationale['ref']}" and c.get("line") == rationale.get("line")
-                and c.get("digest") == rationale.get("digest") for c in carried):
+                and c.get("digest") == rationale.get("digest")
+                and c.get("length") == rationale.get("length") for c in carried):
             rationale = None          # the same link, found again: carried, no new revision
         if rationale is None and carried:
             first = carried[-1]
             rationale = {"source": "carried", "ref": first["uri"][len("file:"):],
-                         **{k: first[k] for k in ("anchor", "line", "digest") if first.get(k)}}
+                         **{k: first[k] for k in LINK_KEYS if k in first}}
             # (`transcript_at` stays in the carried evidence entry itself.)
         # The follow-up revision only when the link is NEW: a carried link is already
         # in the revision just written, so a changed turn adds one revision, not two.
@@ -1164,8 +1222,8 @@ def main() -> int:
                     evidence=base_evidence + [{"uri": f"file:{rationale['ref']}", "kind": "rationale",
                                                "repo": repo_id,
                                                "transcript_at": _transcript_size(args.transcript),
-                                               **{k: rationale[k] for k in ("anchor", "line", "digest")
-                                                  if rationale.get(k)}}],
+                                               **{k: rationale[k] for k in LINK_KEYS
+                                                  if k in rationale}}],
                     provenance=[{"source": "observatory-log/Stop", "measured": True,
                                  "rationale": rationale["source"],
                                  **({"continues": continues} if continues else {})}])

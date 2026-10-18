@@ -874,6 +874,70 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
         self.assertEqual(len(fx.journal()), 1)
 
+    # ---- round 10: no Markdown boundary is guessed; the whole file is compared
+
+    def fenced_fixture(self, inner: str) -> Fixture:
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(self.MADR, encoding="utf-8")
+        fx.commit_all("register")
+        add = ("\n## DEC-0002 measure delivered asks\n\nSet it up:\n\n" + inner +
+               "\nThen the body that matters.\n")
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write(add)
+        fx.wrote(add)
+        self.linked(fx)
+        return fx
+
+    def test_an_edit_below_a_hash_line_in_a_sh_fence(self):
+        fx = self.fenced_fixture("```sh\n# install the hook\nmake install\n```\n")
+        self.rewrite(fx, "Then the body that matters.", "Then the body that changed.")
+        self.asked_next(fx)
+
+    def test_an_edit_below_a_hash_line_in_a_python_fence(self):
+        fx = self.fenced_fixture("```python\n# the counter\nn = 0\n```\n")
+        self.rewrite(fx, "n = 0", "n = 1")
+        self.asked_next(fx)
+
+    def test_an_edit_below_a_hash_line_in_a_comment(self):
+        fx = self.fenced_fixture("<!--\n# reviewer note\nkeep this\n-->\n")
+        self.rewrite(fx, "Then the body that matters.", "Then the body that changed.")
+        self.asked_next(fx)
+
+    def test_an_append_without_a_heading_asks(self):
+        fx = self.madr_fixture()
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\nOne more paragraph added under DEC-0002 by someone else.\n")
+        self.asked_next(fx)
+
+    def test_an_append_of_a_deeper_heading_asks(self):
+        fx = self.madr_fixture()
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n### Amendment\n\nChanges DEC-0002.\n")
+        self.asked_next(fx)
+
+    def test_an_edit_to_another_entry_above_asks(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "One store.", "Two stores.")
+        self.asked_next(fx)
+
+    def test_an_append_after_an_unclosed_fence_is_not_carried(self):
+        fx = self.fenced_fixture("```sh\n# install the hook\n")
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n## DEC-0003 later\n\nWhy.\n")
+        self.asked_next(fx)
+
+    def test_a_drop_is_remembered_for_every_later_turn(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "Delivered only.", "Delivered only, edited by another writer.")
+        for name in ("one.py", "two.py", "three.py"):
+            fx.change(name)
+            fx.stop()
+            self.assertIsNone(fx.receipt().get("rationale"), (name, fx.receipt().get("rationale")))
+        ev = json.loads(fx.ledger("SELECT evidence_json FROM ledger WHERE kind='session'"
+                                  " ORDER BY revision DESC")[0][0])
+        self.assertTrue([e for e in ev if e.get("kind") == "rationale-dropped"], ev)
+
     def test_a_link_still_true_is_carried(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -1259,6 +1323,28 @@ class WithinTheBudget(unittest.TestCase):
         self.assertEqual(record_turn._atx("#nospace"), None)
         self.assertEqual(record_turn._atx("\t## tabbed"), None)
         self.assertEqual(record_turn._atx("   ### three spaces"), (3, "three spaces"))
+
+    def test_a_register_too_large_to_scan_in_time_asks(self):
+        # 4M lines under the 8 MB read limit: scanning them takes longer than the
+        # 2 s budget, so the turn is asked about instead of being linked late.
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        head = "# Decisions\n\n## DEC-0001 big\n\n"
+        body = head + "a\n" * 4_000_000
+        self.assertLess(len(body), 8 << 20)
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.wrote(head, tool="Write")
+        took = fx.timed_stop(limit=60)
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt().get("rationale"))
+        self.assertEqual(len(fx.journal()), 1)
+        self.assertLess(took, self.LIMIT, f"the Stop took {took:.1f} s")
+
+    def test_the_heading_scan_honours_the_deadline(self):
+        import record_turn
+        with self.assertRaises(record_turn._OutOfTime):
+            record_turn._headings(["## x"] * 10, deadline=0.0)
+        with self.assertRaises(record_turn._OutOfTime):
+            record_turn._closed_at_end(["x"] * 10, deadline=0.0)
 
     def test_the_diff_timeout_never_exceeds_the_time_left(self):
         import record_turn

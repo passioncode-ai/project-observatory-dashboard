@@ -692,9 +692,8 @@ block a turn or a prompt:
   - the repository's id;
   - the register's path in the repository;
   - the exact raw heading line, at full length;
-  - a SHA-256 of the register's bytes from the start of the file to the end of
-    that entry. The entry ends at the next line that starts at column 0 with no
-    more `#` than its heading, or at the end of the file.
+  - the length and SHA-256 of the whole register file. No entry boundary is
+    guessed.
 
   A heading longer than 120 characters is never linked, and the turn is asked
   about.
@@ -704,15 +703,21 @@ block a turn or a prompt:
   - this hook wrote it;
   - it names the current repository;
   - the stored line occurs exactly once as a whole line of the file;
-  - the digest is unchanged.
+  - the file is byte-identical to the linked one, or its first bytes are (same
+    length and SHA-256) and what follows starts, at its first non-blank line, with
+    a column-0 heading no deeper than the entry's own. That append is accepted
+    only when the linked file ended in a newline outside any code fence and HTML
+    comment.
 
-  Appending a later entry keeps the link, so the record stays explained after the
-  register is committed and pushed and after the write scrolls out of the
-  transcript. Any other edit above or inside the entry drops it: a deleted,
-  reverted, wrapped, struck, commented, fenced, duplicated or retitled entry, a
-  one-character change, or a change of line endings. So does a session that moves
+  So appending a later entry keeps the link, and the record stays explained after
+  the register is committed and pushed and after the write scrolls out of the
+  transcript. Any other change to the file drops it, wherever it is: an edit to
+  this entry or to any other, a paragraph or a deeper heading appended, a change
+  of line endings, a `# comment` line inside a code block or HTML comment followed
+  by an edit below it. So does a session that moves
   to another repository. A dropped link is attributed afresh only from the
-  session's writes after that link was made, and the turn is asked about when
+  session's writes after that link was made (a mark of that point is carried in
+  every later revision, so it holds for every later turn), and the turn is asked about when
   there are none. A wrong ask is accepted; a wrong silence is not.
 
   Every read of a register or the run ledger, fresh or carried, passes one gate.
