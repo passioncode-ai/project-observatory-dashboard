@@ -16,6 +16,7 @@ A passkey signs only registered statements (`estate-revision/1`, ...) and only u
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
@@ -32,8 +33,20 @@ _SIGNING_RP = re.compile(rf'^sign(?:\.{_LABEL}){{2,}}$')
 _ORIGIN_HOST = re.compile(r'^https://([a-z0-9.-]{1,253})$')
 
 
+_B64URL_CHARS = frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_')
+
+
 def node_b64url(text: str) -> bytes:
-    """Base64url decoded as Node's `Buffer.from(text, "base64url")` decodes it: a dangling last character is dropped."""
+    """Base64url decoded as Node's `Buffer.from(text, "base64url")` decodes it: a dangling last character is dropped.
+    Total: text the standard decoder refuses keeps only its base64url characters, so the answer is bytes that never
+    re-encode to the text (a caller's canonical check refuses it), never an exception."""
+    try:
+        return _decode(text)
+    except (binascii.Error, ValueError):
+        return _decode(''.join(ch for ch in text if ch in _B64URL_CHARS))
+
+
+def _decode(text: str) -> bytes:
     if len(text) % 4 == 1:
         text = text[:-1]
     return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))

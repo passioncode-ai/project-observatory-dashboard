@@ -195,6 +195,15 @@ while the major version is 0, a minor release may change behaviour and says so h
   show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
   `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
 
+### Fixed
+
+- **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the
+  checkout a worktree's `.git` file points at (`worktree_main` in `store/raw/local.json`), and the merge folds a
+  remoteless worktree into its main checkout's project, named in that project's membership rules. With a remote the
+  repository pass already did this; a worktree whose main checkout was not scanned stays visible as its own project.
+  Found by the automatic project registration run's isolated cross-product scenario
+  (org-index `docs/runs/2026-10-17-automatic-project-registration/`).
+
 ### Documentation
 
 - **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what

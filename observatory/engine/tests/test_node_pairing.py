@@ -9,6 +9,7 @@ the vectors' published EdDSA test passkey (a test estate, never the real ceremon
 """
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import json
@@ -105,6 +106,44 @@ class SemanticFixtures(unittest.TestCase):
         value['digest'] = estate.estate_record_digest(value)
         codes = sorted({f['code'] for f in estate.estate_record_rules('estate-record', value)})
         self.assertEqual(codes, ['FAC-SEM-075'])
+
+    def test_a_slot_name_that_is_not_a_string(self):
+        """FAC-SEM-075 compares slot names as the reference's Set does: by value, an object never matching, and never
+        raising on a value JSON allows (a fetched package is untrusted)."""
+        base = json.loads((VECTORS / 'semantic' / 'estate-placement-ok.json').read_text(encoding='utf-8'))['input']
+        index = next(i for i, m in enumerate(base['record']['machines']) if m['id'] == base['machine'])
+        for odd in ({'n': 1}, ['x'], 7, True, None):
+            value = copy.deepcopy(base)
+            value['record']['machines'][index]['secrets'][0]['slot'] = odd
+            with self.subTest(odd=odd):
+                codes = {f['code'] for f in estate.estate_record_rules('estate-placement', value)}
+                self.assertIn('FAC-SEM-075', codes)
+        # A number declared and a number placed match by value, as in JavaScript; a boolean never matches a number.
+        self.assertTrue(estate._same_value(7, 7.0))
+        self.assertFalse(estate._same_value(True, 1))
+        self.assertFalse(estate._same_value({'a': 1}, {'a': 1}))
+
+    def test_json_equal_keeps_booleans_apart_from_numbers(self):
+        self.assertFalse(pairing.json_equal(True, 1))
+        self.assertFalse(pairing.json_equal({'a': False}, {'a': 0}))
+        self.assertFalse(pairing.json_equal([1, True], [1, 1]))
+        self.assertTrue(pairing.json_equal(1, 1.0))
+        self.assertTrue(pairing.json_equal({'a': [1, {'b': None}]}, {'a': [1, {'b': None}]}))
+
+    def test_a_padded_key_with_stray_bits_is_not_canonical(self):
+        key = {'kid': 'm-a#sig', 'use': 'sig', 'alg': 'es256',
+               'publicKey': 'BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU='}
+        alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+        last = key['publicKey'][-2]
+        stray = key['publicKey'][:-2] + alphabet[alphabet.index(last) + 1] + '='   # same bytes, a stray low bit set
+        self.assertEqual(base64.b64decode(stray), base64.b64decode(key['publicKey']))
+        self.assertIsNone(estate.device_key_fingerprint(dict(key, publicKey=stray)))
+
+    def test_node_b64url_is_total(self):
+        from node import webauthn
+        for text in ('abc!', 'a=b', 'AB=C', 'a b', '\u00e9\u00e9', '', '=='):
+            with self.subTest(text=text):
+                self.assertIsInstance(webauthn.node_b64url(text), bytes)
 
     def test_a_package_whose_digest_lies(self):
         """The package's own `digest` must be its digest, even when the record places the bytes it really has."""
