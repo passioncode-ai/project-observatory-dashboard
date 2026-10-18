@@ -3838,8 +3838,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "415f3e703e3f63a5e75cf54d4b7984ecadd9f0efdc052e2011c82086ee455dab",
-      "bytes": 146603
+      "export_sha256": "ed0cecfb707d3125ef8befc850811b53ec43cec6408baf304c4d2f57728ecaad",
+      "bytes": 146633
     },
     {
       "path": "tests/test_ssh_keys.py",
@@ -4631,8 +4631,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "e27fde736506e67be922c3831701da8b713edf2b7d853e21209b92886b97d828",
-      "bytes": 116851,
+      "export_sha256": "b7c8642eaa0feea4c417309de5b2f02b84787ef068b0a4eec36a8193eb236ee1",
+      "bytes": 116901,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
