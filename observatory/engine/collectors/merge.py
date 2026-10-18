@@ -8,6 +8,7 @@ import configuration
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import local_scan
 import scan_remotes
+import tracked
 import json, re, subprocess, sys
 from pathlib import Path
 SP=Path(sys.argv[1]) if len(sys.argv)>1 else paths.SCRATCH; V=paths.VAULT
@@ -480,7 +481,7 @@ _EXCL=json.load(open(paths.config_file('folder_exclusions.json')))
 EXCLUDED_PREFIXES=tuple(x["prefix"] for x in _EXCL["prefixes"])
 EXCLUDED_NAMES={x["name"] for x in _EXCL["names"]}
 for folder,l in local.items():
-    if folder.startswith(EXCLUDED_PREFIXES) or folder in EXCLUDED_NAMES: continue
+    if tracked.is_excluded(Path(folder), EXCLUDED_PREFIXES, EXCLUDED_NAMES): continue
     if l["is_git"] and nwo(l.get("remote")): continue                                
     # A remote this merge cannot key (a host other than GitHub or Bitbucket) is
     # still a remote: the history is published somewhere. Only a checkout with
@@ -492,7 +493,7 @@ for folder,l in local.items():
             if _remote else
             f"{folder}: git repository with no remote, local only"
             if l["is_git"] else f"{folder}: local folder, not a git repository")
-    projects["local:"+folder]={"key":identity.local_key(folder),"name":folder,"anchor":"local-folder",
+    projects["local:"+folder]={"key":identity.local_key(folder),"name":l.get("display_name") or folder,"anchor":"local-folder",
         "vault":None,"repos":[],"rules":[rule],"sites":[],
         # THE GIT FACTS TRAVEL TOO. `mtime` alone is not enough: it is `null`
         # for remoteless repositories the scan measured, so a project committed

@@ -158,7 +158,8 @@ def test_a_route_reaches_the_door_and_the_door_is_a_thing_that_exists():
             calls.append(("rotate", name))
             if name == "ghost":
                 raise LookupError("not in the ledger")
-            return {"name": name, "delivered_to": "vault:x/prod/K", "rotations": 2, "rotated_on": "2026-09-14"}
+            return {"name": name, "delivered_to": "vault:x/prod/K", "rotations": 2, "rotated_on": "2026-09-14",
+                    "replaced": True}
 
         def set_limit(self, label, limit, reset):
             calls.append(("limit", label, limit))

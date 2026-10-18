@@ -7,6 +7,55 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Each project's spend, this month and over the last 30 days** (J-11, OBS-93). The spend scan now reads every
+  key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
+  `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are
+  unchanged). `tools/spend.py project [PROJECT] [--json]` answers from that file without asking the provider
+  (`monthUsd`, `last30Usd`, `keys`, `retiredKeys`, `folders`, `through`, `partial`, `unread`, `fresh`). It is the
+  figure Fabric's launcher reads as a project's recent spend (contract DEC-0037).
+  - A key belongs to the project named in its ledger row's `project` field. Every name of one registered project
+    (its folders, its id, its name) is one bucket keyed by its registry id, so any of them answers the whole project.
+  - **A retired key keeps its spend with its project** (OBS-103). The provider keeps no history of a deleted key
+    (`GET /activity?api_key_hash=` and `GET /keys/{hash}` answer 404, measured 2026-10-15). So `openrouter.py
+    revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone in the ledger's `retired` list,
+    kept 62 days. It holds the name, account, hash, project, day and `deleted`, and the key's spend by day: the
+    activity report, then the key's own row as the last read before the DELETE.
+    - The snapshot is trusted whole only when every clause holds: the month's and the week's (from Monday) days
+      plus `usage_daily` equal the key's `usage_monthly` and `usage_weekly` within $0.0001, and each of the last
+      three completed days falls in the month or week checked, or was reached by the report. A two-day lag on the
+      Tuesday a month begins, and Monday the 1st before the report reaches yesterday, do not reconcile.
+    - Otherwise every window holding a day after its last activity day, through the retirement day, reads null.
+      The month window stays null until the month ends. The counter difference is not booked for the gap.
+    - It is written to the ledger before the DELETE, so a failure after the DELETE keeps it for the retry. A
+      rotation's tombstone is written before the successor's rename.
+    - A `rotate` of a row a failure left part done finishes that rotation, then rotates afresh, so a rotate always
+      replaces the value (`--leaked` and the key page say "rotated" only then). A minted successor is written to the
+      row before its delivery, read by the scan, and deleted once a newer successor holds the slot.
+      A stale successor still alive is snapshotted again before its DELETE, never with a snapshot kept from an
+      earlier run; `issue` over a row holding one is refused until `rotate` finishes it. A predecessor
+      still live is snapshotted, deleted and retired; one already gone is retired with the snapshot kept before its
+      DELETE.
+    - A tombstone carries its row's untracked rotation and pending predecessor, from the one rule the scan uses
+      for live rows (`openrouter.untracked_through`), so a revoke never turns an honest null into a whole, lower
+      figure.
+    - `issue` over a row whose key is gone at the provider keeps its hash as a tombstone, with the snapshot a failed
+      revoke kept. Over a key still live under another name it is refused.
+    - A snapshot that cannot be read still lets the delete proceed; that key's windows are then null.
+  - **Every door verb that writes the OpenRouter ledger holds one lock** (the one `issue-for-policy` held), across
+    processes and threads. Two rotations at once used to drop one rotation's successor from the ledger. A second
+    operation waits up to 150 s (a rotation's delivery can take a minute), and its refusal names the wait and every
+    locked verb. The key server answers each request on its own thread, so a request waiting for the lock does not
+    hold the page. A `retired` that is not a list is refused before any door acts.
+  - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
+    and an account's spend on hashes no ledger row or tombstone holds.
+  - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers
+    a key the provider would not answer for or answered with malformed rows, a pending row, a tombstone without a
+    usage snapshot, a hash two ledger entries hold, a rotation made before tombstones existed, and the keys not reached when the step's deadline
+    (`OBSERVATORY_STEP_DEADLINE`) arrives or the provider becomes unreachable. An unreadable registry, or a ledger
+    entry that is not an object, nulls every project. Both windows hold completed UTC days only.
+  - The top-level `partial` stays about the estate total; `attribution_partial` covers the projects, each `degraded`
+    entry carries its `scope`, and `spend.estate_month` names only the accounts not read.
+  - No finding fires yet. A project's limit is enforced once a recorded spend policy is readable (J-11F).
 - **The agent-network node's foundation** (OBS-107, RM-21). `observatory/engine/node/` holds what one machine
   signs to join a relay and to send a message or a blob, and how it checks what the relay delivers: RFC 8785,
   P-256 key validation, low-S ES256 and fabric-relay/0.1, ported from the contract kit and run over the contract's

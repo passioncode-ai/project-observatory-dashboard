@@ -170,7 +170,7 @@ there are no findings.
 
 ## Sources
 
-Nothing outside the workspace is read until you name it. Each source is a path set with
+Apart from an exact SessionStart declaration described below, nothing outside the workspace is read until you name it. Each source is a path set with
 `project-observatory full configure sources NAME PATH`; `full doctor` lists every enabled
 integration or feature whose source is unset, missing (a path deleted after it was configured)
 or of the wrong kind under `coverage_warnings`, because a collector without its source reports
@@ -193,6 +193,27 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `cloudflare_snapshot` | a JSON snapshot of your Cloudflare zones, kept as evidence | `validate` (snapshot parity; reported as degraded when unset) |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
+
+### Exact Git checkouts declared by SessionStart
+
+When a coding session opens an eligible Git repository or linked worktree outside
+the `projects` root, SessionStart resolves any existing registry identity first
+and writes only that checkout's absolute path to `config/tracked.json`. It does
+not widen `sources.projects` to the parent and never writes
+`registry/projects.json`. The next `full local` or scheduled tick reads the
+declaration and runs the ordinary `scan_folder` → `local.json` → merge → emit
+pipeline. Same-remote clones and worktrees keep the existing primary-checkout
+and `extra_checkouts` dedupe.
+
+Declarations are locked, atomic and idempotent. Folder exclusions still win;
+non-Git folders, a home or other broad parent, and an ambiguous existing
+identity are refused with a reason. `full untrack local-folder PATH` removes a
+declaration and leaves a removal marker that later SessionStart calls do not
+undo. An explicit `full track local-folder PATH` opts back in; `full tracked`
+lists active and removed declarations and degraded rows, and `full doctor`
+summarizes them under `tracked`. Missing or malformed declarations appear in
+`local.json` `degraded` without hiding the ordinary root scan. This observation
+grants no credential or memory binding and changes no organization ownership.
 
 The `mcp` integration reads the declarations from the agent configs under
 `mcp_config_root` — `~/.claude.json` (user and project scopes), `~/.cursor/mcp.json`,

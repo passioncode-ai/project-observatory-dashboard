@@ -156,6 +156,19 @@ the engine migration path accepts the original full-engine layout explicitly.
 
 Two local servers require different ports when used concurrently. Workspace
 labels prevent scheduler-job collisions; they do not allocate TCP ports.
+
+## Declared local folders
+
+`full track local-folder PATH` declares one exact Git checkout in
+`config/tracked.json`; `full untrack local-folder PATH` removes it and leaves a
+removal marker that SessionStart will not override, and `full tracked` lists
+both states and any degradation. These are workspace commands added without
+renaming an existing command or changing `sources.projects`. A declaration is
+not a registry edit: the next `full local` or tick measures it through the same
+filesystem scan, merge and emit pipeline as a root child. The portable 0.1
+`core.discover` remains a preview with no registration side effect, and proposal
+review authority is unchanged.
+
 ## Step arguments and help
 
 Individual engine step commands have fixed arguments; undeclared arguments are

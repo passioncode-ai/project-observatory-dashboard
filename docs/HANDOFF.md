@@ -17,6 +17,14 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-17 — Automatic project registration](runs/2026-10-17-automatic-project-registration/README.md):
+SessionStart declares an eligible external Git checkout in `config/tracked.json`;
+the ordinary local/tick pipeline materializes it. Removal markers, exclusions,
+worktree dedupe, degraded inputs and identity ambiguity are preserved. Root tests
+(214, two clean runs) and all 249 complete-engine suites pass; the three external
+acceptance scopes remain explicitly unrun. Next: cross-repository integration.
+No credential/memory grant or organization change.
+
 [2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
 OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
 OBS-87 adds independent memory observations. Next: combined source acceptance,

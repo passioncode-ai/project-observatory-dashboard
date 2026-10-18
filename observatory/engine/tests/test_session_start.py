@@ -36,10 +36,14 @@ def git(repo: pathlib.Path, *cmd: str) -> None:
 
 
 def planted() -> tuple[pathlib.Path, dict]:
-    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sstart-"))
-    data, reg, scratch, state = d / "projects", d / "registry", d / "scratch", d / "state"
-    for p in (data / "known-folder", data / "stray-folder", d / "outside" / "elsewhere", reg, scratch, state, d / "plain"):
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sstart-")).resolve()
+    data, reg, scratch, state, home = d / "projects", d / "registry", d / "scratch", d / "state", d / "home"
+    for p in (data / "known-folder", data / "stray-folder", d / "outside" / "elsewhere", reg, scratch, state, d / "plain", home / "config"):
         p.mkdir(parents=True)
+    (home / "workspace.json").write_text(json.dumps({
+        "format_version": 1, "minimum_reader": "0.0.0", "minimum_writer": "0.0.0"}), encoding="utf-8")
+    (home / "config" / "settings.json").write_text(json.dumps({
+        "schema_version": 1, "sources": {"projects": str(data)}}), encoding="utf-8")
     for repo in (data / "known-folder", data / "stray-folder", d / "outside" / "elsewhere"):
         git(repo, "init", "-q"); (repo / "f").write_text("x"); git(repo, "add", "f"); git(repo, "commit", "-qm", "seed")
     git(d / "outside" / "elsewhere", "remote", "add", "origin", "git@github.com:Some-Org/elsewhere.git")
@@ -57,8 +61,8 @@ def planted() -> tuple[pathlib.Path, dict]:
     (reg / "env-inventory.json").write_text(json.dumps({"files": [
         {"path": "known-folder/.env", "project": "known-folder",
          "variables": [{"name": "DB_URL", "class": "secret"}, {"name": "PORT", "class": "config"}]}]}), encoding="utf-8")
-    env = {**os.environ, "OBSERVATORY_REGISTRY": str(reg), "OBSERVATORY_DATA": str(data),
-           "OBSERVATORY_SCRATCH": str(scratch), "OBSERVATORY_STATE": str(state)}
+    env = {**os.environ, "OBSERVATORY_HOME": str(home), "OBSERVATORY_REGISTRY": str(reg),
+           "OBSERVATORY_DATA": str(data), "OBSERVATORY_SCRATCH": str(scratch), "OBSERVATORY_STATE": str(state)}
     return d, env
 
 
@@ -98,17 +102,88 @@ def test_an_unknown_folder_inside_the_estate_is_said_and_remembered() -> None:
           and rows[0]["session_id"] == "s-stray", str(rows))
 
 
-def test_a_checkout_outside_the_estate_is_named_as_unobserved() -> None:
+def test_a_checkout_outside_the_estate_is_declared_once_and_reported_pending() -> None:
     d, env = planted()
-    p = run(env, d / "outside" / "elsewhere")
-    check("outside the projects folder: one line that says so, with the remote recorded",
-          p.returncode == 0 and len(p.stdout.strip().splitlines()) == 1
-          and "outside the configured projects folder" in p.stdout
-          and "does not scan it" in p.stdout, p.stdout)
+    registry_before = pathlib.Path(env["OBSERVATORY_REGISTRY"], "projects.json").read_bytes()
+    settings_before = pathlib.Path(env["OBSERVATORY_HOME"], "config", "settings.json").read_bytes()
+    first = run(env, d / "outside" / "elsewhere", "s-outside-1")
+    check("outside the projects folder: one line names the declaration and the ordinary local pass",
+          first.returncode == 0 and len(first.stdout.strip().splitlines()) == 1
+          and "outside the configured projects folder" in first.stdout
+          and "declared in config/tracked.json" in first.stdout
+          and "project-observatory full local" in first.stdout, first.stdout + first.stderr)
+    declarations = pathlib.Path(env["OBSERVATORY_HOME"], "config", "tracked.json")
+    doc = json.loads(declarations.read_text(encoding="utf-8"))
+    check("the narrow declaration names only the exact checkout and no grant or ownership",
+          [r["path"] for r in doc["local_folders"]] == [str((d / "outside" / "elsewhere").resolve())]
+          and all("organization" not in r and "credentials" not in r for r in doc["local_folders"]), str(doc))
+    before = declarations.read_bytes()
+    second = run(env, d / "outside" / "elsewhere", "s-outside-2")
+    check("re-entry is idempotent and says the declaration is pending",
+          second.returncode == 0 and "pending" in second.stdout and declarations.read_bytes() == before,
+          second.stdout + second.stderr)
+    check("SessionStart never writes the registry or sources.projects directly",
+          pathlib.Path(env["OBSERVATORY_REGISTRY"], "projects.json").read_bytes() == registry_before
+          and pathlib.Path(env["OBSERVATORY_HOME"], "config", "settings.json").read_bytes() == settings_before,
+          "registry or settings changed")
     seen = pathlib.Path(env["OBSERVATORY_SCRATCH"]) / "sessions-seen.jsonl"
     rows = [json.loads(l) for l in seen.read_text(encoding="utf-8").splitlines() if l.strip()]
-    check("the remote is kept as owner/name, never the full URL",
-          rows and rows[0]["remote"] == "Some-Org/elsewhere", str(rows))
+    check("the remote is kept as owner/name and the states as declared then pending",
+          [r["remote"] for r in rows] == ["Some-Org/elsewhere", "Some-Org/elsewhere"]
+          and [r["state"] for r in rows] == ["declared", "pending"], str(rows))
+
+
+def test_a_known_project_gains_a_checkout_declaration_without_changing_identity() -> None:
+    d, env = planted()
+    reg = pathlib.Path(env["OBSERVATORY_REGISTRY"])
+    (reg / "repositories.json").write_text(json.dumps({"repositories": [
+        {"id": "repository:Some-Org/elsewhere", "name_with_owner": "Some-Org/elsewhere"}]}), encoding="utf-8")
+    (reg / "relations.json").write_text(json.dumps({"relations": [
+        {"from": "project:known", "to": "repository:Some-Org/elsewhere", "type": "implemented_by"}]}), encoding="utf-8")
+    p = run(env, d / "outside" / "elsewhere")
+    check("the existing project identity wins and the new clone is only a checkout declaration",
+          p.returncode == 0 and p.stdout.startswith("observatory: known")
+          and "checkout declared" in p.stdout, p.stdout + p.stderr)
+    doc = json.loads(pathlib.Path(env["OBSERVATORY_HOME"], "config", "tracked.json").read_text(encoding="utf-8"))
+    check("the declaration does not mint a second project", len(doc["local_folders"]) == 1, str(doc))
+
+
+def test_a_removed_excluded_or_broad_checkout_is_not_automatically_redeclared() -> None:
+    d, env = planted()
+    external = (d / "outside" / "elsewhere").resolve()
+    declarations = pathlib.Path(env["OBSERVATORY_HOME"], "config", "tracked.json")
+    declarations.write_text(json.dumps({"schema_version": 1, "local_folders": [],
+        "dismissed_local_folders": [{"path": str(external), "removed_by": "operator"}]}), encoding="utf-8")
+    p = run(env, external)
+    check("a person's removal wins over SessionStart",
+          p.returncode == 0 and "not declared" in p.stdout and "removed" in p.stdout
+          and json.loads(declarations.read_text(encoding="utf-8"))["local_folders"] == [], p.stdout)
+    exclusions = pathlib.Path(env["OBSERVATORY_HOME"], "config", "folder_exclusions.json")
+    exclusions.write_text(json.dumps({"schema_version": 1, "prefixes": [],
+                                      "names": [{"name": "elsewhere", "why": "Synthetic exclusion"}]}), encoding="utf-8")
+    declarations.unlink()
+    p = run(env, external)
+    check("an exclusion is named and never rewritten as a declaration",
+          p.returncode == 0 and "not declared" in p.stdout and "excluded" in p.stdout
+          and not declarations.exists(), p.stdout)
+    git(pathlib.Path(env["OBSERVATORY_HOME"]), "init", "-q")
+    p = run(env, pathlib.Path(env["OBSERVATORY_HOME"]))
+    check("a broad home or workspace is refused rather than scanned",
+          p.returncode == 0 and "not declared" in p.stdout and not declarations.exists(), p.stdout)
+
+
+def test_an_ambiguous_identity_is_not_guessed_or_declared() -> None:
+    d, env = planted()
+    external = str((d / "outside" / "elsewhere").resolve())
+    pathlib.Path(env["OBSERVATORY_REGISTRY"], "projects.json").write_text(json.dumps({"projects": [
+        {"id": "project:one", "name": "one", "local_folders": [external]},
+        {"id": "project:two", "name": "two", "local_folders": [external]}]}), encoding="utf-8")
+    p = run(env, d / "outside" / "elsewhere")
+    check("two registered owners of one path are reported, never chosen by order",
+          p.returncode == 0 and "multiple registered projects" in p.stdout
+          and "project:one" in p.stdout and "project:two" in p.stdout, p.stdout)
+    check("ambiguity writes no declaration",
+          not pathlib.Path(env["OBSERVATORY_HOME"], "config", "tracked.json").exists(), "tracked.json exists")
 
 
 def test_silence_where_it_is_not_its_business() -> None:
@@ -141,9 +216,11 @@ def test_the_sightings_come_back_as_one_board_row_minus_what_a_tick_has_joined()
             {"at": at(2), "cwd": str(data / "still-stray"), "remote": None, "session_id": "b"},
             {"at": at(3), "cwd": str(data / "still-stray"), "remote": None, "session_id": "c"},
             {"at": at(1), "cwd": str(d / "elsewhere"), "remote": "Org/elsewhere", "session_id": "e"},
+            {"at": at(1), "cwd": str(d / "declared"), "state": "declared", "session_id": "d"},
+            {"at": at(1), "cwd": str(d / "registered"), "state": "pending", "session_id": "r"},
             {"at": at(40), "cwd": str(d / "ancient"), "remote": None, "session_id": "z"}]
     seen.write_text("".join(json.dumps(r) + "\n" for r in rows) + "not json\n", encoding="utf-8")
-    out = sf.findings(seen, {"joined-since"}, data, now)
+    out = sf.findings(seen, {"joined-since", str(d / "registered")}, data, now)
     check("one info row", len(out) == 1 and out[0]["severity"] == "info" and out[0]["type"] == "project.seen_unobserved", str(out))
     check("it counts the two folders still unknown — not the one a tick joined, not the one older than the window",
           out[0]["title"].startswith("2 folders ") and out[0]["title_args"]["n"] == 2, out[0]["title"])
@@ -151,7 +228,10 @@ def test_the_sightings_come_back_as_one_board_row_minus_what_a_tick_has_joined()
           out[0]["detail"].index("still-stray (2 sess.)") < out[0]["detail"].index("elsewhere (1 sess., Org/elsewhere)"),
           out[0]["detail"][:200])
     check("no sightings, no row", sf.findings(d / "missing.jsonl", set(), data, now) == [])
-    check("every sighting joined since: no row", sf.findings(seen, {"joined-since", "still-stray"}, data, now)[0]["title"].startswith("1 folder "))
+    check("every sighting joined since: no row",
+          sf.findings(seen, {"joined-since", "still-stray", str(d / "registered")}, data, now)[0]["title"].startswith("1 folder "))
+    check("the remedy is the declaration pipeline, never a broader sources.projects",
+          "sources.projects" not in out[0]["action"] and "untrack" in out[0]["action"], out[0]["action"])
     src = (ROOT / "tools/build_findings.py").read_text(encoding="utf-8")
     check("the board reads the sightings through session_findings", "import session_findings" in src and "sessions-seen.jsonl" in src)
 
@@ -172,7 +252,10 @@ if __name__ == "__main__":
     print("the line a session opens with — one, actionable, never a value\n")
     for fn in (test_a_known_project_gets_one_line_with_its_counts,
                test_an_unknown_folder_inside_the_estate_is_said_and_remembered,
-               test_a_checkout_outside_the_estate_is_named_as_unobserved,
+               test_a_checkout_outside_the_estate_is_declared_once_and_reported_pending,
+               test_a_known_project_gains_a_checkout_declaration_without_changing_identity,
+               test_a_removed_excluded_or_broad_checkout_is_not_automatically_redeclared,
+               test_an_ambiguous_identity_is_not_guessed_or_declared,
                test_silence_where_it_is_not_its_business,
                test_the_sightings_come_back_as_one_board_row_minus_what_a_tick_has_joined,
                test_the_hook_is_declared_and_its_doctrine_rewritten):
