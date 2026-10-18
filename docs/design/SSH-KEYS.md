@@ -4,7 +4,7 @@ Observatory names every provider credential and never shows its value
 ([AGENT-SECRETS.md](AGENT-SECRETS.md)). The machine's SSH keys are the same kind of thing and were
 invisible to it: `~/.ssh` holds pairs nobody inventoried, nobody knew which one GitHub or a server
 accepts, which one has a passphrase, and making a key, copying its public line and adding it
-somewhere took several commands — the moment a private key gets pasted into the wrong window.
+somewhere took several commands, and that is the moment a private key gets pasted into the wrong window.
 
 This page specifies one door for them. The scenarios are OSS-62–67 in
 [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md#ssh-keys-on-this-machine-pb-163-obs-110).
@@ -20,8 +20,8 @@ for the OpenSSH format the fields that come before the private section (the ciph
 public key, which the format stores in clear). The private section is never read, and nothing read
 from the file is printed, saved, logged, copied, sent or placed in an argument. Everything
 the door shows, copies or sends is the public line from `NAME.pub`, after it parsed as exactly one
-public key. A `.pub` file that holds anything else — a private key saved under the wrong name, two
-keys, a header — is refused, and its content is not echoed in the refusal.
+public key. A `.pub` file that holds anything else (a private key saved under the wrong name, two
+keys, a header) is refused, and its content is not echoed in the refusal.
 
 The public line is safe to show: it is what GitHub and every server publish. Showing it is what
 makes "copy the part you paste" one step.

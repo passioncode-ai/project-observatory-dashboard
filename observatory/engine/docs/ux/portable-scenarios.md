@@ -221,7 +221,7 @@ and for the OpenSSH format the cipher name and the public key stored in clear be
 section), to say whether it has a passphrase and what its fingerprint is. OSS-58–61 are claimed by open pull
 requests, so these start at OSS-62. Tests named below are in `tests/test_ssh_keys.py`.
 
-### OSS-62 — list my keys
+### OSS-62: list my keys
 
 Trigger: "which SSH keys do I have, and where does each one work?"
 
@@ -261,7 +261,7 @@ inventory or the MCP answer; every unread source is in `degraded`.
 Coverage: `Inventory`, `HeaderReadIsBounded` and `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
 Status: implemented; product outcome unobserved.
 
-### OSS-63 — create a key
+### OSS-63: create a key
 
 Trigger: "make me a new SSH key for this server" or "for GitHub".
 
@@ -296,7 +296,7 @@ on Windows), the public file 0644; no passphrase in any argument.
 Coverage: `Create` in `tests/test_ssh_keys.py`.
 Status: implemented; product outcome unobserved.
 
-### OSS-64 — copy its public part
+### OSS-64: copy its public part
 
 Trigger: "copy my key so I can paste it".
 
@@ -320,7 +320,7 @@ an argument.
 Coverage: `CopyPublic`, `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
 Status: implemented; product outcome unobserved.
 
-### OSS-65 — send it to GitHub, a server or a cloud
+### OSS-65: send it to GitHub, a server or a cloud
 
 Trigger: "add this key to GitHub" or "put it on that server".
 
@@ -364,7 +364,7 @@ Coverage: `SendGithub`, `SendServer` (receipts asserted in each), `SendCloud` in
 Status: GitHub and servers implemented; clouds named as a gap (OBS-112); product outcome
 unobserved.
 
-### OSS-66 — findings about my keys
+### OSS-66: findings about my keys
 
 Trigger: the findings board, or `full ssh-keys findings`.
 
@@ -387,7 +387,7 @@ Acceptance: the same inventory gives the same rows; every type has a label in bo
 Coverage: `Findings` in `tests/test_ssh_keys.py`.
 Status: implemented; the dashboard section is OBS-111; product outcome unobserved.
 
-### OSS-67 — rotate a key
+### OSS-67: rotate a key
 
 Trigger: a key leaked, is weak, or is old.
 

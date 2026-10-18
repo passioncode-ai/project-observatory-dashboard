@@ -1026,7 +1026,7 @@ def print_listing(doc: dict) -> None:
     if doc["degraded"]:
         print("\nNot read:")
         for d in doc["degraded"]:
-            print(f"  - {shown(d['source'])}: {shown(d['reason'])}" + (f" — {shown(d['fix'])}" if d.get("fix") else ""))
+            print(f"  - {shown(d['source'])}: {shown(d['reason'])}" + (f"; fix: {shown(d['fix'])}" if d.get("fix") else ""))
     import ssh_key_findings
     n = len(ssh_key_findings.findings(doc))
     print(f"\nFindings: {n} ({CMD} findings)")

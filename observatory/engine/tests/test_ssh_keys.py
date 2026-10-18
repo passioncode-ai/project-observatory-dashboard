@@ -580,7 +580,7 @@ class Inventory(Door):
         unseen = " ".join(doc["unseen"])
         self.assertIn("~/locked/k", unseen)
         if os.geteuid() != 0:
-            self.assertIn("id_noread", unseen)
+            self.assertIn("~/.ssh/id_noread (could not be read", unseen)
         self.assertEqual(self.key(doc, "id_alpha")["fingerprint"], fingerprint(ed25519_blob("id_alpha")))
 
     def test_a_tilde_user_identity_file_is_resolved_or_unseen(self):
@@ -595,6 +595,15 @@ class Inventory(Door):
         self.assertIs(files[f"~{me}/no-such-key-pb163"], False)
         self.assertIsNone(files["~no_such_user_pb163/k"])
         self.assertTrue(any("~no_such_user_pb163/k" in u for u in doc["unseen"]))
+
+    def test_no_ssh_keys_yet_is_not_said_while_the_config_is_unread(self):
+        """A degraded local source that is not a line of `unseen` (an Include that is a FIFO)."""
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text("Include ~/.ssh/pipe\n")
+        os.mkfifo(self.ssh / "pipe")
+        p = self.door("list", "--no-github")
+        self.assertNotIn("No SSH keys yet", p.stdout)
+        self.assertIn("~/.ssh/pipe", p.stdout)
 
     def test_no_ssh_keys_yet_is_not_said_while_the_agent_is_unread(self):
         self.ssh.mkdir(mode=0o700)

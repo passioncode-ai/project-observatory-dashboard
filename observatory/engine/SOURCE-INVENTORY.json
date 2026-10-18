@@ -835,8 +835,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "d2b65e0005fc103c0f89090056be4961102894aa2f25cb2c965aef8af7bd34cc",
-      "bytes": 89420,
+      "export_sha256": "ebda8d1e59aec7288625cac18e336da6541e03519a5b16d2c2535b8ce4153c67",
+      "bytes": 89402,
       "upstream_modified": true
     },
     {
@@ -3845,8 +3845,8 @@
       "path": "tests/test_ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f73fb65b586691e5a87050d98f8b1070335e7a4c7d5446735d178f03dc651825",
-      "bytes": 80107
+      "export_sha256": "5b581a01c366a755d4732525aa59dc9cda0415dd0799dd8af90ae431b6c1d4ab",
+      "bytes": 80591
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -4871,8 +4871,8 @@
       "path": "tools/ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "85b402d0139661748c2cbcac7331af4f50441728e061c685864a9569d3e1835a",
-      "bytes": 72745
+      "export_sha256": "a5436af9f4142814d2d6f4221d176f8aa24f28aef7e769336c7ebc9f81e32474",
+      "bytes": 72747
     },
     {
       "path": "tools/sweep_fixtures.py",
