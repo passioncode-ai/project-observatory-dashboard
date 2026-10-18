@@ -204,8 +204,8 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "95e7b5543c0dd080f0fed53e1d8b9f27c3928961af4d293f376481ecb4bc6f8c",
-      "bytes": 41232,
+      "export_sha256": "de15c510c04f2f9377fe5291166638ca34943a015ec6f835c3685ca99420f664",
+      "bytes": 43137,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -301,8 +301,8 @@
     {
       "path": "collectors/scan_filesystem.py",
       "source_sha256": "c99bffa1518af8a0bba6600890a7bde2fb1643fb004feb635ffdaacdb64d562c",
-      "export_sha256": "a63b118b7f3626ad5aed20383cfc8e222d10fbbd7aa3e0ee758fd91f6d317895",
-      "bytes": 27340,
+      "export_sha256": "a58a3bec9eaf50e1d0cd12e38dd4a5ee58dd28797b94b2ea5bce43357103f215",
+      "bytes": 27571,
       "python_comments_removed": 96,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -3635,8 +3635,8 @@
       "path": "tests/test_local_folders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b4514b30c2ee163da62e00469c47c1ffa86ef957ae146f3d103120e162ee8467",
-      "bytes": 16189
+      "export_sha256": "175bee622937cc2b80b15975bb3875d1f42e6beab8120ca4ba22ffaecc52bb3a",
+      "bytes": 17810
     },
     {
       "path": "tests/test_local_keys.py",

@@ -103,6 +103,15 @@ while the major version is 0, a minor release may change behaviour and says so h
   output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
   [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
+### Fixed
+
+- **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the
+  checkout a worktree's `.git` file points at (`worktree_main` in `store/raw/local.json`), and the merge folds a
+  remoteless worktree into its main checkout's project, named in that project's membership rules. With a remote the
+  repository pass already did this; a worktree whose main checkout was not scanned stays visible as its own project.
+  Found by the automatic project registration run's isolated cross-product scenario
+  (org-index `docs/runs/2026-10-17-automatic-project-registration/`).
+
 ### Documentation
 
 - **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what

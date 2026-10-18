@@ -241,6 +241,33 @@ def test_declared_worktrees_dedupe_and_exclusions_and_removals_stay_out() -> Non
           len([p for p in projects_out if "fixture" in p.get("name", "")]) == 1, str(projects_out))
 
 
+def test_a_remoteless_worktree_joins_its_main_checkout_instead_of_a_sibling_project() -> None:
+    base = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-declared-solo-")).resolve()
+    env = _environment(base)
+    home, projects = base / "home", base / "projects"
+    projects.mkdir()
+    outside = base / "outside"
+    outside.mkdir()
+    main, worktree = outside / "fixture-solo", outside / "fixture-solo-wt"
+    _git_checkout_without_remote(main, env)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "fixture-solo-wt",
+                    str(worktree)], env=env, check=True, capture_output=True)
+    init = _run(env, "observatory.py", "init")
+    check("the remoteless workspace initialises", init.returncode == 0, init.stderr[-300:])
+    if init.returncode:
+        return
+    _configure_projects(home, projects)
+    _declare(home, [main, worktree])
+    _pipeline(env, home)
+    projects_out = json.loads((home / "registry" / "projects.json").read_text(encoding="utf-8"))["projects"]
+    solo = [p for p in projects_out if "fixture-solo" in p.get("name", "")]
+    check("a worktree of a repository with no remote is not a second project",
+          len(solo) == 1 and solo[0].get("name") == "fixture-solo", str([p.get("name") for p in projects_out]))
+    check("the worktree is named in its project's membership rules, not lost",
+          bool(solo) and any(str(worktree.resolve()) in r and "worktree of" in r
+                             for r in solo[0].get("membership_rules") or []), str(solo))
+
+
 def test_declaration_gaps_are_degraded_and_the_root_scan_survives() -> None:
     base = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-declared-degraded-")).resolve()
     env = _environment(base)
@@ -277,6 +304,7 @@ if __name__ == "__main__":
     test_t31_a_folder_on_disk_is_never_silently_absent()
     test_a_declared_external_checkout_materializes_through_the_ordinary_pipeline()
     test_declared_worktrees_dedupe_and_exclusions_and_removals_stay_out()
+    test_a_remoteless_worktree_joins_its_main_checkout_instead_of_a_sibling_project()
     test_declaration_gaps_are_degraded_and_the_root_scan_survives()
     print()
     if FAILURES:
