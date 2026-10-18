@@ -89,11 +89,42 @@ class Vectors(unittest.TestCase):
     def test_placement_context_cases(self):
         for case in vectors()['placement']['cases']:
             with self.subTest(case['name']):
-                ctx = envelope.estate_envelope_context(case['applied'], case['machine'])
+                ctx = envelope.estate_envelope_context(case['applied'], case['machine'],
+                                                       case.get('extraRevocations', ()))
                 for hold in case['expect']['holds']:
                     self.assertEqual(ctx['may_hold'](hold['sender'], case['agentRef'], case['slot']), hold['mayHold'])
+                    if 'senderKnown' in hold:
+                        self.assertEqual(ctx['sender_key'](hold['sender']) is not None, hold['senderKnown'])
                 self.assertEqual(ctx['current_placement'](case['agentRef'], case['slot']),
                                  case['expect']['currentPlacement'])
+
+    def test_a_delta_revocation_is_read_like_the_records_own(self):
+        from node.estate import device_key_ref
+        case = vectors()['placement']['cases'][0]
+        record = case['applied'][-1]
+        laptop = next(m for m in record['machines'] if m['id'] == 'm-laptop')['deviceKeys'][0]
+        octets = relay._base64(laptop['publicKey'])
+        older = dict(laptop, publicKey=base64.b64encode(bytes([4]) + bytes(64)).decode())
+
+        def context(extra):
+            ctx = envelope.estate_envelope_context(case['applied'], case['machine'], extra)
+            return ctx['may_hold']('m-laptop#sig', case['agentRef'], case['slot']), ctx['sender_key']('m-laptop#sig')
+
+        self.assertEqual(context([]), (True, octets))
+        self.assertEqual(context(()), (True, octets))
+        for extra in ([{'kind': 'machine', 'ref': 'm-laptop'}], [{'kind': 'device-key', 'ref': 'm-laptop#sig'}],
+                      [{'kind': 'device-key', 'ref': device_key_ref(laptop)}]):
+            self.assertEqual(context(extra), (False, None), extra)
+        # A delta that revokes an older key under the same kid leaves the listed key standing; refs of another type,
+        # other kinds and a malformed list revoke nothing.
+        for extra in ([{'kind': 'device-key', 'ref': device_key_ref(older)}], [{'kind': 'device-key', 'ref': ['m-laptop#sig']}],
+                      [{'kind': 'hub-key', 'ref': 'm-laptop#sig'}], [{'kind': 'machine', 'ref': 'm-other'}], 'm-laptop',
+                      None, [None, 'm-laptop']):
+            self.assertEqual(context(extra), (True, octets), extra)
+        # Without a delta, the record's own revocation by key reference already removes the key.
+        revoked = dict(record, revocations=[{'kind': 'device-key', 'ref': device_key_ref(laptop)}])
+        ctx = envelope.estate_envelope_context([revoked], case['machine'])
+        self.assertIsNone(ctx['sender_key']('m-laptop#sig'))
 
 
 @needs_crypto

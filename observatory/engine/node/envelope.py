@@ -277,8 +277,12 @@ def _list(value: Any) -> list:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _revoked(record: dict, kind: str) -> list:
-    return [entry.get('ref') for entry in _list(record.get('revocations')) if entry.get('kind') == kind]
+def _revoked(record: dict, kind: str, extra: Sequence[Any] = ()) -> set:
+    """The string refs of `kind` the record revokes, with those of the verified delta entries applied since (DEC-0084):
+    a delta's revocation is read like the record's own."""
+    extra = list(extra) if isinstance(extra, (list, tuple)) else []
+    return {entry.get('ref') for entry in _list(record.get('revocations')) + _list(extra)
+            if entry.get('kind') == kind and isinstance(entry.get('ref'), str)}
 
 
 def _placed_from(record: dict, machine_id: str, agent_ref: str, slot: str) -> Any:
@@ -291,28 +295,37 @@ def _placed_from(record: dict, machine_id: str, agent_ref: str, slot: str) -> An
     return secret.get('from') if secret else None
 
 
-def _signing_key(record: dict, machine_id: Any):
-    if machine_id in _revoked(record, 'machine'):
+def _signing_key(record: dict, machine_id: Any, extra: Sequence[Any] = ()):
+    """A machine's `#sig` key in one revision, as its kid and SEC 1 octets; none when the machine or the key is revoked,
+    by the record or by an applied delta entry, a key by its kid or by its key reference (`device_key_ref`, DEC-0084)."""
+    from .estate import device_key_ref  # estate imports relay, as this module does
+    if isinstance(machine_id, str) and machine_id in _revoked(record, 'machine', extra):
         return None
     machine = next((m for m in _list(record.get('machines')) if m.get('id') == machine_id), None)
     key = next((k for k in _list(machine.get('deviceKeys') if machine else None)
                 if k.get('use') == 'sig' and isinstance(k.get('kid'), str) and k['kid'].endswith('#sig')), None)
-    if key is None or not isinstance(key.get('publicKey'), str) or key['kid'] in _revoked(record, 'device-key'):
+    keys = _revoked(record, 'device-key', extra)
+    if key is None or not isinstance(key.get('publicKey'), str) or key['kid'] in keys \
+            or (device_key_ref(key) or key['kid']) in keys:
         return None
     return key['kid'], relay._base64(key['publicKey'])
 
 
-def estate_envelope_context(applied: Sequence[dict], machine_id: str) -> dict:
+def estate_envelope_context(applied: Sequence[dict], machine_id: str, extra_revocations: Sequence[Any] = ()) -> dict:
     """`may_hold`, `current_placement`, `sender_key` and `applied_revision` for `machine_id`, from the estate-record
     revisions it verified and applied, oldest first. The latest decides who may hold a slot and under which key; the
-    current placement is the earliest revision of the unbroken run, ending at the latest, that names the same `from`."""
+    current placement is the earliest revision of the unbroken run, ending at the latest, that names the same `from`.
+    `extra_revocations` are the revocations of the verified delta entries the machine applied since (DEC-0054), read
+    like the record's own (DEC-0084): an envelope whose sender's key or machine a delta revoked is refused before the
+    next revision arrives."""
+    extra = list(extra_revocations) if isinstance(extra_revocations, (list, tuple)) else []
     latest = applied[-1] if applied else None
 
     def may_hold(sender_kid: str, agent_ref: str, slot: str) -> bool:
         if latest is None:
             return False
         source = _placed_from(latest, machine_id, agent_ref, slot)
-        found = _signing_key(latest, source) if source is not None else None
+        found = _signing_key(latest, source, extra) if source is not None else None
         return found is not None and found[0] == sender_kid
 
     def current_placement(agent_ref: str, slot: str) -> Optional[int]:
@@ -330,7 +343,7 @@ def estate_envelope_context(applied: Sequence[dict], machine_id: str) -> dict:
         if latest is None:
             return None
         for machine in _list(latest.get('machines')):
-            found = _signing_key(latest, machine.get('id'))
+            found = _signing_key(latest, machine.get('id'), extra)
             if found is not None and found[0] == kid:
                 return found[1]
         return None

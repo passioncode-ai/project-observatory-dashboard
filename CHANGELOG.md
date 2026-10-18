@@ -79,6 +79,38 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
   and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
   their owner-only files, and a key is never replaced.
+- **The estate ceremonies on the node** (OBS-133, DEC-0084). A new machine pairs with a trusted one through a one-time
+  relay rendezvous: each side commits to its keys before it sees the other's, both screens show one six-digit code, and
+  the new machine checks that the signed revision lists it with exactly its keys before it trusts the estate. A one-time
+  enroll token is read only from stdin or an owner-only file. A revision that drops a machine or a key without revoking
+  it is refused, a replaced key is revoked by its fingerprint reference, and a machine whose keys were replaced stops.
+- **SSH keys on this machine** (OBS-110, PB-163). `project-observatory full ssh-keys` lists the machine's
+  SSH keys (fingerprint from `ssh-keygen -l` on the `.pub`, whether it has a passphrase from the private
+  file's header alone, the Host blocks and agent that use it, where GitHub accepts it for sign-in and
+  signing), `create` makes an ed25519 key that never overwrites a file (modes 0600/0644, the passphrase
+  typed into ssh-keygen and kept in the macOS Keychain, which also loads the key into the agent),
+  `copy` puts the public line on the clipboard,
+  and `send` registers it on GitHub (`gh ssh-key add`) or on a server (one line appended to
+  `authorized_keys` under `sh` whatever the login shell; `--verify` logs in with no config and the
+  new key alone and passes only when the server names its fingerprint), each with a receipt in the
+  key movements journal. Ten findings reach the board (no passphrase, weak, readable by others and an
+  open `~/.ssh` by `osprivacy`, a private key saved as `.pub`, unused, a GitHub key not found here (information only), a
+  key registered nowhere visible, no public half, a missing `IdentityFile`). Observatory never advises
+  deleting a GitHub key: a key GitHub accepts that it did not find is reported as information, naming
+  where it looked and what it could not read, with no command. Only a private key's
+  clear header is read (the cipher name and the public key), never its private section. The read-only MCP tool `observatory_ssh_keys` gives agents the same inventory and
+  one key's public line. The private key is never shown or moved; tests plant one and search every
+  output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
+  [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
+
+### Fixed
+
+- **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the
+  checkout a worktree's `.git` file points at (`worktree_main` in `store/raw/local.json`), and the merge folds a
+  remoteless worktree into its main checkout's project, named in that project's membership rules. With a remote the
+  repository pass already did this; a worktree whose main checkout was not scanned stays visible as its own project.
+  Found by the automatic project registration run's isolated cross-product scenario
+  (org-index `docs/runs/2026-10-17-automatic-project-registration/`).
 
 ### Documentation
 

@@ -17,6 +17,11 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+2026-10-18, automatic project registration follow-up: a remoteless worktree joins its main checkout's project
+instead of becoming a sibling (`collectors/scan_filesystem.py` `worktree_main`, `collectors/merge.py`;
+`tests/test_local_folders.py` fails without the fix). Root tests and `project-observatory full check` exit 0 locally.
+Next: release, so SessionStart registration reaches the operator's installed engine.
+
 [2026-10-17 — Automatic project registration](runs/2026-10-17-automatic-project-registration/README.md):
 SessionStart declares an eligible external Git checkout in `config/tracked.json`;
 the ordinary local/tick pipeline materializes it. Removal markers, exclusions,

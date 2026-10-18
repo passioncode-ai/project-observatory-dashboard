@@ -148,6 +148,10 @@ BOUNDARY += ('node_estate', 'node_revocation')
 BOUNDARY += ('node_envelope',)
 # `project-observatory full node`: this machine's device keys from a terminal (OBS-114).
 BOUNDARY += ('node_cli',)
+# enroll-token/1, the headless join (DEC-0084): verify, single-use redemption, the token read only from stdin or a file.
+BOUNDARY += ('node_enroll', 'node_pairing')
+# PB-163: the machine's SSH keys; the private key is never shown or moved.
+BOUNDARY += ('ssh_keys',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.
@@ -283,6 +287,8 @@ def copy_source(target: Path) -> None:
                    'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
+    # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
+    selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
     for source in sorted(selected):
         if not source.is_file():
             # Optional root modules/skill docs are not needed by every release.

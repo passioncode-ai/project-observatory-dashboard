@@ -480,9 +480,21 @@ def _elsewhere_sync(folder, l):
 _EXCL=json.load(open(paths.config_file('folder_exclusions.json')))
 EXCLUDED_PREFIXES=tuple(x["prefix"] for x in _EXCL["prefixes"])
 EXCLUDED_NAMES={x["name"] for x in _EXCL["names"]}
+# A REMOTELESS WORKTREE IS ITS MAIN CHECKOUT'S, NOT A SIBLING. With a remote the
+# repository pass above folds a worktree into its repository (`extra_checkouts`);
+# without one nothing keyed it, and an agent's worktree of a local-only repository
+# became a second project with the same history. It joins the project of the
+# checkout its `.git` file points at when that checkout was scanned too; a
+# worktree whose main checkout was not scanned stays visible as its own project.
+_real_of={str(Path(l.get("real_path") or l["path"])):f for f,l in local.items()
+          if l["is_git"] and not l.get("worktree_of")}
+_worktree_joins={}
 for folder,l in local.items():
     if tracked.is_excluded(Path(folder), EXCLUDED_PREFIXES, EXCLUDED_NAMES): continue
     if l["is_git"] and nwo(l.get("remote")): continue                                
+    _main=_real_of.get(l.get("worktree_main") or "")
+    if _main and _main!=folder and not (local[_main].get("remote") or "").strip():
+        _worktree_joins.setdefault(_main,[]).append(folder); continue
     # A remote this merge cannot key (a host other than GitHub or Bitbucket) is
     # still a remote: the history is published somewhere. Only a checkout with
     # NO remote is "unpublished"; the other is named by its host alone — a URL
@@ -506,6 +518,18 @@ for folder,l in local.items():
                       "readme":l["readme"],"files":l.get("file_count",0),"mtime":l.get("mtime","")}}
     if _remote:
         projects["local:"+folder]["local_only"].update(_elsewhere_sync(folder, l))
+for _main,_worktrees in _worktree_joins.items():
+    if "local:"+_main in projects:
+        projects["local:"+_main]["rules"] += [f"{local[w]['path']}: worktree of {_main}, measured with it" for w in sorted(_worktrees)]
+    else:
+        # The main checkout was excluded after all: the worktree must not vanish with it.
+        for w in _worktrees:
+            projects["local:"+w]={"key":identity.local_key(w),"name":local[w].get("display_name") or w,"anchor":"local-folder",
+                "vault":None,"repos":[],"rules":[f"{w}: git worktree with no remote, local only"],"sites":[],
+                "local_only":{"folder":w,"path":local[w]["path"],"kinds":local[w]["kinds"],"unpublished":True,
+                              "commits":int(local[w].get("commits") or 0),"branch":local[w].get("branch","") or "",
+                              "last_commit":local[w].get("last_commit","") or "","dirty":int(local[w].get("dirty") or 0),
+                              "readme":local[w]["readme"],"files":local[w].get("file_count",0),"mtime":local[w].get("mtime","")}}
 # ---------- sites, by evidence rank ----------
 def host_of(u):
     u=(u or "").strip().lower(); u=re.sub(r"^https?://","",u); u=re.sub(r"^www\.","",u)

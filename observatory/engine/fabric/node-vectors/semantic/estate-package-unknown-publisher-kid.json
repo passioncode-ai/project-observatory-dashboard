@@ -1,0 +1,186 @@
+{
+  "description": "A placement under a publisher key the record does not pin (FAC-SEM-074).",
+  "kind": "estate-record",
+  "expect": [
+    "FAC-SEM-074"
+  ],
+  "input": {
+    "schema": "estate-record/1",
+    "estate": "estate-5d0f1a",
+    "revision": 1,
+    "issuedAt": "2026-10-12T09:00:00Z",
+    "validUntil": "2026-11-11T09:00:00Z",
+    "authorities": [
+      {
+        "credentialId": "0nGFzb4RDddKfO7TtqkdYA",
+        "alg": "ES256",
+        "publicKey": {
+          "kty": "EC",
+          "crv": "P-256",
+          "x": "SClQ9Md7xe83S2dtd6FTDLtuT-89QI6cvNk8MQsFfmk",
+          "y": "kdDODXE6MIK1S0mBEjPCpdnCtPdNhDhw-GPmjmOZQ5Q"
+        },
+        "rpId": "sign.example.org",
+        "origins": [
+          "https://sign.example.org"
+        ]
+      },
+      {
+        "credentialId": "hSpa6a_vPaaKjLJRnom7Tg",
+        "alg": "EdDSA",
+        "publicKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "OcuXW5w2VW4qc5B2yo5tY7DI_14AzhA9fSid4CKMyfo"
+        },
+        "rpId": "sign.example.org",
+        "origins": [
+          "https://sign.example.org"
+        ]
+      }
+    ],
+    "machines": [
+      {
+        "id": "m-4c1e",
+        "deviceKeys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "hubKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "tEuo6MY1azEdV6d4ygBTPBrvS9NrUtG_CtdeFK1DEDw",
+          "kid": "hub-m-4c1e-1",
+          "use": "sig",
+          "alg": "EdDSA"
+        },
+        "packages": [
+          {
+            "agentRef": "urn:fabric:agent:example:inbox-digest",
+            "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+            "publisherKid": "unpinned-publisher"
+          }
+        ],
+        "secrets": [
+          {
+            "agentRef": "urn:fabric:agent:example:inbox-digest",
+            "slot": "MAIL_OAUTH",
+            "from": "m-4c1e"
+          }
+        ]
+      },
+      {
+        "id": "m-9a07",
+        "deviceKeys": [
+          {
+            "kid": "m-9a07#sig",
+            "use": "sig",
+            "alg": "ed25519",
+            "publicKey": "E5DhHVXK3sLz51FwFvVW6t3f/e6J7K32OScferYvVjc="
+          },
+          {
+            "kid": "m-9a07#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BF5FcvT0BuMwOOrX+HJlP9oN1qrTQjsNaHLA1LJlKvFoIP4FMy1ZCDlrbtYQQT7FEXDzjHIX6wOmk/Z+WCpqPKg="
+          }
+        ],
+        "packages": [
+          {
+            "agentRef": "urn:fabric:agent:example:inbox-digest",
+            "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+            "publisherKid": "example-publisher-2026"
+          }
+        ],
+        "secrets": [
+          {
+            "agentRef": "urn:fabric:agent:example:inbox-digest",
+            "slot": "MAIL_OAUTH",
+            "from": "m-4c1e"
+          }
+        ]
+      }
+    ],
+    "publisherKeys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "OaiLjkJkL70pyk1-f1wCUCu2Tk9DcCsy7hcjM16Srjw",
+        "kid": "example-publisher-2026",
+        "alg": "EdDSA"
+      }
+    ],
+    "shareGrants": [
+      {
+        "kind": "standing-grant",
+        "meta": {
+          "id": "urn:grant:estate:share-inbox-digest",
+          "revision": 1,
+          "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          "createdAt": "2026-10-12T08:00:00Z",
+          "createdBy": "urn:person:owner"
+        },
+        "project": "urn:project:inbox",
+        "principal": {
+          "id": "urn:person:guest",
+          "revision": 1,
+          "contentHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+        },
+        "resourcePatterns": [
+          "urn:project:inbox:digests/*"
+        ],
+        "dataClasses": [
+          "project-internal"
+        ],
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z",
+        "idempotency": "required",
+        "issuer": "urn:person:owner",
+        "state": "active",
+        "principalKind": "external",
+        "audience": "inbox-digest",
+        "capabilities": [
+          "digest.read"
+        ],
+        "effectCeiling": [
+          "none"
+        ],
+        "spend": {
+          "mode": "limited",
+          "limits": [
+            {
+              "window": "total",
+              "limitUsd": 10
+            }
+          ],
+          "payer": "owner",
+          "credentialSource": {
+            "kind": "capability",
+            "agent": "urn:agent:inbox-digest",
+            "capability": "digest.read"
+          }
+        }
+      }
+    ],
+    "revocations": [],
+    "digest": "sha256:bb378057bc6f38f8d274bd7cc31307a0ab0b5bb74bbea5586b2ecf5ab63b95f6",
+    "signature": {
+      "format": "webauthn-assertion",
+      "credentialId": "0nGFzb4RDddKfO7TtqkdYA",
+      "alg": "ES256",
+      "authenticatorData": "L4UXLM_G7Q6Rz5W9pKS5sMNeEf5owxN4sl1xelH8lhodAAAAAA",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiSF9QbHZYQVh1ek40V1hmOFYwTlZpWVd6UXdiYWlvVVZueTI2Mk9GTzhFYyIsIm9yaWdpbiI6Imh0dHBzOi8vc2lnbi5leGFtcGxlLm9yZyIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+      "sig": "MEYCIQCZR0FoZgcPmNqK7ZT-ciyiDXc0Rj0uLxY37s6__ENMiQIhAMZ0kMVBo2YNxaZay6AKKL-rAVGSFmtBd1S64NdKhjtq"
+    }
+  }
+}

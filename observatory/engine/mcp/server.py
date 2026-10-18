@@ -110,11 +110,12 @@ server = InteropServer(
         "disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
         "local pass; no grants or direct registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the whole "
-        "scope: `observatory_status` (pass `limit` and `detail: summary`; unpaged is "
-        "hundreds of KB); `observatory_findings` filters by `projectId`; "
+        "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
+        "huge); `observatory_findings` filters by `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
-        "Also `observatory_machine` (`section` or `explainPid`); `observatory_assistant_status`; `observatory_assistant_conversation`.\n"
-        "Fabric capabilities (fabric-interop/0.1) use their published schemas exactly: "
+        "Also `observatory_machine` (`section` or `explainPid`); `observatory_ssh_keys` (no private key); "
+        "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
+        "Fabric capabilities (fabric-interop/0.1), exact schemas: "
         "`estate.survey`, `project.detail`, `project.resolve`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
@@ -592,6 +593,30 @@ def observatory_machine(
         memory = g.get("memory") or {}
         out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out
+
+
+@server.tool()
+def observatory_ssh_keys(
+    name: Annotated[str | None, Field(description="One key's file name in ~/.ssh, as the list shows it: the "
+                                                  "answer is then that key, its public line and its commands.")] = None,
+    github: Annotated[bool, Field(description="Ask GitHub now with `gh` (which keys it accepts for sign-in "
+                                              "and signing). Default: GitHub as the last saved inventory "
+                                              "recorded it.")] = False,
+) -> dict[str, Any]:
+    """This machine's SSH keys: name, type, fingerprint, passphrase yes/no, file modes, the Host
+    blocks and agent that use each, where GitHub accepts it, and the findings (no passphrase,
+    weak, readable by others, unused, registered nowhere visible, a GitHub key no disk holds).
+
+    Read-only, and THE PRIVATE KEY IS NEVER IN THE ANSWER: the door reads only a private file's
+    clear header (the cipher name, and the public key stored in clear), never its private section. With `name`, the answer
+    carries that key's PUBLIC line (the part pasted into GitHub or a server, safe to show) and
+    the commands that act: `project-observatory full ssh-keys create NAME`, `copy NAME`,
+    `send NAME --to github`, `send NAME --to server:HOST --verify`. Those run in a terminal; a
+    passphrase is typed by a person into ssh-keygen's own prompt. Design: docs/design/SSH-KEYS.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import ssh_keys
+    return ssh_keys.agent_view(name=name, github=github)
 
 
 MACHINE_TOP = 10

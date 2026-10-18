@@ -348,7 +348,7 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
     # already in the registry. Agents create worktrees under the estate root, and
     # without this the estate would grow by however many an agent happens to
     # have open, each one an invented project with its parent's whole history.
-    worktree_of = ""
+    worktree_of = worktree_main = ""
     if git and dotgit.is_file():
         try:
             head = dotgit.read_text(encoding="utf-8", errors="replace").strip()
@@ -356,9 +356,14 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
             head = ""
         if head.startswith("gitdir:") and "/worktrees/" in head.replace("\\", "/"):
             target = head.split("gitdir:", 1)[1].strip().replace("\\", "/")
-            worktree_of = target.split("/.git/")[0].rstrip("/").split("/")[-1]
+            worktree_main = target.split("/.git/")[0].rstrip("/")
+            worktree_of = worktree_main.split("/")[-1]
+            try:
+                worktree_main = str(pathlib.Path(worktree_main).resolve())
+            except OSError:
+                pass
     rec = {"folder": entry, "path": str(p), "real_path": real, "symlink": is_link, "is_git": git,
-           "worktree_of": worktree_of,
+           "worktree_of": worktree_of, "worktree_main": worktree_main,
            "kinds": detect(p), "readme": first_para(p), "homepage_hits": homepage(p)}
     # THE PROJECT'S OWN DECLARATION OF ITS PARTS. `.gitmodules` names, per
     # module, the path inside this tree and the repository it comes from: a

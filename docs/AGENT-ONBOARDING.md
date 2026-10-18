@@ -11,6 +11,18 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 6. Explain how to update, preview a migration and restore a backup. If this is an existing installation, stop writers before migration and keep the original until the new copy is verified. Do not start a second scheduler over the same data.
 7. Finish with the local dashboard address, commands for another scan, and the list of enabled integrations. Keep the public marketing site separate from the private dashboard.
 
+## SSH keys
+
+When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase
+state, where each is used and registered, the findings). It never contains a private key, and you
+never open one: no `cat ~/.ssh/id_*`, no `ssh-keygen -y`. A `--verify` that fails, or names another
+key, means the new key is not proven: do not remove the old one. Never delete a GitHub key on the
+strength of a `ssh.github_orphan` row: it is information, and Observatory cannot prove a key unused. Make a key with `project-observatory full
+ssh-keys create NAME` (in my terminal, so I type the passphrase into ssh-keygen; `--no-passphrase`
+only when I ask for an unattended key), copy its public line with `ssh-keys copy NAME`, and register
+it with `ssh-keys send NAME --to github` or `--to server:ALIAS --verify`. A cloud has no door yet:
+say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`).
+
 ## Reading offline verification receipts
 
 `full check` emits JSON. A suite whose setup, execution or log capture raises is

@@ -20,6 +20,7 @@ import math
 from typing import Any, Dict, List, Mapping, Optional
 
 from . import ed25519, jcs, p256
+from .estate import KEY_REFERENCE
 from .identifiers import same_identifier
 from .relay import CLOCK_SKEW_SECONDS, strict_time
 
@@ -221,6 +222,10 @@ def _entry_shape(entry: Any) -> Optional[str]:
     revocation = entry.get('revocation')
     if not _is_obj(revocation) or not _is_str(revocation.get('kind')) or not _is_str(revocation.get('ref')):
         return 'revocation names its kind and ref'
+    # A device-key ref is a kid or a key reference (DEC-0084): one with `@` that is neither is refused in every revision
+    # that lists it (estate.py), while reconciliation requires the next revision to list it, so the chain would stop.
+    if revocation['kind'] == 'device-key' and '@' in revocation['ref'] and not KEY_REFERENCE.fullmatch(revocation['ref']):
+        return 'a device-key ref is a kid or a key reference <kid>@sha256:<64 lower-case hex digits>'
     at, revoked_at = delta_time(entry.get('at')), delta_time(revocation.get('revokedAt'))
     if math.isnan(at) or math.isnan(revoked_at):
         return 'at and revokedAt are RFC 3339 date-times with an offset, on days that exist'
