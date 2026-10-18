@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-146`
+**Next free ID:** `OBS-149`
 
 This board is canonical for OBS rows: engine execution, closed by a pull request and a release.
 Product packages, priorities and operator gates are on the organization's board, cited here as
@@ -158,3 +158,5 @@ what was delivered is written in the Item column, after "Outcome:". A row holds 
 | OBS-141 | Companion recorder, rationale anchors (M-8 round 8 row): a link's anchor is the entry heading text only. Store a hash of the entry's section body beside the anchor and require it on the carry-forward check, and refuse generic anchors (`Decision`, `Context`, `Status`, `Consequences` and similar) so a register whose entries reuse a bare word never links. A design change to the evidence shape, so not taken inside M-8. | open | M-8 round 8 on #289 (row) |
 | OBS-144 | Companion recorder, Bash attribution (M-8 round 9 row): a relative write target after `cd X &&` in the same command (`cd docs && echo ... >> DECISIONS.md`) resolves against the call's working directory, not `X`, so the write is not attributed and the turn asks. Track `cd` within one command (and `pushd`), or document it as a permanent miss. | open | M-8 round 9 on #289 (row) |
 | OBS-145 | Node, the LOWs of the #297 scoped round: `installation_findings` compares slot names as the reference's Set does (by value, an object never matching), so a non-string name or slot in a fetched package is an undeclared slot rather than a TypeError; `webauthn.node_b64url` is total (text the decoder refuses keeps only its base64url characters and then fails the canonical check); tests for `json_equal` keeping booleans apart from numbers (M16) and a padded device key with stray bits (M28). The enroll token is a bearer until first use by design: the surface that runs the ceremony shows the bound fingerprint before signing and treats `reused` as an alarm (NODE.md) | open: branch `agent/node-p5-lows`, stacked on PR #297 | Observatory's scoped round on #297, 2026-10-18 |
+| OBS-147 | Companion recorder (M-8 round 10 row): a carried rationale link is not re-checked on a turn that returns early as "unchanged since the last turn" (`tools/record_turn.py`, the early return before the append), so a register edit made on a turn with no other change is only noticed on the next changed turn. Re-check the carried link, or fold the register's state into the unchanged comparison. | open | M-8 round 10 on #289 (row) |
+| OBS-148 | `tests/test_ask_why.py` FIFO case (`test_a_fifo_in_place_of_the_register`): with `O_NONBLOCK` removed from `_read_register` the test hangs instead of failing. Give the Stop subprocess a short timeout in that case so a planted defect fails fast. | open | M-8 round 10 on #289 (row) |

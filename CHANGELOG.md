@@ -139,17 +139,19 @@ while the major version is 0, a minor release may change behaviour and says so h
 
     A second revision of the same record then links the file, and its `why` stays empty. The link
     stores the repository's id, the register's path, the entry heading as `anchor`, the exact raw
-    heading line at full length, and a SHA-256 of the register's bytes from the start of the file to
-    the end of the entry. The entry ends at the next column-0 line with no more `#`, or at the end of
-    the file. A heading over 120 characters is never linked. A later revision carries the link only
-    while it holds by bytes, with no Markdown parsing: this hook wrote it, it names the current
-    repository, the raw line occurs exactly once as a whole line, and the digest is unchanged.
-    Appending a later entry keeps the link. So the record stays explained, with no request and no
+    heading line at full length, and the length and SHA-256 of the whole register file; no entry
+    boundary is guessed. A heading over 120 characters is never linked. A later revision carries the
+    link only while it holds by bytes: this hook wrote it, it names the current repository, the raw
+    line occurs exactly once as a whole line, and the file is byte-identical or its linked bytes are
+    unchanged and what follows starts, at its first non-blank line, with a column-0 heading no
+    deeper than the entry's own (accepted only when the linked file ended in a newline outside any
+    code fence and HTML comment). Appending a later entry keeps the link. So the record stays explained, with no request and no
     extra revision, after the register is committed and pushed and after the write scrolls out of the
-    transcript. Any other edit above or inside the entry drops the link: a deleted, reverted,
-    wrapped, struck, commented, fenced, duplicated or retitled entry, a one-character change, or a
-    change of line endings. So does a move to another repository. A dropped link is attributed afresh
-    only from the session's writes after it was made, and asked about when there are none. A turn
+    transcript. Any other change to the file drops the link: an edit to any entry, a paragraph or a
+    deeper heading appended, a change of line endings, or an edit below a `# comment` line inside a
+    code block or HTML comment. So does a move to another repository. A dropped link is attributed
+    afresh only from the session's writes after it was made (the mark is carried in every later
+    revision), and asked about when there are none. A turn
     that touches a register is attributed again, and a newer decision replaces the anchor.
 
     Every read of a register or the run ledger, fresh or carried, passes one gate: inside the
