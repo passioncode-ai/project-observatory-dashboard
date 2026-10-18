@@ -24,7 +24,7 @@ Any refusal is `{"recorded": false, "reason": …}` — never a traceback, becau
 the caller is a hook that must degrade silently.
 """
 from __future__ import annotations
-import argparse, json, os, re, shlex, sqlite3, subprocess, sys, time, pathlib
+import argparse, json, os, re, shlex, sqlite3, stat, subprocess, sys, time, pathlib
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -303,11 +303,7 @@ def statement_of(facts: dict, repo_id: str) -> str:
 #: ledger also records plain notes.
 RUN_LEDGER = ".task-pipeline/run.md"
 LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:\s*(.*)$", re.I)
-HEADING = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
-#: A Markdown heading as a LINE OF THE FILE: at most three spaces of indent, its
-#: level, its text. Used to anchor a link and to re-check it.
-HEADING_LINE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
-FENCE = re.compile(r"^ {0,3}(```|~~~)")
+
 ANCHOR_CHARS = 120
 #: An untracked or ignored ledger or register is read whole, so it is read bounded.
 READ_LIMIT = 256 * 1024
@@ -373,10 +369,37 @@ def _vendored(rel: str, submodules: list[str]) -> bool:
     return any(rel == s or rel.startswith(s + "/") for s in submodules)
 
 
+def _lines(text: str) -> list[str]:
+    """A register's lines: split on newline only, a trailing carriage return dropped.
+
+    Not `str.splitlines`, which also splits on U+2028, U+0085 and form feeds, so a
+    line no Markdown reader sees as a heading became one here."""
+    return [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
+
+
+def _register_path(top: pathlib.Path, rel: str) -> pathlib.Path | None:
+    """The register at `rel` when it may be read as this checkout's own, else None.
+
+    The one gate before ANY read of a register or the run ledger, for a fresh
+    attribution and for a carried link alike. Refused: a symbolic link, a path under
+    one (`resolve()` differs), a path that resolves outside the checkout, and
+    anything that is not a regular file."""
+    try:
+        root = top.resolve()
+        named = root / rel
+        if named.is_symlink() or named.resolve() != named or root not in named.parents:
+            return None
+        if not stat.S_ISREG(named.lstat().st_mode):
+            return None
+        return named
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
 def _read_bounded(path: pathlib.Path) -> list[str]:
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
-            return fh.read(READ_LIMIT).splitlines()
+            return _lines(fh.read(READ_LIMIT))
     except OSError:
         return []
 
@@ -403,7 +426,7 @@ def _added_lines(top: pathlib.Path, rel: str, facts: dict,
         except Exception:                                                          # noqa: BLE001
             return []
         diff = p.stdout if p.returncode == 0 else ""
-        lines = [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+        lines = [l[1:] for l in _lines(diff) if l.startswith("+") and not l.startswith("+++")]
     return [l for l in lines if l.strip()]
 
 
@@ -535,18 +558,85 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
     return calls
 
 
+def _atx(line: str) -> tuple[int, str] | None:
+    """(level, text) when `line` is a Markdown ATX heading, else None. Linear, no regex.
+
+    Up to three spaces of indent (a tab, or four spaces, is code), one to six `#`,
+    then the end of the line or a space or tab and the text. A closing run of `#` is
+    dropped only when a space or tab precedes it, or when it is the whole text, so
+    `## Use C#` keeps its `#`."""
+    i, n = 0, len(line)
+    while i < n and line[i] == " ":
+        i += 1
+    if i > 3 or (i < n and line[i] == "\t"):
+        return None
+    j = i
+    while j < n and line[j] == "#":
+        j += 1
+    level = j - i
+    if level < 1 or level > 6:
+        return None
+    if j < n and line[j] not in " \t":
+        return None
+    text = line[j:].strip(" \t")
+    k = len(text)
+    while k > 0 and text[k - 1] == "#":
+        k -= 1
+    if k == 0:
+        text = ""
+    elif k < len(text) and text[k - 1] in " \t":
+        text = text[:k].rstrip(" \t")
+    return level, text
+
+
+def _fence(line: str) -> tuple[str, int, bool] | None:
+    """(character, length, has info string) when `line` opens or closes a fence."""
+    i, n = 0, len(line)
+    while i < n and line[i] == " ":
+        i += 1
+    if i > 3 or i >= n or line[i] not in "`~":
+        return None
+    ch, j = line[i], i
+    while j < n and line[j] == ch:
+        j += 1
+    if j - i < 3:
+        return None
+    info = line[j:].strip(" \t")
+    if ch == "`" and "`" in info:
+        return None
+    return ch, j - i, bool(info)
+
+
 def _headings(lines: list[str]) -> list[tuple[int, str]]:
-    """(level, text) of every heading line outside fenced code blocks, in order."""
-    out, fenced = [], False
+    """(level, text) of every ATX heading a Markdown reader would see, in order.
+
+    One linear pass: lines inside a fenced code block (closed only by the same
+    character, at least as long, with no info string; an unclosed fence runs to the
+    end) and inside an HTML comment that spans lines are skipped."""
+    out: list[tuple[int, str]] = []
+    fence: tuple[str, int] | None = None
+    in_comment = False
     for line in lines:
-        if FENCE.match(line):
-            fenced = not fenced
+        if fence is not None:
+            f = _fence(line)
+            if f and f[0] == fence[0] and f[1] >= fence[1] and not f[2]:
+                fence = None
             continue
-        if fenced:
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
             continue
-        m = HEADING_LINE.match(line)
-        if m:
-            out.append((len(m.group(1)), m.group(2).strip()))
+        stripped = line.lstrip(" ")
+        if len(line) - len(stripped) <= 3 and stripped.startswith("<!--"):
+            in_comment = "-->" not in stripped[4:]
+            continue
+        f = _fence(line)
+        if f:
+            fence = (f[0], f[1])
+            continue
+        h = _atx(line)
+        if h and h[1]:
+            out.append(h)
     return out
 
 
@@ -579,7 +669,7 @@ def _anchor_still_true(path: pathlib.Path, anchor: str) -> bool:
         if path.stat().st_size > CARRY_READ_LIMIT:
             return False
         with path.open("r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.read().splitlines()
+            lines = _lines(fh.read())
     except OSError:
         return False
     return sum(1 for _, text in _headings(lines) if text[:ANCHOR_CHARS] == anchor) == 1
@@ -594,6 +684,10 @@ def _register_written(added: list[str], text: str) -> bool:
         # The entry's own heading must be in what the session wrote. Not any heading:
         # `### Consequences` is in every MADR entry, so it attributes nothing.
         return entry in text
+    if any(l.lstrip(" ").startswith("#") for l in added):
+        # Heading syntax the scanner did not accept (inside an unclosed fence, a
+        # comment, indented as code): never fall back to matching lines. Ask.
+        return False
     lines = [l.strip() for l in added if len(l.strip()) >= MIN_NEEDLE][:REGISTER_LINES]
     return bool(lines) and 2 * sum(1 for l in lines if l in text) > len(lines)
 
@@ -604,7 +698,7 @@ def _tail_lines(path: pathlib.Path, limit: int) -> list[str]:
             fh.seek(0, os.SEEK_END)
             size = fh.tell()
             fh.seek(max(0, size - limit))
-            lines = fh.read().decode("utf-8", errors="replace").splitlines()
+            lines = _lines(fh.read().decode("utf-8", errors="replace"))
     except OSError:
         return []
     return lines[1:] if size > limit and lines else lines
@@ -632,8 +726,8 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
         touched = sorted((set(facts.get("files") or ()) | set(facts.get("committed") or ())
                           | set(facts.get("untracked") or ())) - deleted)
         candidates = [r for r in touched if _is_register(r)]
-        ledger_file = top / RUN_LEDGER
-        if not candidates and not ledger_file.is_file():
+        ledger_file = _register_path(top, RUN_LEDGER)
+        if not candidates and ledger_file is None:
             return None
         calls = session_writes(transcript, top, deadline)
         if not calls:
@@ -643,7 +737,10 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
             _check(deadline)
             if _vendored(rel, subs):
                 continue
-            real = os.path.realpath(str(top / rel))
+            named = _register_path(top, rel)
+            if named is None:
+                continue                              # a symlink, or not a regular file
+            real = str(named)
             text = "\n".join(c["text"] for c in calls if real in c["targets"])
             if not text:
                 continue
@@ -655,12 +752,12 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
             anchor = _entry_heading(added)
             # And the entry is in the register NOW, once, as a heading: the same test a
             # carried link must pass on every later turn.
-            if anchor is not None and not _anchor_still_true(top / rel, anchor):
+            if anchor is not None and not _anchor_still_true(named, anchor):
                 continue
             return {"source": "decision-register", "ref": rel,
                     **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
         ledger_text = "\n".join(c["text"] for c in calls if c["ledger"])
-        if ledger_text and ledger_file.is_file():
+        if ledger_text and ledger_file is not None:
             _check(deadline)
             tracked_change = RUN_LEDGER in touched and RUN_LEDGER not in (facts.get("untracked") or ())
             lines = (_added_lines(top, RUN_LEDGER, facts, deadline) if tracked_change
@@ -712,19 +809,8 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
         uri, anchor = str(e.get("uri") or ""), e.get("anchor")
         if not uri.startswith("file:") or not isinstance(anchor, str) or not anchor.strip():
             continue
-        try:
-            root = top.resolve()
-            named = root / uri[len("file:"):]
-            # A register that is a symbolic link — or sits under one — is refused: the
-            # link would make another file's heading count as this register's.
-            if named.is_symlink() or named.resolve() != named or root not in named.parents \
-                    or not named.is_file():
-                # (`root` is already resolved, so a symlinked parent directory shows up
-                # as `named.resolve() != named`.)
-                continue
-        except OSError:
-            continue
-        if _anchor_still_true(named, anchor):
+        named = _register_path(top, uri[len("file:"):])
+        if named is not None and _anchor_still_true(named, anchor):
             out.append(e)
     return out
 

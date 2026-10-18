@@ -677,6 +677,63 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         self.assertEqual(fx.receipt()["rationale"]["source"], "carried")
         self.assertEqual(fx.journal(), [])
 
+    H = "## DEC-0002 measure delivered asks"
+
+    def test_the_heading_inside_a_multi_line_comment(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "<!--\n" + self.H + "\n-->")
+        self.asked_next(fx)
+
+    def test_the_heading_inside_a_nested_four_backtick_fence(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "````\n```\n" + self.H + "\n```\n````")
+        self.asked_next(fx)
+
+    def test_tildes_do_not_close_a_backtick_fence(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "```\n~~~\n" + self.H + "\n```")
+        self.asked_next(fx)
+
+    def test_the_heading_inside_a_tilde_fence(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "~~~\n" + self.H + "\n~~~")
+        self.asked_next(fx)
+
+    def test_an_unclosed_fence_runs_to_the_end(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "```\n" + self.H)
+        self.asked_next(fx)
+
+    def test_a_heading_indented_as_code(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "    " + self.H)
+        self.asked_next(fx)
+
+    def test_a_line_separator_does_not_split_a_line(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "WITHDRAWN\u2028" + self.H)
+        self.asked_next(fx)
+
+    def test_a_carriage_return_line_ending_still_matches(self):
+        fx = self.madr_fixture()
+        p = fx.repo / "docs/DECISIONS.md"
+        p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        fx.change("later.py")
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["source"], "carried")
+
+    def test_a_register_over_the_read_limit_asks(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        filler = "line of an older decision\n" * (record_turn.CARRY_READ_LIMIT // 26 + 10)
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER + filler, encoding="utf-8")
+        self.assertGreater((fx.repo / "docs/DECISIONS.md").stat().st_size, 8 << 20)
+        fx.wrote(REGISTER, tool="Write")
+        fx.stop()
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
+        self.assertEqual(len(fx.journal()), 1)
+
     def test_a_link_still_true_is_carried(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -863,6 +920,44 @@ class NotARationale(unittest.TestCase):
         fx.bash("cat > docs/DECISIONS.md <<'EOF'\n" + body + "\nEOF")
         self.asked(fx)
 
+    def test_a_freshly_written_register_that_is_a_symlink_inside(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/real.md").write_text(REGISTER, encoding="utf-8")
+        (fx.repo / "docs/DECISIONS.md").symlink_to("real.md")
+        fx.wrote(REGISTER, tool="Write")
+        self.asked(fx)
+
+    def test_a_freshly_written_register_that_is_a_symlink_outside(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        outside = fx.work / "outside.md"
+        outside.write_text(REGISTER, encoding="utf-8")
+        (fx.repo / "docs/DECISIONS.md").symlink_to(outside)
+        fx.wrote(REGISTER, tool="Write")
+        self.asked(fx)
+
+    def test_a_ledger_that_is_a_symlink(self):
+        fx = Fixture()
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        target = fx.work / "elsewhere-run.md"
+        target.write_text("# run\n\n- decision: keep the slot, add a journal\n", encoding="utf-8")
+        (fx.repo / ".task-pipeline/run.md").symlink_to(target)
+        fx.change()
+        fx.bash("printf '%s\\n' '- decision: keep the slot, add a journal' >> .task-pipeline/run.md")
+        self.asked(fx)
+
+    def test_heading_syntax_the_scanner_rejects_is_never_matched_by_lines(self):
+        # Everything sits in an unclosed fence: no heading, and no line-majority.
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        body = "```\n## DEC-0009 inside a fence\n\nBecause of a reason here.\n"
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.wrote(body, tool="Write")
+        self.asked(fx)
+
     def test_no_transcript_means_no_attribution(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
@@ -975,6 +1070,32 @@ class WithinTheBudget(unittest.TestCase):
             with self.assertRaises(record_turn._OutOfTime):
                 record_turn._added_lines(fx.repo, "docs/DECISIONS.md", facts,
                                          deadline=record_turn.time.monotonic() + 5)
+
+    def test_a_heading_with_a_long_whitespace_run(self):
+        # Round 8: `'# a' + ' ' * 2600 + 'x'` ran the old heading regex past 20 s.
+        import record_turn, time as _t
+        line = "# a" + " " * 5000 + "x"
+        t0 = _t.monotonic()
+        for tail in ("", "#", "\t", " #"):
+            record_turn._headings([line + tail] * 20)
+        self.assertLess(_t.monotonic() - t0, 0.5)
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        body = "## DEC-0001 real\n\n" + line + "\n"
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.wrote(body, tool="Write")
+        took = fx.timed_stop(limit=60)
+        self.assertLess(took, 2.0 if os.environ.get("CI") is None else self.LIMIT,
+                        f"the Stop took {took:.1f} s")
+        self.assertTrue(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'"))
+
+    def test_the_scanner_keeps_a_hash_inside_the_text(self):
+        import record_turn
+        self.assertEqual(record_turn._atx("## Use C#"), (2, "Use C#"))
+        self.assertEqual(record_turn._atx("## Closed ##"), (2, "Closed"))
+        self.assertEqual(record_turn._atx("#nospace"), None)
+        self.assertEqual(record_turn._atx("\t## tabbed"), None)
+        self.assertEqual(record_turn._atx("   ### three spaces"), (3, "three spaces"))
 
     def test_the_diff_timeout_never_exceeds_the_time_left(self):
         import record_turn
