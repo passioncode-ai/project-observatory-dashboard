@@ -513,6 +513,7 @@ def doctor(base: Path) -> dict:
             "features": _switches(doc, "features"),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
+            "tracked": __import__("tracked").health(),
             "backups": __import__("backup_vault").status(base),
             # Updates that arrive by themselves and the daily encrypted backup: whether the
             # job is scheduled, what it last found, and what needs a person (maintenance.py).
@@ -599,6 +600,13 @@ def _parser() -> argparse.ArgumentParser:
     backups.add_argument("action", choices=["status", "migrate", "decrypt"])
     backups.add_argument("file", nargs="?", type=Path)
     backups.add_argument("output", nargs="?", type=Path)
+    track = sub.add_parser("track", help="declare one exact Git checkout for the ordinary local pipeline")
+    track.add_argument("kind", choices=["local-folder"])
+    track.add_argument("path", type=Path)
+    untrack = sub.add_parser("untrack", help="remove a local-folder declaration and keep it removed")
+    untrack.add_argument("kind", choices=["local-folder"])
+    untrack.add_argument("path", type=Path)
+    sub.add_parser("tracked", help="list declared and removed local folders")
     return ap
 
 
@@ -713,6 +721,20 @@ def main(argv: list[str]) -> int:
         elif a.command == "onboard":
             print((config.SOURCE / "docs/AGENT-ONBOARDING.md").read_text())
             return 0
+        elif a.command == "tracked":
+            result = __import__("tracked").listing()
+        elif a.command == "track":
+            import tracked
+            sys.path.insert(0, str(config.SOURCE / "tools"))
+            import session_start
+            top = session_start.git_top(a.path)
+            if top is None:
+                raise config.ConfigurationError(f"{a.path} is not a Git repository or worktree")
+            result = tracked.declare(top, "operator", automatic=False)
+            if result["status"] == "refused":
+                raise config.ConfigurationError(result["reason"])
+        elif a.command == "untrack":
+            result = __import__("tracked").remove(a.path)
         else:
             config.validate_workspace(base, required=True)
             doc = config.load(base)
