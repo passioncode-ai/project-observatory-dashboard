@@ -18,3 +18,20 @@ Contract: brand-contract v1
 
 | machine.guard_stopping | Git cleanup stopped in three consecutive disk guard runs | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
 | machine.guard_degraded | the disk guard could not measure {source} | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
+
+| ssh.list_empty | No SSH keys yet. Create one: | observatory/engine/tools/ssh_keys.py | OSS-62 | proposed | copy |
+| ssh.copy_done | Copied. Paste it where the key is asked for, or let Observatory send it | observatory/engine/tools/ssh_keys.py | OSS-64 | proposed | copy |
+| ssh.copy_no_clipboard | the clipboard was not set: no clipboard tool (pbcopy, wl-copy, xclip); copy the line above | observatory/engine/tools/ssh_keys.py | OSS-64 | proposed | copy |
+| ssh.create_needs_person | a passphrase is typed by a person, into ssh-keygen's own prompt | observatory/engine/tools/ssh_keys.py | OSS-63 | proposed | copy |
+| ssh.never_overwritten | already exists; a key is never overwritten. Choose another name, | observatory/engine/tools/ssh_keys.py | OSS-63 | proposed | copy |
+| ssh.cloud_gap | no Observatory door registers SSH keys at | observatory/engine/tools/ssh_keys.py | OSS-65 | proposed | copy |
+| ssh.finding_no_passphrase | {key} has no passphrase | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_weak | {key} is a weak {kind} key | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_readable | {key} is readable by other accounts | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_folder | the SSH folder is open to other accounts | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_unused | {key} has not been used for a long time | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_orphan | GitHub accepts {title}, not found where Observatory looked | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_unregistered | {key} is registered nowhere this machine can see | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_private_in_pub | {path} holds a private key | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_public_missing | {key} has no public half | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_identity_missing | {host} names a missing key file | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |

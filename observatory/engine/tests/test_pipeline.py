@@ -267,6 +267,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the lifecycle watch (collectors/scan_lifecycle.py),
                             # written by the tick's `lifecycle` step before this one
                             "store/raw/lifecycle.json", "store/raw/harness.json", "store/raw/spend.json",
+                            # the SSH-key inventory, written by `full ssh-keys list`
+                            # outside the step graph (PB-163): declared so the read is known
+                            "store/raw/ssh-keys.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

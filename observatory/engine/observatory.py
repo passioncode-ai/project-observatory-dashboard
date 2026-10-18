@@ -504,6 +504,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
+  ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
+                               ed25519 key, copy its public line, send it to GitHub or a server;
+                               the private key is never shown or moved
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
   scan-spend                   this month's provider spend across every account the doors hold, for the
                                L0 limit and its 80 % warning, and each project's month and last 30 days
@@ -761,6 +764,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import forget_cli
         return argparse_refusal(lambda: forget_cli.parser().parse_args(rest))
+    if name == "ssh-keys":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import ssh_keys
+        return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -1133,6 +1140,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import forget_cli
         return forget_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "ssh-keys":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import ssh_keys
+        return ssh_keys.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])

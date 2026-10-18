@@ -150,6 +150,8 @@ BOUNDARY += ('node_envelope',)
 BOUNDARY += ('node_cli',)
 # enroll-token/1, the headless join (DEC-0084): verify, single-use redemption, the token read only from stdin or a file.
 BOUNDARY += ('node_enroll', 'node_pairing')
+# PB-163: the machine's SSH keys; the private key is never shown or moved.
+BOUNDARY += ('ssh_keys',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.
