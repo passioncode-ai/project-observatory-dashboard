@@ -2629,7 +2629,10 @@ def collect() -> list[dict]:
                          limit=f"{_limit:g}"),
                 "detail": ("By account: " + ", ".join(f"{a.get('account')} ${float(a.get('usd') or 0):.2f}"
                                                        for a in _s.get("accounts") or [])
-                           + (" (partial: " + ", ".join(d.get("source", "?") for d in _s.get("degraded") or [])
+                           # Only the accounts' sources: a key the per-project figures could not read (scope
+                           # `attribution`, J-11) leaves the estate total whole and is not an account unread.
+                           + (" (partial: " + ", ".join(d.get("source", "?") for d in _s.get("degraded") or []
+                                                         if d.get("scope", "account") == "account")
                               + " not read)" if _s.get("partial") else "")
                            + ". At the limit the meter refuses every further reservation until the month ends."),
                 "action": "see which keys spend with `project-observatory full grant --status` and the door's "

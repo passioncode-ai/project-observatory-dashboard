@@ -12,10 +12,10 @@ The SessionStart hook writes every such sighting to
 this rule reads it back as ONE row, so the disagreement is a measured fact
 with a decision attached rather than a memory.
 
-WHAT IT IS NOT. Not a defect in any project: a folder outside the projects root
-is the operator's choice, and the remedy is theirs — move it under the root, or
-say it is not to be watched. One row, the folders named, worst-first by how
-many sessions opened them, over the last `DAYS` days.
+WHAT IT IS NOT. Not a defect in any project: an eligible outside Git checkout
+is declared for the ordinary local pipeline, while an exclusion, a person's
+removal or an ambiguous identity keeps it out. Only those refused or ambiguous
+sightings remain here, one row, worst-first by sessions, over `DAYS` days.
 """
 from __future__ import annotations
 import collections
@@ -67,11 +67,16 @@ def findings(path: pathlib.Path, known_folders: set[str], data_root: pathlib.Pat
     for cwd, rs in by_cwd.items():
         p = pathlib.Path(cwd)
         try:
-            folder = p.resolve().relative_to(data_root.resolve()).parts[0]
+            resolved = p.resolve()
+            if str(resolved) in known_folders:
+                continue
+            folder = resolved.relative_to(data_root.resolve()).parts[0]
             if folder in known_folders:
-                continue                                                    
+                continue
         except (ValueError, IndexError, OSError):
             pass
+        if rs[-1].get("state") in {"declared", "pending"}:
+            continue
         remote = next((r.get("remote") for r in rs if r.get("remote")), None)
         still.append((cwd, len({r.get("session_id") for r in rs}), remote))
     if not still:
@@ -88,7 +93,8 @@ def findings(path: pathlib.Path, known_folders: set[str], data_root: pathlib.Pat
         "detail": (f"{named}{f' and {more} more' if more > 0 else ''} — {total_sessions} session(s) in all. "
                    f"Each was where an agent was told to work and the board could show nothing "
                    f"about it: no keys by name, no findings, no history. A folder under the configured project directory "
-                   f"joins on the next tick; one elsewhere joins only if it moves."),
-        "action": ("move the folder under the configured project directory, or update "
-                   "sources.projects; otherwise this row records a project outside the scan scope"),
+                   f"joins on the next tick; an eligible Git folder elsewhere is declared in config/tracked.json "
+                   f"and joins through the same local pipeline. A refusal or ambiguity stays here with its reason."),
+        "action": ("inspect the refusal or ambiguity; run project-observatory full track local-folder PATH "
+                   "to opt in, or full untrack local-folder PATH to keep a declaration removed"),
     }]

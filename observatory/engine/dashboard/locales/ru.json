@@ -1679,7 +1679,12 @@
   "other": "{origin} занимает {gb} ГБ в {n} процессах"
  },
  "{path} is committed to git": "{path} закоммичен в git",
- "{path} is outside the configured projects folder — the observatory does not scan it; recorded in sessions-seen.jsonl. To observe it, move it into the projects folder or change sources.projects": "{path} вне настроенной папки проектов: Observatory её не сканирует, запись сделана в sessions-seen.jsonl. Чтобы её наблюдать, переместите её в папку проектов или измените sources.projects",
+ "checkout declared for the next local pass": "копия заявлена для следующего локального запуска",
+ "checkout declaration pending for the next local pass": "декларация копии ожидает следующего локального запуска",
+ "{path} matches multiple registered projects: {reason}; identity is unresolved and nothing new was declared": "{path} совпадает с несколькими проектами в реестре: {reason}; идентичность не определена, новая декларация не создана",
+ "{path} is outside the configured projects folder — declared in config/tracked.json; the next tick (if the schedule is on), or now: project-observatory full local": "{path} вне настроенной папки проектов — заявлено в config/tracked.json; следующий плановый запуск (если расписание включено), а сразу — project-observatory full local",
+ "{path} is outside the configured projects folder — declaration pending for the next tick (if the schedule is on), or now: project-observatory full local": "{path} вне настроенной папки проектов — декларация ожидает следующего планового запуска (если расписание включено), а сразу — project-observatory full local",
+ "{path} is outside the configured projects folder — not declared: {reason}. It stays unobserved; run project-observatory full track local-folder PATH after fixing the cause": "{path} вне настроенной папки проектов — не заявлено: {reason}. Оно останется вне наблюдения; после устранения причины выполните project-observatory full track local-folder PATH",
  "{plugin}'s newest measurement is from {date}": "последнее измерение {plugin} — от {date}",
  "{prior}; the queue could not be read: {error}": "{prior}; не удалось прочитать очередь: {error}",
  "{project} has no folder and no repository, so nothing about it can be measured": "{project}: нет ни папки, ни репозитория, поэтому измерить ничего нельзя",

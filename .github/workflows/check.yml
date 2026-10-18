@@ -231,6 +231,12 @@ jobs:
           python observatory/engine/tools/install_launchd.py status
           python observatory/engine/tools/install_launchd.py uninstall
           schtasks /Query /FO LIST | grep -c ProjectObservatory || true
+      - id: ledgerlock
+        name: The OpenRouter door's ledger lock across threads (J-11)
+        continue-on-error: true
+        run: |
+          cd observatory/engine
+          python tests/test_spend.py -v ProjectSpend.test_two_rotations_at_once_both_land ProjectSpend.test_the_rotate_command_reads_the_ledger_under_the_lock ProjectSpend.test_the_lock_refusal_names_every_locked_verb
       - id: tests
         name: Synthetic runtime and privacy tests
         continue-on-error: true
@@ -253,5 +259,6 @@ jobs:
             echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
+            echo "| OpenRouter ledger lock | ${{ steps.ledgerlock.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
