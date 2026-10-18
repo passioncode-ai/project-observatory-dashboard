@@ -1,0 +1,4774 @@
+{
+  "about": "Vectors for the estate ceremonies' pairing (DEC-0084, docs/specification/ceremonies.md). A side commits to sha256: + hex SHA-256 of the UTF-8 RFC 8785 form of {type: fabric-enroll-commit/1, role, keys, nonce}, with genesis (the digest of the estate's revision 1) for the trusted side (commits: pairingCommit), both commit before either reveals, and each checks the other's reveal against its commitment (reveals: checkReveal(commit, reveal, expected?)). The comparison code is the first 5 bytes, big-endian, of SHA-256 over the RFC 8785 transcript {type: fabric-enroll-code/1, new: {keys, nonce}, trusted: {keys, nonce, genesis}}, modulo 10^6, as six digits (codes: comparisonCode(new, trusted)); a port computes it only through checkedComparisonCode(newCommit, new, trustedCommit, trusted), which checks each reveal against its commitment first (checkedCodes). The estate fingerprint is five groups of five digits from SHA-256 over {type: estate-fingerprint/1, digest} of revision 1 (fingerprints: estateFingerprint). rendezvous: rendezvousVerdict(openedAt, messages, at), at an RFC 3339 instant read as the clock — one exchange within 600 s, burned by any failure, and one abort accepted after both reveals. join: joinListed(record, new, trusted, genesis) on the revision that adds the machine, genesis the digest of the revision 1 the new machine verified its chain from. ownKeys: ownKeysDecision(record, machine, held). Every refusal answers {ok: false, problem} and nothing throws. The lax cases are what a careless port gets wrong: non-canonical JSON, a swapped role, folded hex.",
+  "keys": {
+    "new": [
+      {
+        "kid": "m-7b2d#sig",
+        "use": "sig",
+        "alg": "es256",
+        "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+      },
+      {
+        "kid": "m-7b2d#kem",
+        "use": "kem",
+        "alg": "ecdh-p256",
+        "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+      }
+    ],
+    "trusted": [
+      {
+        "kid": "m-4c1e#sig",
+        "use": "sig",
+        "alg": "es256",
+        "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+      },
+      {
+        "kid": "m-4c1e#kem",
+        "use": "kem",
+        "alg": "ecdh-p256",
+        "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+      }
+    ],
+    "replaced": [
+      {
+        "kid": "m-7b2d#sig",
+        "use": "sig",
+        "alg": "es256",
+        "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+      },
+      {
+        "kid": "m-7b2d#kem",
+        "use": "kem",
+        "alg": "ecdh-p256",
+        "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+      }
+    ],
+    "other": [
+      {
+        "kid": "m-e5f0#sig",
+        "use": "sig",
+        "alg": "es256",
+        "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+      }
+    ]
+  },
+  "commits": [
+    {
+      "name": "the new machine's commitment",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "input": "{\"keys\":[{\"alg\":\"es256\",\"kid\":\"m-7b2d#sig\",\"publicKey\":\"BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8=\",\"use\":\"sig\"},{\"alg\":\"ecdh-p256\",\"kid\":\"m-7b2d#kem\",\"publicKey\":\"BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s=\",\"use\":\"kem\"}],\"nonce\":\"uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc\",\"role\":\"new\",\"type\":\"fabric-enroll-commit/1\"}"
+    },
+    {
+      "name": "the trusted machine's commitment",
+      "side": {
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      }
+    },
+    {
+      "name": "the same keys and nonce committed as the other role give another commitment",
+      "side": {
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:48cf566f032f04dff3d053b8a02ee888fc62a6f5f245ef74391b16aac40beecc"
+      }
+    },
+    {
+      "name": "a machine with only a #sig key commits",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-e5f0#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+          }
+        ],
+        "nonce": "YRVvUT7hXp1OriC0-5dnv5s23iQ2VVJJcVB226CACLw"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:d19117501fea2803deac06a276cca781ba06e5ce8f06e497f5f2954bbb43316e"
+      }
+    },
+    {
+      "name": "an Ed25519 #sig key commits like an ES256 one",
+      "side": {
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-9a07#sig",
+            "use": "sig",
+            "alg": "ed25519",
+            "publicKey": "E5DhHVXK3sLz51FwFvVW6t3f/e6J7K32OScferYvVjc="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:87c7f92a0d177e8fbca00406b4f97584ac2157b855d60651fc35c9d8406c139c"
+      }
+    },
+    {
+      "name": "the trusted side without its estate's genesis",
+      "side": {
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-genesis"
+      }
+    },
+    {
+      "name": "lax: the new side naming a genesis (it has no estate yet)",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-genesis"
+      }
+    },
+    {
+      "name": "lax: a genesis in upper-case hex",
+      "side": {
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4D7C9D5653D99158DD358BB5242B5F8811CEDF2F813355DDF9FB0CFCBAE9B5C6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-genesis"
+      }
+    },
+    {
+      "name": "lax: the keys listed in another order are another commitment (RFC 8785 sorts members, never array items)",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          },
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": true,
+        "commit": "sha256:f3fb14d8824b73dc6ae1526ac66b4907b9ca3d22ebfc816b459e0323056b47c5"
+      }
+    },
+    {
+      "name": "a role that is neither new nor trusted",
+      "side": {
+        "role": "joiner",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-role"
+      }
+    },
+    {
+      "name": "a nonce of 31 bytes",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWU"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-nonce"
+      }
+    },
+    {
+      "name": "a nonce whose last character cannot end 32 bytes",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUB"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-nonce"
+      }
+    },
+    {
+      "name": "a padded nonce",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc="
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-nonce"
+      }
+    },
+    {
+      "name": "no key",
+      "side": {
+        "role": "new",
+        "keys": [],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a #kem key alone",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "two #sig keys",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BBQMRepChvJAdVMhwu+O1FlQTlrm2mLGfbIYi8vjICMJyIfVx6f+NvE+j80XhamoRatX5Nk8tZRH/Xx98slLhWo="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "keys of two machines",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-other#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "one key in both roles",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a #sig key under an ECDH algorithm",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "ecdh-p256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a kid that names the other role",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#kem",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a P-256 key that is not on the curve",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "an Ed25519 key of small order",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "ed25519",
+            "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "lax: a key in unpadded base64",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8"
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a key with a member the record does not list",
+      "side": {
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8=",
+            "x": "1"
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "not an object",
+      "side": [
+        {
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    }
+  ],
+  "reveals": [
+    {
+      "name": "the new machine's reveal opens its commitment",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": true,
+        "machine": "m-7b2d"
+      }
+    },
+    {
+      "name": "the trusted machine's reveal opens its commitment",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "expected": "trusted",
+      "answer": {
+        "ok": true,
+        "machine": "m-4c1e"
+      }
+    },
+    {
+      "name": "without an expected role, the reveal is checked against its commitment's",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": true,
+        "machine": "m-7b2d"
+      }
+    },
+    {
+      "name": "a reveal with another nonce than committed",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "YRVvUT7hXp1OriC0-5dnv5s23iQ2VVJJcVB226CACLw"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "a reveal with another key than committed (a key swapped after the other's nonce was seen)",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "a reveal of an attacker's keys and nonce against the new machine's commitment",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-e5f0#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+          }
+        ],
+        "nonce": "YRVvUT7hXp1OriC0-5dnv5s23iQ2VVJJcVB226CACLw"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "lax: a commitment over non-canonical JSON does not open",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:5623ca9a3cd110335250d05330c9be502320b007d1f259a0653e057e46c6f3b1"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      },
+      "laxInput": "{\"nonce\":\"uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc\",\"keys\":[{\"kid\":\"m-7b2d#sig\",\"use\":\"sig\",\"alg\":\"es256\",\"publicKey\":\"BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8=\"},{\"kid\":\"m-7b2d#kem\",\"use\":\"kem\",\"alg\":\"ecdh-p256\",\"publicKey\":\"BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s=\"}],\"role\":\"new\",\"type\":\"fabric-enroll-commit/1\"}"
+    },
+    {
+      "name": "lax: a swapped role — the new machine's commitment and reveal presented as the trusted side's",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "expected": "trusted",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "a trusted reveal of another estate than it committed to",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "expected": "trusted",
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "a trusted reveal without its genesis",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI"
+      },
+      "expected": "trusted",
+      "answer": {
+        "ok": false,
+        "problem": "bad-genesis"
+      }
+    },
+    {
+      "name": "lax: a reveal in another role than its commitment's",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "role-mismatch"
+      }
+    },
+    {
+      "name": "lax: a reveal in its commitment's role, but not the role expected of the other side",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "expected": "trusted",
+      "answer": {
+        "ok": false,
+        "problem": "role-mismatch"
+      }
+    },
+    {
+      "name": "a reveal whose nonce is not 32 bytes",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "short"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "bad-nonce"
+      }
+    },
+    {
+      "name": "a reveal whose keys are not one machine's",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "expected": "new",
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a commit message where a reveal belongs",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a commit message with an extra member",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ]
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a commitment in upper-case hex",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58B3ACAD225DA8298DC83E3E5F8F760602C08EA7811DAEEE702CDDAD2A7FD515"
+      },
+      "reveal": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "another schema",
+      "commit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "reveal": {
+        "schema": "pairing-message/2",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    }
+  ],
+  "codes": [
+    {
+      "name": "the code both screens show",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "724799"
+      },
+      "transcript": "{\"new\":{\"keys\":[{\"alg\":\"es256\",\"kid\":\"m-7b2d#sig\",\"publicKey\":\"BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8=\",\"use\":\"sig\"},{\"alg\":\"ecdh-p256\",\"kid\":\"m-7b2d#kem\",\"publicKey\":\"BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s=\",\"use\":\"kem\"}],\"nonce\":\"uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc\"},\"trusted\":{\"genesis\":\"sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6\",\"keys\":[{\"alg\":\"es256\",\"kid\":\"m-4c1e#sig\",\"publicKey\":\"BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE=\",\"use\":\"sig\"},{\"alg\":\"ecdh-p256\",\"kid\":\"m-4c1e#kem\",\"publicKey\":\"BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8=\",\"use\":\"kem\"}],\"nonce\":\"Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI\"},\"type\":\"fabric-enroll-code/1\"}"
+    },
+    {
+      "name": "another nonce of the new machine changes the code",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "JpECtx3F2DcXI5X4r2ghRGTDcx8pbGU7MkCNYSVDsKg"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "416052"
+      }
+    },
+    {
+      "name": "another nonce of the trusted machine changes the code",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "r57K2buCe30ZYZoMnTbe9PTDbCG-C4abPFdclDudcsg",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "584885"
+      }
+    },
+    {
+      "name": "another key of the new machine changes the code (an attacker in the middle)",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-e5f0#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "857231"
+      }
+    },
+    {
+      "name": "another key of the trusted machine changes the code (an attacker in the middle)",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-e5f0#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "732095"
+      }
+    },
+    {
+      "name": "another estate of the trusted machine changes the code (a chain substituted for the person's)",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "answer": {
+        "ok": true,
+        "code": "518405"
+      }
+    },
+    {
+      "name": "the new machine without its #kem key gives another code: the #kem key is bound too",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "193399"
+      }
+    },
+    {
+      "name": "the replaced keys of the same machine id give another code",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "067583"
+      }
+    },
+    {
+      "name": "lax: a port that writes the transcript with the two sides swapped gets another code",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "724799"
+      },
+      "laxCode": "394173"
+    },
+    {
+      "name": "lax: the two reveals passed in swapped order are refused, not coded",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "role-mismatch"
+      }
+    },
+    {
+      "name": "two reveals in the same role",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "role-mismatch"
+      }
+    },
+    {
+      "name": "a reveal in no known role",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "joiner",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-role"
+      }
+    },
+    {
+      "name": "a machine paired with itself",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "same-machine"
+      }
+    },
+    {
+      "name": "a reveal with a bad nonce",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "AAAA"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-nonce"
+      }
+    },
+    {
+      "name": "a reveal with bad keys",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-keys"
+      }
+    },
+    {
+      "name": "a trusted reveal that names no estate",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "bad-genesis"
+      }
+    },
+    {
+      "name": "not a reveal",
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    }
+  ],
+  "checkedCodes": [
+    {
+      "name": "both reveals open their commitments: the code",
+      "newCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trustedCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": true,
+        "code": "724799"
+      }
+    },
+    {
+      "name": "lax: the trusted side revealed another nonce than it committed to (picked after seeing the new side's): no code",
+      "newCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trustedCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "oHmlpPP6YrINSaY0JxC0FJAgu_Sa8AqzpEf82ivtPv0",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "lax: the new side revealed another key than it committed to: no code",
+      "newCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trustedCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "commit-mismatch"
+      }
+    },
+    {
+      "name": "the two commitments swapped: the new side's reveal does not open the trusted commitment",
+      "newCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "trusted",
+        "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trustedCommit": {
+        "schema": "pairing-message/1",
+        "step": "commit",
+        "role": "new",
+        "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "answer": {
+        "ok": false,
+        "problem": "role-mismatch"
+      }
+    }
+  ],
+  "fingerprints": [
+    {
+      "name": "the fingerprint of a revision 1",
+      "digest": "sha256:7d1c1f5a3b0e29c4a6f8d2b1e0c9a7f6e5d4c3b2a1908f7e6d5c4b3a29180706",
+      "answer": {
+        "ok": true,
+        "fingerprint": "82502 15204 30620 29998 70976"
+      },
+      "input": "{\"digest\":\"sha256:7d1c1f5a3b0e29c4a6f8d2b1e0c9a7f6e5d4c3b2a1908f7e6d5c4b3a29180706\",\"type\":\"estate-fingerprint/1\"}"
+    },
+    {
+      "name": "the fingerprint of the all-zero digest",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "answer": {
+        "ok": true,
+        "fingerprint": "14718 81621 57010 10504 40994"
+      }
+    },
+    {
+      "name": "one changed digit of the digest changes the fingerprint",
+      "digest": "sha256:7d1c1f5a3b0e29c4a6f8d2b1e0c9a7f6e5d4c3b2a1908f7e6d5c4b3a29180707",
+      "answer": {
+        "ok": true,
+        "fingerprint": "66965 07301 30246 51391 00668"
+      }
+    },
+    {
+      "name": "lax: a digest in upper-case hex is refused, never folded",
+      "digest": "sha256:7D1C1F5A3B0E29C4A6F8D2B1E0C9A7F6E5D4C3B2A1908F7E6D5C4B3A29180706",
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a digest without its prefix",
+      "digest": "7d1c1f5a3b0e29c4a6f8d2b1e0c9a7f6e5d4c3b2a1908f7e6d5c4b3a29180706",
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a digest of 63 hex digits",
+      "digest": "sha256:7d1c1f5a3b0e29c4a6f8d2b1e0c9a7f6e5d4c3b2a1908f7e6d5c4b3a2918070",
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "not a string",
+      "digest": 7,
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    }
+  ],
+  "rendezvous": [
+    {
+      "name": "both commitments, then both reveals: complete",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:02:00.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        }
+      ],
+      "answer": {
+        "state": "complete"
+      }
+    },
+    {
+      "name": "the trusted machine may commit first, and the trusted reveal may come first",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:02:00.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "state": "complete"
+      }
+    },
+    {
+      "name": "complete at exactly 600 s",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:10:00.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        }
+      ],
+      "answer": {
+        "state": "complete"
+      }
+    },
+    {
+      "name": "expired at 601 s, whatever it carried",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:10:01.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "expired",
+        "index": -1
+      }
+    },
+    {
+      "name": "open with nothing yet",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:01.000Z",
+      "messages": [],
+      "answer": {
+        "state": "open"
+      }
+    },
+    {
+      "name": "open after both commitments",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        }
+      ],
+      "answer": {
+        "state": "open"
+      }
+    },
+    {
+      "name": "open after both commitments and one reveal",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "state": "open"
+      }
+    },
+    {
+      "name": "a clock 60 s before the opening is within the skew",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T08:59:00.000Z",
+      "messages": [],
+      "answer": {
+        "state": "open"
+      }
+    },
+    {
+      "name": "a clock 61 s before the opening is refused",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T08:58:59.000Z",
+      "messages": [],
+      "answer": {
+        "state": "burned",
+        "reason": "expired",
+        "index": -1
+      }
+    },
+    {
+      "name": "a reveal before the other side committed burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "out-of-order",
+        "index": 1
+      }
+    },
+    {
+      "name": "a second commitment from one role burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:d19117501fea2803deac06a276cca781ba06e5ce8f06e497f5f2954bbb43316e"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "repeated",
+        "index": 1
+      }
+    },
+    {
+      "name": "a second reveal from one role burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "repeated",
+        "index": 3
+      }
+    },
+    {
+      "name": "a reveal that does not open its commitment burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "YRVvUT7hXp1OriC0-5dnv5s23iQ2VVJJcVB226CACLw"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "commit-mismatch",
+        "index": 2
+      }
+    },
+    {
+      "name": "an abort burns it: the person said the codes differ",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "trusted"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "aborted",
+        "index": 3
+      }
+    },
+    {
+      "name": "an abort as the first message burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "new"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "aborted",
+        "index": 0
+      }
+    },
+    {
+      "name": "anything after both reveals is refused: one rendezvous, one pairing",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "closed",
+        "index": 4
+      }
+    },
+    {
+      "name": "one abort after both reveals burns it: the person said the codes differ, and the relay forwards it to the other side",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "new"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "aborted",
+        "index": 4
+      }
+    },
+    {
+      "name": "a second abort after both reveals is never read: the first one ended the rendezvous",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "new"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "trusted"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "aborted",
+        "index": 4
+      }
+    },
+    {
+      "name": "lax: an abort with an extra member after both reveals is no abort, so the rendezvous is closed",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+            },
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "trusted",
+          "keys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+          "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "new",
+          "reason": "codes differ"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "closed",
+        "index": 4
+      }
+    },
+    {
+      "name": "a message that is not a pairing message burns it",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "type": "hello"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": 1
+      }
+    },
+    {
+      "name": "a reveal with bad keys burns it as malformed",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "trusted",
+          "commit": "sha256:bd05c73f63f98e161d4e1e3196fdb224cf70a33761118715a6cd997d6a74a2c2"
+        },
+        {
+          "schema": "pairing-message/1",
+          "step": "reveal",
+          "role": "new",
+          "keys": [
+            {
+              "kid": "m-7b2d#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+            }
+          ],
+          "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": 2
+      }
+    },
+    {
+      "name": "an abort with an extra member is no abort",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [
+        {
+          "schema": "pairing-message/1",
+          "step": "abort",
+          "role": "new",
+          "reason": "codes differ"
+        }
+      ],
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "an opening that is not an RFC 3339 instant",
+      "openedAt": "2026-10-15 09:00:00",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [],
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": -1
+      }
+    },
+    {
+      "name": "an opening on a day that does not exist",
+      "openedAt": "2026-02-30T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": [],
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": -1
+      }
+    },
+    {
+      "name": "messages that are not a list",
+      "openedAt": "2026-10-15T09:00:00Z",
+      "at": "2026-10-15T09:00:30.000Z",
+      "messages": {
+        "0": {
+          "schema": "pairing-message/1",
+          "step": "commit",
+          "role": "new",
+          "commit": "sha256:58b3acad225da8298dc83e3e5f8f760602c08ea7811daeee702cddad2a7fd515"
+        }
+      },
+      "answer": {
+        "state": "burned",
+        "reason": "malformed",
+        "index": -1
+      }
+    }
+  ],
+  "join": [
+    {
+      "name": "the revision lists the new machine with its revealed keys and the trusted machine with its #sig key",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": true
+      }
+    },
+    {
+      "name": "the keys may be listed in another order",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              },
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": true
+      }
+    },
+    {
+      "name": "a chain of another estate, however well signed: its revision 1 is not the genesis the code bound",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "answer": {
+        "ok": false,
+        "problem": "other-estate"
+      }
+    },
+    {
+      "name": "the revision does not list the new machine",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "not-listed"
+      }
+    },
+    {
+      "name": "the revision lists and revokes the new machine",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": [
+          {
+            "kind": "machine",
+            "ref": "m-7b2d",
+            "revokedAt": "2026-10-15T09:00:00Z"
+          }
+        ]
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "not-listed"
+      }
+    },
+    {
+      "name": "the revision lists the new machine with another key than it revealed",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "other-keys"
+      }
+    },
+    {
+      "name": "the revision lists the new machine without its #kem key",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "other-keys"
+      }
+    },
+    {
+      "name": "the revision does not list the trusted machine's revealed #sig key",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BP2QDH2yFyEh5oBWIiOI7vOQqQibfaLPt/1yviGnTIkLO34S3f9UTtYS5Oybu2JDU61rpYgrlsV/4WItRl6gJWY="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "trusted-not-listed"
+      }
+    },
+    {
+      "name": "the trusted machine is not in the revision",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "trusted-not-listed"
+      }
+    },
+    {
+      "name": "the reveals swapped",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "no record",
+      "record": null,
+      "new": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "new",
+        "keys": [
+          {
+            "kid": "m-7b2d#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+          },
+          {
+            "kid": "m-7b2d#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+          }
+        ],
+        "nonce": "uLTm0WpJyNnMFIfuKbvcNuWNtPSQvRsghByRnwzaWUc"
+      },
+      "trusted": {
+        "schema": "pairing-message/1",
+        "step": "reveal",
+        "role": "trusted",
+        "keys": [
+          {
+            "kid": "m-4c1e#sig",
+            "use": "sig",
+            "alg": "es256",
+            "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+          },
+          {
+            "kid": "m-4c1e#kem",
+            "use": "kem",
+            "alg": "ecdh-p256",
+            "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+          }
+        ],
+        "nonce": "Dx1e4QZZ_HLDYrQO4103J_to72RdqI9k4OCqxZiSusI",
+        "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6"
+      },
+      "genesis": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+      "answer": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    }
+  ],
+  "ownKeys": [
+    {
+      "name": "the node holds every listed key: apply",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "apply",
+        "retire": []
+      }
+    },
+    {
+      "name": "the node re-paired and holds old and new keys: apply, and destroy the old ones",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 3,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        },
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+        }
+      ],
+      "answer": {
+        "action": "apply",
+        "retire": [
+          "m-7b2d#sig@sha256:98515fe0f649b8ffc8e4c90b359011d2ab5ace3f400ab6703432f47f8aa45c9d",
+          "m-7b2d#kem@sha256:7a8714cbb28241ed7d3302be8cb1c54d72aa94081faf66d957a5476f86a8ca40"
+        ]
+      }
+    },
+    {
+      "name": "the record replaced a key the node does not hold: stop using the old ones",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 3,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BKrKOD7cpB235NIazhl4kdi0eo06vrzdg4QLY6j865WXsdlDMFZmup2ZBNcmifhZMwImkDmhq5ttqwjo24T7YUg="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "stop",
+        "reason": "keys-replaced"
+      }
+    },
+    {
+      "name": "only the #kem key was replaced and the node holds the old one: stop",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 3,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BA8tP7PC0IBBHb2SM3nVsIzKz9MwRYS9G4Nt1ONrsqjVBvthtzUbgGVuX5Ov1739ACvENPM0QFBx9bLlJYeEEq0="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "stop",
+        "reason": "keys-replaced"
+      }
+    },
+    {
+      "name": "the record does not list the machine: removed",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "stop",
+        "reason": "removed"
+      }
+    },
+    {
+      "name": "the record revokes the machine: removed",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": [
+          {
+            "kind": "machine",
+            "ref": "m-7b2d",
+            "revokedAt": "2026-10-15T09:00:00Z"
+          }
+        ]
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "stop",
+        "reason": "removed"
+      }
+    },
+    {
+      "name": "a machine listed with no key is never applied",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": []
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "stop",
+        "reason": "keys-replaced"
+      }
+    },
+    {
+      "name": "no machine id",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": 7,
+      "held": [
+        {
+          "kid": "m-7b2d#sig",
+          "use": "sig",
+          "alg": "es256",
+          "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+        },
+        {
+          "kid": "m-7b2d#kem",
+          "use": "kem",
+          "alg": "ecdh-p256",
+          "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+        }
+      ],
+      "answer": {
+        "action": "malformed"
+      }
+    },
+    {
+      "name": "held keys that are not a list",
+      "record": {
+        "schema": "estate-record/1",
+        "estate": "estate-5d0f1a",
+        "revision": 2,
+        "machines": [
+          {
+            "id": "m-4c1e",
+            "deviceKeys": [
+              {
+                "kid": "m-4c1e#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+              },
+              {
+                "kid": "m-4c1e#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+              }
+            ]
+          },
+          {
+            "id": "m-7b2d",
+            "deviceKeys": [
+              {
+                "kid": "m-7b2d#sig",
+                "use": "sig",
+                "alg": "es256",
+                "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+              },
+              {
+                "kid": "m-7b2d#kem",
+                "use": "kem",
+                "alg": "ecdh-p256",
+                "publicKey": "BJgcFrvvLT5w5c+7PuGeTrY3w1B50PJn5y535OfuOuFpKTYLlr7zOu2MASKV8yNQh8f509brL1iRsZtOmUvIh0s="
+              }
+            ]
+          }
+        ],
+        "revocations": []
+      },
+      "machine": "m-7b2d",
+      "held": {
+        "kid": "m-7b2d#sig",
+        "use": "sig",
+        "alg": "es256",
+        "publicKey": "BHYJMaoWOLgoAKpohhiGWkOVtgcc2kkbvHn+caRxyt5jkpRXgLuzfCIM8GLpSdTfAef5BsXs+IU2tp0x32En0A8="
+      },
+      "answer": {
+        "action": "malformed"
+      }
+    }
+  ]
+}

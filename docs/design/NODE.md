@@ -282,6 +282,66 @@ nothing and prints the same. `--show` prints it without creating anything, and e
 A machine's identity is not moved by copying the folder: a new machine runs `--init` and is added to the estate by its
 own ceremony (DEC-0084).
 
+## The estate ceremonies (OBS-133, slice 5)
+
+The contract decides how a machine joins and leaves an estate in DEC-0084 (fabric-agent-contract #113). The node ports
+its checks; the ceremony's screens and the passkey prompt belong to whatever surface runs it.
+
+**Adding a machine by pairing** (`node/pairing.py`). The new machine and one trusted machine meet once at a relay
+rendezvous:
+- each first sends a commitment to its role, its device keys and a fresh 32-byte nonce (the trusted side also commits
+  to the digest of the estate's revision 1), and only then reveals them;
+- `check_reveal` opens each reveal against its commitment. A side that changed its keys or nonce after seeing the
+  other's is refused, so an attacker in the middle gets one guess at the code;
+- `checked_comparison_code` derives the six digits both screens show, and only after both reveals opened. The person
+  compares them and only then signs the revision that lists the new machine;
+- `rendezvous_verdict` burns the rendezvous for the first malformed, repeated, out-of-order or mismatched message, an
+  abort, a message after both reveals, or anything past 600 s.
+
+Before the new machine pins the estate and applies that revision, `join_listed` checks three things:
+- the chain starts at the revision 1 the trusted side revealed. A copied passkey and a copied trusted key cannot start
+  another estate there;
+- the record lists the new machine with exactly its revealed keys;
+- the record still lists the trusted machine with its `#sig` key.
+
+`estate_fingerprint` shows revision 1's digest as five groups of five digits, so a person can compare two screens.
+
+**What a revision drops, it revokes** (FAC-SEM-114). `verify_estate_record` with a parent refuses a revision that
+drops a machine, or a machine's key, without a matching revocation in the same revision. A replaced key is revoked by
+its key reference `<kid>@sha256:<fingerprint>` (`device_key_ref`), never by its kid, because the new key keeps the kid.
+A malformed `@` reference is refused (FAC-SEM-076).
+
+`own_keys_decision` is what a node does with a verified revision for its own keys:
+- `apply`, destroying the held keys the revision no longer lists (`retire`);
+- `stop` when the machine is removed;
+- `stop` when its listed keys are ones it does not hold. Another machine now speaks for this id.
+
+**Joining by an enroll token** (`node/enroll_token.py`). An `enroll-token/1` is signed by the estate's passkey for one
+estate and lives at most 900 s. `verify_enroll_token` checks it in the contract's order: the estate, the authority
+(revoked, duplicate or unknown), the passkey assertion, then the window.
+- `redeem_enroll_token` is the hub's check: the joining machine's keys, its `enroll-join/1` proof over the token
+  (`join_proof`, signed by its `#sig` key), revocation, and one use. Recording the use in the ledger is the hub's job.
+- `read_token` takes the token only from stdin or an owner-only regular file of at most 64 KiB, opened without following
+  a symlink. A token pasted as an argument, a URL or an environment variable is refused, and no error repeats the
+  token.
+
+Three changes follow on the relay side:
+- `peer_keys` subtracts a key revoked by its key reference as well as by its kid, and lists references it cannot read in
+  `unread`;
+- `session_stands` keeps a session only while its kid still names the same key bytes;
+- the secret envelope's open context takes the revocation-delta entries like the record's own (`extra_revocations`),
+  which closes OBS-118.
+
+**Before installing a package** (`installation_findings`, the contract's `estate-placement` kind), a machine checks
+that it is in the record, that the package is the one its digest names, that the record places that package on this
+machine in this context (FAC-SEM-074), that every secret of the agent fills a slot the package declares (FAC-SEM-075),
+and that the placement's share grant holds (FAC-SEM-111). The install itself is packet P6. A revocation delta entry
+whose device-key ref holds `@` but is no key reference is refused as malformed, since no revision could list it.
+
+`tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
+`enroll-token.json` and the 70 `estate-*` fixtures of `semantic/`. Then they run the add, re-key and remove ceremonies
+end to end between two device-key sets, on a test estate. The vectors are pinned to #113's merge commit `1531f21`.
+
 ## The walking skeleton
 
 `python observatory/engine/tools/node_skeleton.py --relay-source PATH` runs the whole path on one machine:
@@ -310,9 +370,12 @@ Presence fails because that relay pins the contract at `51719e4`, before DEC-006
 bare `presence` frames instead of one `presence-result` carrying `replyTo`, which the node (contract `bf3fd6b`)
 waits for. The fix is the relay's contract bump.
 
+Second run, 2026-10-18, against relay `00937e0` (relay#11, the contract bump to `bf3fd6b`): every step passed, presence
+included (`"ok": true`).
+
 ## What comes next
 
 | Slice | What |
 |---|---|
-| 5 | the enrollment client, once the contract's machine ceremonies are decided |
+| 5 | the ceremony surface: the pairing screens and the passkey prompt, in the app that runs them (the checks above are done) |
 | 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5 |

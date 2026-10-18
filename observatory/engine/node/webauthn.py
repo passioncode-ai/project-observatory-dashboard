@@ -22,7 +22,7 @@ import re
 from typing import Any, Mapping, Optional, Sequence
 
 from . import ed25519, jcs, p256
-from .relay import json_depth_ok
+from .relay import json_depth_ok, strict_time
 
 ASSERTION_ALGORITHMS = ('ES256', 'EdDSA')
 FLAGS = {'UP': 0x01, 'UV': 0x04, 'BE': 0x08, 'BS': 0x10, 'AT': 0x40, 'ED': 0x80}
@@ -162,8 +162,45 @@ def verify_assertion(assertion: Any, credential: Mapping[str, Any], challenge: b
 
 _SHA256 = re.compile(r'^sha256:[a-f0-9]{64}$')
 #: The passkey-signed statements a node checks; key-signed ones (relay-auth/1, relay-blob/1) are built in `relay`.
-PASSKEY_STATEMENTS = {'estate-revision/1': (('digest',), lambda f: isinstance(f.get('digest'), str)
-                                            and _SHA256.match(f['digest']) is not None)}
+#: Whose machines an `enroll-token/1` lets join: an estate's (DEC-0084).
+_ESTATE_SCOPE = re.compile(r'estate:[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}')
+#: 32 random bytes as unpadded base64url: 43 characters, the last carrying no stray bits.
+NONCE32 = re.compile(r'[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]')
+#: The enroll token's members beside `type` (DEC-0084), in the reference's order.
+ENROLL_TOKEN_FIELDS = ('scope', 'genesis', 'purpose', 'ceiling', 'notBefore', 'expiresAt', 'nonce', 'uses')
+
+
+def _matches(pattern: re.Pattern, value: Any) -> bool:
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
+
+
+def _enroll_token_values(f: Mapping[str, Any]) -> bool:
+    """The values only; the window's length (at most 900 s) is FAC-SEM-113's and the verifier's (`enroll_token`)."""
+    return (_matches(_ESTATE_SCOPE, f.get('scope')) and _matches(_SHA256, f.get('genesis'))
+            and f.get('purpose') == 'agent-host' and (f.get('ceiling') is None or _matches(_SHA256, f.get('ceiling')))
+            and strict_time(f.get('notBefore')) is not None and strict_time(f.get('expiresAt')) is not None
+            and _matches(NONCE32, f.get('nonce'))
+            # `uses` is the number 1: JSON's 1 and 1.0 are one number, a boolean is none.
+            and not isinstance(f.get('uses'), bool) and isinstance(f.get('uses'), (int, float)) and f.get('uses') == 1)
+
+
+#: The passkey-signed statements this node reads, each its fields and the check of their values.
+PASSKEY_STATEMENTS = {'estate-revision/1': (('digest',), lambda f: _matches(_SHA256, f.get('digest'))),
+                      'enroll-token/1': (ENROLL_TOKEN_FIELDS, _enroll_token_values)}
+#: The key-signed statements this node reads (a device key signs them, never a passkey).
+KEY_STATEMENTS = {'enroll-join/1': (('digest', 'nonce'),
+                                    lambda f: _matches(_SHA256, f.get('digest')) and _matches(NONCE32, f.get('nonce')))}
+
+
+def key_statement(kind: str, fields: Any) -> Optional[bytes]:
+    """The UTF-8 RFC 8785 bytes of a key-signed `{type, ...fields}`, under the same rules as `signing_statement`."""
+    spec = KEY_STATEMENTS.get(kind)
+    if spec is None or not isinstance(fields, dict) or sorted(fields) != sorted(spec[0]) or not spec[1](fields):
+        return None
+    try:
+        return jcs.canonical_bytes(dict(fields, type=kind))
+    except jcs.CanonicalError:
+        return None
 
 
 def signing_statement(kind: str, fields: Any) -> Optional[bytes]:

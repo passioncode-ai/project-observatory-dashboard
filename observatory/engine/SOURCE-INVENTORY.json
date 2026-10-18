@@ -1099,8 +1099,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bae2d1d858d013c3f481e013b7b4e281913322f61a5791acdbf04dc697e68062",
-      "bytes": 1644
+      "export_sha256": "830d95827d5ed4282ae5c642d221d6e908986e8a807c9e9211ea78a833bddb18",
+      "bytes": 2548
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1108,6 +1108,13 @@
       "upstream_modified": true,
       "export_sha256": "e63411c0e1b615773d20c8c82b34a0c5ef7fc367fffc04d106b537c2628e5663",
       "bytes": 14561
+    },
+    {
+      "path": "fabric/node-vectors/enroll-token.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "475e8e54cb47ceeb8b7b478327b7f8b9e89cf8293521986c65a9f3ad437bbc71",
+      "bytes": 84725
     },
     {
       "path": "fabric/node-vectors/estate-record.json",
@@ -1131,25 +1138,515 @@
       "bytes": 5481
     },
     {
+      "path": "fabric/node-vectors/pairing.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c5d99e2a54ba210a06b94350bebda635369bf50b470981c6d10aedbf914c498b",
+      "bytes": 156268
+    },
+    {
       "path": "fabric/node-vectors/relay.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6242729104e3fb4f08e144194a94af40b9bb3df15045bba733cf985de281fb3f",
-      "bytes": 193112
+      "export_sha256": "47563a359dc876500bb0405689eaa8c43bd9e148ab09c77c1a0f74e5850d42bb",
+      "bytes": 224568
     },
     {
       "path": "fabric/node-vectors/revocation-delta.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "07aa63ef6293fc5c1f355f21db7b6097e62e512d31bfcf837691d7953c51d3ec",
-      "bytes": 163122
+      "export_sha256": "cdb1fb989808bf0bc7843ef39571c1aa2a27d2f2dd2281572e921fc77bfb7217",
+      "bytes": 165456
     },
     {
       "path": "fabric/node-vectors/secret-envelope.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "446776b8a49a69d1b772265450cf3b6bdb1e7a0e9da7945e154b710d857c5ead",
-      "bytes": 109989
+      "export_sha256": "3ed14f7f95857b10a8d7ec97ded697ea65ea564c9f4c731e11c221e9ef03a3b3",
+      "bytes": 118651
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-authority-invalid-key.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9128533916807bd8935e709026fc5c9b839f4bab413c661cbbc2ca2d351672eb",
+      "bytes": 5670
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-authority-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ab95f211ea278e8db5ba3a56703ede865636ce8c12c87a471e7b16ecb1b877ea",
+      "bytes": 5705
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-contexts-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dbc4175fd5c46b7e58f3d31e73cd1bd2f1dd6bf071a0454b306080d5ff3b28f7",
+      "bytes": 9924
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-kid-revoked-new-key-listed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4cc3ffd26b6759c405208be00d052d2fb7347c63f54c972c5cf392b1cbd4ead7",
+      "bytes": 6222
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-not-canonical.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "cb178d5fd3ea9127a5e07c76972d610b994a4c6518ad38694908d47f34971c1f",
+      "bytes": 5756
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-ref-malformed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7c20622266e7b8fc742e41a3ea8beec68d7f94a02d6c34dd22ef05dcdf1ee575",
+      "bytes": 5955
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-device-key-ref-still-listed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "26feb9dcc8485c2c9465b67c60c57d3d20ef66e37ced2a9c275cfb4a2ce06502",
+      "bytes": 5910
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-grant-not-external.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ff3ad3c37b2228fac9e2d7926bac265ff20cedfc79a47b13d9698abfc408b183",
+      "bytes": 5711
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-grant-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f77c3b37d293c44ff921f883048d025071963c66fc1e8f71e4998c56bdad3e83",
+      "bytes": 7133
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-hub-kid-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "02efce975c3df2bd144edda33cccdb7acf6ff410cc9e56baf6e42be492676688",
+      "bytes": 5908
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-hub-small-order.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b3319080d500ef69b9301c4ef0159f28775119bc03b0102337c44ad48fed0c51",
+      "bytes": 5683
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-key-replaced-kid-other-machine.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "35e6622736217825e9689933a0f883909068ce68104a1ba8e5c6cfec823c32da",
+      "bytes": 6224
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-invalid-p256.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "647c46868c26a039ac9428c22152002afe3c1a24114dbc4f5a77c3083ee4142f",
+      "bytes": 5680
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-key-both-roles.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "90caf8092f23b67af239c926c65c033c95d4aa9660ee6e450d395943e1b2e0cf",
+      "bytes": 5659
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-kid-other-machine.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c46783c611102521fdc12742b1cc9b0746854d8ec9ceea9be122af67c2114a6b",
+      "bytes": 5660
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-small-order-key.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e5dd4701cc84afe60ecc82d2ebe0bb0f7f2028a7c77ef003653e11db79c96a01",
+      "bytes": 5668
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2aac4e2740eb1cdabdf4e77b2b9ba4ce360653bafeef9d1d72dd30c30e288ee6",
+      "bytes": 5488
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-machine-without-sig.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "aad73a2f7405db7faa7843e24c1772986ea59a443cf248ae3496e576fd9b22af",
+      "bytes": 5497
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-grant-context-case.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d130f5f1060f70a8b9c74ef6e52f78f326c42e7cebec9bcea243725c7755f3f5",
+      "bytes": 9867
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-grant-other-context.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1730c334e25c1e7f5a61108a12b432a6d75bdbca9ba445d658b37145d32bff04",
+      "bytes": 9848
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-grant-other-spelling.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "79f83c363275dff7341b05acb7d6e1ef20926325146d3b37635a5070fce44cb1",
+      "bytes": 9853
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-grant-revoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a5a9037076022b2864b14de03adcb47ec0d995ebd4298d6dd6e59fee3e412b2c",
+      "bytes": 10056
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-unknown-grant.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "827c9af1a565390a5c77094ac08713d859cefdf34423e097b402a3e68122c787",
+      "bytes": 9832
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-org-placement-without-grant.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ef9852b20ff18ccf924c5a86f46f4830407ac97368b0b639f9ab3f4e936996d3",
+      "bytes": 9759
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-package-placed-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "feb264b43e484381fa5e7429638b5b0c92db173829f93ada36293c5cc2c71584",
+      "bytes": 5899
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-package-unknown-publisher-kid.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2e3cb4260c946273651a57a8a6fb7b094c3c32f9a7a74a2a9674e63ba18f584a",
+      "bytes": 5675
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-personal-placement-with-grant.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6cd90a8622413109d81e4155684d6fbb58b14d089fc54b87da2c72c16ac31452",
+      "bytes": 9924
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placed-twice-in-context.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f516258cbb71e15c275ba079e0e5098cb4527e4c479b9e7796f9a676b796a182",
+      "bytes": 10178
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placed-twice-personal.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f989571d6db88cc692d7d2fbf1a8cb48bd673ed6d738734c32f44f5eff02d68c",
+      "bytes": 10162
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-not-placed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b55d1278b2f7892398a8c711183b8783c5bfdb671077160d6e63d098de16de0d",
+      "bytes": 10227
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "722cc3add94355f14689ece39f91597eb798d96b0119b0d4a93ec83a13f6efe1",
+      "bytes": 10644
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-org-not-placed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5a5e52f5f0fef0eca53cb1827165a030a12ef97cc2a0c7225569ccbfce8f7c88",
+      "bytes": 15134
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-org-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "957a457ce8be4e4129fca6afca482cd3de5bb8258c9b6d5098ca61953a2562bb",
+      "bytes": 15090
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-org-undeclared-slot.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c035184cc53a705b90d23dba79295488eee854f6706a05c1bc496b7df5e4b410",
+      "bytes": 15155
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-org-without-grant.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9ee0a87a59addf51480e20a4c0f806343e4f2a015dbf36103f828a5560c02b27",
+      "bytes": 15037
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-other-version.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "83b2a5fde11e55db097a01fd3e616fae99e7b477f5fc8e0cc18172c4562ff37d",
+      "bytes": 10671
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-package-changed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d6826254eab86cac53ee254daa66594d5046dfeef418825c8b97c8ffce0f0fd1",
+      "bytes": 10669
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-undeclared-slot.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7956f32f744926de674036a7ef6e5826a4d8bf80af041783611a4a0a3a034e95",
+      "bytes": 10825
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-placement-unknown-machine.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c801586c8260a406956c96864bd391573dfbfc86330b7dfade9bceeb8013ee31",
+      "bytes": 10631
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-publisher-kid-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5363dca955d885077db68535d63d0d814eae78eab8b8f14797c986fde2b6e7ed",
+      "bytes": 5839
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-digest-mismatch.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "43149f33d204c00cc9f0116237c8bec003cbf9af5bf98796a78420cce918c2f1",
+      "bytes": 5670
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-ends-before-issued.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8100beacc17504ddf3e2418d18cecc4475569a0bc93f9346666b03c994a11478",
+      "bytes": 5648
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "58bb5b75435e2a5846f75a4fcc18294d79c8d8bc0b716fa047e82ae2b588101d",
+      "bytes": 5623
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-record-too-long-lived.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0c1e6ce3122a089a08788ff55c95f8a9d07f201d02b5996e1d512ebc2c6a11f0",
+      "bytes": 5692
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-drops-revocation.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f01fac7aa535287e5b499cde577cdd1f273d2791c559866b6eeb8a5ec4eaf2ee",
+      "bytes": 10252
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-hub-key-changed-same-kid.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5ecd023f5701b5f89112b363b003ddc6bff15c593667f4ed312524144acfac24",
+      "bytes": 12073
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-hub-key-recertified.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6e714b041c24e67cc3bd8ca879ebf6e4a5463715742488a84683c0bbe1652124",
+      "bytes": 12152
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-issued-before-parent.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6ba9a0ce63dad3009269a7f82790ceab5f5f6176f30b8b1a6d884bc7804c3623",
+      "bytes": 11118
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-kem-dropped-kid-revoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8b5068d80dffb924f7494b246a8c2daba78f30918f75683929fdabdab605063f",
+      "bytes": 11966
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-kem-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "01dcba201da3f3185106f4c238862b21e05d499ab6614f8e1cbe0370773bb901",
+      "bytes": 12284
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ca96c3c7e808007420bf1d41c006ae0db9008a0563efa5671b69ff87a02db693",
+      "bytes": 12554
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-key-replaced-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5be3dcaced51a351673a2ad76e8e4f05f3bf4815e65e527fa49cb2dd46cbcafa",
+      "bytes": 12082
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-machine-id-changed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b1872654cb3f88f9b59b697a9af4cf10b5c66fff5c68626692f6bdbe39f0b29d",
+      "bytes": 12187
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c42a7c7e841d88063ea91a7f94d212e05e862856a08e6df914ca51345e535b07",
+      "bytes": 11134
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-other-estate.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "064e842da7c37cf7e10dcc36f5f906d90dbb7546ad1f9456364a5ff0d9a89a7d",
+      "bytes": 11110
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-parent-mismatch.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7cef05987841237cf8a78a120e72153ed71b86a1d4a565a82ae621f9d707b5f9",
+      "bytes": 11141
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-hub-machine-hub-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "080eeb4d32751f94d332e4d08a0eaed7d6693f128da48dc5e4822db81099064b",
+      "bytes": 10671
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-hub-machine-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1f98c30f7c9bd7976c3be726ef0de63912ac6623b25744f8897fdacbbde0891e",
+      "bytes": 10796
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-remove-machine-unrevoked.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0b55b3cbb9ddde0158fdd6fd6e69ec26e69af308c5fe46717054f29821bff3eb",
+      "bytes": 11030
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-skips.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7ff3f2e200287bb31a6f69492b5824f3a93309b2c9c71c40d31a457754da528f",
+      "bytes": 11152
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revocation-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1d85821b2895390ed83b5b5fec05e538a31ad8805856a5cea10b4065f049345a",
+      "bytes": 5010
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revoked-machine-listed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dab209369f34c54870cdba7184170ddb5dd3e2b7e0fde8d6293991c59c5a4263",
+      "bytes": 5814
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revoked-package-placed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "db1d0e1732de585bdff5ad49a9fe832220d1a30e6101cf0d4d84d0fa0d0618f5",
+      "bytes": 5855
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-secret-agent-not-placed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9c828844a7e8055b1a20e6d61afb37a01040378edaed0f54ce0039434ade226e",
+      "bytes": 5677
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-secret-context-not-placed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a9e9e133a110eaac5cc5507283e9c964dee8679e7ff8617db16bfb35591094f6",
+      "bytes": 9921
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-secret-from-unknown-machine.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "04dd02e1b5640f69ce9ba57eaea108ee182a3d85b3df31b9502eb5dee2effbfc",
+      "bytes": 5669
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-secret-slot-twice-in-context.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b03fdc29a04fe3f510e0c8126a01673d0124a543feec94ededc767b8f6922c2f",
+      "bytes": 10023
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-secret-slot-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e2bcf5a983443eaf74e732a2828bd19e90a233c7520fe621a7153c358dcd85cb",
+      "bytes": 5825
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-share-grant-personal.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a2430f2a6b0d81253b7f0c097c6b48d2de90797e72bb238f110d8ce9dadc2c1a",
+      "bytes": 9959
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -1472,18 +1969,25 @@
       "bytes": 2393
     },
     {
+      "path": "node/enroll_token.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d0ced16be56a072d503c80fc84587ede7492552c66b7e6a174b62a20acc4f2b4",
+      "bytes": 16785
+    },
+    {
       "path": "node/envelope.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ba18ff5711b58142ad7242e2a8ae103d0073819fcd9a10cb20005c170db4073d",
-      "bytes": 17429
+      "export_sha256": "de7a3300f33e84bdeb8f2f5645f051c6db978cb39943e080991ce13e92e31a1b",
+      "bytes": 18651
     },
     {
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "92d04701861f163ea7b9b4f09c9b7881c98723b3cc90ed36867bc17d7e994d69",
-      "bytes": 24137
+      "export_sha256": "c465161ee31598c039a98fd1d7434eee3b30db2e355a89907b60e09d907b8170",
+      "bytes": 33094
     },
     {
       "path": "node/identifiers.py",
@@ -1507,18 +2011,25 @@
       "bytes": 6906
     },
     {
+      "path": "node/pairing.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "55f9d305a7381b48e54166214032524485e9516e6c4e2284cd2f3895419952df",
+      "bytes": 14371
+    },
+    {
       "path": "node/relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2582d23e74fd0cb6e8615c433667b3a029dabd108c682b14ce3294b381deaa98",
-      "bytes": 22487
+      "export_sha256": "d09fb8fd0567d51dda9727543248912f3f6fe6ef635f555a3806dba67424cb8b",
+      "bytes": 24503
     },
     {
       "path": "node/revocation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "339193ea282c8a2d4172bcb4725562b06437802d1f69947cfe67a8188ae04e47",
-      "bytes": 24668
+      "export_sha256": "43cdebdaea8b480a75dd5249c94c999d18ac69be548bcd134f2a8ae9aa732902",
+      "bytes": 25166
     },
     {
       "path": "node/session.py",
@@ -1531,8 +2042,8 @@
       "path": "node/webauthn.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "67b97033004aed00034f55f3aa0fbeda1f79c90da8ec617c9d213e8984147d98",
-      "bytes": 10617
+      "export_sha256": "74c75c77bfa71006a44a8bd63691e5830933b80e4832c97ea1492fc5843fb76e",
+      "bytes": 12839
     },
     {
       "path": "node/ws.py",
@@ -2273,8 +2784,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "432ce36f406f17e066bb1057108189d3b0959677dd692969c3b04801148d27ac",
-      "bytes": 27769,
+      "export_sha256": "a9944b03a8253b1fb711c853764c3face17f23c6a3b90a7de9d702c11998aa67",
+      "bytes": 28106,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3331,11 +3842,18 @@
       "bytes": 3490
     },
     {
+      "path": "tests/test_node_enroll.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "cf08f9fa3ddac5ff2e32ed742b9f53520e823d53343dc7f01361a64b641c3a18",
+      "bytes": 12316
+    },
+    {
       "path": "tests/test_node_envelope.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aabcaf8607150f88351422e6bb325fc4816b8601219d905bc7ad42a5f67ef19b",
-      "bytes": 7467
+      "export_sha256": "21e9e84f46ebf8c8d266d3761b55b5c3255eaea7c2fb5ce113a19c3289e649fa",
+      "bytes": 9635
     },
     {
       "path": "tests/test_node_estate.py",
@@ -3348,8 +3866,15 @@
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8d75de56b8fa5094809284f3a4fb7d1985fc6504e18445ea4a782c8a0d0c134d",
-      "bytes": 34590
+      "export_sha256": "c92ad81f6dd510c7c60bce1d7ddb8dd9b670b0dfcd7a30c6950ead0b68ba7a7c",
+      "bytes": 36323
+    },
+    {
+      "path": "tests/test_node_pairing.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ab454f9a413d62e0b2b0e21b2d4cffa0c20f2018cb61318ff988219f8616a336",
+      "bytes": 15191
     },
     {
       "path": "tests/test_node_revocation.py",
@@ -5075,7 +5600,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 661,
+  "file_count": 736,
   "excluded": [
     "git-history",
     "operator-registries",

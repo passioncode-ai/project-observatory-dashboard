@@ -117,6 +117,32 @@ def estate_challenge(digest: str) -> bytes:
     return hashlib.sha256(estate_challenge_input(digest)).digest()
 
 
+_BASE64 = re.compile(r'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?')
+#: A key reference (DEC-0084): a device kid, `@sha256:`, 64 lower-case hex digits.
+KEY_REFERENCE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}#(sig|kem)@sha256:[a-f0-9]{64}')
+
+
+def device_key_fingerprint(key: Any) -> Optional[str]:
+    """`sha256:` and the hex SHA-256 of a device key's octets (DEC-0084), or None when its `publicKey` is not a
+    non-empty string in canonical padded base64: two readers never disagree on which key a fingerprint names."""
+    import base64
+    text = key.get('publicKey') if isinstance(key, dict) else None
+    if not isinstance(text, str) or not text or not _BASE64.fullmatch(text):
+        return None
+    raw = base64.b64decode(text)
+    if base64.b64encode(raw).decode('ascii') != text:
+        return None
+    return 'sha256:' + hashlib.sha256(raw).hexdigest()
+
+
+def device_key_ref(key: Any) -> Optional[str]:
+    """The `device-key` revocation reference of one key (DEC-0084): `<kid>@<fingerprint>`, which revokes that key
+    alone and leaves the next key under the same kid usable; None without a string kid or a fingerprint."""
+    fingerprint = device_key_fingerprint(key)
+    kid = key.get('kid') if isinstance(key, dict) else None
+    return kid + '@' + fingerprint if fingerprint is not None and isinstance(kid, str) else None
+
+
 def _revocation_key(entry: dict) -> str:
     return _show(entry.get('kind')) + ' ' + _show(entry.get('ref'))
 
@@ -199,7 +225,9 @@ def verify_estate_record(record: Any, *, at_ms: Optional[int], parent: Any = _MI
         return _fail('not-yet-valid')
     if at_ms > until:
         return _fail('expired')
-    codes = list(dict.fromkeys(finding['code'] for finding in record_findings(record)))
+    # With a parent, what the revision drops it revokes (FAC-SEM-114, DEC-0084).
+    dropped = dropped_findings(parent, record) if isinstance(parent, dict) else []
+    codes = list(dict.fromkeys(finding['code'] for finding in record_findings(record) + dropped))
     if codes:
         return _fail('rule-violation', codes=codes)
     return {'ok': True, 'digest': digest, 'revision': int(record['revision']), 'signedBy': credential['credentialId'],
@@ -263,6 +291,114 @@ def revision_chain(value: dict) -> list:
     return findings
 
 
+def dropped_findings(parent: dict, nxt: dict) -> list:
+    """FAC-SEM-114 (DEC-0084): what a revision drops, it revokes in the same revision. A machine the parent lists
+    and `nxt` does not is revoked as `machine <id>`, and its hub key as `hub-key <kid>`; a device key of a kept
+    machine no longer listed (by key reference) is revoked by its reference or its kid; a hub key of a kept machine
+    no longer certified with the same kid and key is revoked as `hub-key <old kid>`. Matched exactly."""
+    findings: list = []
+    flag = _flagger(findings, 'FAC-SEM-114')
+    revocations = _list(nxt.get('revocations'))
+
+    def revoked(kind: str, *refs: Any) -> bool:
+        return any(entry.get('kind') == kind and any(ref is not None and entry.get('ref') == ref and
+                                                     type(entry.get('ref')) is type(ref) for ref in refs)
+                   for entry in revocations)
+    kept_machines: dict = {}
+    for machine in _list(nxt.get('machines')):
+        key = _key_of(machine.get('id'))
+        kept_machines.setdefault(key, machine)
+    for machine, m in _indexed(parent.get('machines')):
+        at = f'/parent/machines/{m}'
+        hub = machine.get('hubKey') if isinstance(machine.get('hubKey'), dict) else None
+        kept = kept_machines.get(_key_of(machine.get('id')))
+        if kept is None:
+            if not revoked('machine', machine.get('id')):
+                flag(f'{at}/id', 'a revision that drops a machine revokes it')
+            if hub is not None and not revoked('hub-key', hub.get('kid')):
+                flag(f'{at}/hubKey/kid', "a removed machine's hub key is revoked in the same revision")
+            continue
+        listed = {device_key_ref(k) for k in _list(kept.get('deviceKeys'))} - {None}
+        for key, k in _indexed(machine.get('deviceKeys')):
+            ref = device_key_ref(key)
+            if ref is None or ref in listed:
+                continue
+            if not revoked('device-key', ref, key.get('kid')):
+                flag(f'{at}/deviceKeys/{k}', 'a replaced or dropped device key is revoked in the same revision')
+        next_hub = kept.get('hubKey') if isinstance(kept.get('hubKey'), dict) else None
+        same_hub = next_hub is not None and hub is not None and next_hub.get('kid') == hub.get('kid') \
+            and next_hub.get('x') == hub.get('x')
+        if hub is not None and not same_hub and not revoked('hub-key', hub.get('kid')):
+            flag(f'{at}/hubKey/kid', 'a hub key no longer certified as it was is revoked; a re-certified one takes a new kid')
+    return findings
+
+
+def estate_record_rules(kind: str, value: Any) -> Optional[list]:
+    """The contract's `estateRecordRules`: `estate-record` (one revision), `estate-record-revision` (`{parent, next}`,
+    FAC-SEM-072 and FAC-SEM-114) and `estate-placement` (what a machine checks before it installs a package)."""
+    value = value if isinstance(value, dict) else {}
+    if kind == 'estate-record':
+        return record_findings(value)
+    if kind == 'estate-record-revision':
+        parent = value.get('parent') if isinstance(value.get('parent'), dict) else {}
+        nxt = value.get('next') if isinstance(value.get('next'), dict) else {}
+        return revision_chain(value) + dropped_findings(parent, nxt)
+    if kind == 'estate-placement':
+        return installation_findings(value)
+    return None
+
+
+def package_digest(pkg: dict) -> str:
+    """`sha256:<hex>` of a `fabric-package/1` without its `digest` and `signatures` (the contract's `packageDigest`)."""
+    covered = {k: v for k, v in pkg.items() if k not in ('digest', 'signatures')}
+    return 'sha256:' + hashlib.sha256(jcs.rfc8785(covered).encode('utf-8')).hexdigest()
+
+
+def installation_findings(value: dict) -> list:
+    """What a machine checks before it installs a package (`estate-placement`: `{record, machine, package[, context]}`):
+    the machine is in the record, the package is the one its digest names and the record places it on this machine in
+    this context (FAC-SEM-074); every secret of this agent fills a slot the package declares (FAC-SEM-075); the
+    placement's share grant holds (FAC-SEM-111)."""
+    findings: list = []
+    record = value.get('record') if isinstance(value.get('record'), dict) else {}
+    pkg = value.get('package') if isinstance(value.get('package'), dict) else {}
+    machine, machine_index = next(((m, i) for m, i in _indexed(record.get('machines'))
+                                   if m.get('id') == value.get('machine')), (None, -1))
+    try:
+        digest: Optional[str] = package_digest(pkg)
+    except (jcs.CanonicalError, TypeError, ValueError):
+        digest = None
+    flag074 = _flagger(findings, 'FAC-SEM-074')
+    if machine is None:
+        flag074('/machine', f"machine {_show(value.get('machine'))} is not in the estate record")
+        return findings
+    if digest is None or digest != pkg.get('digest'):
+        flag074('/package/digest', 'the package is not the one its digest names: it changed after it was packed')
+    context = _context_of(value)
+    placement, placement_index = next(((e, i) for e, i in _indexed(machine.get('packages'))
+                                       if e.get('agentRef') == pkg.get('agentRef') and _context_of(e) == context),
+                                      (None, -1))
+    if placement is None:
+        flag074('/package/agentRef', f"the record places no {_show(pkg.get('agentRef'))} on machine "
+                                     f"{_show(value.get('machine'))} in the context {_show(context)}")
+    elif placement.get('digest') != digest:
+        flag074('/package', f"the record places {_show(placement.get('digest'))} of this agent on this machine in this "
+                            'context, not this package')
+    declared = {slot.get('name') for slot in _list(pkg.get('secrets'))}
+    flag075 = _flagger(findings, 'FAC-SEM-075')
+    for secret, index in _indexed(machine.get('secrets')):
+        if secret.get('agentRef') == pkg.get('agentRef') and _context_of(secret) == context \
+                and secret.get('slot') not in declared:
+            flag075(f'/record/machines/{machine_index}/secrets/{index}/slot',
+                    f"the package declares no slot {_show(secret.get('slot'))}: a secret goes only where a placed "
+                    'package declares it')
+    if placement is not None:
+        flag111 = _flagger(findings, 'FAC-SEM-111')
+        for suffix, message in _placement_grant_problems(record, placement):
+            flag111(f'/record/machines/{machine_index}/packages/{placement_index}{suffix}', message)
+    return findings
+
+
 def _valid_device_key(key: dict) -> bool:
     raw = _node_base64(_show(key.get('publicKey', '') if key.get('publicKey') is not None else ''))
     if key.get('alg') == 'ed25519':
@@ -297,7 +433,10 @@ def _keys(value: dict, flag) -> None:
         for key, k in _indexed(machine.get('deviceKeys')):
             if key.get('kid') != f"{_show(machine.get('id'))}#{_show(key.get('use'))}":
                 flag(f'{at}/deviceKeys/{k}/kid', 'a device key is listed as <machine id>#sig or #kem, by its role')
-            if not _valid_device_key(key):
+            if device_key_fingerprint(key) is None:
+                # A key with no canonical fingerprint could be read as two keys, and no key reference names it.
+                flag(f'{at}/deviceKeys/{k}/publicKey', "a device key's octets are canonical padded base64 (DEC-0084)")
+            elif not _valid_device_key(key):
                 flag(f'{at}/deviceKeys/{k}/publicKey', 'a device key is valid for its algorithm')
             if key.get('publicKey') in seen:
                 flag(f'{at}/deviceKeys/{k}/publicKey', 'one key is never used for the other role')
@@ -422,7 +561,9 @@ def _grants_and_revocations(value: dict, flag) -> None:
     listed = {
         'authority': [e.get('credentialId') for e in _list(value.get('authorities'))],
         'machine': [m.get('id') for m in machines],
-        'device-key': [k.get('kid') for m in machines for k in _list(m.get('deviceKeys'))],
+        # A kid and each listed key's own reference (DEC-0084): revoking either while listing it is refused.
+        'device-key': [ref for m in machines for k in _list(m.get('deviceKeys'))
+                       for ref in (k.get('kid'), device_key_ref(k)) if ref is not None],
         'hub-key': [m['hubKey'].get('kid') for m in machines if isinstance(m.get('hubKey'), dict)],
         'publisher-key': [k.get('kid') for k in _list(value.get('publisherKeys'))],
         'package': [p.get('digest') for m in machines for p in _list(m.get('packages'))],
@@ -434,6 +575,10 @@ def _grants_and_revocations(value: dict, flag) -> None:
         key = _show(revocation.get('kind')) + ' ' + _show(ref)
         if key in seen:
             flag(f'/revocations/{index}', 'revoked twice')
+        ref_text = revocation.get('ref')
+        if revocation.get('kind') == 'device-key' and isinstance(ref_text, str) and '@' in ref_text \
+                and not KEY_REFERENCE.fullmatch(ref_text):
+            flag(f'/revocations/{index}/ref', 'a device-key revocation names a kid or a key reference (DEC-0084)')
         seen.add(key)
         kind = revocation.get('kind')
         if isinstance(kind, str) and kind in listed and ref in listed[kind]:

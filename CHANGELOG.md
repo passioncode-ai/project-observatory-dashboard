@@ -79,6 +79,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`project-observatory full node`** (OBS-114). `--init` creates this machine's device keys for the agent network
   and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
   their owner-only files, and a key is never replaced.
+- **The estate ceremonies on the node** (OBS-133, DEC-0084). A new machine pairs with a trusted one through a one-time
+  relay rendezvous: each side commits to its keys before it sees the other's, both screens show one six-digit code, and
+  the new machine checks that the signed revision lists it with exactly its keys before it trusts the estate. A one-time
+  enroll token is read only from stdin or an owner-only file. A revision that drops a machine or a key without revoking
+  it is refused, a replaced key is revoked by its fingerprint reference, and a machine whose keys were replaced stops.
 - **SSH keys on this machine** (OBS-110, PB-163). `project-observatory full ssh-keys` lists the machine's
   SSH keys (fingerprint from `ssh-keygen -l` on the `.pub`, whether it has a passphrase from the private
   file's header alone, the Host blocks and agent that use it, where GitHub accepts it for sign-in and

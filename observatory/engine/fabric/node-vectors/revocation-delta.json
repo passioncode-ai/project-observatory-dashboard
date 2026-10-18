@@ -981,6 +981,78 @@
       }
     },
     {
+      "name": "a device-key revocation whose ref holds @ but is no key reference (DEC-0084: a revision could never list it)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "4ba7300e4fd19c13ab940fb7d87fc1afc72171bda65f771cc153af175b963153"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "device-key",
+              "ref": "m-4c1e#sig@sha256:ABC",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "MZMNfHWcXhMFrsHvw9RrSZ9YACPOV5wc7JoPpofUB_F2jGrvhWwUhWBlqiNhT3wDqiWEFYx7f5JHFzQFr9Q-Cw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
       "name": "a signature of 85 characters",
       "state": {
         "estate": "estate-5d0f1a",
