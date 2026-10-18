@@ -24,7 +24,7 @@ Any refusal is `{"recorded": false, "reason": …}` — never a traceback, becau
 the caller is a hook that must degrade silently.
 """
 from __future__ import annotations
-import argparse, json, os, re, shlex, sqlite3, stat, subprocess, sys, time, pathlib
+import argparse, hashlib, hmac, json, os, re, shlex, sqlite3, stat, subprocess, sys, time, pathlib
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -305,6 +305,11 @@ RUN_LEDGER = ".task-pipeline/run.md"
 LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:\s*(.*)$", re.I)
 
 ANCHOR_CHARS = 120
+#: The longest heading text that may be linked. A longer heading is never linked
+#: (the turn asks): the stored anchor is then always the full heading, never cut.
+LINK_HEADING_CHARS = ANCHOR_CHARS
+#: The longest raw heading or ledger line, in bytes, that may be linked.
+LINK_LINE_BYTES = 1024
 #: An untracked or ignored ledger or register is read whole, so it is read bounded.
 READ_LIMIT = 256 * 1024
 #: The largest register a carried link is re-checked against, read whole.
@@ -396,12 +401,49 @@ def _register_path(top: pathlib.Path, rel: str) -> pathlib.Path | None:
         return None
 
 
-def _read_bounded(path: pathlib.Path) -> list[str]:
+def _read_register(top: pathlib.Path, rel: str, limit: int, mode: str = "whole") -> bytes | None:
+    """The bytes of a register or the run ledger, through the gate, or None.
+
+    The path passes `_register_path`, then the file is opened once without following
+    a link and without blocking (a FIFO), and the DESCRIPTOR is checked: a regular
+    file with one hard link. So a swap between the check and the read reads nothing.
+    `mode` is "whole" (refused when larger than `limit`), "head" (the first `limit`
+    bytes) or "tail" (the last `limit` bytes)."""
+    named = _register_path(top, rel)
+    if named is None:
+        return None
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            return _lines(fh.read(READ_LIMIT))
+        import osprivacy
+        fd = osprivacy.open(str(named), os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+    except (OSError, ImportError):
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            return None
+        if mode == "tail" and st.st_size > limit:
+            os.lseek(fd, st.st_size - limit, os.SEEK_SET)
+        want = limit + 1 if mode == "whole" else limit
+        chunks, got = [], 0
+        while got < want:
+            b = os.read(fd, min(1 << 20, want - got))
+            if not b:
+                break
+            chunks.append(b)
+            got += len(b)
+        data = b"".join(chunks)
+        if mode == "whole" and len(data) > limit:
+            return None
+        return data
     except OSError:
-        return []
+        return None
+    finally:
+        os.close(fd)
+
+
+def _read_bounded(top: pathlib.Path, rel: str) -> list[str]:
+    data = _read_register(top, rel, READ_LIMIT, "head")
+    return [] if data is None else _lines(data.decode("utf-8", errors="replace"))
 
 
 def _added_lines(top: pathlib.Path, rel: str, facts: dict,
@@ -413,7 +455,7 @@ def _added_lines(top: pathlib.Path, rel: str, facts: dict,
     needs longer (a register of megabytes) raises `_OutOfTime`, and the turn is
     asked about."""
     if rel in facts.get("untracked", ()):
-        lines = _read_bounded(top / rel)
+        lines = _read_bounded(top, rel)
     else:
         left = 20.0 if deadline is None else deadline - time.monotonic()
         if left <= 0:
@@ -472,7 +514,8 @@ def _resolve(target: str, cwd: str | None, top: pathlib.Path) -> str:
     return os.path.realpath(os.path.join(base, target))
 
 
-def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -> list[dict]:
+def session_writes(transcript: str | None, top: pathlib.Path, deadline: float,
+                   since: int = 0) -> list[dict]:
     """This session's WRITING tool calls, from one bounded pass over its transcript.
 
     Each is `{"targets": {real path, …}, "text": str, "ledger": bool}`: an
@@ -481,7 +524,8 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
     `ledger` is true for a call that writes the run ledger, including task-pipeline's
     `stage_checkpoint.py`, which names no file. Only the transcript's last
     `TRANSCRIPT_TAIL` bytes are read, once, and only lines carrying a `tool_use` are
-    parsed. Raises `_OutOfTime` past the deadline.
+    parsed. Raises `_OutOfTime` past the deadline. `since` is a byte offset of the
+    transcript: calls written before it are not read.
     """
     if not transcript:
         return []
@@ -489,8 +533,11 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
         with open(transcript, "rb") as fh:
             fh.seek(0, os.SEEK_END)
             size = fh.tell()
-            fh.seek(max(0, size - TRANSCRIPT_TAIL))
+            start = max(0, size - TRANSCRIPT_TAIL, since)
+            fh.seek(start)
             data = fh.read()
+            if start and not data.startswith(b"{"):
+                data = data.split(b"\n", 1)[1] if b"\n" in data else b""
     except OSError:
         return []
     ledger = os.path.realpath(str(top / RUN_LEDGER))
@@ -607,16 +654,19 @@ def _fence(line: str) -> tuple[str, int, bool] | None:
     return ch, j - i, bool(info)
 
 
-def _headings(lines: list[str]) -> list[tuple[int, str]]:
-    """(level, text) of every ATX heading a Markdown reader would see, in order.
+def _headings(lines: list[str]) -> list[tuple[int, str, int]]:
+    """(level, text, line index) of every ATX heading a Markdown reader would see.
+
+    Used only to CHOOSE the anchor of a fresh link; a carried link is checked by
+    bytes (`_link_holds`), never by this.
 
     One linear pass: lines inside a fenced code block (closed only by the same
     character, at least as long, with no info string; an unclosed fence runs to the
     end) and inside an HTML comment that spans lines are skipped."""
-    out: list[tuple[int, str]] = []
+    out: list[tuple[int, str, int]] = []
     fence: tuple[str, int] | None = None
     in_comment = False
-    for line in lines:
+    for index, line in enumerate(lines):
         if fence is not None:
             f = _fence(line)
             if f and f[0] == fence[0] and f[1] >= fence[1] and not f[2]:
@@ -636,7 +686,7 @@ def _headings(lines: list[str]) -> list[tuple[int, str]]:
             continue
         h = _atx(line)
         if h and h[1]:
-            out.append(h)
+            out.append((h[0], h[1], index))
     return out
 
 
@@ -645,7 +695,7 @@ def _entry_heading(added: list[str]) -> str | None:
     that level. A Context / Decision / Consequences entry anchors on its own title
     (`## DEC-0002 …`), never on a subheading every older entry repeats; a new file's
     `# Decisions` title wins only when it is the only level present."""
-    heads = _headings(added)
+    heads = [(level, text) for level, text, _ in _headings(added)]
     if not heads:
         return None
     top = min(level for level, _ in heads)
@@ -655,24 +705,95 @@ def _entry_heading(added: list[str]) -> str | None:
     if top == 1 and len(entries) == 1 and any(level > top for level, _ in heads):
         nxt = min(level for level, _ in heads if level > top)
         entries = [text for level, text in heads if level == nxt]
-    return entries[-1][:ANCHOR_CHARS]
+    return entries[-1]
 
 
-def _anchor_still_true(path: pathlib.Path, anchor: str) -> bool:
-    """Exactly one heading line of the file, outside fenced code, reads `anchor`.
+def _raw_level(raw: bytes) -> int:
+    """The `#` count of a raw heading line (up to three spaces of indent), else 0."""
+    i = 0
+    while i < len(raw) and i < 4 and raw[i:i + 1] == b" ":
+        i += 1
+    j = i
+    while j < len(raw) and raw[j:j + 1] == b"#":
+        j += 1
+    level = j - i
+    if i > 3 or not 1 <= level <= 6 or (j < len(raw) and raw[j:j + 1] not in b" \t\r"):
+        return 0
+    return level
 
-    Not a substring search: a struck or WITHDRAWN heading, the anchor quoted in a
-    comment, a code block or an index line, and a subheading every entry repeats
-    (`Consequences`) all fail it. The file is read whole up to `CARRY_READ_LIMIT`;
-    a larger register is not re-checked, and the link is dropped (the turn asks)."""
+
+def _entry_digest(lines: list[bytes], index: int) -> str:
+    """sha256 of the register's bytes from the start of the file to the end of the
+    entry at `index`: up to, not including, the next line that starts at column 0
+    with no more `#` than the entry's own heading (or the end of the file). A ledger
+    line (no heading) ends at itself.
+
+    From the START of the file, not the heading: an unclosed fence, a comment or a
+    list item opened above the entry would hide it without touching the entry's own
+    bytes. Appending later entries never changes it; any other edit does, and asks."""
+    level = _raw_level(lines[index])
+    end = index + 1
+    if level:
+        while end < len(lines):
+            k = _raw_level(lines[end])
+            if k and k <= level and lines[end][:1] == b"#":
+                break
+            end += 1
+    return hashlib.sha256(b"\n".join(lines[:end])).hexdigest()
+
+
+def _link_fields(lines: list[bytes], index: int) -> dict | None:
+    """`{line, digest}` for a link to `lines[index]`, or None when it cannot be linked
+    (longer than LINK_LINE_BYTES, or not UTF-8)."""
+    raw = lines[index]
+    if len(raw) > LINK_LINE_BYTES:
+        return None
     try:
-        if path.stat().st_size > CARRY_READ_LIMIT:
-            return False
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            lines = _lines(fh.read())
-    except OSError:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return {"line": text, "digest": _entry_digest(lines, index)}
+
+
+def _heading_link(top: pathlib.Path, rel: str, anchor: str) -> dict | None:
+    """The link fields for the register heading that reads `anchor`, when exactly one
+    heading a Markdown reader would see reads it and the heading is short enough to
+    link. None otherwise: the turn is asked about."""
+    if len(anchor) > LINK_HEADING_CHARS:
+        return None
+    data = _read_register(top, rel, CARRY_READ_LIMIT)
+    if data is None:
+        return None
+    raw = data.split(b"\n")
+    text = [l.decode("utf-8", errors="replace") for l in raw]
+    text = [t[:-1] if t.endswith("\r") else t for t in text]
+    hits = [index for _, heading, index in _headings(text) if heading == anchor]
+    return _link_fields(raw, hits[0]) if len(hits) == 1 else None
+
+
+def _ledger_link(top: pathlib.Path, line: str) -> dict | None:
+    """The link fields for the run-ledger line `line`, when it occurs exactly once."""
+    data = _read_register(top, RUN_LEDGER, CARRY_READ_LIMIT)
+    if data is None:
+        return None
+    raw = data.split(b"\n")
+    want = line.encode("utf-8")
+    hits = [i for i, l in enumerate(raw) if l == want or l == want + b"\r"]
+    return _link_fields(raw, hits[0]) if len(hits) == 1 else None
+
+
+def _link_holds(top: pathlib.Path, rel: str, line: str, digest: str) -> bool:
+    """A carried link is still true: by BYTES, no Markdown. The register passes the
+    gate, the stored raw line occurs exactly once as a whole line, and the digest of
+    the file up to the end of that entry (`_entry_digest`) is unchanged. Any edit
+    above or inside the entry asks again; appending a later entry does not."""
+    data = _read_register(top, rel, CARRY_READ_LIMIT)
+    if data is None:
         return False
-    return sum(1 for _, text in _headings(lines) if text[:ANCHOR_CHARS] == anchor) == 1
+    raw = data.split(b"\n")
+    want = line.encode("utf-8")
+    hits = [i for i, l in enumerate(raw) if l == want]
+    return len(hits) == 1 and hmac.compare_digest(_entry_digest(raw, hits[0]), digest)
 
 
 def _register_written(added: list[str], text: str) -> bool:
@@ -692,20 +813,16 @@ def _register_written(added: list[str], text: str) -> bool:
     return bool(lines) and 2 * sum(1 for l in lines if l in text) > len(lines)
 
 
-def _tail_lines(path: pathlib.Path, limit: int) -> list[str]:
-    try:
-        with path.open("rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - limit))
-            lines = _lines(fh.read().decode("utf-8", errors="replace"))
-    except OSError:
+def _tail_lines(top: pathlib.Path, rel: str, limit: int) -> list[str]:
+    data = _read_register(top, rel, limit, "tail")
+    if data is None:
         return []
-    return lines[1:] if size > limit and lines else lines
+    lines = _lines(data.decode("utf-8", errors="replace"))
+    return lines[1:] if len(data) >= limit and lines else lines
 
 
 def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
-                 deadline: float | None = None) -> dict | None:
+                 deadline: float | None = None, since: int = 0) -> dict | None:
     """`{source, ref, anchor?}` when THIS session already wrote its rationale, else None.
 
     Best-effort and bounded: the caller has already written the record, and this
@@ -729,7 +846,7 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
         ledger_file = _register_path(top, RUN_LEDGER)
         if not candidates and ledger_file is None:
             return None
-        calls = session_writes(transcript, top, deadline)
+        calls = session_writes(transcript, top, deadline, since)
         if not calls:
             return None
         subs = _submodules(top) if candidates else []
@@ -750,18 +867,20 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
             # The LAST heading added: a register grows at its end, and a new
             # register's first heading is its title, not a decision.
             anchor = _entry_heading(added)
-            # And the entry is in the register NOW, once, as a heading: the same test a
-            # carried link must pass on every later turn.
-            if anchor is not None and not _anchor_still_true(named, anchor):
+            if anchor is None:
+                continue                    # no heading: nothing a link can hold to
+            # The entry is in the register NOW, once, as a heading, and short enough
+            # to link; the link stores its raw line and the digest a carry re-checks.
+            fields = _heading_link(top, rel, anchor)
+            if fields is None:
                 continue
-            return {"source": "decision-register", "ref": rel,
-                    **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
+            return {"source": "decision-register", "ref": rel, "anchor": anchor, **fields}
         ledger_text = "\n".join(c["text"] for c in calls if c["ledger"])
         if ledger_text and ledger_file is not None:
             _check(deadline)
             tracked_change = RUN_LEDGER in touched and RUN_LEDGER not in (facts.get("untracked") or ())
             lines = (_added_lines(top, RUN_LEDGER, facts, deadline) if tracked_change
-                     else _tail_lines(ledger_file, LEDGER_TAIL))
+                     else _tail_lines(top, RUN_LEDGER, LEDGER_TAIL))
             tried = 0
             for line in reversed(lines):
                 m = LEDGER_LINE.match(line)
@@ -772,8 +891,11 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
                     break
                 said = m.group(1).strip()
                 if len(said) >= MIN_NEEDLE and said in ledger_text:
+                    fields = _ledger_link(top, line)
+                    if fields is None:
+                        return None
                     return {"source": "task-pipeline", "ref": RUN_LEDGER,
-                            "anchor": line.strip()[:ANCHOR_CHARS]}
+                            "anchor": line.strip()[:ANCHOR_CHARS], **fields}
     except _OutOfTime:
         return None
     except Exception:                                                              # noqa: BLE001
@@ -781,14 +903,35 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
     return None
 
 
+def _dropped_since(prior, repo_id: str, top: pathlib.Path, held: list[dict]) -> int:
+    """The transcript offset after which a FRESH attribution may look, when a link of
+    the record's latest revision no longer holds: the offset stored with that link.
+
+    Without this a dropped link came straight back: the session's old write of the
+    entry is still in its transcript, so a fresh attribution re-linked an entry that
+    another writer has since withdrawn, wrapped or moved. After a drop only writes
+    the session made after the link count."""
+    if prior is None:
+        return 0
+    try:
+        ev = json.loads(prior["evidence_json"] or "[]")
+    except (ValueError, TypeError, IndexError, KeyError):
+        return 0
+    at = 0
+    for e in ev if isinstance(ev, list) else ():
+        if isinstance(e, dict) and e.get("kind") == "rationale" and e not in held:
+            v = e.get("transcript_at")
+            at = max(at, v if isinstance(v, int) and v >= 0 else 1 << 62)
+    return at
+
+
 def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
     """The rationale links of the record's latest revision that are STILL TRUE.
 
     A link is carried only when this hook wrote it — the revision's provenance is
     `observatory-log/Stop` with a `rationale` key, so a link another writer put in
-    the evidence is never carried — when it names this repository, when the linked
-    file still exists inside the checkout, and when a bounded read of that file
-    still contains the link's anchor. A register deleted, reverted, checked out or
+    the evidence is never carried — when it names this repository, and when its
+    raw line and digest still hold by bytes (`_link_holds`). A register deleted, reverted, checked out or
     rewritten, or a session that moved to another repository, drops the link, and
     the turn is attributed afresh (and asked about when that finds nothing).
     """
@@ -806,13 +949,22 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
     for e in ev if isinstance(ev, list) else ():
         if not isinstance(e, dict) or e.get("kind") != "rationale" or e.get("repo") != repo_id:
             continue
-        uri, anchor = str(e.get("uri") or ""), e.get("anchor")
-        if not uri.startswith("file:") or not isinstance(anchor, str) or not anchor.strip():
+        uri, line, digest = str(e.get("uri") or ""), e.get("line"), e.get("digest")
+        # A link without its raw line and digest (written before this check existed)
+        # is not carried: the turn is attributed afresh.
+        if not uri.startswith("file:") or not isinstance(line, str) or not line \
+                or not isinstance(digest, str) or len(digest) != 64:
             continue
-        named = _register_path(top, uri[len("file:"):])
-        if named is not None and _anchor_still_true(named, anchor):
+        if _link_holds(top, uri[len("file:"):], line, digest):
             out.append(e)
     return out
+
+
+def _transcript_size(transcript: str | None) -> int:
+    try:
+        return os.path.getsize(transcript) if transcript else 0
+    except OSError:
+        return 0
 
 
 def _why_asks(conn) -> dict | None:
@@ -987,15 +1139,17 @@ def main() -> int:
             or (pathlib.Path(top or cwd) / RUN_LEDGER).is_file()
         if not has_why and (not carried or touched_register):
             rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
-                                     time.monotonic() + ATTRIBUTION_SECONDS)
+                                     time.monotonic() + ATTRIBUTION_SECONDS,
+                                     _dropped_since(prior, repo_id, pathlib.Path(top or cwd), carried))
         if rationale is not None and carried and any(
-                c["uri"] == f"file:{rationale['ref']}" and c.get("anchor") == rationale.get("anchor")
-                for c in carried):
+                c["uri"] == f"file:{rationale['ref']}" and c.get("line") == rationale.get("line")
+                and c.get("digest") == rationale.get("digest") for c in carried):
             rationale = None          # the same link, found again: carried, no new revision
         if rationale is None and carried:
             first = carried[-1]
             rationale = {"source": "carried", "ref": first["uri"][len("file:"):],
-                         **({"anchor": first["anchor"]} if first.get("anchor") else {})}
+                         **{k: first[k] for k in ("anchor", "line", "digest") if first.get(k)}}
+            # (`transcript_at` stays in the carried evidence entry itself.)
         # The follow-up revision only when the link is NEW: a carried link is already
         # in the revision just written, so a changed turn adds one revision, not two.
         if rationale and rationale["source"] != "carried":
@@ -1009,8 +1163,9 @@ def main() -> int:
                     state="proposed", confidence=None,
                     evidence=base_evidence + [{"uri": f"file:{rationale['ref']}", "kind": "rationale",
                                                "repo": repo_id,
-                                               **({"anchor": rationale["anchor"]}
-                                                  if rationale.get("anchor") else {})}],
+                                               "transcript_at": _transcript_size(args.transcript),
+                                               **{k: rationale[k] for k in ("anchor", "line", "digest")
+                                                  if rationale.get(k)}}],
                     provenance=[{"source": "observatory-log/Stop", "measured": True,
                                  "rationale": rationale["source"],
                                  **({"continues": continues} if continues else {})}])

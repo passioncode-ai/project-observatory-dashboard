@@ -650,30 +650,49 @@ block a turn or a prompt:
   - no transcript;
   - a pass that runs out of its 2 seconds.
 
-  When the rationale counts, a second revision of the same record links that file
-  in its evidence (with the repository's id) instead of asking for a copy. Later
-  revisions carry the link forward only while it is still true: the link was
-  written by this hook, it names the current repository, and exactly one heading
-  of the register still reads the link's anchor. So the record stays explained after the register is committed and
-  pushed and after the write scrolls out of the transcript, without another
-  revision just for the link. A register deleted, reverted, checked out or
-  rewritten, or a session that moved to another repository, drops the link and is
-  attributed afresh, and asked about when nothing is found. A turn that touches a
-  register is attributed again, and a new decision replaces the older anchor.
-  Every read of a register or the run ledger, fresh or carried, first passes one
-  gate: the path is a regular file inside the checkout, not a symbolic link and not
-  under one. Headings are read in one linear pass over the file split on newlines
-  only (a carriage return before the newline is dropped; U+2028 and similar do not
-  split a line). A heading is a line with at most three spaces of indent, one to
-  six `#`, then a space or tab and the text; a closing run of `#` counts only after
-  a space or tab, so `## Use C#` keeps its `#`. Lines inside a fenced code block
-  (closed only by the same character, at least as long, with no info string; an
-  unclosed fence runs to the end) and inside an HTML comment are not headings. A
-  struck or WITHDRAWN heading, the anchor left in a comment, a code block or an
-  index line, a heading indented as code, or a second copy of the heading does not
-  count, and an added block whose heading syntax the pass rejects is asked about,
-  never matched line by line. A register larger than 8 MB is not re-checked, and
-  the link is dropped.
+  When the rationale counts, a second revision of the same record links that file.
+  The link is fixed in the evidence by four facts, not by the display anchor:
+  - the repository's id;
+  - the register's path in the repository;
+  - the exact raw heading line, at full length;
+  - a SHA-256 of the register's bytes from the start of the file to the end of
+    that entry. The entry ends at the next line that starts at column 0 with no
+    more `#` than its heading, or at the end of the file.
+
+  A heading longer than 120 characters is never linked, and the turn is asked
+  about.
+
+  Later revisions carry the link only while it holds **by bytes**, with no
+  Markdown parsing:
+  - this hook wrote it;
+  - it names the current repository;
+  - the stored line occurs exactly once as a whole line of the file;
+  - the digest is unchanged.
+
+  Appending a later entry keeps the link, so the record stays explained after the
+  register is committed and pushed and after the write scrolls out of the
+  transcript. Any other edit above or inside the entry drops it: a deleted,
+  reverted, wrapped, struck, commented, fenced, duplicated or retitled entry, a
+  one-character change, or a change of line endings. So does a session that moves
+  to another repository. A dropped link is attributed afresh only from the
+  session's writes after that link was made, and the turn is asked about when
+  there are none. A wrong ask is accepted; a wrong silence is not.
+
+  Every read of a register or the run ledger, fresh or carried, passes one gate.
+  The path must be inside the checkout, not a symbolic link and not under one.
+  The file is then opened once, without following a link and without blocking. The
+  opened file must be a regular file with a single hard link, and at most its limit
+  plus one byte is read (8 MB for a register).
+
+  A fresh link still uses a Markdown heading scanner, only to choose the anchor.
+  It is a linear pass over the file split on newlines only. A heading has at most
+  three spaces of indent, one to six `#`, then a space or tab, and `## Use C#`
+  keeps its `#`. Lines in fenced code are not headings: a fence closes only on
+  the same character, at least as long, with no info string, and an unclosed
+  fence runs to the end. Lines in a multi-line HTML comment are not headings
+  either. The heading must be the shallowest one the work added and must appear
+  exactly once. An added block whose heading syntax the scanner rejects is asked
+  about, never matched line by line.
 - **UserPromptSubmit** hands that request to the model with the session's next
   prompt, as context, once. It records the delivery and prints nothing when no
   request is pending. The context is capped at 4,000 characters. A request that

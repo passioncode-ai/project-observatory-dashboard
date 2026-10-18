@@ -57,8 +57,9 @@ session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
 heading (unique in the register) or, with no heading, most of its added lines, or that wrote a `decision:` /
 `stage:` line into `.task-pipeline/run.md`. Failed calls, subagent calls and
 Bash commands over 65,536 characters are not counted. The record then links
-that file, and keeps the link while exactly one heading of the file still
-reads that entry's title.
+that file, and keeps the link while the entry's exact heading line occurs once
+and the file's bytes up to the end of that entry are unchanged; any edit to
+the entry asks again.
 Correct that record rather than creating a second one:
 
 ```

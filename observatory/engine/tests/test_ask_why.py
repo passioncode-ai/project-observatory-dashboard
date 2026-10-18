@@ -714,13 +714,153 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         self.rewrite(fx, self.H, "WITHDRAWN\u2028" + self.H)
         self.asked_next(fx)
 
-    def test_a_carriage_return_line_ending_still_matches(self):
+    def test_a_line_ending_change_drops_the_carried_link(self):
+        # A byte-level check: converting the register to CRLF is an edit, so the
+        # carried link no longer holds (a fresh attribution may link it again).
         fx = self.madr_fixture()
         p = fx.repo / "docs/DECISIONS.md"
         p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))
+        self.asked_next(fx)
+        self.assertIs(fx.receipt().get("recorded"), True, "dropped cleanly, not a fault")
+
+    # ---- round 9: structures the scanner does not model; the byte check covers them
+
+    def test_a_list_item_fence_around_the_heading(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "- ```\n" + self.H + "\n  ```")
+        self.asked_next(fx)
+
+    def test_a_list_item_comment_around_the_heading(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "- <!--\n" + self.H)
+        p = fx.repo / "docs/DECISIONS.md"
+        p.write_text(p.read_text(encoding="utf-8") + "-->\n", encoding="utf-8")
+        self.asked_next(fx)
+
+    def test_a_list_item_opened_above_the_heading(self):
+        # The entry's own bytes are untouched; only a line above changed.
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "- withdrawn:\n\n    ```\n" + self.H)
+        self.asked_next(fx)
+
+    def test_withdrawn_appended_past_the_display_length(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        head = "## DEC-0001 " + "a" * 100
+        body = "# Decisions\n\n" + head + "\n\nWhy.\n"
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.wrote(body, tool="Write")
+        self.linked(fx)
+        self.assertEqual(fx.receipt()["rationale"]["line"], head)
+        p = fx.repo / "docs/DECISIONS.md"
+        p.write_text(body.replace(head, head + " " + "b" * 40 + " WITHDRAWN"), encoding="utf-8")
+        self.asked_next(fx)
+
+    def test_a_heading_longer_than_the_link_limit_is_never_linked(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        body = "# Decisions\n\n## DEC-0001 " + "a" * record_turn.LINK_HEADING_CHARS + "\n\nWhy.\n"
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        fx.wrote(body, tool="Write")
+        fx.stop()
+        self.assertIsNone(fx.receipt().get("rationale"))
+        self.assertEqual(len(fx.journal()), 1)
+
+    def test_a_comment_opened_with_the_short_form(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "<!-->\n" + self.H)
+        self.asked_next(fx)
+
+    def test_an_html_block_around_the_heading(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "<details>\n\n" + self.H)
+        self.asked_next(fx)
+
+    def test_a_setext_duplicate_of_the_heading(self):
+        fx = self.madr_fixture()
+        p = fx.repo / "docs/DECISIONS.md"
+        p.write_text(p.read_text(encoding="utf-8").replace(
+            "# Decisions\n", "# Decisions\n\nDEC-0002 measure delivered asks\n---------\n", 1),
+            encoding="utf-8")
+        self.asked_next(fx)
+
+    def test_a_backtick_fence_with_an_info_string(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, self.H, "```markdown\n" + self.H)
+        self.asked_next(fx)
+
+    def test_a_one_character_body_edit(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "Delivered only.", "Delivered only!")
+        self.asked_next(fx)
+
+    def test_an_unchanged_entry_with_a_later_entry_appended_stays_carried(self):
+        fx = self.madr_fixture()
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n## DEC-0003 someone else's later decision\n\nWhy.\n")
         fx.change("later.py")
         fx.stop()
         self.assertEqual(fx.receipt()["rationale"]["source"], "carried")
+        self.assertEqual(fx.journal(), [])
+
+    def test_a_symlinked_parent_directory(self):
+        fx = self.madr_fixture()
+        docs = fx.repo / "docs"
+        real = fx.repo / "real-docs"
+        docs.rename(real)
+        docs.symlink_to("real-docs")
+        self.asked_next(fx)
+
+    def test_a_fifo_in_place_of_the_register(self):
+        fx = self.madr_fixture()
+        p = fx.repo / "docs/DECISIONS.md"
+        p.unlink()
+        os.mkfifo(p)
+        fx.change("later.py")
+        took = fx.timed_stop(limit=30)
+        self.assertLess(took, 10, "a FIFO must never block the hook")
+        self.assertIsNone(fx.receipt().get("rationale"))
+        self.assertEqual(len(fx.journal()), 1)
+
+    def test_a_hard_linked_register(self):
+        fx = self.madr_fixture()
+        os.link(fx.repo / "docs/DECISIONS.md", fx.work / "second-name.md")
+        self.asked_next(fx)
+
+    def test_after_a_drop_only_a_later_write_links_again(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "Delivered only.", "Delivered only, edited by another writer.")
+        self.asked_next(fx, "first.py")
+        # The session writes the entry again: that later write links it afresh.
+        fx.wrote("## DEC-0002 measure delivered asks\n\nDelivered only, edited by another writer.\n",
+                 use_id="toolu_again")
+        fx.change("second.py")
+        fx.stop()
+        self.assertEqual((fx.receipt().get("rationale") or {}).get("source"), "decision-register")
+
+    def test_a_link_from_before_the_byte_check_is_not_carried(self):
+        # A hook-written link with only an anchor (no raw line, no digest), as links
+        # were written before this check: it is never carried.
+        fx = self.madr_fixture()
+        mid = fx.receipt()["memoryId"]
+        code = ("import sys, json; sys.path.insert(0, '.')\n"
+                "from store import db, ledger as L\n"
+                "c = db.connect()\n"
+                "r = c.execute(\"SELECT revision, statement, evidence_json FROM ledger WHERE memory_id=? "
+                "ORDER BY revision DESC LIMIT 1\", (sys.argv[1],)).fetchone()\n"
+                "ev = [e for e in json.loads(r[2]) if e.get('kind') != 'rationale'] + [{'uri': "
+                "'file:docs/DECISIONS.md', 'kind': 'rationale', 'repo': 'repository:fixture/watched', "
+                "'anchor': 'DEC-0002 measure delivered asks'}]\n"
+                "L.append(c, owner='agent:claude-code', kind='session', memory_id=sys.argv[1],"
+                " expected_revision=r[0], statement=r[1], evidence=ev, session_id='sess-1', state='proposed',"
+                " provenance=[{'source': 'observatory-log/Stop', 'rationale': 'decision-register'}])\n"
+                "c.commit()\n")
+        p = subprocess.run([PY, "-c", code, mid], cwd=ROOT, env=fx.env, capture_output=True,
+                           text=True, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        self.asked_next(fx)
+        self.assertIs(fx.receipt().get("recorded"), True, "dropped cleanly, not a fault")
 
     def test_a_register_over_the_read_limit_asks(self):
         import record_turn
@@ -1088,6 +1228,29 @@ class WithinTheBudget(unittest.TestCase):
         self.assertLess(took, 2.0 if os.environ.get("CI") is None else self.LIMIT,
                         f"the Stop took {took:.1f} s")
         self.assertTrue(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'"))
+
+    def test_the_descriptor_is_checked_not_only_the_path(self):
+        # The path check passed, then the file was swapped for a FIFO: the read
+        # checks the opened descriptor and refuses, without blocking.
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        os.mkfifo(fx.repo / "docs/swapped.md")
+        with mock.patch.object(record_turn, "_register_path",
+                               side_effect=lambda top, rel: top / rel):
+            self.assertIsNone(record_turn._read_register(fx.repo, "docs/swapped.md", 1024))
+
+    def test_the_read_gate_on_a_fifo_and_a_hard_link(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        os.mkfifo(fx.repo / "docs/fifo.md")
+        self.assertIsNone(record_turn._read_register(fx.repo, "docs/fifo.md", 1024))
+        (fx.repo / "docs/a.md").write_text("x\n", encoding="utf-8")
+        self.assertEqual(record_turn._read_register(fx.repo, "docs/a.md", 1024), b"x\n")
+        self.assertIsNone(record_turn._read_register(fx.repo, "docs/a.md", 1), "over the limit")
+        os.link(fx.repo / "docs/a.md", fx.repo / "docs/b.md")
+        self.assertIsNone(record_turn._read_register(fx.repo, "docs/a.md", 1024))
 
     def test_the_scanner_keeps_a_hash_inside_the_text(self):
         import record_turn
