@@ -1486,6 +1486,63 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               issue("proj/prod/CF_X") == 1 and not delivered2 and not delivered, str(delivered2))
 
 
+def test_cf_sending_domain_preset_grants_one_zone_and_its_account_sending() -> None:
+    """Onboarding a domain to Email Sending is `POST /zones/{z}/email/sending/subdomains`:
+    a ZONE endpoint that answers 401 to a token whose Email Sending right covers the
+    account and whose zone rights cover `zone.*` (the fabric-inbox-account shape,
+    measured 2026-10-18 on a real account). What it takes is
+    the zone's own resource for Zone Read and DNS Write, and Email Sending on the
+    account, as two policies: one policy may not mix levels on one resource. The
+    catalogue offers Email Sending at the account level only."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    preset = m.PRESETS["email-sending-domain"]
+    offered = ([(g, "zone") for g in preset["groups"]]
+               + [(g, "account") for g in preset["account_groups"]])
+    _preset_fake(m, log, offered, "/zones/z1/email/sending/subdomains", "sd-value-")
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_zone("email-sending-domain", "example.com", "proj/prod/CF_SENDING_DOMAIN", None, wait=0)
+    check("email-sending-domain issues", rc == 0, str(rc))
+    create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+    pols = create[0]["policies"] if create else []
+    check("email-sending-domain grants Zone Read and DNS Write on the zone's own resource",
+          len(pols) == 2 and pols[0]["resources"] == {"com.cloudflare.api.account.zone.z1": "*"}
+          and [g["id"] for g in pols[0]["permission_groups"]] == ["id-zone-Zone Read", "id-zone-DNS Write"],
+          str(pols))
+    check("email-sending-domain grants Email Sending on the account, as its own policy",
+          len(pols) == 2 and pols[1]["resources"] == {"com.cloudflare.api.account.a1": "*"}
+          and [g["id"] for g in pols[1]["permission_groups"]]
+          == ["id-account-Email Sending Write", "id-account-Email Sending Read"], str(pols))
+    check("email-sending-domain is named after the zone and the slot",
+          bool(create) and create[0]["name"]
+          == "observatory-email-sending-domain example.com proj/prod/CF_SENDING_DOMAIN (managed)", str(create))
+    check("email-sending-domain is verified with the NEW token by listing the zone's sending subdomains",
+          any(path.startswith("/zones/z1/email/sending/subdomains") and tok.startswith("sd-value-")
+              for _m, path, tok, _p in log), str(log[-3:]))
+    check("email-sending-domain lands in the slot and is never printed",
+          [d[1:] for d in delivered] == [("proj", "prod", "CF_SENDING_DOMAIN")]
+          and "sd-value-" not in out.getvalue(), out.getvalue())
+    check("the printed summary names the account grant too",
+          "Email Sending Write" in out.getvalue(), out.getvalue())
+
+    # Email Sending offered only at the zone level is never taken, and nothing is minted.
+    m2 = cf(); _cf_with_admin(m2)
+    log2 = []
+    _preset_fake(m2, log2, [(g, "zone") for g in preset["groups"] + preset["account_groups"]],
+                 "/zones/z1/email/sending/subdomains", "sd-value-")
+    m2.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("nothing to deliver"))
+    m2._journal = lambda *a, **k: None
+    check("email-sending-domain: a zone-level Email Sending group is never taken",
+          m2.cmd_issue_zone("email-sending-domain", "example.com", "proj/prod/CF_SENDING_DOMAIN", None, wait=0) == 1
+          and not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log2), str(log2))
+    check("email-sending-domain: the account path refuses it",
+          m2.cmd_issue_account("email-sending-domain", "proj/prod/CF_SENDING_DOMAIN", None) == 2, "")
+
+
 def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> None:
     """A zone that has never had a Single Redirect has no
     `http_request_dynamic_redirect` entrypoint, and Cloudflare answers 404 for it
@@ -3161,6 +3218,7 @@ if __name__ == "__main__":
                test_cf_groups_lists_names_and_levels_and_never_a_value,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
+               test_cf_sending_domain_preset_grants_one_zone_and_its_account_sending,
                test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects,
                test_cf_email_routing_token_is_one_per_slot,
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,

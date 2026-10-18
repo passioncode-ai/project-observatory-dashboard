@@ -7,6 +7,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A Cloudflare preset that onboards a domain to Email Sending** (`email-sending-domain`). Until a zone's domain is
+  onboarded, an account delivers only to its verified Email Routing destinations and refuses every other recipient
+  with `10203 email.sending_disabled`, whatever the Workers plan. Onboarding is a zone endpoint
+  (`POST /zones/{zone}/email/sending/subdomains`) that refused the account-wide token shape with 401. The preset grants
+  Zone Read and DNS Write on the zone's own resource plus Email Sending on its account, as two policies, verifies the
+  new value by listing the zone's sending subdomains, and delivers it to a vault slot:
+  `cloudflare.py issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME`.
 - **Each project's spend, this month and over the last 30 days** (J-11, OBS-93). The spend scan now reads every
   key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
   `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are

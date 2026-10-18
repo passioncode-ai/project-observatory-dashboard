@@ -14,6 +14,7 @@
         [--expire-days 92] [--lifecycle-rule staging/:2 ...]   # rules only, no key
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
@@ -212,6 +213,24 @@ PRESETS: dict[str, dict] = {
         "why": "puts Workers in front of hostnames of one zone for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/workers/routes",
+    },
+    # ONBOARDING A DOMAIN TO EMAIL SENDING, ONE ZONE, INTO THE VAULT. Until a
+    # zone's domain is onboarded, an account sends only to its verified Email
+    # Routing destinations and refuses everyone else with `10203
+    # email.sending_disabled` (measured 2026-10-18), Workers Paid or not.
+    # Onboarding is `POST /zones/{z}/email/sending/subdomains`, a ZONE endpoint:
+    # it answered 401 to the fabric-inbox-account shape (Email Sending on the
+    # account, zone rights on `zone.*`) and listed the subdomains for this one,
+    # the zone's own resource for Zone Read and DNS Write plus Email Sending on
+    # its account, two policies. Verified by listing the zone's sending
+    # subdomains with the NEW value.
+    "email-sending-domain": {
+        "name": "observatory-email-sending-domain {zone} {slot} (managed)",
+        "groups": ("Zone Read", "DNS Write"),
+        "account_groups": ("Email Sending Write", "Email Sending Read"),
+        "why": "onboards one zone's domain to Email Sending and reads its records, for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/email/sending/subdomains",
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
@@ -575,6 +594,13 @@ def mint(admin: str, account_id: str, preset: dict,
                          "resources": {f"com.cloudflare.api.account.{account_id}":
                                        {"com.cloudflare.api.account.zone.*": "*"}},
                          "permission_groups": [{"id": i} for i in zone_ids]})
+    if preset.get("account_groups"):
+        # Account-level groups beside a zone grant (Email Sending is offered at
+        # the account level only), as their own policy on the same account.
+        acct_ids = group_ids(admin, account_id, preset["account_groups"], "account")
+        policies.append({"effect": "allow",
+                         "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
+                         "permission_groups": [{"id": i} for i in acct_ids]})
     tid = existing_token(admin, account_id, name)
     if tid:
         # GRANTS FOLLOW THE PRESET. Rolling reissues the value and keeps the
@@ -904,7 +930,10 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
              preset=preset_key, zone=zone, account=account["name"])
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
-          f"{', '.join(preset['groups'])} on {zone} only; "
+          f"{', '.join(preset['groups'])} on {zone} only"
+          + (f", {', '.join(preset['account_groups'])} on its account"
+             if preset.get("account_groups") else "")
+          + "; "
           f"use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} {name} -- <command>")
     return 0
 
