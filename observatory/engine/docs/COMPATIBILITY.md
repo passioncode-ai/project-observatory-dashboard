@@ -229,7 +229,10 @@ totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents clai
 malformed target). URLs fail closed: `origin` and `source_repository` are
 kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with "origin unreadable" in
 `degraded`); in every other string a URL-shaped token that is not strict (`@`, `:/`, `:\`, or `?`/`#` after a
-`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. This
+`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment, including doubled separators, `./` and `../`
+segments before it and, on macOS, the `/System/Volumes/Data` firmlink (`_`, `-` and any punctuation before it
+are boundaries). `validate` refuses the home directory anywhere it ends a path, independently of that rewrite, so
+a form the rewrite misses makes the scan stale instead of reaching the registry. This
 covers scheme URLs with user-info, a query or a fragment; a schemeless `token=…`, a bare `?key=…` or a
 percent-encoded form is not recognised as a URL. A Windows drive path outside the home (`C:\work\x`) holds
 `:\` and is written `[url]` too. When the scan is missing or cannot be used (including a scan row without a valid agent id, and any

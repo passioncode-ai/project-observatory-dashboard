@@ -19,6 +19,7 @@ token or path is read.
 from __future__ import annotations
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -965,8 +966,13 @@ class FixCycle3(Fixture):
                     self.fail(f"not idempotent: {text!r} -> {once!r}")
                 if "Zq9K" in once:
                     self.fail(f"marker survived: {text!r} -> {once!r}")
-                if scan_agents.problems(tiny_doc(once)):
-                    self.fail(f"problems() on sanitised text: {text!r} -> {once!r}")
+                found = scan_agents.problems(tiny_doc(once))
+                home_only = found == ["agents.json holds an absolute home path; paths under home are written ~/"]
+                # The one refusal sanitised text may still draw: a home the sanitiser leaves because
+                # a letter, digit, `~` or `:` precedes it (past separators and dots). `home_leaks`
+                # refuses it on purpose (fail closed).
+                if found and not (home_only and re.search(r"(?:[^\W_]|[~:])[/\\.]*/srv/alpha", once)):
+                    self.fail(f"problems() on sanitised text: {text!r} -> {once!r}: {found}")
 
     def test_a_keyed_token_cut_by_the_first_bound_leaves_no_piece(self):
         text = "a " * 700 + "u:SECRETLONG" + AT + "h" * 50
@@ -1083,7 +1089,9 @@ class FixCycle3(Fixture):
             self.assertEqual(scan_agents._text("HOME=/srv/alpha/x (/srv/alpha) '/srv/alpha'"), "HOME=~/x (~) '~'")
             self.assertEqual(scan_agents._text("abc/srv/alpha/x"), "abc/srv/alpha/x", "no left boundary")
             self.assertEqual(scan_agents._text("/srv/alpha.bak"), "/srv/alpha.bak", "a name character follows")
-            self.assertEqual(scan_agents.problems(tiny_doc("abc/srv/alpha/x", "/srv/alpha.bak")), [])
+            self.assertEqual(scan_agents.problems(tiny_doc("/srv/alpha.bak")), [])
+            self.assertTrue(scan_agents.problems(tiny_doc("abc/srv/alpha/x")),
+                            "another path ending in the home is refused, never written (fail closed)")
 
     def test_home_is_case_insensitive_only_where_the_file_system_is(self):
         with patch.object(scan_agents, "_home", return_value="/srv/Alpha"):
@@ -1360,6 +1368,94 @@ class FixCycle6(Fixture):
         bad["scanned_on"] = 5
         out = scan_agents.unusable(bad, "TypeError", TODAY)
         self.assertIn("rows are from an unknown day", out["degraded"][-1]["reason"])
+
+
+class FixCycle7(Fixture):
+    """Review round 9 of #288: home paths with doubled slashes, dot segments or the firmlink."""
+
+    FORMS = ("//srv/alpha", "/./srv/alpha", "/../srv/alpha", "///./../srv/alpha")
+
+    def test_the_four_forms_are_written_with_a_tilde(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            for form in self.FORMS:
+                with self.subTest(form=form):
+                    out = scan_agents._text(f"state in {form}/.alpha")
+                    self.assertEqual(out, "state in ~/.alpha")
+                    self.assertEqual(scan_agents.problems(tiny_doc(out)), [])
+            with patch.object(scan_agents.sys, "platform", "darwin"):
+                self.assertEqual(scan_agents._text("at /System/Volumes/Data/srv/alpha/x"), "at ~/x")
+                self.assertEqual(scan_agents._text("at /system/volumes/data//SRV/alpha/x"), "at ~/x")
+            with patch.object(scan_agents.sys, "platform", "linux"):
+                self.assertNotEqual(scan_agents._text("at /System/Volumes/Data/srv/alpha/x"), "at ~/x")
+
+    def test_underscore_and_hyphen_are_boundaries(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            self.assertEqual(scan_agents._text("x_/srv/alpha/y and x-/srv/alpha"), "x_~/y and x-~")
+
+    def test_the_four_forms_reach_neither_registry_nor_wiki(self):
+        """e2e_r9.py: the four forms in a summary and a manifest path, through emit and projection."""
+        import workspace
+        from emitter_fixture import environment, seed
+        home = str(self.home)
+        man = self.home / "fixture" / "m" / "fabric-agent.json"
+        man.parent.mkdir(parents=True)
+        man.write_text(json.dumps(manifest_doc("alpha-agent")), encoding="utf-8")
+        forms = ["/" + home, "/." + home, "/.." + home]
+        if sys.platform == "darwin":
+            forms.append("/System/Volumes/Data" + home)          # the firmlink exists only on macOS
+        for i, h in enumerate(forms):
+            doc = descriptor(f"a{i}-agent", 47420 + i, manager="none")
+            doc["summary"] = f"state in {h}/.alpha"
+            doc["fabricManifest"] = h + "/fixture/m/fabric-agent.json"
+            self.put(doc)
+        root = self.base / "estate"
+        root.mkdir()
+        seed(root)
+        workspace.initialize(root / "home", identities=False)
+        settings = root / "home" / "config" / "settings.json"
+        conf = json.loads(settings.read_text(encoding="utf-8"))
+        conf.setdefault("features", {})["wiki_projection"] = True
+        settings.write_text(json.dumps(conf), encoding="utf-8")
+        raw, reg, vault = root / "raw", root / "registry", root / "vault"
+        (raw / "agents.json").write_text(json.dumps(self.scan(launchd={}, platform="linux",
+                                                              now=datetime.now(timezone.utc))), encoding="utf-8")
+        env = {**environment(root), "OBSERVATORY_HOME": str(root / "home"), "OBSERVATORY_VAULT": str(vault)}
+        (vault / "inventory").mkdir(parents=True)
+        for script, args in (("collectors/emit_registry.py", [str(raw)]), ("tools/project_into_vault.py", [])):
+            p = subprocess.run([sys.executable, script, *args], cwd=ROOT, env=env, capture_output=True,
+                               text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        for f in (reg / "agents.json", vault / "inventory" / "agents.json"):
+            text = f.read_text(encoding="utf-8")
+            self.assertEqual(text.count(home), 0, f)
+        doc = json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(doc["agents"]), len(forms))
+        self.assertTrue(all(r["manifest"]["state"] == "pinned" for r in doc["agents"]))
+
+    def test_a_home_form_the_sanitiser_leaves_makes_the_document_unusable(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["summary"] = f"backup at x{self.home}/data"             # a letter before it: left alone
+        self.put(doc)
+        self.assertNotEqual(scan_agents._text(doc["summary"]).count(str(self.home)), 0, "the sanitiser leaves it")
+        with self.assertRaises(ValueError):
+            document(self.scan(launchd={}), mcp_scan(), None)
+
+    def test_problems_checks_every_string_independently(self):
+        self.put(descriptor("alpha-agent", 47401))
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        for planted in (str(self.home), "//" + str(self.home)[1:] + "/x", str(self.home).upper() + "/x"):
+            bad = json.loads(json.dumps(out))
+            bad["agents"][0]["summary"] = planted
+            found = scan_agents.problems(bad)
+            if planted.isupper() and sys.platform not in ("darwin", "win32"):
+                continue
+            self.assertTrue(any("home path" in p for p in found), planted)
+
+    def test_a_boolean_port_is_refused(self):
+        self.put(descriptor("alpha-agent", 47401))
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        out["agents"][0]["port"] = True
+        self.assertTrue(any("port" in p for p in scan_agents.problems(out)))
 
 
 class EmitHistory(Fixture):

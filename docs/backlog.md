@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-141`
+**Next free ID:** `OBS-144`
 
 This board is canonical for OBS rows: engine execution, closed by a pull request and a release.
 Product packages, priorities and operator gates are on the organization's board, cited here as
@@ -150,3 +150,5 @@ what was delivered is written in the Item column, after "Outcome:". A row holds 
 | OBS-138 | `issue-for-policy` counts each key of a project at its own ceiling (`_counted`) but not the ceilings of the successors a rotation left on a row (`successor_pending`, `stale_successors`), so the project's live ceilings can add up past its limit while the plan reads within it. Count every key a row holds, as `scan_spend.row_hashes` reads them | open | J-11 verification round 8 on #285 (merged `b4f4bc6`) |
 | OBS-139 | Agents registry: `unusable()` heals the strings of a hand-edited previous document but not its other fields; a non-string or wrongly typed field there still reaches the rewritten document, and the exit invariant does not run on that path. Run `problems()` on the rewritten document too and drop or retype what it refuses (`collectors/scan_agents.py`, `unusable`) | open | Observatory round-8 review of #288 (row 5a); follows OBS-83 |
 | OBS-140 | Agents registry: partial but shape-valid scans from a foreign writer are taken as fresh: an empty services list while `descriptors` counts more, `unreadable` with no previous document, `absent` with rows, an unknown `schema_version`, a home path of another account (round-8 A2b, A13, A14, A15, A4). The collector never writes these; check them in `document()` and make each unusable | open | Observatory round-8 review of #288 (row 5b); follows OBS-83 |
+| OBS-142 | Agents registry: a C0 or line separator (U+001C to U+001F, U+0085) splits a URL token from its query, so the token rule sees two harmless tokens. Treat those characters as part of a token, or replace them before splitting (`collectors/scan_agents.py`, `_fix`) | open | Observatory round-9 review of #288 (row); follows OBS-83 |
+| OBS-143 | Agents registry: a credential carried in a URL path (a webhook or a bot-token path) passes the strict URL rule, which only refuses user-info, query and fragment. Named as uncovered in the docstring; decide whether paths with long opaque segments are refused (`strict_url`) | open | Observatory round-9 review of #288 (row); follows OBS-83 |

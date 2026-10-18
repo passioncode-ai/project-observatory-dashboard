@@ -45,7 +45,9 @@ a scan written by an older collector is cleaned too. A problem's text stops at i
 a command key it names is dropped. Commands are listed by name (`doctor`, `update`), never their
 argument vectors. No regular expression here can backtrack over unbounded input. What this covers
 is scheme URLs with user-info, a query or a fragment; a schemeless `token=…` or a percent-encoded
-form is not recognised as a URL, and a Windows drive path outside the home (`C:\\work\\x`) holds
+form is not recognised as a URL; a credential carried in a URL's PATH (a webhook or bot-token
+path) is not recognised either, and a C0 or line separator can split a URL from its query; a
+Windows drive path outside the home (`C:\\work\\x`) holds
 `:\\` and is written `[url]`. A descriptor whose FILE NAME is URL-shaped is not read at all: its id
 would carry the name. When the scan is missing or cannot be used, the emit rewrites the previous
 document with `stale: true` and one degraded line naming the error (`unusable`).
@@ -176,28 +178,97 @@ def _home() -> str:
     return unicodedata.normalize("NFC", str(pathlib.Path.home())).rstrip("/\\")
 
 
-def _home_pattern() -> re.Pattern | None:
-    """The home directory as a whole path segment: not right after a name or path character (a
-    letter, digit, `_ . - / \\` or `~`), so any punctuation before it (a backtick, `[`, `,`, `;`)
-    is a boundary; not before a name character; either separator; case-insensitive where the
-    file system is (macOS, Windows). A literal with fixed-width boundaries: no backtracking."""
-    home = _home()
-    return _home_regex(home, sys.platform) if home else None
+#: Characters of a name: the home directory followed by one of these is a longer name, not home.
+_NAME_CHARS = frozenset(string.ascii_letters + string.digits + "_.-")
+#: The macOS data-volume firmlink: `/System/Volumes/Data/Users/x` is `/Users/x`.
+_FIRMLINK = "/system/volumes/data"
+
+
+def _case_insensitive(platform: str) -> bool:
+    return platform in ("darwin", "win32")
 
 
 @functools.lru_cache(maxsize=8)
 def _home_regex(home: str, platform: str) -> re.Pattern:
+    """The home directory as a literal (either separator), not followed by a name character."""
     body = r"[/\\]".join(re.escape(part) for part in re.split(r"[/\\]", home))
-    flags = re.IGNORECASE if platform in ("darwin", "win32") else 0
-    return re.compile(r"(?<![A-Za-z0-9_.\-/\\~])" + body + r"(?![A-Za-z0-9_.-])", flags)
+    return re.compile(body + r"(?![A-Za-z0-9_.-])", re.IGNORECASE if _case_insensitive(platform) else 0)
+
+
+def _home_pattern() -> re.Pattern | None:
+    home = _home()
+    return _home_regex(home, sys.platform) if home else None
+
+
+def _home_spans(text: str) -> list[tuple[int, int]]:
+    """Each place the home directory is written as a path in `text`, as (start, end) to replace by `~`.
+
+    The span takes in what a path can carry before the home without leaving it: a run of separators
+    and `.` or `..` segments (`//HOME`, `/./HOME`, `/../HOME`) and, on macOS, the data-volume
+    firmlink (`/System/Volumes/Data/HOME`). Before the span there must be the start of the text or
+    a character that is not a letter, digit, `~` or `:`: `_HOME`, `-HOME` and any other punctuation
+    are boundaries; `x/srv/alpha/y` is another path (which `home_leaks` still refuses); after `:`
+    the path is inside a URL (`file:///HOME`), which the token rule replaces whole. After it,
+    anything but a name character. Linear: each walk to the left stops at the previous span."""
+    home = _home()
+    if not home:
+        return []
+    spans: list[tuple[int, int]] = []
+    floor = 0
+    for m in _home_regex(home, sys.platform).finditer(text):
+        j = m.start()
+        while True:
+            while j > floor and text[j - 1] in "/\\.":
+                j -= 1
+            head = text[max(floor, j - len(_FIRMLINK)):j].replace("\\", "/")
+            if sys.platform == "darwin" and len(head) == len(_FIRMLINK) and head.lower() == _FIRMLINK:
+                j -= len(_FIRMLINK)
+                continue
+            break
+        if j > 0 and (text[j - 1].isalnum() or text[j - 1] in "~:"):
+            # After a letter, a digit or `~` it is another path; after `:` it is inside a URL
+            # (`file:///HOME`), which the token rule replaces whole.
+            continue
+        spans.append((j, m.end()))
+        floor = m.end()
+    return spans
 
 
 def tilde(value):
-    """A string with the home directory written `~` wherever `_home_pattern` finds it."""
+    """A string with each home path `_home_spans` finds written `~`."""
     if not isinstance(value, str):
         return value
-    home = _home_pattern()
-    return home.sub("~", value) if home else value
+    out, last = [], 0
+    for a, b in _home_spans(value):
+        out.append(value[last:a])
+        out.append("~")
+        last = b
+    out.append(value[last:])
+    return "".join(out)
+
+
+def home_leaks(value: str) -> bool:
+    """THE INDEPENDENT CHECK `problems()` runs over every string: the home directory anywhere
+    (NFC, either separator, case-folded on macOS and Windows), followed by the end, a separator or
+    any character that is not a name character, whatever precedes it. Stricter than `tilde`, which
+    leaves `x/srv/alpha/y` alone; such a string makes the document refused, so a home form the
+    sanitiser does not rewrite turns the scan stale instead of reaching the registry."""
+    home = _home()
+    if not home:
+        return False
+    fold = _case_insensitive(sys.platform)
+
+    def norm(t: str) -> str:
+        t = unicodedata.normalize("NFC", t).replace("\\", "/")
+        return t.lower() if fold else t
+    needle, hay = norm(home), norm(value)
+    i = hay.find(needle)
+    while i >= 0:
+        after = i + len(needle)
+        if after == len(hay) or hay[after] not in _NAME_CHARS:
+            return True
+        i = hay.find(needle, i + 1)
+    return False
 
 
 def _clean(value: str) -> str:
@@ -971,14 +1042,15 @@ def problems(doc) -> list[str]:
         out.append("agents.json degraded holds a line without a known source and a text reason")
     # THE SANITISER'S OWN RULE: a string `_fix` would change is one it never touched. Sanitised
     # output is a fixed point of `_fix`, so these can only fire on a document that bypassed it.
-    dirty = [s for s in _strings(doc) if _fix(s) != s]
-    home = _home_pattern()
-    if home and any(home.search(s) for s in dirty):
+    strings = list(_strings(doc))
+    # The home directory: checked INDEPENDENTLY of the sanitiser, over every string, failing closed.
+    if any(home_leaks(s) for s in strings):
         out.append("agents.json holds an absolute home path; paths under home are written ~/")
+    dirty = [s for s in strings if _fix(s) != s]
     if any(_token(t) != t for s in dirty for t in _WHITESPACE.split(s)):
         out.append("agents.json holds a URL-shaped token the sanitiser replaces (user-info or a query: a "
                    "credential's shape), never kept")
-    elif dirty and not (home and any(home.search(s) for s in dirty)):
+    elif any(not _home_spans(s) for s in dirty):
         out.append("agents.json holds text the sanitiser would change (unnormalised Unicode or an escape)")
     if (doc.get("totals") or {}).get("agents") != len(doc["agents"]):
         out.append("agents.json totals disagree with the list")
