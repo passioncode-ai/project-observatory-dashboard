@@ -1019,8 +1019,11 @@ class FixCycle3(Fixture):
     def test_junk_scan_fields_are_dropped_or_validated(self):
         self.put(descriptor("alpha-agent", 47401))
         scan = self.scan(launchd={})
-        scan["services"].append({"id": "not an id"})
-        scan["services"].append("not a row")
+        for junk in ({"id": "not an id"}, "not a row", {}):
+            bad_scan = json.loads(json.dumps(scan))
+            bad_scan["services"].append(junk)
+            with self.subTest(row=junk), self.assertRaises(ValueError):
+                document(bad_scan, mcp_scan(), None)
         scan["degraded"].append({"source": "elsewhere", "reason": 5, "agent": "x"})
         scan["scanned_at"] = "garbage" + scan["scanned_at"]
         previous = {"agents": [{"id": "../../etc"}, {"id": "agent:gone-agent.default"}]}
@@ -1233,6 +1236,130 @@ class FixCycle5(Fixture):
             self.skipTest("this file system normalises names")
         out = document(self.scan(launchd={}, platform="linux"), mcp_scan(), None)
         self.assertEqual(out["agents"], [])
+
+
+class FixCycle6(Fixture):
+    """Review round 8 of #288: one invariant at the exit, and the PoCs that broke the shape checks."""
+
+    def good_scan(self):
+        self.put(descriptor("alpha-agent", 47401))
+        self.put(descriptor("beta-agent", 47402))
+        return self.scan(launchd={"com.example.alpha-agent": {"pid": 4242, "status": 0}})
+
+    # --- MEDIUM 1: rows without ids are a partial scan, never a fresh empty estate ------------
+    def test_rows_without_ids_make_the_scan_unusable_and_keep_first_seen(self):
+        previous = document(self.good_scan(), mcp_scan(), None)
+        for junk in ([{}, {"name": "x"}], ["row"], [{"id": 5}]):
+            scan = self.good_scan()
+            scan["services"] = junk
+            with self.subTest(rows=junk), self.assertRaises(ValueError):
+                document(scan, mcp_scan(), previous)
+        kept = scan_agents.unusable(previous, "ValueError", TODAY)
+        later = document(self.good_scan(), mcp_scan(), json.loads(json.dumps(kept)))
+        self.assertEqual([r["first_seen_on"] for r in later["agents"]],
+                         [r["first_seen_on"] for r in previous["agents"]], "first-seen survives (A1b)")
+
+    # --- MEDIUM 2: the exit invariant -----------------------------------------------------------
+    def test_document_never_returns_what_problems_refuses(self):
+        cases = {
+            "supervisor-bogus": lambda r: r.__setitem__("supervisor", {"state": "bogus"}),
+            "supervisor-list": lambda r: r.__setitem__("supervisor", ["running"]),
+            "manifest-string": lambda r: r.__setitem__("manifest", "x"),
+            "port-string": lambda r: r.__setitem__("port", "47401"),
+            "valid-string": lambda r: r.__setitem__("valid", "yes"),
+            "problems-int": lambda r: r.__setitem__("problems", 5),
+            "supervisor-extra": lambda r: r["supervisor"].__setitem__("tokenFile", "~/x"),
+        }
+        for name, mutate in cases.items():
+            scan = self.good_scan()
+            mutate(scan["services"][0])
+            with self.subTest(case=name), self.assertRaises(ValueError):
+                document(scan, mcp_scan(), None)
+        scan = self.good_scan()
+        scan["services"].append(dict(scan["services"][0]))
+        with self.subTest(case="dup-ids"), self.assertRaises(ValueError):
+            document(scan, mcp_scan(), None)
+
+    def test_an_auth_block_in_a_scan_row_is_never_written(self):
+        scan = self.good_scan()
+        scan["services"][0]["auth"] = {"tokenFile": "~/fixture/SECRETTOKENPATH"}
+        scan["services"][0]["undeclared"] = "SECRETUNDECLARED"
+        out = document(scan, mcp_scan(), None)
+        text = json.dumps(out)
+        self.assertNotIn("SECRETTOKENPATH", text)
+        self.assertNotIn("SECRETUNDECLARED", text)
+        self.assertNotIn('"auth"', text)
+        self.assertEqual(scan_agents.problems(out), [])
+
+    def test_problems_checks_every_row_field_type(self):
+        out = document(self.good_scan(), mcp_scan(), None)
+        for field, value in (("valid", "yes"), ("commands", ["rm"]), ("first_seen_on", "today"),
+                             ("mcp_declarations", "x"), ("supervisor", "running"), ("extra", 1)):
+            bad = json.loads(json.dumps(out))
+            bad["agents"][0][field] = value
+            self.assertTrue(scan_agents.problems(bad), field)
+
+    # --- MEDIUM 3: any punctuation is a home boundary ---------------------------------------------
+    def test_home_after_any_punctuation_is_written_with_a_tilde(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            for sep in ("`", "[", ",", ";", "<", "{", "|", "*", "!", "+"):
+                with self.subTest(sep=sep):
+                    out = scan_agents._text(f"logs{sep}/srv/alpha/Library/Logs")
+                    self.assertEqual(out, f"logs{sep}~/Library/Logs")
+                    self.assertEqual(scan_agents.problems(tiny_doc(out)), [])
+                    self.assertTrue(scan_agents.problems(tiny_doc(f"logs{sep}/srv/alpha/x")))
+            self.assertEqual(scan_agents._text("x/srv/alpha/y"), "x/srv/alpha/y", "a path character is no boundary")
+            self.assertEqual(scan_agents._text("~/srv/alpha/y"), "~/srv/alpha/y", "idempotent after ~")
+
+    def test_home_after_punctuation_reaches_neither_registry_nor_wiki(self):
+        """e2e_home.py of round 8, through the real emit and the wiki projection."""
+        import workspace
+        from emitter_fixture import environment, seed
+        home = str(self.home)
+        for i, summary in enumerate([f"Logs in `{home}/Library/Logs/alpha`", f"state [{home}/.alpha]",
+                                     f"cfg,{home}/x", f"see {home}/Library/Logs"]):
+            doc = descriptor(f"a{i}-agent", 47410 + i, manager="none")
+            doc["summary"] = summary
+            self.put(doc)
+        root = self.base / "estate"
+        root.mkdir()
+        seed(root)
+        workspace.initialize(root / "home", identities=False)
+        settings = root / "home" / "config" / "settings.json"
+        conf = json.loads(settings.read_text(encoding="utf-8"))
+        conf.setdefault("features", {})["wiki_projection"] = True
+        settings.write_text(json.dumps(conf), encoding="utf-8")
+        raw, reg, vault = root / "raw", root / "registry", root / "vault"
+        (raw / "agents.json").write_text(json.dumps(self.scan(launchd={}, platform="linux",
+                                                              now=datetime.now(timezone.utc))), encoding="utf-8")
+        env = {**environment(root), "OBSERVATORY_HOME": str(root / "home"), "OBSERVATORY_VAULT": str(vault)}
+        (vault / "inventory").mkdir(parents=True)
+        for script, args in (("collectors/emit_registry.py", [str(raw)]), ("tools/project_into_vault.py", [])):
+            p = subprocess.run([sys.executable, script, *args], cwd=ROOT, env=env, capture_output=True,
+                               text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        for f in (reg / "agents.json", vault / "inventory" / "agents.json"):
+            self.assertEqual(f.read_text(encoding="utf-8").count(home), 0, f)
+        self.assertEqual(len(json.loads((reg / "agents.json").read_text(encoding="utf-8"))["agents"]), 4)
+
+    # --- LOW: the surviving mutants ---------------------------------------------------------------
+    def test_valid_sources_without_services_are_refused(self):
+        scan = self.good_scan()
+        del scan["services"]
+        with self.assertRaises(TypeError):
+            document(scan, mcp_scan(), None)
+
+    def test_unusable_handles_hand_edited_previous_documents(self):
+        previous = document(self.good_scan(), mcp_scan(), None)
+        bad = json.loads(json.dumps(previous))
+        bad["degraded"] = 5
+        out = scan_agents.unusable(bad, "TypeError", TODAY)
+        self.assertEqual(len(out["degraded"]), 1)
+        self.assertIsNone(scan_agents.unusable({"degraded": []}, "TypeError", TODAY), "no agents list")
+        bad = json.loads(json.dumps(previous))
+        bad["scanned_on"] = 5
+        out = scan_agents.unusable(bad, "TypeError", TODAY)
+        self.assertIn("rows are from an unknown day", out["degraded"][-1]["reason"])
 
 
 class EmitHistory(Fixture):

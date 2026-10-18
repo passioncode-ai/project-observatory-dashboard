@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f6db4f477652c41b964d73eef9dba2843ddaf7602b22c454c8792e55a6ade726",
-      "bytes": 46406
+      "export_sha256": "4827549f2cd14385389390b7a3ca46c53faad44d21c6da1c0d87fe813e5b56a1",
+      "bytes": 52391
     },
     {
       "path": "collectors/scan_bitbucket.py",
@@ -828,8 +828,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "639aec39aee6788ddceb0b45b8cd0abef7d849b418ac97b45bb87f2a394e9555",
-      "bytes": 23796,
+      "export_sha256": "8b793c1cc6c971f70d6f3e7bbf7428f1e9c64ee6a4caa3661c4d813b5000f3d2",
+      "bytes": 24007,
       "upstream_modified": true
     },
     {
@@ -3723,8 +3723,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c3078d41c80a1b13ef4210b3964cff789e3cea3ef8c372bb0422ff08269bde07",
-      "bytes": 74776
+      "export_sha256": "accf174d44f756bfcf62855193753bfe3cbadd4cd973f04a40a661cc6ba05318",
+      "bytes": 82203
     },
     {
       "path": "tests/test_scan_ids.py",

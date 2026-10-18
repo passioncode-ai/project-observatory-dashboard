@@ -48,7 +48,12 @@ is scheme URLs with user-info, a query or a fragment; a schemeless `token=…` o
 form is not recognised as a URL, and a Windows drive path outside the home (`C:\\work\\x`) holds
 `:\\` and is written `[url]`. A descriptor whose FILE NAME is URL-shaped is not read at all: its id
 would carry the name. When the scan is missing or cannot be used, the emit rewrites the previous
-document with `stale: true` and one degraded line naming the error (`unusable`). No process id and no instant: the document changes when the estate changes, not on
+document with `stale: true` and one degraded line naming the error (`unusable`).
+
+ONE INVARIANT AT THE EXIT. `document()` never returns a document `problems()` refuses: it rebuilds
+every row from the schema's keys (`SCAN_ROW_KEYS`, `ROW_KEYS`), raises on a scan row without a
+valid agent id (a partial scan is not a smaller estate), and checks the finished document with
+`problems()` before returning it; a refusal raises, and the emit takes `unusable`. No process id and no instant: the document changes when the estate changes, not on
 every tick, so the registry is not committed every thirty minutes for nothing.
 
 WHAT IS NEVER TRUSTED. A descriptor or manifest is opened without blocking, must be a regular
@@ -125,6 +130,17 @@ MAX_PROBLEMS = 20
 LIMITS = {"name": 80, "summary": 200, "default": 300, "problem": 240, "file": 160}
 _ID = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _INSTANCE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+#: The keys a row of the registry document may carry (`schemas/agents.schema.json`, `$defs.agent`),
+#: and those the collector itself writes. A row is REBUILT from these, never copied whole, so a key
+#: no one declared (an `auth` block among them) cannot travel through.
+SCAN_ROW_KEYS = ("id", "service_id", "instance", "name", "summary", "placement", "origin", "host", "port",
+                 "protocol", "descriptor", "installed_at", "source_repository", "key_in_url", "commands",
+                 "supervisor", "manifest", "valid", "problems")
+ROW_KEYS = SCAN_ROW_KEYS + ("carried", "carried_since", "first_seen_on", "last_seen_running_on",
+                            "mcp_declarations", "source_refs")
+_SUPERVISOR_KEYS = {"manager", "label", "unit", "task", "plist", "plist_present", "state", "last_exit_status", "why"}
+_MANIFEST_KEYS = {"state", "path", "contract_version", "provider_id", "provider_revision", "content_hash",
+                  "supported_contract_versions"}
 #: `agent:<id>.<instance>`, or `agent:file:<name>` for a descriptor whose own id is unusable.
 AGENT_ID = re.compile(r"^agent:([a-z][a-z0-9-]{1,62}\.[a-z][a-z0-9-]{0,31}|file:[A-Za-z0-9._-]{1,160})$")
 #: THE ONE URL SHAPE THIS DOCUMENT KEEPS: `scheme://host[:port][/path]` and nothing else — no
@@ -161,8 +177,9 @@ def _home() -> str:
 
 
 def _home_pattern() -> re.Pattern | None:
-    """The home directory as a whole path segment: after the start, whitespace, a quote, `=`, `:`
-    or `(`; before anything but a name character; either separator; case-insensitive where the
+    """The home directory as a whole path segment: not right after a name or path character (a
+    letter, digit, `_ . - / \\` or `~`), so any punctuation before it (a backtick, `[`, `,`, `;`)
+    is a boundary; not before a name character; either separator; case-insensitive where the
     file system is (macOS, Windows). A literal with fixed-width boundaries: no backtracking."""
     home = _home()
     return _home_regex(home, sys.platform) if home else None
@@ -172,7 +189,7 @@ def _home_pattern() -> re.Pattern | None:
 def _home_regex(home: str, platform: str) -> re.Pattern:
     body = r"[/\\]".join(re.escape(part) for part in re.split(r"[/\\]", home))
     flags = re.IGNORECASE if platform in ("darwin", "win32") else 0
-    return re.compile(r"(?:^|(?<=[\s'\"=:(]))" + body + r"(?![A-Za-z0-9_.-])", flags)
+    return re.compile(r"(?<![A-Za-z0-9_.\-/\\~])" + body + r"(?![A-Za-z0-9_.-])", flags)
 
 
 def tilde(value):
@@ -733,7 +750,7 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
     if dir_state == "unreadable":
         rows = []
         for r in previous_rows.values():
-            row = copy.deepcopy(r)
+            row = {k: copy.deepcopy(r[k]) for k in ROW_KEYS if k in r}
             row["carried_since"] = r.get("carried_since") or scan_day
             row["carried"] = True
             rows.append(row)
@@ -742,14 +759,14 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
         rows = []
         for r in scan.get("services") or []:
             if not isinstance(r, dict) or not isinstance(r.get("id"), str) or not AGENT_ID.match(r["id"]):
-                degraded.append({"source": "fabric-services",
-                                 "reason": "a scan row without a valid agent id was dropped"})
-                continue
-            row = copy.deepcopy(r)
+                # A partial scan is not a smaller estate: dropping the row would list its agent as
+                # removed and reset its first-seen date on the next good scan.
+                raise ValueError("a scan row is not an object with a valid agent id")
+            row = {k: copy.deepcopy(r[k]) for k in SCAN_ROW_KEYS if k in r}
             row["carried"] = False
             before = previous_rows.get(row["id"]) or {}
             row["first_seen_on"] = min(filter(None, (before.get("first_seen_on"), scan_day)))
-            running = (row.get("supervisor") or {}).get("state") == "running"
+            running = _obj(row.get("supervisor")).get("state") == "running"
             row["last_seen_running_on"] = scan_day if running else before.get("last_seen_running_on")
             row["source_refs"] = [SOURCE_ID]
             rows.append(row)
@@ -773,12 +790,12 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
     for row in rows:
         if row.get("carried"):
             continue
-        state = (row.get("supervisor") or {}).get("state") or "not-measured"
+        state = _obj(row.get("supervisor")).get("state") or "not-measured"
         by_state[state] = by_state.get(state, 0) + 1
     rows = _sanitise(rows)
     degraded = _sanitise(degraded)
     sources = _sanitise(sources)
-    return {
+    doc = {
         "schema_version": SCHEMA_VERSION, "updated_on": obs_date,
         "scanned_on": _day(scan.get("scanned_at")),
         "stale": stale,
@@ -795,12 +812,19 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
                    "valid": sum(1 for r in rows if r.get("valid")),
                    "invalid": sum(1 for r in rows if not r.get("valid")),
                    "carried": sum(1 for r in rows if r.get("carried")),
-                   "manifests_pinned": sum(1 for r in rows if (r.get("manifest") or {}).get("state") == "pinned"),
+                   "manifests_pinned": sum(1 for r in rows if _obj(r.get("manifest")).get("state") == "pinned"),
                    "by_supervisor_state": dict(sorted(by_state.items())),
                    "mcp": mcp_totals},
         "degraded": degraded,
         "source_refs": [SOURCE_ID] + ([MCP_SOURCE_ID] if mcp_scan is not None else []),
     }
+    # THE EXIT INVARIANT: never a document `problems()` refuses. Whatever shape a scan arrives in,
+    # a document that would turn the validator red is not returned: the emit then keeps the
+    # previous rows, stale, with the reason (`unusable`).
+    refused = problems(doc)
+    if refused:
+        raise ValueError(f"the agents document would be refused: {refused[0]}")
+    return doc
 
 
 UNUSABLE = "the agents scan could not be used"
@@ -838,6 +862,73 @@ def _strings(node):
             yield from _strings(value)
 
 
+def _obj(v) -> dict:
+    """`v` when it is an object, else an empty one: a reader of a hand-edited document never crashes."""
+    return v if isinstance(v, dict) else {}
+
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _row_shape(row: dict) -> list[str]:
+    """What a row carries that `schemas/agents.schema.json` would refuse: an undeclared key, a
+    missing one, or a value of the wrong type. The schema's own rules, without the jsonschema
+    dependency the base install does not have."""
+    out = [f"carries an undeclared key {k!r}" for k in row if k not in ROW_KEYS and k != "auth"]
+    out += [f"lacks {k}" for k in ROW_KEYS
+            if k not in row and k not in ("summary", "installed_at", "source_repository", "carried_since")]
+    text = lambda v: v is None or isinstance(v, str)                                     # noqa: E731
+    for k in ("service_id", "instance", "name", "summary", "origin", "host", "protocol", "installed_at",
+              "source_repository"):
+        if k in row and not text(row[k]):
+            out.append(f"{k} is not a string or null")
+    if "placement" in row and row["placement"] not in ("local", "remote"):
+        out.append("placement is not local or remote")
+    if not isinstance(row.get("descriptor", ""), str):
+        out.append("descriptor is not a string")
+    for k in ("key_in_url", "valid", "carried"):
+        if k in row and not isinstance(row[k], bool):
+            out.append(f"{k} is not a boolean")
+    if not (isinstance(row.get("commands", []), list) and set(row.get("commands", [])) <= {"doctor", "update"}):
+        out.append("commands is not a list of doctor and update")
+    if not (isinstance(row.get("problems", []), list) and all(isinstance(p, str) for p in row.get("problems", []))):
+        out.append("problems is not a list of strings")
+    for k in ("first_seen_on", "carried_since"):
+        if k in row and not (isinstance(row[k], str) and _DATE.fullmatch(row[k])):
+            out.append(f"{k} is not a date")
+    if row.get("last_seen_running_on") is not None and not (
+            isinstance(row["last_seen_running_on"], str) and _DATE.fullmatch(row["last_seen_running_on"])):
+        out.append("last_seen_running_on is not a date or null")
+    mcp = row.get("mcp_declarations")
+    if mcp is not None and not (isinstance(mcp, list) and all(isinstance(m, str) and m.startswith("mcp:")
+                                                              for m in mcp)):
+        out.append("mcp_declarations is not null or a list of mcp: ids")
+    if not (isinstance(row.get("source_refs", []), list) and all(isinstance(r, str) for r in row.get("source_refs", []))):
+        out.append("source_refs is not a list of strings")
+    sup = row.get("supervisor")
+    if not isinstance(sup, dict):
+        out.append("supervisor is not an object")
+    else:
+        out += [f"supervisor carries an undeclared key {k!r}" for k in sup if k not in _SUPERVISOR_KEYS]
+        if "last_exit_status" in sup and not _is_int(sup["last_exit_status"]):
+            out.append("supervisor.last_exit_status is not an integer")
+        if "plist_present" in sup and not isinstance(sup["plist_present"], bool):
+            out.append("supervisor.plist_present is not a boolean")
+        for k in ("manager", "label", "unit", "task", "plist", "why"):
+            if k in sup and not text(sup[k]):
+                out.append(f"supervisor.{k} is not a string")
+    man = row.get("manifest")
+    if not isinstance(man, dict):
+        out.append("manifest is not an object")
+    else:
+        out += [f"manifest carries an undeclared key {k!r}" for k in man if k not in _MANIFEST_KEYS]
+        versions = man.get("supported_contract_versions", [])
+        if not (isinstance(versions, list) and all(isinstance(v, str) for v in versions)):
+            out.append("manifest.supported_contract_versions is not a list of strings")
+    return out
+
+
 def problems(doc) -> list[str]:
     """What `tools/validate_registry.py` refuses in `registry/agents.json`."""
     if not isinstance(doc, dict) or not isinstance(doc.get("agents"), list):
@@ -857,12 +948,13 @@ def problems(doc) -> list[str]:
             out.append(f"agent id is not agent:<id>.<instance> or agent:file:<name>: {rid}")
         if "auth" in row:
             out.append(f"{rid} carries auth: the token file is never part of the registry")
+        out.extend(f"{rid} {p}" for p in _row_shape(row))
         port = row.get("port")
         if port is not None and (not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535):
             out.append(f"{rid} has a port outside 1..65535: {port}")
-        if (row.get("supervisor") or {}).get("state") not in SUPERVISOR_STATES:
-            out.append(f"{rid} has an unknown supervisor state: {(row.get('supervisor') or {}).get('state')}")
-        manifest = row.get("manifest") or {}
+        if _obj(row.get("supervisor")).get("state") not in SUPERVISOR_STATES:
+            out.append(f"{rid} has an unknown supervisor state: {_obj(row.get('supervisor')).get('state')}")
+        manifest = _obj(row.get("manifest"))
         if manifest.get("state") not in MANIFEST_STATES:
             out.append(f"{rid} has an unknown manifest state: {manifest.get('state')}")
         for field, kind in (("contract_version", str), ("provider_id", str), ("content_hash", str),

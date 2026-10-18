@@ -232,8 +232,10 @@ kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with
 `scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. This
 covers scheme URLs with user-info, a query or a fragment; a schemeless `token=…`, a bare `?key=…` or a
 percent-encoded form is not recognised as a URL. A Windows drive path outside the home (`C:\work\x`) holds
-`:\` and is written `[url]` too. When the scan is missing or cannot be used, the previous document is kept
-with `stale: true` and a degraded line naming the error and the day its rows are from; a descriptor file whose
+`:\` and is written `[url]` too. When the scan is missing or cannot be used (including a scan row without a valid agent id, and any
+scan that would produce a document `validate` refuses), the previous document is kept with `stale: true` and a
+degraded line naming the error and the day its rows are from; rows are rebuilt from the schema's keys only, so an
+undeclared key such as `auth` is never written; a descriptor file whose
 name is shaped like a URL is not read. A scan dated after the emit is stale
 (`clock-skew` in `degraded`). The wiki projection
 mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
