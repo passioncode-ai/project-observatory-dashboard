@@ -20,6 +20,8 @@ import stat
 import sys
 from typing import Any, BinaryIO, Mapping, Optional
 
+import osprivacy
+
 from . import ed25519, p256, webauthn
 from .estate import _show, device_key_fingerprint
 from .pairing import machine_of_keys
@@ -202,8 +204,8 @@ def join_proof(keys: Any, token: Any) -> str:
 
 
 def read_token(source: str, stdin: Optional[BinaryIO] = None) -> dict:
-    """The enroll token from `-` (stdin) or a file only this user can read: a regular file owned by this user, mode 0600
-    or narrower, not a symlink, checked on the open descriptor. Never from argv, a URL or the environment: `source` names
+    """The enroll token from `-` (stdin) or a file only this user can read: a regular file owned by this user that nobody
+    else may read (`osprivacy.private`), not a symlink, checked on the open descriptor. Never from argv, a URL or the environment: `source` names
     where the token is, it is never the token, so text that looks like one is refused, as is a URL or an `env:` name.
     The token is parsed strictly (`relay.parse_json`); ValueError says what is wrong without echoing the token."""
     if not isinstance(source, str) or not source:
@@ -217,18 +219,18 @@ def read_token(source: str, stdin: Optional[BinaryIO] = None) -> dict:
         raw = stream.read(MAX_TOKEN_BYTES + 1)
     else:
         try:
-            fd = os.open(source, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+            fd = osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
         except OSError as error:
             raise ValueError('the token file cannot be opened (%s); a symlink is refused' % error.strerror) from None
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode):
                 raise ValueError('the token file is not a regular file')
-            if hasattr(os, 'getuid') and info.st_uid != os.getuid():
+            if not osprivacy.owned_by_me(fd):
                 raise ValueError('the token file belongs to another user')
-            if info.st_mode & 0o177:
-                raise ValueError('the token file may be read by others: chmod 600 it (mode %03o)'
-                                 % stat.S_IMODE(info.st_mode))
+            if not osprivacy.private(fd):
+                raise ValueError('the token file may be read by others: make it yours alone (%s)'
+                                 % osprivacy.describe(fd))
             chunks, size = [], 0
             while size <= MAX_TOKEN_BYTES:
                 chunk = os.read(fd, MAX_TOKEN_BYTES + 1 - size)

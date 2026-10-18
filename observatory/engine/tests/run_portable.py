@@ -283,6 +283,8 @@ def copy_source(target: Path) -> None:
                    'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
+    # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
+    selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
     for source in sorted(selected):
         if not source.is_file():
             # Optional root modules/skill docs are not needed by every release.

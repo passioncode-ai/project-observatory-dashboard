@@ -89,9 +89,12 @@ class Vectors(unittest.TestCase):
     def test_placement_context_cases(self):
         for case in vectors()['placement']['cases']:
             with self.subTest(case['name']):
-                ctx = envelope.estate_envelope_context(case['applied'], case['machine'])
+                ctx = envelope.estate_envelope_context(case['applied'], case['machine'],
+                                                       case.get('extraRevocations', ()))
                 for hold in case['expect']['holds']:
                     self.assertEqual(ctx['may_hold'](hold['sender'], case['agentRef'], case['slot']), hold['mayHold'])
+                    if 'senderKnown' in hold:
+                        self.assertEqual(ctx['sender_key'](hold['sender']) is not None, hold['senderKnown'])
                 self.assertEqual(ctx['current_placement'](case['agentRef'], case['slot']),
                                  case['expect']['currentPlacement'])
 

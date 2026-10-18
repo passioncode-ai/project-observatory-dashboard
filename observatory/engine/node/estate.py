@@ -334,8 +334,8 @@ def dropped_findings(parent: dict, nxt: dict) -> list:
 
 
 def estate_record_rules(kind: str, value: Any) -> Optional[list]:
-    """The contract's `estateRecordRules` for the kinds a node checks: `estate-record` (one revision) and
-    `estate-record-revision` (`{parent, next}`, FAC-SEM-072 and FAC-SEM-114)."""
+    """The contract's `estateRecordRules`: `estate-record` (one revision), `estate-record-revision` (`{parent, next}`,
+    FAC-SEM-072 and FAC-SEM-114) and `estate-placement` (what a machine checks before it installs a package)."""
     value = value if isinstance(value, dict) else {}
     if kind == 'estate-record':
         return record_findings(value)
@@ -343,7 +343,60 @@ def estate_record_rules(kind: str, value: Any) -> Optional[list]:
         parent = value.get('parent') if isinstance(value.get('parent'), dict) else {}
         nxt = value.get('next') if isinstance(value.get('next'), dict) else {}
         return revision_chain(value) + dropped_findings(parent, nxt)
+    if kind == 'estate-placement':
+        return installation_findings(value)
     return None
+
+
+def package_digest(pkg: dict) -> str:
+    """`sha256:<hex>` of a `fabric-package/1` without its `digest` and `signatures` (the contract's `packageDigest`)."""
+    covered = {k: v for k, v in pkg.items() if k not in ('digest', 'signatures')}
+    return 'sha256:' + hashlib.sha256(jcs.rfc8785(covered).encode('utf-8')).hexdigest()
+
+
+def installation_findings(value: dict) -> list:
+    """What a machine checks before it installs a package (`estate-placement`: `{record, machine, package[, context]}`):
+    the machine is in the record, the package is the one its digest names and the record places it on this machine in
+    this context (FAC-SEM-074); every secret of this agent fills a slot the package declares (FAC-SEM-075); the
+    placement's share grant holds (FAC-SEM-111)."""
+    findings: list = []
+    record = value.get('record') if isinstance(value.get('record'), dict) else {}
+    pkg = value.get('package') if isinstance(value.get('package'), dict) else {}
+    machine, machine_index = next(((m, i) for m, i in _indexed(record.get('machines'))
+                                   if m.get('id') == value.get('machine')), (None, -1))
+    try:
+        digest: Optional[str] = package_digest(pkg)
+    except (jcs.CanonicalError, TypeError, ValueError):
+        digest = None
+    flag074 = _flagger(findings, 'FAC-SEM-074')
+    if machine is None:
+        flag074('/machine', f"machine {_show(value.get('machine'))} is not in the estate record")
+        return findings
+    if digest is None or digest != pkg.get('digest'):
+        flag074('/package/digest', 'the package is not the one its digest names: it changed after it was packed')
+    context = _context_of(value)
+    placement, placement_index = next(((e, i) for e, i in _indexed(machine.get('packages'))
+                                       if e.get('agentRef') == pkg.get('agentRef') and _context_of(e) == context),
+                                      (None, -1))
+    if placement is None:
+        flag074('/package/agentRef', f"the record places no {_show(pkg.get('agentRef'))} on machine "
+                                     f"{_show(value.get('machine'))} in the context {_show(context)}")
+    elif placement.get('digest') != digest:
+        flag074('/package', f"the record places {_show(placement.get('digest'))} of this agent on this machine in this "
+                            'context, not this package')
+    declared = {slot.get('name') for slot in _list(pkg.get('secrets'))}
+    flag075 = _flagger(findings, 'FAC-SEM-075')
+    for secret, index in _indexed(machine.get('secrets')):
+        if secret.get('agentRef') == pkg.get('agentRef') and _context_of(secret) == context \
+                and secret.get('slot') not in declared:
+            flag075(f'/record/machines/{machine_index}/secrets/{index}/slot',
+                    f"the package declares no slot {_show(secret.get('slot'))}: a secret goes only where a placed "
+                    'package declares it')
+    if placement is not None:
+        flag111 = _flagger(findings, 'FAC-SEM-111')
+        for suffix, message in _placement_grant_problems(record, placement):
+            flag111(f'/record/machines/{machine_index}/packages/{placement_index}{suffix}', message)
+    return findings
 
 
 def _valid_device_key(key: dict) -> bool:

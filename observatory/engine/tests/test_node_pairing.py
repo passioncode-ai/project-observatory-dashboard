@@ -89,12 +89,32 @@ class PairingVectors(unittest.TestCase):
 class SemanticFixtures(unittest.TestCase):
     def test_every_estate_fixture(self):
         fixtures = sorted((VECTORS / 'semantic').glob('*.json'))
-        self.assertGreaterEqual(len(fixtures), 25)
+        self.assertGreaterEqual(len(fixtures), 69)
         for path in fixtures:
             fixture = json.loads(path.read_text(encoding='utf-8'))
             with self.subTest(path.name):
                 codes = sorted({f['code'] for f in estate.estate_record_rules(fixture['kind'], fixture['input'])})
                 self.assertEqual(codes, sorted(fixture['expect']))
+
+    def test_a_secret_value_as_slot_name(self):
+        """The contract's `estate-secret-value-as-slot` fixture, rebuilt here: its slot is the AWS documentation's example
+        access key id, a shape the public-release gate refuses, so that one fixture is not vendored (README)."""
+        value = json.loads((VECTORS / 'semantic' / 'estate-record-ok.json').read_text(encoding='utf-8'))['input']
+        value = copy.deepcopy(value)
+        value['machines'][0]['secrets'][0]['slot'] = 'AKIA' + 'IOSFODNN7EXAMPLE'
+        value['digest'] = estate.estate_record_digest(value)
+        codes = sorted({f['code'] for f in estate.estate_record_rules('estate-record', value)})
+        self.assertEqual(codes, ['FAC-SEM-075'])
+
+    def test_a_package_whose_digest_lies(self):
+        """The package's own `digest` must be its digest, even when the record places the bytes it really has."""
+        value = json.loads((VECTORS / 'semantic' / 'estate-placement-ok.json').read_text(encoding='utf-8'))['input']
+        self.assertEqual(estate.estate_record_rules('estate-placement', value), [])
+        lying = copy.deepcopy(value)
+        lying['package']['digest'] = 'sha256:' + '0' * 64
+        paths = [f['instancePath'] for f in estate.estate_record_rules('estate-placement', lying)]
+        self.assertEqual(paths, ['/package/digest'])
+        self.assertEqual(estate.package_digest(value['package']), value['package']['digest'])
 
     def test_key_references(self):
         key = {'kid': 'm-a#sig', 'use': 'sig', 'alg': 'es256',

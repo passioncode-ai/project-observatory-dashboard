@@ -166,9 +166,16 @@ class ReadToken(unittest.TestCase):
         self.assertEqual(enroll_token.read_token('-', stdin=stream), valid_token())
 
     def test_a_file_others_may_read_is_refused(self):
-        for mode in (0o640, 0o604, 0o644, 0o700, 0o660):
-            with self.assertRaisesRegex(ValueError, 'chmod 600'):
+        for mode in (0o640, 0o604, 0o644, 0o660):
+            with self.assertRaisesRegex(ValueError, 'read by others'):
                 enroll_token.read_token(str(self.write('t-%o.json' % mode, mode)))
+
+    def test_a_file_of_another_user_is_refused(self):
+        from unittest import mock
+        path = str(self.write('theirs.json', 0o600))
+        with mock.patch.object(enroll_token.osprivacy, 'owned_by_me', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'another user'):
+                enroll_token.read_token(path)
 
     def test_a_symlink_or_a_folder_is_refused(self):
         target = self.write('real.json', 0o600)

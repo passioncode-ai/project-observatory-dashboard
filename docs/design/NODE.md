@@ -332,10 +332,15 @@ Three changes follow on the relay side:
 - the secret envelope's open context takes the revocation-delta entries like the record's own (`extra_revocations`),
   which closes OBS-118.
 
+**Before installing a package** (`installation_findings`, the contract's `estate-placement` kind), a machine checks
+that it is in the record, that the package is the one its digest names, that the record places that package on this
+machine in this context (FAC-SEM-074), that every secret of the agent fills a slot the package declares (FAC-SEM-075),
+and that the placement's share grant holds (FAC-SEM-111). The install itself is packet P6. A revocation delta entry
+whose device-key ref holds `@` but is no key reference is refused as malformed, since no revision could list it.
+
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
-`enroll-token.json` and the 25 estate fixtures of `semantic/`. Then they run the add, re-key and remove ceremonies end
-to end between two device-key sets, on a test estate. The vectors are pinned to #113's head `05f6b9f` until it
-merges.
+`enroll-token.json` and the 70 `estate-*` fixtures of `semantic/`. Then they run the add, re-key and remove ceremonies
+end to end between two device-key sets, on a test estate. The vectors are pinned to #113's merge commit `1531f21`.
 
 ## The walking skeleton
 

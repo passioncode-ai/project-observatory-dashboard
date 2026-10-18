@@ -1,0 +1,473 @@
+{
+  "description": "A slot placed for the organization's instance that the package does not declare (FAC-SEM-075, DEC-0082); the personal instance's slots are its own.",
+  "kind": "estate-placement",
+  "expect": [
+    "FAC-SEM-075"
+  ],
+  "input": {
+    "record": {
+      "schema": "estate-record/1",
+      "estate": "estate-5d0f1a",
+      "revision": 1,
+      "issuedAt": "2026-10-12T09:00:00Z",
+      "validUntil": "2026-11-11T09:00:00Z",
+      "authorities": [
+        {
+          "credentialId": "0nGFzb4RDddKfO7TtqkdYA",
+          "alg": "ES256",
+          "publicKey": {
+            "kty": "EC",
+            "crv": "P-256",
+            "x": "SClQ9Md7xe83S2dtd6FTDLtuT-89QI6cvNk8MQsFfmk",
+            "y": "kdDODXE6MIK1S0mBEjPCpdnCtPdNhDhw-GPmjmOZQ5Q"
+          },
+          "rpId": "sign.example.org",
+          "origins": [
+            "https://sign.example.org"
+          ]
+        },
+        {
+          "credentialId": "hSpa6a_vPaaKjLJRnom7Tg",
+          "alg": "EdDSA",
+          "publicKey": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "OcuXW5w2VW4qc5B2yo5tY7DI_14AzhA9fSid4CKMyfo"
+          },
+          "rpId": "sign.example.org",
+          "origins": [
+            "https://sign.example.org"
+          ]
+        }
+      ],
+      "machines": [
+        {
+          "id": "m-4c1e",
+          "deviceKeys": [
+            {
+              "kid": "m-4c1e#sig",
+              "use": "sig",
+              "alg": "es256",
+              "publicKey": "BAlY11RNjwoIwuAd0QrNCoeddZRpr5ueLSdxBla8GxLcqF9603uYlmbl9TlA4ulvzPYY3j7bw2jc5g9cpOER6ZE="
+            },
+            {
+              "kid": "m-4c1e#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BD59C6uiK3pDkKuvL3NZabarYa2kIth3/4BntlQ7yIaYxRSQ0rFfFRHAaM98zOVbXziRb7SILbvpEF91YC574J8="
+            }
+          ],
+          "hubKey": {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "tEuo6MY1azEdV6d4ygBTPBrvS9NrUtG_CtdeFK1DEDw",
+            "kid": "hub-m-4c1e-1",
+            "use": "sig",
+            "alg": "EdDSA"
+          },
+          "packages": [
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+              "publisherKid": "example-publisher-2026"
+            },
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+              "publisherKid": "example-publisher-2026",
+              "context": "org:org_7kq2m4xw",
+              "grant": "urn:grant:estate:share-inbox-digest-org-a"
+            },
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+              "publisherKid": "example-publisher-2026",
+              "context": "org:org_3fh9p1zc",
+              "grant": "urn:grant:estate:share-inbox-digest-org-b"
+            }
+          ],
+          "secrets": [
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "slot": "MAIL_OAUTH",
+              "from": "m-4c1e"
+            },
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "slot": "UNDECLARED_SLOT",
+              "from": "m-4c1e",
+              "context": "org:org_7kq2m4xw"
+            },
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "slot": "MAIL_OAUTH",
+              "from": "m-4c1e",
+              "context": "org:org_3fh9p1zc"
+            }
+          ]
+        },
+        {
+          "id": "m-9a07",
+          "deviceKeys": [
+            {
+              "kid": "m-9a07#sig",
+              "use": "sig",
+              "alg": "ed25519",
+              "publicKey": "E5DhHVXK3sLz51FwFvVW6t3f/e6J7K32OScferYvVjc="
+            },
+            {
+              "kid": "m-9a07#kem",
+              "use": "kem",
+              "alg": "ecdh-p256",
+              "publicKey": "BF5FcvT0BuMwOOrX+HJlP9oN1qrTQjsNaHLA1LJlKvFoIP4FMy1ZCDlrbtYQQT7FEXDzjHIX6wOmk/Z+WCpqPKg="
+            }
+          ],
+          "packages": [
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+              "publisherKid": "example-publisher-2026"
+            }
+          ],
+          "secrets": [
+            {
+              "agentRef": "urn:fabric:agent:example:inbox-digest",
+              "slot": "MAIL_OAUTH",
+              "from": "m-4c1e"
+            }
+          ]
+        }
+      ],
+      "publisherKeys": [
+        {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "OaiLjkJkL70pyk1-f1wCUCu2Tk9DcCsy7hcjM16Srjw",
+          "kid": "example-publisher-2026",
+          "alg": "EdDSA"
+        }
+      ],
+      "shareGrants": [
+        {
+          "kind": "standing-grant",
+          "meta": {
+            "id": "urn:grant:estate:share-inbox-digest",
+            "revision": 1,
+            "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "createdAt": "2026-10-12T08:00:00Z",
+            "createdBy": "urn:person:owner"
+          },
+          "project": "urn:project:inbox",
+          "principal": {
+            "id": "urn:person:guest",
+            "revision": 1,
+            "contentHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "resourcePatterns": [
+            "urn:project:inbox:digests/*"
+          ],
+          "dataClasses": [
+            "project-internal"
+          ],
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "idempotency": "required",
+          "issuer": "urn:person:owner",
+          "state": "active",
+          "principalKind": "external",
+          "audience": "inbox-digest",
+          "capabilities": [
+            "digest.read"
+          ],
+          "effectCeiling": [
+            "none"
+          ],
+          "spend": {
+            "mode": "limited",
+            "limits": [
+              {
+                "window": "total",
+                "limitUsd": 10
+              }
+            ],
+            "payer": "owner",
+            "credentialSource": {
+              "kind": "capability",
+              "agent": "urn:agent:inbox-digest",
+              "capability": "digest.read"
+            }
+          }
+        },
+        {
+          "kind": "standing-grant",
+          "meta": {
+            "id": "urn:grant:estate:share-inbox-digest-org-a",
+            "revision": 1,
+            "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "createdAt": "2026-10-12T08:00:00Z",
+            "createdBy": "urn:person:owner"
+          },
+          "project": "urn:project:inbox",
+          "principal": {
+            "id": "urn:org:first",
+            "revision": 1,
+            "contentHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "resourcePatterns": [
+            "urn:project:inbox:digests/*"
+          ],
+          "dataClasses": [
+            "project-internal"
+          ],
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "idempotency": "required",
+          "issuer": "urn:person:owner",
+          "state": "active",
+          "principalKind": "external",
+          "audience": "inbox-digest",
+          "capabilities": [
+            "digest.read"
+          ],
+          "effectCeiling": [
+            "none"
+          ],
+          "spend": {
+            "mode": "limited",
+            "limits": [
+              {
+                "window": "total",
+                "limitUsd": 10
+              }
+            ],
+            "payer": "owner",
+            "credentialSource": {
+              "kind": "capability",
+              "agent": "urn:agent:inbox-digest",
+              "capability": "digest.read"
+            }
+          },
+          "context": "org:org_7kq2m4xw"
+        },
+        {
+          "kind": "standing-grant",
+          "meta": {
+            "id": "urn:grant:estate:share-inbox-digest-org-b",
+            "revision": 1,
+            "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "createdAt": "2026-10-12T08:00:00Z",
+            "createdBy": "urn:person:owner"
+          },
+          "project": "urn:project:inbox",
+          "principal": {
+            "id": "urn:org:second",
+            "revision": 1,
+            "contentHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "resourcePatterns": [
+            "urn:project:inbox:digests/*"
+          ],
+          "dataClasses": [
+            "public"
+          ],
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "idempotency": "required",
+          "issuer": "urn:person:owner",
+          "state": "active",
+          "principalKind": "external",
+          "audience": "inbox-digest",
+          "capabilities": [
+            "digest.read"
+          ],
+          "effectCeiling": [
+            "none"
+          ],
+          "spend": {
+            "mode": "limited",
+            "limits": [
+              {
+                "window": "total",
+                "limitUsd": 2
+              }
+            ],
+            "payer": "owner",
+            "credentialSource": {
+              "kind": "capability",
+              "agent": "urn:agent:inbox-digest",
+              "capability": "digest.read"
+            }
+          },
+          "context": "org:org_3fh9p1zc"
+        }
+      ],
+      "revocations": [],
+      "digest": "sha256:8b37d84cd61ef772e77350b5d04331298d60ad154bd3668cbe3e924c26187e13",
+      "signature": {
+        "format": "webauthn-assertion",
+        "credentialId": "0nGFzb4RDddKfO7TtqkdYA",
+        "alg": "ES256",
+        "authenticatorData": "L4UXLM_G7Q6Rz5W9pKS5sMNeEf5owxN4sl1xelH8lhodAAAAAA",
+        "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiSF9QbHZYQVh1ek40V1hmOFYwTlZpWVd6UXdiYWlvVVZueTI2Mk9GTzhFYyIsIm9yaWdpbiI6Imh0dHBzOi8vc2lnbi5leGFtcGxlLm9yZyIsImNyb3NzT3JpZ2luIjpmYWxzZX0",
+        "sig": "MEYCIQCZR0FoZgcPmNqK7ZT-ciyiDXc0Rj0uLxY37s6__ENMiQIhAMZ0kMVBo2YNxaZay6AKKL-rAVGSFmtBd1S64NdKhjtq"
+      }
+    },
+    "machine": "m-4c1e",
+    "package": {
+      "schema": "fabric-package/1",
+      "kind": "agent",
+      "id": "inbox-digest",
+      "version": "1.2.0",
+      "publisher": "example",
+      "agentRef": "urn:fabric:agent:example:inbox-digest",
+      "licence": "AGPL-3.0-only OR LicenseRef-Example-Commercial",
+      "runners": [
+        "claude-code"
+      ],
+      "skills": [
+        "digest"
+      ],
+      "allowedToolsCeiling": [
+        "Read",
+        "mcp__inbox-digest__*"
+      ],
+      "listingChars": 96,
+      "provider": "fabric-agent.json",
+      "service": {
+        "id": "inbox-digest",
+        "name": "Inbox digest",
+        "summary": "Writes one digest of a mailbox each morning.",
+        "entry": [
+          "bin/serve.mjs"
+        ],
+        "runtime": {
+          "name": "node",
+          "version": ">=22"
+        }
+      },
+      "secrets": [
+        {
+          "name": "MAIL_OAUTH",
+          "purpose": "Reads the mailbox the digest summarises"
+        }
+      ],
+      "requires": {
+        "servers": [
+          "mail-gateway"
+        ],
+        "packages": [
+          {
+            "publisher": "example",
+            "id": "writing-rules",
+            "range": "^1"
+          }
+        ],
+        "platforms": [
+          "darwin",
+          "linux",
+          "windows"
+        ],
+        "gpu": false
+      },
+      "costPresets": [
+        {
+          "id": "quick",
+          "capability": "digest.write",
+          "label": "Quick",
+          "maxUsd": 0.05,
+          "default": true
+        },
+        {
+          "id": "thorough",
+          "capability": "digest.write",
+          "label": "Thorough",
+          "maxUsd": 0.4
+        }
+      ],
+      "resultSignal": {
+        "name": "digest-written",
+        "says": "done when the digest is written"
+      },
+      "state": [
+        {
+          "path": "digests",
+          "purpose": "Digests already written, so none is written twice"
+        }
+      ],
+      "evals": {
+        "suite": "evals/suite.json",
+        "receipt": {
+          "ranAt": "2026-10-12T08:30:00Z",
+          "suite": "sha256:b7f7411abceb3c9160745afdeb4cfad044ed49c926ae2c54e3b59d33675b8437",
+          "passed": 1,
+          "failed": 0
+        }
+      },
+      "dependencies": [
+        {
+          "ecosystem": "npm",
+          "name": "mail-parser",
+          "version": "4.1.0",
+          "sha256": "sha256:052a28297edf6760ee10e648408bf5ff3104d4559cf57aaa114615bd09ced88d",
+          "path": "vendor/mail-parser-4.1.0.tgz"
+        },
+        {
+          "ecosystem": "npm",
+          "name": "html-to-text",
+          "version": "9.0.5",
+          "sha256": "sha256:ba1d6bf173f323548886fbb322b57361d6f81614af7e32b70b9f6b0ad4e2a0aa"
+        }
+      ],
+      "files": [
+        {
+          "path": ".claude-plugin/plugin.json",
+          "sha256": "sha256:1a5289f35c70db070f92b1171dd1b700b32d35d4d277c10fbbe8906281c592f1"
+        },
+        {
+          "path": "bin/serve.mjs",
+          "sha256": "sha256:7c73dbd59c796c2abf11faaf5dd5154f23d41bd663e2202bf0724b09bbb57af4"
+        },
+        {
+          "path": "evals/inputs/morning.json",
+          "sha256": "sha256:2ba9f74506f79bccad45892b6e032c925531c15c03160046317f8e05dbf8486d"
+        },
+        {
+          "path": "evals/suite.json",
+          "sha256": "sha256:b7f7411abceb3c9160745afdeb4cfad044ed49c926ae2c54e3b59d33675b8437"
+        },
+        {
+          "path": "fabric-agent.json",
+          "sha256": "sha256:6353fff99eb6e5b729706c05f5b2a985f686d427b383e0ce2f63a639a852fb8d"
+        },
+        {
+          "path": "lib/server.mjs",
+          "sha256": "sha256:1df8ae90b21b2a990ea6723c3c016b27887b39f4de36fefd91915d04bb564273"
+        },
+        {
+          "path": "skills/digest/SKILL.md",
+          "sha256": "sha256:fe14a6a3cd2aad3ae287609a26cb2c765151947e614cfa56657a07639500ff9e"
+        },
+        {
+          "path": "vendor/mail-parser-4.1.0.tgz",
+          "sha256": "sha256:052a28297edf6760ee10e648408bf5ff3104d4559cf57aaa114615bd09ced88d"
+        }
+      ],
+      "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
+      "signatures": [
+        {
+          "role": "publisher",
+          "alg": "EdDSA",
+          "kid": "example-publisher-2026",
+          "sig": "m_mNo4nqMTiZZJFbOF5WnExNZw8N3qgfpmydscLb2rO3UsbSZy5fAbZJxulj2dsTOLx4bDk3Axt3U4frO-ctAA"
+        },
+        {
+          "role": "organization",
+          "alg": "EdDSA",
+          "kid": "example-org-admin-1",
+          "sig": "rumdqiJ8Ocq2zJo20nFXfMwThIku2xKNmxdJbtkr4sIR4bcwXuBJ0ngKSVB88Dz-uLM8Y8kJW6VYGy-Vy82YBQ"
+        }
+      ]
+    },
+    "context": "org:org_7kq2m4xw"
+  }
+}
