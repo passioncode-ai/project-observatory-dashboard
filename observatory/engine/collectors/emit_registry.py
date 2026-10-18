@@ -90,7 +90,7 @@ for _c in _id_changes:
 # reads local folders. The validator checked only that a reference RESOLVED,
 # never that it was the right one.
 NEW_SOURCES = [
-    ("SRC-0007", "Filesystem scan of the configured project roots: folder list, git remotes, checked-out branch, commit counts, project-type markers, README opening paragraph, CNAME/wrangler/package.json homepage fields.", []),
+    ("SRC-0007", "Filesystem scan of the configured project roots and exact local-folder declarations: folder list, git remotes, checked-out branch, commit counts, project-type markers, README opening paragraph, CNAME/wrangler/package.json homepage fields.", []),
     ("SRC-0008", "GitHub REST/GraphQL listing via `gh repo list` for the explicitly connected account and its accessible organizations: name, description, homepageUrl, visibility, archived, fork, language, default branch, pushedAt.", []),
     ("SRC-0009", "Obsidian vault project notes: folder inventory, overview summary, GitHub/Bitbucket references and DATA/ paths quoted inside the notes.", []),
     ("SRC-0010", "`git ls-remote --symref` against each checkout's own remote, over the SSH keys that already clone it — no API credential involved. Answers whether a local clone is current, behind, ahead or on a branch that exists nowhere else, and the remote's default branch where no API reports one.", ["local.sync", "local.remote_head", "local.remote_checked_on"]),
