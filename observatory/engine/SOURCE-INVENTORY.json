@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6c19ec71a34d0656543aa1024d82b3180ff0dcdd1f6fb871478535e06e9e8fad",
-      "bytes": 58221
+      "export_sha256": "816c97e640eb84aa62d03145ac8a88be5b730bc07c7d372cc47ea5149ac464b8",
+      "bytes": 58803
     },
     {
       "path": "collectors/scan_bitbucket.py",

@@ -297,6 +297,16 @@ def _lexical(text: str, fold: bool) -> list[str]:
     return [f.lower() if fold else f for f in forms]
 
 
+@functools.lru_cache(maxsize=8)
+def _home_needles(home: str, fold: bool) -> tuple[str, ...]:
+    """What `home_leaks` looks for: home in its resolved lexical form, and `~<user>`."""
+    needle = _lexical(home, fold)[-1].rstrip("/")
+    if not needle:
+        return ()
+    user = needle.rsplit("/", 1)[-1]
+    return (needle,) + (("~" + user,) if user and not user.endswith(":") else ())
+
+
 def home_leaks(value: str) -> bool:
     """THE INDEPENDENT CHECK `problems()` runs over every string: the home directory anywhere,
     followed by the end, a separator or any character that is not a name character, whatever
@@ -308,13 +318,14 @@ def home_leaks(value: str) -> bool:
     home = _home()
     if not home:
         return False
-    fold = _case_insensitive(sys.platform)
-    needle = _lexical(home, fold)[-1].rstrip("/")
-    if not needle:
+    needles = _home_needles(home, _case_insensitive(sys.platform))
+    if not needles:
         return False
-    user = needle.rsplit("/", 1)[-1]
-    needles = [needle] + (["~" + user] if user and not user.endswith(":") else [])
-    for hay in _lexical(value, fold):
+    # Every form above needs a separator, `\\`, `%`, `~` or a non-ASCII character: a string with
+    # none of them (an id, a state, a date) cannot spell home, and most strings are such.
+    if value.isascii() and "/" in needles[0] and not any(c in value for c in "/\\%~"):
+        return False
+    for hay in dict.fromkeys(_lexical(value, _case_insensitive(sys.platform))):
         for n in needles:
             i = hay.find(n)
             while i >= 0:
