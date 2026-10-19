@@ -4,7 +4,7 @@ Objective (operator request, 2026-10-19): a backup from which the whole starting
 agent machine can be moved to another machine, taken automatically once a day and before
 updates, into a file in an agreed local place.
 
-Base: `21e04267` (origin/main) on branch `feat/OBS-157-machine-backup`. This record is
+Base: `21e04267` (origin/main), merged with `ef9c8c33` (release 0.25.0, #303) on branch `feat/OBS-157-machine-backup`. This record is
 committed with the implementation; resolve the final object id with `git log -1 --format=%H`
 on that branch.
 
@@ -37,9 +37,11 @@ on that branch.
 - **KEEP 3.** A measured bundle is 47 MB; three are about 140 MB.
 - **Restore uses plain git** with the person's own configuration (SSH keys, credential
   helpers); the backup side reads checkouts through `safe_git`.
-- **Adjacent defect folded in.** `backup_vault.SNAPSHOT_KINDS` lacked `before-update`, so
-  `backups migrate` never exported a local before-update folder, rotation skipped it, and
-  `doctor` kept asking for a migrate that could not clear it.
+- **Adjacent defect.** `backup_vault.SNAPSHOT_KINDS` lacked `before-update`, so `backups
+  migrate` never exported a local before-update folder, rotation skipped it, and `doctor` kept
+  asking for a migrate that could not clear it. This branch fixed it; #303 (release 0.25.0)
+  landed the same fix on main meanwhile, so the merge keeps main's list and this branch adds the
+  `machine` kind and the tests (export, verification, removal, rotation of before-update).
 - **Not solved here:** OBS-20 (the backups root in `~/Documents`, a privacy-guarded folder:
   the bundle follows the root) and OBS-19 (the jobs' privacy consent: a file the job may not
   read is named as not carried).
@@ -51,8 +53,7 @@ on that branch.
 - `observatory/engine/machine_backup.py`: manifest, inventories, checkouts, bundle, rotation,
   disk floor, state (`store/machine-backup.json`), status, restore (plan, apply, overwrite,
   packages, clone), `full machine-backup [now|status]`, `full machine-restore`.
-- `backup_vault.py`: every snapshot kind in one list; `machine` kind in `backups status`;
-  `encrypt_stream`.
+- `backup_vault.py`: the `machine` kind in `backups status`; `encrypt_stream`.
 - `maintenance.py`: `step_machine` in the pass, the bundle's warnings in `maintain status`.
 - `engine_update.py`: the bundle before the jobs stop.
 - `workspace.py`, `observatory.py`: the two commands, `doctor.machine_backup`.

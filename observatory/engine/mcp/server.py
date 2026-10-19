@@ -527,15 +527,20 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage"],
                        Field(description="overview = totals and the top few of each (default); "
-                                         "a named section = that section in full.")] = "overview",
+                                         "a named section = that section in full, except coverage which always stays bounded.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
     and the largest cache/VM/history locations, worktrees and branches by class,
     the cleanup plan with its journal, and the disk guard's last run (pressure,
     what it freed by the disk's own count, the largest files, who holds the swap).
+    Coverage summarizes saved checkout/cache and open-deleted-file observations with source ages, bounded
+    rows, snapshot counts and null reclaimable bytes. It never refreshes inventories
+    or marks a candidate actionable.
+    Open-deleted logical sizes are command-visible only; refresh with
+    `full machine --open-unlinked` on macOS/Linux. They never prove reclaimable bytes.
     Missing swap remains null with its reason/time; largest-file coverage carries
     completeness and error counts even when the bounded file list is empty.
 
@@ -548,6 +553,10 @@ def observatory_machine(
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
     """
+    if section == "coverage" and explainPid is None:
+        import coverage_view
+        coverage = coverage_view.summary()
+        return {"measuredAt": None, "degraded": coverage["degraded"], "coverage": coverage}
     import machine_view
     full = machine_view.summary(explainPid)
     base = {"measuredAt": full.get("measuredAt"), "degraded": full["degraded"]}
@@ -560,7 +569,8 @@ def observatory_machine(
     if section != "overview":
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
-           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
+           "coverage": full.get("coverage"),
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {**{key: procs.get(key) for key in
@@ -620,6 +630,12 @@ def observatory_ssh_keys(
 
 
 MACHINE_TOP = 10
+
+
+# Publish the additive bounded coverage contract on the actual tool, not only prose.
+import coverage_view as _coverage_contract
+server._tool_manager.get_tool("observatory_machine").fn_metadata.output_schema = {
+    "type": "object", "properties": {"coverage": _coverage_contract.OUTPUT_SCHEMA}}
 
 
 @server.capability("machine.mcp.inventory")

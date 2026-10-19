@@ -526,22 +526,35 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
             pass
 
 
-def record_run(started: str, outcome: str, code: int | None, reason: str) -> None:
+def record_run(started: str, outcome: str, code: int | None, reason: str,
+               run_id: str | None = None) -> None:
     """`store/raw/tick-run.json`: start, end, outcome, reason — one per run (LC-03).
 
     Written by the supervisor, which outlives the tick script, so a tick stopped
-    at its ceiling or by a signal still leaves a record; `tick.json` is the
-    script's own and is missing exactly then."""
+    at its ceiling or by a signal still leaves a record. `tick.json` retains
+    the last completed report plus current progress; only matching, validated
+    stage metadata is copied, with unfinished stages unknown."""
     doc = {"started_at": started, "ended_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "outcome": outcome, "exit": code, "reason": reason}
+    # Optional stage evidence must never suppress the authoritative whole-run outcome.
+    doc["stage_progress"] = {"schema": 1, "coverage": "unknown",
+                             "reason": "stage_receipt_unavailable", "stages": []}
+    try:
+        import tick_progress
+        doc["stage_progress"] = tick_progress.snapshot(paths.SCRATCH, run_id)
+    except Exception:  # noqa: BLE001 — malformed optional metadata stays unknown
+        pass
     try:
         import atomic
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "tick-run.json", doc)
         import tick_health
         tick_health.record(paths.SCRATCH, doc)
-    except Exception as exc:                                                      # noqa: BLE001
-        print(f"the tick-run receipt could not be written: {type(exc).__name__}: {exc}", file=sys.stderr)
+    except Exception:                                                             # noqa: BLE001
+        try:
+            print("the tick-run receipt could not be written", file=sys.stderr)
+        except OSError:
+            pass
 # endregion tick-watchdog
 
 
@@ -574,7 +587,10 @@ def supervised(command: list[str]) -> int:
             return 0
         ceiling = ceiling_seconds()
         started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        env = {**os.environ, "OBSERVATORY_HOME": str(paths.HOME),
+        import uuid
+        from tick_progress import RUN_ENV
+        run_id = uuid.uuid4().hex
+        env = {**os.environ, RUN_ENV: run_id, "OBSERVATORY_HOME": str(paths.HOME),
                "OBSERVATORY_TICK_SUPERVISOR_PID": str(os.getpid()),
                DEADLINE_ENV: f"{time.time() + ceiling:.0f}"}
         _step_marker().unlink(missing_ok=True)
@@ -615,7 +631,7 @@ def supervised(command: list[str]) -> int:
             if pgid > 1:
                 _stop_group(pgid, 0.5)
                 _step_marker().unlink(missing_ok=True)
-            record_run(started, outcome, code, reason)
+            record_run(started, outcome, code, reason, run_id=run_id)
     finally:
         oslocks.flock(fd, oslocks.LOCK_UN)
         os.close(fd)

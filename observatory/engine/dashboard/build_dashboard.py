@@ -454,6 +454,7 @@ def from_store() -> dict:
                 "snapshot_kind": (ms.get("snapshot") or {}).get("result"),
                 "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or [],
                 "warning_items": ms.get("warning_items") or [],
+                "log_retention": ms.get("log_retention"),
                 # The machine bundle (OBS-157): when, how large, how many items. No path.
                 "machine": {k: (ms.get("machine_backup") or {}).get(k)
                             for k in ("enabled", "newest_at", "size", "items", "not_carried_count")}}

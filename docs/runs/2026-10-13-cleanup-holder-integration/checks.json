@@ -1,0 +1,30 @@
+{
+  "schema": "cleanup-holder-composition/1",
+  "base": "93223f5c095b9c688f24214aeb38f16bb9bc3e90",
+  "components": [
+    "5458f228193f960f05b16bc162c0f5dde5eea7db",
+    "0dbda978eceedb305f3b2fab76f4a961a11287d5"
+  ],
+  "tested_source": "df74d29eb08311f737c8e820412f93c506891061",
+  "coverage": "synthetic isolated HOME; no live process scan or cleanup",
+  "checks": [
+    {
+      "suite": "HoldersCompleteness+WorktreeFinalHolders+FreshTargetProbe",
+      "cases": 10,
+      "exit_code": 0
+    },
+    {
+      "suite": "git_hardening",
+      "cases": 61,
+      "exit_code": 0
+    },
+    {
+      "suite": "engine_doc_copies",
+      "cases": 6,
+      "exit_code": 0
+    }
+  ],
+  "combined_independent_review": "PENDING",
+  "hosted_ci": "PENDING",
+  "installed_acceptance": "NOT_RUN"
+}

@@ -216,6 +216,10 @@
   {
    "token": "bcrypt",
    "reason": "OpenSSH's key-derivation function name (bcrypt_pbkdf), written in an encrypted private key's header; the SSH-key tests build such headers (PB-163). A public algorithm, not a private project"
+  },
+  {
+   "token": "_worktrees",
+   "reason": "a generic folder-name convention for worktree checkouts, and in the engine a Python loop variable of the merge collector (collectors/merge.py, a remoteless worktree joins its main checkout's project, #301); a private list reaches it only because a machine keeps its own worktrees in a folder of that name"
   }
  ]
 }

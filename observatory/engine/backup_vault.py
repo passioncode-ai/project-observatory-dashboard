@@ -66,11 +66,9 @@ ROOT_ENV = "OBSERVATORY_BACKUPS"
 PASS_ENV = "OBSERVATORY_BACKUP_PASSPHRASE"
 SNAPSHOT_SUFFIX, DB_SUFFIX = ".obsnap", ".obsdb"
 #: `daily` is the maintenance job's own (maintenance.SNAPSHOT_KIND), so its rotation never
-#: removes a snapshot a person took with `workspace-backup`. `before-update` is what
-#: `full update` takes (engine_update.py): it was missing here until OBS-157, so `backups
-#: migrate` never exported a local before-update folder, nothing rotated those folders, and
-#: `doctor` asked for a migrate that could not clear them. Every snapshot kind the engine
-#: writes is listed here, and every list of kinds below reads this one.
+#: removes a snapshot a person took with `workspace-backup`.
+#: The updater emits `before-update`; use this allowlist for local inventory,
+#: migration and encrypted discovery alike. Unknown kinds are not ours to migrate.
 SNAPSHOT_KINDS = ("snapshot", "before-upgrade", "before-update", "daily")
 #: The machine's agent setup (machine_backup.py, OBS-157): a kind of its own in the same
 #: root, so its rotation and a workspace snapshot's never touch each other.
@@ -976,7 +974,7 @@ def status(base: Path) -> dict:
                         "takes the copies and their key together. Point it at another disk or a synced "
                         "folder: `project-observatory full configure storage backups /absolute/path` "
                         f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
-    legacy = [p for kind in SNAPSHOT_KINDS for p in local_snapshots(base, kind)]
+    legacy = [path for kind in SNAPSHOT_KINDS for path in local_snapshots(base, kind)]
     # A rolled-back update keeps the changed workspace beside the restored one: a full,
     # UNENCRYPTED copy, secrets/ included, that nothing removes (audit A18).
     failed = sorted(p for p in base.parent.glob(f"{base.name}.failed-update-*") if p.is_dir())

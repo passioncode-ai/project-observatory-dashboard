@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "source_commit": "1536adddaadb427a6830fa2343774801f87a60c8",
+  "scope": "synthetic-offline",
+  "status": "PASS_SCOPED",
+  "sources": [
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "eda88faa0e7948b9189ad670b19e8b7fb6f9a7c5e5063d9ab4259179dcfbc93f",
+      "git_blob": "9e29ffcdd1972ca6535df844d99a67cec891014c"
+    },
+    {
+      "path": "observatory/engine/tests/test_policy_rotation_admission.py",
+      "sha256": "22cff62d2683d99ed75f86a29ba065479d7ecba770146ae609366c520dbd8cb1",
+      "git_blob": "4ba0dee753eb89a6e054a70f887ee1f63e6cc305"
+    },
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
+      "git_blob": "b1f992281817fb5d8dd8cb6e8d426c4536613f72"
+    }
+  ],
+  "focused_cases": 13,
+  "independent_probes": 14,
+  "independent_review": "Parent independent source and synthetic fixture review; private receipt retained by maintainer",
+  "baseline": {
+    "requested": 128,
+    "completed": 128,
+    "pass": 58,
+    "fail": 70,
+    "error": 0,
+    "exit_code": 1,
+    "remaining_failures": "70 convergence (c') findings; no relaxation of assertions"
+  },
+  "full_5200": "NOT_RUN",
+  "live_provider": "NOT_RUN",
+  "installed": "NOT_RUN",
+  "legacy_unbound_policy_scope": "OPEN"
+}
