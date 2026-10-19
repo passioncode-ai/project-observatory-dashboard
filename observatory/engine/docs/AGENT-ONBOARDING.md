@@ -115,6 +115,17 @@ to a directory, submodule entry or special file is explicitly unmeasured and is
 never opened as a file. An interrupted or unreadable source is
 unmeasured, not proof that it contains no credential.
 
+### The agents on this machine
+
+`registry/agents.json` (and its wiki copy `inventory/agents.json`) is generated each tick
+with `features.machine_watch` on: one row per Fabric service descriptor, `id`
+`agent:<service-id>.<instance>`. Read `supervisor.state` (`running`, `loaded`, `not-loaded`,
+`not-measured`, `platform`, `unsupervised`), `manifest.state` (`pinned`, `absent`,
+`unreadable`) and `mcp_declarations` (ids from `registry/mcp-servers.json`; `null` means not
+measured). Check `stale` and `degraded` before saying an agent is absent or stopped: with `stale` true the
+scan is older than one tick and `carried` rows are an earlier scan's. Never edit the file:
+the next emit rewrites it. Fix a descriptor through its installer instead.
+
 ### Tool configuration coverage
 
 With the harness integration enabled, the scan names credential-shaped fields in
