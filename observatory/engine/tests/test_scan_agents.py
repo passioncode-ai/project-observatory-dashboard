@@ -1443,12 +1443,13 @@ class FixCycle7(Fixture):
     def test_problems_checks_every_string_independently(self):
         self.put(descriptor("alpha-agent", 47401))
         out = document(self.scan(launchd={}), mcp_scan(), None)
-        for planted in (str(self.home), "//" + str(self.home)[1:] + "/x", str(self.home).upper() + "/x"):
+        upper = str(self.home).upper() + "/x"
+        for planted in (str(self.home), "//" + str(self.home)[1:] + "/x", upper):
             bad = json.loads(json.dumps(out))
             bad["agents"][0]["summary"] = planted
             found = scan_agents.problems(bad)
-            if planted.isupper() and sys.platform not in ("darwin", "win32"):
-                continue
+            if planted == upper and sys.platform not in ("darwin", "win32"):
+                continue  # a case-sensitive filesystem: the upper-cased form names another path
             self.assertTrue(any("home path" in p for p in found), planted)
 
     def test_a_boolean_port_is_refused(self):
