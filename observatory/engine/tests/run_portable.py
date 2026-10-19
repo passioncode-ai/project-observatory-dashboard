@@ -195,6 +195,8 @@ BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the
 # canary that it reaches the model, read from a synthetic transcript.
 BOUNDARY += ('ask_why', 'ask_why_reach')
+# The machine bundle and its restore onto an empty home (OBS-157).
+BOUNDARY += ('machine_backup',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -233,6 +235,8 @@ ROOT_FILES = (
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py',
+    # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
+    'machine_backup.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).

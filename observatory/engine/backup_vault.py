@@ -66,8 +66,15 @@ ROOT_ENV = "OBSERVATORY_BACKUPS"
 PASS_ENV = "OBSERVATORY_BACKUP_PASSPHRASE"
 SNAPSHOT_SUFFIX, DB_SUFFIX = ".obsnap", ".obsdb"
 #: `daily` is the maintenance job's own (maintenance.SNAPSHOT_KIND), so its rotation never
-#: removes a snapshot a person took with `workspace-backup`.
-SNAPSHOT_KINDS = ("snapshot", "before-upgrade", "daily")
+#: removes a snapshot a person took with `workspace-backup`. `before-update` is what
+#: `full update` takes (engine_update.py): it was missing here until OBS-157, so `backups
+#: migrate` never exported a local before-update folder, nothing rotated those folders, and
+#: `doctor` asked for a migrate that could not clear them. Every snapshot kind the engine
+#: writes is listed here, and every list of kinds below reads this one.
+SNAPSHOT_KINDS = ("snapshot", "before-upgrade", "before-update", "daily")
+#: The machine's agent setup (machine_backup.py, OBS-157): a kind of its own in the same
+#: root, so its rotation and a workspace snapshot's never touch each other.
+MACHINE_KIND, MACHINE_SUFFIX = "machine", ".obmachine"
 #: Written into each workspace's folder in the root: the workspace path the copies belong
 #: to, so a reinstall at that path finds its own backups and never another's.
 OWNER_FILE = ".workspace-path"
@@ -154,7 +161,7 @@ def candidates(base: Path) -> list[dict]:
                         continue  # the same name at another path is another workspace
                 except OSError:
                     continue
-            snaps = sorted([f for kind in ("snapshot", "before-upgrade", "before-update", "daily")
+            snaps = sorted([f for kind in SNAPSHOT_KINDS
                             for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
                            key=lambda f: _artifact_stamp(f.name))
             # Every snapshot, so a damaged newest one still leaves an older one to restore.
@@ -733,6 +740,14 @@ def _publish(dest: Path, fill, secret: str, meta: dict) -> Path:
     return dest
 
 
+def encrypt_stream(dest: Path, fill, secret: str, *, kind: str, content: str) -> Path:
+    """Encrypt whatever `fill(writer)` writes, prove it decrypts, then rename it into place.
+
+    The machine bundle (machine_backup.py) streams its tar straight into the writer, so no
+    plaintext copy of the files it carries is ever written next to the root."""
+    return _publish(dest, fill, secret, {"kind": kind, "content": content})
+
+
 def encrypt_file(source: Path, dest: Path, secret: str, *, kind: str) -> Path:
     def fill(writer):
         with source.open("rb") as inp:
@@ -961,7 +976,7 @@ def status(base: Path) -> dict:
                         "takes the copies and their key together. Point it at another disk or a synced "
                         "folder: `project-observatory full configure storage backups /absolute/path` "
                         f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
-    legacy = local_snapshots(base, "snapshot") + local_snapshots(base, "before-upgrade") + local_snapshots(base, "daily")
+    legacy = [p for kind in SNAPSHOT_KINDS for p in local_snapshots(base, kind)]
     # A rolled-back update keeps the changed workspace beside the restored one: a full,
     # UNENCRYPTED copy, secrets/ included, that nothing removes (audit A18).
     failed = sorted(p for p in base.parent.glob(f"{base.name}.failed-update-*") if p.is_dir())
@@ -973,8 +988,8 @@ def status(base: Path) -> dict:
         warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
                         "run `project-observatory full backups migrate`")
     latest = {}
-    for kind, suffix in ((DB_KIND, DB_SUFFIX), ("snapshot", SNAPSHOT_SUFFIX), ("before-upgrade", SNAPSHOT_SUFFIX),
-                         ("before-update", SNAPSHOT_SUFFIX), ("daily", SNAPSHOT_SUFFIX)):
+    for kind, suffix in ((DB_KIND, DB_SUFFIX), *((k, SNAPSHOT_SUFFIX) for k in SNAPSHOT_KINDS),
+                         (MACHINE_KIND, MACHINE_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
     return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],

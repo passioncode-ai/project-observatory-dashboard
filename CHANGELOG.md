@@ -7,6 +7,27 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A daily encrypted backup of this machine's agent setup, and a restore onto a new machine** (OBS-157).
+  One `machine-<stamp>-<id>.obmachine` per run goes to the same backups root as the workspace snapshots, in the same
+  `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
+  settings, CLI logins, launchd or systemd user jobs, the Fabric service descriptors, the Homebrew, npm, pipx and uv
+  inventories, and every checkout's remotes (without user information), branch, HEAD, dirty and ahead/behind state
+  with a git bundle of its unpushed commits, a patch of its uncommitted changes and its untracked files. The
+  maintenance job takes one a day, `full update` one before it stops the jobs (unless one is under an hour old), and
+  `full machine-backup` one now. `config/machine-backup.json` adds an operator's own paths, excludes and checkout
+  roots. `full machine-restore [BUNDLE | --latest]` prints the plan; `--apply` writes only what is missing,
+  `--overwrite` moves a conflict aside first, `--packages` installs the inventories and `--clone` clones the checkouts
+  and puts back their carried work. Measured on a working agent machine: 47 MB, 8,232 items, 453 checkouts, about a
+  minute.
+  - Nothing is written without a passphrase; a disk that would keep under 2 GB free refuses the write, recorded and
+    shown in `doctor`, `maintain status` and Health; three bundles are kept.
+  - What a cap leaves out is not carried and named per folder in the bundle's `MANIFEST.json`, the answer, `doctor`
+    and Health; transcripts (opt-in) and plugin caches are skipped and named. No value reaches the manifest, the
+    state file or an answer.
+  - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
+    Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
+    Scenario OSS-68.
+
 - **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
   service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
   the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.
@@ -216,6 +237,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
 
 ### Fixed
+
+- **`full backups migrate` exports the snapshots `full update` takes** (OBS-157). `before-update` was missing
+  from the snapshot kinds, so a local `backups/before-update-*` folder was never exported or rotated and `doctor`
+  kept asking for a migrate that could not clear it. Every snapshot kind the engine writes is now one list, read by
+  migrate, rotation, `backups status`, `restore --latest` and `forget`; `backups status` also lists the `machine`
+  kind.
 
 - **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the
   checkout a worktree's `.git` file points at (`worktree_main` in `store/raw/local.json`), and the merge folds a

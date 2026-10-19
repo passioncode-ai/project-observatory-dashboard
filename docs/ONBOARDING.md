@@ -1338,6 +1338,94 @@ confirmed.
 `workspace-backup --output DIR` still writes a plaintext snapshot directory
 where you name it; that is an explicit choice and it is not encrypted.
 
+### This machine's agent setup, and moving to a new machine
+
+The workspace snapshot carries the engine's own data. Everything around it that makes a
+machine an agent machine is backed up separately, in the **same backups root**, encrypted
+with the **same passphrase**, as one file per run: `machine-<UTC stamp>-<id>.obmachine`
+(`machine_backup.py`, OBS-157). It is taken once a day by the maintenance job, before every
+engine update (unless one younger than an hour exists), and when you ask:
+
+```sh
+project-observatory full machine-backup            # take one now; prints size, items and what was not carried
+project-observatory full machine-backup status     # the newest, its age and size, what it did not carry
+```
+
+What one bundle holds, by category:
+
+| Category | What |
+|---|---|
+| Claude Code | `~/.claude/settings.json`, `settings.local.json`, `CLAUDE.md`, `keybindings.json`, `agents/`, `commands/`, `hooks/`, `skills/`, the plugin registry (`~/.claude/plugins/installed_plugins.json`, `~/.claude/plugins/known_marketplaces.json`) and `~/.claude.json`; `~/.agents/skills` |
+| Codex | `~/.codex/config.toml`, `~/.codex/AGENTS.md` |
+| Git, SSH, shell | `~/.gitconfig`, `~/.gitignore_global`, `~/.config/git/`, `~/.ssh/`, `~/.zshrc`, `~/.zprofile`, `~/.zshenv`, `~/.bashrc`, `~/.bash_profile`, `~/.profile` |
+| CLI logins | `~/.config/gh/`, doctl's configuration, `~/.config/heroku/`, `~/.netrc` |
+| Jobs and services | `~/Library/LaunchAgents/*.plist` (macOS) or `~/.config/systemd/user/` (Linux); the Fabric service descriptors directory |
+| Inventories | Homebrew (`brew bundle dump`), global npm, pipx and uv tools; this engine's workspace path, version and newest snapshot |
+| Checkouts | every Git checkout under the `projects` source and the declared local folders (or `roots`, below): remote URLs without user information, branch, HEAD, dirty and ahead/behind; a `git bundle` of the commits no remote has, a patch of uncommitted changes and the untracked files, each under a cap |
+
+A symbolic link is recorded as a link with its target, never followed. Left out on purpose
+and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
+(`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
+Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
+belong in the vault, which the workspace snapshot carries. Anything over a cap (16 MB per
+file, 32 MB per entry, 160 MB of file copies, 16 MB per checkout bundle, 8 MB per patch or
+set of untracked files, 64 MB for all checkouts) is **not carried** and named, per folder, in
+`MANIFEST.json`, in the command's answer, in `doctor` (`machine_backup.not_carried`) and on the
+Health page. Measured on a working agent machine (2026-10-19): 47 MB, 8,232 items, 453
+checkouts, about a minute. Three bundles are kept.
+
+Nothing is written without a passphrase: a bundle holds `~/.ssh` and CLI logins, so it is
+never written unencrypted, not even inside the workspace. A write is also refused when the
+root's disk would keep less than 2 GB free; the refusal is recorded and shown by `doctor`,
+`maintain status` and Health (`machine-backup-refused-disk`), and the next attempt is an hour
+later. `doctor` warns when the newest bundle is older than 36 hours.
+
+**Your own paths** (a private agent's configuration, a tool this list does not know) go in
+`<home>/config/machine-backup.json`, which stays on this machine:
+
+```json
+{"include": ["~/.config/my-agent", "/opt/my-agent/etc/agent.toml"],
+ "exclude": ["~/.ssh/*.old", "*.log"],
+ "roots": ["~/src", "~/work"],
+ "transcripts": false,
+ "enabled": true,
+ "limits": {"total_mb": 160, "entry_mb": 32, "min_free_gb": 2}}
+```
+
+Every key is optional; an unknown key or a wrong value is refused by name (`doctor` shows it
+as `machine-backup-settings`). `exclude` patterns match a path written `~/…`, or a bare name.
+`limits` takes `file_mb`, `entry_mb`, `total_mb`, `bundle_mb`, `patch_mb`, `untracked_mb`,
+`checkouts_mb`, `min_free_gb`, `depth` (how deep `roots` are searched, default 4) and
+`checkout_seconds` (the checkout inventory's time budget, default 900). `"enabled": false`
+stops the daily and pre-update bundles.
+
+**Moving to a new machine, step by step:**
+
+1. On the old machine, keep the passphrase somewhere off the machine:
+   `project-observatory full backup-passphrase show` (it prints only to a terminal).
+2. Copy the backups root (`full backups status` names it) to the new machine, into the same
+   place: `~/Documents/Project Observatory/Backups/` on macOS. With iCloud Desktop & Documents
+   on, it is already there.
+3. On the new machine install the engine (README, Install), then look before writing:
+   `project-observatory full machine-restore --latest` prints every item, where it goes and
+   whether it is `missing`, the `same` or a `conflict`. Without a workspace it asks for the
+   passphrase at the terminal, or reads `OBSERVATORY_BACKUP_PASSPHRASE`. A bundle copied
+   elsewhere is named instead: `full machine-restore /path/to/machine-….obmachine`.
+4. `full machine-restore --latest --apply` writes only what is missing, with each file's mode
+   (so `~/.ssh` is 700 and a key 600). `--overwrite` replaces a conflict, moving the existing
+   file aside as `<name>.before-machine-restore-<stamp>`.
+5. `full machine-restore --latest --packages` installs Homebrew's Brewfile (`brew bundle
+   install --no-upgrade`) and the npm, pipx and uv tools. Install Homebrew first.
+6. `full machine-restore --latest --clone` clones every recorded checkout that is not there
+   yet (with your own Git configuration and the SSH keys step 4 put back), adds its other
+   remotes, fetches its carried unpushed commits, checks out its branch and HEAD, applies its
+   patch and writes its untracked files. A checkout that exists is never touched; a worktree
+   is added to its restored main checkout.
+7. `project-observatory full init` (or `full restore --latest`) brings back the workspace
+   itself from its own snapshot, then `full maintain ensure` schedules the job.
+
+The plan and every answer carry paths, counts and reasons, never a file's contents.
+
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
 `--apply --writers-stopped`. It leaves the original in place and does not start
