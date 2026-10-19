@@ -2617,8 +2617,8 @@
       "path": "tests/adv_j1_property.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
-      "bytes": 25497
+      "export_sha256": "78016782f85e9d1fa7bffe5bcdf16cada1a5899938083c39ea822b4af71c9c1e",
+      "bytes": 23123
     },
     {
       "path": "tests/adv_j1_property_forget.py",
@@ -2809,17 +2809,10 @@
       "upstream_modified": true
     },
     {
-      "path": "tests/rotation_capacity_model.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "3f1f95711f410f28abe61fe6018a6242bf987e1fd1ae5e0c39d1a269a2d8903b",
-      "bytes": 7581
-    },
-    {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "3a4d18fa84f12bbced3ff9622125b10d7e97c80d77f6bf9c660e91d851766254",
-      "bytes": 34601,
+      "export_sha256": "57ad1d49c34fed30b0943cf6c8615d14b010bfcdb94fa8bc6c031e7e2d792d29",
+      "bytes": 34412,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3144,8 +3137,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "c789cff1062821f82f33156a6b972a46b941579a8b15a8ee5fa378d2da7d7556",
-      "bytes": 180846,
+      "export_sha256": "1ba3a696a9014a7cae350f5f0fdec214c7019e8ed32a3e5077cc4255053ea778",
+      "bytes": 180340,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -3626,25 +3619,11 @@
       "bytes": 19378
     },
     {
-      "path": "tests/test_issued_spend.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "dd9e9c1c6e6d0bc9332f89a15a8fb0128457f4ce45e3ea48fe286530058e7910",
-      "bytes": 7771
-    },
-    {
       "path": "tests/test_j1_evidence.py",
       "source_sha256": null,
       "upstream_modified": true,
       "export_sha256": "4b5fc2f406707b1956b80e0c77f75498cc2fd136fd375aefb0face7567efc6f2",
       "bytes": 7463
-    },
-    {
-      "path": "tests/test_j3_adversary.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "daa8c60a1330e5a354be5df7fc255587039461580ea6ec73d4c2c401228cec1d",
-      "bytes": 5364
     },
     {
       "path": "tests/test_key.py",
@@ -3761,8 +3740,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b7f1981f9d07a0ffd639409e26ae4e7268391fd6ebaa272ab7af0d022d93a0da",
-      "bytes": 62037
+      "export_sha256": "fcc23168d902cd187db554e3ddf4afe235513f7ac57850c4f4462f410a1840bd",
+      "bytes": 62058
     },
     {
       "path": "tests/test_machine_findings.py",
@@ -3984,8 +3963,8 @@
       "path": "tests/test_openrouter_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "065df9870e27e3ee6b6429268da3622aeb0f563e440699abef0e5948f288ea91",
-      "bytes": 26573
+      "export_sha256": "50444668ab4cff4febdc0b95ffeb58682fc82d2e3b634d6155faf8d5821a45ea",
+      "bytes": 25116
     },
     {
       "path": "tests/test_organizations.py",
@@ -4076,13 +4055,6 @@
       "upstream_modified": true,
       "export_sha256": "b9fc8b75e14494802491d5004a5cedd2d58314f53ca325814832e92f7b5ffa66",
       "bytes": 14529
-    },
-    {
-      "path": "tests/test_policy_rotation_admission.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "22cff62d2683d99ed75f86a29ba065479d7ecba770146ae609366c520dbd8cb1",
-      "bytes": 7161
     },
     {
       "path": "tests/test_portable_mcp.py",
@@ -4186,8 +4158,8 @@
     {
       "path": "tests/test_provider_secret_boundaries.py",
       "source_sha256": "c9d258e5efec069e47379357e0c849b77e7a3bb3b22afc9ea181c574cf7ffdd9",
-      "export_sha256": "17969f40dfd7494b89debd885bcdb94fbd4f30700e0e015552418642c228c04f",
-      "bytes": 12350,
+      "export_sha256": "c9d258e5efec069e47379357e0c849b77e7a3bb3b22afc9ea181c574cf7ffdd9",
+      "bytes": 11670,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -4326,13 +4298,6 @@
       "bytes": 14271
     },
     {
-      "path": "tests/test_revoke_consumers.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "95948e882279b840ab7bc252ddadeeffbacc06d37a554861e6e5603e1308449f",
-      "bytes": 5889
-    },
-    {
       "path": "tests/test_rollup.py",
       "source_sha256": "e10922fce2aeb03078c34b7e1a441f4db3f0b346592eb2d4a10ff9985efc3470",
       "export_sha256": "8e4d70c2f8eab49c095dd7a1f3ee5ace158a00cc86b32e2f70572eb35e93b050",
@@ -4348,20 +4313,6 @@
       "upstream_modified": true,
       "export_sha256": "4c194023703117acd17b84360994f993d1bfbc76bfd3045d5a1a25314e29de55",
       "bytes": 19448
-    },
-    {
-      "path": "tests/test_rotation_accounting.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "e662084dd782970b3b7ddc900148eaa268668d768671e14fdbdb043e657ff4bd",
-      "bytes": 14626
-    },
-    {
-      "path": "tests/test_rotation_capacity.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "0d4753eef6da3cd3288607f430740cfd0ae267b1b728161f52b0e955ac72d5f7",
-      "bytes": 8560
     },
     {
       "path": "tests/test_runtime_identity.py",
@@ -5718,7 +5669,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 753,
+  "file_count": 746,
   "excluded": [
     "git-history",
     "operator-registries",

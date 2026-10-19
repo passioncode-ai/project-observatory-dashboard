@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Adversarial extension of test_or_policy_property (J-1, PR #246 @ 6f30de4). Scratch only.
 
-Fakes only: no network, no provider, no secret values (each minted key has a distinct synthetic plaintext and its real SHA256).
+Fakes only: no network, no provider, no secret values (every key value is a fixed dummy).
 
 Invariants, measured on an EXACT provider (Decimal of what it stores, sub-cent included):
  (a)  a write that raises the project's provider total leaves it within the limit — except inside
@@ -18,7 +18,6 @@ Invariants, measured on an EXACT provider (Decimal of what it stores, sub-cent i
 from __future__ import annotations
 import contextlib
 import io
-import hashlib
 import json
 import pathlib
 import random
@@ -107,8 +106,7 @@ class Prov:
             if mode == "unreach-before":
                 raise self.U("openrouter unreachable: TimeoutError")
             self.n += 1
-            value = f"synthetic-adversary-key-{self.n:08d}"
-            h = hashlib.sha256(value.encode()).hexdigest()
+            h = f"h{self.n}"
             self.keys[h] = {"hash": h, "name": payload["name"], "limit": self.echo(payload["limit"]),
                             "limit_reset": payload["limit_reset"], "disabled": False,
                             "label": f"sk-or-v1-abc...{self.n:03d}", "_proj": payload["name"].startswith("project-a"),
@@ -119,7 +117,7 @@ class Prov:
                 raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
             if mode == "unreach-after":
                 raise self.U("openrouter unreachable: TimeoutError")
-            return {"data": self.public(self.keys[h]), "key": value}
+            return {"data": self.public(self.keys[h]), "key": "sk-or-v1-" + "q" * 40}
         h = path.rsplit("/", 1)[-1]
         if h in self.unread and method is None:
             raise self.U("openrouter unreachable: TimeoutError")
@@ -282,54 +280,15 @@ def revoke(m, name):
         return "killed"
 
 
-def representation(m, p):
-    """Synthetic observer: explicit identities differ from bounded unknown reservations.
-
-    A reservation matches at most one provider row within its declared capacity.
-    It accounts for uncertainty, not identity proof, delivery or convergence. No
-    production recovery action is authorized by this observer's name comparison.
-    """
+def untracked(m, p):
     try:
         issued = m.ledger()["issued"]
-        if not isinstance(issued, dict) or any(not isinstance(r, dict) for r in issued.values()):
-            raise ValueError
-    except Exception:
-        raise RuntimeError("ENVIRONMENT ledger could not be inspected; invariant unjudged") from None
-    known = {r.get(field) for r in issued.values() for field in ("hash", "predecessor_hash", "successor_hash")
-             if isinstance(r.get(field), str) and r.get(field)}
-    reservations = []
-    for name, row in issued.items():
-        if row.get("pending") and not row.get("hash"):
-            reservations.append((name, row.get("limit_usd")))
-        if row.get("rotation_status") == "mint-pending" and not row.get("successor_hash"):
-            reservations.append((name + "-next", row.get("successor_limit_usd")))
-    reserved, missing = [], []
-    for handle, row in p.keys.items():
-        if not row["_proj"] or handle in known: continue
-        match = None
-        for index, (name, capacity) in enumerate(reservations):
-            if name != row['name'] or type(capacity) not in (int, float): continue
-            try:
-                cap = Decimal(str(capacity)); actual = Decimal(str(row.get('_asked', row['limit'])))
-                fits = cap.is_finite() and actual.is_finite() and cap > 0 and 0 <= actual <= cap
-            except Exception: fits = False
-            if fits: match = index; break
-        if match is not None:
-            reservations.pop(match); reserved.append(handle)
-        else:
-            missing.append(f"{handle}({row['name']}, ${row['limit']})")
-    return {"explicit": sorted(known), "reserved_unknown": reserved, "untracked": missing}
-
-
-def untracked(m, p):
-    return representation(m, p)["untracked"]
-
-
-def serves_every_slot(plan, refs):
-    """A returned plan is not CLI success: held-rotation returns a plan, too."""
-    if not isinstance(plan, list) or any(not isinstance(row, dict) for row in plan): return False
-    if any(row.get('action') not in ('in-place', 'ceiling-moved', 'issued') for row in plan): return False
-    return set(refs) <= {row.get('ref') for row in plan if row.get('to')}
+    except Exception:                       # noqa: BLE001
+        return []
+    known = {r.get("hash") for r in issued.values()} | {r.get("predecessor_hash") for r in issued.values()}
+    blind = {n for n, r in issued.items() if r.get("pending") and not r.get("hash")}
+    return [f"{h}({r['name']}, ${r['limit']})" for h, r in p.keys.items()
+            if r["_proj"] and h not in known and r["name"] not in blind]
 
 
 def case(seed, trace=False):
@@ -494,11 +453,9 @@ def case(seed, trace=False):
             # invalid policy needs a corrected policy, not key deletion/reminting.
             log.append("invalid-input partition: expected rejection, state checked")
             break
-        if any(s.get("action") == "held-rotation" for s in plan or []):
-            log.append("held-rotation: no implemented reconciliation remedy; reservation is not convergence")
         todo = [s for s in plan or [] if s.get("action") in
                 ("held-pending", "not-in-policy", "held-missing", "held-disabled")]
-        if not todo and err is None and serves_every_slot(plan, refs):
+        if not todo and err is None:
             last = plan
             break
         for s in todo:

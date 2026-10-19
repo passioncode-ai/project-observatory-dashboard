@@ -1628,9 +1628,6 @@ def test_or_stash_demands_a_label_because_the_provider_names_nothing() -> None:
 def test_or_rotation_creates_and_delivers_before_deleting() -> None:
     """The order is the contract: a delete-first rotation that fails halfway
     leaves the consumer with a dead key and a silent fallback."""
-    import hashlib
-    successor_value = "sk-or-v1-" + "n" * 40
-    successor_hash = hashlib.sha256(successor_value.encode()).hexdigest()
     m = orr()
     d = pathlib.Path(tmpdir.mkdtemp()).resolve()
     m.ADMIN_STORE = d / "openrouter-admin"
@@ -1653,7 +1650,7 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
             return {"data": [{"name": "fabric-agent", "hash": "h-old",
                               "limit": 10, "usage": 3}]}
         if path == "/keys" and payload:
-            return {"data": {"hash": successor_hash}, "key": successor_value}
+            return {"data": {"hash": "h-new"}, "key": "sk-or-v1-" + "n" * 40}
         # The door reads an issued key by the hash its ledger recorded (GET /keys/{hash}).
         if path == "/keys/h-old" and method is None and payload is None:
             return {"data": {"name": "fabric-agent", "hash": "h-old", "limit": 10, "usage": 3}}
@@ -1672,7 +1669,7 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
           and delivered[0][2].get("rotate") is True, "delivery must request replacement")
     led = json.loads(m.LEDGER.read_text())
     check("the ledger moved to the successor",
-          led["issued"]["fabric-agent"]["hash"] == successor_hash
+          led["issued"]["fabric-agent"]["hash"] == "h-new"
           and led["issued"]["fabric-agent"]["rotations"] == 1, str(led)[:200])
 
 
@@ -2287,8 +2284,7 @@ def test_or_policy_round_two() -> None:
 
     def mint_fails(*a, **k):
         raise RuntimeError("openrouter answered 500 for /keys")
-    # Policy already owns the ledger lock and calls the locked implementation.
-    m._issue_key_locked = mint_fails
+    m.issue_key = mint_fails
     try:
         m.issue_for_policy(_two_slots(), "example")
         check("the partial run raises", False, "returned")
@@ -2688,11 +2684,7 @@ def test_or_policy_round_four() -> None:
         rec = m.ledger()["issued"]["project-a-prod-k0"]
         scratch = pathlib.Path(tmpdir.mkdtemp())
         m.paths.SCRATCH = scratch
-        scan = {"schema_version": 1, "scanned_at": __import__("datetime").datetime.now(
-                    __import__("datetime").timezone.utc).isoformat(), "keys": [],
-                "destinations": {}, "destination_hashes": {}, "degraded": []}
-        scan.update(make(h, rec.get("label")))
-        (scratch / "openrouter.json").write_text(json.dumps(scan), encoding="utf-8")
+        (scratch / "openrouter.json").write_text(json.dumps(make(h, rec.get("label"))), encoding="utf-8")
         try:
             m.revoke_key("project-a-prod-k0")
             check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,
