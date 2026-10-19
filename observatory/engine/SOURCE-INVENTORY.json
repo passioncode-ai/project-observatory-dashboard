@@ -1868,8 +1868,8 @@
       "path": "fabric_hub.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ca96c0355814545e96c4fbf05ab2561eda4e921ce89b7345573f05e12cdc68b3",
-      "bytes": 16489
+      "export_sha256": "d5bf2473860fbd93c1f2e8b3ba7fa1de36116b7b885daf455b037a006682000e",
+      "bytes": 16506
     },
     {
       "path": "fabric_service.py",

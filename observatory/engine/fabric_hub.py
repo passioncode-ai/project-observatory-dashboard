@@ -36,6 +36,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import osproc
 import paths
 import private_io
 import service_identity
@@ -74,15 +75,10 @@ def binding_file() -> Path:
 
 
 def _alive(pid: Any) -> bool:
+    """Asked through `osproc.alive`, never by a signal: on Windows `os.kill(pid, 0)` terminates the process."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+    return osproc.alive(pid)
 
 
 def read_hub() -> dict:
