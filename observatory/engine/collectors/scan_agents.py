@@ -105,6 +105,7 @@ import sys
 import hashlib
 import string
 import unicodedata
+import urllib.parse
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -247,27 +248,80 @@ def tilde(value):
     return "".join(out)
 
 
+#: A JSON `\uXXXX` escape, decoded by `_lexical` before the separators are read.
+_JSON_U = re.compile(r"\\u([0-9A-Fa-f]{4})")
+#: How many rounds of percent-decoding `_lexical` applies: `%252F` is two, three bounds the work.
+_PCT_ROUNDS = 3
+
+
+def _segments(text: str, resolve: bool) -> str:
+    """`text` split on `/`, empty and `.` segments dropped, `seg/..` resolved when `resolve`.
+    One pass over the segments with a stack: linear, whatever the nesting."""
+    lead, parts = text.startswith("/"), text.split("/")
+    out: list[str] = []
+    for seg in parts:
+        if seg in ("", "."):
+            continue
+        if resolve and seg == "..":
+            if out and out[-1] != "..":
+                out.pop()
+            elif not lead:
+                out.append(seg)
+            continue                            # `/..` at the root is the root
+        out.append(seg)
+    tail = "/" if text.endswith("/") and out else ""
+    return ("/" if lead else "") + "/".join(out) + tail
+
+
+def _lexical(text: str, fold: bool) -> list[str]:
+    """The forms of `text` `home_leaks` searches, each a lexical normalisation that a path
+    resolver, a JSON reader or a URL decoder would apply before it reached the file system:
+    NFC; then NFKC (fullwidth `／` and `～`), JSON `\\uXXXX` and `\\/` escapes, bounded
+    percent-decoding, backslashes as separators and separator runs collapsed; then `.` segments
+    dropped; then `seg/..` resolved. `…`, the mark of a cut string, stays a boundary. Every stage is searched, so a home written plainly and then
+    left by `..` (`HOME/../x`) is still found. Case-folded where the file system folds case."""
+    base = unicodedata.normalize("NFC", text)
+    # `…` ends a cut string (`_text`) and NFKC would spell it `...`, three name characters, so a
+    # home cut right after its last part would stop matching: it stays a boundary instead.
+    t = unicodedata.normalize("NFKC", base.replace("\u2026", "\n"))
+    t = _JSON_U.sub(lambda m: chr(int(m.group(1), 16)), t)
+    for _ in range(_PCT_ROUNDS):
+        if "%" not in t:
+            break
+        decoded = urllib.parse.unquote(t, errors="replace")
+        if decoded == t:
+            break
+        t = unicodedata.normalize("NFKC", decoded)
+    t = re.sub(r"/{2,}", "/", t.replace("\\", "/"))
+    forms = [base.replace("\\", "/"), t, _segments(t, resolve=False), _segments(t, resolve=True)]
+    return [f.lower() if fold else f for f in forms]
+
+
 def home_leaks(value: str) -> bool:
-    """THE INDEPENDENT CHECK `problems()` runs over every string: the home directory anywhere
-    (NFC, either separator, case-folded on macOS and Windows), followed by the end, a separator or
-    any character that is not a name character, whatever precedes it. Stricter than `tilde`, which
-    leaves `x/srv/alpha/y` alone; such a string makes the document refused, so a home form the
+    """THE INDEPENDENT CHECK `problems()` runs over every string: the home directory anywhere,
+    followed by the end, a separator or any character that is not a name character, whatever
+    precedes it, in any lexical form `_lexical` folds back to it (separator runs, `.` segments,
+    `x/..` detours, backslashes, JSON escapes, percent-encoding, fullwidth forms; case-folded on
+    macOS and Windows), and `~<user>` naming the same home. Stricter than `tilde`, which rewrites
+    only the plain forms; a string this finds makes the document refused, so a home form the
     sanitiser does not rewrite turns the scan stale instead of reaching the registry."""
     home = _home()
     if not home:
         return False
     fold = _case_insensitive(sys.platform)
-
-    def norm(t: str) -> str:
-        t = unicodedata.normalize("NFC", t).replace("\\", "/")
-        return t.lower() if fold else t
-    needle, hay = norm(home), norm(value)
-    i = hay.find(needle)
-    while i >= 0:
-        after = i + len(needle)
-        if after == len(hay) or hay[after] not in _NAME_CHARS:
-            return True
-        i = hay.find(needle, i + 1)
+    needle = _lexical(home, fold)[-1].rstrip("/")
+    if not needle:
+        return False
+    user = needle.rsplit("/", 1)[-1]
+    needles = [needle] + (["~" + user] if user and not user.endswith(":") else [])
+    for hay in _lexical(value, fold):
+        for n in needles:
+            i = hay.find(n)
+            while i >= 0:
+                after = i + len(n)
+                if after == len(hay) or hay[after] not in _NAME_CHARS:
+                    return True
+                i = hay.find(n, i + 1)
     return False
 
 

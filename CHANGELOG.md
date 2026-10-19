@@ -7,6 +7,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
+  service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
+  the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.
+  - A home written in an equivalent lexical form (doubled separators, `.` segments, `x/..` detours, backslashes,
+    JSON and percent escapes, fullwidth characters, `~user`) is caught by the independent check: the scan is
+    refused and the last document is kept stale (round 8 of #288).
+
 - **Each project's spend, this month and over the last 30 days** (J-11, OBS-93). The spend scan now reads every
   key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
   `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are

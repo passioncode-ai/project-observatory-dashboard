@@ -1459,6 +1459,178 @@ class FixCycle7(Fixture):
         self.assertTrue(any("port" in p for p in scan_agents.problems(out)))
 
 
+class FixCycle8(Fixture):
+    """Review round 8 (adversarial) of #288: a home written in an equivalent lexical form.
+
+    `home_leaks` used to read home as its parts joined by exactly one separator, so a path with a
+    doubled separator, a `.` segment, an `x/..` detour, a backslash, a JSON escape, percent-encoding
+    or fullwidth characters passed `problems()` and reached registry and wiki. Each form is
+    generated here for a home, planted in every string field, and must be flagged."""
+
+    @staticmethod
+    def forms(home: str, user_tail: str = "DATA/x") -> dict[str, str]:
+        """Equivalent spellings of `home + '/' + user_tail`, keyed by what makes each one differ."""
+        parts = home.strip("/").split("/")
+        last = parts[-1]
+        head = "/" + "/".join(parts[:-1]) if len(parts) > 1 else ""
+        plain = home + "/" + user_tail
+        out = {
+            "double-separator": head + "//" + last + "/" + user_tail,
+            "separator-run": "///" + "///".join(parts) + "/" + user_tail,
+            "dot-segment": head + "/./" + last + "/" + user_tail,
+            "dot-segments-everywhere": "/./" + "/./".join(parts) + "/./" + user_tail,
+            "dot-dot-detour": head + "/zz/../" + last + "/" + user_tail,
+            "dot-dot-deep": head + "/a/b/../../" + last + "/" + user_tail,
+            "backslash-before-name": head + "/\\" + last + "/" + user_tail,
+            "backslashes": plain.replace("/", "\\"),
+            "doubled-backslashes": plain.replace("/", "\\\\"),
+            "json-escaped-slashes": plain.replace("/", "\\/"),
+            "json-unicode-escape": plain.replace("/", "\\u002f"),
+            "percent-encoded": plain.replace("/", "%2F"),
+            "percent-encoded-lower": plain.replace("/", "%2f"),
+            "percent-encoded-twice": plain.replace("/", "%252F"),
+            "fullwidth-separators": plain.replace("/", "\uff0f"),
+            "fullwidth-name": head + "/" + "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c
+                                                   for c in last) + "/" + user_tail,
+            "tilde-user": "~" + last + "/" + user_tail,
+            "fullwidth-tilde-user": "\uff5e" + last + "/" + user_tail,
+            "tilde-user-alone": "~" + last,
+        }
+        out["json-string-of-backslashes"] = json.dumps({"p": plain.replace("/", "\\")})
+        out["json-string-escaped"] = json.dumps({"p": plain}).replace("/", "\\/")
+        return out
+
+    BENIGN = ("https://example.com/a/../b", "https://example.com/a%2Fb/c?x=1", "1.2.3", "v2026.10.19",
+              "/usr/local/bin", "~/x/../y", "~", "50% off", "%2Fusr%2Flocal", "C:\\Program Files\\x",
+              "a/./b//c", "caf\\u00e9", "\\u002fusr", "/other/../srv/alphabet", "~alphabet/x",
+              "/srv/alpha-old/x", "/srv/alpha.bak", "/srv/alphabet")
+
+    def test_every_equivalent_form_is_flagged_and_benign_strings_are_not(self):
+        for platform in ("linux", "darwin"):
+            with patch.object(scan_agents, "_home", return_value="/srv/alpha"), \
+                    patch.object(scan_agents.sys, "platform", platform):
+                for name, form in self.forms("/srv/alpha").items():
+                    with self.subTest(platform=platform, form=name):
+                        self.assertTrue(scan_agents.home_leaks("state in " + form + " now"), form)
+                        self.assertTrue(any("home path" in p for p in scan_agents.problems(tiny_doc(form))))
+                for text in self.BENIGN:
+                    with self.subTest(platform=platform, benign=text):
+                        self.assertFalse(scan_agents.home_leaks(text), text)
+
+    def test_a_home_left_by_dot_dot_is_still_flagged(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            self.assertTrue(scan_agents.home_leaks("/srv/alpha/../other"))
+            self.assertTrue(scan_agents.home_leaks("/srv/beta/../alpha/x"))
+            # `_text` cuts with `…`; NFKC would read it as `...`, three name characters.
+            self.assertTrue(scan_agents.home_leaks("/srv/zz/../alpha\u2026"))
+            self.assertFalse(scan_agents.home_leaks("/srv/alpha..."))      # another name
+
+    def test_the_normalisation_is_linear_on_hostile_input(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            for text in ("a/.." * 20000, "%25" * 20000, "\\" * 40000, "./" * 20000):
+                self.assertFalse(scan_agents.home_leaks(text))
+
+    def test_every_string_field_of_a_document_is_checked(self):
+        self.put(descriptor("alpha-agent", 47401, manifest=self.put_manifest("alpha-agent")))
+        out = document(self.scan(launchd={"com.example.alpha-agent": {"pid": 1, "status": 0}}), mcp_scan(), None)
+        self.assertEqual(scan_agents.problems(out), [])
+
+        def paths(node, at=()):
+            if isinstance(node, str):
+                yield at
+            elif isinstance(node, dict):
+                for k, v in node.items():
+                    yield from paths(v, at + (k,))
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    yield from paths(v, at + (i,))
+        fields = list(paths(out["agents"][0]))
+        self.assertGreater(len(fields), 5)
+        for name, form in self.forms(str(self.home)).items():
+            for field in fields:
+                with self.subTest(form=name, field=field):
+                    bad = json.loads(json.dumps(out))
+                    node = bad["agents"][0]
+                    for k in field[:-1]:
+                        node = node[k]
+                    node[field[-1]] = "at " + form
+                    self.assertTrue(any("home path" in p for p in scan_agents.problems(bad)))
+
+    def test_a_descriptor_carrying_any_form_is_refused_whole(self):
+        """The fields the round named: the scan never yields a fresh document holding a form."""
+        for name, form in self.forms(str(self.home)).items():
+            for field in ("summary", "name", "fabricManifest", "lifecycle.plist", "lifecycle.label",
+                          "lifecycle.unit", "lifecycle.manager"):
+                with self.subTest(form=name, field=field):
+                    for f in self.services.iterdir():
+                        f.unlink()
+                    doc = descriptor("alpha-agent", 47401)
+                    if field.startswith("lifecycle."):
+                        doc["lifecycle"][field.split(".", 1)[1]] = form
+                    else:
+                        doc[field] = form
+                    self.put(doc)
+                    try:
+                        out = document(self.scan(launchd={}), mcp_scan(), None)
+                    except ValueError:
+                        continue                                   # refused: the emit keeps it stale
+                    # Not refused: the form must be gone, by the test's own reading, not the module's.
+                    text = json.dumps(out, ensure_ascii=False)
+                    self.assertNotIn(form, text)
+                    self.assertNotIn(self.home.name, text)
+
+    def test_the_forms_reach_neither_registry_nor_wiki(self):
+        """Through emit and projection: a clean tick, then one whose scan carries the forms. The
+        second is refused, the first document is kept stale, and no form of home is in either file."""
+        import workspace
+        from emitter_fixture import environment, seed
+        home = str(self.home)
+        forms = self.forms(home, ".alpha")
+        root = self.base / "estate"
+        root.mkdir()
+        seed(root)
+        workspace.initialize(root / "home", identities=False)
+        settings = root / "home" / "config" / "settings.json"
+        conf = json.loads(settings.read_text(encoding="utf-8"))
+        conf.setdefault("features", {})["wiki_projection"] = True
+        settings.write_text(json.dumps(conf), encoding="utf-8")
+        raw, reg, vault = root / "raw", root / "registry", root / "vault"
+        env = {**environment(root), "OBSERVATORY_HOME": str(root / "home"), "OBSERVATORY_VAULT": str(vault)}
+        (vault / "inventory").mkdir(parents=True)
+
+        def tick():
+            (raw / "agents.json").write_text(json.dumps(self.scan(launchd={}, platform="linux",
+                                                                  now=datetime.now(timezone.utc))),
+                                             encoding="utf-8")
+            for script, args in (("collectors/emit_registry.py", [str(raw)]),
+                                 ("tools/project_into_vault.py", [])):
+                p = subprocess.run([sys.executable, script, *args], cwd=ROOT, env=env, capture_output=True,
+                                   text=True, timeout=300)
+                self.assertEqual(p.returncode, 0, p.stderr[-400:])
+            return p
+
+        self.put(descriptor("clean-agent", 47419, manager="none"))
+        tick()
+        first = json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+        self.assertFalse(first["stale"])
+        for i, key in enumerate(("double-separator", "dot-dot-detour", "backslash-before-name",
+                                 "json-escaped-slashes", "percent-encoded", "fullwidth-separators",
+                                 "tilde-user")):
+            doc = descriptor(f"a{i}-agent", 47420 + i, manager="none")
+            doc["summary"] = "state in " + forms[key]
+            self.put(doc)
+        tick()
+        with patch.object(scan_agents, "_home", return_value=home):
+            for f in (reg / "agents.json", vault / "inventory" / "agents.json"):
+                text = f.read_text(encoding="utf-8")
+                for key, form in forms.items():
+                    self.assertNotIn(form, text, (f, key))
+                data = json.loads(text)
+                self.assertTrue(data["stale"], f)
+                self.assertEqual([r["id"] for r in data["agents"]], ["agent:clean-agent.default"], f)
+                self.assertFalse(any(scan_agents.home_leaks(s) for s in scan_agents._strings(data)), f)
+
+
 class EmitHistory(Fixture):
     """The emit reads the previous registry document, so dates and removals persist across ticks."""
 

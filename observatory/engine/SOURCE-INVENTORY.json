@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9a7aed8d73e7f48bfc6810db73a433be6ad5ac836ee9ef4b410647bc0803095",
-      "bytes": 55433
+      "export_sha256": "6c19ec71a34d0656543aa1024d82b3180ff0dcdd1f6fb871478535e06e9e8fad",
+      "bytes": 58221
     },
     {
       "path": "collectors/scan_bitbucket.py",
@@ -4248,8 +4248,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "788a2a387069b228e611bd335eca71c1f0f2f74269bed3fd6735ea8b3374abc5",
-      "bytes": 88111
+      "export_sha256": "cbbaafab0c36cb2ef8bee30e002a8b474e92e2c6c99125ec481d6e99b815cf59",
+      "bytes": 98142
     },
     {
       "path": "tests/test_scan_ids.py",
