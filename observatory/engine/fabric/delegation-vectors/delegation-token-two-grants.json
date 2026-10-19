@@ -1,0 +1,42 @@
+{
+  "iss": "urn:fabric:estate:example",
+  "sub": "urn:person:operator",
+  "act": {
+    "sub": "example-media",
+    "session": "run-2026-10-11-0042",
+    "act": {
+      "sub": "example-agent.default"
+    }
+  },
+  "aud": "example-writer",
+  "scope": "writer.write writer.check",
+  "effect": [
+    "draft"
+  ],
+  "grant": [
+    "urn:grant:project-a:example-media-writer#3",
+    "urn:grant:project-a:unlimited-other#3"
+  ],
+  "spend": {
+    "mode": "limited",
+    "remaining": [
+      {
+        "window": "task",
+        "remainingUsd": 1.5
+      },
+      {
+        "window": "day",
+        "remainingUsd": 4.2
+      },
+      {
+        "window": "month",
+        "remainingUsd": 38
+      }
+    ],
+    "perCallMaxUsd": 0.5
+  },
+  "project": "urn:project:a",
+  "iat": 1791720000,
+  "exp": 1791720600,
+  "jti": "01JA7Y5Q3C2K9M8N4P6R0S1T2V"
+}

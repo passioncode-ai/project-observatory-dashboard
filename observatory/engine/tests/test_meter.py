@@ -147,8 +147,9 @@ class Verifier(unittest.TestCase):
                            "unauthenticated", "unknown-key")
         self.assertRefused(self.verify(token, jwks={"keys": [self.estate.jwk, self.estate.jwk]}),
                            "issuer-unavailable", "duplicate-kid")
+        # DEC-0045 item 7 (F-B-319): a published key of another use is the issuer's fault, as any unusable key.
         self.assertRefused(self.verify(token, jwks={"keys": [{**self.estate.jwk, "use": "enc"}]}),
-                           "unauthenticated", "key-not-for-signing")
+                           "issuer-unavailable", "key-not-for-signing")
         self.assertRefused(self.verify(token, jwks={"keys": [{**self.estate.jwk, "crv": "X25519"}]}),
                            "issuer-unavailable", "unusable-key")
         self.assertRefused(self.verify(token, jwks={"keys": [{**self.estate.jwk, "d": "secret"}]}),
@@ -174,7 +175,8 @@ class Verifier(unittest.TestCase):
 
     def test_audience_chain_scope_and_effect(self):
         self.assertRefused(self.verify(self.estate.sign(claims(aud="copylot"))), "wrong-audience")
-        deep = {"sub": "a", "act": {"sub": "b", "act": {"sub": "c", "act": {"sub": "d", "act": {"sub": "e"}}}}}
+        deep = {"sub": "agent-a", "act": {"sub": "agent-b", "act": {"sub": "agent-c", "act": {
+            "sub": "agent-d", "act": {"sub": "agent-e"}}}}}
         self.assertRefused(self.verify(self.estate.sign(claims(act=deep))), "chain-too-deep", "depth-5")
         self.assertRefused(self.verify(self.estate.sign(claims(act={"sub": 7}))), "unauthenticated", "malformed-chain")
         self.assertRefused(self.verify(self.estate.sign(claims(scope="grant.checker"))), "scope-not-granted")
@@ -193,14 +195,15 @@ class Verifier(unittest.TestCase):
             return node
         five, six = self.estate.sign(claims(act=chain(5))), self.estate.sign(claims(act=chain(6)))
         self.assertTrue(D.verify_meter_token(five, meter="project-observatory", capability="grant.check",
-                                             jwks=self.estate.jwks, now=NOW).ok)
+                                             jwks=self.estate.jwks, now=NOW, issuer=ISSUER).ok)
         self.assertEqual(D.verify_meter_token(six, meter="project-observatory", capability="grant.check",
-                                              jwks=self.estate.jwks, now=NOW).detail, "chain-too-deep:depth-6")
+                                              jwks=self.estate.jwks, now=NOW, issuer=ISSUER).detail,
+                         "chain-too-deep:depth-6")
         self.assertRefused(self.verify(five), "chain-too-deep", "depth-5")
 
     def test_the_meter_token_maps_every_refusal_to_principal_unproven(self):
         result = D.verify_meter_token(self.estate.sign(claims(aud="copylot")), meter="project-observatory",
-                                      capability="grant.check", jwks=self.estate.jwks, now=NOW)
+                                      capability="grant.check", jwks=self.estate.jwks, now=NOW, issuer=ISSUER)
         self.assertEqual((result.code, result.detail), ("principal-unproven", "wrong-audience:audience-mismatch"))
 
     def test_reading_the_token_from_headers(self):
