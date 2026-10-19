@@ -4006,8 +4006,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8e412267df044c534e0c6834efd1657d19d329d1ce47dc64cbf6d15edc3f3e0f",
-      "bytes": 27908
+      "export_sha256": "c042095c47b6ea504fc8922e15af64b7091154cef0915b409aa65f8a851965b7",
+      "bytes": 28006
     },
     {
       "path": "tests/test_node_pairing.py",

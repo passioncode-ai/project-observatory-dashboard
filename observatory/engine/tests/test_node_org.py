@@ -354,7 +354,8 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertTrue(result['ok'], result)
         for path in (self.node / 'orgs' / ORG).iterdir():
             self.assertNotIn('S' * 32, path.read_bytes().decode('utf-8', 'replace'), path.name)
-        self.assertEqual(oct((self.node / 'orgs' / ORG / 'enrollment.json').stat().st_mode & 0o777), '0o600')
+        if os.name == 'posix':                          # Windows has no owner-only mode bits
+            self.assertEqual(oct((self.node / 'orgs' / ORG / 'enrollment.json').stat().st_mode & 0o777), '0o600')
 
     def test_a_used_token_is_refused_and_leaves_nothing(self):
         from node.org import OrgError
