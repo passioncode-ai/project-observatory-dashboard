@@ -275,6 +275,40 @@ class Sealed(unittest.TestCase):
         self.assertIsNone(D.read_delegation_token({"Authorization": f"Bearer {approval}"}))
         self.assertIsNone(D.read_delegation_token({"Authorization": f"Bearer {self.estate.sign(CLAIMS, {'typ': 'JWT'})}"}))
 
+    # round 1 of review: Python's `$` matches before a final newline; the contract's `.test` does not ----------------
+    def test_a_trailing_newline_is_never_part_of_a_grammar(self):
+        cases = (
+            ("jti", {"jti": CLAIMS["jti"] + "\n"}, "unauthenticated/malformed-claims"),
+            ("sub", {"sub": "urn:person:operator\n"}, "unauthenticated/malformed-claims"),
+            ("iss", {"iss": ISSUER + "\n"}, "unauthenticated/malformed-claims"),
+            ("task", {"task": "task-1\n"}, "unauthenticated/malformed-claims"),
+            ("project", {"project": "urn:project:a\n"}, "unauthenticated/malformed-claims"),
+            ("act.sub", {"act": {"sub": "example-media\n"}}, "unauthenticated/malformed-chain"),
+            ("act.session", {"act": {"sub": "example-media", "session": "run-1\n"}}, "unauthenticated/malformed-chain"),
+            ("scope", {"scope": "writer.write writer.check zz.extra\n"}, "unauthenticated/malformed-claims"),
+            ("aud", {"aud": "example-writer\n"}, "unauthenticated/malformed-claims"),
+        )
+        for name, overrides, expected in cases:
+            with self.subTest(name):
+                self.assertEqual(self.call(self.token(**overrides)), expected)
+        self.assertEqual(self.meter(self.estate.sign({**METER_CLAIMS, "scope": "grant.check\n"})),
+                         "principal-unproven/unauthenticated:malformed-claims")
+        token = self.token()
+        self.assertIsNone(D.read_delegation_token({"Authorization": f"Bearer {token}\n"}))
+
+    def test_non_json_numbers_a_bad_signature_segment_and_integer_valued_times(self):
+        head = D.b64url_encode(json.dumps({"alg": "EdDSA", "typ": D.DELEGATION_TYP, "kid": "estate-new"}).encode())
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            body = json.dumps(CLAIMS)[:-1] + f', "exp": {constant}}}'
+            payload = D.b64url_encode(body.replace(f'"exp": {EXP}, ', "").encode())
+            signing = f"{head}.{payload}"
+            token = f"{signing}.{D.b64url_encode(self.estate.key.sign(signing.encode()))}"
+            self.assertEqual(self.call(token), "unauthenticated/malformed", constant)
+        h, p, _s = self.token().split(".")
+        self.assertEqual(self.call(f"{h}.{p}.A"), "unauthenticated/bad-signature")
+        self.assertEqual(self.call(self.token(iat=float(IAT), exp=float(EXP))), "ok")
+        self.assertEqual(self.call(self.token(exp=EXP + 0.5)), "unauthenticated/malformed-claims")
+
     # the ratchet ---------------------------------------------------------------------------------------------------
     def test_malformed_input_is_refused_and_escapes_are_read(self):
         h, p, s = self.token().split(".")

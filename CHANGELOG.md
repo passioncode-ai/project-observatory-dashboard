@@ -15,7 +15,7 @@ while the major version is 0, a minor release may change behaviour and says so h
     small-order encodings let anyone forge a token with no private key: the contract's vector
     `delegation-small-order.json` verified as `ok`. The key is now the issuer's unusable key,
     `issuer-unavailable` (`small-order-key`), before anything is verified under it. The same predicate
-    (`node/ed25519.py` `is_small_order_key`) now guards the release-signature check as well, in both its
+    (`is_small_order_key` in the engine's `ed25519_order.py`, which `node/ed25519.py` re-exports) now guards the release-signature check as well, in both its
     `cryptography` and its plain-Python path.
   - **The trusted issuer is required.** `verify_delegation` and `verify_meter_token` take `issuer` with no default;
     none or empty is `issuer-unavailable` (`no-trusted-issuer`), never "any key in the set".
@@ -27,6 +27,12 @@ while the major version is 0, a minor release may change behaviour and says so h
     `unauthenticated` whatever else is wrong.
   - A published key of another `use` or `alg` is now `issuer-unavailable` (`key-not-for-signing`), not
     `unauthenticated`.
+  - Every grammar (agent ids, session and task ids, URIs, `scope`, `jti`) must match the whole value: Python's `$`
+    let a trailing newline through where the contract's regular expressions do not. The same full-match rule now
+    applies to the meter's request and grant-reference checks and to the agent-network node's identifier,
+    envelope, passkey, estate and blob checks. `NaN` and `Infinity` in a token are `malformed`, a signature segment
+    no base64url encoder writes is `bad-signature` (it raised before), and an integer-valued time such as
+    `1791720000.0` is read as the integer the contract reads.
 
 **Behaviour change for existing installs.** A meter that verified tokens without a trusted issuer now denies every
 grant check and every token-bearing slot or keyserver call as `principal-unproven`

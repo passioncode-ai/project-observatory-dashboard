@@ -89,7 +89,7 @@ def parse_context(value: Any) -> Optional[dict]:
         return None
     if value == PERSONAL_CONTEXT:
         return {'kind': 'personal'}
-    if not value.startswith('org:') or not _ORG_ID.match(value[4:]):
+    if not value.startswith('org:') or not _ORG_ID.fullmatch(value[4:]):
         return None
     return {'kind': 'org', 'org': value[4:]}
 

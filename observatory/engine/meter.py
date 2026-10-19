@@ -95,7 +95,7 @@ _GRANT_VALIDATOR: Any = None
 
 
 def rfc3339(value: Any) -> Optional[int]:
-    if not isinstance(value, str) or not _RFC3339.match(value):
+    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
         return None
     return parse_time(value.replace("t", "T").replace("z", "Z"))
 
@@ -171,7 +171,7 @@ def validate_request(request: Any) -> dict:
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0 or amount != amount \
             or amount == float("inf"):
         raise RequestError("amountUsd must be a number of USD at least 0")
-    if not isinstance(request.get("tokenJti"), str) or not _JTI.match(request["tokenJti"]):
+    if not isinstance(request.get("tokenJti"), str) or not _JTI.fullmatch(request["tokenJti"]):
         raise RequestError("tokenJti must be the jti of the token the callee was called with")
     ref = request.get("grantRef")
     if ref is not None and (not isinstance(ref, str) or not 1 <= len(ref) <= 256):
@@ -409,7 +409,7 @@ class Meter:
         directory = self.grants_dir()
         if directory is None:
             return deny("unknown-state", "no grant directory is configured")
-        match = _GRANT_REF.match(ref)
+        match = _GRANT_REF.fullmatch(ref)
         if not match:
             return deny("no-grant", "malformed-reference")
         grant_id, revision = match.group(1), int(match.group(2))

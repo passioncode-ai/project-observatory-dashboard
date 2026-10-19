@@ -87,6 +87,11 @@ def _no_duplicates(pairs: list) -> dict:
     return out
 
 
+def _no_constant(name: str):
+    """`NaN`, `Infinity` and `-Infinity` are not JSON (RFC 8259 §6); the contract's `JSON.parse` refuses them."""
+    raise ValueError(name)
+
+
 def b64url_decode(segment: str) -> bytes:
     return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
 
@@ -96,10 +101,11 @@ def b64url_encode(raw: bytes) -> str:
 
 
 def _segment(segment: str) -> tuple[Optional[dict], Optional[str]]:
-    if not _B64URL.match(segment):
+    if not _B64URL.fullmatch(segment):
         return None, "malformed"
     try:
-        value = json.loads(b64url_decode(segment).decode("utf-8"), object_pairs_hook=_no_duplicates)
+        value = json.loads(b64url_decode(segment).decode("utf-8"), object_pairs_hook=_no_duplicates,
+                           parse_constant=_no_constant)
     except _Duplicate:
         return None, "duplicate-member"
     except (ValueError, UnicodeDecodeError):
@@ -119,9 +125,13 @@ def parse_compact(token: Any) -> tuple[Optional[tuple[dict, dict, bytes, bytes]]
     payload, problem = _segment(parts[1])
     if problem:
         return None, problem
-    if not _B64URL.match(parts[2]):
+    if not _B64URL.fullmatch(parts[2]):
         return None, "malformed"
-    return (header, payload, f"{parts[0]}.{parts[1]}".encode("ascii"), b64url_decode(parts[2])), None
+    try:
+        signature = b64url_decode(parts[2])
+    except ValueError:          # a length no base64url encoder writes (1 mod 4): no 64-byte signature, row 4 refuses
+        signature = b""
+    return (header, payload, f"{parts[0]}.{parts[1]}".encode("ascii"), signature), None
 
 
 def _is_string(value: Any) -> bool:
@@ -129,7 +139,13 @@ def _is_string(value: Any) -> bool:
 
 
 def _is_time(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    """A NumericDate as the contract's `isTime` reads one: a non-negative integer. JSON has one number type, so
+    `1791720000.0` is the integer the contract's `Number.isInteger` accepts; NaN and infinities never parse."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, float):
+        return value.is_integer() and value >= 0
+    return isinstance(value, int) and value >= 0
 
 
 def _header_problem(header: dict, typ: str) -> Optional[str]:
@@ -158,7 +174,7 @@ def _key_for(jwks: Mapping, kid: str):
     if jwk.get("kty") != "OKP" or jwk.get("crv") != "Ed25519" or not _is_string(jwk.get("x")) or "d" in jwk:
         return None, "unusable-key"
     try:
-        raw = b64url_decode(jwk["x"]) if _B64URL.match(jwk["x"]) else b""
+        raw = b64url_decode(jwk["x"]) if _B64URL.fullmatch(jwk["x"]) else b""
     except ValueError:
         return None, "unusable-key"
     if len(raw) != 32:
@@ -246,9 +262,9 @@ def _actor_chain_depth(act: Any) -> Optional[int]:
         return None
     depth, node = 0, act
     while node is not None:
-        if not isinstance(node, dict) or not isinstance(node.get("sub"), str) or not AGENT_ID.match(node["sub"]):
+        if not isinstance(node, dict) or not isinstance(node.get("sub"), str) or not AGENT_ID.fullmatch(node["sub"]):
             return None
-        if "session" in node and not (isinstance(node["session"], str) and OPAQUE_ID.match(node["session"])):
+        if "session" in node and not (isinstance(node["session"], str) and OPAQUE_ID.fullmatch(node["session"])):
             return None
         depth += 1
         if depth > 64:
@@ -279,7 +295,7 @@ def _spend_shaped(spend: Any) -> bool:
 
 
 def _matches(pattern: re.Pattern, value: Any) -> bool:
-    return isinstance(value, str) and pattern.match(value) is not None
+    return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
 def _delegation_shape(payload: dict) -> tuple[Optional[int], Optional[str]]:
@@ -292,7 +308,7 @@ def _delegation_shape(payload: dict) -> tuple[Optional[int], Optional[str]]:
     typed = (
         _matches(URI, payload.get("iss")) and _matches(URI, payload.get("sub"))
         and _matches(AGENT_ID, payload.get("aud"))
-        and isinstance(scope, str) and len(scope) <= 4096 and SCOPE.match(scope) is not None
+        and isinstance(scope, str) and len(scope) <= 4096 and SCOPE.fullmatch(scope) is not None
         and isinstance(effect, list) and len(effect) > 0 and all(isinstance(e, str) for e in effect)
         and len(set(effect)) == len(effect) and all(e in EFFECT_CLASSES for e in effect)
         # Fabric ADR-0144 amendment 3, DEC-0045 item 1: exactly one grant per token.
@@ -388,7 +404,7 @@ def read_delegation_token(headers: Mapping[str, Any]) -> Optional[tuple[str, str
     forwarded = get(DELEGATION_HEADER)
     if forwarded is not None:
         return str(forwarded).strip(), "fabric-delegation"
-    match = re.match(r"^Bearer\s+(\S+)$", get("Authorization") or "", re.IGNORECASE)
+    match = re.fullmatch(r"Bearer\s+(\S+)", get("Authorization") or "", re.IGNORECASE)
     if match:
         parsed, problem = parse_compact(match.group(1))
         if not problem and parsed[0].get("typ") == DELEGATION_TYP:
