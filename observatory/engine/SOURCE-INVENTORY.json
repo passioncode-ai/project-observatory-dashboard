@@ -3524,8 +3524,8 @@
       "path": "tests/test_holder_capture.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4361fcb36357cadf4ce5f2fd4853f0dc2045bd1116caaf68030188d96dcf20ab",
-      "bytes": 10897
+      "export_sha256": "7b0a8851eba5947e5b9d8d66b928e26d7b1509f541542e50a50745c1875258d2",
+      "bytes": 11247
     },
     {
       "path": "tests/test_honest_absence.py",

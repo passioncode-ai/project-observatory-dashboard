@@ -68,15 +68,19 @@ class CaptureContract(unittest.TestCase):
                 self.assertNotIn("stderr", result)
 
     def test_silent_partial_and_term_ignoring_children_stop_on_deadline(self):
+        # A 1 s budget leaves the full CLEANUP_SECONDS reserve for SIGKILL and the reap.
+        # With 0.35 s the reserve was 87 ms, and a loaded macOS runner took longer to
+        # reap a TERM-ignoring child, so the capture honestly said cleanup-incomplete
+        # (PR #303, run 39201288577). The bound under test is the deadline, not the speed.
         for prefix in ("", "print('partial',flush=True); ",
                        "signal.signal(signal.SIGTERM,signal.SIG_IGN); "):
             with self.subTest(prefix=prefix):
                 started = time.monotonic()
-                result = self.capture("import time,signal; " + prefix + "time.sleep(30)", seconds=.35)
+                result = self.capture("import time,signal; " + prefix + "time.sleep(30)", seconds=1)
                 self.assertFalse(result["complete"])
                 self.assertEqual(result["reason"], "command-timeout")
                 self.assertTrue(result["reaped"])
-                self.assertLess(time.monotonic() - started, 1.5)
+                self.assertLess(time.monotonic() - started, 2.5)
 
     def test_missing_command_read_error_and_invalid_encoding_are_unknown(self):
         result = holders._capture([str(self.base / "missing")], deadline=time.monotonic()+1)
