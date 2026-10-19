@@ -409,7 +409,7 @@ ASSERTION_LINE_SUITES = frozenset((
     'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
     'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
     'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
-    'manifest_urls', 'digitalocean_door'
+    'manifest_urls', 'digitalocean_door', 'heroku_door'
 ))
 # Per-suite positive minimums may strengthen the default of one executed check.
 # Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.
