@@ -2697,7 +2697,11 @@ def collect() -> list[dict]:
     # Reads store/raw/fabric-attribution.json (collectors/scan_fabric_attribution.py).
     import fabric_attribution
     out.extend(fabric_attribution.conflict_findings(
-        fabric_attribution.load(), lambda **a: titled("{project} belongs to {count} Fabric projects", **a)))
+        fabric_attribution.load(),
+        lambda project, count, ambiguous: (titled("Fabric cannot tell which project {project} is", project=project)
+                                           if ambiguous else
+                                           titled("{project} belongs to {count} Fabric projects",
+                                                  project=project, count=count))))
 
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills

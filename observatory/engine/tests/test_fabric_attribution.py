@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -46,6 +48,10 @@ class FakeHub:
         self.auth: list[tuple[str, str]] = []  # (tool, bearer)
         self.refuse_binding = False
         self.allow = True
+        self.serve_tool = True          # False: the tool is not on tools/list
+        self.unknown_tool_error = False  # True: the SDK's own answer for a tool it does not have
+        self.poll_secret = True          # False: an earlier request waits; no poll secret this time
+        self.requests = 0
         hub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -65,6 +71,10 @@ class FakeHub:
                     return
                 if body["method"] == "initialize":
                     result = {"protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": {"name": "fake"}}
+                elif body["method"] == "tools/list":
+                    names = ["fabric.access.request", "fabric.access.status"] + (
+                        ["fabric.project.resolve"] if hub.serve_tool else [])
+                    result = {"tools": [{"name": n} for n in names]}
                 else:
                     name, args = body["params"]["name"], body["params"]["arguments"]
                     hub.auth.append((name, bearer))
@@ -91,18 +101,25 @@ class FakeHub:
 
         if name == "fabric.access.request":
             assert bearer == DOOR and args["callee"] == "fabric" and args["capabilities"] == ["project.resolve"]
-            return ok({"requestId": "r1", "status": "allowed" if self.allow else "denied", "expiresAt": "x",
-                       "pollSecret": "p" * 43, "note": "n"})
+            self.requests += 1
+            later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
+            answer = {"requestId": "r1", "status": "allowed" if self.allow else "denied", "expiresAt": later,
+                      "note": "n"}
+            return ok({**answer, "pollSecret": "p" * 43} if self.poll_secret else answer)
         if name == "fabric.access.status":
             return ok({"status": "allowed", "credential": BINDING})
         if name == "fabric.project.resolve":
+            if self.unknown_tool_error:
+                return {"content": [{"type": "text", "text": "MCP error -32602: Tool fabric.project.resolve not found"}],
+                        "isError": True}
             if bearer != BINDING:
                 return err("access-required")
             answer = self.answers.get(args["path"], {"refusal": "no-project"})
             return err(answer["refusal"]) if "refusal" in answer else ok(answer)
         return err("unknown")
 
-    def write_hub_json(self, *, pid: int | None = None, origin: str | None = None) -> None:
+    def write_hub_json(self, *, pid: int | None = None, origin: str | None = None,
+                       started: str | None = None) -> None:
         folder = BASE / "fabric"
         folder.mkdir(exist_ok=True)
         token = folder / "hub-door-token"
@@ -110,7 +127,8 @@ class FakeHub:
         os.chmod(token, 0o600)
         (folder / "hub.json").write_text(json.dumps({
             "protocol": "fabric-hub/0.1", "origin": origin or self.origin, "mcp": "/mcp",
-            "doorTokenFile": str(token), "pid": pid or os.getpid(), "startedAt": "2026-01-01T00:00:00Z"}))
+            "doorTokenFile": str(token), "pid": pid or os.getpid(),
+            "startedAt": started or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
 
     def close(self) -> None:
         self.server.shutdown()
@@ -126,7 +144,11 @@ def folders(*paths: str) -> list[dict]:
     return [{"path": p, "commonDir": None, "origin": None, "toplevel": None} for p in paths]
 
 
-class Pull(unittest.TestCase):
+# The listener check reads `lsof` and `ps` (POSIX); on Windows the hub cannot be verified and nothing is sent.
+VERIFIABLE = os.name != "nt" and shutil.which("lsof") is not None and shutil.which("ps") is not None
+
+
+class _HubCase(unittest.TestCase):
     def setUp(self) -> None:
         self.hub = FakeHub()
         self.hub.write_hub_json()
@@ -145,6 +167,10 @@ class Pull(unittest.TestCase):
     def pull(self, previous: dict | None = None) -> dict:
         return fat.collect(previous or {}, fabric_hub.Resolver, folders=self.f, stamp="2026-01-02T00:00:00Z")
 
+
+
+@unittest.skipUnless(VERIFIABLE, "the hub's listener is verified with lsof and ps")
+class Pull(_HubCase):
     def test_an_answer_becomes_an_alias_with_provenance(self) -> None:
         self.hub.answers[self.a] = self.answer(UUID_A)
         doc = self.pull()
@@ -166,12 +192,18 @@ class Pull(unittest.TestCase):
         stored = fabric_hub.binding_file()
         self.assertEqual(stored.stat().st_mode & 0o777, 0o600)
 
-    def test_a_folder_in_no_project_is_asked_again_and_never_created(self) -> None:
-        self.pull()
-        asked = sum(1 for n, _b in self.hub.auth if n == "fabric.project.resolve")
-        self.pull(self.pull())
-        again = sum(1 for n, _b in self.hub.auth if n == "fabric.project.resolve")
-        self.assertGreater(again, asked)
+    def asked(self) -> int:
+        return sum(1 for n, _b in self.hub.auth if n == "fabric.project.resolve")
+
+    def test_a_refusal_is_cached_then_asked_again_and_nothing_is_created(self) -> None:
+        first = self.pull()
+        asked = self.asked()
+        second = self.pull(first)
+        self.assertEqual(self.asked(), asked)  # within the refusal's TTL: not asked again
+        for row in second["folders"].values():
+            row["epoch"] -= fat.REFUSAL_SECONDS + 1
+        self.pull(second)
+        self.assertGreater(self.asked(), asked)
         self.assertNotIn("fabric.project.create", {n for n, _b in self.hub.auth})
 
     def test_detached_withdraws_and_a_new_uuid_replaces(self) -> None:
@@ -235,7 +267,10 @@ class Pull(unittest.TestCase):
         self.assertEqual([d["reason"] for d in doc["degraded"]], ["access-refused"])
         self.pull()
         self.assertEqual(sum(1 for n, _b in self.hub.auth if n == "fabric.access.request"), 1)
-        self.hub.write_hub_json(pid=os.getppid())  # Fabric restarted: asked again at once
+        # Fabric restarted (the refusal came from another process): asked again at once.
+        pending = json.loads(fabric_hub._pending_file().read_text())
+        pending["pid"] = pending["pid"] + 1
+        fabric_hub.private_io.write(fabric_hub._pending_file(), json.dumps(pending))
         self.pull()
         self.assertEqual(sum(1 for n, _b in self.hub.auth if n == "fabric.access.request"), 2)
 
@@ -246,12 +281,117 @@ class Pull(unittest.TestCase):
             self.assertEqual(doc["folders"][self.a]["refusal"], code)
 
 
+@unittest.skipUnless(VERIFIABLE, "the hub's listener is verified with lsof and ps")
+class PullMore(_HubCase):
+    def test_a_live_pid_that_is_not_the_listener_gets_nothing(self) -> None:
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(other.kill)
+        self.hub.write_hub_json(pid=other.pid)
+        doc = self.pull()
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["hub-unverified"])
+        self.assertEqual(self.hub.auth, [])
+
+    def test_a_reused_pid_started_after_the_hub_gets_nothing(self) -> None:
+        self.hub.write_hub_json(started="2001-01-01T00:00:00Z")
+        doc = self.pull()
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["hub-unverified"])
+        self.assertEqual(self.hub.auth, [])
+
+    def test_no_proxy_ever_carries_the_bearer(self) -> None:
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        saved = {k: os.environ.get(k) for k in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY")}
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in saved.items()])
+        for k in ("http_proxy", "HTTP_PROXY"):
+            os.environ[k] = "http://127.0.0.1:9"  # nothing listens there: a proxied request fails
+        for k in ("no_proxy", "NO_PROXY"):
+            os.environ.pop(k, None)
+        doc = self.pull()
+        self.assertEqual(doc["aliases"]["project:alpha-web"]["alias"], "fabric:" + UUID_A)
+
+    def test_an_absent_tool_is_named_and_withdraws_nothing(self) -> None:
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        first = self.pull()
+        first["folders"] = {}
+        self.hub.serve_tool = False
+        doc = self.pull(first)
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["tool-absent"])
+        self.assertEqual(doc["aliases"]["project:alpha-web"]["alias"], "fabric:" + UUID_A)
+        self.assertEqual([h["change"] for h in doc["history"]], ["added"])
+
+    def test_the_sdks_unknown_tool_answer_is_tool_absent(self) -> None:
+        self.hub.unknown_tool_error = True
+        doc = fat.collect({}, lambda deadline: fabric_hub.Resolver(deadline=deadline, check_tools=False),
+                          folders=self.f)
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["tool-absent"])
+
+    def test_an_error_outside_the_contract_withdraws_nothing(self) -> None:
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        first = self.pull()
+        first["folders"] = {}
+        self.hub.answers[self.a] = {"refusal": "internal"}
+        doc = self.pull(first)
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["hub-error"])
+        self.assertEqual(doc["aliases"]["project:alpha-web"]["alias"], "fabric:" + UUID_A)
+
+    def test_ambiguous_is_a_conflict_not_a_silent_withdrawal(self) -> None:
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        first = self.pull()
+        first["folders"] = {}
+        self.hub.answers[self.a] = {"refusal": "ambiguous"}
+        doc = self.pull(first)
+        self.assertEqual(doc["conflicts"][0]["reason"], "ambiguous")
+        self.assertNotIn("project:alpha-web", doc["unattributed"])
+        self.assertEqual(doc["history"][-1]["change"], "withdrawn")
+        self.assertIn("ambiguous", doc["history"][-1]["reason"])
+
+    def test_a_renamed_project_keeps_its_alias_and_history(self) -> None:
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        first = self.pull()
+        first["folders"] = {}
+        self.f = {"project:alpha-site": folders(self.a), "project:beta-api": folders(self.b)}
+        doc = self.pull(first)
+        self.assertEqual(doc["aliases"]["project:alpha-site"]["alias"], "fabric:" + UUID_A)
+        self.assertEqual(doc["history"][-1], {"at": "2026-01-02T00:00:00Z", "project": "project:alpha-site",
+                                              "change": "moved", "from": "project:alpha-web",
+                                              "alias": "fabric:" + UUID_A})
+
+    def test_a_lost_poll_secret_waits_for_the_request_to_expire_then_asks_again(self) -> None:
+        self.hub.poll_secret = False
+        doc = self.pull()
+        self.assertEqual([d["reason"] for d in doc["degraded"]], ["access-pending"])
+        self.pull()
+        self.assertEqual(self.hub.requests, 1)  # not asked again while the request waits
+        pending = json.loads(fabric_hub._pending_file().read_text())
+        pending["expiresAt"] = "2001-01-01T00:00:00Z"
+        fabric_hub.private_io.write(fabric_hub._pending_file(), json.dumps(pending))
+        self.hub.poll_secret = True
+        self.hub.answers[self.a] = self.answer(UUID_A)
+        doc = self.pull()
+        self.assertEqual(self.hub.requests, 2)
+        self.assertEqual(doc["aliases"]["project:alpha-web"]["alias"], "fabric:" + UUID_A)
+
+
+class TrueCase(unittest.TestCase):
+    def test_a_folder_is_spelled_as_the_file_system_holds_it(self) -> None:
+        root = pathlib.Path(tmpdir.mkdtemp()).resolve()
+        (root / "Alpha-Web").mkdir()
+        self.assertEqual(fat._real(root / "ALPHA-WEB"), fat._real(root / "Alpha-Web"))
+        self.assertTrue(fat._real(root / "ALPHA-WEB").endswith("/Alpha-Web"))
+
+
+class Unverifiable(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows only")
+    def test_windows_refuses_rather_than_trusting_a_pid(self) -> None:
+        self.assertTrue(fabric_hub.verify_listener(os.getpid(), 1, "2026-01-01T00:00:00Z"))
+
+
 class Findings(unittest.TestCase):
     def test_a_conflict_is_a_finding_naming_both_fabric_projects(self) -> None:
         sys.path.insert(0, str(ROOT / "dashboard"))
         from finding_types import titled
-        def title(**a):
-            return titled("{project} belongs to {count} Fabric projects", **a)
+        def title(project, count, ambiguous):
+            return titled("{project} belongs to {count} Fabric projects", project=project, count=count)
         rows = fat.conflict_findings({"conflicts": [{"project": "project:alpha-web",
                                                      "fabric": ["fabric:" + UUID_A, "fabric:" + UUID_B]}]}, title)
         self.assertEqual(rows[0]["title"], "project:alpha-web belongs to 2 Fabric projects")
@@ -261,6 +401,7 @@ class Findings(unittest.TestCase):
         self.assertEqual(fat.conflict_findings({}, title), [])
 
 
+@unittest.skipUnless(VERIFIABLE, "the hub's listener is verified with lsof and ps")
 class SessionStart(unittest.TestCase):
     def test_fabric_is_asked_first_and_its_answer_mapped_through_the_recorded_alias(self) -> None:
         hub = FakeHub()
@@ -311,7 +452,7 @@ class Resolve(unittest.TestCase):
         for query in (str(repo), str(repo / "src"), str(link)):
             out = identifiers.resolve(query, reg)
             self.assertEqual(out.get("canonical"), "project:alpha-web", query)
-            self.assertEqual(out["matched"]["via"], "folder")
+            self.assertEqual(out["matched"]["via"], "alias")
         worktree = root / "_worktrees" / "alpha-feature"
         subprocess.run(["git", "-C", str(repo), "-c", "user.email=a@example.com", "-c", "user.name=a",
                         "commit", "-q", "--allow-empty", "-m", "x"], check=True)

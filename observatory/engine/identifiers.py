@@ -421,7 +421,7 @@ def _folder(query: str, reg: Registry) -> dict:
     explained = reg.attribute(query)
     answer = explained.get("answer") or {}
     if answer.get("outcome") == "attached" and answer.get("project") in reg.projects:
-        return _answer(answer["project"], query, "folder", reg)
+        return _answer(answer["project"], query, "alias", reg)
     if answer.get("outcome") == "ambiguous":
         return _refusal("ambiguous", query, reg, candidates=sorted(answer.get("projects") or []))
     if answer.get("outcome") == "new":

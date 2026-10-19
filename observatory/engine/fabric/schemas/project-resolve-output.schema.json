@@ -60,10 +60,9 @@
                 "alias",
                 "repository",
                 "deployment",
-                "domain",
-                "folder"
+                "domain"
               ],
-              "description": "canonical: the registry's own id. alias: a curated other name (config/identifiers.json), or a `fabric:<uuid>` Fabric records for the project (owner `fabric`, measured from Fabric's hub). repository / deployment / domain: a name the registry measures. folder: an absolute folder, attributed by the Fabric contract's folder rules (DEC-0089)."
+              "description": "canonical: the registry's own id. alias: a curated other name (config/identifiers.json). repository / deployment / domain: a name the registry measures."
             }
           }
         },

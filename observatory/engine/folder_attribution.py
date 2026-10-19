@@ -210,18 +210,26 @@ def record_origin(origin: str | None) -> str | None:
     value = origin.strip()
     scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*)://", value)
     if scheme:
+        # A URL with no repository identity names nothing a rule could match, and its authority cannot be
+        # read reliably (a password holding `/`, `?` or `#`): nothing of it is kept.
+        if normalize_origin(value) is None:
+            return None
         rest = re.split(r"[?#]", value[scheme.end():])[0]
-        slash = rest.find("/")
-        authority = rest if slash < 0 else rest[:slash]
+        slash = rest.find("/")  # a URL with an identity has a path, so its authority ends here
+        authority = rest[:slash]
         at = authority.rfind("@")
         user = "" if at < 0 or re.search("http", scheme.group(1), re.I) else authority[:at].split(":")[0]
-        value = f"{scheme.group(0)}{user + '@' if user else ''}{authority[at + 1:]}{'' if slash < 0 else rest[slash:]}"
+        value = f"{scheme.group(0)}{user + '@' if user else ''}{authority[at + 1:]}{rest[slash:]}"
     elif not (value.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", value) or value.startswith(".")):
         scp = re.fullmatch(r"(?:([^@/\s]+)@)?([^:/\s]+):(\S+)", value)
-        if scp:
-            user = "" if scp.group(1) is None else scp.group(1).split(":")[0] + "@"
-            value = f"{user}{scp.group(2)}:{re.split(r'[?#]', scp.group(3))[0]}"
-    return None if _secret_url(value) else value
+        # A remote that is not a local path and has no identity cannot be read reliably: nothing is kept.
+        if not scp or normalize_origin(value) is None:
+            return None
+        host = scp.group(2)  # the host ends the user information at its last `@`, as normalize_origin reads it
+        user = "" if scp.group(1) is None else scp.group(1).split(":")[0] + "@"
+        value = f"{user}{host[host.rfind('@') + 1:]}:{re.split(r'[?#]', scp.group(3))[0]}"
+    # The kept origin names the same repository as the raw one, by construction.
+    return None if _secret_url(value) or normalize_origin(value) != normalize_origin(origin) else value
 
 
 def owner_of(repository: str) -> str:
@@ -368,8 +376,8 @@ def explain_folder(snapshot: Any) -> dict:
 
     kept_origin = record_origin(origin if isinstance(origin, str) else None)
 
-    def git_record(path: str, top: str | None) -> dict:
-        return {"path": path, "commonDir": common_dir, "origin": kept_origin, "toplevel": top}
+    def git_record(path: str, top: str | None) -> dict | None:
+        return None if broad(path) else {"path": path, "commonDir": common_dir, "origin": kept_origin, "toplevel": top}
 
     if explicit is not _ABSENT:
         target = next((p for p in projects if p[0] == explicit), None) if _id_ok(explicit) else None
@@ -416,17 +424,18 @@ def explain_folder(snapshot: Any) -> dict:
         return any(test(e) for p in projects for e in p[1])
 
     deepest = None
+    folder_cut = cut_of(folder)
     for project in projects:
         for entry in project[1]:
-            if not broad(entry.path) and under(folder, entry.path) and (deepest is None or len(entry.path) > len(deepest)):
+            if (not broad(entry.path) and reaches(folder, folder_cut, entry.path)
+                    and (deepest is None or len(entry.path) > len(deepest))):
                 deepest = entry.path
     if any(under(folder, s) and not (deepest is not None and deepest != s and under(deepest, s)) for s in tombstones):
         return at(2, {"outcome": "refused", "reason": "tombstoned"})
-    folder_cut = cut_of(folder)
     if any_folder(lambda e: same_repository(e) and reaches(folder, folder_cut, e.path)):
         common = _nearest_in(projects, same_common, place)
         identity = _nearest_in(projects, same_identity, place)
-        nearer = identity if identity[0] and (not common[0] or len(identity[1]) > len(common[1])) else common
+        nearer = identity if (not common[0] or len(identity[1]) > len(common[1])) else common
         by_place = _decide(nearer[0], "folder")
         if by_place:
             return at(3, by_place)
@@ -435,8 +444,14 @@ def explain_folder(snapshot: Any) -> dict:
         return at(3, by_folder)
     if any(under(folder, t) or under(root, t) for t in temp_roots):
         return at(4, {"outcome": "refused", "reason": "transient"})
+    # AT-5: a checkout right under home is a container whatever folder of it the agent starts in.
+    checkout_top = None if git is None else toplevel
+    loose_root = loose_under_home(root) and not any_folder(
+        lambda e: same_repository(e) and (checkout_top != root or under(e.path, root)))
     if (broad(folder) or broad(root) or loose_under_home(folder)
-            or (loose_under_home(root) and not any_folder(same_repository))):
+            or (checkout_top is not None and checkout_top != root
+                and (loose_under_home(checkout_top) or checkout_top in declared))
+            or loose_root):
         return at(5, {"outcome": "refused", "reason": "container"})
     if git is not None:
         top = toplevel
@@ -448,10 +463,11 @@ def explain_folder(snapshot: Any) -> dict:
             where = top if found[1] == "" else (top if _is_root(top) else top + "/") + found[1]
             return at(row, answer, git_record(where, top) if answer["outcome"] == "attached" else None)
 
-        hit = at_place(_nearest_in(projects, same_common, place), 6, "worktree")
-        if hit:
-            return hit
-        hit = at_place(_nearest_in(projects, same_identity, place), 7, "repository")
+        # AT-6 and AT-7 weigh the same places AT-3 does: the nearest across common dir and identity.
+        common = _nearest_in(projects, same_common, place)
+        identity = _nearest_in(projects, same_identity, place)
+        identity_nearer = not common[0] or len(identity[1]) > len(common[1])
+        hit = at_place(identity, 7, "repository") if identity_nearer else at_place(common, 6, "worktree")
         if hit:
             return hit
 

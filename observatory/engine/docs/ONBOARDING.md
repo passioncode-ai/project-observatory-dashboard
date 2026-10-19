@@ -118,11 +118,12 @@ alias (owner `fabric`) in `store/raw/fabric-attribution.json`, with when and fro
 process it came. Fabric writes nothing into the workspace. The first pass asks Fabric once for
 access to `project.resolve`; on your own machine Fabric allows it at once and journals it. The
 credential it hands over stays in an owner-only file under the workspace state and goes only to
-the hub `hub.json` names, and only while that process is alive. A folder Fabric later detaches
+the hub `hub.json` names, only while that process is alive and owns the hub's listening port as
+you, and never through a proxy. A folder Fabric later detaches
 withdraws the alias, a different answer replaces it, and both stay in the file's `history`. A
 project whose folders sit in two Fabric projects is a `fabric.attribution_conflict` finding until
 you settle it in Fabric. When Fabric is not running nothing recorded changes, and `degraded` says
-why (`hub-absent`, `hub-dead`, `hub-origin-refused`, `access-pending`, `access-refused`,
+why (`hub-absent`, `hub-dead`, `hub-origin-refused`, `hub-unverified`, `access-pending`, `access-refused`,
 `tool-absent`, `hub-error`, `budget`). `project.resolve` answers `fabric:<uuid>` and an absolute
 folder too: a folder by the contract's own rules over the registry's folders, with the `_*`
 folders under the projects root and `config/folder_exclusions.json` as declared containers.

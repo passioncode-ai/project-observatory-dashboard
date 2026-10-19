@@ -2185,5 +2185,6 @@
  "GitHub key not found on this machine": "Ключ на GitHub, не найденный на этой машине",
  "GitHub accepts {title}, not found where Observatory looked": "GitHub принимает {title}, но Observatory не нашёл его там, где искал",
  "Project in two Fabric projects": "Проект в двух проектах Fabric",
- "{project} belongs to {count} Fabric projects": "{project} относится к {count} проектам Fabric"
+ "{project} belongs to {count} Fabric projects": "{project} относится к {count} проектам Fabric",
+ "Fabric cannot tell which project {project} is": "Fabric не может определить, к какому проекту относится {project}"
 }
