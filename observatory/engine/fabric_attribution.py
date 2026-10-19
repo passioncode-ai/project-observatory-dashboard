@@ -323,8 +323,8 @@ def collect(previous: dict, resolver_factory: Callable[..., Any], *, folders: di
                 stopped = exc.code
                 doc["degraded"].append({"source": "fabric-hub", "reason": exc.code, "detail": exc.detail})
                 continue
-            except (OSError, RuntimeError, ValueError) as exc:
-                # The credential store or the answer could not be handled: said, never a failed tick.
+            except Exception as exc:  # noqa: BLE001 - any other failure is said, never a failed tick
+                # The credential store or the answer could not be handled; the pass still writes its file.
                 stopped = "hub-error"
                 doc["degraded"].append({"source": "fabric-hub", "reason": "hub-error", "detail": type(exc).__name__})
                 continue

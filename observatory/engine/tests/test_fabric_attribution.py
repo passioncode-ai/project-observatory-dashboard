@@ -52,6 +52,8 @@ class FakeHub:
         self.unknown_tool_error = False  # True: the SDK's own answer for a tool it does not have
         self.poll_secret = True          # False: an earlier request waits; no poll secret this time
         self.requests = 0
+        self.expires = True       # False: the access request's answer names no expiry
+        self.malformed = None     # "result" or "error": the hub answers resolve with a non-object
         hub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -79,7 +81,11 @@ class FakeHub:
                     name, args = body["params"]["name"], body["params"]["arguments"]
                     hub.auth.append((name, bearer))
                     result = hub.tool(name, args, bearer)
-                payload = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": result}).encode()
+                reply = {"jsonrpc": "2.0", "id": body["id"], "result": result}
+                if hub.malformed and body.get("method") == "tools/call" and body["params"]["name"] == "fabric.project.resolve":
+                    reply = ({"jsonrpc": "2.0", "id": body["id"], "result": ["not", "an", "object"]}
+                             if hub.malformed == "result" else {"jsonrpc": "2.0", "id": body["id"], "error": "boom"})
+                payload = json.dumps(reply).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Mcp-Session-Id", "s1")
@@ -103,8 +109,8 @@ class FakeHub:
             assert bearer == DOOR and args["callee"] == "fabric" and args["capabilities"] == ["project.resolve"]
             self.requests += 1
             later = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
-            answer = {"requestId": "r1", "status": "allowed" if self.allow else "denied", "expiresAt": later,
-                      "note": "n"}
+            answer = {"requestId": "r1", "status": "allowed" if self.allow else "denied", "note": "n",
+                      **({"expiresAt": later} if self.expires else {})}
             return ok({**answer, "pollSecret": "p" * 43} if self.poll_secret else answer)
         if name == "fabric.access.status":
             return ok({"status": "allowed", "credential": BINDING})
@@ -372,7 +378,42 @@ class PullMore(_HubCase):
         self.assertEqual(doc["aliases"]["project:alpha-web"]["alias"], "fabric:" + UUID_A)
 
 
+    def test_a_lost_poll_secret_without_an_expiry_backs_off(self) -> None:
+        self.hub.poll_secret, self.hub.expires = False, False
+        for _ in range(3):
+            doc = self.pull()
+            self.assertEqual([d["reason"] for d in doc["degraded"]], ["access-pending"])
+        self.assertEqual(self.hub.requests, 1)
+
+    def test_a_malformed_answer_is_a_named_hub_error_and_the_pass_completes(self) -> None:
+        for kind in ("result", "error"):
+            self.hub.malformed = kind
+            doc = self.pull()
+            self.assertEqual([d["reason"] for d in doc["degraded"]], ["hub-error"], kind)
+            out = BASE / f"malformed-{kind}.json"
+            fat.write(doc, out)
+            self.assertTrue(out.is_file())
+
+    def test_the_listener_is_verified_in_any_language(self) -> None:
+        port = int(self.hub.origin.rsplit(":", 1)[1])
+        started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        saved = {k: os.environ.get(k) for k in ("LC_ALL", "LANG", "LC_TIME")}
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in saved.items()])
+        for loc in ("ru_RU.UTF-8", "de_DE.UTF-8", "en_GB.UTF-8"):
+            for k in saved:
+                os.environ[k] = loc
+            fabric_hub._VERIFIED.clear()
+            self.assertEqual(fabric_hub.verify_listener(os.getpid(), port, started), "", loc)
+
+
 class TrueCase(unittest.TestCase):
+    def test_etime_reads_every_form_ps_prints(self) -> None:
+        self.assertEqual(fabric_hub._etime_seconds("05:07"), 307)
+        self.assertEqual(fabric_hub._etime_seconds("02:05:07"), 7507)
+        self.assertEqual(fabric_hub._etime_seconds("3-02:05:07"), 3 * 86400 + 7507)
+        self.assertIsNone(fabric_hub._etime_seconds("Mon Oct 19"))
+
     def test_a_folder_is_spelled_as_the_file_system_holds_it(self) -> None:
         root = pathlib.Path(tmpdir.mkdtemp()).resolve()
         (root / "Alpha-Web").mkdir()

@@ -41,6 +41,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+import osprivacy
 import osproc
 import paths
 import private_io
@@ -56,6 +57,8 @@ _ORIGIN = re.compile(r"^http://127\.0\.0\.1:[0-9]{1,5}\Z")
 PROTOCOL_VERSION = "2025-06-18"
 #: After Fabric refuses the access request, the same Fabric process is asked again only this long after.
 REASK_SECONDS = 6 * 3600
+#: A waiting request whose poll secret was lost and that names no expiry is asked again after this long.
+WAIT_SECONDS = 3600
 
 
 class HubUnavailable(Exception):
@@ -98,11 +101,22 @@ def _iso_epoch(value: Any) -> float | None:
 
 
 def _run(argv: list[str], timeout: float) -> str | None:
+    # The C locale: `ps` and `lsof` print what this reads in the same form in every language.
+    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout if done.returncode == 0 else None
+
+
+def _etime_seconds(value: str) -> int | None:
+    """`ps -o etime=` (`[[dd-]hh:]mm:ss`) in seconds, or None."""
+    m = re.fullmatch(r"(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)", value.strip())
+    if not m:
+        return None
+    days, hours, minutes, seconds = (int(g) if g else 0 for g in m.groups())
+    return ((days * 24 + hours) * 60 + minutes) * 60 + seconds
 
 
 def verify_listener(pid: int, port: int, started_at: Any, *, timeout: float = 2.0) -> str:
@@ -122,19 +136,19 @@ def verify_listener(pid: int, port: int, started_at: Any, *, timeout: float = 2.
     else:
         out = _run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"], timeout)
         owners = {int(line[1:]) for line in (out or "").splitlines() if line[:1] == "p" and line[1:].isdigit()}
-        info = _run(["ps", "-o", "uid=,lstart=", "-p", str(pid)], timeout) or ""
-        parts = info.split(None, 1)
+        # `etime` ([[dd-]hh:]mm:ss since the process started) is numbers in every locale, unlike `lstart`'s
+        # localised date, and needs no local-time conversion.
+        info = _run(["ps", "-o", "uid=,etime=", "-p", str(pid)], timeout) or ""
+        parts = info.split()
         if out is None:
             reason = "the listener on the hub's port could not be read (lsof)"
         elif owners != {pid}:
             reason = "the process listening on the hub's port is not the one hub.json names"
-        elif len(parts) != 2 or not parts[0].isdigit() or int(parts[0]) != os.getuid():
+        elif len(parts) != 2 or parts[0] != osprivacy.account():
             reason = "the hub process does not run as this user"
         else:
-            try:
-                began = time.mktime(time.strptime(" ".join(parts[1].split()), "%a %b %d %H:%M:%S %Y"))
-            except ValueError:
-                began = None
+            elapsed = _etime_seconds(parts[1])
+            began = None if elapsed is None else time.time() - elapsed
             hub_started = _iso_epoch(started_at)
             if began is None or hub_started is None:
                 reason = "the hub's start time could not be compared with its process"
@@ -246,20 +260,24 @@ class _Session:
         if not isinstance(answer, dict):
             raise HubUnavailable("hub-error", "the hub sent no answer")
         if "error" in answer:
-            message = str((answer.get("error") or {}).get("message") or "")[:200]
+            error = answer.get("error")
+            message = str(error.get("message") if isinstance(error, dict) else error or "")[:200]
             if "not found" in message.lower() or "unknown tool" in message.lower():
                 raise HubUnavailable("tool-absent", f"this Fabric does not serve {name} yet")
             raise HubUnavailable("hub-error", f"the hub refused {name}")
-        result = answer.get("result") or {}
-        text = " ".join(str(c.get("text") or "") for c in result.get("content") or [] if isinstance(c, dict))
+        result = answer.get("result")
+        if not isinstance(result, dict):
+            raise HubUnavailable("hub-error", f"the hub's answer to {name} is not an object")
+        content = result.get("content") if isinstance(result.get("content"), list) else []
+        text = " ".join(str(c.get("text") or "") for c in content if isinstance(c, dict))
         if result.get("isError") and re.search(r"tool\b.*\bnot found|unknown tool", text, re.I):
             # The MCP SDK answers an unknown tool as a tool error ("MCP error -32602: Tool X not found").
             raise HubUnavailable("tool-absent", f"this Fabric does not serve {name} yet")
         structured = result.get("structuredContent")
         if not isinstance(structured, dict):
             try:
-                structured = json.loads(((result.get("content") or [{}])[0]).get("text") or "{}")
-            except (ValueError, AttributeError, IndexError):
+                structured = json.loads(((content or [{}])[0]).get("text") or "{}")
+            except (ValueError, AttributeError, IndexError, TypeError):
                 structured = {}
         return (structured if isinstance(structured, dict) else {}), bool(result.get("isError"))
 
@@ -333,7 +351,9 @@ def request_access(hub: dict, *, timeout: float = 5.0, polls: int = 5, deadline:
         # Fabric said no to this same process recently: asking every tick would only fill its journal.
         raise HubUnavailable("access-refused", "Fabric refused the access request; asked again after "
                                                f"{REASK_SECONDS // 3600} h or when Fabric restarts")
-    waits_until = _iso_epoch(pending.get("expiresAt"))
+    # Without an expiry from Fabric, a request whose secret was lost is asked again after `WAIT_SECONDS`.
+    asked_at = pending.get("askedAt") if isinstance(pending.get("askedAt"), (int, float)) else 0
+    waits_until = _iso_epoch(pending.get("expiresAt")) or asked_at + WAIT_SECONDS
     if same and not pending.get("pollSecret") and waits_until and time.time() < waits_until:
         raise HubUnavailable("access-pending", "a request waits in Fabric and its poll secret was lost; "
                                                "asked again when it expires at " + str(pending.get("expiresAt")))
@@ -348,7 +368,7 @@ def request_access(hub: dict, *, timeout: float = 5.0, polls: int = 5, deadline:
             raise HubUnavailable("access-refused", "Fabric refused the access request"
                                  if answer.get("status") != "denied" else "the operator denied this access in Fabric")
         pending = {"requestId": answer["requestId"], "pollSecret": answer.get("pollSecret"), "pid": hub["pid"],
-                   "expiresAt": answer.get("expiresAt")}
+                   "expiresAt": answer.get("expiresAt"), "askedAt": time.time()}
         private_io.write(_pending_file(), json.dumps(pending))
         if not pending["pollSecret"]:
             raise HubUnavailable("access-pending", "a request waits in Fabric and its poll secret was lost; "

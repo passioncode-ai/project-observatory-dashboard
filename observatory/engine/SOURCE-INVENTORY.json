@@ -937,7 +937,7 @@
       "path": "fabric/attribution-vectors/SOURCE.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bdeb00c6aa28cb6e0f8730d4443fd9eee87e2a92d0f9f16cddee3e794e7c3c23",
+      "export_sha256": "9842e89ad50bc25edac840ccc5eb4a269585244160ca34cabb0ab174cb1dbea6",
       "bytes": 1184
     },
     {
@@ -1861,15 +1861,15 @@
       "path": "fabric_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "156bbc01ea9494de1cbabe0cec506bd4e5e827aeb73a152ed742659cf4c747e1",
-      "bytes": 24045
+      "export_sha256": "ba0753127a99edfa52d9b6ba2d2597211b134ef20476b6ba4d5af4bec2985a0d",
+      "bytes": 24089
     },
     {
       "path": "fabric_hub.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "80622dd5656a1499f963c02747129d93acabc952e1336b9584f2d64060065033",
-      "bytes": 23199
+      "export_sha256": "252f4a5ec31563d74cb251dbdb55bb14bff3b92495d555f16d6c94ca6918e46f",
+      "bytes": 24443
     },
     {
       "path": "fabric_service.py",
@@ -3459,8 +3459,8 @@
       "path": "tests/test_fabric_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4471d45e61186a2fe98a3fa3abca92dd28ea31710db1452335ec2cd93ad547c1",
-      "bytes": 24566
+      "export_sha256": "4698d0cf25c673e8c3a90d51de06952fa61089680be0e18d66d84ed333692d34",
+      "bytes": 26957
     },
     {
       "path": "tests/test_fabric_service.py",
