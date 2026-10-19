@@ -19,6 +19,7 @@ Contract: brand-contract v1
 | machine.guard_stopping | Git cleanup stopped in three consecutive disk guard runs | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
 | machine.guard_degraded | the disk guard could not measure {source} | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
 
+| observatory.why_unanswered | {n} requests for a why went unanswered | observatory/engine/tools/build_findings.py | The request for a why: once, with the next prompt, measured (M-8) | proposed | copy |
 | ssh.list_empty | No SSH keys yet. Create one: | observatory/engine/tools/ssh_keys.py | OSS-62 | proposed | copy |
 | ssh.copy_done | Copied. Paste it where the key is asked for, or let Observatory send it | observatory/engine/tools/ssh_keys.py | OSS-64 | proposed | copy |
 | ssh.copy_no_clipboard | the clipboard was not set: no clipboard tool (pbcopy, wl-copy, xclip); copy the line above | observatory/engine/tools/ssh_keys.py | OSS-64 | proposed | copy |

@@ -44,6 +44,14 @@ import tempfile
 # operator's live workspace; `setdefault` kept them, and a suite run from that shell
 # resolved the real store. Only a path inside a temporary directory is kept — that is
 # what `run_portable.py` and the suites' own fixtures hand over.
+#
+# THE TEMPORARY DIRECTORY BY ITS REAL PATH. macOS hands out `/var/folders/…`, a symbolic
+# link into `/private/var/folders/…`, and the engine refuses a configuration path that
+# passes through a symbolic link — so a suite started by hand, outside the runner (which
+# resolves its own base), failed before its first case. Exported, so the hooks and
+# tools the suites start resolve the same directory.
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+os.environ["TMPDIR"] = tempfile.tempdir
 _TEMP_ROOTS = {os.path.realpath(p) for p in (tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders",
                                               "/private/var/folders")}
 

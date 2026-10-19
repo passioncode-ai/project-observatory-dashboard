@@ -195,13 +195,14 @@ def require_stopped(writers_stopped: bool) -> None:
 LOG_SUFFIXES = ('.log', '.err', '.out', '.jsonl')
 #: What the session hooks write on every agent turn, whether or not the tick and the
 #: server are stopped: the Stop hook's receipt (`tools/record_turn.py`), the folders a
-#: session opened in (`tools/session_start.py`) and a hook's fault log
-#: (`companion_faults.py`). Before 0.19.2 a write to any of them while an update was
+#: session opened in (`tools/session_start.py`), a hook's fault log
+#: (`companion_faults.py`) and the journal of requests for a why (`why_asks.py`). Before 0.19.2 a write to any of them while an update was
 #: staged refused the update, though no update reads them. They are copied, never
 #: required to hold still; `test_every_receipt_a_session_hook_writes_is_exempt` keeps
 #: this set equal to what those modules write.
 SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-seen.jsonl',
-                              'store/raw/companion-faults.jsonl'})
+                              'store/raw/companion-faults.jsonl', 'store/raw/why-asks.jsonl',
+                              'store/raw/why-asks.jsonl.1', 'store/raw/why-asks.jsonl.lock'})
 
 
 def volatile(name: str, databases: set[str]) -> bool:

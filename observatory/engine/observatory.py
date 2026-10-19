@@ -917,6 +917,18 @@ FOREIGN_WRITES_IGNORED = {
         "with the gate, for the same reason its receipt is exempted below. "
         "Append-only by design, so a neighbouring session losing a "
         "turn mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl":
+        "appended by the companion's Stop hook the first time it asks about a record's "
+        "`why` — in every session of every watched project, concurrently with the gate, "
+        "like the receipt below. Append-only by design, so a neighbouring session's "
+        "ask mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl.1":
+        "the previous generation of the journal above, renamed into place by whichever "
+        "session's hook first finds the journal past its size — concurrently with the "
+        "gate, for the same reason",
+    "store/raw/why-asks.jsonl.lock":
+        "the lock that journal rotation takes so two sessions do not rotate at once; "
+        "created by the first session's hook to rotate, concurrently with the gate",
     "store/raw/record-turn.json":
         "written by the companion's Stop hook — in EVERY session of EVERY watched "
         "project on this machine, concurrently with the gate. Forty-nine Claude "

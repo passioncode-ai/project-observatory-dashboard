@@ -36,6 +36,7 @@ import estate
 import identity
 import atomic
 import companion_faults              
+import why_asks  # noqa: E402
 import leak_register  # noqa: E402
 import paths              
 from store import db as store_db              
@@ -1382,6 +1383,51 @@ def companion_findings(rows: list[dict], slot: dict,
                       "read the receipt now — it is the only copy",
             "evidence": ["store/raw/record-turn.json#fault"]})
     return out
+
+
+def why_unanswered_findings(measured: dict | None) -> list[dict]:
+    """The companion's request for a `why`, as a rate: is anybody answering it?
+
+    The request ran after every changed turn as a Stop notice — 3,593 times in
+    fourteen days on one machine for 34 answers — and nothing measured that. It is
+    now asked once per record, delivered with the next prompt and journalled
+    (`why_asks.py`); this reads the answer rate over the window and speaks when the
+    ask costs every session context and records almost nothing: below
+    `why_asks.FLOOR_RATE` with at least `why_asks.FLOOR_ASKS` DELIVERED asks. An ask
+    that was never delivered — a headless session with no second prompt — is
+    pending, not unanswered, and never counts. Fewer delivered asks is too little to
+    judge, and an unmeasured rate (no store) says nothing.
+    """
+    m = measured or {}
+    delivered, answered, rate = m.get("delivered"), m.get("answered"), m.get("rate")
+    if not isinstance(delivered, int) or not isinstance(answered, int) or rate is None:
+        return []
+    if delivered < why_asks.FLOOR_ASKS or rate >= why_asks.FLOOR_RATE:
+        return []
+    days = (m.get("window") or {}).get("days", why_asks.WINDOW_DAYS)
+    pending = m.get("pending") or 0
+    waiting = (f" {pending} further ask(s) never reached the model (no later prompt in "
+               f"their session) and are not counted." if pending else "")
+    floor = (" A journal generation was larger than its read bound, so the counts "
+             "are floors." if m.get("floor") else "")
+    bad = (f" {m['unreadable']} journal line(s) could not be read." if m.get("unreadable") else "")
+    return [{
+        "type": "observatory.why_unanswered", "subject": "skill:observatory-log",
+        "severity": "warning",
+        **titled("{n} requests for a why went unanswered", n=delivered - answered),
+        "detail": (f"{answered} of {delivered} records whose request for a `why` reached "
+                   f"the model in the last {days} days received one ({rate:.0%}). Each "
+                   f"record is asked about once, as context on the next prompt, and not "
+                   f"at all when the session wrote its decision register; below "
+                   f"{why_asks.FLOOR_RATE:.0%} the ask costs every session context and "
+                   f"puts almost nothing in the ledger." + waiting + floor + bad),
+        "action": ("check that an ask reached the model: `python \"$(project-observatory "
+                   "full-path)/why_asks.py\" reached <session transcript .jsonl> <memory id>` "
+                   "(exit 0 when the model received it). If it did and agents in this setup "
+                   "still do not answer, the ask is noise here: answer pending records with "
+                   "observatory_record(memory_id=…, why=…), or disable the observatory-log "
+                   "plugin's UserPromptSubmit hook"),
+        "evidence": ["store/raw/why-asks.jsonl", "store/raw/record-turn.json#whyAsks"]}]
 
 
 def blank_page_findings(receipt: dict | None,
@@ -3058,6 +3104,14 @@ def collect() -> list[dict]:
               file=sys.stderr)
         lost, unread = [], 0
     out += companion_findings(lost, slot, unread)
+
+    # THE ASK FOR A WHY, MEASURED. Read here from the journal and the ledger rather
+    # than from the receipt's `whyAsks`, which the next quiet turn of any session
+    # overwrites — the same slot problem `companion_faults.py` solved for faults.
+    try:
+        out += why_unanswered_findings(why_asks.measure_store())
+    except Exception as exc:                                                        # noqa: BLE001
+        print(f"  why-ask rate unreadable: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     # THE INSTALLED COPY IS NOT THIS REPOSITORY, which is how a fix to the hook
     # can have no effect at all. A plugin whose marketplace source is a local
