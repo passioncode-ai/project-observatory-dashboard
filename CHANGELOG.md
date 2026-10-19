@@ -7,6 +7,29 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
+  `tools/cloudflare.py` does for Cloudflare, on the Platform API:
+  - `stash` keeps an admin token read by the door alone: the CLI session's, piped in (`heroku auth:token | heroku.py
+    stash`) or read inside the process with `--from-cli`, never in argv.
+  - `issue --preset identity|read|deploy|config-read|config-write --vault PROJECT/ENV/NAME [--team T] [--app A]
+    [--expire-days N]` mints a direct OAuth authorization with that preset's scopes only (never `global`), described
+    after its preset, slot, team and app. It proves the new value can read the app, the team's apps or the account,
+    then writes it to the slot on stdin. A failed proof or vault write deletes what the call created. Issuing again
+    regenerates the same authorization; a changed preset makes a new one and deletes the old only after delivery.
+  - Heroku narrows an authorization by scope only, never to a team or an app, so `--team` and `--app` are its stated
+    purpose and what the proof reads; every issue says so. The `config-` presets reach config vars and need `--app`.
+  - `rotate` regenerates in place (`--leaked` for every slot an open leak names), `revoke` deletes at Heroku before the
+    ledger row, `list` and `ping` report from `heroku-issued.json` (ids, scopes, slot, team, app, dates; never a value
+    or the refresh token), and `ping` names a gone or widened authorization and managed strays.
+  - `teams`, `members --team` and `apps --team` read every page, with the slots issued for each team and app.
+    `member add|role|remove --team T --email E [--role admin|member|collaborator]` prints its plan and changes nothing
+    until `--apply`, then reads the team again to verify. It refuses `owner`, the last admin and the stashed admin's
+    own membership.
+  - `tools/cloudflare.py` gains `accounts` (every stashed account, the tokens Cloudflare holds in it and the vault slot
+    each managed one names), `members --account`, and `member add|role|remove --account` with the same plan, `--apply`
+    and verification. It changes legacy roles only, and refuses the last Super Administrator and a member whose
+    access is set by permission policies.
+
 - **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
   service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
   the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.

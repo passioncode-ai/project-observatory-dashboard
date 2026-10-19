@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The two credential doors — `tools/cloudflare.py` and `tools/openrouter.py`.
+"""The credential doors: `tools/cloudflare.py`, `tools/openrouter.py` and `tools/heroku.py`.
 
 Both share one architecture, decided in this order by the operator on
 2026-09-13: the ADMIN credential is stashed locally and nothing reads it but the
@@ -47,7 +47,7 @@ def load(rel: str, name: str):
 
 def test_no_door_takes_or_prints_a_value_outside_stdin() -> None:
     """The rule both doors exist to enforce, checked on their CODE."""
-    for rel in ("tools/cloudflare.py", "tools/openrouter.py"):
+    for rel in ("tools/cloudflare.py", "tools/openrouter.py", "tools/heroku.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")
         code = source_reader.code_only(src)
         check(f"{rel} takes values on stdin only",
@@ -69,7 +69,8 @@ def test_no_door_takes_or_prints_a_value_outside_stdin() -> None:
 def test_the_ledgers_hold_no_values() -> None:
     """Meta files and the ledger carry names, dates and places — never values."""
     for rel, fields in (("tools/cloudflare.py", ("account_id", "issued_on", "rotations")),
-                        ("tools/openrouter.py", ("destination", "limit_usd", "rotations"))):
+                        ("tools/openrouter.py", ("destination", "limit_usd", "rotations")),
+                        ("tools/heroku.py", ("authorization_id", "issued_on", "rotations"))):
         src = (ROOT / rel).read_text(encoding="utf-8")
         # `code_keeping_strings`: the field names ARE string literals, which
         # `code_only` strips along with the prose.
@@ -1330,6 +1331,123 @@ def test_cf_r2_lifecycle_command_line() -> None:
           seen.get("lifecycle", ((), {}))[0] == ("b-1", "eu", 92, ["staging/:2"], "acct"),
           str(seen.get("lifecycle")))
     check("the usage lists the lifecycle command", "cloudflare.py\" lifecycle" in m.__doc__, "")
+
+
+def _cf_team_fake(m, log, members=None, me="admin@example.invalid"):
+    """An account with two pages of tokens and members, and the legacy role list."""
+    state = {"members": members if members is not None else [
+        {"id": "m1", "user": {"email": "admin@example.invalid"}, "status": "accepted",
+         "roles": [{"id": "r-super", "name": m.SUPER_ADMIN}]},
+        {"id": "m2", "user": {"email": "dev@example.invalid"}, "status": "accepted",
+         "roles": [{"id": "r-ro", "name": "Administrator Read Only"}]},
+        {"id": "m3", "user": {"email": "policy@example.invalid"}, "status": "accepted",
+         "roles": [], "policies": [{"id": "p1"}]}]}
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        page = 2 if "page=2" in path else 1
+        if path.startswith("/accounts/a1/tokens?"):
+            rows = [{"id": "t1", "name": "observatory-analytics-read (managed)", "status": "active"},
+                    {"id": "t2", "name": "observatory-d1-edit alpha/prod/CLOUDFLARE_API_TOKEN (managed)",
+                     "status": "active"}] if page == 1 else [
+                    {"id": "t3", "name": "a token someone made by hand", "status": "active"}]
+            return {"result": rows, "result_info": {"total_pages": 2}}
+        if path.startswith("/accounts/a1/members?"):
+            rows = state["members"]
+            half = len(rows) // 2 or 1
+            return {"result": rows[:half] if page == 1 else rows[half:], "result_info": {"total_pages": 2}}
+        if path.startswith("/accounts/a1/roles?"):
+            return {"result": [{"id": "r-super", "name": m.SUPER_ADMIN},
+                               {"id": "r-ro", "name": "Administrator Read Only"}]}
+        if path == "/user":
+            if me is None:
+                raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+            return {"result": {"email": me}}
+        if path == "/accounts/a1/members" and payload is not None:
+            state["members"].append({"id": "m9", "user": {"email": payload["email"]}, "status": "pending",
+                                     "roles": [{"id": payload["roles"][0], "name": "Administrator Read Only"}]})
+            return {"result": {}}
+        if path.startswith("/accounts/a1/members/") and method == "PUT":
+            mid = path.rsplit("/", 1)[1]
+            for mb in state["members"]:
+                if mb["id"] == mid:
+                    mb["roles"] = [{"id": payload["roles"][0]["id"], "name": m.SUPER_ADMIN
+                                    if payload["roles"][0]["id"] == "r-super" else "Administrator Read Only"}]
+            return {"result": {}}
+        if path.startswith("/accounts/a1/members/") and method == "DELETE":
+            mid = path.rsplit("/", 1)[1]
+            state["members"] = [mb for mb in state["members"] if mb["id"] != mid]
+            return {"result": {}}
+        raise AssertionError(f"unexpected {method} {path}")
+    m._request = fake
+    return state
+
+
+def _cf_run(fn, *a):
+    import contextlib, io
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = fn(*a)
+    return rc, out.getvalue(), err.getvalue()
+
+
+def test_cf_accounts_names_every_account_its_tokens_and_their_slots() -> None:
+    """`accounts` (OBS-156): every stashed account, the tokens Cloudflare holds in
+    it over every page, and the vault slot a managed token's name records."""
+    m = cf(); _cf_with_admin(m)
+    m.token_dir = lambda: pathlib.Path(tmpdir.mkdtemp()).resolve()
+    log = []
+    _cf_team_fake(m, log)
+    rc, o, e = _cf_run(m.cmd_accounts)
+    check("accounts reads", rc == 0, o + e)
+    check("names the account and its id", "Acct" in o and "id a1" in o, o)
+    check("counts tokens over both pages", "tokens at Cloudflare: 3, 2 managed" in o, o)
+    check("and names the slot a managed token records",
+          "-> vault alpha/prod/CLOUDFLARE_API_TOKEN" in o, o)
+    check("the slot parser ignores unmanaged names",
+          m.slot_of("a/b/c by hand") is None and m.slot_of("x a/b/c (managed)") == "a/b/c", "")
+    check("and no value is printed", "admin-token" not in o + e, o + e)
+
+
+def test_cf_members_and_member_writes_are_a_plan_until_apply() -> None:
+    m = cf(); _cf_with_admin(m)
+    m._journal = lambda *a, **k: None
+    log = []
+    state = _cf_team_fake(m, log)
+    rc, o, e = _cf_run(m.cmd_members, None)
+    check("members reads every page with roles or policies", rc == 0 and "members of Acct (3)" in o
+          and "Administrator Read Only" in o and "1 policy(ies)" in o, o + e)
+    writes = lambda: [c for c in log if c[0] in ("PUT", "DELETE") or (c[0] == "POST" and c[3])]
+    rc, o, e = _cf_run(m.cmd_member, "add", None, "new@example.invalid", "Administrator Read Only", False)
+    check("a dry run prints the plan and writes nothing", rc == 0 and "dry run" in o and not writes(), o + e)
+    rc, o, e = _cf_run(m.cmd_member, "add", None, "new@example.invalid", "Administrator Read Only", True)
+    check("--apply invites with the role id, and verifies", rc == 0 and "applied and verified" in o
+          and any(c[3] and c[3].get("roles") == ["r-ro"] for c in log if c[0] == "POST"), o + e)
+    rc, o, e = _cf_run(m.cmd_member, "role", None, "dev@example.invalid", m.SUPER_ADMIN, True)
+    check("--apply changes a role with PUT", rc == 0 and any(c[0] == "PUT" for c in log), o + e)
+    rc, o, e = _cf_run(m.cmd_member, "remove", None, "new@example.invalid", None, True)
+    check("--apply removes", rc == 0 and all(mb["id"] != "m9" for mb in state["members"]), o + e)
+    rc, o, e = _cf_run(m.cmd_member, "role", None, "dev@example.invalid", "No Such Role", False)
+    check("an unknown role is refused with the account's own names", rc == 1 and "Administrator Read Only" in e, e)
+
+
+def test_cf_member_writes_refuse_what_would_lock_the_account() -> None:
+    m = cf(); _cf_with_admin(m)
+    log = []
+    state = _cf_team_fake(m, log, me=None)
+    plan = m.plan_account_member
+    check("the last Super Administrator cannot be removed",
+          "last" in (plan("remove", state["members"], "admin@example.invalid", None, None)[1] or ""), "")
+    check("nor demoted", "last" in (plan("role", state["members"], "admin@example.invalid",
+                                         "Administrator Read Only", None)[1] or ""), "")
+    check("the admin's own membership is refused when it is known",
+          plan("remove", state["members"], "dev@example.invalid", None, "dev@example.invalid")[1] is not None, "")
+    check("a policy-based member's role is not rewritten",
+          "policies" in (plan("role", state["members"], "policy@example.invalid", m.SUPER_ADMIN, None)[1] or ""), "")
+    check("a non-member cannot be removed",
+          plan("remove", state["members"], "nobody@example.invalid", None, None)[1] is not None, "")
+    rc, o, e = _cf_run(m.cmd_member, "remove", None, "dev@example.invalid", None, False)
+    check("an unreadable admin user is said in the plan", rc == 0 and "only the last Super Administrator" in o, o)
 
 
 def test_cf_groups_lists_names_and_levels_and_never_a_value() -> None:
@@ -3159,6 +3277,9 @@ if __name__ == "__main__":
                test_cf_proof_waits_long_enough_for_a_slow_edge,
                test_cf_r2_lifecycle_command_line,
                test_cf_groups_lists_names_and_levels_and_never_a_value,
+               test_cf_accounts_names_every_account_its_tokens_and_their_slots,
+               test_cf_members_and_member_writes_are_a_plan_until_apply,
+               test_cf_member_writes_refuse_what_would_lock_the_account,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
                test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects,

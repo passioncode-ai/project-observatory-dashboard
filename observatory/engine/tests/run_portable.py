@@ -190,6 +190,8 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+# The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
+BOUNDARY += ('heroku_door',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
 BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the

@@ -175,8 +175,13 @@ confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbi
 provider text; malformed metadata remains unconfirmed and its body is not printed.
 
 
-Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
-`openrouter.py`. Check their installed `--help` and non-secret inventory first.
+Cloudflare, OpenRouter and Heroku have separate tools, `cloudflare.py`,
+`openrouter.py` and `heroku.py`. Check their installed `--help` and non-secret inventory first.
+A Heroku credential is `heroku.py issue --preset read|deploy|identity --vault
+<project>/<env>/<NAME> [--team <team>] [--app <app>]`: an OAuth authorization with that
+scope only, proved and delivered on stdin. Heroku cannot narrow one to a team or an app,
+so prefer `read` and name the app. Team and account membership (`heroku.py member`,
+`cloudflare.py member`) is a printed plan until `--apply`; apply only a change the task asked for.
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
