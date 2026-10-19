@@ -2923,8 +2923,8 @@
       "path": "tests/test_ask_why.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0f5cef355f5253ccfac5e9e3b02ae88da3494708ebef0206ae7f23d6117b6908",
-      "bytes": 90295
+      "export_sha256": "c683c823c2bf9bc62fd63929d232a7351f7db9a775d7786749bbd97a898f9fe0",
+      "bytes": 92680
     },
     {
       "path": "tests/test_ask_why_reach.py",
@@ -5225,8 +5225,8 @@
     {
       "path": "tools/record_turn.py",
       "source_sha256": "424602905763c916d14026733edd68dcbda519ac41d469344b30d2d1f770df24",
-      "export_sha256": "9f0d73e30fe4f8506db957da3bb20f019e078d21fd784a0442f3c3f8bfff372c",
-      "bytes": 66302,
+      "export_sha256": "356b480b85db375e1196e264d91be75888c12b48097239220c760a471184bbfe",
+      "bytes": 66718,
       "python_comments_removed": 119,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,

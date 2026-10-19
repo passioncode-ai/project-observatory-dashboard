@@ -307,30 +307,74 @@ class AskOncePerRecord(unittest.TestCase):
         self.assertEqual(len(fx.journal()), 1, "no second ask")
         self.assertEqual(fx.context(fx.prompt()), "")
 
-    def test_a_record_another_project_took_is_not_revised(self):
+    def _after(self, act: str) -> None:
+        """Three changed turns on a record, then `act` takes it out of this
+        session's hands, then three more changed turns: exactly one new record,
+        asked about once, revised turn after turn."""
         fx = Fixture()
         fx.stop()
         mid = fx.journal()[0]["memoryId"]
-        code = ("import sys; sys.path.insert(0, '.')\n"
-                "from store import db, ledger as L\n"
-                "c = db.connect()\n"
-                "r = c.execute(\"SELECT revision, statement FROM ledger WHERE memory_id=? "
-                "ORDER BY revision DESC LIMIT 1\", (sys.argv[1],)).fetchone()\n"
-                "L.append(c, owner='agent:claude-code', memory_id=sys.argv[1],"
-                " expected_revision=r[0], statement=r[1], why='elsewhere',"
-                " project_id='project:someone-else')\n"
-                "c.commit()\n")
-        p = subprocess.run([PY, "-c", code, mid], cwd=ROOT, env=fx.env, capture_output=True,
-                           text=True, timeout=120)
+        fx.prompt()
+        for i in range(3):
+            (fx.repo / f"a{i}.txt").write_text("x\n", encoding="utf-8")
+            fx.stop()
+        rev = fx.ledger("SELECT max(revision) FROM ledger WHERE memory_id=?", mid)[0][0]
+        self.assertGreaterEqual(rev, 4, "the old record's revision is above a new one's 1")
+        code = {
+            "foreign": ("import importlib.util, sys\n"
+                        "spec = importlib.util.spec_from_file_location('s', 'mcp/server.py')\n"
+                        "m = importlib.util.module_from_spec(spec); sys.modules['s'] = m\n"
+                        "spec.loader.exec_module(m)\n"
+                        "out = m.observatory_record(owner='agent:claude-code', memoryId=sys.argv[1],"
+                        " expectedRevision=int(sys.argv[2]), statement='claim', why='elsewhere',"
+                        " projectId='project:someone-else')\n"
+                        "assert 'memoryId' in out, out\n"),
+            "promoted": ("import sys; sys.path.insert(0, '.')\n"
+                         "from store import db, ledger as L\n"
+                         "c = db.connect()\n"
+                         "L.corroborate(c, sys.argv[1], by='service:corroborate',"
+                         " check={'how': 'the commit resolves'}, expected_revision=int(sys.argv[2]))\n"
+                         "c.commit()\n"),
+            "rejected": ("import sys; sys.path.insert(0, '.')\n"
+                         "from store import db, ledger as L\n"
+                         "c = db.connect()\n"
+                         "L.transition(c, sys.argv[1], to_state='rejected', owner='agent:claude-code',"
+                         " expected_revision=int(sys.argv[2]))\n"
+                         "c.commit()\n"),
+        }[act]
+        p = subprocess.run([PY, "-c", code, mid, str(rev)], cwd=ROOT, env=fx.env,
+                           capture_output=True, text=True, timeout=120)
         self.assertEqual(p.returncode, 0, p.stderr[-400:])
-        (fx.repo / "third.txt").write_text("more\n", encoding="utf-8")
-        fx.stop()
-        r = fx.receipt()
-        self.assertTrue(r.get("recorded"), r)
-        self.assertNotEqual(r.get("memoryId"), mid, "a fresh record")
-        self.assertEqual(r.get("continues"), mid)
+        took = fx.ledger("SELECT max(revision) FROM ledger WHERE memory_id=?", mid)[0][0]
+        seen, revisions = set(), []
+        for i in range(3):
+            (fx.repo / f"b{i}.txt").write_text("x\n", encoding="utf-8")
+            p = fx.stop()
+            self.assertEqual(p.returncode, 0, p.stderr[-400:])
+            r = fx.receipt()
+            self.assertTrue(r.get("recorded"), r)
+            self.assertFalse(r.get("fault"), r)
+            seen.add(r["memoryId"])
+            revisions.append(r["revision"])
+            if i == 0:
+                self.assertEqual(r.get("continues"), mid, r)
+            fx.context(fx.prompt())
+        self.assertEqual(len(seen), 1, f"one new record, not one per turn: {seen}")
+        self.assertNotIn(mid, seen)
+        self.assertEqual(revisions, sorted(set(revisions)), f"revisions climb: {revisions}")
+        asked = [j["memoryId"] for j in fx.journal()]
+        self.assertEqual(asked, [mid, *seen], "the new record is asked about once")
         self.assertEqual(fx.ledger("SELECT max(revision) FROM ledger WHERE memory_id=?",
-                                   mid)[0][0], 2, "the other project's record is untouched")
+                                   mid)[0][0], took, "the record it continues is untouched")
+
+    def test_a_record_another_project_took_is_continued_once(self):
+        self._after("foreign")
+
+    def test_a_promoted_record_is_continued_once(self):
+        self._after("promoted")
+
+    def test_a_rejected_record_is_continued_once(self):
+        self._after("rejected")
 
 
 class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):

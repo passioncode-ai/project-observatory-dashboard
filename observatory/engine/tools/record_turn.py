@@ -1141,14 +1141,22 @@ def main() -> int:
             # of every session. Without it the append would raise and the hook
             # would report `recorded: false` for the rest of the session; with
             # it the turn starts a fresh record, which is what an erasure means.
+            #
+            # THE NEWEST ROW THIS SESSION WROTE, by creation order (`created_at`,
+            # then `rowid`, which is append order), never the highest revision
+            # number. A record this session starts after a promotion, a rejection
+            # or a takeover by another project begins at revision 1, below the
+            # record it continues; ordered by revision, the next turn picked the
+            # old record again, started yet another one and asked again on every
+            # changed turn.
             row = conn.execute(
                 "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id,"
                 " l.evidence_json, l.provenance_json, l.project_id"
-                " FROM ledger l JOIN (SELECT memory_id, MAX(revision) r FROM ledger"
-                "   WHERE session_id = ? AND kind = 'session' GROUP BY memory_id) m"
-                "  ON m.memory_id = l.memory_id AND m.r = l.revision"
-                " WHERE l.memory_id NOT IN (SELECT memory_id FROM tombstones)"
-                " ORDER BY l.revision DESC LIMIT 1", (args.session_id,)).fetchone()
+                " FROM ledger l"
+                " WHERE l.session_id = ? AND l.kind = 'session'"
+                "   AND l.memory_id NOT IN (SELECT memory_id FROM tombstones)"
+                " ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1",
+                (args.session_id,)).fetchone()
             prior, foreign = _latest_of(conn, row if row and row["memory_id"] else None)
         # A PROMOTED RECORD IS FINISHED, as far as this writer is concerned.
         #

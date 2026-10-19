@@ -191,6 +191,10 @@ while the major version is 0, a minor release may change behaviour and says so h
     keeps the `why`; before, it revised from its own last revision and every later turn of the session
     failed with a revision conflict. A latest revision that names another project is not revised: the
     turn starts a new record that `continues` it.
+  - **One new record, not one per turn.** The Stop hook picks the session's record by the newest row
+    the session wrote, not by the highest revision number. A record it starts after a promotion, a
+    rejection or a takeover by another project begins at revision 1, so it lost to the old record, and
+    every later changed turn started another record and asked again.
   - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
     `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
     model, such as a headless single-prompt session, is pending and never unanswered.
