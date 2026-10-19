@@ -38,25 +38,46 @@ SUFFIXES = (".log", ".err", ".out", ".jsonl")
 HELD_OPEN = frozenset({"serverd.err", "serverd.out", "tick.log", "tick.err"})
 
 
-def _real_parents(path: Path) -> bool:
-    """Refuse linked or unreadable ancestors, including explicit out-of-directory logs."""
+def _real_dirs(directory: Path, root: Path | None = None) -> bool:
+    """`directory` and every folder between `root` and it are real directories, not links.
+
+    `root` is resolved once with realpath, so links AT or ABOVE it are allowed: macOS's /tmp and
+    /var, a home folder on a linked volume. Below it a link would let a log write or rename land
+    somewhere the sweep never chose, so it refuses. By default the root is the directory's own
+    parent: the log folder itself must be real. A directory outside `root` refuses."""
     try:
-        return all(stat.S_ISDIR(parent.lstat().st_mode) for parent in path.absolute().parents)
-    except OSError:
+        directory = Path(os.path.abspath(directory))
+        root = Path(os.path.abspath(root)) if root is not None else directory.parent
+        rel = directory.relative_to(root)
+        current = Path(os.path.realpath(root))
+        if not stat.S_ISDIR(current.lstat().st_mode):
+            return False
+        for part in rel.parts:
+            current = current / part
+            if not stat.S_ISDIR(current.lstat().st_mode):
+                return False
+        return True
+    except (OSError, ValueError):
         return False
 
 
-def _single_file(path: Path):
+def _real_parents(path: Path, root: Path | None = None) -> bool:
+    """Refuse linked or unreadable folders below the trusted root, explicit outside logs included."""
+    path = Path(os.path.abspath(path))
+    return _real_dirs(path.parent, root if root is not None else path.parent.parent)
+
+
+def _single_file(path: Path, root: Path | None = None):
     try:
         info = path.lstat()
-        return info if _real_parents(path) and stat.S_ISREG(info.st_mode) and info.st_nlink == 1 else None
+        return info if _real_parents(path, root) and stat.S_ISREG(info.st_mode) and info.st_nlink == 1 else None
     except OSError:
         return None
 
 
-def _private(path: Path) -> bool:
+def _private(path: Path, root: Path | None = None) -> bool:
     try:
-        if _single_file(path) is None:
+        if _single_file(path, root) is None:
             return False
         if not osprivacy.private(path):
             osprivacy.make_private(path)
@@ -66,7 +87,8 @@ def _private(path: Path) -> bool:
 
 
 def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None = None,
-           copy_truncate: bool | None = None, _observation: dict | None = None) -> bool:
+           copy_truncate: bool | None = None, _observation: dict | None = None,
+           root: Path | None = None) -> bool:
     """Rotate `path` when it is larger than `max_bytes`; True when it did.
 
     `copy_truncate` defaults to whether the file's name is in HELD_OPEN. A symlink
@@ -78,11 +100,11 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
     generations = GENERATIONS if generations is None else max(1, generations)
     if copy_truncate is None:
         copy_truncate = path.name in HELD_OPEN
-    info = _single_file(path)
+    info = _single_file(path, root)
     if info is None:
         return False
     if info.st_size <= max_bytes:
-        private = _private(path)
+        private = _private(path, root)
         observation.update(status="complete" if private else "failed",
                            reason=None if private else "permissions_unverified")
         return False
@@ -97,7 +119,7 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
             continue
         except OSError:
             return False
-        if _single_file(gen(n)) is None:
+        if _single_file(gen(n), root) is None:
             return False
     observation.update(status="failed", reason="rotation_failed")
     gen(generations).unlink(missing_ok=True)
@@ -125,9 +147,9 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
     observation.update(status="complete", reason=None)
     for n in range(1, generations + 1):
         # Missing generations are expected; failures on existing files are not.
-        if os.path.lexists(gen(n)) and not _private(gen(n)):
+        if os.path.lexists(gen(n)) and not _private(gen(n), root):
             observation.update(status="failed", reason="permissions_unverified")
-    if copy_truncate and not _private(path):
+    if copy_truncate and not _private(path, root):
         observation.update(status="failed", reason="permissions_unverified")
     return True
 
@@ -143,7 +165,7 @@ def unknown_report(reason: str = "scope_failed") -> dict:
             "refused": None, "failed": None, "reasons": {reason: 1}}
 
 
-def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detailed=False):
+def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detailed=False, root=None):
     rotated: list[str] = []
     rotated_paths: set[Path] = set()
     directory = Path(directory)
@@ -155,12 +177,22 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
         if report["status"] == "complete":
             report["status"] = "partial"
 
+    root = Path(root) if root is not None else Path(os.path.abspath(directory)).parent
+    absent = False
     try:
-        safe = _real_parents(directory) and stat.S_ISDIR(directory.lstat().st_mode)
+        directory.lstat()
+    except FileNotFoundError:
+        # A log folder that does not exist yet (a fresh install, no hook has run) holds
+        # nothing to retain: zero entries, measured, never "unknown".
+        absent = True
     except OSError:
-        safe = False
+        pass
+    safe = not absent and _real_dirs(directory, root)
     entries = []
-    if not safe:
+    if absent:
+        report["observed_count"] = 0
+        report["absent"] = True
+    elif not safe:
         report = unknown_report("directory_unverified")
     else:
         try:
@@ -175,8 +207,10 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
     for path in candidates:
         observation = {}
         try:
+            # An explicit log outside the trusted root is judged against its own parent.
+            inside = Path(os.path.abspath(path)).is_relative_to(Path(os.path.abspath(root)))
             did_rotate = rotate(path, max_bytes=max_bytes, generations=generations,
-                                _observation=observation)
+                                _observation=observation, root=root if inside else None)
         except Exception:  # detailed mode isolates failures without serializing exceptions
             if not detailed:
                 raise
@@ -192,26 +226,28 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
     for path in entries:
         stem, _, tail = path.name.rpartition(".")
         if tail.isdigit() and Path(stem).suffix in SUFFIXES and path.with_name(stem) not in rotated_paths:
-            if not _private(path):
+            if not _private(path, root):
                 report["refused"] += 1
                 reason("permissions_unverified")
     return rotated, report
 
 
 def sweep(directory: Path, *, max_bytes: int | None = None, generations: int | None = None,
-          files: tuple[Path, ...] = ()) -> list[str]:
+          files: tuple[Path, ...] = (), root: Path | None = None) -> list[str]:
     """Legacy list API: rotate once and return names; operation errors still raise."""
-    return _sweep(directory, max_bytes=max_bytes, generations=generations, files=files)[0]
+    return _sweep(directory, max_bytes=max_bytes, generations=generations, files=files, root=root)[0]
 
 
 def sweep_report(directory: Path, *, max_bytes: int | None = None, generations: int | None = None,
-                 files: tuple[Path, ...] = ()) -> dict:
+                 files: tuple[Path, ...] = (), root: Path | None = None) -> dict:
     """One execution's bounded receipt, with no path, content or exception text.
 
     `observed_count` counts directory entries, including unrelated names; null
-    means enumeration was not complete. Action counts are completed observations,
+    means enumeration was not complete. A directory that does not exist is `absent`:
+    complete, with zero entries. Links at or above `root` (default: the directory's
+    parent) are followed; below it they refuse. Action counts are completed observations,
     not an estimate of remaining files. A failed rotation may have moved older
     generations; its effects are not claimed to be rolled back.
     """
     return _sweep(directory, max_bytes=max_bytes, generations=generations,
-                  files=files, detailed=True)[1]
+                  files=files, detailed=True, root=root)[1]

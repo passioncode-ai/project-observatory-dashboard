@@ -1726,11 +1726,17 @@ with the separate `--checkouts --root ...` or `--cache-coverage` command when ne
 
 ### Missing worktree registration receipts
 
-For a missing worktree, cleanup invokes Git's repository-wide registration prune.
-A `pruned` journal row means that command exited zero; `registration_changes` stays
-null because the row does not measure how many registrations changed. A nonzero
-exit, timeout or launch error is `failed`; its effect remains unknown and it is not
-counted as a successful prune. Reasons omit Git output and exception bodies.
+For a missing worktree, cleanup first proves the directory absent: its parent folder
+is listed and lacks the entry. An unplugged drive, a renamed parent folder or a
+permission error is `unknown` instead; the survey marks that worktree `unreadable`
+and nothing is pruned. When the directory is absent, the worktree's HEAD is kept
+reachable first: by its branch, or for a detached HEAD by an
+`archive/wt-<sha8>` branch. Then only that one registration is removed with
+`git worktree remove`, never a repository-wide `git worktree prune`. An unknown,
+changed or unreadable HEAD, or a locked registration, removes nothing. A `pruned`
+journal row names the kept ref (`retained_ref`) and means Git exited zero;
+`registration_changes` stays null. A nonzero exit, timeout or launch error is
+`failed` with an unknown effect. Reasons omit Git output and exception bodies.
 Inspect `git worktree list --porcelain` in the owning repository before retrying.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 

@@ -1000,47 +1000,216 @@ class NoBareGit(unittest.TestCase):
 
 
 class MissingRegistrationReceipt(unittest.TestCase):
-    def invoke(self, response=None, error=None, exists=False):
+    """An auto `worktree-missing` action drops ONE registration, only after the directory is proven
+    absent and its HEAD is kept by a ref. A repository-wide `git worktree prune` once dropped the
+    record of a detached worktree on a renamed volume, and its commit became unreachable."""
+
+    def setUp(self) -> None:
         import cleanup
-        with patch.object(cleanup.os.path, "exists", return_value=exists), patch.object(
-                cleanup, "git", return_value=response, side_effect=error) as command:
-            row = cleanup.act({"class": "worktree-missing", "tier": "auto",
-                               "repo": "alpha-web", "target": "alpha-worktree"}, pathlib.Path("unused"))
-        return row, command
+        self.cleanup = cleanup
+        self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-missing-wt-")).resolve()
+        self.addCleanup(self._restore_modes)
+        self.repo = self.d / "alpha-web"
+        bare(self.d, "init", "-q", "-b", "main", str(self.repo))
+        bare(self.repo, "commit", "-q", "--allow-empty", "-m", "init")
+        self.vol = self.d / "volume"
+        self.vol.mkdir()
 
-    def test_failed_git_never_reports_pruned_or_leaks_stderr(self):
-        row, command = self.invoke(subprocess.CompletedProcess([], 128, "private output", "private error"))
-        self.assertEqual(row["result"], "failed")
-        self.assertEqual(row["exit_code"], 128)
-        self.assertEqual(row["scope"], "repository-missing-registrations")
+    def _restore_modes(self) -> None:
+        for p in (self.d / "volume", self.d / "volume-renamed"):
+            if p.exists():
+                p.chmod(0o755)
+
+    def detached(self, path: pathlib.Path) -> str:
+        bare(self.repo, "worktree", "add", "-q", "--detach", str(path))
+        bare(path, "commit", "-q", "--allow-empty", "-m", "the only commit of this worktree")
+        return bare(path, "rev-parse", "HEAD").stdout.strip()
+
+    def registered(self) -> list[str]:
+        out = bare(self.repo, "worktree", "list", "--porcelain").stdout
+        return [line.split(" ", 1)[1] for line in out.splitlines() if line.startswith("worktree ")]
+
+    def act(self, target: pathlib.Path, head: str | None) -> dict:
+        return self.cleanup.act({"class": "worktree-missing", "tier": "auto", "repo": str(self.repo),
+                                 "target": str(target), "head": head}, self.d / "archive")
+
+    def reachable(self, sha: str) -> bool:
+        refs = bare(self.repo, "for-each-ref", "--contains", sha, "--format=%(refname)").stdout.split()
+        return bool(refs)
+
+    def test_a_renamed_volume_is_unknown_and_its_registration_stays(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        self.vol.rename(self.d / "volume-renamed")
+        row = self.act(wt, head)
+        self.assertEqual(row["result"], "skipped", row)
+        self.assertEqual(row["reason_code"], "presence-unknown")
+        self.assertIn(str(wt), self.registered())
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "a permission-denied parent needs POSIX modes and a non-root user")
+    def test_a_permission_denied_parent_is_unknown(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        self.vol.chmod(0)
+        row = self.act(wt, head)
+        self.vol.chmod(0o755)
+        self.assertEqual(row["result"], "skipped", row)
+        self.assertEqual(row["reason_code"], "presence-unknown")
+        self.assertIn(str(wt), self.registered())
+
+    def test_an_absent_detached_worktree_keeps_its_commit_under_an_archive_ref(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        other = self.d / "elsewhere" / "wt2"
+        other.parent.mkdir()
+        other_head = self.detached(other)
+        shutil.rmtree(wt)
+        other.parent.rename(self.d / "elsewhere-renamed")     # missing to Git, unknown to us
+        row = self.act(wt, head)
+        self.assertEqual(row["result"], "pruned", row)
+        self.assertEqual(row["scope"], "one-registration")
+        self.assertEqual(row["retained_ref"], f"refs/heads/archive/wt-{head[:8]}")
+        self.assertEqual(bare(self.repo, "rev-parse", row["retained_ref"]).stdout.strip(), head)
+        self.assertNotIn(str(wt), self.registered())
+        self.assertIn(str(other), self.registered(), "a repository-wide prune would drop this one too")
+        bare(self.repo, "gc", "-q", "--prune=now")
+        self.assertTrue(self.reachable(head))
+        self.assertEqual(bare(self.repo, "cat-file", "-t", other_head).stdout.strip(), "commit")
+
+    def test_an_absent_branch_worktree_is_kept_by_its_branch(self) -> None:
+        wt = self.vol / "topic"
+        bare(self.repo, "worktree", "add", "-q", "-b", "topic", str(wt))
+        bare(wt, "commit", "-q", "--allow-empty", "-m", "topic work")
+        head = bare(wt, "rev-parse", "HEAD").stdout.strip()
+        shutil.rmtree(wt)
+        row = self.act(wt, head)
+        self.assertEqual(row["result"], "pruned", row)
+        self.assertEqual(row["retained_ref"], "refs/heads/topic")
+        self.assertTrue(self.reachable(head))
+
+    def test_unknown_or_changed_head_prunes_nothing(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        shutil.rmtree(wt)
+        for given in (None, "0" * 40):
+            with self.subTest(head=given):
+                row = self.act(wt, given)
+                self.assertEqual(row["result"], "skipped", row)
+                self.assertIn("nothing pruned", row["reason"])
+                self.assertIn(str(wt), self.registered())
+        self.assertTrue(head)
+
+    def test_a_reappeared_directory_prunes_nothing(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        row = self.act(wt, head)
+        self.assertEqual((row["result"], row["reason"]), ("skipped", "the directory exists again"))
+
+    def test_failed_git_never_reports_pruned_or_leaks_stderr(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        shutil.rmtree(wt)
+        real = self.cleanup.git
+
+        def refusing(repo, *args, **kw):
+            if args[:2] == ("worktree", "remove"):
+                return subprocess.CompletedProcess([], 128, "SECRET-OUTPUT", "SECRET-ERROR")
+            return real(repo, *args, **kw)
+        with patch.object(self.cleanup, "git", side_effect=refusing):
+            row = self.act(wt, head)
+        self.assertEqual((row["result"], row["exit_code"], row["effect"]), ("failed", 128, "unknown"))
         self.assertIsNone(row["registration_changes"])
-        self.assertNotIn("private", str(row))
-        command.assert_called_once_with("alpha-web", "worktree", "prune")
+        self.assertNotIn("SECRET", str(row))
 
-    def test_success_reports_command_scope_without_inventing_change_count(self):
-        row, _ = self.invoke(subprocess.CompletedProcess([], 0, "", ""))
-        self.assertEqual(row["result"], "pruned")
-        self.assertEqual(row["scope"], "repository-missing-registrations")
-        self.assertEqual(row["exit_code"], 0)
-        self.assertIsNone(row["registration_changes"])
+    def test_a_timeout_has_uncertain_effect_and_no_raw_exception(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        shutil.rmtree(wt)
+        real = self.cleanup.git
 
-    def test_timeout_has_uncertain_effect_and_no_raw_exception(self):
-        row, _ = self.invoke(error=subprocess.TimeoutExpired("private command", 1, output="private output"))
-        self.assertEqual(row["result"], "failed")
-        self.assertEqual(row["effect"], "unknown")
+        def hanging(repo, *args, **kw):
+            if args[:2] == ("worktree", "remove"):
+                raise subprocess.TimeoutExpired("SECRET-COMMAND", 1, output="SECRET-OUTPUT")
+            return real(repo, *args, **kw)
+        with patch.object(self.cleanup, "git", side_effect=hanging):
+            row = self.act(wt, head)
+        self.assertEqual((row["result"], row["effect"]), ("failed", "unknown"))
         self.assertEqual(row["reason_code"], "registration-prune-incomplete")
-        self.assertNotIn("private", str(row))
+        self.assertNotIn("SECRET", str(row))
 
-    def test_launch_error_is_reported_without_exception_body(self):
-        row, _ = self.invoke(error=OSError("private path"))
-        self.assertEqual(row["result"], "failed")
-        self.assertEqual(row["effect"], "unknown")
-        self.assertNotIn("private", str(row))
+    def test_the_survey_marks_an_unknown_directory_unreadable_not_missing(self) -> None:
+        import scan_git_hygiene
+        gone, unknown = self.d / "gone-wt", self.vol / "wt"
+        self.detached(gone)
+        self.detached(unknown)
+        shutil.rmtree(gone)
+        self.vol.rename(self.d / "volume-renamed")
+        rows = {w["path"]: w for w in scan_git_hygiene.worktrees(str(self.repo), set(), time.time())}
+        self.assertEqual(rows[str(gone)]["state"], "missing")
+        self.assertEqual(rows[str(unknown)]["state"], "unreadable")
+        self.assertEqual(rows[str(unknown)]["presence"], "unknown")
+        import cleanup
+        planned = cleanup.plan_git({"checkouts": [{"path": str(self.repo), "repository": "repository:example-org/alpha-web",
+                                                   "default_branch": "main", "branches": [],
+                                                   "worktrees": list(rows.values())}]}, cleanup.load_config())
+        self.assertEqual([(a["class"], a["target"]) for a in planned], [("worktree-missing", str(gone))])
+        self.assertEqual(planned[0]["head"], rows[str(gone)]["head"])
 
-    def test_reappeared_directory_prevents_prune(self):
-        row, command = self.invoke(exists=True)
-        self.assertEqual(row["result"], "skipped")
-        command.assert_not_called()
+
+class LocalUpstreamIsNotACopy(unittest.TestCase):
+    """`branch.X.remote=.` makes a local branch the upstream; "identical to its upstream" then
+    proves no copy exists elsewhere, least of all when the upstream is the branch itself."""
+
+    def setUp(self) -> None:
+        import cleanup
+        self.cleanup = cleanup
+        self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-local-upstream-")).resolve()
+        self.origin, self.repo = self.d / "origin.git", self.d / "alpha-web"
+        bare(self.d, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        bare(self.d, "init", "-q", "-b", "main", str(self.repo))
+        bare(self.repo, "commit", "-q", "--allow-empty", "-m", "init")
+        bare(self.repo, "remote", "add", "origin", str(self.origin))
+        bare(self.repo, "branch", "topic")
+        bare(self.repo, "checkout", "-q", "topic")
+        bare(self.repo, "commit", "-q", "--allow-empty", "-m", "only here")
+        bare(self.repo, "checkout", "-q", "main")
+
+    def why(self) -> str:
+        return self.cleanup.still_safe_branch({"class": "branch-pushed", "repo": str(self.repo),
+                                               "target": "topic", "default_branch": "main"})
+
+    def test_the_branch_as_its_own_upstream_refuses(self) -> None:
+        bare(self.repo, "config", "branch.topic.remote", ".")
+        bare(self.repo, "config", "branch.topic.merge", "refs/heads/topic")
+        self.assertEqual(self.why(), "branch upstream is local, not a remote copy")
+
+    def test_another_local_branch_as_upstream_refuses(self) -> None:
+        bare(self.repo, "branch", "mirror", "topic")
+        bare(self.repo, "config", "branch.topic.remote", ".")
+        bare(self.repo, "config", "branch.topic.merge", "refs/heads/mirror")
+        self.assertEqual(self.why(), "branch upstream is local, not a remote copy")
+
+    def test_a_pushed_remote_tracking_upstream_still_passes(self) -> None:
+        bare(self.repo, "push", "-q", "-u", "origin", "topic")
+        self.assertEqual(self.why(), "")
+
+
+class UnknownHoldersAreNamed(unittest.TestCase):
+    def test_unknown_holder_coverage_is_not_reported_as_a_working_process(self) -> None:
+        import cleanup
+        import holders
+        d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-holders-")).resolve()
+        with patch.object(cleanup, "_LISTING", (time.monotonic(), holders.Holders(None))), \
+                patch.object(cleanup, "busy_now", return_value=True):
+            row = cleanup.act({"class": "worktree-clean", "tier": "auto", "repo": str(d),
+                               "target": str(d / "wt")}, d / "archive")
+        self.assertEqual(row["reason"], "holders could not be checked; nothing removed")
+        with patch.object(cleanup, "_LISTING", (time.monotonic(), holders.Holders(["/elsewhere"]))), \
+                patch.object(cleanup, "busy_now", return_value=True):
+            row = cleanup.act({"class": "worktree-clean", "tier": "auto", "repo": str(d),
+                               "target": str(d / "wt")}, d / "archive")
+        self.assertEqual(row["reason"], "a process works inside it now")
 
 
 if __name__ == "__main__":

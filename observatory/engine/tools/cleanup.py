@@ -53,7 +53,7 @@ import configuration  # noqa: E402
 import paths  # noqa: E402
 import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
-from cleanup_safety import protected_tree_reason  # noqa: E402
+from cleanup_safety import protected_tree_reason, worktree_presence  # noqa: E402
 from holders import fresh_busy  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
@@ -384,6 +384,7 @@ def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
             idle = w.get("idle_days") or 0
             if fresh and w["state"] == "missing":
                 out.append({**base, "class": "worktree-missing", "tier": "auto", "target": w["path"],
+                            "head": w.get("head"), "branch": w.get("branch"),
                             "why": "its directory no longer exists"})
             elif fresh and w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-clean", "tier": "auto", "target": w["path"],
@@ -507,6 +508,14 @@ def still_safe_branch(a: dict, expected: str | None = None) -> str:
         up = git(repo, "rev-parse", "--abbrev-ref", name + "@{upstream}")
         if up.returncode or not up.stdout.strip():
             return "branch upstream could not be read"
+        # `branch.X.remote=.` makes a local branch the upstream: identical to it proves no copy
+        # exists anywhere else, least of all when the upstream is the branch itself.
+        remote = git(repo, "config", "--get", f"branch.{name}.remote")
+        if remote.returncode or remote.stdout.strip() in ("", "."):
+            return "branch upstream is local, not a remote copy"
+        full = git(repo, "rev-parse", "--symbolic-full-name", name + "@{upstream}")
+        if full.returncode or not full.stdout.strip().startswith("refs/remotes/"):
+            return "branch upstream is not a remote-tracking ref"
         ahead = git(repo, "rev-list", "--count", f"{up.stdout.strip()}..{sha}")
         if ahead.returncode or ahead.stdout.strip() != "0":
             return "branch is no longer identical to its upstream"
@@ -563,6 +572,70 @@ def index_visibility_reason(target: str) -> str:
         return "index flags could not be read; nothing removed"
 
 
+def archive_head_ref(repo: str, head: str) -> tuple[str, str]:
+    """Keep a detached HEAD reachable under `refs/heads/archive/wt-<sha8>`: (ref, refusal)."""
+    name = f"archive/wt-{head[:8]}"
+    ref = "refs/heads/" + name
+    existing = git(repo, "show-ref", "--verify", "--quiet", ref)
+    if existing.returncode == 0:
+        resolved = git(repo, "rev-parse", "--verify", ref)
+        if resolved.returncode or resolved.stdout.strip() != head:
+            return ref, "detached HEAD archive ref conflicts; nothing removed"
+    elif existing.returncode == 1:
+        made = git(repo, "branch", name, head)
+        if made.returncode:
+            return ref, "detached HEAD archive ref could not be created; nothing removed"
+    else:
+        return ref, "detached HEAD archive ref could not be read; nothing removed"
+    return ref, ""
+
+
+def retain_missing_head(repo: str, target: str, head: str | None) -> tuple[str, str]:
+    """Before a missing worktree's registration goes, keep its HEAD reachable: (ref, refusal).
+
+    The registration is the only thing that still names a detached worktree's commits; once it
+    is removed they are unreachable and `gc` deletes them. Its current record must still carry
+    the HEAD the survey saw; a branch HEAD is kept by its branch, a detached one by an archive
+    ref, the same one a removed clean or dirty worktree gets. Unknown, locked or changed refuses.
+    """
+    try:
+        if not head:
+            return "", "HEAD of the missing worktree is unknown; nothing pruned"
+        listed = git(repo, "worktree", "list", "--porcelain")
+        if listed.returncode or not listed.stdout.startswith("worktree "):
+            return "", "worktree registrations could not be read; nothing pruned"
+        record = None
+        for block in listed.stdout.split("\n\n"):
+            fields = {}
+            for line in block.splitlines():
+                key, _, value = line.partition(" ")
+                fields[key] = value
+            if fields.get("worktree") == target:
+                record = fields
+        if record is None:
+            return "", "the registration is gone already; nothing pruned"
+        if "locked" in record:
+            return "", "the registration is locked; nothing pruned"
+        if record.get("HEAD") != head:
+            return "", "the worktree's HEAD changed since the survey; nothing pruned"
+        if git(repo, "cat-file", "-e", head + "^{commit}").returncode:
+            return "", "the worktree's HEAD commit could not be read; nothing pruned"
+        if record.get("branch", "").startswith("refs/heads/"):
+            ref = record["branch"]
+        elif "detached" in record:
+            ref, why = archive_head_ref(repo, head)
+            if why:
+                return ref, why.replace("nothing removed", "nothing pruned")
+        else:
+            return "", "the worktree's HEAD attachment could not be read; nothing pruned"
+        retained = git(repo, "rev-parse", "--verify", ref)
+        if retained.returncode or retained.stdout.strip() != head:
+            return ref, "HEAD retention could not be verified; nothing pruned"
+        return ref, ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "", "HEAD retention could not be read; nothing pruned"
+
+
 def retain_worktree_head(repo: str, target: str, head: str) -> str:
     """Prove current HEAD remains reachable without trusting the survey's branch."""
     try:
@@ -574,19 +647,9 @@ def retain_worktree_head(repo: str, target: str, head: str) -> str:
             if not ref.startswith("refs/heads/"):
                 return "HEAD branch could not be verified; nothing removed"
         elif symbolic.returncode == 1:
-            name = f"archive/wt-{head[:8]}"
-            ref = "refs/heads/" + name
-            existing = git(repo, "show-ref", "--verify", "--quiet", ref)
-            if existing.returncode == 0:
-                resolved = git(repo, "rev-parse", "--verify", ref)
-                if resolved.returncode or resolved.stdout.strip() != head:
-                    return "detached HEAD archive ref conflicts; nothing removed"
-            elif existing.returncode == 1:
-                made = git(repo, "branch", name, head)
-                if made.returncode:
-                    return "detached HEAD archive ref could not be created; nothing removed"
-            else:
-                return "detached HEAD archive ref could not be read; nothing removed"
+            ref, why = archive_head_ref(repo, head)
+            if why:
+                return why
         else:
             return "HEAD attachment could not be read; nothing removed"
         retained = git(repo, "rev-parse", "--verify", ref)
@@ -638,25 +701,41 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
                 **({"reason": "branch changed or could not be deleted; nothing deleted"} if done.returncode else {})}
     if cls == "worktree-missing":
-        if os.path.exists(target):
+        presence = worktree_presence(target)
+        if presence == "present":
             return {**rec, "result": "skipped", "reason": "the directory exists again"}
-        # Git prunes eligible administrative records across this repository. Its
-        # exit status proves command completion, never a target-only change count.
-        detail = {"scope": "repository-missing-registrations", "registration_changes": None}
+        if presence != "absent":
+            return {**rec, "result": "skipped", "reason_code": "presence-unknown",
+                    "reason": "the directory could not be proven absent (an unmounted drive, a renamed "
+                              "or unreadable parent folder); nothing pruned"}
+        rec["head"] = a.get("head")
+        ref, why = retain_missing_head(repo, target, a.get("head"))
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
+        rec["retained_ref"] = ref
+        if worktree_presence(target) != "absent":
+            return {**rec, "result": "skipped", "reason": "the directory reappeared; nothing pruned"}
+        # One registration, never `git worktree prune`: a repository-wide prune also drops the
+        # records of worktrees on an unplugged drive, whose detached commits nothing else names.
+        # Without --force, Git refuses a directory that came back with changes.
+        detail = {"scope": "one-registration", "registration_changes": None}
         try:
-            done = git(repo, "worktree", "prune")
+            done = git(repo, "worktree", "remove", target)
         except (OSError, subprocess.SubprocessError):
             return {**rec, **detail, "result": "failed", "effect": "unknown",
                     "reason_code": "registration-prune-incomplete",
-                    "reason": "registration pruning did not complete; inspect current registrations before retrying"}
+                    "reason": "registration removal did not complete; inspect current registrations before retrying"}
         if done.returncode:
             return {**rec, **detail, "result": "failed", "exit_code": done.returncode,
                     "effect": "unknown", "reason_code": "registration-prune-failed",
-                    "reason": "Git reported a registration pruning failure; inspect current registrations before retrying"}
+                    "reason": "Git refused to remove the registration; inspect current registrations before retrying"}
         return {**rec, **detail, "result": "pruned", "exit_code": 0}
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):
-            return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+            unknown = _LISTING[1] is not None and not getattr(_LISTING[1], "known", True)
+            return {**rec, "result": "skipped",
+                    "reason": "holders could not be checked; nothing removed" if unknown
+                    else "a process works inside it now"}
         why = index_visibility_reason(target)
         if why:
             return {**rec, "result": "skipped", "reason": why}

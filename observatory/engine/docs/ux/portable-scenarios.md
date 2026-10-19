@@ -244,12 +244,15 @@ holder outcomes so its Git tests do not inspect the host process table.
 
 ### Missing registration cleanup result
 
-When a worktree path is absent, the person and agent see the repository-wide
-registration-prune scope. Git failure or interruption produces a failed row with
-unknown effects, never `pruned`. Successful command completion does not invent a
-registration count. A path that reappears is skipped. Inspect current registrations
-before retrying; raw command output is absent from reasons.
-Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (five cases).
+When a worktree path is absent, the person and agent see one registration removed,
+never a repository-wide prune, and the ref that keeps its HEAD (`retained_ref`: its
+branch, or `archive/wt-<sha8>` for a detached HEAD). A path on an unplugged drive,
+under a renamed parent or behind a permission error is unknown and nothing is pruned.
+An unknown or changed HEAD prunes nothing. Git failure or interruption produces a
+failed row with unknown effects, never `pruned`, and invents no registration count.
+A path that reappears is skipped. Raw command output is absent from reasons.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (nine cases, real
+Git worktrees: renamed volume, permission-denied parent, detached and branch HEADs).
 
 ### Open-deleted-file visibility
 

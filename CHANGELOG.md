@@ -167,8 +167,21 @@ project's OpenRouter spend, the agent-network node, SSH keys and external checko
   check: use an idle workspace. Copy/truncate can still lose a concurrent append.
   Incomplete or unreadable process listings cannot declare an omitted target free;
   clean and archived dirty worktrees repeat a bounded holder check immediately
-  before removal. Failed registration pruning reports unknown effects and its
-  repository-wide scope instead of claiming success.
+  before removal. A missing worktree's registration goes only when its directory is
+  proven absent (an unplugged drive, a renamed parent folder or a permission error is
+  unknown and prunes nothing) and after its HEAD is kept by its branch or an
+  `archive/wt-<sha8>` branch; only that one registration is removed, never a
+  repository-wide `git worktree prune`, which could make a detached worktree's commits
+  unreachable. Failed removal reports unknown effects instead of claiming success. A
+  branch whose upstream is local (`branch.X.remote` set to `.`) is no longer deleted as
+  pushed. Log rotation follows links above the workspace (macOS `/tmp`, `/var`, a linked
+  home) and still refuses them inside it, and a log folder that does not exist yet is
+  reported absent, not unknown.
+- **0.25.0 reclaims less disk than 0.24.5.** With holder coverage unknown (no complete
+  process inventory on any platform), the disk guard and worktree cleanup now remove
+  nothing that needs a holder check: build output, caches tied to a running tool and
+  worktrees are kept and reported, where 0.24.5 removed them. This is deliberate: a
+  path a process may still hold is not deleted on a guess.
 - **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
   failures produce error evidence without losing completed suite results. Unknown
   completion fails the run instead of becoming a passing or empty summary.

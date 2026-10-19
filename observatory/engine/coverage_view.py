@@ -190,6 +190,36 @@ def summary():
             'open_unlinked': open_unlinked.saved_summary(at)}
 
 
+#: The command that refreshes each saved coverage receipt, named in its degradations.
+REFRESH = {'checkouts': 'project-observatory full machine --checkouts --root PATH',
+           'caches': 'project-observatory full machine --cache-coverage',
+           'open_unlinked': 'project-observatory full machine --open-unlinked'}
+
+
+def degradations(coverage: dict) -> list[dict]:
+    """Every coverage source that is not fully measured, as `{source, code, reason}`.
+
+    The MCP contract reads an empty `degraded` as full coverage, so a source that was never
+    surveyed, is unreadable, stale or partial is named here with what refreshes it; a cache
+    survey is partial by design (contents are never walked) and is named every time.
+    """
+    out = []
+    for key, command in REFRESH.items():
+        source = coverage.get(key) if isinstance(coverage, dict) else None
+        if not isinstance(source, dict):
+            out.append({'source': key, 'code': 'unreadable', 'reason': f'no summary; run `{command}`'})
+            continue
+        name = source.get('source') or key
+        codes = [c for c in source.get('degraded') or [] if isinstance(c, str)]
+        if not codes and (source.get('partial') is not False or source.get('coverage_complete') is False):
+            codes = ['partial-coverage']
+        for code in codes:
+            reason = (f'not surveyed yet; run `{command}`' if code == 'not-surveyed'
+                      else f'{code.replace("-", " ")}; `{command}` refreshes it')
+            out.append({'source': name, 'code': code, 'reason': reason})
+    return out
+
+
 # Shared by the actual MCP tool schema; other machine sections retain their schema.
 SOURCE_SCHEMA = {
     'type': 'object',

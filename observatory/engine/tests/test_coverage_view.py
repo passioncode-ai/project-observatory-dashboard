@@ -101,6 +101,13 @@ class CoverageView(Base):
         self.assertIn('coverage', tool.parameters['properties']['section']['enum'])
         self.assertIn('coverage', server.observatory_machine()['sections'])
         out = server.observatory_machine(section='coverage')
+        # An empty workspace has surveyed nothing: `degraded` names every source, because the
+        # server's own contract reads an empty list as full coverage.
+        named = {(d['source'], d['code']) for d in out['degraded']}
+        self.assertIn(('checkout-candidates.json', 'not-surveyed'), named)
+        self.assertIn(('cache-coverage.json', 'not-surveyed'), named)
+        self.assertIn(('open-unlinked.json', 'not-surveyed'), named)
+        self.assertTrue(all(d['reason'] and '`project-observatory full machine' in d['reason'] for d in out['degraded']))
         self.assertIn('checkouts', out['coverage'])
         self.assertIn('caches', out['coverage'])
         import jsonschema

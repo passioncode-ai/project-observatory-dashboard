@@ -834,6 +834,22 @@ class Pass(Base):
         self.assertTrue(stale["stale"])
         self.assertEqual(stale["checked_at"], observed["checked_at"])
 
+    def test_a_fresh_install_without_log_folders_is_complete_not_unknown(self):
+        # No hook has run and no update was logged yet: those folders do not exist, which is
+        # nothing to retain, not missing evidence (it used to warn log-retention-incomplete forever).
+        state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+        for folder in (update_events.directory(), state_dir / "project-observatory", self.home / "store" / "logs"):
+            # Only ever inside this test's sandbox: never a real home's folders.
+            self.assertTrue(Path(os.path.realpath(folder)).is_relative_to(Path(os.path.realpath(self.base))), folder)
+            if folder.exists():
+                shutil.rmtree(folder)
+        receipt = M._rotate_logs(self.home, at=AT)
+        for name in ("engine", "updater", "hooks"):
+            self.assertEqual((receipt["scopes"][name]["status"], receipt["scopes"][name]["absent"]), ("complete", True), name)
+        projected = M.log_retention_status(receipt, at=AT)
+        self.assertEqual(projected["status"], "complete")
+        self.assertTrue(all(projected["scopes"][n]["absent"] for n in ("engine", "updater", "hooks")))
+
     def test_lost_scope_receipt_does_not_claim_zero_effects(self):
         import log_policy
         logs = self.home / "store" / "logs"

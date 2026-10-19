@@ -603,13 +603,39 @@ class LogRetentionEvidence(Workspace):
         self.logs = self.paths.STATE / "logs"
         self.logs.mkdir(parents=True, exist_ok=True)
 
-    def test_missing_is_unknown_but_empty_directory_is_measured(self):
+    def test_a_folder_that_does_not_exist_is_absent_and_complete(self):
+        # A fresh install has no hooks or updater log folder yet: nothing to retain, measured.
         absent = self.lp.sweep_report(self.base / "absent")
         empty = self.lp.sweep_report(self.logs)
-        self.assertEqual(absent["status"], "unknown")
-        self.assertIsNone(absent["observed_count"])
+        self.assertEqual((absent["status"], absent["observed_count"], absent["absent"]), ("complete", 0, True))
+        self.assertEqual((absent["rotated"], absent["refused"], absent["failed"], absent["reasons"]), (0, 0, 0, {}))
         self.assertEqual(empty["status"], "complete")
         self.assertEqual(empty["observed_count"], 0)
+        self.assertNotIn("absent", empty)
+
+    def test_links_above_the_root_rotate_and_links_below_it_refuse(self):
+        # macOS's /tmp and /var, or a home on a linked volume, sit above the workspace.
+        real = self.base / "real-volume"
+        (real / "ws" / "store" / "logs").mkdir(parents=True)
+        linked_home = self.base / "linked-home"
+        linked_home.symlink_to(real, target_is_directory=True)
+        logs = linked_home / "ws" / "store" / "logs"
+        (logs / "gate.log").write_bytes(b"x" * 100)
+        receipt = self.lp.sweep_report(logs, max_bytes=10, root=linked_home / "ws")
+        self.assertEqual((receipt["status"], receipt["rotated"]), ("complete", 1), receipt)
+        self.assertTrue((real / "ws" / "store" / "logs" / "gate.log.1").exists())
+        # Below the root a link still refuses: the store folder points elsewhere.
+        other = self.base / "other-store"
+        (other / "logs").mkdir(parents=True)
+        (other / "logs" / "gate.log").write_bytes(b"y" * 100)
+        ws2 = real / "ws2"
+        ws2.mkdir()
+        (ws2 / "store").symlink_to(other, target_is_directory=True)
+        refused = self.lp.sweep_report(linked_home / "ws2" / "store" / "logs", max_bytes=10, root=linked_home / "ws2")
+        self.assertEqual(refused["status"], "unknown")
+        self.assertFalse((other / "logs" / "gate.log.1").exists())
+        self.assertFalse(self.lp.rotate(linked_home / "ws2" / "store" / "logs" / "gate.log", max_bytes=10,
+                                        root=linked_home / "ws2"))
 
     def test_unreadable_and_linked_scopes_are_unknown(self):
         linked = self.base / "linked"

@@ -1010,10 +1010,13 @@ def _rotate_logs(base: Path, *, at=None) -> dict:
     scopes = {"engine": lambda: base / "store" / "logs",
               "updater": update_events.directory,
               "hooks": lambda: state_dir / "project-observatory"}
+    # The workspace is the engine scope's trusted root: links at or above it (macOS /tmp,
+    # /var, a linked home) are followed once, links inside it refuse.
+    roots = {"engine": base}
     for name, directory in scopes.items():
         checked_at = iso(at or now())
         try:
-            receipt["scopes"][name] = log_policy.sweep_report(directory())
+            receipt["scopes"][name] = log_policy.sweep_report(directory(), root=roots.get(name))
         except Exception:  # rotation must not fail maintenance or leak external diagnostics
             receipt["scopes"][name] = log_policy.unknown_report()
         receipt["scopes"][name]["checked_at"] = checked_at
@@ -1049,6 +1052,8 @@ def log_retention_status(raw, *, at=None) -> dict:
                  and (row["status"] != "unknown" or row["observed_count"] is None))
         result["scopes"][name] = ({k: row[k] for k in ("status", "observed_count", "rotated", "refused", "failed", "reasons")}
                                     if valid else log_policy.unknown_report("receipt_unreadable"))
+        if valid and row.get("absent") is True and row["status"] == "complete" and row["observed_count"] == 0:
+            result["scopes"][name]["absent"] = True
         measured = parse_iso(row.get("checked_at")) if isinstance(row, dict) else None
         age_scope = (at - measured).total_seconds() if measured else None
         if age_scope is None or age_scope < 0:
