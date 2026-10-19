@@ -1215,6 +1215,41 @@ files under the home directory, walked once a day within a time budget, and neve
 removes one. If the guard has not reported for three hours while
 `auto_cleanup` is on, the finding `machine.guard_idle` says so.
 
+## Join an organization server (device enrollment)
+
+An organization that runs a `fabric-device/0.1` server (contract DEC-0031) can enroll this machine so that its
+activity for that organization (the daily `grant.usage` of agents you share into it) reaches the organization's
+server, signed by this machine. An administrator issues a single-use enrollment token; put it in a vault slot, never on
+a command line:
+
+```bash
+python "$(project-observatory full-path)/tools/vault.py" put my-org prod ENROLLMENT_TOKEN   # the token on stdin
+project-observatory full org enroll --server https://org.example --org org_example --token-slot my-org/prod/ENROLLMENT_TOKEN
+project-observatory full org status
+```
+
+The token is read from the slot for that one request and is never stored, printed or logged. Enrollment creates this
+machine's device keys if it has none (`full node --init`), sends a certificate request signed by its `#sig` key, and
+keeps the 7-day certificate, the stream epoch and the protocols the server accepts under the workspace's
+`node/orgs/<org id>/`, owner-only. From then on the hourly maintenance job runs `full org tick`: it rotates the
+certificate at two thirds of its life, checks in, sends share registrations, collects `grant.usage` and empties the
+outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
+
+- `org status` shows each organization's server, certificate expiry and whether rotation is due, the last check-in,
+  the outbox depth and the last batch's result, and `degraded` lines: `org:needs-enrollment` (the certificate expired
+  or the server asked for re-enrollment: enroll again with a new token), `org:share-registration-not-listed` (the
+  server does not accept `share-registration/1` yet, so neither registrations nor `grant.usage` are sent),
+  `org:share-registration-refused` (a typed refusal that waits for your estate record to change) and
+  `org:outbox-retrying`.
+- `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
+- `org leave --org <id>` removes this machine's local state for that organization. The device keys stay. The
+  organization keeps its records until an administrator retires the device.
+- Share registrations come only from the estate revision this machine verified and applied
+  (`org records apply --record FILE`, and `--delta FILE` for revocation-delta pages); a draft is never sent.
+
+Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
+offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.
+
 ## Organizations and resources
 
 **Which repository owners are yours** is a separate, smaller file,

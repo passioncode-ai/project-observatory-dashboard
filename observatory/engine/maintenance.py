@@ -884,6 +884,21 @@ def configuration_enabled(base: Path, name: str) -> bool:
     return (doc.get("features") or {}).get(name) is True
 
 
+def step_org(base: Path, commands: "Commands") -> dict:
+    """Organization enrollments (OBS-161): rotation before expiry, a signed check-in, share registrations, grant
+    usage and the activity outbox, through `full org tick`. Nothing runs on a machine with no enrollment; a failure is
+    recorded, never raised."""
+    orgs = base / "node" / "orgs"
+    if not orgs.is_dir() or not any((p / "enrollment.json").exists() for p in orgs.iterdir() if p.is_dir()):
+        return {"result": "none"}
+    code, doc, tail = commands.full("org", "tick", timeout=300)
+    rows = doc.get("organizations") if isinstance(doc.get("organizations"), list) else []
+    summary = [{"org": r.get("org"), "result": r.get("result") or ("error" if r.get("error") else "ran")}
+               for r in rows if isinstance(r, dict)]
+    return {"result": "ran" if code == 0 else "error", "organizations": summary,
+            **({"detail": tail} if code != 0 and tail else {})}
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
              clock=time.monotonic, guard=step_guard) -> dict:
@@ -946,6 +961,8 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
             if services is not None:
                 report["jobs"] = step_jobs()
+        if not report["update"]["result"].startswith("updated"):
+            report["org"] = step_org(base, commands or Commands(base))
         state["pass"] = {"at": iso(at)}
         report["log_retention"] = state["log_retention"] = _rotate_logs(base)
         write_state(base, state)

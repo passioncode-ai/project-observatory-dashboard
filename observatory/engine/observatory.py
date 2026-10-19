@@ -509,7 +509,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
                                ed25519 key, copy its public line, send it to GitHub or a server;
                                the private key is never shown or moved
-  scan-mcp                     the MCP servers your agent configs declare (integration mcp)
+  org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
+                               enrollments (fabric-device/0.1): enroll with a token from a vault slot,
+                               signed check-ins, rotation, the activity outbox, share registrations
+  scan-mcp                    the MCP servers your agent configs declare (integration mcp)
   scan-spend                   this month's provider spend across every account the doors hold, for the
                                L0 limit and its 80 % warning, and each project's month and last 30 days
                                by key hash (tools/spend.py project; integration openrouter)
@@ -758,6 +761,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import access_binding_cli
         return argparse_refusal(lambda: access_binding_cli.parser().parse_args(rest))
+    if name == "org":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import org as org_cli
+        return argparse_refusal(lambda: org_cli.parser().parse_args(rest))
     if name == "memory-http":
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service
@@ -1158,6 +1165,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return ssh_keys.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "org":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import org as org_cli
+        return org_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])
