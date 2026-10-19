@@ -3,6 +3,30 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **Fabric's project id on every project** (OBS-160; Fabric CO-331, fabric-agent-contract DEC-0089). Fabric owns
+  the canonical project id. A new tick step, `fabric-attribution` (and `full fabric-attribution`), asks Fabric's
+  hub `fabric.project.resolve` for every folder the registry holds and records `fabric:<uuid>` on the project in
+  `store/raw/fabric-attribution.json`, with its provenance (Fabric, the hub's pid, the time) and a history of
+  every addition, replacement and withdrawal. The hub is reached only at the origin `hub.json` names, only on
+  `127.0.0.1` and only while its pid is alive; access is asked once with `fabric.access.request`, and the binding
+  credential stays in an owner-only file and goes nowhere else. A project whose folders resolve to two Fabric
+  projects is the finding `fabric.attribution_conflict`, never a merge. An unreachable hub is named in
+  `degraded` and changes nothing recorded.
+- **`project.resolve` answers `fabric:<uuid>` and absolute folders.** A folder is attributed by the contract's
+  folder rules (`folder_attribution.py`, a port checked against all of the contract's vectors), with the `_*`
+  folders under the projects root and `config/folder_exclusions.json` as declared containers. The output
+  schema's `matched.via` gains `folder`; the release that ships it pins the schema at its own tag.
+
+### Changed
+
+- **The SessionStart hook asks Fabric which project a session's folder is**, then the contract's folder rules
+  while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
+  project on its own rules first.
+
 ## 0.25.0 (2026-10-19)
 
 The recovery work of 2026-10-13 lands on this line. Cleanup keeps local work it cannot verify, rechecks every target
