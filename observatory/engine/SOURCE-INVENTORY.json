@@ -307,8 +307,8 @@
       "path": "collectors/scan_digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cde6b278d2e3d537ec2fa96d8d6bbc413b0490a1a724e372ae8b0bf8522c28ec",
-      "bytes": 8955
+      "export_sha256": "fc34c08d00f5864786cb8befecbc7a8952b60cd83f3624221a62056f55d9bbe7",
+      "bytes": 10266
     },
     {
       "path": "collectors/scan_domains.py",
@@ -884,8 +884,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "24982d1d0f4adf8f75e0ddb6434ec63fbf5b3ac78660caec962a468d7845b048",
-      "bytes": 118745,
+      "export_sha256": "6dd12fd3cf62fba352f6ea59c014523294dc619a165f6088868e440d404410df",
+      "bytes": 118989,
       "upstream_modified": true
     },
     {
@@ -3302,8 +3302,8 @@
       "path": "tests/test_digitalocean_account.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "563c559602e799d5595cfca91b16d22c03a43677c4fd5454aa7452068529ad04",
-      "bytes": 29928
+      "export_sha256": "393ab7238732cff9ee4b80939d42d6d7d60070df7359bc465fe76ddb57fd01c5",
+      "bytes": 38224
     },
     {
       "path": "tests/test_digitalocean_door.py",
@@ -5108,15 +5108,15 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e0a11df627aabe842a57263c068133488989806540cedd1a0a9594af87a28721",
-      "bytes": 78341
+      "export_sha256": "c8700f993b6f61eb7691a99b172975ab04151c221a732f32846871e48931b2ad",
+      "bytes": 83762
     },
     {
       "path": "tools/digitalocean_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3c22f4048a273eee1fa25919af09da7643e38bd0338334a8e94d995989202111",
-      "bytes": 6070
+      "export_sha256": "044dcd2dc02626802b72ca9a9ec60213894b3f979ba5b9c86465dea20120414e",
+      "bytes": 6384
     },
     {
       "path": "tools/disk_guard.py",

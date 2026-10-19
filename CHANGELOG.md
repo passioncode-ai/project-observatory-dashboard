@@ -28,7 +28,13 @@ while the major version is 0, a minor release may change behaviour and says so h
     Droplets with their monthly price, App Platform apps with the repositories they deploy from, databases without
     their credentials, volumes and domains. It reads with the team's `observatory-read` token when one is installed,
     else its stashed token, and says which. A 401 (the team), 403 (a resource) or 429 (a resource, with the wait) is
-    named in `degraded`; the rest still lands.
+    named in `degraded`; the rest still lands, as does every row but a malformed one, and a team not
+    reached before the step's deadline is named while what was read is written.
+  - What the door refuses: a team's own stashed token, or any token that can read outside its preset's
+    scopes, installed as a narrow token; an install over a label already installed (`rotate` replaces it and
+    revokes the old one); a value with whitespace or a control character, before any header is built. `revoke` of
+    a token whose value is gone claims nothing and keeps the record (`revoke LABEL --forget` drops it, saying no
+    revocation was observed). Install, rotate and revoke hold one lock beside the records.
   - Two findings: `digitalocean.droplet_off_billed` (a powered-off Droplet is billed in full until destroyed) and
     `digitalocean.app_down` (an App Platform app with no active deployment; its project named only through a
     repository the registry already ties to one), plus `digitalocean.snapshot_stale` past two days.

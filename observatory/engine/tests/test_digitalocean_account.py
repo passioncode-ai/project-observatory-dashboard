@@ -37,8 +37,16 @@ ADMIN_B = "dop_v1_" + "b2" * 32
 NARROW = "dop_v1_" + "c3" * 32
 NARROW_NEW = "dop_v1_" + "d4" * 32
 FOREIGN = "dop_v1_" + "e5" * 32
+BROAD_A = "dop_v1_" + "a7" * 32          # team A, full access, but not the stashed one
+READ2 = "dop_v1_" + "b8" * 32
+ROT_A, ROT_B = "dop_v1_" + "c9" * 32, "dop_v1_" + "da" * 32
+ROT_C, ROT_D = "dop_v1_" + "1c" * 32, "dop_v1_" + "2d" * 32
+NEWLINED = "dop_v1_" + "eb" * 16 + "\n" + "fc" * 16    # http.client quotes such a header in its error
 DB_SECRET = "db-secret-" + "f6" * 10
-VALUES = (ADMIN_A, ADMIN_B, NARROW, NARROW_NEW, FOREIGN, DB_SECRET)
+VALUES = (ADMIN_A, ADMIN_B, NARROW, NARROW_NEW, FOREIGN, BROAD_A, READ2, ROT_A, ROT_B, ROT_C, ROT_D, DB_SECRET,
+          "eb" * 16, "fc" * 16)
+#: What a narrow token of the fake cannot read: the probes outside its preset.
+NARROW_FORBID = ["/v2/customers", "/v2/account/keys", "/v2/tags"]
 TEAM_A = {"uuid": "11111111-1111-4111-8111-111111111111", "name": "Example Team"}
 TEAM_B = {"uuid": "22222222-2222-4222-8222-222222222222", "name": "Other Team"}
 
@@ -60,12 +68,19 @@ class Provider:
         self.tokens = {
             ADMIN_A: {"team": TEAM_A, "alive": True, "forbid": [], "org": True},
             ADMIN_B: {"team": TEAM_B, "alive": True, "forbid": [], "org": False},
-            NARROW: {"team": TEAM_A, "alive": True, "forbid": ["/v2/customers"], "org": False},
-            NARROW_NEW: {"team": TEAM_A, "alive": True, "forbid": ["/v2/customers"], "org": False},
+            NARROW: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
+            NARROW_NEW: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
             FOREIGN: {"team": TEAM_B, "alive": True, "forbid": [], "org": False},
+            BROAD_A: {"team": TEAM_A, "alive": True, "forbid": [], "org": False},
+            READ2: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
+            ROT_A: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
+            ROT_B: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
+            ROT_C: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
+            ROT_D: {"team": TEAM_A, "alive": True, "forbid": list(NARROW_FORBID), "org": False},
         }
         self.revocable = True           # does the OAuth revoke endpoint kill a PAT?
         self.rate_limited: set[str] = set()
+        self.delay = 0.0                # seconds per request, to widen a race window
         self.calls: list[tuple[str, str, str]] = []   # (method, path, team uuid or "?")
         self.created_teams: list[dict] = []
         self.data = {
@@ -88,6 +103,7 @@ class Provider:
                         {"name": "w", "git": {"repo_clone_url": "https://github.com/example-org/broken.git"}}]},
                      "region": {"slug": "nyc"}, "created_at": "2026-03-01T00:00:00Z",
                      "in_progress_deployment": {"id": "dep-9", "phase": "ERROR"}},
+                    {"id": "app-3", "spec": {"name": "odd", "services": [{"name": "w", "github": "not-an-object"}]}},
                 ],
                 "databases": [
                     {"id": "db-1", "name": "shop-db", "engine": "pg", "version": "16", "size": "db-s-1vcpu-1gb",
@@ -131,6 +147,9 @@ def serve(provider: Provider) -> tuple[http.server.ThreadingHTTPServer, str]:
             path = url.path
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b""
+            if provider.delay:
+                import time
+                time.sleep(provider.delay)
             tok = provider.tokens.get(self._token())
             provider.calls.append((method, path, tok["team"]["uuid"] if tok else "?"))
             if path == "/v1/oauth/revoke":
@@ -171,6 +190,8 @@ def serve(provider: Provider) -> tuple[http.server.ThreadingHTTPServer, str]:
                                                  "name": doc.get("name")},
                                         "invitations": [{"email": i["email"], "status": "ok"}
                                                         for i in doc.get("invitations") or []]})
+            if path in ("/v2/account/keys", "/v2/tags"):
+                return self._send(200, {path.rsplit("/", 1)[1]: [], "links": {}, "meta": {"total": 0}})
             if path == "/v2/customers/my/balance":
                 return self._send(200, data["balance"])
             if path.startswith("/v2/domains/"):
@@ -251,6 +272,13 @@ def case_stash_teams_and_members(tmp: pathlib.Path, env: dict, provider: Provide
           r.returncode == 0 and "other-team" in r.stdout and clean(out), out[-300:])
     meta_b = json.loads((stash.parent / "other-team.meta.json").read_text())
     check("its record says it came from doctl, by context name", meta_b.get("source") == "doctl:work", str(meta_b))
+    real = tmp / "doctl-config.yaml"
+    link = tmp / "doctl-link.yaml"
+    link.symlink_to(real)
+    r = door(dict(env, DOCTL_CONFIG=str(link)), "stash", "--from-doctl", "work")
+    check("a symlinked doctl config is refused", r.returncode != 0 and "symbolic link" in r.stderr,
+          r.stderr[-200:])
+    link.unlink()
     r = door(env, "stash", "--from-doctl", "nosuch")
     check("an unknown doctl context is refused by name, listing the known ones",
           r.returncode != 0 and "work" in r.stderr and clean(r.stderr), r.stderr[-200:])
@@ -374,6 +402,86 @@ def case_issue_install_rotate_revoke(tmp: pathlib.Path, env: dict, provider: Pro
           not all_files_clean(tmp), str(all_files_clean(tmp)))
 
 
+def case_review_round_1(tmp: pathlib.Path, env: dict, provider: Provider) -> None:
+    """The first adversarial round on #306: each HIGH and MEDIUM, as the operator would hit it."""
+    vault = tmp / "vault"
+    # HIGH 2: the team's own token, or any token wider than its preset, is never installed as narrow.
+    r = door(env, "install", "--preset", "read-only", "--team", "example-team", "--vault", "r1/prod/DO_TOKEN",
+             stdin=ADMIN_A + "\n")
+    check("install refuses the team's own stashed token", r.returncode != 0 and "stashed token" in r.stderr
+          and not (vault / "r1").exists() and clean(r.stdout + r.stderr), r.stderr[-300:])
+    r = door(env, "install", "--preset", "read-only", "--team", "example-team", "--vault", "r1/prod/DO_TOKEN",
+             stdin=BROAD_A + "\n")
+    check("install refuses a token broader than its preset", r.returncode != 0 and "broader" in r.stderr
+          and "/v2/account/keys" in r.stderr and not (vault / "r1").exists(), r.stderr[-300:])
+
+    # MEDIUM 4: installing over a live label would orphan the old token.
+    r = door(env, "install", "--preset", "read-only", "--team", "example-team", "--vault", "r1/prod/DO_TOKEN",
+             stdin=ROT_A + "\n")
+    check("a narrow token installs", r.returncode == 0, (r.stdout + r.stderr)[-300:])
+    label = "read-only--r1-prod-do_token"
+    r = door(env, "install", "--preset", "read-only", "--team", "example-team", "--vault", "r1/prod/DO_TOKEN",
+             stdin=ROT_B + "\n")
+    slot = vault / "r1" / "prod" / "DO_TOKEN"
+    check("install over an installed label is refused and names rotate",
+          r.returncode != 0 and "rotate" in r.stderr and slot.read_text().strip() == ROT_A, r.stderr[-300:])
+
+    # MEDIUM 5: two rotations at once are serialised: both counted, every replaced value revoked.
+    provider.delay = 0.3       # each run spends seconds between its first read and its last write
+    procs = [subprocess.Popen([sys.executable, str(DOOR), "rotate", label], env=env, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in (0, 1)]
+    for p, v in zip(procs, (ROT_C, ROT_D)):
+        p.stdin.write(v + "\n")
+        p.stdin.close()
+    outs = [(p.stdout.read(), p.stderr.read(), p.wait(timeout=120))[:2] for p in procs]
+    provider.delay = 0.0
+    rec = json.loads((tmp / "secrets" / "digitalocean-issued" / f"{label}.meta.json").read_text())
+    held = slot.read_text().strip()
+    alive = [v for v in (ROT_A, ROT_C, ROT_D) if provider.tokens[v]["alive"]]
+    check("concurrent rotations both count, and only the held value stays alive",
+          all(p.returncode == 0 for p in procs) and rec.get("rotations") == 2 and alive == [held],
+          f"rotations={rec.get('rotations')} alive={len(alive)} codes={[p.returncode for p in procs]} "
+          f"{[o[1][-200:] for o in outs]}")
+    check("and neither prints a value", all(clean(o[0] + o[1]) for o in outs))
+    check("the doors hold one records lock around install, rotate and revoke",
+          DOOR.read_text().count("with records_lock():") == 3)
+
+    # HIGH 1: with its value gone, revoke claims nothing and keeps the record.
+    slot.unlink()
+    r = door(env, "revoke", label)
+    rec_file = tmp / "secrets" / "digitalocean-issued" / f"{label}.meta.json"
+    check("revoke with no value refuses, keeps the record and says it cannot prove anything",
+          r.returncode != 0 and rec_file.is_file() and "cannot revoke" in r.stderr
+          and "revoked" not in r.stdout, (r.stdout + r.stderr)[-300:])
+    r = door(env, "revoke", label, "--forget")
+    check("revoke --forget drops the record and says no revocation was observed",
+          r.returncode == 0 and not rec_file.exists() and "did NOT observe" in r.stdout, r.stdout[-300:])
+
+    # HIGH 3: a value with a newline never reaches a header, and nothing prints it.
+    planted = vault / "r3" / "prod" / "DIGITALOCEAN_TOKEN"
+    planted.parent.mkdir(parents=True, mode=0o700)
+    planted.write_text(NEWLINED + "\n")
+    planted.chmod(0o600)
+    r = door(env, "teams", "--probe")
+    check("teams --probe over a slot with a newline inside its value prints no value and no traceback",
+          r.returncode == 0 and clean(r.stdout + r.stderr) and "Traceback" not in r.stderr
+          and "r3/prod/DIGITALOCEAN_TOKEN" in r.stdout, (r.stdout + r.stderr)[-400:])
+    rec_file.write_text(json.dumps({"kind": "installed", "label": label, "preset": "read-only",
+                                    "team_label": "example-team", "team_uuid": TEAM_A["uuid"],
+                                    "vault": "r3/prod/DIGITALOCEAN_TOKEN", "rotations": 0}))
+    rec_file.chmod(0o600)
+    for args, stdin in ((("ping",), None), (("revoke", label), None), (("rotate", label), READ2 + "\n")):
+        r = door(env, *args, stdin=stdin)
+        check(f"{args[0]} over that slot prints no value and no traceback",
+              clean(r.stdout + r.stderr) and "Traceback" not in r.stderr, (r.stdout + r.stderr)[-300:])
+    r = door(env, "stash", stdin="dop_v1_" + "ab" * 8 + "\x07" + "cd" * 8 + "\n")
+    check("a control character on stdin is refused before anything is sent",
+          r.returncode != 0 and "cannot have" in r.stderr, r.stderr[-200:])
+    rec_file.unlink()
+    planted.unlink()
+    provider.tokens[READ2]["alive"] = True
+
+
 def case_api_override_is_loopback_only(env: dict) -> None:
     e = dict(env, OBSERVATORY_DO_API="https://evil.example.invalid")
     r = door(e, "teams")
@@ -421,9 +529,18 @@ def case_collector(tmp: pathlib.Path, env: dict, provider: Provider) -> None:
     check("a 429 is named as a rate limit with its wait",
           any(d["source"].endswith("example-team/volumes") and "429" in d["reason"] and "30" in d["reason"]
               for d in doc.get("degraded", [])), str(reasons))
+    check("one malformed app row is skipped and named; the other apps land",
+          len(a.get("apps") or []) == 2 and any(d["source"].endswith("example-team/apps") and "1 row" in d["reason"]
+                                                 for d in doc.get("degraded", [])), str(doc.get("degraded")))
     b = teams.get("other-team", {})
     check("a team read with its stashed token says so", b.get("token_kind") == "stash", str(b))
 
+    import time as _time
+    r = subprocess.run([sys.executable, str(SCAN), str(out_file)], capture_output=True, text=True, timeout=120,
+                       env=dict(env, OBSERVATORY_STEP_DEADLINE=str(_time.time() + 5)))
+    doc = json.loads(out_file.read_text())
+    check("past the step's deadline the scan is still written, naming the teams it did not read",
+          r.returncode == 0 and any("deadline" in d["reason"] for d in doc["degraded"]), str(doc["degraded"])[:300])
     provider.tokens[ADMIN_B]["alive"] = False
     r = subprocess.run([sys.executable, str(SCAN), str(out_file)], env=env,
                        capture_output=True, text=True, timeout=120)
@@ -457,6 +574,11 @@ def case_findings(provider: Provider) -> None:
           down and "shop" in down.get("detail", "") and "ERROR" in down.get("detail", ""), str(down))
     check("an active Droplet and a serving app raise nothing",
           types.count("digitalocean.droplet_off_billed") == 1 and types.count("digitalocean.app_down") == 1)
+    doc["teams"][0]["apps"].append({"id": "app-4", "name": "first", "serving": False, "repositories": [],
+                                    "last_phase": "BUILDING"})
+    building = F.findings(doc, repos, relations, today=date(2026, 10, 20))
+    check("an app whose first deployment is still building is not flagged",
+          not any(r["subject"].endswith(":app-4") for r in building))
     stale = F.findings(doc, repos, relations, today=date(2026, 10, 25))
     check("a stale scan says only that it is stale",
           [r["type"] for r in stale] == ["digitalocean.snapshot_stale"], str(stale)[:200])
@@ -478,11 +600,10 @@ def main() -> int:
             case_team_create(env, provider)
             case_issue_install_rotate_revoke(tmp, env, provider)
             case_api_override_is_loopback_only(env)
+            case_review_round_1(tmp, env, provider)
             # The collector reads with an observatory-read token where one is installed.
-            r = door(env, "install", "--preset", "observatory-read", "--team", "example-team", stdin=NARROW_NEW + "\n")
-            provider.tokens[NARROW_NEW]["alive"] = True
-            r = door(env, "install", "--preset", "observatory-read", "--team", "example-team", stdin=NARROW_NEW + "\n")
-            check("a fresh observatory-read token installs", r.returncode == 0, (r.stdout + r.stderr)[-300:])
+            r = door(env, "rotate", "observatory-read--example-team", stdin=READ2 + "\n")
+            check("the collector's read token is replaced by rotate", r.returncode == 0, (r.stdout + r.stderr)[-300:])
             case_collector(tmp, env, provider)
         case_findings(provider)
     finally:

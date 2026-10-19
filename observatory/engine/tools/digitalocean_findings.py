@@ -31,6 +31,9 @@ if _DASHBOARD not in _sys.path:
     _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
 from finding_types import titled  # noqa: E402
 
+#: Deployment phases of a deployment still on its way (App Platform's phase enum).
+IN_PROGRESS = frozenset({"PENDING", "PENDING_BUILD", "BUILDING", "PENDING_DEPLOY", "DEPLOYING"})
+
 #: Days past which the scan is stale; the tick refreshes it daily.
 STALE_AFTER_DAYS = 2
 
@@ -72,7 +75,8 @@ def app_down(teams: list[dict], index: dict[str, str]) -> list[dict]:
     out = []
     for t in teams:
         for a in t.get("apps") or []:
-            if a.get("serving"):
+            # A first deployment still on its way is not an app down: it has never served yet.
+            if a.get("serving") or a.get("last_phase") in IN_PROGRESS:
                 continue
             project = next((index[r] for r in a.get("repositories") or [] if r in index), None)
             phase = a.get("last_phase")

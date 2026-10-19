@@ -38,8 +38,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 import atomic  # noqa: E402
+import step_budget  # noqa: E402
 import digitalocean as door  # noqa: E402
 
+#: Seconds kept for writing the scan when the tick's deadline nears: a team not started by then
+#: is named in `degraded` and what was read is written (OBS-40's partial answer).
+WRITE_RESERVE = 15
 #: (field in the raw file, listing path, the key DigitalOcean answers with).
 LISTINGS = (("droplets", "/v2/droplets", "droplets"), ("apps", "/v2/apps", "apps"),
             ("databases", "/v2/databases", "databases"), ("volumes", "/v2/volumes", "volumes"),
@@ -138,7 +142,17 @@ def read_team(label: str, meta: dict, value: str, kind: str, degraded: list[dict
         degraded.append({"source": f"digitalocean:{label}/balance", "reason": str(e)[:200]})
     for field, path, key in LISTINGS:
         try:
-            team[field] = [ROWS[field](r) for r in door._pages(path, value, key)]
+            rows, bad = [], 0
+            for r in door._pages(path, value, key):
+                # ONE MALFORMED ROW is that row's problem: it is counted, the others land.
+                try:
+                    rows.append(ROWS[field](r))
+                except Exception:  # noqa: BLE001
+                    bad += 1
+            team[field] = rows
+            if bad:
+                degraded.append({"source": f"digitalocean:{label}/{field}",
+                                 "reason": f"{bad} row(s) not in the shape this collector reads; skipped"})
         except door.ApiError as e:
             team[field] = None
             degraded.append({"source": f"digitalocean:{label}/{field}", "reason": str(e)})
@@ -166,8 +180,18 @@ def main(argv: list[str]) -> int:
     except (door.DoorError, RuntimeError) as e:
         tokens = []
         degraded.append({"source": "digitalocean", "reason": f"the door's stash could not be read: {str(e)[:160]}"})
-    for label, meta, value, kind in tokens:
-        row = read_team(label, meta, value, kind, degraded)
+    for i, (label, meta, value, kind) in enumerate(tokens):
+        if step_budget.remaining() < WRITE_RESERVE:
+            left = [t[0] for t in tokens[i:]]
+            degraded.append({"source": "digitalocean", "reason":
+                             f"the step's deadline came first; not read: {', '.join(left)}"})
+            break
+        try:
+            row = read_team(label, meta, value, kind, degraded)
+        except Exception as e:  # noqa: BLE001  one team's surprise never costs the others their scan
+            row = None
+            degraded.append({"source": f"digitalocean:{label}",
+                             "reason": f"the team could not be read ({type(e).__name__}); details withheld"})
         if row:
             teams.append(row)
     if not tokens and not degraded:

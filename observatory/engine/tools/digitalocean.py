@@ -826,16 +826,29 @@ def _endpoint(path: str) -> str:
     return path.split("?", 1)[0]
 
 
+#: What a token may contain: printable ASCII, no space. A value with a newline or a control
+#: character makes http.client raise an error whose MESSAGE quotes the header, value included,
+#: so such a value is refused before any header is built.
+TOKEN_SHAPE = re.compile(r"[\x21-\x7e]{1,512}")
+
+
+def token_ok(value: object) -> bool:
+    return isinstance(value, str) and TOKEN_SHAPE.fullmatch(value) is not None
+
+
 def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
           content_type: str = "application/json") -> dict:
     """One call. The error names the endpoint and the status, never a header or a body."""
     import urllib.error
     import urllib.request
-    req = urllib.request.Request(url, data=body, method=method,
-                                 headers={"Authorization": f"Bearer {token}", "Content-Type": content_type,
-                                          "User-Agent": "project-observatory"})
     endpoint = _endpoint(urllib.parse.urlsplit(url).path)
+    if not token_ok(token):
+        raise DoorError(f"a value meant for {endpoint} is not shaped like a token (whitespace or a "
+                        "control character inside it); it was not sent")
     try:
+        req = urllib.request.Request(url, data=body, method=method,
+                                     headers={"Authorization": f"Bearer {token}", "Content-Type": content_type,
+                                              "User-Agent": "project-observatory"})
         with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()
     except urllib.error.HTTPError as e:
@@ -845,6 +858,8 @@ def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
         raise ApiError(e.code, endpoint, wait if (wait or "").isdigit() else None) from None
     except OSError as e:
         raise DoorError(f"DigitalOcean unreachable on {endpoint}: {type(e).__name__}") from None
+    except Exception as e:  # noqa: BLE001  any other message may quote the request; only the class leaves
+        raise DoorError(f"the call to {endpoint} failed ({type(e).__name__}); details withheld") from None
     try:
         doc = json.loads(raw) if raw.strip() else {}
     except ValueError:
@@ -896,6 +911,8 @@ def one_value(raw: str) -> str:
         raise DoorError("nothing arrived on stdin")
     if len(value.split()) > 1:
         raise DoorError(f"{len(value.split())} whitespace-separated pieces arrived on stdin, not one token")
+    if not token_ok(value):
+        raise DoorError("what arrived on stdin has a character a token cannot have")
     return value
 
 
@@ -943,6 +960,12 @@ def stash_of(label: str) -> tuple[pathlib.Path, dict]:
             return path, meta
     have = ", ".join(n for n, _p, _m in stashes()) or "none"
     raise DoorError(f"no stashed team called {label!r} (have: {have}); `digitalocean.py stash` first")
+
+
+def records_lock():
+    """One writer at a time over the records, the read store and the slots they name: held from
+    the first read of a record to its last write (install, rotate, revoke)."""
+    return private_io.lock(RECORDS / ".lock")
 
 
 def records() -> list[tuple[str, pathlib.Path, dict]]:
@@ -1032,12 +1055,20 @@ def cmd_stash(from_doctl: str | None) -> int:
         print(_stash_value(one_value(sys.stdin.read()), "stdin"))
         return 0
     path = doctl_config_path()
+    if path.is_symlink():
+        raise DoorError("doctl's config is a symbolic link; refusing to follow it")
     try:
         ctxs = doctl_contexts(private_io.read(path) if path.is_file() else "")
     except RuntimeError:
-        # doctl writes its config 0600; a wider file is still readable, but say so.
-        ctxs = doctl_contexts(path.read_text(encoding="utf-8"))
-        print(f"note: doctl's config is readable beyond its owner; `chmod 600` it", file=sys.stderr)
+        # doctl writes its config 0600; a wider file is still readable, but say so. Opened without
+        # following a link, and only as a regular file.
+        import stat as _stat
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, encoding="utf-8") as f:
+            if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                raise DoorError("doctl's config is not a regular file") from None
+            ctxs = doctl_contexts(f.read())
+        print("note: doctl's config is readable beyond its owner; `chmod 600` it", file=sys.stderr)
     if not ctxs:
         raise DoorError(f"no doctl context holds a token (looked in doctl's config: {path.name})")
     wanted = sorted(ctxs) if from_doctl == "all" else [from_doctl]
@@ -1265,6 +1296,33 @@ def _prove(value: str, preset: str, domain: str | None) -> None:
             raise DoorError(f"the token cannot do its preset's read {_endpoint(path)}: {e}") from None
 
 
+#: Reads OUTSIDE a preset's scopes: a token that can do one of them is broader than declared.
+#: Reads only; a 200 is the evidence (a 404 proves nothing either way).
+BREADTH_PROBES = (("ssh_key:read", "/v2/account/keys?per_page=1"), ("tag:read", "/v2/tags?per_page=1"),
+                  ("billing:read", "/v2/customers/my/balance"), ("droplet:read", "/v2/droplets?per_page=1"),
+                  ("app:read", "/v2/apps?per_page=1"), ("domain:read", "/v2/domains?per_page=1"),
+                  ("database:read", "/v2/databases?per_page=1"))
+
+
+def _refuse_broad(value: str, preset: str) -> None:
+    """A narrow preset must not carry a team's own token, nor any token wider than its scopes."""
+    for label, path, _meta in stashes():
+        if _same(private_io.read(path).strip(), value):
+            raise DoorError(f"refused: this is the stashed token of team {label}, not a narrow token; mint a "
+                            f"new one with the preset's scopes (`digitalocean.py presets`)")
+    scopes = set(PRESETS[preset]["scopes"])
+    for scope, path in BREADTH_PROBES:
+        if scope in scopes:
+            continue
+        try:
+            _api(path, value)
+        except DoorError:
+            continue
+        raise DoorError(f"refused: the token can read {_endpoint(path)} ({scope}), which preset {preset} does "
+                        f"not include; it is broader than declared (full access?). Mint it with only the "
+                        f"preset's scopes")
+
+
 def _verify_team(value: str, team_uuid: str | None, team: str) -> dict:
     try:
         acct = account_of(value)
@@ -1306,13 +1364,25 @@ def cmd_install(preset: str, team: str, target: str | None, domain: str | None,
     if sys.stdin.isatty():
         raise DoorError("give the token on stdin (e.g. `pbpaste | digitalocean.py install ...`)")
     value = one_value(sys.stdin.read())
+    with records_lock():
+        return _install_locked(value, preset, team, vault_spec, domain, project, expires_on)
+
+
+def _install_locked(value: str, preset: str, team: str, vault_spec: str | None, domain: str | None,
+                    project: str | None, expires_on: str | None) -> int:
+    p = PRESETS[preset]
     _path, meta = stash_of(team)
     where = plan(vault_spec) if vault_spec else None       # the vault's own refusals, before anything
-    acct = _verify_team(value, meta.get("team_uuid"), team)
-    _prove(value, preset, domain)
     label = _label(preset, team, where)
     rec_path = RECORDS / f"{label}.meta.json"
     prior = read_record(rec_path)
+    if prior or (not where and (READ_STORE / team).exists()):
+        # Installing over a live token would orphan it: still valid at DigitalOcean, no longer known here.
+        raise DoorError(f"{label} is already installed; replace it with `digitalocean.py rotate {label}` "
+                        f"(the old token is then revoked and proved dead)")
+    acct = _verify_team(value, meta.get("team_uuid"), team)
+    _prove(value, preset, domain)
+    _refuse_broad(value, preset)
     rec = {"kind": "installed", "label": label, "preset": preset, "team_label": team,
            "team_uuid": acct["team_uuid"], "team_name": acct["team_name"],
            "vault": f"{where['project']}/{where['env']}/{where['name']}" if where else None,
@@ -1363,16 +1433,22 @@ def _record(label: str) -> tuple[pathlib.Path, dict]:
 
 
 def cmd_token_rotate(label: str) -> int:
-    rec_path, rec = _record(label)
     if sys.stdin.isatty():
-        raise DoorError("give the NEW token on stdin; mint it in the control panel with the same scopes "
-                        f"({', '.join(PRESETS[rec['preset']]['scopes'])}) at {PANEL_TOKENS}")
+        raise DoorError("give the NEW token on stdin; mint it in the control panel with the preset's scopes "
+                        f"(`digitalocean.py presets`) at {PANEL_TOKENS}")
     value = one_value(sys.stdin.read())
+    with records_lock():
+        return _rotate_locked(label, value)
+
+
+def _rotate_locked(label: str, value: str) -> int:
+    rec_path, rec = _record(label)
     old = _current(rec)
     if old is not None and _same(old, value):
         raise DoorError("the new value is the one already installed; mint a new token")
     _verify_team(value, rec.get("team_uuid"), rec["team_label"])
     _prove(value, rec["preset"], rec.get("domain"))
+    _refuse_broad(value, rec["preset"])
     said = _deliver(value, rec)
     rec.update(rotated_on=today(), rotations=(rec.get("rotations") or 0) + 1)
     write_record(rec_path, rec)
@@ -1389,10 +1465,27 @@ def cmd_token_rotate(label: str) -> int:
     return 2
 
 
-def cmd_revoke(label: str) -> int:
+def cmd_revoke(label: str, forget: bool = False) -> int:
+    with records_lock():
+        return _revoke_locked(label, forget)
+
+
+def _revoke_locked(label: str, forget: bool) -> int:
     rec_path, rec = _record(label)
     value = _current(rec)
-    if value is not None and not revoke_and_prove(value):
+    where = rec.get("vault") or rec.get("destination")
+    if value is None:
+        # No value, no proof: DigitalOcean has no endpoint to revoke a personal token by id, so the
+        # door cannot say whether the token still lives. The record is the only trace of it.
+        if not forget:
+            raise DoorError(f"{label}: its value is gone from {where}, so the door cannot revoke it or prove it "
+                            f"dead; the record is kept. Delete the token in the control panel ({PANEL_TOKENS}), "
+                            f"then `digitalocean.py revoke {label} --forget` drops the record")
+        rec_path.unlink()
+        _journal("forget", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
+        print(f"forgot {label}: record removed; this door did NOT observe a revocation (its value was gone)")
+        return 0
+    if not revoke_and_prove(value):
         raise DoorError(f"DigitalOcean still accepts {label}; nothing was removed here. Delete the token in "
                         f"the control panel ({PANEL_TOKENS}), then run revoke again")
     if rec.get("vault"):
@@ -1525,6 +1618,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("label")
     p = sub.add_parser("revoke", help="revoke at DigitalOcean, prove it, then remove here")
     p.add_argument("label")
+    p.add_argument("--forget", action="store_true",
+                   help="only when the value is gone and the token was deleted in the control panel: drop the record")
     a = ap.parse_args(argv)
     try:
         if a.area == "db":
@@ -1556,13 +1651,17 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_ping()
         if a.area == "rotate":
             return cmd_token_rotate(a.label)
-        return cmd_revoke(a.label)
+        return cmd_revoke(a.label, a.forget)
     except DoorError as e:
         print(f"digitalocean: {e}", file=sys.stderr)
         return 1
     except RuntimeError:
         # private_io's refusals (a wide or symlinked credential file) carry no value; say which class.
         print("digitalocean: a private credential file was refused (mode or symlink); values hidden",
+              file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001  a message can quote a value: only the class is shown
+        print(f"digitalocean: failed ({type(e).__name__}); details withheld so no value can be printed",
               file=sys.stderr)
         return 1
 
