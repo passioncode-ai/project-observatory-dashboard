@@ -48,14 +48,25 @@ and nothing in the ledger can tell it from a measured one.
 
 ## Recording it
 
-The Observatory's Stop hook has already stored the facts as a `proposed` record
-and printed its id. Correct that record rather than creating a second one:
+The Observatory's Stop hook has already stored the facts as a `proposed` record.
+Its id arrives once, as context with the next prompt. There is no ask when, within
+2 seconds of the record being written, the hook finds in the last 4 MB of this
+session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
+`>>`, `tee`, `sed -i`) that targeted a `decisions.md` or an `adr/` `.md`,
+`.markdown` or `.txt` file (outside vendored trees) with the entry's own
+heading (unique in the register) or, with no heading, most of its added lines, or that wrote a `decision:` /
+`stage:` line into `.task-pipeline/run.md`. Failed calls, subagent calls and
+Bash commands over 65,536 characters are not counted. The record then links
+that file, and keeps the link while the entry's exact heading line occurs once
+and the file is unchanged, or has only a new entry appended after it; any other
+edit to the file asks again.
+Correct that record rather than creating a second one:
 
 ```
 observatory_record(
   owner="agent:claude-code",
-  memory_id="<the id the hook printed>",
-  expected_revision=<the revision it printed>,
+  memory_id="<the id the hook gave>",
+  expected_revision=<the revision it gave>,
   statement="<the same claim, unchanged>",
   why="<one or two sentences>"
 )

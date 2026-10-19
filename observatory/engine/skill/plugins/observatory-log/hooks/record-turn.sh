@@ -72,9 +72,16 @@ print(d.get(sys.argv[1]) or "")
 
 cwd="$(read_field cwd)"; [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 session="$(read_field session_id)"
+# The session's own transcript, so a register another session is editing in the same
+# checkout does not silence this session's ask. Passed only to a recorder that reads
+# it: an older engine's argument parser would refuse the flag and record nothing.
+transcript="$(read_field transcript_path)"
+extra=()
+if [ -n "$transcript" ] && [ -f "$transcript" ] && grep -q -- '--transcript' "$root/tools/record_turn.py" 2>/dev/null; then
+  extra=(--transcript "$transcript")
+fi
 
-
-result="$("$py" "$root/tools/record_turn.py" --cwd "$cwd" --session-id "$session" 2>/dev/null)"
+result="$("$py" "$root/tools/record_turn.py" --cwd "$cwd" --session-id "$session" ${extra[@]+"${extra[@]}"} 2>/dev/null)"
 [ -n "$result" ] || exit 0
 
 printf '%s' "$result" | "$py" "${CLAUDE_PLUGIN_ROOT:-$(dirname "$0")/..}/hooks/ask-why.py" 2>/dev/null

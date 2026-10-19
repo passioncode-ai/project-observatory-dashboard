@@ -633,7 +633,131 @@ as `lesson:` notes are converted once with
 (without `--apply` it lists what it would change and writes nothing).
 
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
-use the CLI and MCP without those hooks.
+use the CLI and MCP without those hooks. It declares three, and none of them can
+block a turn or a prompt:
+
+- **SessionStart** prints at most two lines about the project, only when one is
+  actionable.
+- **Stop** records the facts of a turn that changed a watched repository as a
+  `proposed` ledger record, one per session, revised per turn. It writes the
+  record first, then asks for the `why` of that record **once**. It does not ask
+  when this session's own tools already wrote the rationale. That is checked
+  after the record exists, within 2 seconds, from one pass over the last 4 MB of
+  the session's transcript (the Stop payload names it). The pass collects the
+  session's writing calls:
+  - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+  - Bash commands that write a file through `>`, `>>` (also `cat > file <<EOF`),
+    `tee` or `sed -i`, with the files they write.
+
+  The rationale counts in two cases:
+  - **A decision register.** A file named `decisions.md` in any folder and any
+    letter case, or a `.md`, `.markdown` or `.txt` file under an `adr/` directory.
+    It must be outside vendored trees (`vendor/`, `node_modules/`, `third_party/`,
+    `.venv/` and similar) and submodules, and not deleted, and the work must have
+    added at least one non-blank line to it, ignoring whitespace. One of those
+    calls must target that exact file, and its text must carry the addition: the
+    entry's own heading (the shallowest heading the work added, so a Context /
+    Decision / Consequences entry anchors on its title, not on a subheading), or,
+    when the addition has no heading, more than half of the added lines. One
+    common line is not enough. That heading must also appear in the register
+    exactly once as a heading a Markdown reader would see (see below).
+  - **The run ledger.** A `decision:` or `stage:` line in `.task-pipeline/run.md`,
+    consulted only when one of those calls wrote the ledger, or ran task-pipeline's
+    `stage_checkpoint.py`. The ledger's newest 64 KB and newest 200 such lines are
+    read, including when git ignores the file, and the line's text must be in what
+    those calls wrote.
+
+  The pass skips calls whose result was an error, and subagent (`isSidechain`)
+  lines. It does not scan a Bash command longer than 65,536 characters. The `git
+  diff` it reads gets only the time left in the 2 seconds; a diff that needs longer
+  (a register of megabytes) is asked about.
+
+  The turn is asked about in every other case:
+  - another session's edit in the same checkout;
+  - a file the session only read or grepped;
+  - a pull-request body that shares a heading;
+  - a write by a tool the pass does not know (a copy, a script, `perl -i`);
+  - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script
+    containing `|` or `;` (the command is split there);
+  - a relative path written after a `cd` in the same command;
+  - a path whose letter case differs from the file's on a case-insensitive volume;
+  - a subagent's edit;
+  - a failed call;
+  - a command longer than 65,536 characters;
+  - no transcript;
+  - a pass that runs out of its 2 seconds.
+
+  When the rationale counts, a second revision of the same record links that file.
+  The link is fixed in the evidence by four facts, not by the display anchor:
+  - the repository's id;
+  - the register's path in the repository;
+  - the exact raw heading line, at full length;
+  - the length and SHA-256 of the whole register file. No entry boundary is
+    guessed.
+
+  A heading longer than 120 characters is never linked, and the turn is asked
+  about.
+
+  Later revisions carry the link only while it holds **by bytes**, with no
+  Markdown parsing:
+  - this hook wrote it;
+  - it names the current repository;
+  - the stored line occurs exactly once as a whole line of the file;
+  - the file is byte-identical to the linked one, or its first bytes are (same
+    length and SHA-256) and what follows starts, at its first non-blank line, with
+    a column-0 heading no deeper than the entry's own. That append is accepted
+    only when the linked file ended in a newline outside any code fence and HTML
+    comment.
+
+  So appending a later entry keeps the link, and the record stays explained after
+  the register is committed and pushed and after the write scrolls out of the
+  transcript. Any other change to the file drops it, wherever it is: an edit to
+  this entry or to any other, a paragraph or a deeper heading appended, a change
+  of line endings, a `# comment` line inside a code block or HTML comment followed
+  by an edit below it. So does a session that moves
+  to another repository. A dropped link is attributed afresh only from the
+  session's writes after that link was made (a mark of that point is carried in
+  every later revision, so it holds for every later turn), and the turn is asked about when
+  there are none. A wrong ask is accepted; a wrong silence is not.
+
+  Every read of a register or the run ledger, fresh or carried, passes one gate.
+  The path must be inside the checkout, not a symbolic link and not under one.
+  The file is then opened once, without following a link and without blocking. The
+  opened file must be a regular file with a single hard link, and at most its limit
+  plus one byte is read (8 MB for a register).
+
+  A fresh link still uses a Markdown heading scanner, only to choose the anchor.
+  It is a linear pass over the file split on newlines only. A heading has at most
+  three spaces of indent, one to six `#`, then a space or tab, and `## Use C#`
+  keeps its `#`. Lines in fenced code are not headings: a fence closes only on
+  the same character, at least as long, with no info string, and an unclosed
+  fence runs to the end. Lines in a multi-line HTML comment are not headings
+  either. The heading must be the shallowest one the work added and must appear
+  exactly once. An added block whose heading syntax the scanner rejects is asked
+  about, never matched line by line.
+- **UserPromptSubmit** hands that request to the model with the session's next
+  prompt, as context, once. It records the delivery and prints nothing when no
+  request is pending. The context is capped at 4,000 characters. A request that
+  does not fit is not marked delivered: it goes back to wait for the next prompt. The request waits in a private per-session file under
+  `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
+  mode 0600). The file is removed when delivered. An undelivered one older than
+  seven days is removed the next time either hook writes or delivers a request. If
+  the file cannot be written, the request falls back to a Stop notice. An engine
+  older than this plugin, whose recorder does not decide whether to ask, also gets
+  the Stop notice, never an injected prompt.
+
+Every request is journalled in `store/raw/why-asks.jsonl` (it rotates to
+`why-asks.jsonl.1` past 1 MB; both are read, so a record is not asked again when it
+scrolls), and so is every delivery. A delivered request counts as answered when its
+record later carries a `why`. A request that never reached the model, such as a
+headless session with a single prompt, is pending and is never counted as
+unanswered. The rate over seven days, answered ÷ delivered, is in
+`store/raw/record-turn.json` (`whyAsks`: `asked`, `delivered`, `pending`,
+`answered`, `rate`, `window`) and from
+`python "$(project-observatory full-path)/why_asks.py"`. Below 10 % with at least
+20 delivered requests, the board raises `observatory.why_unanswered`.
+`why_asks.py reached <transcript.jsonl> <memory id>` says whether a request
+reached the model in a given session transcript.
 
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs

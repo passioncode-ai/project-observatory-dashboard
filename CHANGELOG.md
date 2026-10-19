@@ -110,6 +110,111 @@ while the major version is 0, a minor release may change behaviour and says so h
   output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
   [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
+### Changed
+
+- **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
+  measures the answers on what was delivered** (M-8, INB-004). The Stop hook printed the request as a
+  Stop `systemMessage` after every changed turn. On one machine over fourteen days that was 3,593
+  requests and 34 answers. A Stop `systemMessage` is a notice for the person and is not rendered into
+  the model's input. Now:
+  - **Once per record.** A session is one record revised per turn, so a session is asked once.
+    `store/raw/why-asks.jsonl` (new, append-only) journals each request and each delivery. It rotates
+    to `why-asks.jsonl.1` past 1 MB, under a lock, and both are read, so a record is not asked again
+    when it scrolls.
+  - **The record first.** The Stop hook writes the record before anything else.
+  - **Not when this session wrote the rationale.** Within 2 seconds after the record is written, one
+    pass over the last 4 MB of the session's transcript (named by the Stop payload) collects this
+    session's writing calls:
+    - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+    - Bash commands that write through `>`, `>>` (also `cat > file <<EOF`), `tee` or `sed -i`, with
+      the files they write.
+
+    No request is made in two cases:
+    - one of those calls targets a decision register (a `decisions.md`, or a `.md`, `.markdown` or
+      `.txt` file under `adr/`, outside vendored trees and submodules, not deleted, with at least one
+      non-blank added line, whitespace ignored), and its text carries the entry's own heading (the
+      shallowest heading the work added, never a repeated `### Consequences`), or, with no heading,
+      more than half of its added lines; that heading must appear in the register exactly once, as a
+      heading line outside fenced code;
+    - one of those calls wrote `.task-pipeline/run.md` (or ran `stage_checkpoint.py`), and a
+      `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
+      git ignores it, has its text in what those calls wrote.
+
+    The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
+    not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
+    `&` and newlines, so the scan is linear in the command's length.
+
+    A second revision of the same record then links the file, and its `why` stays empty. The link
+    stores the repository's id, the register's path, the entry heading as `anchor`, the exact raw
+    heading line at full length, and the length and SHA-256 of the whole register file; no entry
+    boundary is guessed. A heading over 120 characters is never linked. A later revision carries the
+    link only while it holds by bytes: this hook wrote it, it names the current repository, the raw
+    line occurs exactly once as a whole line, and the file is byte-identical or its linked bytes are
+    unchanged and what follows starts, at its first non-blank line, with a column-0 heading no
+    deeper than the entry's own (accepted only when the linked file ended in a newline outside any
+    code fence and HTML comment). Appending a later entry keeps the link. So the record stays explained, with no request and no
+    extra revision, after the register is committed and pushed and after the write scrolls out of the
+    transcript. Any other change to the file drops the link: an edit to any entry, a paragraph or a
+    deeper heading appended, a change of line endings, or an edit below a `# comment` line inside a
+    code block or HTML comment. So does a move to another repository. A dropped link is attributed
+    afresh only from the session's writes after it was made (the mark is carried in every later
+    revision), and asked about when there are none. A turn
+    that touches a register is attributed again, and a newer decision replaces the anchor.
+
+    Every read of a register or the run ledger, fresh or carried, passes one gate: inside the
+    checkout, not a symbolic link and not under one, opened once without following a link or
+    blocking, a regular file with one hard link, read up to its limit plus one byte. A fresh anchor
+    is chosen by a linear Markdown heading scan (newline split only, fences and multi-line comments
+    skipped, `## Use C#` keeps its `#`), and an added block whose heading syntax the scan rejects is
+    asked about, never matched line by line. The attribution's `git diff` gets only the time left in
+    the 2 seconds.
+
+    The turn is asked about in every other case:
+    - another session's edit in the same checkout;
+    - a file the session only read or grepped;
+    - a pull-request body that shares a heading;
+    - a write by a tool the pass does not know (`cp`, a script, `perl -i`);
+    - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script containing `|`
+      or `;`;
+    - a relative path written after a `cd` in the same command;
+    - a path whose letter case differs from the file's on a case-insensitive volume;
+    - a subagent's edit, a failed call, or a command longer than 65,536 characters;
+    - no transcript;
+    - a pass that runs out of its 2 seconds.
+  - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
+    pending request to the model as `additionalContext` with the next prompt, once, and records the
+    delivery. The context is capped at 4,000 characters, and a request that does not fit waits for the
+    following prompt without being marked delivered. It prints nothing when nothing is pending, never
+    writes through a symbolic link, and reaches no file for a session id that is not a plain name.
+    - The request waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` (0600). An
+      undelivered one older than seven days is pruned by either hook.
+    - If that file cannot be written, the request falls back to the Stop notice. An older engine whose
+      recorder does not decide whether to ask also gets the Stop notice, never an injected prompt. A
+      fault to record is still a Stop notice: the recorder's output to the hook now carries `fault`,
+      which only its receipt carried before.
+  - **Answering keeps the session recorded.** The answer the request asks for,
+    `observatory_record(owner, memory_id, expected_revision, statement, why)`, is written as a note with
+    no session id. The next turn revises the record from its latest revision, whoever wrote it, and
+    keeps the `why`; before, it revised from its own last revision and every later turn of the session
+    failed with a revision conflict. A latest revision that names another project is not revised: the
+    turn starts a new record that `continues` it.
+  - **One new record, not one per turn.** The Stop hook picks the session's record by the newest row
+    the session wrote, not by the highest revision number. A record it starts after a promotion, a
+    rejection or a takeover by another project begins at revision 1, so it lost to the old record, and
+    every later changed turn started another record and asked again.
+  - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
+    `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
+    model, such as a headless single-prompt session, is pending and never unanswered.
+    - `why_asks.py` prints the same.
+    - `why_asks.py reached <transcript> <memory id>` says whether a request reached the model in a
+      session transcript.
+    - The new finding `observatory.why_unanswered` fires below a 10 % rate over seven days with at
+      least 20 delivered requests.
+
+  `tests/test_skill.py` T8 now expects the `UserPromptSubmit` hook it used to forbid, and runs it to
+  show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
+  `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
+
 ### Fixed
 
 - **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the

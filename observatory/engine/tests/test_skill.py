@@ -38,9 +38,33 @@ def test_t8_no_session_start() -> None:
     """
     hooks = json.loads((PLUGIN / "hooks/hooks.json").read_text(encoding="utf-8"))
     events = sorted(hooks["hooks"])
-    check("T8 the plugin declares SessionStart and Stop, and nothing else",
-          events == ["SessionStart", "Stop"], f"declared: {events}")
-    check("T8 it declares no UserPromptSubmit hook", "UserPromptSubmit" not in events, f"declared: {events}")
+    check("T8 the plugin declares SessionStart, Stop and UserPromptSubmit, and nothing else",
+          events == ["SessionStart", "Stop", "UserPromptSubmit"], f"declared: {events}")
+    # A UserPromptSubmit hook is now declared ON PURPOSE, and this check used to
+    # forbid one. The request for a `why` was a Stop `systemMessage` — a notice for
+    # the person that is never rendered into the model's input — after every changed
+    # turn: 3,593 asks for 34 answers in fourteen days on one machine. It moved to the
+    # next prompt's `additionalContext` (M-8, `tests/test_ask_why_reach.py`). What T8
+    # forbids is unbounded doctrine injected into every session, so the hook is held
+    # to that bound here, by running it: it prints only a pending ask this plugin's
+    # own Stop hook left, once per record, and nothing at all otherwise.
+    ups = [h for grp in hooks["hooks"].get("UserPromptSubmit", []) for h in grp["hooks"]]
+    check("T8 the UserPromptSubmit hook is the one bounded script",
+          len(ups) == 1 and "hooks/prompt-why.py" in ups[0]["command"]
+          and ups[0]["command"].rstrip().endswith("exit 0") and ups[0].get("timeout", 99) <= 10,
+          str(ups))
+    import subprocess as _sp, tempfile as _tf
+    with _tf.TemporaryDirectory() as state:
+        for payload in ('{"session_id": "t8-nothing-pending", "prompt": "hi"}', "", "not json"):
+            q = _sp.run(["bash", "-c", ups[0]["command"]] if ups else ["true"], input=payload,
+                        env={**os.environ, "XDG_STATE_HOME": state,
+                             "CLAUDE_PLUGIN_ROOT": str(PLUGIN)},
+                        capture_output=True, text=True, timeout=60)
+            check(f"T8 with nothing pending it prints nothing and exits 0 ({payload[:12]!r})",
+                  q.returncode == 0 and q.stdout == "", repr(q.stdout[:80]))
+    desc0 = hooks.get("description", "")
+    check("T8 the description discloses the UserPromptSubmit hook and its bound",
+          "UserPromptSubmit" in desc0 and "once" in desc0 and "nothing" in desc0, desc0[:200])
     cmds = [h["command"] for ev in hooks["hooks"].values() for grp in ev for h in grp["hooks"]]
     check("T8 the SessionStart hook is the bounded script, not an inline echo",
           any("session-start.sh" in c for c in cmds), str(cmds))
@@ -64,12 +88,13 @@ def test_t8_no_session_start() -> None:
 
 
 def test_hook_never_blocks() -> None:
-    src = (PLUGIN / "hooks/ask-why.py").read_text(encoding="utf-8")
-    check("the hook emits no blocking decision",
-          '"decision"' not in src and "'decision'" not in src,
-          "a Stop veto costs a turn; the facts are already recorded")
-    check("the hook exits 0 on every path",
-          "SystemExit(0)" in src and "exit 2" not in src)
+    for name in ("ask-why.py", "prompt-why.py"):
+        src = (PLUGIN / "hooks" / name).read_text(encoding="utf-8")
+        check(f"{name} emits no blocking decision",
+              '"decision"' not in src and "'decision'" not in src,
+              "a Stop veto costs a turn and a prompt veto costs the person's message")
+        check(f"{name} exits 0 on every path",
+              "SystemExit(0)" in src and "exit 2" not in src)
 
 
 def test_hook_is_silent_when_not_its_business() -> None:
@@ -130,27 +155,34 @@ def test_hook_asks_for_the_why() -> None:
     # that plants an invisible change is trap T16 wearing a fix's clothes.
     import watched_repo
     _work, repo, built = watched_repo.build()
+    # THE HOOK STATE TOO: the request now waits for the next prompt in a per-session
+    # file under XDG_STATE_HOME, which must never be the person's own.
     env = {**os.environ, **built, "OBSERVATORY_DB": str(tmp),
            "CLAUDE_PLUGIN_ROOT": str(PLUGIN),
-           "OBSERVATORY_SCRATCH": str(pathlib.Path(tmp).parent / "scratch")}
+           "OBSERVATORY_SCRATCH": str(pathlib.Path(tmp).parent / "scratch"),
+           "XDG_STATE_HOME": str(pathlib.Path(tmp).parent / "state")}
     payload = {"session_id": "skill-test-ask", "cwd": str(repo), "stop_hook_active": False}
     try:
         p = subprocess.run(["bash", str(hook)], input=json.dumps(payload), text=True,
                            capture_output=True, env=env, timeout=90)
-        if not p.stdout.strip():
+        check("the Stop hook itself says nothing to the person",
+              p.returncode == 0 and not p.stdout.strip(), p.stdout[:160])
+        # The request arrives with the next prompt, as context the model reads.
+        q = subprocess.run([sys.executable, str(PLUGIN / "hooks/prompt-why.py")],
+                           input=json.dumps({"session_id": "skill-test-ask"}), text=True,
+                           capture_output=True, env=env, timeout=60)
+        if not q.stdout.strip():
             check("a changed watched repository produces a request for the why", False,
                   f"no output even with a planted change; stderr={p.stderr[:120]!r}")
             return
-        out = json.loads(p.stdout)
+        out = json.loads(q.stdout)
+        ctx = (out.get("hookSpecificOutput") or {}).get("additionalContext", "")
         check("a changed watched repository produces a request for the why",
-              "why" in out.get("systemMessage", ""), str(out)[:140])
+              "why" in ctx, str(out)[:140])
         check("the request names the exact call to make",
-              "observatory_record(" in out["systemMessage"]
-              and "expected_revision=" in out["systemMessage"])
+              "observatory_record(" in ctx and "expected_revision=" in ctx)
         check("the request refuses a fabricated reason",
-              "invented" in out["systemMessage"] or "fabricat" in out["systemMessage"])
-        check("the request is suppressed from the user's transcript",
-              out.get("suppressOutput") is True, str(out.get("suppressOutput")))
+              "invented" in ctx or "fabricat" in ctx)
         check("no blocking decision is returned",
               "decision" not in out and out.get("continue") is not False, str(out.keys()))
 
@@ -193,6 +225,7 @@ def test_declared_tools_exist() -> None:
     missing = named - served
     check("every observatory tool the skill names is served", not missing, f"missing {missing}")
     ask = (PLUGIN / "hooks/ask-why.py").read_text(encoding="utf-8")
+    ask += (PLUGIN / "hooks/prompt-why.py").read_text(encoding="utf-8")
     named_hook = set(re.findall(r"observatory_[a-z_]+", ask))
     check("every tool the hook's message names is served", not (named_hook - served),
           f"missing {named_hook - served}")
