@@ -97,13 +97,17 @@ def _no_constant(name: str):
 
 
 def _json_int(text: str):
-    """An integer literal as JavaScript reads one: one past Python's digit limit (4300 digits) is far beyond a
-    double's range, which `JSON.parse` makes an infinity; `isTime` then refuses it as a claim (`malformed-claims`),
-    not the whole token (`malformed`)."""
+    """An integer literal as JavaScript reads one. `JSON.parse` makes every number a double, so an integer that rounds
+    past the largest double (from 2**1024 - 2**970 up: 309 digits and more, and anything past Python's 4300-digit
+    limit) is an infinity there; `isTime` and `isAmount` then refuse it as a claim of the wrong type
+    (`malformed-claims`). Python's int would keep it exact and accept it, so it becomes the same infinity here."""
+    infinity = float("-inf") if text.startswith("-") else float("inf")
     try:
-        return int(text)
-    except ValueError:
-        return float("-inf") if text.startswith("-") else float("inf")
+        value = int(text)
+        float(value)            # OverflowError exactly where a double rounds to infinity
+    except (ValueError, OverflowError):
+        return infinity
+    return value
 
 
 def b64url_decode(segment: str) -> bytes:

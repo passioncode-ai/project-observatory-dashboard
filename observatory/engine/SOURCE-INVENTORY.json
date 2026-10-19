@@ -843,8 +843,8 @@
       "path": "delegation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "40343e477c605837a13ea9c540fad5fe8cd5f86da89418ec631cba7a2dcb2636",
-      "bytes": 19690
+      "export_sha256": "8cc7429522462c6e7278e6dd1eb19de6de049d97be27b20df287173909360e4d",
+      "bytes": 20019
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -3330,8 +3330,8 @@
       "path": "tests/test_delegation_sealed.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "03c6bdf5b5d025a38f6adbcbe6ef52029dbd26c7c9ab6c3393648be28901b4de",
-      "bytes": 25462
+      "export_sha256": "134a17dfd3af4af7d97980b1d4a2ee86231bc214715fb1ffbccb513c1cb226b2",
+      "bytes": 26398
     },
     {
       "path": "tests/test_delivery.py",

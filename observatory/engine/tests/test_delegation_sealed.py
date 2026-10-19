@@ -334,6 +334,18 @@ class Sealed(unittest.TestCase):
         token = f"{signing}.{D.b64url_encode(self.estate.key.sign(signing.encode()))}"
         self.assertEqual(self.call(token), "unauthenticated/malformed-claims")
 
+    def test_an_integer_a_double_cannot_hold_is_an_infinity_as_in_javascript(self):
+        """Review round 3: `JSON.parse` rounds 2**1024 - 2**970 and above to Infinity, one less to the largest double."""
+        boundary = 2 ** 1024 - 2 ** 970
+        def remaining(amount):
+            return self.token(spend={"mode": "limited", "remaining": [{"window": "day", "remainingUsd": amount}]})
+        for amount, expected in ((10 ** 308, "ok"), (2 * 10 ** 308, "unauthenticated/malformed-claims"),
+                                 (10 ** 399, "unauthenticated/malformed-claims"),
+                                 (boundary - 1, "ok"), (boundary, "unauthenticated/malformed-claims")):
+            with self.subTest(digits=len(str(amount)), amount=str(amount)[:6]):
+                self.assertEqual(self.call(remaining(amount)), expected)
+        self.assertEqual(self.call(self.token(exp=10 ** 399)), "unauthenticated/malformed-claims")
+
     def test_a_published_x_with_a_trailing_newline_fails_closed(self):
         """Node's base64url decoder skips the newline; the engine refuses the key as unusable (the issuer's fault),
         which never accepts what the contract refuses. Recorded in docs/design/METER.md."""

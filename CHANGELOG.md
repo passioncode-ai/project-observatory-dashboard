@@ -35,8 +35,8 @@ while the major version is 0, a minor release may change behaviour and says so h
     `1791720000.0` is read as the integer the contract reads.
   - White space in a grammar is ECMAScript's, as in the contract: a URI holding U+FEFF is refused, one holding
     U+001F or U+0085 is accepted, and the meter's timestamps and the node's relay origins take ASCII digits only.
-    An integer past Python's 4300-digit limit is a claim of the wrong type (`malformed-claims`), as the contract
-    reads the infinity `JSON.parse` makes of it.
+    An integer no double can hold (2^1024 - 2^970 and above, 309 digits or more) in a time or an amount is a claim
+    of the wrong type (`malformed-claims`), as the contract reads the infinity `JSON.parse` makes of it.
 
 **Behaviour change for existing installs.** A meter that verified tokens without a trusted issuer now denies every
 grant check and every token-bearing slot or keyserver call as `principal-unproven`
