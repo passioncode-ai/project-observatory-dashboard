@@ -75,7 +75,7 @@ def binding_file() -> Path:
 
 
 def _alive(pid: Any) -> bool:
-    """Asked through `osproc.alive`, never by a signal: on Windows `os.kill(pid, 0)` terminates the process."""
+    """Asked through `osproc.alive`, never by sending a signal: on Windows a signal 0 terminates the process."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return False
     return osproc.alive(pid)

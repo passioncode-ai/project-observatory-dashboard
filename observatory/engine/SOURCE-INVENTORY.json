@@ -1861,15 +1861,15 @@
       "path": "fabric_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f62d94cf7e8836237088844073b4d63eb84b440a1c6a5d529e0f15916ca2b849",
-      "bytes": 18931
+      "export_sha256": "4e402cb513c5664d895b54e798d84dac2ae148b2d347a782502b0536fcca7276",
+      "bytes": 20248
     },
     {
       "path": "fabric_hub.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d5bf2473860fbd93c1f2e8b3ba7fa1de36116b7b885daf455b037a006682000e",
-      "bytes": 16506
+      "export_sha256": "81412a7ad3834dbbee133acc344ff114e05ac498591e61017332d0f17f3b20c6",
+      "bytes": 16507
     },
     {
       "path": "fabric_service.py",
@@ -3459,8 +3459,8 @@
       "path": "tests/test_fabric_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e2227ff524267354b845217004f87d0b2c0aea241d455eb31de58bab864bed35",
-      "bytes": 16233
+      "export_sha256": "6eed77a9eb480ee06b310e28113f1c28a8ff959a1a9326f02c22084e7d95248b",
+      "bytes": 16887
     },
     {
       "path": "tests/test_fabric_service.py",
@@ -5028,8 +5028,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "721ab2e7fc370597cdfb2691cf6b791561a44ce9db3ffc51c718fd0385eca2bd",
-      "bytes": 283807,
+      "export_sha256": "67233f3a7afa5914ed45ba7d3964cc9386bb45a907c020873e8882a5421e0e08",
+      "bytes": 282834,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
@@ -5652,8 +5652,8 @@
     {
       "path": "tools/tick_lease.py",
       "source_sha256": "e77182b3838aba63707e5e182c066b17fed6e195b2f18c67ee938c80236bad84",
-      "export_sha256": "68753ebd3e97628bf6c9a0c6aca0706a3096f569a383c591adccfd821cefe0ef",
-      "bytes": 32055,
+      "export_sha256": "1930b922b06d749b6fc497cc024b82ea8d936aa65d810990cc02c4d76cd4e19f",
+      "bytes": 32077,
       "python_comments_removed": 45,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

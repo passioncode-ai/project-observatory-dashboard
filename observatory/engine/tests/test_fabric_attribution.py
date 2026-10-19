@@ -8,20 +8,21 @@ in a temporary workspace; nothing reaches a real Fabric.
 """
 from __future__ import annotations
 
-import atexit
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-BASE = pathlib.Path(tempfile.mkdtemp(prefix="obs-fabric-attr-")).resolve()
-atexit.register(shutil.rmtree, BASE, True)
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
+
+BASE = pathlib.Path(tmpdir.mkdtemp(prefix="obs-fabric-attr-")).resolve()
 for key, sub in (("OBSERVATORY_HOME", "runtime"), ("OBSERVATORY_STATE", "runtime/store"),
                  ("OBSERVATORY_SCRATCH", "runtime/store/raw"), ("OBSERVATORY_REGISTRY", "runtime/registry"),
                  ("OBSERVATORY_DATA", "data")):
@@ -29,8 +30,6 @@ for key, sub in (("OBSERVATORY_HOME", "runtime"), ("OBSERVATORY_STATE", "runtime
     (BASE / sub).mkdir(parents=True, exist_ok=True)
 os.environ["OBSERVATORY_FABRIC_HUB_JSON"] = str(BASE / "fabric" / "hub.json")
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 import fabric_attribution as fat  # noqa: E402
 import fabric_hub  # noqa: E402
 import identifiers  # noqa: E402
@@ -133,7 +132,7 @@ class Pull(unittest.TestCase):
         self.hub.write_hub_json()
         fabric_hub.forget_binding()
         fabric_hub._pending_file().unlink(missing_ok=True)
-        self.root = pathlib.Path(tempfile.mkdtemp(dir=BASE))
+        self.root = pathlib.Path(tmpdir.mkdtemp())
         self.a, self.b = str(self.root / "alpha-web"), str(self.root / "beta-api")
         self.f = {"project:alpha-web": folders(self.a), "project:beta-api": folders(self.b)}
 
@@ -247,6 +246,18 @@ class Pull(unittest.TestCase):
             self.assertEqual(doc["folders"][self.a]["refusal"], code)
 
 
+class Findings(unittest.TestCase):
+    def test_a_conflict_is_a_finding_naming_both_fabric_projects(self) -> None:
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        from finding_types import titled
+        rows = fat.conflict_findings({"conflicts": [{"project": "project:alpha-web",
+                                                     "fabric": ["fabric:" + UUID_A, "fabric:" + UUID_B]}]}, titled)
+        self.assertEqual([r["type"] for r in rows], ["fabric.attribution_conflict"])
+        self.assertEqual(rows[0]["subject"], "project:alpha-web")
+        self.assertIn("fabric:" + UUID_B, rows[0]["detail"])
+        self.assertEqual(fat.conflict_findings({}, titled), [])
+
+
 class SessionStart(unittest.TestCase):
     def test_fabric_is_asked_first_and_its_answer_mapped_through_the_recorded_alias(self) -> None:
         hub = FakeHub()
@@ -280,7 +291,7 @@ class Resolve(unittest.TestCase):
         self.assertEqual(identifiers.resolve("fabric:" + UUID_B, self.registry())["error"], "not-found")
 
     def test_folders_resolve_by_the_contract_rules(self) -> None:
-        root = pathlib.Path(tempfile.mkdtemp(dir=BASE)).resolve()
+        root = pathlib.Path(tmpdir.mkdtemp()).resolve()
         repo = root / "alpha-web"
         (repo / "src").mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)

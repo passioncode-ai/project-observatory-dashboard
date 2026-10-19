@@ -2694,24 +2694,9 @@ def collect() -> list[dict]:
     # Observatory records each project's `fabric:<uuid>` alias (collectors/scan_fabric_attribution.py). A project
     # whose folders resolve to two Fabric projects is reported, never merged: which one is right is a decision in
     # Fabric (detach a folder there, or move it), and until then no alias is kept for it.
-    _ff = paths.SCRATCH / "fabric-attribution.json"
-    if _ff.is_file():
-        try:
-            _fa = json.loads(_ff.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            _fa = {}
-        for _c in (_fa.get("conflicts") or []) if isinstance(_fa, dict) else []:
-            if not isinstance(_c, dict) or not isinstance(_c.get("project"), str):
-                continue
-            out.append({
-                "type": "fabric.attribution_conflict", "subject": _c["project"], "severity": "warning",
-                **titled("{project} belongs to {count} Fabric projects", project=_c["project"],
-                         count=len(_c.get("fabric") or [])),
-                "detail": ("Fabric attributes this project's folders to " + ", ".join(_c.get("fabric") or [])
-                           + "; Observatory keeps no Fabric alias for it until they agree."),
-                "action": "in Fabric, detach the folder that belongs elsewhere or move it into one project; the "
-                          "next tick (or `project-observatory full fabric-attribution`) records the answer",
-                "evidence": ["store/raw/fabric-attribution.json"]})
+    # Reads store/raw/fabric-attribution.json (collectors/scan_fabric_attribution.py).
+    import fabric_attribution
+    out.extend(fabric_attribution.conflict_findings(fabric_attribution.load(), titled))
 
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills
