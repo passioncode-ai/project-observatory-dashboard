@@ -49,6 +49,45 @@ with the hub's own keys. `full doctor` reports it under `meter` (`degraded`: `me
 that fixes it), and `full grant --status` lists it in `degraded`. The contract defines no default issuer, so the
 meter sets none: trusting whichever key signed would be the forgery this fix closes.
 
+### Added
+
+- **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
+  `tools/cloudflare.py` does for Cloudflare, on the Platform API:
+  - `stash` keeps an admin token read by the door alone: the CLI session's, piped in (`heroku auth:token | heroku.py
+    stash`) or read inside the process with `--from-cli`, never in argv.
+  - `issue --preset identity|read|deploy|config-read|config-write --vault PROJECT/ENV/NAME [--team T] [--app A]
+    [--expire-days N]` mints a direct OAuth authorization with that preset's scopes only (never `global`), described
+    after its preset, slot, team and app. It proves the new value can read the app, the team's apps or the account,
+    then writes it to the slot on stdin. A failed proof or vault write deletes what the call created. Issuing again
+    regenerates the same authorization; a changed preset makes a new one and deletes the old only after delivery.
+  - Heroku narrows an authorization by scope only, never to a team or an app, so `--team` and `--app` are its stated
+    purpose and what the proof reads; every issue says so. The `config-` presets reach config vars and need `--app`.
+  - `rotate` regenerates in place (`--leaked` for every slot an open leak names), `revoke` deletes at Heroku before the
+    ledger row, `list` and `ping` report from `heroku-issued.json` (ids, scopes, slot, team, app, dates; never a value
+    or the refresh token), and `ping` names a gone or widened authorization and managed strays.
+  - `teams`, `members --team` and `apps --team` read every page, with the slots issued for each team and app.
+    `member add|role|remove --team T --email E [--role admin|member|collaborator]` prints its plan and changes nothing
+    until `--apply`, then reads the team again to verify. It refuses `owner`, the last admin and the stashed admin's
+    own membership.
+  - `tools/cloudflare.py` gains `accounts` (every stashed account, the tokens Cloudflare holds in it and the vault slot
+    each managed one names), `members --account`, and `member add|role|remove --account` with the same plan, `--apply`
+    and verification. It reads Super Administrator from both places it lives, legacy roles and permission policies,
+    and refuses: any write while some member's Super Administrator state cannot be read (a record with neither
+    roles nor policies, a role or permission group without a name, a policy scope it cannot read); removing, or
+    changing the role of, a member who holds Super Administrator unless another accepted member holds it on the
+    whole account (a policy scoped to a zone or to some objects does not count); a role change of a member whose
+    access is set by policies, since it writes legacy roles only; and the stashed admin's own membership when the
+    token can read its user. Lists are read to their end whether they report `total_pages`, `total_count` or
+    only a page size, and one still going after 100 pages is an error, not a cut.
+  - A team that takes people by invitation (its `team-invite-acceptance` feature on) is written the Heroku CLI's
+    way: `member add` sends an invitation, `members` lists pending invitations as pending, `member remove` of a
+    pending invitee cancels the invitation, and the read-back that verifies such a write is the invitations list.
+    A feature list that cannot be read refuses the write rather than guess the endpoint.
+  - `issue`, `rotate`, `revoke` and `ping` hold one lock beside `heroku-issued.json` from their first read to
+    their last write, and each write replaces only its own row, so concurrent runs keep every row.
+  - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
+    what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
+
 ## 0.25.0 (2026-10-19)
 
 The recovery work of 2026-10-13 lands on this line. Cleanup keeps local work it cannot verify, rechecks every target
