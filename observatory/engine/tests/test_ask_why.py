@@ -157,6 +157,28 @@ class Fixture:
         return subprocess.run([PY, str(PROMPT)], input=payload, text=True,
                               capture_output=True, env=self.env, timeout=60)
 
+    def answer(self, delivered: str, why: str) -> subprocess.CompletedProcess:
+        """Answer a delivered ask exactly as it prescribes: the real MCP tool
+        `observatory_record(owner, memory_id, expected_revision, statement, why)`,
+        with the memory id and revision read from the ask's own text."""
+        import re
+        m = re.search(r'observatory_record\(owner="([^"]+)", memory_id="([^"]+)", '
+                      r'expected_revision=(\d+)', delivered)
+        assert m, delivered[-400:]
+        code = ("import importlib.util, json, sqlite3, sys\n"
+                "spec = importlib.util.spec_from_file_location('srv_answer', 'mcp/server.py')\n"
+                "mod = importlib.util.module_from_spec(spec)\n"
+                "sys.modules['srv_answer'] = mod\n"
+                "spec.loader.exec_module(mod)\n"
+                "from store import db\n"
+                "st = db.connect().execute('SELECT statement FROM ledger WHERE memory_id=?"
+                " AND revision=?', (sys.argv[2], int(sys.argv[3]))).fetchone()[0]\n"
+                "out = mod.observatory_record(owner=sys.argv[1], memoryId=sys.argv[2],"
+                " expectedRevision=int(sys.argv[3]), statement=st, why=sys.argv[4])\n"
+                "assert 'memoryId' in out, out\n")
+        return subprocess.run([PY, "-c", code, *m.groups(), why], cwd=ROOT, env=self.env,
+                              capture_output=True, text=True, timeout=120)
+
     def receipt(self) -> dict:
         return json.loads((self.scratch / "record-turn.json").read_text(encoding="utf-8"))
 
@@ -243,28 +265,72 @@ class AskOncePerRecord(unittest.TestCase):
         self.assertEqual(fx.context(fx.prompt("sess-a")), "")
 
     def test_an_explained_record_is_never_asked_about(self):
+        # The answer goes through the REAL tool, as the ask prescribes: a `note` with
+        # no session id. A lookup keyed on the session's own `kind='session'` rows
+        # never saw it and revised with a stale revision.
         fx = Fixture()
         fx.stop()
-        mid = fx.journal()[0]["memoryId"]
-        fx.prompt()                                     # the ask is consumed
-        code = ("import sys; sys.path.insert(0, '.')\n"
-                "from store import db, ledger as L\n"
-                "c = db.connect()\n"
-                "r = c.execute(\"SELECT revision, statement FROM ledger WHERE memory_id=? "
-                "ORDER BY revision DESC LIMIT 1\", (sys.argv[1],)).fetchone()\n"
-                "L.append(c, owner='agent:claude-code', kind='session', memory_id=sys.argv[1],"
-                " expected_revision=r[0], statement=r[1], why='the constraint',"
-                " session_id='sess-1', state='proposed')\n"
-                "c.commit()\n")
-        p = subprocess.run([PY, "-c", code, mid], cwd=ROOT, env=fx.env, capture_output=True,
-                           text=True, timeout=120)
+        delivered = fx.context(fx.prompt())             # the ask is consumed
+        p = fx.answer(delivered, "the constraint")
         self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        mid = fx.journal()[0]["memoryId"]
+        kind, session = fx.ledger("SELECT kind, session_id FROM ledger WHERE memory_id=?"
+                                  " ORDER BY revision DESC LIMIT 1", mid)[0]
+        self.assertEqual((kind, session), ("note", None), "the tool's own shape")
         (fx.repo / "third.txt").write_text("more\n", encoding="utf-8")
         fx.stop()
         self.assertEqual(len(fx.journal()), 1, "no second ask")
         self.assertEqual(fx.context(fx.prompt()), "")
         w = fx.receipt()["whyAsks"]
         self.assertEqual((w["delivered"], w["answered"], w["rate"]), (1, 1, 1.0), w)
+
+    def test_answering_the_ask_does_not_stop_the_recording(self):
+        fx = Fixture()
+        fx.stop()
+        p = fx.answer(fx.context(fx.prompt()), "the constraint")
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        mid = fx.journal()[0]["memoryId"]
+        for n, name in enumerate(("third.txt", "fourth.txt"), start=1):
+            (fx.repo / name).write_text("more\n", encoding="utf-8")
+            p = fx.stop()
+            self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-400:])
+            r = fx.receipt()
+            self.assertTrue(r.get("recorded"), r)
+            self.assertFalse(r.get("fault"), r)
+            self.assertEqual(r.get("memoryId"), mid, "the same record, revised")
+            self.assertTrue(r.get("hasWhy"), r)
+        rows = fx.ledger("SELECT revision, kind, session_id, why FROM ledger WHERE memory_id=?"
+                         " ORDER BY revision", mid)
+        self.assertEqual([r[1] for r in rows], ["session", "note", "session", "session"])
+        self.assertEqual(rows[-1][2], "sess-1")
+        self.assertEqual(rows[-1][3], "the constraint", "the why is carried forward")
+        self.assertEqual(len(fx.journal()), 1, "no second ask")
+        self.assertEqual(fx.context(fx.prompt()), "")
+
+    def test_a_record_another_project_took_is_not_revised(self):
+        fx = Fixture()
+        fx.stop()
+        mid = fx.journal()[0]["memoryId"]
+        code = ("import sys; sys.path.insert(0, '.')\n"
+                "from store import db, ledger as L\n"
+                "c = db.connect()\n"
+                "r = c.execute(\"SELECT revision, statement FROM ledger WHERE memory_id=? "
+                "ORDER BY revision DESC LIMIT 1\", (sys.argv[1],)).fetchone()\n"
+                "L.append(c, owner='agent:claude-code', memory_id=sys.argv[1],"
+                " expected_revision=r[0], statement=r[1], why='elsewhere',"
+                " project_id='project:someone-else')\n"
+                "c.commit()\n")
+        p = subprocess.run([PY, "-c", code, mid], cwd=ROOT, env=fx.env, capture_output=True,
+                           text=True, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        (fx.repo / "third.txt").write_text("more\n", encoding="utf-8")
+        fx.stop()
+        r = fx.receipt()
+        self.assertTrue(r.get("recorded"), r)
+        self.assertNotEqual(r.get("memoryId"), mid, "a fresh record")
+        self.assertEqual(r.get("continues"), mid)
+        self.assertEqual(fx.ledger("SELECT max(revision) FROM ledger WHERE memory_id=?",
+                                   mid)[0][0], 2, "the other project's record is untouched")
 
 
 class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
@@ -1325,19 +1391,41 @@ class WithinTheBudget(unittest.TestCase):
         self.assertEqual(record_turn._atx("   ### three spaces"), (3, "three spaces"))
 
     def test_a_register_too_large_to_scan_in_time_asks(self):
-        # 4M lines under the 8 MB read limit: scanning them takes longer than the
-        # 2 s budget, so the turn is asked about instead of being linked late.
-        fx = Fixture()
-        (fx.repo / "docs").mkdir()
+        # DETERMINISTIC: the scan's own clock is injected, so the verdict does not
+        # depend on how fast this machine is. It used to write 4M lines and assume
+        # they could not be scanned in 2 s; a fast machine could. Here every budget
+        # check costs 50 ms of a virtual clock, starting at the real one, and only
+        # `_check` reads it (git's own timeouts keep the real clock).
+        import record_turn
+        import time as _t
         head = "# Decisions\n\n## DEC-0001 big\n\n"
-        body = head + "a\n" * 4_000_000
-        self.assertLess(len(body), 8 << 20)
-        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
-        fx.wrote(head, tool="Write")
-        took = fx.timed_stop(limit=60)
-        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt().get("rationale"))
-        self.assertEqual(len(fx.journal()), 1)
-        self.assertLess(took, self.LIMIT, f"the Stop took {took:.1f} s")
+
+        def attribute(lines: int) -> tuple[dict | None, int]:
+            fx = Fixture()
+            (fx.repo / "docs").mkdir()
+            (fx.repo / "docs/DECISIONS.md").write_text(head + "a\n" * lines, encoding="utf-8")
+            fx.wrote(head, tool="Write")
+            facts = record_turn.diff_facts(fx.repo)
+            start = _t.monotonic()
+            checks = [0]
+
+            def virtual_check(deadline: float) -> None:
+                checks[0] += 1
+                if start + 0.05 * checks[0] > deadline:
+                    raise record_turn._OutOfTime()
+
+            with mock.patch.object(record_turn, "_check", virtual_check):
+                got = record_turn.rationale_of(
+                    fx.repo, facts, str(fx.transcript("sess-1")),
+                    deadline=start + record_turn.ATTRIBUTION_SECONDS)
+            return got, checks[0]
+
+        small, _ = attribute(10)
+        self.assertIsNotNone(small, "a small register is linked under the same clock")
+        self.assertEqual(small["anchor"], "DEC-0001 big")
+        big, checks = attribute(400_000)
+        self.assertIsNone(big, "past the budget the turn is asked about, never linked late")
+        self.assertGreater(checks * 0.05, record_turn.ATTRIBUTION_SECONDS)
 
     def test_the_heading_scan_honours_the_deadline(self):
         import record_turn
@@ -1472,6 +1560,25 @@ class FailOpen(unittest.TestCase):
             {"recorded": False, "fault": True, "reason": "IllegalTransition: x"}),
             text=True, capture_output=True, timeout=60)
         self.assertIn("could NOT record", json.loads(p.stdout)["systemMessage"])
+
+    def test_a_real_fault_reaches_the_stop_hook(self):
+        # Through the whole hook, not a hand-made payload: the recorder printed its
+        # payload WITHOUT `fault` (only the receipt had it), so the branch above was
+        # unreachable. A store that cannot be opened is a fault.
+        fx = Fixture()
+        (fx.work / "not-a-db").mkdir()
+        fx.env["OBSERVATORY_DB"] = str(fx.work / "not-a-db")
+        p = fx.stop()
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        self.assertIs(fx.receipt().get("fault"), True, fx.receipt())
+        self.assertIn("could NOT record", json.loads(p.stdout)["systemMessage"])
+
+    def test_a_quiet_turn_is_not_a_fault_on_the_wire(self):
+        fx = Fixture()
+        fx.stop()
+        p = fx.stop()                                   # nothing moved since
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, ""))
+        self.assertIs(fx.receipt().get("fault"), False, fx.receipt())
 
     def test_an_old_recorder_without_the_ask_field_gets_the_old_stop_notice(self):
         # An engine that decides nothing about asking would inject into the model's

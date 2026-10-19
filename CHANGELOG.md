@@ -183,7 +183,14 @@ while the major version is 0, a minor release may change behaviour and says so h
       undelivered one older than seven days is pruned by either hook.
     - If that file cannot be written, the request falls back to the Stop notice. An older engine whose
       recorder does not decide whether to ask also gets the Stop notice, never an injected prompt. A
-      fault to record is still a Stop notice.
+      fault to record is still a Stop notice: the recorder's output to the hook now carries `fault`,
+      which only its receipt carried before.
+  - **Answering keeps the session recorded.** The answer the request asks for,
+    `observatory_record(owner, memory_id, expected_revision, statement, why)`, is written as a note with
+    no session id. The next turn revises the record from its latest revision, whoever wrote it, and
+    keeps the `why`; before, it revised from its own last revision and every later turn of the session
+    failed with a revision conflict. A latest revision that names another project is not revised: the
+    turn starts a new record that `continues` it.
   - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
     `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
     model, such as a headless single-prompt session, is pending and never unanswered.

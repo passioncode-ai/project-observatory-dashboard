@@ -77,8 +77,12 @@ def out(payload: dict, receipt: dict | None = None) -> int:
     nothing, and the only sign was a ledger row that had stopped moving fifteen
     hours earlier.
     """
-    print(json.dumps(payload, ensure_ascii=False))
     reason = payload.get("reason") or ""
+    # THE FAULT TRAVELS TO THE HOOK TOO. `ask-why.py` turns a fault into a Stop
+    # notice and stays quiet on a quiet turn; with the mark only in the receipt
+    # below, that branch could never run. A boolean: no path, no secret.
+    payload = {**payload, "fault": bool(reason) and not any(k in reason for k in NOT_A_FAULT)}
+    print(json.dumps(payload, ensure_ascii=False))
     # THE SESSION, because this file is SHARED. Every session of every watched
     # project on the machine writes it — 49 Claude processes were running when
     # that was measured — so the last writer wins and a reader must be able to
@@ -89,8 +93,7 @@ def out(payload: dict, receipt: dict | None = None) -> int:
     # `whyAsks` measurement — so the hook's stdin stays the size it was.
     payload = {**payload, **(receipt or {}),
                "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "session": _session_id or "",
-               "fault": bool(reason) and not any(k in reason for k in NOT_A_FAULT)}
+               "session": _session_id or ""}
     try:
         atomic.write_json(paths.SCRATCH / "record-turn.json", payload)
     except Exception as exc:                                                      
@@ -1013,6 +1016,38 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
     return out
 
 
+def _latest_of(conn, own) -> tuple[dict | None, str | None]:
+    """The record to revise: `own` (this session's newest `kind='session'` row) as it
+    stands at its LATEST revision, whoever wrote that revision. `(prior, foreign)`.
+
+    **The defect this closes.** The ask tells the agent to answer with
+    `observatory_record(owner, memory_id, expected_revision, statement, why)`. That
+    tool writes the answer as `kind='note'` with no session id, so a lookup keyed on
+    `session_id` and `kind='session'` never saw it, the next changed turn revised
+    with a stale `expected_revision`, and every later turn of the session ended in
+    `RevisionConflict`: answering the ask stopped the session's recording.
+
+    The answer's revision, state, `why` and workflow are taken; the statement,
+    evidence and provenance stay this hook's own, so "unchanged since the last turn"
+    still compares what this hook wrote, and a rationale link is carried only when
+    this hook wrote it. A latest revision that names ANOTHER project is not revised:
+    `prior` is None and `foreign` names the record, which the fresh record
+    `continues` (an answer that names no project is this session's)."""
+    if own is None:
+        return None, None
+    latest = conn.execute(
+        "SELECT revision, why, state, workflow_id, project_id FROM ledger"
+        " WHERE memory_id = ? ORDER BY revision DESC LIMIT 1",
+        (own["memory_id"],)).fetchone()
+    if latest is None or latest["revision"] == own["revision"]:
+        return own, None
+    if latest["project_id"] is not None and latest["project_id"] != own["project_id"]:
+        return None, own["memory_id"]
+    return {**{k: own[k] for k in own.keys()},
+            "revision": latest["revision"], "why": latest["why"],
+            "state": latest["state"], "workflow_id": latest["workflow_id"]}, None
+
+
 def _transcript_size(transcript: str | None) -> int:
     try:
         return os.path.getsize(transcript) if transcript else 0
@@ -1099,7 +1134,7 @@ def main() -> int:
 
     conn = store_db.connect()
     try:
-        prior = None
+        prior, foreign = None, None
         if args.session_id:
             # `NOT IN tombstones`, because a record an erasure has closed takes
             # no further revisions and this hook runs on every turn
@@ -1108,13 +1143,13 @@ def main() -> int:
             # it the turn starts a fresh record, which is what an erasure means.
             row = conn.execute(
                 "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id,"
-                " l.evidence_json, l.provenance_json"
+                " l.evidence_json, l.provenance_json, l.project_id"
                 " FROM ledger l JOIN (SELECT memory_id, MAX(revision) r FROM ledger"
                 "   WHERE session_id = ? AND kind = 'session' GROUP BY memory_id) m"
                 "  ON m.memory_id = l.memory_id AND m.r = l.revision"
                 " WHERE l.memory_id NOT IN (SELECT memory_id FROM tombstones)"
                 " ORDER BY l.revision DESC LIMIT 1", (args.session_id,)).fetchone()
-            prior = row if row and row["memory_id"] else None
+            prior, foreign = _latest_of(conn, row if row and row["memory_id"] else None)
         # A PROMOTED RECORD IS FINISHED, as far as this writer is concerned.
         #
         # **The defect this closes was silent and total.** `tools/corroborate.py`
@@ -1136,7 +1171,7 @@ def main() -> int:
         # and the link to what came before travels in `provenance` — not in
         # `supersedes`, which would say the earlier record is no longer true when
         # it is still true about earlier work.
-        continues = None
+        continues = foreign
         if prior is not None and (prior["state"] or "") != "proposed":
             continues = prior["memory_id"]
             prior = None
