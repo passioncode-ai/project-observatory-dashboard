@@ -117,6 +117,32 @@ class CoverageView(Base):
             jsonschema.validate(out, tool.fn_metadata.output_schema)
 
 
+    def test_the_overview_names_coverage_it_did_not_measure(self):
+        # Every machine receipt current and clean: the overview's `degraded` must still name the
+        # coverage sources it carries unmeasured, once each (an empty list reads as full coverage).
+        import importlib
+        import machine_view
+        import memory_snapshot
+        import server
+        server = importlib.reload(server)
+        stamp = '2026-10-19T10:00:00Z'
+        docs = {'machine.json': {'measured_at': stamp, 'memory': {'degraded': []},
+                                 'processes': {'degraded': []}, 'disk': {'degraded': []}},
+                'git-hygiene.json': {'measured_at': stamp, 'checkouts': [], 'degraded': []},
+                'cleanup-plan.json': {'planned_at': stamp}, 'disk-guard.json': {'at': stamp, 'degraded': []}}
+        fresh = {'memory': {'degraded': []}, 'processes': {'degraded': []}}
+        with patch.object(machine_view, '_load', side_effect=lambda name, *_: (docs[name], None)), \
+                patch.object(memory_snapshot, 'read_sources', return_value=fresh), \
+                patch.object(machine_view, 'guard_summaries', return_value=[]), \
+                patch.object(machine_view, 'journal', return_value=[]):
+            out = server.observatory_machine(section='overview')
+        named = [(d['source'], d['code']) for d in out['degraded']]
+        for source in ('checkout-candidates.json', 'cache-coverage.json', 'open-unlinked.json'):
+            self.assertIn((source, 'not-surveyed'), named)
+        self.assertIn(('open-unlinked.json', 'visibility-limited'), named)
+        self.assertEqual(len(named), len(set(named)), 'each source once')
+        self.assertEqual(out['coverage']['degraded'], [d for d in out['degraded'] if d in out['coverage']['degraded']])
+
 if __name__ == '__main__':
     import unittest
     unittest.main()

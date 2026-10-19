@@ -182,12 +182,16 @@ def _source(name, kind, collections, at):
 def summary():
     import open_unlinked
     at = datetime.now(timezone.utc)
-    return {'read_at': at.isoformat(), 'scope': 'saved-inventory-only', 'actionable': False,
-            'limits': {'bytes_per_source': MAX_BYTES, 'rows_per_collection': MAX_ROWS,
-                       'sample_rows_per_source': SAMPLE_ROWS, 'max_age_seconds': MAX_AGE_SECONDS},
-            'checkouts': _source('checkout-candidates.json', 'checkout-candidates', ('candidates',), at),
-            'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at),
-            'open_unlinked': open_unlinked.saved_summary(at)}
+    out = {'read_at': at.isoformat(), 'scope': 'saved-inventory-only', 'actionable': False,
+           'limits': {'bytes_per_source': MAX_BYTES, 'rows_per_collection': MAX_ROWS,
+                      'sample_rows_per_source': SAMPLE_ROWS, 'max_age_seconds': MAX_AGE_SECONDS},
+           'checkouts': _source('checkout-candidates.json', 'checkout-candidates', ('candidates',), at),
+           'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at),
+           'open_unlinked': open_unlinked.saved_summary(at)}
+    # Every surface that embeds this block (CLI, MCP section, overview) carries what it did not
+    # measure with it; an empty list would read as full coverage.
+    out['degraded'] = degradations(out)
+    return out
 
 
 #: The command that refreshes each saved coverage receipt, named in its degradations.
@@ -237,8 +241,9 @@ SOURCE_SCHEMA = {
     },
 }
 OUTPUT_SCHEMA = {
-    'type': 'object', 'required': ['read_at', 'scope', 'actionable', 'checkouts', 'caches', 'limits'],
+    'type': 'object', 'required': ['read_at', 'scope', 'actionable', 'checkouts', 'caches', 'limits', 'degraded'],
     'properties': {'read_at': {'type': 'string'}, 'scope': {'const': 'saved-inventory-only'},
+                   'degraded': {'type': 'array', 'items': {'type': 'object', 'required': ['source', 'code', 'reason']}},
                    'actionable': {'const': False}, 'checkouts': SOURCE_SCHEMA, 'caches': SOURCE_SCHEMA,
                    'limits': {'type': 'object'},
                    'open_unlinked': {'type': 'object', 'required': ['partial', 'actionable', 'reclaimable_bytes'],

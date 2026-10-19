@@ -177,12 +177,15 @@ is listed and lacks the entry. An unplugged drive, a renamed parent folder or a
 permission error is `unknown` instead; the survey marks that worktree `unreadable`
 and nothing is pruned. When the directory is absent, the worktree's HEAD is kept
 reachable first: by its branch, or for a detached HEAD by an
-`archive/wt-<sha8>` branch. Then only that one registration is removed with
-`git worktree remove`, never a repository-wide `git worktree prune`. An unknown,
-changed or unreadable HEAD, or a locked registration, removes nothing. A `pruned`
-journal row names the kept ref (`retained_ref`) and means Git exited zero;
-`registration_changes` stays null. A nonzero exit, timeout or launch error is
-`failed` with an unknown effect. Reasons omit Git output and exception bodies.
+`archive/wt-<sha8>` branch (a symbolic ref there does not count). Then only that
+registration's entry, `.git/worktrees/<name>`, found by the path its own `gitdir`
+records, is moved to `.git/worktrees-retired/` with its index and reflog: never a
+working directory, never a repository-wide `git worktree prune`. A directory that
+comes back loses nothing; move the entry back and run `git worktree repair` to
+register it again. An unknown, changed or unreadable HEAD, or a locked or ambiguous
+entry, moves nothing. A `pruned` journal row names the kept ref (`retained_ref`) and
+the moved entry (`retired_entry`); `registration_changes` stays null. A failed or
+interrupted move is `failed` with an unknown effect. Reasons omit Git output and exception bodies.
 Inspect `git worktree list --porcelain` in the owning repository before retrying.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 

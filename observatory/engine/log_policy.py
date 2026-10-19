@@ -38,32 +38,54 @@ SUFFIXES = (".log", ".err", ".out", ".jsonl")
 HELD_OPEN = frozenset({"serverd.err", "serverd.out", "tick.log", "tick.err"})
 
 
-def _real_dirs(directory: Path, root: Path | None = None) -> bool:
-    """`directory` and every folder between `root` and it are real directories, not links.
+def _absolute(path) -> Path:
+    """Absolute WITHOUT lexical `..` collapse: `abspath` turned `root/link/../logs` into
+    `root/logs` while the operating system follows the link first."""
+    path = Path(path)
+    return path if path.is_absolute() else Path(os.getcwd()) / path
+
+
+def _dir_state(directory: Path, root: Path | None = None) -> str:
+    """`real`, `absent` or `unverified` for `directory` below the trusted `root`.
 
     `root` is resolved once with realpath, so links AT or ABOVE it are allowed: macOS's /tmp and
-    /var, a home folder on a linked volume. Below it a link would let a log write or rename land
-    somewhere the sweep never chose, so it refuses. By default the root is the directory's own
-    parent: the log folder itself must be real. A directory outside `root` refuses."""
+    /var, a home folder on a linked volume. Below it every component is checked with lstat: a
+    link (a dangling one too) or a non-directory is `unverified`, and only a component that does
+    not exist at all makes the folder `absent`. A `..` segment, or a directory outside `root`,
+    is `unverified`. By default the root is the directory's own parent."""
     try:
-        directory = Path(os.path.abspath(directory))
-        root = Path(os.path.abspath(root)) if root is not None else directory.parent
+        directory = _absolute(directory)
+        root = _absolute(root) if root is not None else directory.parent
+        if ".." in directory.parts or ".." in root.parts:
+            return "unverified"
         rel = directory.relative_to(root)
         current = Path(os.path.realpath(root))
-        if not stat.S_ISDIR(current.lstat().st_mode):
-            return False
+        try:
+            if not stat.S_ISDIR(current.lstat().st_mode):
+                return "unverified"
+        except FileNotFoundError:
+            return "absent"
         for part in rel.parts:
             current = current / part
-            if not stat.S_ISDIR(current.lstat().st_mode):
-                return False
-        return True
+            try:
+                mode = current.lstat().st_mode
+            except FileNotFoundError:
+                return "absent"
+            if not stat.S_ISDIR(mode):
+                return "unverified"
+        return "real"
     except (OSError, ValueError):
-        return False
+        return "unverified"
+
+
+def _real_dirs(directory: Path, root: Path | None = None) -> bool:
+    """`directory` and every folder between `root` and it are real directories, not links."""
+    return _dir_state(directory, root) == "real"
 
 
 def _real_parents(path: Path, root: Path | None = None) -> bool:
     """Refuse linked or unreadable folders below the trusted root, explicit outside logs included."""
-    path = Path(os.path.abspath(path))
+    path = _absolute(path)
     return _real_dirs(path.parent, root if root is not None else path.parent.parent)
 
 
@@ -177,17 +199,11 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
         if report["status"] == "complete":
             report["status"] = "partial"
 
-    root = Path(root) if root is not None else Path(os.path.abspath(directory)).parent
-    absent = False
-    try:
-        directory.lstat()
-    except FileNotFoundError:
-        # A log folder that does not exist yet (a fresh install, no hook has run) holds
-        # nothing to retain: zero entries, measured, never "unknown".
-        absent = True
-    except OSError:
-        pass
-    safe = not absent and _real_dirs(directory, root)
+    root = _absolute(root) if root is not None else _absolute(directory).parent
+    # A log folder that does not exist yet (a fresh install, no hook has run) holds nothing to
+    # retain: zero entries, measured. A dangling link or a `..` on the way is not absence.
+    state = _dir_state(directory, root)
+    absent, safe = state == "absent", state == "real"
     entries = []
     if absent:
         report["observed_count"] = 0
@@ -208,7 +224,7 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
         observation = {}
         try:
             # An explicit log outside the trusted root is judged against its own parent.
-            inside = Path(os.path.abspath(path)).is_relative_to(Path(os.path.abspath(root)))
+            inside = _absolute(path).is_relative_to(root)
             did_rotate = rotate(path, max_bytes=max_bytes, generations=generations,
                                 _observation=observation, root=root if inside else None)
         except Exception:  # detailed mode isolates failures without serializing exceptions

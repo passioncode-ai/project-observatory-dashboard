@@ -576,6 +576,11 @@ def archive_head_ref(repo: str, head: str) -> tuple[str, str]:
     """Keep a detached HEAD reachable under `refs/heads/archive/wt-<sha8>`: (ref, refusal)."""
     name = f"archive/wt-{head[:8]}"
     ref = "refs/heads/" + name
+    # A symbolic ref here would keep the commit only while its referent does: not retention.
+    symbolic = git(repo, "symbolic-ref", "--quiet", ref)
+    if symbolic.returncode != 1:
+        return ref, ("detached HEAD archive ref is symbolic; nothing removed" if symbolic.returncode == 0
+                     else "detached HEAD archive ref could not be read; nothing removed")
     existing = git(repo, "show-ref", "--verify", "--quiet", ref)
     if existing.returncode == 0:
         resolved = git(repo, "rev-parse", "--verify", ref)
@@ -631,9 +636,41 @@ def retain_missing_head(repo: str, target: str, head: str | None) -> tuple[str, 
         retained = git(repo, "rev-parse", "--verify", ref)
         if retained.returncode or retained.stdout.strip() != head:
             return ref, "HEAD retention could not be verified; nothing pruned"
+        if git(repo, "symbolic-ref", "--quiet", ref).returncode != 1:
+            return ref, "the ref that would keep HEAD is symbolic; nothing pruned"
         return ref, ""
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return "", "HEAD retention could not be read; nothing pruned"
+
+
+def missing_admin_entry(repo: str, target: str, head: str) -> tuple[pathlib.Path | None, str]:
+    """The one `.git/worktrees/<name>` entry whose `gitdir` points at `target`: (entry, refusal).
+
+    Matched by the path the entry itself records, never by a name, and its HEAD file must
+    still be the HEAD that was kept. A locked, ambiguous or unreadable entry refuses."""
+    common = git(repo, "rev-parse", "--git-common-dir")      # relative to `repo` before Git 2.31
+    if common.returncode or not common.stdout.strip():
+        return None, "the repository's git directory could not be read; nothing pruned"
+    root = pathlib.Path(repo, common.stdout.strip()) / "worktrees"
+    want = os.path.normpath(target)
+    found = []
+    for entry in root.iterdir():
+        gitdir = (entry / "gitdir").read_text(encoding="utf-8").strip() if (entry / "gitdir").is_file() else ""
+        if gitdir and os.path.isabs(gitdir) and os.path.basename(gitdir) == ".git" \
+                and os.path.normpath(os.path.dirname(gitdir)) == want:
+            found.append(entry)
+    if len(found) != 1:
+        return None, "the registration's entry could not be identified; nothing pruned"
+    entry = found[0]
+    if (entry / "locked").exists() or os.path.islink(entry) or not entry.is_dir():
+        return None, "the registration's entry is locked or not a plain folder; nothing pruned"
+    recorded = (entry / "HEAD").read_text(encoding="utf-8").strip()
+    if recorded.startswith("ref: "):
+        tip = git(repo, "rev-parse", "--verify", recorded[5:])
+        recorded = tip.stdout.strip() if tip.returncode == 0 else ""
+    if recorded != head:
+        return None, "the worktree's HEAD changed since it was kept; nothing pruned"
+    return entry, ""
 
 
 def retain_worktree_head(repo: str, target: str, head: str) -> str:
@@ -713,22 +750,27 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         if why:
             return {**rec, "result": "skipped", "reason": why}
         rec["retained_ref"] = ref
-        if worktree_presence(target) != "absent":
-            return {**rec, "result": "skipped", "reason": "the directory reappeared; nothing pruned"}
-        # One registration, never `git worktree prune`: a repository-wide prune also drops the
-        # records of worktrees on an unplugged drive, whose detached commits nothing else names.
-        # Without --force, Git refuses a directory that came back with changes.
+        # Only the administrative entry moves, never a working directory and never a
+        # repository-wide `git worktree prune` (which also drops the records of worktrees on an
+        # unplugged drive). The entry is renamed aside inside the repository, index and reflog
+        # kept: a directory that reappears after this check loses nothing, and moving the entry
+        # back (then `git worktree repair`) restores the registration.
         detail = {"scope": "one-registration", "registration_changes": None}
         try:
-            done = git(repo, "worktree", "remove", target)
-        except (OSError, subprocess.SubprocessError):
+            admin, why = missing_admin_entry(repo, target, a.get("head"))
+            if why:
+                return {**rec, "result": "skipped", "reason": why}
+            if worktree_presence(target) != "absent":
+                return {**rec, "result": "skipped", "reason": "the directory reappeared; nothing pruned"}
+            retired = admin.parent.parent / "worktrees-retired"
+            retired.mkdir(mode=0o700, exist_ok=True)
+            dest = retired / f"{admin.name}-{rec['head'][:8]}-{int(time.time())}"
+            os.rename(admin, dest)
+        except (OSError, subprocess.SubprocessError, UnicodeError):
             return {**rec, **detail, "result": "failed", "effect": "unknown",
                     "reason_code": "registration-prune-incomplete",
                     "reason": "registration removal did not complete; inspect current registrations before retrying"}
-        if done.returncode:
-            return {**rec, **detail, "result": "failed", "exit_code": done.returncode,
-                    "effect": "unknown", "reason_code": "registration-prune-failed",
-                    "reason": "Git refused to remove the registration; inspect current registrations before retrying"}
+        rec["retired_entry"] = "worktrees-retired/" + dest.name
         return {**rec, **detail, "result": "pruned", "exit_code": 0}
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):

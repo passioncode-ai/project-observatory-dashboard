@@ -637,6 +637,25 @@ class LogRetentionEvidence(Workspace):
         self.assertFalse(self.lp.rotate(linked_home / "ws2" / "store" / "logs" / "gate.log", max_bytes=10,
                                         root=linked_home / "ws2"))
 
+    def test_a_dangling_link_or_dotdot_below_the_root_is_unverified(self):
+        root = self.base / "lp-root"
+        root.mkdir()
+        (root / "dangling").symlink_to(self.base / "nowhere", target_is_directory=True)
+        dangling = self.lp.sweep_report(root / "dangling" / "logs", root=root)
+        self.assertEqual((dangling["status"], dangling["reasons"]), ("unknown", {"directory_unverified": 1}))
+        self.assertNotIn("absent", dangling)
+        # `root/link/../logs`: the system follows the link first, so `..` lands outside the root.
+        elsewhere = self.base / "elsewhere"
+        (elsewhere / "x").mkdir(parents=True)
+        (elsewhere / "logs").mkdir()
+        (elsewhere / "logs" / "a.log").write_bytes(b"x" * 2000)
+        (root / "lnk").symlink_to(elsewhere / "x", target_is_directory=True)
+        (root / "logs").mkdir()
+        dotdot = self.lp.sweep_report(root / "lnk" / ".." / "logs", root=root, max_bytes=100)
+        self.assertEqual(dotdot["status"], "unknown")
+        self.assertEqual(sorted(os.listdir(elsewhere / "logs")), ["a.log"], "nothing rotated outside the root")
+        self.assertFalse(self.lp.rotate(root / "lnk" / ".." / "logs" / "a.log", max_bytes=100, root=root))
+
     def test_unreadable_and_linked_scopes_are_unknown(self):
         linked = self.base / "linked"
         linked.symlink_to(self.logs, target_is_directory=True)

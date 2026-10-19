@@ -1069,6 +1069,7 @@ class MissingRegistrationReceipt(unittest.TestCase):
         row = self.act(wt, head)
         self.assertEqual(row["result"], "pruned", row)
         self.assertEqual(row["scope"], "one-registration")
+        self.assertTrue(row["retired_entry"].startswith("worktrees-retired/"))
         self.assertEqual(row["retained_ref"], f"refs/heads/archive/wt-{head[:8]}")
         self.assertEqual(bare(self.repo, "rev-parse", row["retained_ref"]).stdout.strip(), head)
         self.assertNotIn(str(wt), self.registered())
@@ -1106,21 +1107,17 @@ class MissingRegistrationReceipt(unittest.TestCase):
         row = self.act(wt, head)
         self.assertEqual((row["result"], row["reason"]), ("skipped", "the directory exists again"))
 
-    def test_failed_git_never_reports_pruned_or_leaks_stderr(self) -> None:
+    def test_a_failed_move_never_reports_pruned_or_leaks_its_error(self) -> None:
         wt = self.vol / "wt"
         head = self.detached(wt)
         shutil.rmtree(wt)
-        real = self.cleanup.git
-
-        def refusing(repo, *args, **kw):
-            if args[:2] == ("worktree", "remove"):
-                return subprocess.CompletedProcess([], 128, "SECRET-OUTPUT", "SECRET-ERROR")
-            return real(repo, *args, **kw)
-        with patch.object(self.cleanup, "git", side_effect=refusing):
+        with patch.object(self.cleanup.os, "rename", side_effect=OSError("SECRET-ERROR")):
             row = self.act(wt, head)
-        self.assertEqual((row["result"], row["exit_code"], row["effect"]), ("failed", 128, "unknown"))
+        self.assertEqual((row["result"], row["effect"]), ("failed", "unknown"))
+        self.assertEqual(row["reason_code"], "registration-prune-incomplete")
         self.assertIsNone(row["registration_changes"])
         self.assertNotIn("SECRET", str(row))
+        self.assertIn(str(wt), self.registered())
 
     def test_a_timeout_has_uncertain_effect_and_no_raw_exception(self) -> None:
         wt = self.vol / "wt"
@@ -1129,14 +1126,52 @@ class MissingRegistrationReceipt(unittest.TestCase):
         real = self.cleanup.git
 
         def hanging(repo, *args, **kw):
-            if args[:2] == ("worktree", "remove"):
+            if args[:2] == ("rev-parse", "--git-common-dir"):
                 raise subprocess.TimeoutExpired("SECRET-COMMAND", 1, output="SECRET-OUTPUT")
             return real(repo, *args, **kw)
         with patch.object(self.cleanup, "git", side_effect=hanging):
             row = self.act(wt, head)
         self.assertEqual((row["result"], row["effect"]), ("failed", "unknown"))
-        self.assertEqual(row["reason_code"], "registration-prune-incomplete")
         self.assertNotIn("SECRET", str(row))
+
+    def test_a_directory_that_reappears_at_the_last_moment_loses_nothing(self) -> None:
+        # Between the last presence check and the move, the directory comes back clean with a
+        # new detached commit. Only the administrative entry moves; the directory and its
+        # commit stay, and moving the entry back plus `git worktree repair` registers it again.
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        held = self.d / "held"
+        os.rename(wt, held)
+        real_rename = os.rename
+        late = {}
+
+        def racing(src, dst, *rest, **kw):
+            if "worktrees-retired" in str(dst):
+                real_rename(held, wt)
+                bare(wt, "commit", "-q", "--allow-empty", "-m", "late")
+                late["sha"] = bare(wt, "rev-parse", "HEAD").stdout.strip()
+            return real_rename(src, dst, *rest, **kw)
+        with patch.object(self.cleanup.os, "rename", side_effect=racing):
+            row = self.act(wt, head)
+        self.assertEqual(row["result"], "pruned", row)
+        self.assertTrue((wt / ".git").exists(), "the working directory was not touched")
+        self.assertEqual(bare(self.repo, "cat-file", "-t", late["sha"]).stdout.strip(), "commit")
+        common = self.repo / ".git"
+        retired = common / row["retired_entry"]
+        self.assertEqual((retired / "HEAD").read_text().strip(), late["sha"])
+        real_rename(retired, common / "worktrees" / "wt")
+        bare(self.repo, "worktree", "repair", str(wt))
+        self.assertIn(str(wt), self.registered())
+
+    def test_a_symbolic_archive_ref_is_not_retention(self) -> None:
+        wt = self.vol / "wt"
+        head = self.detached(wt)
+        shutil.rmtree(wt)
+        bare(self.repo, "symbolic-ref", f"refs/heads/archive/wt-{head[:8]}", "refs/heads/main")
+        row = self.act(wt, head)
+        self.assertEqual(row["result"], "skipped", row)
+        self.assertIn("symbolic", row["reason"])
+        self.assertIn(str(wt), self.registered())
 
     def test_the_survey_marks_an_unknown_directory_unreadable_not_missing(self) -> None:
         import scan_git_hygiene

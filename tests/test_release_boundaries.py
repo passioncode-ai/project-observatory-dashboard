@@ -152,6 +152,19 @@ class ReleaseBoundaryTests(unittest.TestCase):
         self.assertEqual(report['public_identifiers_subtracted'],1)
         self.assertEqual(report['private_denylist_entries'],1)
         self.assertEqual([f for f in report['findings'] if f['kind']=='private-identifier'][0]['count'],1)
+    def test_the_merge_collector_s_worktree_loop_is_not_a_private_name(self):
+        # The maintainer's list holds `_worktrees` (a folder-name convention); collectors/merge.py
+        # uses it as a loop variable. Published on purpose, it is subtracted, and a real private
+        # name beside it is still found.
+        self.assertIn('_worktrees', privacy.public_identifiers())
+        self.put('observatory/engine/collectors/merge.py','for _main,_worktrees in joins.items(): confidential-fixture')
+        outside=Path(tempfile.mkdtemp(prefix='observatory-deny-'));self.addCleanup(__import__('shutil').rmtree,outside)
+        deny=outside/'deny.json';deny.write_text(json.dumps(['_worktrees','confidential-fixture']))
+        run=subprocess.run(['python3',str(ROOT/'tools/check_public_release.py'),'--root',str(self.root),
+                            '--private-denylist',str(deny)],capture_output=True,text=True)
+        report=json.loads(run.stdout)
+        self.assertEqual(report['public_identifiers_subtracted'],1)
+        self.assertEqual(sum(f['count'] for f in report['findings'] if f['kind']=='private-identifier'),1)
     def test_a_public_identifier_without_a_reason_is_refused(self):
         bad=self.put('ids.json',json.dumps({'identifiers':[{'token':'someone','reason':' '}]}))
         with self.assertRaises(ValueError):privacy.public_identifiers(bad)

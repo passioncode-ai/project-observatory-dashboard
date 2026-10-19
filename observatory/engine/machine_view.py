@@ -147,5 +147,12 @@ def summary(explain_pid: int | None = None) -> dict:
         sys.path.insert(0, str(paths.ROOT / "collectors"))
         import scan_machine
         out["explain"] = scan_machine.explain(int(explain_pid))
+    # The coverage block carries its own unmeasured sources; the overview's `degraded` names
+    # them too, once each, or an empty list would claim full coverage beside them.
+    seen = {(d.get("source"), d.get("code")) for d in degraded if isinstance(d, dict)}
+    for d in (out.get("coverage") or {}).get("degraded") or []:
+        if (d.get("source"), d.get("code")) not in seen:
+            seen.add((d.get("source"), d.get("code")))
+            degraded.append(d)
     out["degraded"] = degraded
     return out

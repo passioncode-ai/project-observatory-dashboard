@@ -556,7 +556,7 @@ def observatory_machine(
     if section == "coverage" and explainPid is None:
         import coverage_view
         coverage = coverage_view.summary()
-        return {"measuredAt": None, "degraded": coverage_view.degradations(coverage), "coverage": coverage}
+        return {"measuredAt": None, "degraded": coverage["degraded"], "coverage": coverage}
     import machine_view
     full = machine_view.summary(explainPid)
     base = {"measuredAt": full.get("measuredAt"), "degraded": full["degraded"]}
