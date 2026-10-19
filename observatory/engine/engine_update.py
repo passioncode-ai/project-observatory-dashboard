@@ -1403,6 +1403,10 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+#: How many times `update_lock` tries, 0.1 s apart, before it reports the lock as taken.
+UPDATE_LOCK_TRIES = 20
+
+
 def _update_lock_path(base: Path) -> Path:
     return base.parent / f".{base.name}.observatory-update.lock"
 
@@ -1419,9 +1423,17 @@ def update_lock(base: Path):
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
-        try:
-            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
-        except BlockingIOError:
+        # `update_lock_held` (maintenance, and a session's MCP server deciding whether it may
+        # move onto a new release, OBS-159) probes this lock by taking it for an instant; a
+        # few short retries keep such a probe from refusing a real update.
+        for attempt in range(UPDATE_LOCK_TRIES):
+            try:
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt + 1 < UPDATE_LOCK_TRIES:
+                    time.sleep(0.1)
+        else:
             raise UpdateError("Another `full update --apply` is running for this workspace, or the daily "
                               "backup holds the jobs stopped; nothing was changed — try again in a few "
                               "minutes") from None

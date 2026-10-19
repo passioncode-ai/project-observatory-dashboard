@@ -104,8 +104,29 @@ class Client:
         self.lines.put(None)
 
     def send(self, obj: dict) -> None:
-        self.proc.stdin.write((json.dumps(obj) + "\n").encode())
+        self.send_raw((json.dumps(obj) + "\n").encode())
+
+    def send_raw(self, data: bytes) -> None:
+        self.proc.stdin.write(data)
         self.proc.stdin.flush()
+
+    def answers(self, ids, timeout: float = 180) -> None:
+        """Wait until every id in `ids` was answered (ids compare as the wire does: 7 == 7.0)."""
+        want = set(ids)
+        deadline = time.monotonic() + timeout
+        want -= {m.get("id") for m in self.seen if "method" not in m}
+        while want and time.monotonic() < deadline:
+            try:
+                msg = self.lines.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if msg is None:
+                break
+            self.seen.append(msg)
+            if "method" not in msg:
+                want.discard(msg.get("id"))
+        if want:
+            raise AssertionError(f"{len(want)} request(s) never answered, e.g. {sorted(want)[:5]}")
 
     def answer(self, mid, timeout: float = 120) -> dict:
         deadline = time.monotonic() + timeout
@@ -186,7 +207,8 @@ class SwapOverPipes(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
         env.update(HOME=str(self.base / "user"), OBSERVATORY_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
                    OBSERVATORY_PRODUCT_LOG_DIR=str(self.base / "product-logs"),
-                   OBSERVATORY_RELOAD_RETRY_SECONDS="0", OBSERVATORY_DB=str(self.home / "store/observatory.db"))
+                   OBSERVATORY_RELOAD_RETRY_SECONDS="0", OBSERVATORY_RELOAD_DRAIN_SECONDS="10",
+                   OBSERVATORY_DB=str(self.home / "store/observatory.db"))
         self.env = env
         self.client = None
 
@@ -237,6 +259,44 @@ class SwapOverPipes(unittest.TestCase):
                         "the tool set changed, so the client is told")
         swaps = [r for r in self.log() if r.get("event") == "swapped"]
         self.assertEqual([(r["pid"], r["from"], r["to"]) for r in swaps], [(pid, "9.0.0", "9.1.0")])
+
+    def test_over_a_thousand_pipelined_requests_cross_a_swap_each_answered_once(self):
+        # More held lines than the SDK's inbound stream holds (1024): feeding them before the
+        # SDK reads deadlocked the new process (round 1, HIGH 2).
+        c = self.start()
+        self.install.install_b("9.1.0")
+        ids = list(range(100, 1135))
+        c.send_raw(b"".join((json.dumps({"jsonrpc": "2.0", "id": i, "method": "ping"}) + "\n").encode()
+                            for i in ids))
+        c.answers(ids)
+        self.assertEqual(body(c.call(2000, "observatory_reload_probe"))["version"], "9.1.0")
+        self.assert_once(c.close(), *ids, 2000)
+
+    def test_a_malformed_frame_or_a_float_id_does_not_stall_a_later_swap(self):
+        c = self.start()
+        c.send({"jsonrpc": "2.0", "id": 7.0, "method": "ping"})    # the SDK drops it unanswered
+        c.send({"id": 8, "method": "ping"})                      # no "jsonrpc": the SDK drops it
+        c.send_raw(b"\xff\xfe not json\n")                      # invalid UTF-8, decoded with U+FFFD
+        c.send({"jsonrpc": "2.0", "id": 9, "method": "ping"})
+        c.answers([9])
+        self.install.install_b("9.1.0")
+        started = time.monotonic()
+        self.assertEqual(body(c.call(10, "observatory_reload_probe"))["version"], "9.1.0")
+        self.assertLess(time.monotonic() - started, 9, "no request counted in flight that the SDK never answers")
+        c.close()
+        self.assertFalse([r for r in self.log() if r.get("event") == "drain-dropped"])
+
+    def test_the_client_leaving_during_a_swap_ends_the_server_promptly(self):
+        c = self.start()
+        self.install.install_b("9.1.0")
+        c.send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": {"name": "observatory_reload_probe", "arguments": {}}})
+        c.proc.stdin.close()
+        started = time.monotonic()
+        c.proc.wait(timeout=30)
+        self.assertLess(time.monotonic() - started, 25)
+        c.release()
+        self.assertNotIn("Traceback", (self.base / "server.err").read_text(errors="replace"))
 
     def test_an_update_in_progress_refuses_until_it_ends(self):
         import oslocks
@@ -349,6 +409,34 @@ class StateAndJudgement(unittest.TestCase):
         self.assertIn("cannot take over", why)
 
 
+class LocksAndPins(unittest.TestCase):
+    def test_a_probe_of_the_update_lock_does_not_refuse_a_real_update(self):
+        import engine_update
+        import oslocks
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "home"
+            base.mkdir()
+            lock = engine_update._update_lock_path(base)
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+            threading.Timer(0.3, os.close, args=(fd,)).start()   # a probe holding it for a moment
+            with engine_update.update_lock(base):
+                self.assertTrue(engine_update.update_lock_held(base))
+            self.assertFalse(engine_update.update_lock_held(base))
+
+    def test_the_relay_fails_loudly_when_the_sdk_it_reaches_into_moves(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import stdio_relay
+        lock = (ROOT / "requirements-full.lock").read_text(encoding="utf-8")
+        pinned = [line.split("==", 1)[1].strip() for line in lock.splitlines() if line.startswith("mcp==")]
+        self.assertEqual(pinned, [stdio_relay.TESTED_MCP],
+                         "the lock moved `mcp`: re-read the SDK internals stdio_relay uses, then move TESTED_MCP")
+        from mcp.shared._context_streams import create_context_streams  # noqa: F401
+        from capability_tools import InteropServer
+        lowlevel = InteropServer(name="pin")._lowlevel_server
+        self.assertTrue(callable(lowlevel.run) and callable(lowlevel.create_initialization_options))
+
+
 class LogAndLifecycle(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -367,6 +455,15 @@ class LogAndLifecycle(unittest.TestCase):
         self.assertTrue(out["swapped"][0]["running"])
         self.assertNotIn("/", out["refused"][0]["reason"])
         self.assertTrue(os.stat(session_reload.log_path(self.home)).st_mode & 0o077 == 0 or not POSIX)
+
+    def test_a_swap_reaches_the_machine_log_with_codes_only(self):
+        machine = self.home / "product-logs"
+        with patch.dict(os.environ, {"OBSERVATORY_PRODUCT_LOG_DIR": str(machine)}), patch("sys.stderr"):
+            session_reload.record(self.home / "elsewhere", "swapped", **{"from": "1.0.0", "to": "1.1.0"})
+            times = session_reload.reload_times()
+        self.assertIn(os.getpid(), times)
+        row = json.loads((machine / session_reload.LOG_NAME).read_text().splitlines()[-1])
+        self.assertEqual(set(row), {"at", "event", "pid"})
 
     def test_the_lifecycle_scan_ages_a_swapped_server_from_its_swap(self):
         import collectors.scan_lifecycle as sl

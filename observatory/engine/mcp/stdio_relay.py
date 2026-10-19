@@ -52,6 +52,11 @@ import configuration
 import osprivacy
 import session_reload
 
+#: The `mcp` release this relay was written and tested against. It reaches three SDK
+#: internals (`mcp.shared._context_streams.create_context_streams`, `MCPServer._lowlevel_server`
+#: and the lowlevel server's `run`), so tests/test_session_reload.py fails when the lock moves
+#: `mcp` to another version: read those three again before changing this pin.
+TESTED_MCP = "2.3.0"
 #: Retry a transient refusal (an update running, requests still in flight) no sooner than this.
 RETRY_SECONDS = float(os.environ.get("OBSERVATORY_RELOAD_RETRY_SECONDS", "15"))
 #: A test-only fault: `fail` makes `execv` raise, so the failed-exec branch runs for real.
@@ -75,7 +80,7 @@ class Relay:
         self.buffer = bytearray()
         self.paused = False
         self.eof = False
-        self.inflight: set = set()
+        self.inflight: dict = {}               # validated request id -> when it was handed on
         self.held: list[bytes] = []
         self.swapping = False
         self.blocked: tuple | None = None      # marker identity a permanent refusal was made at
@@ -168,18 +173,33 @@ class Relay:
                 del self.buffer[:at + 1]
             await self._route(line)
 
-    async def _deliver(self, line: bytes) -> None:
+    async def _deliver(self, line: bytes, request: bool = False) -> None:
+        """Hand one frame to the SDK. A request is counted in flight only once it validated,
+        under its validated id: the SDK drops a frame that does not validate without an
+        answer, and an id counted for it would stall every later swap."""
         try:
-            message: Any = SessionMessage(types.jsonrpc_message_adapter.validate_json(line, by_name=False))
+            # Decoded as the SDK's own transport decodes: invalid UTF-8 becomes U+FFFD.
+            valid = types.jsonrpc_message_adapter.validate_json(line.decode("utf-8", errors="replace"),
+                                                                 by_name=False)
+            message: Any = SessionMessage(valid)
         except Exception as exc:  # noqa: BLE001: the SDK answers a malformed frame itself
-            message = exc
-        await self.to_sdk.send(message)
+            valid, message = None, exc
+        if request and valid is not None and getattr(valid, "method", None) is not None \
+                and getattr(valid, "id", None) is not None:
+            if valid.method == "initialize" and isinstance(getattr(valid, "params", None), dict):
+                self.init_params, self.init_id = valid.params, valid.id
+            self.inflight[_key(valid.id)] = time.monotonic()
+        try:
+            await self.to_sdk.send(message)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError):
+            if request and valid is not None:
+                self.inflight.pop(_key(getattr(valid, "id", None)), None)
 
     async def _route(self, line: bytes, from_held: bool = False) -> None:
         if not line.strip():
             return
         try:
-            obj = json.loads(line)
+            obj = json.loads(line.decode("utf-8", errors="replace"))
         except ValueError:
             obj = None
         if not isinstance(obj, dict):
@@ -195,9 +215,8 @@ class Relay:
                 self.held.append(line)
                 self.tg.start_soon(self._swap)
                 return
-            if method == "initialize" and isinstance(obj.get("params"), dict):
-                self.init_params, self.init_id = obj["params"], obj["id"]
-            self.inflight.add(_key(obj["id"]))
+            await self._deliver(line, request=True)
+            return
         elif isinstance(method, str):
             if method == "notifications/initialized":
                 self.initialized = True
@@ -207,7 +226,7 @@ class Relay:
                 if len(kept) != len(self.held):
                     self.held = kept
                     return
-                self.inflight.discard(target)
+                self.inflight.pop(target, None)
         await self._deliver(line)
 
     # --- outbound --------------------------------------------------------------------
@@ -233,7 +252,7 @@ class Relay:
                 if answer:
                     # Only once it is on the wire: a swap waits for an empty set, and an
                     # answer pulled but not yet written would die with the old process.
-                    self.inflight.discard(_key(mid))
+                    self.inflight.pop(_key(mid), None)
 
     # --- the swap --------------------------------------------------------------------
 
@@ -248,18 +267,32 @@ class Relay:
         return time.monotonic() >= self.retry_at
 
     async def _drained(self) -> bool:
+        """Whether every request handed on was answered within DRAIN_SECONDS.
+
+        On a timeout the ids still counted are dropped from the set, with a logged line: a
+        request the SDK never answers must not hold every later swap for the full bound
+        (the next attempt then finds the set empty). Stops at once when the client left."""
         deadline = time.monotonic() + session_reload.DRAIN_SECONDS
-        while self.inflight:
+        while self.inflight and not self.eof:
             if time.monotonic() > deadline:
+                stuck = len(self.inflight)
+                self.inflight.clear()
+                session_reload.record(self.home, "drain-dropped", count=stuck,
+                                      reason=f"no answer within {int(session_reload.DRAIN_SECONDS)} s")
                 return False
             await anyio.sleep(0.05)
-        return True
+        return not self.eof
 
     async def _swap(self) -> None:
         try:
             outcome = await self._attempt()
         except Exception as exc:  # noqa: BLE001: a swap that breaks must still release the held requests
             outcome = (f"the swap failed ({type(exc).__name__})", False)
+        if self.eof:
+            # The client closed the session: nobody waits for the held requests.
+            self.held.clear()
+            self.swapping = False
+            return
         if outcome is not None:
             reason, transient = outcome
             session_reload.REFUSAL = reason
@@ -289,6 +322,8 @@ class Relay:
             return "an update of this workspace is in progress", True
         if not await self._drained():
             return f"requests were still running after {int(session_reload.DRAIN_SECONDS)} s", True
+        if self.eof:
+            return "the client closed the session", True
         before = self._identity()
         answer, why = await anyio.to_thread.run_sync(
             session_reload.preflight, sys.executable, self.script, self.argv)
@@ -296,6 +331,8 @@ class Relay:
             why = session_reload.judge(answer, protocol=self.protocol)
         if why is not None:
             return why, False
+        if self.eof:
+            return "the client closed the session", True
         if self._identity() != before:
             return "the installed release changed during its start check", True
         if session_reload.update_lock_held(self.home):
@@ -365,14 +402,19 @@ class Relay:
         async with anyio.create_task_group() as tg:
             self.tg = tg
             tg.start_soon(self._writer, from_sdk)
+            # The SDK reads before anything is fed: a hand-over can carry more held lines
+            # than the inbound stream holds, and feeding them first would deadlock.
+            tg.start_soon(lowlevel.run, sdk_in, sdk_out, options)
             if self.resumed is not None:
                 await self._resume()
                 await self._lines()
             tg.start_soon(self._reader)
-            await lowlevel.run(sdk_in, sdk_out, options)
 
 
 def _key(value: Any) -> tuple:
+    """A request id as the wire compares it: 7 and 7.0 are one id, "7" another."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
     return (type(value).__name__, value)
 
 

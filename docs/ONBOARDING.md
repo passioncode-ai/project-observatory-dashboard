@@ -1595,8 +1595,8 @@ the tool list changed, the client receives `notifications/tools/list_changed`.
 
 Where it cannot move, it answers `stale-server` and names why, and the session gets the new
 release when it restarts or reconnects the server: on Windows (`os.execv` starts a new
-process there), while a `full update --apply` holds the workspace (it tries again at a later
-request), when the installed release fails its check, speaks another MCP revision or no
+process there), while a `full update --apply` holds the workspace or the requests already
+running take longer than a minute to answer (it tries again at a later request), when the installed release fails its check, speaks another MCP revision or no
 longer exists, or when the replacement itself fails. Each move and each refusal is one line
 in `store/logs/mcp-reload.jsonl` (from, to, pid, and the reason for a refusal) and on the
 server's stderr; `full doctor` lists them under `session_servers`. `full update` lists the

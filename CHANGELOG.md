@@ -56,7 +56,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   (the server now declares `tools.listChanged`). The session's stdio is served by `mcp/stdio_relay.py`
   instead of the SDK's own transport on POSIX.
   - Where the move is impossible the server keeps answering `stale-server`, now with the reason: Windows,
-    an update holding the workspace (retried at a later request), an installed release that fails its check
+    an update holding the workspace or requests still running after a minute (both retried at a later
+    request), an installed release that fails its check
     or speaks another MCP revision, code that is gone, or a failed `execv`. The pipe stays open and no
     request is answered twice.
   - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,

@@ -204,18 +204,37 @@ def record(home: Path, event: str, **fields) -> dict:
         sys.stderr.flush()
     except (OSError, ValueError):
         pass
+    _append(log_path(home), line)
+    if event == "swapped":
+        # The machine's product log folder (update_events.directory()) learns the pid and time
+        # only, codes-only like updates.jsonl: the lifecycle scan reads it for the servers of
+        # every workspace on this account, whatever home each one serves.
+        _append(machine_log_path(), json.dumps({"at": row["at"], "event": event, "pid": row["pid"]},
+                                               sort_keys=True))
+    return row
+
+
+def machine_log_path() -> Path | None:
     try:
-        file = log_path(home)
+        import update_events
+        return update_events.directory() / LOG_NAME
+    except Exception:  # noqa: BLE001: no machine log folder, no machine line
+        return None
+
+
+def _append(file: Path | None, line: str) -> None:
+    if file is None:
+        return
+    try:
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if file.is_symlink():
-            return row
+            return
         _trim(file)
         fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as out:
             out.write(line + "\n")
     except OSError:
         pass
-    return row
 
 
 def _trim(file: Path) -> None:
@@ -232,10 +251,11 @@ def _trim(file: Path) -> None:
         pass
 
 
-def read_log(home: Path, limit: int = 200) -> list[dict]:
+def read_log(home: Path | None, limit: int = 200, *, file: Path | None = None) -> list[dict]:
     try:
-        lines = log_path(home).read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
-    except OSError:
+        target = file if file is not None else log_path(home)
+        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+    except (OSError, TypeError):
         return []
     rows = []
     for line in lines:
@@ -248,11 +268,15 @@ def read_log(home: Path, limit: int = 200) -> list[dict]:
     return rows
 
 
-def reload_times(home: Path) -> dict[int, float]:
-    """pid -> the epoch of its latest swap. A swap keeps the pid and its start time, so
-    the lifecycle scan reads the code's age from here rather than from `ps`."""
+def reload_times(home: Path | None = None) -> dict[int, float]:
+    """pid -> the epoch of its latest swap, from the machine's log and, given one, a home's.
+    A swap keeps the pid and its start time, so the lifecycle scan reads the code's age
+    from here rather than from `ps`."""
     out: dict[int, float] = {}
-    for row in read_log(home, LOG_KEEP_LINES):
+    rows = read_log(None, LOG_KEEP_LINES, file=machine_log_path())
+    if home is not None:
+        rows += read_log(home, LOG_KEEP_LINES)
+    for row in rows:
         if row.get("event") != "swapped" or not isinstance(row.get("pid"), int):
             continue
         try:

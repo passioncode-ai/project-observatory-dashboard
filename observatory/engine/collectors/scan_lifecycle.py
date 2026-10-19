@@ -207,7 +207,8 @@ def snapshot() -> dict:
                 launchd[int(cols[0])] = cols[2]
     import time
     # OBS-159: a session server that moved onto the installed release kept its pid and its
-    # start time, so the age of the code it runs is read from the engine's reload log.
+    # start time, so the age of the code it runs is read from the reload log: the machine's
+    # (every workspace's servers) and this home's.
     try:
         import session_reload
         reloads = {str(pid): at for pid, at in session_reload.reload_times(paths.HOME).items()}
