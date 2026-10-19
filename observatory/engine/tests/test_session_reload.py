@@ -48,6 +48,15 @@ def observatory_reload_probe() -> dict[str, Any]:
     return {"version": VERSION, "degraded": []}
 
 '''
+SLOW = '''
+
+@server.tool(name="observatory_reload_slow", title="Slow (test release)")
+async def observatory_reload_slow(seconds: float = 1.0) -> dict[str, Any]:
+    """Answers after `seconds` (a test-only tool)."""
+    await asyncio.sleep(seconds)
+    return {"version": VERSION, "degraded": []}
+
+'''
 ANCHOR = "# memory/0.1 (PB-137 N-025)"
 
 
@@ -64,6 +73,8 @@ class Install:
         self.engine = folder / "engine"
         shutil.copytree(ROOT, self.engine, ignore=shutil.ignore_patterns(
             "tests", "__pycache__", "node_modules", "*.pyc", ".pytest_cache"))
+        text = self.server.read_text(encoding="utf-8")
+        _replace(self.server, text.replace(ANCHOR, SLOW + ANCHOR, 1))
         self.set_version(version)
 
     @property
@@ -284,7 +295,23 @@ class SwapOverPipes(unittest.TestCase):
         self.assertEqual(body(c.call(10, "observatory_reload_probe"))["version"], "9.1.0")
         self.assertLess(time.monotonic() - started, 9, "no request counted in flight that the SDK never answers")
         c.close()
-        self.assertFalse([r for r in self.log() if r.get("event") == "drain-dropped"])
+
+    def test_a_request_running_past_the_drain_bound_is_answered_once_before_any_swap(self):
+        # Round 2: clearing the in-flight set at the bound let the next attempt exec while
+        # this request ran, and its answer was lost.
+        c = self.start(OBSERVATORY_RELOAD_DRAIN_SECONDS="2")
+        c.send({"jsonrpc": "2.0", "id": 50, "method": "tools/call",
+                "params": {"name": "observatory_reload_slow", "arguments": {"seconds": 12}}})
+        time.sleep(0.5)
+        self.install.install_b("9.1.0")
+        c.send({"jsonrpc": "2.0", "id": 51, "method": "ping"})
+        c.answers([51])
+        early = c.call(52, "observatory_reload_probe")
+        self.assertEqual(body(early)["error"], "stale-server", "the swap waits for request 50")
+        self.assertIn("still running", body(early)["detail"])
+        self.assertEqual(body(c.answer(50, timeout=60))["version"], "9.0.0")
+        self.assertEqual(body(c.call(53, "observatory_reload_probe"))["version"], "9.1.0")
+        self.assert_once(c.close(), 50, 51, 52, 53)
 
     def test_the_client_leaving_during_a_swap_ends_the_server_promptly(self):
         c = self.start()

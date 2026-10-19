@@ -1951,8 +1951,8 @@
       "path": "mcp/stdio_relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f3e7dd51c38207e68d122ab7a56b73de475da7434f4b133b0496b66e038ab945",
-      "bytes": 19780
+      "export_sha256": "1467fa35684831518fbb7d03a65cb28589001206ae3e6fd1eacee5bcfdf61063",
+      "bytes": 19601
     },
     {
       "path": "mcp_inventory.py",
@@ -4469,8 +4469,8 @@
       "path": "tests/test_session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a3b2bc9216ec7584048f3dc96c55640b4b5474aae432b401287798d0cba46c7f",
-      "bytes": 22720
+      "export_sha256": "d8b7377de9c9195911b96314b847b8d69acf0c3dd57d5066ae108d8c612f0321",
+      "bytes": 24103
     },
     {
       "path": "tests/test_session_start.py",

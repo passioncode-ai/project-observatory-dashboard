@@ -269,16 +269,13 @@ class Relay:
     async def _drained(self) -> bool:
         """Whether every request handed on was answered within DRAIN_SECONDS.
 
-        On a timeout the ids still counted are dropped from the set, with a logged line: a
-        request the SDK never answers must not hold every later swap for the full bound
-        (the next attempt then finds the set empty). Stops at once when the client left."""
+        Only validated requests are counted (`_deliver`), so every id here gets an answer.
+        A request still running at the bound keeps the swap deferred, refused as transient
+        and tried again at a later request: dropping its id would let the next attempt exec
+        while it runs and lose its answer. Stops at once when the client left."""
         deadline = time.monotonic() + session_reload.DRAIN_SECONDS
         while self.inflight and not self.eof:
             if time.monotonic() > deadline:
-                stuck = len(self.inflight)
-                self.inflight.clear()
-                session_reload.record(self.home, "drain-dropped", count=stuck,
-                                      reason=f"no answer within {int(session_reload.DRAIN_SECONDS)} s")
                 return False
             await anyio.sleep(0.05)
         return not self.eof
