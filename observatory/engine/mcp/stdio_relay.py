@@ -4,7 +4,7 @@ The SDK's own `stdio_server()` reads stdin through a buffered text layer: bytes 
 read but not yet handed on live in that buffer, and an `os.execv` would drop them. This
 relay owns the wire instead:
 
-- fds 0 and 1 are duplicated onto private close-on-exec descriptors, and 0/1 are pointed
+- fds 0 and 1 are duplicated onto private non-inheritable descriptors, and 0/1 are pointed
   at the null device and at stderr while it serves (as the SDK does), so a handler's
   stray print never reaches the wire;
 - stdin is read with `select` and `os.read` into the relay's own buffer under a lock,
@@ -32,7 +32,6 @@ expects no answer to it).
 from __future__ import annotations
 
 import errno
-import fcntl
 import json
 import os
 import select
@@ -50,6 +49,7 @@ from mcp.shared.message import SessionMessage
 
 import code_freshness
 import configuration
+import osprivacy
 import session_reload
 
 #: Retry a transient refusal (an update running, requests still in flight) no sooner than this.
@@ -91,8 +91,9 @@ class Relay:
     # --- the wire ------------------------------------------------------------------
 
     def _claim(self) -> None:
-        self.wire_in = fcntl.fcntl(0, fcntl.F_DUPFD_CLOEXEC, 3)
-        self.wire_out = fcntl.fcntl(1, fcntl.F_DUPFD_CLOEXEC, 3)
+        # os.dup gives a non-inheritable descriptor, and with 0, 1 and 2 open it lands above 2.
+        self.wire_in = os.dup(0)
+        self.wire_out = os.dup(1)
         self._divert()
 
     def _divert(self) -> None:
@@ -100,7 +101,7 @@ class Relay:
             sys.stdout.flush()
         except (OSError, ValueError):
             pass
-        null = os.open(os.devnull, os.O_RDONLY)
+        null = osprivacy.open(os.devnull, os.O_RDONLY)
         try:
             os.dup2(null, 0)
         finally:

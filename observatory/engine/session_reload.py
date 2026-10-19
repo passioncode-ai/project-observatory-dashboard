@@ -265,15 +265,8 @@ def reload_times(home: Path) -> dict[int, float]:
 
 
 def _alive(pid) -> bool:
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
+    import osproc
+    return osproc.alive(pid) if isinstance(pid, int) else False
 
 
 def summary(home: Path, limit: int = 20) -> dict:

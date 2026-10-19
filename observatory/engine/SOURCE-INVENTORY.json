@@ -1951,8 +1951,8 @@
       "path": "mcp/stdio_relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "231af550c572c94a71cf713d7dd5ee90ba5cce403db34af90196becd94958881",
-      "bytes": 16966
+      "export_sha256": "4805695f5e1feaacb6b17ebed158e70167e16243f7d14461e707acc38429907d",
+      "bytes": 17013
     },
     {
       "path": "mcp_inventory.py",
@@ -2418,8 +2418,8 @@
       "path": "session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ace4f735342915ca3bee67000cd4a2f47b630cc6e057c3ba64d75b7614dadb86",
-      "bytes": 12340
+      "export_sha256": "c02b599de32011dc34a798a3e4f08189b449484d150861a13da5fe84b4a9a614",
+      "bytes": 12215
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
