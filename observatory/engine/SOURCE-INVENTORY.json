@@ -843,8 +843,8 @@
       "path": "delegation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8fcb5881c0e4fcf971e63a568b03a055c14895dc61893cfcbd3e700924456761",
-      "bytes": 18796
+      "export_sha256": "40343e477c605837a13ea9c540fad5fe8cd5f86da89418ec631cba7a2dcb2636",
+      "bytes": 19690
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -2035,8 +2035,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "065d9235cb9433b01ac3fbd1aa4df83c30f66de9490191e80743e9ecd40806fb",
-      "bytes": 38133
+      "export_sha256": "650dfc947fb4bbcee25d91fb827f28f50c556e96d7b71f86921cfa37149f3387",
+      "bytes": 38159
     },
     {
       "path": "node/__init__.py",
@@ -2119,8 +2119,8 @@
       "path": "node/relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d09fb8fd0567d51dda9727543248912f3f6fe6ef635f555a3806dba67424cb8b",
-      "bytes": 24503
+      "export_sha256": "63400ddaebc6f256cc2e97e50172f75bef1186f4350db753856b5eca1e970430",
+      "bytes": 24564
     },
     {
       "path": "node/revocation.py",
@@ -3330,8 +3330,8 @@
       "path": "tests/test_delegation_sealed.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "45db2815c5354ef21bd9c4f39981327c525404f6a04b6fc2357c1e56b888168d",
-      "bytes": 23089
+      "export_sha256": "03c6bdf5b5d025a38f6adbcbe6ef52029dbd26c7c9ab6c3393648be28901b4de",
+      "bytes": 25462
     },
     {
       "path": "tests/test_delivery.py",

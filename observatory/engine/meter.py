@@ -89,7 +89,7 @@ _JTI = re.compile(r"^[A-Za-z0-9._~-]{16,128}$")
 _GRANT_REF = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._:-]{0,199})#(0|[1-9][0-9]{0,15})$")
 MAX_PROJECTED_GRANT_BYTES = 1_048_576
 #: An RFC 3339 date-time with `Z` or a numeric offset; a local time is not one.
-_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$")
+_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$", re.ASCII)  # ASCII digits
 _SCHEMAS = Path(__file__).resolve().parent / "fabric" / "delegation-schemas"
 _GRANT_VALIDATOR: Any = None
 

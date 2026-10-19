@@ -257,6 +257,10 @@ chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
 
 The keys are cached for ten minutes and re-read at most once a minute on an unknown `kid` (DL-15).
 
+One deliberate difference from the contract's Node verifier: a published key whose `x` carries a character outside
+base64url (a trailing newline, padding) is refused as unusable (`issuer-unavailable`), where Node's decoder skips
+it. The difference only refuses; it never accepts a key the contract refuses.
+
 `full doctor` reports the meter's readiness under `meter` without opening its ledger: `issuer` (`config`, `hub` or
 `null`), `keys`, `grantDirectory`, `degraded` (`meter:no-trusted-issuer`, `meter:no-estate-keys`,
 `meter:no-grant-directory`) and `next`, the one line that fixes the first gap. `full grant --status` carries the

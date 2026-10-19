@@ -309,6 +309,37 @@ class Sealed(unittest.TestCase):
         self.assertEqual(self.call(self.token(iat=float(IAT), exp=float(EXP))), "ok")
         self.assertEqual(self.call(self.token(exp=EXP + 0.5)), "unauthenticated/malformed-claims")
 
+    # round 2 of review: white space and digits as JavaScript reads them --------------------------------------------
+    def test_white_space_and_digits_are_javascripts(self):
+        # U+FEFF is white space only in JavaScript: the contract refuses a URI holding it, so the engine does.
+        for claim in ("sub", "iss", "project"):
+            self.assertEqual(self.call(self.token(**{claim: "urn:person:op\ufefferator"})),
+                             "unauthenticated/malformed-claims", claim)
+        # U+001F and U+0085 are white space only in Python: the contract accepts them inside a URI, so the engine does.
+        for char in ("\x1f", "\x85"):
+            self.assertEqual(self.call(self.token(sub=f"urn:person:op{char}erator")), "ok", repr(char))
+        token = self.token()
+        self.assertIsNone(D.read_delegation_token({"Authorization": f"Bearer {token}\ufeff"}))
+        self.assertEqual(D.read_delegation_token({"Authorization": f"Bearer\u3000{token}"}), (token, "authorization"))
+        # A digit of another script is not a digit to the contract's regular expressions.
+        from node import relay
+        self.assertTrue(relay.is_relay_origin("https://relay.example:4430"))
+        self.assertFalse(relay.is_relay_origin("https://relay.example:\u0664\u0664\u0663\u0660"))
+        self.assertIsNone(M.parse_time("\u0662\u0660\u0662\u0666-10-19T12:00:00Z"))
+
+    def test_an_integer_past_pythons_digit_limit_is_a_claim_of_the_wrong_type(self):
+        body = json.dumps({k: v for k, v in CLAIMS.items() if k != "exp"})[:-1] + ', "exp": 1' + "0" * 5000 + "}"
+        head = D.b64url_encode(json.dumps({"alg": "EdDSA", "typ": D.DELEGATION_TYP, "kid": "estate-new"}).encode())
+        signing = f"{head}.{D.b64url_encode(body.encode())}"
+        token = f"{signing}.{D.b64url_encode(self.estate.key.sign(signing.encode()))}"
+        self.assertEqual(self.call(token), "unauthenticated/malformed-claims")
+
+    def test_a_published_x_with_a_trailing_newline_fails_closed(self):
+        """Node's base64url decoder skips the newline; the engine refuses the key as unusable (the issuer's fault),
+        which never accepts what the contract refuses. Recorded in docs/design/METER.md."""
+        self.assertEqual(self.call(self.token(), jwks=self.estate.jwks(x=self.estate.jwk["x"] + "\n")),
+                         "issuer-unavailable/unusable-key")
+
     # the ratchet ---------------------------------------------------------------------------------------------------
     def test_malformed_input_is_refused_and_escapes_are_read(self):
         h, p, s = self.token().split(".")

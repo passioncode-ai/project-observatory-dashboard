@@ -48,8 +48,12 @@ _B64URL = re.compile(r"^[A-Za-z0-9_-]+$")
 OPAQUE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 #: An agent id (contract `src/fabric-links.ts` AGENT_ID): an actor's `sub` and the token's `aud`.
 AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,62}(\.[a-z][a-z0-9-]{0,31})?$")
+#: ECMAScript's white space and line terminators (ECMA-262 WhiteSpace, LineTerminator): what `\s` means in the
+#: contract's JavaScript. Python's `\s` differs (it takes U+001C-U+001F and U+0085, and not U+FEFF), so every grammar
+#: the contract writes with `\s` or `\S` is spelled with this set here (OBS-162 review round 2).
+JS_SPACE = "\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 #: A URI as DL-2 types one: a scheme, a colon and no white space (`iss`, `sub`, `project`).
-URI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:\S+$")
+URI = re.compile(rf"[A-Za-z][A-Za-z0-9+.-]*:[^{JS_SPACE}]+")
 #: `delegation-token.schema.json` `jti` and `scope` grammars.
 JTI = re.compile(r"^[A-Za-z0-9._~-]{16,128}$")
 SCOPE = re.compile(r"^[a-z][a-z0-9._-]{1,127}( [a-z][a-z0-9._-]{1,127})*$")
@@ -92,6 +96,16 @@ def _no_constant(name: str):
     raise ValueError(name)
 
 
+def _json_int(text: str):
+    """An integer literal as JavaScript reads one: one past Python's digit limit (4300 digits) is far beyond a
+    double's range, which `JSON.parse` makes an infinity; `isTime` then refuses it as a claim (`malformed-claims`),
+    not the whole token (`malformed`)."""
+    try:
+        return int(text)
+    except ValueError:
+        return float("-inf") if text.startswith("-") else float("inf")
+
+
 def b64url_decode(segment: str) -> bytes:
     return base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4))
 
@@ -105,7 +119,7 @@ def _segment(segment: str) -> tuple[Optional[dict], Optional[str]]:
         return None, "malformed"
     try:
         value = json.loads(b64url_decode(segment).decode("utf-8"), object_pairs_hook=_no_duplicates,
-                           parse_constant=_no_constant)
+                           parse_constant=_no_constant, parse_int=_json_int)
     except _Duplicate:
         return None, "duplicate-member"
     except (ValueError, UnicodeDecodeError):
@@ -404,7 +418,7 @@ def read_delegation_token(headers: Mapping[str, Any]) -> Optional[tuple[str, str
     forwarded = get(DELEGATION_HEADER)
     if forwarded is not None:
         return str(forwarded).strip(), "fabric-delegation"
-    match = re.fullmatch(r"Bearer\s+(\S+)", get("Authorization") or "", re.IGNORECASE)
+    match = re.fullmatch(rf"Bearer[{JS_SPACE}]+([^{JS_SPACE}]+)", get("Authorization") or "", re.IGNORECASE)
     if match:
         parsed, problem = parse_compact(match.group(1))
         if not problem and parsed[0].get("typ") == DELEGATION_TYP:
