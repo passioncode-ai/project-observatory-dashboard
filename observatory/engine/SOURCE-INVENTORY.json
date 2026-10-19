@@ -870,8 +870,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "229e9274b09b74fd49a4cc7b10c154f736690d8a2f7d694962e3acf1b75dacca",
-      "bytes": 134254,
+      "export_sha256": "697824125975b313bb15f23429176d051f045780ba6955df54926efd67196f2f",
+      "bytes": 134633,
       "upstream_modified": true
     },
     {
@@ -1927,8 +1927,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e731e5a3701e984ae4a8b5006def212d5d6b994146362967e4d4ba90388b339",
-      "bytes": 84850
+      "export_sha256": "769f51e79986c27598f5ec3dd90173a91de20ea6a44ba122e0c60447dc844d39",
+      "bytes": 85119
     },
     {
       "path": "mcp/capability_tools.py",
@@ -2014,8 +2014,8 @@
       "path": "node/device_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "213deec47e8304dd9702f7df32ea8026dee86467ca1fd171e94f2d938e11a05f",
-      "bytes": 10002
+      "export_sha256": "3df9d92c36c3039349de68f8167cff0bbd888ca4461974e76b7d85cdd4a1f878",
+      "bytes": 10384
     },
     {
       "path": "node/ed25519.py",
@@ -2070,8 +2070,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4324ade2525b1cb572704ce6e17f9caa4e2144814e374f38304269179859ca53",
-      "bytes": 49312
+      "export_sha256": "f50f2a970aae068ef854e299ebecd8383f7279048f6b5934b5ecec96d4c4c596",
+      "bytes": 64458
     },
     {
       "path": "node/p256.py",
@@ -4006,8 +4006,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c042095c47b6ea504fc8922e15af64b7091154cef0915b409aa65f8a851965b7",
-      "bytes": 28006
+      "export_sha256": "e7386cf42fcc1da299895e6bb4016f5ae1a6c01f3d0abfa977524283282a980d",
+      "bytes": 45183
     },
     {
       "path": "tests/test_node_pairing.py",
@@ -5364,8 +5364,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db8e87cc6e3767ff488469cfb2e2554645f85d4840f2194b9f61b93e1b526987",
-      "bytes": 6925
+      "export_sha256": "29bcb4da2bd0080d447569f0f6a6787ad5d801e8a56f9bc69dce8b0dd6797a60",
+      "bytes": 7264
     },
     {
       "path": "tools/project_into_vault.py",

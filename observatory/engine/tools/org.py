@@ -18,7 +18,7 @@
     project-observatory full org flush [--org ID]
         send the outbox now
     project-observatory full org leave --org ID
-        remove this machine's local enrollment state for one organization; the device keys stay
+        remove this machine's local enrollment state for one organization, its own device keys with it
     project-observatory full org records apply --record FILE [--authorities FILE]
     project-observatory full org records apply --delta FILE
         apply an estate revision this machine verifies (against the one applied before it, or the first under the
@@ -94,9 +94,14 @@ def run(args) -> dict:
         at_ms = int(time.time() * 1000)
         if args.record:
             authorities = json.loads(args.authorities.read_text(encoding="utf-8")) if args.authorities else None
-            return org.apply_record(NODE.resolve(), json.loads(args.record.read_text(encoding="utf-8")), at_ms,
-                                    authorities)
-        return org.apply_delta_page(NODE.resolve(), json.loads(args.delta.read_text(encoding="utf-8")), at_ms)
+            applied = org.apply_record(NODE.resolve(), json.loads(args.record.read_text(encoding="utf-8")), at_ms,
+                                       authorities)
+        else:
+            applied = org.apply_delta_page(NODE.resolve(), json.loads(args.delta.read_text(encoding="utf-8")), at_ms)
+        # A changed revision or delta changes registrations: each enrollment sends what changed now, not at the next tick.
+        applied["registrations"] = {org_id: _enrollment(org_id)._register_quietly()
+                                    for org_id in org.enrolled_orgs(NODE)}
+        return applied
     action = {"status": "describe", "check-in": "check_in", "rotate": "rotate", "tick": "tick", "flush": "flush"}
     results = []
     for org_id in _orgs(args):

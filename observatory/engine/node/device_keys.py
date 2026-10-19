@@ -98,6 +98,12 @@ def _load(text: str):
 class DeviceKeys:
     """The `#sig` and `#kem` keys of one device."""
 
+    #: What an enrollment request declares about the key (device-enrollment `key`): an owner-only PKCS#8 file, which
+    #: the contract admits as `file` with `exportable: true` (CT-65, DEC-0094). A hardware store (the Keychain helper,
+    #: DEC-0053) is another class with the same interface and its own `storage`, `exportable: false`.
+    storage = 'file'
+    exportable = True
+
     def __init__(self, device_id: str, sig_key, kem_key, created: str):
         if not isinstance(device_id, str) or not DEVICE_ID.fullmatch(device_id):
             raise ValueError('a device id is opaque: [A-Za-z0-9][A-Za-z0-9._:~-]{0,127}')

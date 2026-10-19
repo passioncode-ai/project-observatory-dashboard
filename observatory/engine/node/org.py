@@ -12,9 +12,12 @@ One enrollment per organization (DEC-0082), each in its own owner-only folder `<
   registrations with the server's latest answer to each.
 - `journal.jsonl`: structured, secret-free lines of what was done (bounded).
 
-The device key is the machine's `#sig` key (`node/device_keys.py`): the certificate request is signed by it, and every
-request after enrollment carries its `fabric-device` HTTP signature, `keyid` the certificate's serial
-(`http_signature.py`). A share registration is derived only from the estate revision and the revocation-delta entries
+Each enrollment has device keys of its own (devices.md), in `<node>/orgs/<org.id>/keys/` (`node/device_keys.py`): an
+owner-only PKCS#8 file, declared as such (`storage: file`, `exportable: true`, CT-65); the certificate request is
+signed by its `#sig` key, and every request after enrollment carries its `fabric-device` HTTP signature, `keyid` the
+certificate's serial (`http_signature.py`). A hardware key store (the Keychain helper, DEC-0053) plugs in through
+`Enrollment(keys=...)` with its own `storage`. Every command that changes an enrollment holds its lock
+(`<node>/orgs/.locks/<org.id>.lock`) and reads the state again under it. A share registration is derived only from the estate revision and the revocation-delta entries
 this machine verified and applied (`records/`), and only toward a server whose enrollment response lists
 `share-registration/1`; `grant.usage` for a grant is sent only when the server's latest answer to that grant's
 registration lets it (`share_registration.gate`).
@@ -59,7 +62,20 @@ PATHS = {'enroll': '/v1/devices/enroll', 'check-in': '/v1/devices/check-in', 'ro
 MAX_BATCH = 1000
 #: The outbox's bound: past it the oldest pending events are dropped and one `buffer.overflow` names them.
 MAX_PENDING = 10000
+#: Dropping happens in steps, so a burst past the bound ends in one `buffer.overflow`, not one per event.
+OVERFLOW_HEADROOM = 1000
 BACKOFF_FLOOR, BACKOFF_CEILING = 30, 3600
+#: A batch the receiver refuses for what it is (malformed, too large, another device's) is never sent again as it is:
+#: retrying it would hold the stream forever. Every other failure (409 `activation-closed`, 429, 5xx, no answer) is
+#: retried with backoff under the same `batchId`.
+PERMANENT_BATCH_STATUSES = frozenset({400, 413, 422})
+PERMANENT_BATCH_CODES = frozenset({'device-mismatch', 'payload-too-large', 'batch-invalid', 'collector-mismatch'})
+#: An enrollment refused because the server's policy does not take this key's storage (CT-65: a server MAY refuse a
+#: file-held key by policy): a named state, not a retry.
+STORAGE_REFUSALS = frozenset({'key-storage-refused', 'key-storage-not-allowed', 'storage-not-allowed',
+                              'attestation-required', 'key-not-hardware'})
+#: The certificate refusals that end the enrollment: the machine needs a new token.
+ENDING_CODES = frozenset({'epoch-superseded', 'certificate-revoked', 'certificate-expired', 'certificate-unknown'})
 JOURNAL_BYTES = 256 * 1024
 _CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 _BOOT = 'boot-' + secrets.token_hex(4)
@@ -112,6 +128,13 @@ def _json(raw: bytes) -> Any:
         return json.loads(raw.decode('utf-8'))
     except (ValueError, UnicodeDecodeError):
         return None
+
+
+def _protocols(doc: Any) -> Optional[List[str]]:
+    """The protocol list an answer carries (DEC-0067), or None when it carries none: the held list is replaced only by
+    a list that arrives (DEC-0094)."""
+    value = doc.get('protocols') if isinstance(doc, dict) else None
+    return [p for p in value if isinstance(p, str)] if isinstance(value, list) else None
 
 
 def _error_code(doc: Any) -> Optional[str]:
@@ -225,13 +248,37 @@ class Enrollment:
         self.folder = self.node / 'orgs' / org_id
         self._keys, self.transport, self.clock, self.meter_db = keys, transport, clock, meter_db
         self.paths = dict(PATHS, **(paths or {}))
+        self._depth = 0
+
+    # -- the lock ----------------------------------------------------------------------------------------------
+    @contextlib.contextmanager
+    def _locked(self):
+        """One writer per enrollment at a time, across processes (the CLI and the maintenance job): every command that
+        changes the state or the outbox runs under it and reads the state again inside it, so a check-in can never save
+        a copy older than a rotation's certificate, and a tick never recreates what `leave` removed. The lock file is
+        outside the enrollment's folder, so removing the folder never frees a lock another process waits on."""
+        if self._depth:
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+            return
+        with private_io.lock(self.node / 'orgs' / '.locks' / (self.org_id + '.lock')):
+            self._depth = 1
+            try:
+                yield
+            finally:
+                self._depth = 0
 
     # -- state -------------------------------------------------------------------------------------------------
     @property
     def keys(self):
+        """This enrollment's own device keys (devices.md: each organization enrollment of a machine gets keys of its
+        own), in `<node>/orgs/<org>/keys/`: a device id and `#sig`/`#kem` pair no other organization sees."""
         if self._keys is None:
             from .device_keys import DeviceKeys
-            self._keys = DeviceKeys.load_or_create((self.node / 'device').resolve())
+            self._keys = DeviceKeys.load_or_create(self.node.resolve() / 'orgs' / self.org_id / 'keys')
         return self._keys
 
     def state(self) -> Optional[dict]:
@@ -276,8 +323,11 @@ class Enrollment:
                   reason TEXT, PRIMARY KEY (epoch, seq));
                 CREATE TABLE IF NOT EXISTS registrations (grant_id TEXT PRIMARY KEY, doc TEXT NOT NULL, digest TEXT
                   NOT NULL, answer TEXT, gate TEXT NOT NULL DEFAULT 'hold', record_digest TEXT, sent_at INTEGER,
-                  attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0);
+                  attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
+                  active_registered INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL);""")
+            with contextlib.suppress(sqlite3.OperationalError):    # an outbox from before the column
+                conn.execute('ALTER TABLE registrations ADD COLUMN active_registered INTEGER NOT NULL DEFAULT 0')
             yield conn
         finally:
             conn.close()
@@ -306,11 +356,15 @@ class Enrollment:
         return status, _json(raw)
 
     def _signed(self, state: dict, path: str, doc: dict) -> Tuple[int, Any]:
-        """A device request signed afresh (DEC-0056): a new nonce and `created` on every attempt."""
+        """A device request signed afresh (DEC-0056): a new nonce and `created` on every attempt, `created` on the
+        server's clock as the last check-in measured it (`skewSeconds`). A `signature-stale` refusal forgets that
+        measure and asks for a check-in now, which measures it again. The first answer past the signature check under
+        a rotated certificate lets the previous certificate go (CT-65); a `certificate-unknown` before that goes back
+        to the previous one, which the server keeps valid until the new serial is first presented."""
         body = json.dumps(doc, separators=(',', ':')).encode('utf-8')
+        created = int(self.clock() + (state.get('skewSeconds') or 0))
         headers = http_signature.sign_request(self.keys.sign, method='POST', origin=state['server'], target=path,
-                                              body=body, serial=state['certificate']['serial'],
-                                              created=int(self.clock()))
+                                              body=body, serial=state['certificate']['serial'], created=created)
         try:
             status, raw = self.transport(state['server'] + path, {'Content-Type': 'application/json', **headers},
                                          body, 30)
@@ -319,9 +373,22 @@ class Enrollment:
             return 0, None
         answer = _json(raw)
         if status == 401:
-            self.journal('request-refused', path=path, status=401, code=_error_code(answer))
+            code = _error_code(answer)
+            self.journal('request-refused', path=path, status=401, code=code)
+            previous = state.get('previousCertificate')
+            if code == 'signature-stale':
+                state['skewSeconds'] = 0
+                state['nextCheckInAt'] = 0
+                self._save(state)
+            elif code == 'certificate-unknown' and isinstance(previous, dict) \
+                    and self.clock() < strict_time(previous['notAfter']) / 1000:
+                state['certificate'] = state.pop('previousCertificate')
+                self._save(state)
+                self.journal('certificate-fallback', serial=state['certificate']['serial'])
+        elif 0 < status < 500 and state.get('previousCertificate'):
+            state.pop('previousCertificate', None)
+            self._save(state)
         return status, answer
-
     def _certificate(self, response: Any, epoch_expected: Optional[int] = None) -> dict:
         """The certificate an enrollment or rotation answered, checked against what was asked: this organization and
         device, a serial, a window, and the machine's own `#sig` key in the DER."""
@@ -357,13 +424,13 @@ class Enrollment:
         spki = self.keys.sig_spki()
         return {'protocol': DEVICE_PROTOCOL, 'kind': 'enrollment-request', 'org': {'id': self.org_id},
                 'device': {'id': self.keys.device_id, 'platform': platform_name()},
-                'key': {'algorithm': 'ecdsa-p256', 'storage': 'platform-keystore', 'exportable': False,
+                'key': {'algorithm': 'ecdsa-p256', 'storage': getattr(self.keys, 'storage', 'file'),
+                        'exportable': bool(getattr(self.keys, 'exportable', True)),
                         'publicKeySha256': 'sha256:' + hashlib.sha256(spki).hexdigest()},
                 'deviceKeys': self.keys.enrollment_keys(),
                 'csr': base64.b64encode(self.keys.csr()).decode('ascii'),
                 'auth': {'method': 'enrollment-token', 'tokenId': token_id},
                 'requestedAt': iso(self.clock())}
-
     def enroll(self, server: str, token: str) -> dict:
         origin = http_signature.public_origin(server)
         if origin is None:
@@ -371,57 +438,75 @@ class Enrollment:
         match = TOKEN.fullmatch(token or '')
         if not match:
             raise OrgError('token-malformed', 'an enrollment token is <tokenId>.<secret>')
-        previous = self.state()
-        status, answer = self._post(origin, self.paths['enroll'], self.enrollment_request(match.group(1)),
-                                    {'Authorization': 'EnrollmentToken ' + token})
-        if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'enrollment-response':
-            code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
-            self.journal('enroll-refused', status=status, code=code)
-            raise OrgError('enroll-refused', 'the server refused the enrollment: %s (HTTP %s)' % (code, status))
-        cert = self._certificate(answer)
-        epoch = answer.get('streamEpoch')
-        if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1 \
-                or (previous and epoch <= previous.get('epoch', 0)):
-            raise OrgError('epoch-invalid', 'the stream epoch is not above every epoch issued to this device')
-        interval = (answer.get('checkIn') or {}).get('intervalSeconds')
-        protocols = [p for p in answer.get('protocols', []) if isinstance(p, str)] \
-            if isinstance(answer.get('protocols'), list) else []
-        doc = {'schema': 'org-enrollment/1', 'org': self.org_id, 'device': self.keys.device_id, 'server': origin,
-               'certificate': cert, 'epoch': epoch, 'protocols': protocols,
-               'checkInSeconds': interval if isinstance(interval, int) and 30 <= interval <= 86400 else 300,
-               'collectionStart': answer.get('collectionStart') if strict_time(answer.get('collectionStart'))
-               is not None else None,
-               'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
-               'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
-               'reEnroll': False, 'nextCheckInAt': 0}
-        private_io.parent(self.folder)
-        self._save(doc)
-        with self._db() as conn:                           # a new enrollment: registrations are sent again
-            conn.execute("UPDATE registrations SET next_at = 0, sent_at = NULL WHERE gate != 'hold-degraded'")
-        self.journal('enrolled', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
-                     protocols=protocols, reEnrollment=previous is not None)
-        return self.describe()
-
+        with self._locked():
+            previous = self.state()
+            status, answer = self._post(origin, self.paths['enroll'], self.enrollment_request(match.group(1)),
+                                        {'Authorization': 'EnrollmentToken ' + token})
+            if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'enrollment-response':
+                code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
+                self.journal('enroll-refused', status=status, code=code)
+                if code in STORAGE_REFUSALS or 'storage' in code:
+                    raise OrgError('key-storage-refused', "the server's policy refuses this machine's %s-held device "
+                                   'key: %s (HTTP %s)' % (getattr(self.keys, 'storage', 'file'), code, status))
+                raise OrgError('enroll-refused', 'the server refused the enrollment: %s (HTTP %s)' % (code, status))
+            cert = self._certificate(answer)
+            epoch = answer.get('streamEpoch')
+            if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1 \
+                    or (previous and epoch <= previous.get('epoch', 0)):
+                raise OrgError('epoch-invalid', 'the stream epoch is not above every epoch issued to this device')
+            interval = (answer.get('checkIn') or {}).get('intervalSeconds')
+            doc = {'schema': 'org-enrollment/1', 'org': self.org_id, 'device': self.keys.device_id, 'server': origin,
+                   'certificate': cert, 'epoch': epoch, 'protocols': _protocols(answer) or [],
+                   'checkInSeconds': interval if isinstance(interval, int) and 30 <= interval <= 86400 else 300,
+                   'collectionStart': answer.get('collectionStart') if strict_time(answer.get('collectionStart'))
+                   is not None else None,
+                   'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
+                   'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
+                   'reEnroll': False, 'nextCheckInAt': 0, 'skewSeconds': 0}
+            private_io.parent(self.folder)
+            self._save(doc)
+            with self._db() as conn:                       # a new enrollment: registrations are sent again
+                conn.execute("UPDATE registrations SET next_at = 0, sent_at = NULL WHERE gate != 'hold-degraded'")
+            self.journal('enrolled', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
+                         protocols=doc['protocols'], reEnrollment=previous is not None)
+            self._register_quietly()
+            return self.describe()
     def rotate(self) -> dict:
-        state = self._require()
-        doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'rotation-request', 'device': {'id': self.keys.device_id},
-               'csr': base64.b64encode(self.keys.csr()).decode('ascii')}
-        status, answer = self._signed(state, self.paths['rotate'], doc)
-        if status != 200 or not isinstance(answer, dict):
-            code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
-            self.journal('rotate-refused', status=status, code=code)
-            if code in ('epoch-superseded', 'certificate-revoked', 'certificate-expired'):
-                state['reEnroll'] = True
+        """A new certificate for the same key. The request is persisted before it is sent and sent again, unchanged,
+        after a lost answer: the server answers the same request with the same certificate (CT-65)."""
+        with self._locked():
+            state = self._require()
+            pending = state.get('pendingRotation')
+            if not isinstance(pending, dict) or pending.get('serial') != state['certificate']['serial']:
+                pending = {'serial': state['certificate']['serial'], 'at': iso(self.clock()),
+                           'request': {'protocol': DEVICE_PROTOCOL, 'kind': 'rotation-request',
+                                       'device': {'id': self.keys.device_id},
+                                       'csr': base64.b64encode(self.keys.csr()).decode('ascii')}}
+                state['pendingRotation'] = pending
                 self._save(state)
-            raise OrgError('rotate-refused', 'the server refused the rotation: %s (HTTP %s)' % (code, status))
-        state['certificate'] = self._certificate(answer)
-        if isinstance(answer.get('protocols'), list):
-            state['protocols'] = [p for p in answer['protocols'] if isinstance(p, str)]
-        state['rotate'] = False
-        self._save(state)
-        self.journal('rotated', serial=state['certificate']['serial'], notAfter=state['certificate']['notAfter'])
-        return self.describe()
-
+            status, answer = self._signed(state, self.paths['rotate'], pending['request'])
+            if status != 200 or not isinstance(answer, dict):
+                code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
+                self.journal('rotate-refused', status=status, code=code)
+                if code in ENDING_CODES:
+                    state['reEnroll'] = True
+                    state.pop('pendingRotation', None)
+                elif status in (400, 422):                 # refused for what it is: the next rotation asks anew
+                    state.pop('pendingRotation', None)
+                self._save(state)
+                raise OrgError('rotate-refused', 'the server refused the rotation: %s (HTTP %s)' % (code, status))
+            cert = self._certificate(answer)
+            if cert['serial'] != state['certificate']['serial']:
+                state['previousCertificate'] = state['certificate']
+            state['certificate'] = cert
+            protocols = _protocols(answer)
+            if protocols is not None:
+                state['protocols'] = protocols
+            state['rotate'] = False
+            state.pop('pendingRotation', None)
+            self._save(state)
+            self.journal('rotated', serial=cert['serial'], notAfter=cert['notAfter'])
+            return self.describe()
     def rotation_due(self, state: dict) -> bool:
         cert = state['certificate']
         start, end = strict_time(cert['notBefore']) / 1000, strict_time(cert['notAfter']) / 1000
@@ -445,166 +530,257 @@ class Enrollment:
             last = conn.execute('SELECT MAX(seq) AS s FROM events WHERE epoch = ?', (state['epoch'],)).fetchone()['s'] or 0
             floor = conn.execute("SELECT MIN(seq) AS s FROM events WHERE epoch = ? AND state = 'pending'",
                                  (state['epoch'],)).fetchone()['s']
-            dropped = self._meta(conn, 'dropped', [])
+            dropped = self._undelivered_drops(conn, state['epoch'])
+            retrying = (self._meta(conn, 'retry') or {}).get('attempts', 0) > 0
+        healthy = not retrying and not dropped
+        health = {'state': 'healthy'} if healthy else \
+            {'state': 'degraded', 'detail': 'activity outbox retrying' if retrying else 'activity events dropped'}
         doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'check-in', 'protocols': [DEVICE_PROTOCOL],
                'device': {'id': self.keys.device_id}, 'sequenceNum': state['sequenceNum'] + 1, 'at': iso(self.clock()),
                'agent': {'version': VERSION, 'buildChannel': 'official'},
-               'health': {'state': 'healthy'}, 'logging': {'enabled': True},
+               'health': health, 'logging': {'enabled': True},
                'collectors': [{'collector': {'id': COLLECTOR_ID, 'epoch': state['epoch']}, 'source': 'meter',
                                'lastSeq': last, 'bufferedFrom': floor if floor is not None else last + 1,
-                               'dropped': [{'fromSeq': d['fromSeq'], 'toSeq': d['toSeq']} for d in dropped
-                                           if d.get('epoch') == state['epoch'] and not d.get('acked')],
-                               'healthy': True}],
+                               'dropped': dropped, 'healthy': healthy}],
                'policy': {'layers': [{'source': 'server', 'revision': 0, 'status': 'applied'}]},
                'certificate': {'serial': state['certificate']['serial'], 'notAfter': state['certificate']['notAfter']}}
         if state.get('fullState'):
             doc['fullState'] = True
         return doc
-
     def check_in(self) -> dict:
-        state = self._require()
-        doc = self.check_in_document(state)
-        status, answer = self._signed(state, self.paths['check-in'], doc)
-        state['sequenceNum'] = doc['sequenceNum']          # a sequence number is spent once sent, answered or not
-        if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
-            code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
-            state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
-            state['nextCheckInAt'] = int(self.clock()) + min(state['checkInSeconds'], 300)
-            if code in ('certificate-revoked', 'certificate-expired', 'certificate-unknown'):
-                state['reEnroll'] = True
+        with self._locked():
+            state = self._require()
+            doc = self.check_in_document(state)
+            state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
             self._save(state)
-            self.journal('check-in-failed', status=status, code=code)
-            return {'ok': False, 'code': code, 'status': status}
-        flags = answer.get('flags') if isinstance(answer.get('flags'), list) else []
-        state['fullState'] = 'report_full_state' in flags
-        nxt = answer.get('nextCheckInSeconds')
-        state['checkInSeconds'] = nxt if isinstance(nxt, int) and 30 <= nxt <= 86400 else state['checkInSeconds']
-        state['nextCheckInAt'] = int(self.clock()) + state['checkInSeconds']
-        if strict_time(answer.get('collectionStart')) is not None:
-            state['collectionStart'] = answer['collectionStart']
-        action = (answer.get('certificate') or {}).get('action') if isinstance(answer.get('certificate'), dict) else None
-        state['rotate'] = state.get('rotate') or action == 'rotate'
-        state['reEnroll'] = action == 're-enroll'
-        server_at = strict_time(answer.get('at'))
-        state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'ok',
-                                'skewSeconds': None if server_at is None else round(server_at / 1000 - self.clock())}
-        self._save(state)
-        self.journal('checked-in', sequenceNum=doc['sequenceNum'], action=action, flags=flags)
+            status, answer = self._signed(state, self.paths['check-in'], doc)
+            if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
+                code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
+                state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
+                state['nextCheckInAt'] = 0 if code == 'signature-stale' else \
+                    int(self.clock()) + min(state['checkInSeconds'], 300)
+                if code in ENDING_CODES:
+                    state['reEnroll'] = True
+                self._save(state)
+                self.journal('check-in-failed', status=status, code=code)
+                return {'ok': False, 'code': code, 'status': status}
+            flags = answer.get('flags') if isinstance(answer.get('flags'), list) else []
+            state['fullState'] = 'report_full_state' in flags
+            nxt = answer.get('nextCheckInSeconds')
+            state['checkInSeconds'] = nxt if isinstance(nxt, int) and 30 <= nxt <= 86400 else state['checkInSeconds']
+            state['nextCheckInAt'] = int(self.clock()) + state['checkInSeconds']
+            if strict_time(answer.get('collectionStart')) is not None:
+                state['collectionStart'] = answer['collectionStart']
+            protocols = _protocols(answer)                 # DEC-0094: the held list is replaced from wherever it comes
+            listed_before = self.accepts_shares(state)
+            if protocols is not None:
+                state['protocols'] = protocols
+            action = (answer.get('certificate') or {}).get('action') if isinstance(answer.get('certificate'), dict) \
+                else None
+            state['rotate'] = state.get('rotate') or action == 'rotate'
+            state['reEnroll'] = action == 're-enroll'
+            server_at = strict_time(answer.get('at'))
+            skew = None if server_at is None else round(server_at / 1000 - self.clock())
+            if skew is not None and abs(skew) <= 86400:
+                state['skewSeconds'] = skew
+            state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'ok', 'skewSeconds': skew}
+            self._save(state)
+            self.journal('checked-in', sequenceNum=doc['sequenceNum'], action=action, flags=flags)
+            newly_listed = self.accepts_shares(state) and not listed_before
+        if newly_listed:                                   # the server began to take registrations: send them now
+            self._register_quietly()
         return {'ok': True, 'nextCheckInSeconds': state['checkInSeconds'], 'action': action}
-
     # -- the outbox --------------------------------------------------------------------------------------------
     def enqueue(self, kind: str, data: dict, *, occurred: str, key: Optional[str] = None, source: str = 'meter',
                 monotonic: str = '0') -> Optional[dict]:
         """Persists one event of this enrollment's stream once (`key` dedupes), with its id and the next seq."""
-        state = self._require()
-        with self._db() as conn:
-            conn.execute('BEGIN IMMEDIATE')
-            try:
-                if key and conn.execute('SELECT 1 FROM events WHERE key = ?', (key,)).fetchone():
+        with self._locked():
+            state = self._require()
+            with self._db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                try:
+                    if key and conn.execute('SELECT 1 FROM events WHERE key = ?', (key,)).fetchone():
+                        conn.execute('COMMIT')
+                        return None
+                    event = self._insert(conn, state['epoch'], kind, data, occurred=occurred, key=key, source=source,
+                                         monotonic=monotonic)
+                    self._bound(conn, state)
                     conn.execute('COMMIT')
-                    return None
-                seq = (conn.execute('SELECT MAX(seq) AS s FROM events WHERE epoch = ?',
-                                    (state['epoch'],)).fetchone()['s'] or 0) + 1
-                event = {'protocol': ACTIVITY_PROTOCOL, 'eventId': ulid(int(self.clock() * 1000)), 'kind': kind,
-                         'source': source, 'collector': {'id': COLLECTOR_ID, 'epoch': state['epoch']}, 'seq': seq,
-                         'occurred': occurred, 'bootId': _BOOT, 'monotonicNs': monotonic, 'data': data}
-                conn.execute('INSERT INTO events(epoch, seq, event_id, kind, key, body) VALUES(?, ?, ?, ?, ?, ?)',
-                             (state['epoch'], seq, event['eventId'], kind, key, json.dumps(event, sort_keys=True)))
-                self._bound(conn, state)
-                conn.execute('COMMIT')
-            except BaseException:
-                conn.execute('ROLLBACK')
-                raise
-        return event
+                except BaseException:
+                    conn.execute('ROLLBACK')
+                    raise
+            return event
 
+    def _insert(self, conn, epoch: int, kind: str, data: dict, *, occurred: str, key: Optional[str] = None,
+                source: str = 'meter', monotonic: str = '0') -> dict:
+        seq = (conn.execute('SELECT MAX(seq) AS s FROM events WHERE epoch = ?', (epoch,)).fetchone()['s'] or 0) + 1
+        event = {'protocol': ACTIVITY_PROTOCOL, 'eventId': ulid(int(self.clock() * 1000)), 'kind': kind,
+                 'source': source, 'collector': {'id': COLLECTOR_ID, 'epoch': epoch}, 'seq': seq,
+                 'occurred': occurred, 'bootId': _BOOT, 'monotonicNs': monotonic, 'data': data}
+        conn.execute('INSERT INTO events(epoch, seq, event_id, kind, key, body) VALUES(?, ?, ?, ?, ?, ?)',
+                     (epoch, seq, event['eventId'], kind, key, json.dumps(event, sort_keys=True)))
+        return event
     def _bound(self, conn, state: dict) -> None:
-        """Past MAX_PENDING the oldest pending events are dropped, from the head, and one `buffer.overflow` names them
-        (activity.md, streams). It never renumbers."""
+        """Past MAX_PENDING the oldest pending events are dropped down to OVERFLOW_HEADROOM under the bound, so a burst
+        ends in one `buffer.overflow` (activity.md, streams). It never renumbers."""
         pending = conn.execute("SELECT COUNT(*) AS n FROM events WHERE state = 'pending'").fetchone()['n']
         if pending <= MAX_PENDING:
             return
-        excess = pending - MAX_PENDING + 1
-        rows = conn.execute("SELECT epoch, seq, kind FROM events WHERE state = 'pending' AND epoch = ? ORDER BY seq "
-                            "LIMIT ?", (state['epoch'], excess)).fetchall()
+        rows = conn.execute("SELECT seq, kind FROM events WHERE state = 'pending' AND epoch = ? AND kind != "
+                            "'buffer.overflow' ORDER BY seq LIMIT ?",
+                            (state['epoch'], pending - (MAX_PENDING - OVERFLOW_HEADROOM))).fetchall()
+        self._drop(conn, state['epoch'], rows)
+
+    def _drop(self, conn, epoch: int, rows: List[sqlite3.Row]) -> None:
+        """Consumes `rows` (seq, kind) as dropped and names them in one `buffer.overflow`: the newest one not yet sent
+        takes the new ranges; otherwise a new one. A dropped event's key is freed, so a `grant.usage` day is enqueued
+        again once it may be sent."""
         if not rows:
             return
-        first, last = rows[0]['seq'], rows[-1]['seq']
+        seqs = sorted(r['seq'] for r in rows)
+        conn.executemany("UPDATE events SET state = 'dropped', key = NULL WHERE epoch = ? AND seq = ?",
+                         [(epoch, q) for q in seqs])
+        ranges: List[dict] = []
+        for q in seqs:
+            if ranges and ranges[-1]['toSeq'] + 1 == q:
+                ranges[-1]['toSeq'] = q
+            else:
+                ranges.append({'fromSeq': q, 'toSeq': q})
         by_kind: Dict[str, int] = {}
         for row in rows:
             by_kind[row['kind']] = by_kind.get(row['kind'], 0) + 1
-        conn.execute("UPDATE events SET state = 'dropped' WHERE epoch = ? AND seq BETWEEN ? AND ? AND state = "
-                     "'pending'", (state['epoch'], first, last))
-        dropped = self._meta(conn, 'dropped', [])
-        dropped.append({'epoch': state['epoch'], 'fromSeq': first, 'toSeq': last})
-        self._set_meta(conn, 'dropped', dropped[-50:])
-        seq = conn.execute('SELECT MAX(seq) AS s FROM events WHERE epoch = ?', (state['epoch'],)).fetchone()['s'] + 1
-        event = {'protocol': ACTIVITY_PROTOCOL, 'eventId': ulid(), 'kind': 'buffer.overflow', 'source': 'meter',
-                 'collector': {'id': COLLECTOR_ID, 'epoch': state['epoch']}, 'seq': seq, 'occurred': iso(self.clock()),
-                 'bootId': _BOOT, 'monotonicNs': str(time.monotonic_ns()),
-                 'data': {'dropped': {'events': len(rows), 'ranges': [{'fromSeq': first, 'toSeq': last}],
-                                      'byKind': [{'kind': k, 'count': n} for k, n in sorted(by_kind.items())]}}}
-        conn.execute('INSERT INTO events(epoch, seq, event_id, kind, body) VALUES(?, ?, ?, ?, ?)',
-                     (state['epoch'], seq, event['eventId'], 'buffer.overflow', json.dumps(event, sort_keys=True)))
+        inflight = self._meta(conn, 'inflight') or {}
+        span = inflight.get('span') or [None, 0, -1]
+        target = conn.execute("SELECT seq, body FROM events WHERE epoch = ? AND kind = 'buffer.overflow' AND state = "
+                              "'pending' ORDER BY seq DESC LIMIT 1", (epoch,)).fetchone()
+        if target is not None and not (span[0] == epoch and span[1] <= target['seq'] <= span[2]):
+            event = json.loads(target['body'])
+            held = event['data']['dropped']
+            merged = sorted(held['ranges'] + ranges, key=lambda r: r['fromSeq'])
+            held['ranges'] = []
+            for r in merged:
+                if held['ranges'] and held['ranges'][-1]['toSeq'] + 1 >= r['fromSeq']:
+                    held['ranges'][-1]['toSeq'] = max(held['ranges'][-1]['toSeq'], r['toSeq'])
+                else:
+                    held['ranges'].append(dict(r))
+            held['events'] += len(rows)
+            kinds = {k['kind']: k['count'] for k in held['byKind']}
+            for k, n in by_kind.items():
+                kinds[k] = kinds.get(k, 0) + n
+            held['byKind'] = [{'kind': k, 'count': n} for k, n in sorted(kinds.items())]
+            conn.execute('UPDATE events SET body = ? WHERE epoch = ? AND seq = ?',
+                         (json.dumps(event, sort_keys=True), epoch, target['seq']))
+            return
+        self._insert(conn, epoch, 'buffer.overflow',
+                     {'dropped': {'events': len(rows), 'ranges': ranges,
+                                  'byKind': [{'kind': k, 'count': n} for k, n in sorted(by_kind.items())]}},
+                     occurred=iso(self.clock()), monotonic=str(time.monotonic_ns()))
 
-    def _slice(self, conn) -> Tuple[Optional[int], List[sqlite3.Row]]:
-        """The next batch: the oldest stream with pending events, its consecutive run from the oldest, at most 1000."""
+    def _undelivered_drops(self, conn, epoch: int) -> List[dict]:
+        """The dropped ranges whose `buffer.overflow` the server has not taken yet: what a check-in reports."""
+        out: List[dict] = []
+        for row in conn.execute("SELECT body FROM events WHERE epoch = ? AND kind = 'buffer.overflow' AND state = "
+                                "'pending' ORDER BY seq", (epoch,)):
+            out.extend({'fromSeq': r['fromSeq'], 'toSeq': r['toSeq']}
+                       for r in json.loads(row['body'])['data']['dropped']['ranges'])
+        return out
+    def _slice(self, conn, limit: int = MAX_BATCH) -> Tuple[Optional[int], List[sqlite3.Row]]:
+        """The next batch: the oldest stream with pending events, its consecutive run from the oldest, at most
+        `limit`."""
         head = conn.execute("SELECT epoch, seq FROM events WHERE state = 'pending' ORDER BY epoch, seq LIMIT 1").fetchone()
         if head is None:
             return None, []
-        rows = conn.execute("SELECT seq, event_id, body FROM events WHERE state = 'pending' AND epoch = ? AND seq >= ? "
-                            "ORDER BY seq LIMIT ?", (head['epoch'], head['seq'], MAX_BATCH)).fetchall()
+        rows = conn.execute("SELECT seq, event_id, kind, body FROM events WHERE state = 'pending' AND epoch = ? AND "
+                            "seq >= ? ORDER BY seq LIMIT ?", (head['epoch'], head['seq'], limit)).fetchall()
         run = []
         for row in rows:
             if run and row['seq'] != run[-1]['seq'] + 1:
                 break
             run.append(row)
         return head['epoch'], run
-
     def flush(self, max_batches: int = 20) -> dict:
-        """Sends pending events, batch by batch, until the outbox is empty, a batch fails, or the backoff holds."""
-        state = self._require()
-        sent = {'batches': 0, 'accepted': 0, 'duplicates': 0, 'rejected': 0}
-        with self._db() as conn:
-            retry = self._meta(conn, 'retry', {'attempts': 0, 'nextAt': 0})
-            if retry['nextAt'] > self.clock():
-                return dict(sent, held='backoff', nextAttempt=iso(retry['nextAt']))
-            for _ in range(max_batches):
-                epoch, run = self._slice(conn)
-                if not run:
-                    break
-                inflight = self._meta(conn, 'inflight')
-                span = [epoch, run[0]['seq'], run[-1]['seq']]
-                batch_id = inflight['batchId'] if inflight and inflight.get('span') == span else ulid()
-                self._set_meta(conn, 'inflight', {'batchId': batch_id, 'span': span})
-                doc = {'protocol': ACTIVITY_PROTOCOL, 'device': {'id': self.keys.device_id}, 'batchId': batch_id,
-                       'sent': iso(self.clock()), 'events': [json.loads(r['body']) for r in run]}
-                status, ack = self._signed(state, self.paths['batches'], doc)
-                if status != 200 or not isinstance(ack, dict):
-                    code = _error_code(ack) or ('unreachable' if status == 0 else 'http-%d' % status)
-                    retry = {'attempts': retry['attempts'] + 1, 'nextAt': self._backoff(retry['attempts'])}
-                    self._set_meta(conn, 'retry', retry)
-                    self._set_meta(conn, 'lastBatch', {'at': iso(self.clock()), 'result': code, 'status': status,
-                                                       'events': len(run)})
-                    self.journal('batch-failed', status=status, code=code, events=len(run), batchId=batch_id)
-                    return dict(sent, held=code, nextAttempt=iso(retry['nextAt']))
-                counts = self._consume(conn, epoch, run, ack)
-                retry = {'attempts': 0, 'nextAt': 0}
-                self._set_meta(conn, 'retry', retry)
-                self._set_meta(conn, 'inflight', None)
-                self._set_meta(conn, 'lastBatch', {'at': iso(self.clock()), 'result': 'ok', 'status': 200,
-                                                   'events': len(run), **counts})
-                self.journal('batch-sent', batchId=batch_id, events=len(run), **counts)
-                sent['batches'] += 1
-                for name in ('accepted', 'duplicates', 'rejected'):
-                    sent[name] += counts[name]
-        return sent
+        """Sends pending events, batch by batch, until the outbox is empty, a batch fails, or the backoff holds.
 
+        A `grant.usage` whose grant's registration answer no longer lets it (`gate` is checked again at send) ends the
+        batch before it; at the head of the stream it is dropped and named in a `buffer.overflow`, and the day is
+        enqueued again once the gate opens. A batch refused for what it is (400, 422, `device-mismatch`) is consumed
+        as rejected; a 413 halves the batch size first. A 200 that acknowledges none of the batch is held and retried
+        under the same `batchId`."""
+        with self._locked():
+            state = self._require()
+            sent = {'batches': 0, 'accepted': 0, 'duplicates': 0, 'rejected': 0}
+            with self._db() as conn:
+                retry = self._meta(conn, 'retry', {'attempts': 0, 'nextAt': 0})
+                if retry['nextAt'] > self.clock():
+                    return dict(sent, held='backoff', nextAttempt=iso(retry['nextAt']))
+                gates = {r['grant_id']: r['gate'] for r in conn.execute('SELECT grant_id, gate FROM registrations')}
+                for _ in range(max_batches * 4):
+                    if sent['batches'] >= max_batches:
+                        break
+                    limit = self._meta(conn, 'batchLimit', MAX_BATCH)
+                    epoch, run = self._slice(conn, limit)
+                    if not run:
+                        break
+                    cut = next((i for i, r in enumerate(run) if r['kind'] == 'grant.usage'
+                                and gates.get(json.loads(r['body'])['data'].get('grantId')) != 'send'), None)
+                    if cut == 0:
+                        self._drop(conn, epoch, run[:1])
+                        self.journal('grant-usage-withheld', seq=run[0]['seq'])
+                        continue
+                    run = run[:cut] if cut else run
+                    inflight = self._meta(conn, 'inflight')
+                    span = [epoch, run[0]['seq'], run[-1]['seq']]
+                    batch_id = inflight['batchId'] if inflight and inflight.get('span') == span else ulid()
+                    self._set_meta(conn, 'inflight', {'batchId': batch_id, 'span': span})
+                    doc = {'protocol': ACTIVITY_PROTOCOL, 'device': {'id': self.keys.device_id}, 'batchId': batch_id,
+                           'sent': iso(self.clock()), 'events': [json.loads(r['body']) for r in run]}
+                    status, ack = self._signed(state, self.paths['batches'], doc)
+                    code = None if status == 200 and isinstance(ack, dict) else \
+                        _error_code(ack) or ('unreachable' if status == 0 else 'http-%d' % status)
+                    if status == 413 and len(run) > 1:
+                        self._set_meta(conn, 'batchLimit', max(1, len(run) // 2))
+                        self._set_meta(conn, 'inflight', None)
+                        self.journal('batch-too-large', events=len(run), batchId=batch_id)
+                        continue
+                    if code is not None and (status in PERMANENT_BATCH_STATUSES or code in PERMANENT_BATCH_CODES):
+                        conn.executemany("UPDATE events SET state = 'rejected', reason = ? WHERE epoch = ? AND seq = ?",
+                                         [(code[:40], epoch, r['seq']) for r in run])
+                        self._set_meta(conn, 'inflight', None)
+                        self._set_meta(conn, 'lastBatch', {'at': iso(self.clock()), 'result': code, 'status': status,
+                                                           'events': len(run), 'permanent': True})
+                        self.journal('batch-refused', status=status, code=code, events=len(run), batchId=batch_id)
+                        sent['rejected'] += len(run)
+                        continue
+                    if code is None:
+                        counts = self._consume(conn, epoch, run, ack)
+                        left = conn.execute("SELECT COUNT(*) AS n FROM events WHERE epoch = ? AND seq BETWEEN ? AND ? "
+                                            "AND state = 'pending'", (epoch, span[1], span[2])).fetchone()['n']
+                        if left == len(run):
+                            code = 'not-acknowledged'
+                    if code is not None:
+                        retry = {'attempts': retry['attempts'] + 1, 'nextAt': self._backoff(retry['attempts'])}
+                        self._set_meta(conn, 'retry', retry)
+                        self._set_meta(conn, 'lastBatch', {'at': iso(self.clock()), 'result': code, 'status': status,
+                                                           'events': len(run)})
+                        self.journal('batch-failed', status=status, code=code, events=len(run), batchId=batch_id)
+                        return dict(sent, held=code, nextAttempt=iso(retry['nextAt']))
+                    retry = {'attempts': 0, 'nextAt': 0}
+                    self._set_meta(conn, 'retry', retry)
+                    self._set_meta(conn, 'inflight', None)
+                    self._set_meta(conn, 'batchLimit', min(MAX_BATCH, limit * 2))
+                    self._set_meta(conn, 'lastBatch', {'at': iso(self.clock()), 'result': 'ok', 'status': 200,
+                                                       'events': len(run), **counts})
+                    self.journal('batch-sent', batchId=batch_id, events=len(run), **counts)
+                    sent['batches'] += 1
+                    for name in ('accepted', 'duplicates', 'rejected'):
+                        sent[name] += counts[name]
+            return sent
     def _consume(self, conn, epoch: int, run: List[sqlite3.Row], ack: dict) -> dict:
         """Applies an ack: rejected events are consumed with their reason; every seq up to the stream's ack, and in
         its `held` ranges, is consumed. What the ack does not name stays pending and goes in a later batch."""
         rejected = [r for r in ack.get('rejected', []) if isinstance(r, dict)] if isinstance(ack.get('rejected'), list) else []
         for item in rejected:
-            conn.execute("UPDATE events SET state = 'rejected', reason = ? WHERE event_id = ?",
+            conn.execute("UPDATE events SET state = 'rejected', reason = ? WHERE event_id = ? AND state = 'pending'",
                          (str(item.get('reason'))[:40], item.get('eventId')))
         for entry in ack.get('acks', []) if isinstance(ack.get('acks'), list) else []:
             collector = entry.get('collector') if isinstance(entry, dict) else None
@@ -619,17 +795,8 @@ class Enrollment:
                 if isinstance(held, dict) and isinstance(held.get('fromSeq'), int) and isinstance(held.get('toSeq'), int):
                     conn.execute("UPDATE events SET state = 'acked' WHERE epoch = ? AND seq BETWEEN ? AND ? AND "
                                  "state = 'pending'", (stream, held['fromSeq'], held['toSeq']))
-        dropped = self._meta(conn, 'dropped', [])
-        overflow_acked = {(json.loads(r['body'])['data']['dropped']['ranges'][0]['fromSeq'])
-                          for r in conn.execute("SELECT body FROM events WHERE kind = 'buffer.overflow' AND state != "
-                                                "'pending' AND epoch = ?", (epoch,))}
-        for d in dropped:
-            if d.get('epoch') == epoch and d['fromSeq'] in overflow_acked:
-                d['acked'] = True
-        self._set_meta(conn, 'dropped', dropped)
         num = lambda name: ack.get(name) if isinstance(ack.get(name), int) else 0
         return {'accepted': num('accepted'), 'duplicates': num('duplicates'), 'rejected': len(rejected)}
-
     # -- share registrations and grant usage -------------------------------------------------------------------
     def accepts_shares(self, state: dict) -> bool:
         return SHARE_PROTOCOL in (state.get('protocols') or [])
@@ -637,133 +804,169 @@ class Enrollment:
     def register_shares(self) -> dict:
         """Derives this enrollment's registrations from the applied estate revision and delta entries and sends what
         changed, what is due again (weekly) and what waits on a backoff. Nothing at all before the server lists
-        `share-registration/1`."""
-        state = self._require()
-        if not self.accepts_shares(state):
-            return {'sent': 0, 'held': 'protocol-not-listed'}
-        record, entries = applied_records(self.node)
-        if record is None:
-            return {'sent': 0, 'held': 'no-applied-record'}
-        record_digest = record.get('digest') if isinstance(record.get('digest'), str) else None
-        now = int(self.clock())
-        out = {'sent': 0, 'degraded': [], 'answers': {}}
-        with self._db() as conn:
-            previous = [r['grant_id'] for r in conn.execute(
-                "SELECT grant_id, doc, answer FROM registrations") if json.loads(r['doc']).get('state') == 'active'
-                and share_registration.gate(json.loads(r['answer']) if r['answer'] else None) == 'send']
-            derived = share_registration.derive(record, entries, self.org_id, previous)
-            out['degraded'] = derived['degraded']
-            for registration in derived['registrations']:
-                grant_id, digest = registration['grantId'], share_registration.digest(registration)
-                row = conn.execute('SELECT * FROM registrations WHERE grant_id = ?', (grant_id,)).fetchone()
-                if row is not None and row['digest'] == digest:
-                    if row['gate'] == 'hold-degraded' and row['record_digest'] == record_digest:
-                        continue                           # a typed refusal waits for the record to change
-                    if row['gate'] == 'send' and row['sent_at'] and now - row['sent_at'] < share_registration.RESEND_SECONDS:
-                        continue
-                    if row['gate'] == 'hold' and row['next_at'] > now:
-                        continue
-                if row is not None and row['digest'] == digest and registration['state'] == 'withdrawn' \
-                        and row['gate'] == 'send':
-                    continue                               # a withdrawal is final once taken
-                status, answer = self._signed(state, self.paths['share-registration'], registration)
-                if status == 200 and isinstance(answer, dict):
-                    shaped = {'status': 200, 'receipt': answer}
-                elif status == 401:
-                    shaped = {'status': 401, 'code': _error_code(answer)}
-                elif isinstance(answer, dict) and isinstance(answer.get('error'), dict):
-                    shaped = {'status': status, 'body': answer}
-                else:
-                    shaped = {'status': status}
-                gate = share_registration.gate(shaped)
-                attempts = (row['attempts'] + 1) if row is not None and gate == 'hold' else 0
-                conn.execute(
-                    'INSERT INTO registrations(grant_id, doc, digest, answer, gate, record_digest, sent_at, attempts, '
-                    'next_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(grant_id) DO UPDATE SET doc = excluded.doc, '
-                    'digest = excluded.digest, answer = excluded.answer, gate = excluded.gate, record_digest = '
-                    'excluded.record_digest, sent_at = excluded.sent_at, attempts = excluded.attempts, next_at = '
-                    'excluded.next_at',
-                    (grant_id, json.dumps(registration, sort_keys=True), digest, json.dumps(shaped, sort_keys=True),
-                     gate, record_digest, now, attempts, self._backoff(attempts) if gate == 'hold' else 0))
-                self.journal('share-registration', grantState=registration['state'], status=status, gate=gate,
-                             code=_error_code(answer) if status != 200 else (answer or {}).get('state'))
-                out['sent'] += 1
-                out['answers'][grant_id] = gate
-        return out
+        `share-registration/1`.
 
+        `previouslyRegistered` is, as share-registration.md reads, the grant ids this node registered active toward
+        this enrollment: every id whose active registration the server took (`active_registered`), every id whose
+        active registration went out without an answer that refused it, and every id whose last registration is still
+        held (`hold`), so a held withdrawal is derived, and sent, again."""
+        with self._locked():
+            state = self._require()
+            if not self.accepts_shares(state):
+                return {'sent': 0, 'held': 'protocol-not-listed'}
+            record, entries = applied_records(self.node)
+            if record is None:
+                return {'sent': 0, 'held': 'no-applied-record'}
+            record_digest = record.get('digest') if isinstance(record.get('digest'), str) else None
+            now = int(self.clock())
+            out = {'sent': 0, 'degraded': [], 'answers': {}}
+            with self._db() as conn:
+                previous = sorted(r['grant_id'] for r in conn.execute(
+                    'SELECT grant_id, doc, gate, active_registered FROM registrations')
+                    if r['active_registered'] or r['gate'] == 'hold'
+                    or (json.loads(r['doc']).get('state') == 'active' and r['gate'] == 'send'))
+                derived = share_registration.derive(record, entries, self.org_id, previous)
+                out['degraded'] = derived['degraded']
+                for registration in derived['registrations']:
+                    grant_id, digest = registration['grantId'], share_registration.digest(registration)
+                    row = conn.execute('SELECT * FROM registrations WHERE grant_id = ?', (grant_id,)).fetchone()
+                    if row is not None and row['digest'] == digest:
+                        if row['gate'] == 'hold-degraded' and row['record_digest'] == record_digest:
+                            continue                       # a typed refusal waits for the record to change
+                        if row['gate'] == 'send' and registration['state'] == 'withdrawn':
+                            continue                       # a withdrawal is final once taken
+                        if row['gate'] == 'send' and row['sent_at'] \
+                                and now - row['sent_at'] < share_registration.RESEND_SECONDS:
+                            continue
+                        if row['gate'] == 'hold' and row['next_at'] > now:
+                            continue
+                    status, answer = self._signed(state, self.paths['share-registration'], registration)
+                    if status == 200 and isinstance(answer, dict):
+                        shaped = {'status': 200, 'receipt': answer}
+                    elif status == 401:
+                        shaped = {'status': 401, 'code': _error_code(answer)}
+                    elif isinstance(answer, dict) and isinstance(answer.get('error'), dict):
+                        shaped = {'status': status, 'body': answer}
+                    else:
+                        shaped = {'status': status}
+                    gate = share_registration.gate(shaped)
+                    active = registration['state'] == 'active'
+                    was = bool(row['active_registered']) if row is not None else False
+                    if gate == 'send':
+                        registered = active                # taken: active is registered, a withdrawal ends it
+                    elif gate == 'hold':
+                        registered = was or active         # unanswered: it may have landed
+                    else:
+                        registered = was                   # refused: nothing changed on the server
+                    attempts = (row['attempts'] + 1) if row is not None and gate == 'hold' else 0
+                    conn.execute(
+                        'INSERT INTO registrations(grant_id, doc, digest, answer, gate, record_digest, sent_at, '
+                        'attempts, next_at, active_registered) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+                        'ON CONFLICT(grant_id) DO UPDATE SET doc = excluded.doc, digest = excluded.digest, answer = '
+                        'excluded.answer, gate = excluded.gate, record_digest = excluded.record_digest, sent_at = '
+                        'excluded.sent_at, attempts = excluded.attempts, next_at = excluded.next_at, '
+                        'active_registered = excluded.active_registered',
+                        (grant_id, json.dumps(registration, sort_keys=True), digest, json.dumps(shaped, sort_keys=True),
+                         gate, record_digest, now, attempts, self._backoff(attempts) if gate == 'hold' else 0,
+                         int(registered)))
+                    self.journal('share-registration', grantState=registration['state'], status=status, gate=gate,
+                                 code=_error_code(answer) if status != 200 else (answer or {}).get('state'))
+                    out['sent'] += 1
+                    out['answers'][grant_id] = gate
+            return out
+
+    def _register_quietly(self) -> dict:
+        """Registrations sent on a change (an enrollment, an applied revision, a protocol list), not only on the
+        schedule; a failure is the schedule's to retry."""
+        try:
+            result = self.register_shares()
+            return {k: result[k] for k in ('sent', 'held') if k in result}
+        except (OrgError, OSError, sqlite3.Error, ValueError, RuntimeError) as error:
+            code = getattr(error, 'code', type(error).__name__)
+            self.journal('share-registration-deferred', error=code)
+            return {'deferred': code}
     def usage_days(self, until_ms: int) -> List[dict]:
-        """The meter's settled grant-check receipts summed per (UTC day, grant): ended days only."""
+        """The meter's settled grant-check receipts summed per (UTC day, grant), for ended days whose every
+        reservation is settled or past its expiry: a day is never summed while a call of it may still settle (a
+        reservation lives `meter.RESERVATION_SECONDS`, and may settle after midnight). `waiting` counts the others."""
         if self.meter_db is None or not Path(self.meter_db).exists():
             return []
         import paths as _paths
+        now = until_ms // 1000
         conn = sqlite3.connect(_paths.sqlite_uri(self.meter_db), uri=True, timeout=30)
         try:
             rows = conn.execute(
-                "SELECT date(created_at, 'unixepoch') AS day, grant_id, COUNT(*) AS calls, SUM(settled_usd) AS cost "
-                "FROM reservations WHERE settled_usd IS NOT NULL AND created_at < ? GROUP BY day, grant_id "
-                "ORDER BY day, grant_id", ((until_ms // 86400000) * 86400,)).fetchall()
+                "SELECT date(created_at, 'unixepoch') AS day, grant_id, COUNT(settled_usd) AS calls, "
+                "SUM(settled_usd) AS cost, SUM(CASE WHEN settled_usd IS NULL AND expires_at > ? THEN 1 ELSE 0 END) "
+                "AS open FROM reservations WHERE created_at < ? GROUP BY day, grant_id ORDER BY day, grant_id",
+                (now, (until_ms // 86400000) * 86400)).fetchall()
         except sqlite3.Error:
             return []
         finally:
             conn.close()
-        return [{'day': r[0], 'grantId': r[1], 'calls': int(r[2]), 'costUsd': round(float(r[3]), 6)} for r in rows]
-
+        return [{'day': r[0], 'grantId': r[1], 'calls': int(r[2]), 'costUsd': round(float(r[3] or 0), 6),
+                 'waiting': bool(r[4])} for r in rows if r[2] or r[4]]
     def collect_grant_usage(self) -> dict:
         """Enqueues one `grant.usage` per (ended UTC day, grant) for the share grants the applied revision places in
         this organization's context, from the collection start on, each only when the grant's registration answer
-        lets it (`gate`); a held grant's days wait in the meter and are enqueued once the gate opens."""
-        state = self._require()
-        start = strict_time(state.get('collectionStart'))
-        if start is None:
-            return {'enqueued': 0, 'held': 'no-collection-start'}
-        record, _ = applied_records(self.node)
-        context = 'org:' + self.org_id
-        grants = {g['meta']['id'] for g in (record or {}).get('shareGrants', []) if isinstance(g, dict)
-                  and g.get('context') == context and isinstance(g.get('meta'), dict)
-                  and share_registration.is_share_grant_id(g['meta'].get('id'))}
-        with self._db() as conn:
-            gates = {r['grant_id']: r['gate'] for r in conn.execute('SELECT grant_id, gate FROM registrations')}
-        enqueued, held = 0, set()
-        for day in self.usage_days(int(self.clock() * 1000)):
-            if day['grantId'] not in grants or strict_time(day['day'] + 'T00:00:00Z') < start:
-                continue
-            if gates.get(day['grantId']) != 'send':
-                held.add(day['grantId'])
-                continue
-            data = {'day': day['day'], 'grantId': day['grantId'], 'context': context, 'calls': day['calls'],
-                    'unpricedCalls': 0, 'costUsd': day['costUsd']}
-            if self.enqueue('grant.usage', data, occurred=day['day'] + 'T00:00:00Z',
-                            key='grant.usage|%s|%s' % (day['day'], day['grantId'])):
-                enqueued += 1
-        if enqueued:
-            self.journal('grant-usage-enqueued', events=enqueued)
-        return {'enqueued': enqueued, 'heldGrants': len(held)}
-
+        lets it (`gate`) and once none of that day's reservations can still settle; a held grant's days wait in the
+        meter and are enqueued once the gate opens."""
+        with self._locked():
+            state = self._require()
+            start = strict_time(state.get('collectionStart'))
+            if start is None:
+                return {'enqueued': 0, 'held': 'no-collection-start'}
+            record, _ = applied_records(self.node)
+            context = 'org:' + self.org_id
+            grants = {g['meta']['id'] for g in (record or {}).get('shareGrants', []) if isinstance(g, dict)
+                      and g.get('context') == context and isinstance(g.get('meta'), dict)
+                      and share_registration.is_share_grant_id(g['meta'].get('id'))}
+            with self._db() as conn:
+                gates = {r['grant_id']: r['gate'] for r in conn.execute('SELECT grant_id, gate FROM registrations')}
+            enqueued, held, waiting = 0, set(), 0
+            for day in self.usage_days(int(self.clock() * 1000)):
+                if day['grantId'] not in grants or strict_time(day['day'] + 'T00:00:00Z') < start:
+                    continue
+                if day['waiting']:
+                    waiting += 1
+                    continue
+                if gates.get(day['grantId']) != 'send':
+                    held.add(day['grantId'])
+                    continue
+                data = {'day': day['day'], 'grantId': day['grantId'], 'context': context, 'calls': day['calls'],
+                        'unpricedCalls': 0, 'costUsd': day['costUsd']}
+                if self.enqueue('grant.usage', data, occurred=day['day'] + 'T00:00:00Z',
+                                key='grant.usage|%s|%s' % (day['day'], day['grantId'])):
+                    enqueued += 1
+            if enqueued:
+                self.journal('grant-usage-enqueued', events=enqueued)
+            return {'enqueued': enqueued, 'heldGrants': len(held), 'waitingDays': waiting}
     # -- the schedule ------------------------------------------------------------------------------------------
     def tick(self) -> dict:
         """What is due, in order: rotation, check-in, share registrations, grant usage, the outbox. Each step's
-        failure is recorded and the next still runs."""
-        state = self.state()
-        if state is None:
-            return {'org': self.org_id, 'result': 'not-enrolled'}
-        if self.expired(state) or state.get('reEnroll'):
-            self.journal('needs-enrollment', expired=self.expired(state))
-            return {'org': self.org_id, 'result': 'needs-enrollment'}
-        report: Dict[str, Any] = {'org': self.org_id}
-        steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
-                 ('checkIn', lambda: self.check_in() if self.clock() >= (self.state().get('nextCheckInAt') or 0)
-                  else 'not-due'),
-                 ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage), ('outbox', self.flush)]
-        for name, step in steps:
-            try:
-                result = step()
-                report[name] = {'result': 'done'} if isinstance(result, dict) and 'device' in result else result
-            except OrgError as error:
-                report[name] = {'error': error.code, 'message': str(error)[:200]}
-            except (OSError, sqlite3.Error, ValueError, RuntimeError) as error:
-                report[name] = {'error': type(error).__name__}
-        return report
-
+        failure is recorded and the next still runs. The whole tick holds the enrollment's lock."""
+        with self._locked():
+            state = self.state()
+            if state is None:
+                return {'org': self.org_id, 'result': 'not-enrolled'}
+            if self.expired(state) or state.get('reEnroll'):
+                self.journal('needs-enrollment', expired=self.expired(state))
+                return {'org': self.org_id, 'result': 'needs-enrollment'}
+            report: Dict[str, Any] = {'org': self.org_id}
+            steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
+                     ('checkIn', lambda: self.check_in() if self.clock() >= (self.state().get('nextCheckInAt') or 0)
+                      else 'not-due'),
+                     ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage),
+                     ('outbox', self.flush)]
+            for name, step in steps:
+                try:
+                    result = step()
+                    report[name] = {'result': 'done'} if isinstance(result, dict) and 'device' in result else result
+                except OrgError as error:
+                    report[name] = {'error': error.code, 'message': str(error)[:200]}
+                except (OSError, sqlite3.Error, ValueError, RuntimeError) as error:
+                    report[name] = {'error': type(error).__name__}
+            return report
     # -- status and leaving ------------------------------------------------------------------------------------
     def describe(self) -> dict:
         state = self.state()
@@ -778,7 +981,9 @@ class Enrollment:
                'protocols': state.get('protocols', []), 'shareRegistration': self.accepts_shares(state),
                'collectionStart': state.get('collectionStart'), 'lastCheckIn': state.get('lastCheckIn'),
                'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': self.expired(state)
-               or bool(state.get('reEnroll'))}
+               or bool(state.get('reEnroll')), 'rotationPending': isinstance(state.get('pendingRotation'), dict),
+               'key': {'storage': getattr(self.keys, 'storage', 'file'),
+                       'exportable': bool(getattr(self.keys, 'exportable', True))}}
         with self._db() as conn:
             counts = {r['state']: r['n'] for r in conn.execute('SELECT state, COUNT(*) AS n FROM events GROUP BY state')}
             out['outbox'] = {'pending': counts.get('pending', 0), 'acked': counts.get('acked', 0),
@@ -799,14 +1004,17 @@ class Enrollment:
         return out
 
     def leave(self) -> dict:
-        """Removes what enrollment created, locally: this organization's folder. The device keys stay (they are the
-        machine's), and the server keeps its records until an administrator retires the device."""
-        if not self.folder.exists():
-            return {'org': self.org_id, 'left': False, 'reason': 'not-enrolled'}
-        if self.folder.is_symlink() or not self.folder.resolve().is_relative_to((self.node / 'orgs').resolve()):
-            raise OrgError('refused', 'the organization folder is not inside this node')
-        shutil.rmtree(self.folder)
-        return {'org': self.org_id, 'left': True}
+        """Removes what enrollment created, locally: this organization's folder, its own device keys with it (they
+        belong to this enrollment and no other). The server keeps its records until an administrator retires the
+        device. Under the lock, so a tick in flight finishes first and the next one finds nothing to recreate."""
+        with self._locked():
+            if not self.folder.exists():
+                return {'org': self.org_id, 'left': False, 'reason': 'not-enrolled'}
+            if self.folder.is_symlink() or not self.folder.resolve().is_relative_to((self.node / 'orgs').resolve()):
+                raise OrgError('refused', 'the organization folder is not inside this node')
+            shutil.rmtree(self.folder)
+            self._keys = None
+            return {'org': self.org_id, 'left': True}
 
 
 def enrolled_orgs(node: Path) -> List[str]:

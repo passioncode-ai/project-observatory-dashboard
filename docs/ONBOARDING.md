@@ -1228,8 +1228,10 @@ project-observatory full org enroll --server https://org.example --org org_examp
 project-observatory full org status
 ```
 
-The token is read from the slot for that one request and is never stored, printed or logged. Enrollment creates this
-machine's device keys if it has none (`full node --init`), sends a certificate request signed by its `#sig` key, and
+The token is read from the slot for that one request and is never stored, printed or logged. Enrollment creates
+device keys for this organization alone (in `node/orgs/<org id>/keys/`: no other organization sees them), declared as
+what they are, an owner-only key file (`storage: file`); a server whose policy wants a hardware key refuses with
+`key-storage-refused`. It sends a certificate request signed by that `#sig` key, and
 keeps the 7-day certificate, the stream epoch and the protocols the server accepts under the workspace's
 `node/orgs/<org id>/`, owner-only. From then on the hourly maintenance job runs `full org tick`: it rotates the
 certificate at two thirds of its life, checks in, sends share registrations, collects `grant.usage` and empties the
@@ -1242,8 +1244,10 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `org:share-registration-refused` (a typed refusal that waits for your estate record to change) and
   `org:outbox-retrying`.
 - `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
-- `org leave --org <id>` removes this machine's local state for that organization. The device keys stay. The
+- `org leave --org <id>` removes this machine's local state for that organization, its own device keys with it. The
   organization keeps its records until an administrator retires the device.
+- Two `org` commands for one organization never run at once: each waits for the other (the maintenance job's tick
+  included), so a command can take as long as a tick in flight.
 - Share registrations come only from the estate revision this machine verified and applied
   (`org records apply --record FILE`, and `--delta FILE` for revocation-delta pages); a draft is never sent.
 

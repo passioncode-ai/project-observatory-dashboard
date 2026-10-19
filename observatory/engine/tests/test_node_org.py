@@ -171,16 +171,28 @@ class FakeServer:
         self.ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'test-ca')])
         self.tokens = {'et_1': 'S' * 32, 'et_2': 'T' * 32}
         self.used, self.certs, self.nonces, self.events, self.registrations = set(), {}, set(), {}, {}
+        self.batches, self.sequences, self.requests = [], [], []
         self.epoch, self.fail_batches, self.log, self.share_answer = 0, 0, [], None
+        self.refuse_storage, self.skew, self.org = (), 0, ORG
+        self.checkin_protocols, self.batch_answer, self.lose_rotation, self.rotations = None, None, False, {}
+        self.pause = None                                  # (path, started Event, release Event): hold one request
         self._hashes = hashes
 
     def __call__(self, url, headers, body, timeout):
         path = url[len('https://org.example'):]
         self.log.append(path)
+        self.requests.append((path, json.loads(body)))
         handler = {'/v1/devices/enroll': self.enroll, '/v1/devices/check-in': self.check_in,
                    '/v1/devices/rotate': self.rotate, '/v1/activity/batches': self.batch,
                    '/v1/devices/share-registrations': self.share}[path]
+        if self.pause and self.pause[0] == path:
+            pause, self.pause = self.pause, None
+            pause[1].set()
+            assert pause[2].wait(10)
         status, doc = handler(path, {k.lower(): v for k, v in headers.items()}, body)
+        if path == '/v1/devices/rotate' and self.lose_rotation:
+            self.lose_rotation = False
+            raise OSError('the answer was lost on the way back')
         return status, json.dumps(doc).encode()
 
     def _issue(self, csr, device):
@@ -195,10 +207,10 @@ class FakeServer:
         fmt = lambda t: t.strftime('%Y-%m-%dT%H:%M:%SZ')
         self.certs[serial] = {'serial': serial, 'notBefore': fmt(now), 'notAfter': fmt(now + dt.timedelta(days=7)),
                               'key': {'alg': 'es256', 'publicKey': base64.b64encode(point).decode()},
-                              'device': device, 'org': ORG, 'epoch': self.epoch}
+                              'device': device, 'org': self.org, 'epoch': self.epoch}
         return {'der': base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(), 'serial': serial,
                 'notBefore': self.certs[serial]['notBefore'], 'notAfter': self.certs[serial]['notAfter'],
-                'binding': {'org': {'id': ORG}, 'device': {'id': device}}, 'issuer': 'test-ca'}
+                'binding': {'org': {'id': self.org}, 'device': {'id': device}}, 'issuer': 'test-ca'}
 
     def _csr(self, text):
         from cryptography import x509
@@ -220,7 +232,11 @@ class FakeServer:
         if 'sha256:' + hashlib.sha256(spki).hexdigest() != doc['key']['publicKeySha256']:
             return 422, {'error': {'code': 'key-mismatch'}}
         assert [k['kid'].split('#')[1] for k in doc['deviceKeys']] == ['sig', 'kem']
+        assert (doc['key']['storage'], doc['key']['exportable']) in (('file', True), ('platform-keystore', False))
+        if doc['key']['storage'] in self.refuse_storage:
+            return 403, {'error': {'code': 'key-storage-refused', 'message': 'policy'}}
         self.used.add(token_id)
+        self.org = doc['org']['id']
         self.epoch += 1
         return 200, {'protocol': 'fabric-device/0.1', 'kind': 'enrollment-response', 'protocols': self.protocols,
                      'certificate': self._issue(csr, doc['device']['id']), 'streamEpoch': self.epoch,
@@ -230,9 +246,13 @@ class FakeServer:
     def _verify(self, path, headers, body):
         result = hs.verify_request({'method': 'POST', 'target': path, 'headers': headers, 'body': body},
                                    public_base_url='https://org.example', certificate=self.certs.get,
-                                   at_ms=int(self.clock() * 1000), seen=lambda s, n: (s, n) in self.nonces)
+                                   at_ms=int((self.clock() + self.skew) * 1000),
+                                   seen=lambda s, n: (s, n) in self.nonces)
         if result['ok']:
             self.nonces.add((result['serial'], result['nonce']))
+            replaced = self.certs[result['serial']].pop('replaces', None)
+            if replaced:                                   # CT-65: the old certificate ends when the new one is used
+                self.certs[replaced]['revoked'] = True
         return result
 
     def check_in(self, path, headers, body):
@@ -242,8 +262,12 @@ class FakeServer:
         cert = self.certs[v['serial']]
         doc = json.loads(body)
         assert doc['device']['id'] == cert['device'] and doc['certificate']['serial'] == v['serial']
+        self.sequences.append(doc['sequenceNum'])
         out = {'protocol': 'fabric-device/0.1', 'kind': 'check-in-response', 'device': doc['device'],
-               'at': '2026-10-19T00:00:00Z', 'nextCheckInSeconds': 300, 'flags': []}
+               'at': dt.datetime.fromtimestamp(self.clock() + self.skew, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+               'nextCheckInSeconds': 300, 'flags': []}
+        if self.checkin_protocols is not None:
+            out['protocols'] = self.checkin_protocols
         if self.clock() >= strict_time(cert['notBefore']) / 1000 + 7 * 86400 * 2 / 3:
             out['certificate'] = {'action': 'rotate'}
         return 200, out
@@ -254,10 +278,14 @@ class FakeServer:
             return 401, {'error': {'code': v['code']}}
         doc = json.loads(body)
         old = self.certs[v['serial']]
+        if (v['serial'], doc['csr']) in self.rotations:     # CT-65: the same request, the same certificate
+            return 200, self.rotations[(v['serial'], doc['csr'])]
         csr = self._csr(doc['csr'])
-        old['revoked'] = True
-        return 200, {'protocol': 'fabric-device/0.1', 'kind': 'rotation-response',
-                     'certificate': self._issue(csr, old['device']), 'streamEpoch': old['epoch']}
+        answer = {'protocol': 'fabric-device/0.1', 'kind': 'rotation-response',
+                  'certificate': self._issue(csr, old['device']), 'streamEpoch': old['epoch']}
+        self.certs[answer['certificate']['serial']]['replaces'] = v['serial']
+        self.rotations[(v['serial'], doc['csr'])] = answer
+        return 200, answer
 
     def batch(self, path, headers, body):
         v = self._verify(path, headers, body)
@@ -267,6 +295,11 @@ class FakeServer:
             self.fail_batches -= 1
             return 503, {'error': {'code': 'unavailable'}}
         doc = json.loads(body)
+        self.batches.append((doc['batchId'], [e['seq'] for e in doc['events']], [e['kind'] for e in doc['events']]))
+        if self.batch_answer:
+            answer = self.batch_answer(doc)
+            if answer:
+                return answer
         cert = self.certs[v['serial']]
         accepted = duplicates = 0
         rejected, top = [], {}
@@ -337,6 +370,13 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.make = lambda: Enrollment(self.node, ORG, transport=self.server, clock=self.clock, meter_db=self.meter)
         self.private_io = private_io
 
+    def open_gate(self, grant, gate='send'):
+        """A registration answered as `gate`, written as register_shares would."""
+        with self.make()._db() as conn:
+            conn.execute("INSERT INTO registrations(grant_id, doc, digest, gate, active_registered) VALUES(?, ?, ?, ?, 1)"
+                         " ON CONFLICT(grant_id) DO UPDATE SET gate = excluded.gate",
+                         (grant, json.dumps({'state': 'active'}), 'sha256:x', gate))
+
     def enroll(self, token='et_1.' + 'S' * 32):
         return self.make().enroll('https://org.example', token)
 
@@ -352,7 +392,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertIn('org:share-registration-not-listed', status['degraded'])
         result = self.make().check_in()
         self.assertTrue(result['ok'], result)
-        for path in (self.node / 'orgs' / ORG).iterdir():
+        for path in (p for p in (self.node / 'orgs' / ORG).rglob('*') if p.is_file() and p.suffix != '.pem'):
             self.assertNotIn('S' * 32, path.read_bytes().decode('utf-8', 'replace'), path.name)
         if os.name == 'posix':                          # Windows has no owner-only mode bits
             self.assertEqual(oct((self.node / 'orgs' / ORG / 'enrollment.json').stat().st_mode & 0o777), '0o600')
@@ -409,7 +449,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.apply(share_record(grants=((GRANT, 'org:' + ORG), (OTHER_GRANT, 'org:another_org'))))
         report = self.make().tick()
         self.assertEqual(report['shares']['answers'], {GRANT: 'send'})
-        self.assertEqual(report['grantUsage'], {'enqueued': 1, 'heldGrants': 0})
+        self.assertEqual(report['grantUsage'], {'enqueued': 1, 'heldGrants': 0, 'waitingDays': 0})
         self.assertEqual(report['outbox']['accepted'], 1)
         (event,) = self.server.events.values()
         self.assertEqual(event['data'], {'day': '2026-10-18', 'grantId': GRANT, 'context': 'org:' + ORG,
@@ -421,8 +461,11 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(len(self.server.events), 1)
         # A week later the registration is sent again and answered unchanged.
         self.now[0] += 7 * 86400 + 1
+        before = self.server.log.count('/v1/devices/share-registrations')
         self.enroll('et_2.' + 'T' * 32)                  # the certificate would have expired: re-enroll
-        self.assertEqual(self.make().register_shares()['sent'], 1)
+        # The enrollment itself sends the registrations again (on change, not at the next tick).
+        self.assertEqual(self.server.log.count('/v1/devices/share-registrations'), before + 1)
+        self.assertEqual(self.make().register_shares()['sent'], 0)
 
     def test_a_typed_refusal_holds_until_the_record_changes(self):
         self.server.protocols.append('share-registration/1')
@@ -431,7 +474,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.share_answer = (409, {'error': {'code': 'agent-mismatch', 'message': 'no'}})
         self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'hold-degraded'})
         self.assertEqual(self.make().register_shares()['sent'], 0)
-        self.assertEqual(self.make().collect_grant_usage(), {'enqueued': 0, 'heldGrants': 1})
+        self.assertEqual(self.make().collect_grant_usage(), {'enqueued': 0, 'heldGrants': 1, 'waitingDays': 0})
         self.assertIn('org:share-registration-refused', self.make().describe()['degraded'])
         self.server.share_answer = None
         self.apply(share_record(revision=8, digest='sha256:' + 'b' * 64))
@@ -440,10 +483,8 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_the_outbox_retries_under_one_batch_id_and_survives_a_restart(self):
         self.enroll()
         for day in ('2026-10-16', '2026-10-17'):
-            self.make().enqueue('grant.usage', {'day': day, 'grantId': GRANT, 'context': 'org:' + ORG, 'calls': 1,
-                                                'unpricedCalls': 1, 'costUsd': None},
-                                occurred=day + 'T00:00:00Z', key=day)
-        self.assertIsNone(self.make().enqueue('grant.usage', {}, occurred='2026-10-16T00:00:00Z', key='2026-10-16'))
+            self.make().enqueue('meter.call', {'day': day}, occurred=day + 'T00:00:00Z', key=day)
+        self.assertIsNone(self.make().enqueue('meter.call', {}, occurred='2026-10-16T00:00:00Z', key='2026-10-16'))
         self.server.fail_batches = 1
         first = self.make().flush()
         self.assertEqual(first['held'], 'unavailable')
@@ -457,6 +498,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
 
     def test_a_foreign_context_is_consumed_as_rejected(self):
         self.enroll()
+        self.open_gate(GRANT)
         self.make().enqueue('grant.usage', {'day': '2026-10-16', 'grantId': GRANT, 'context': 'org:someone_else',
                                             'calls': 1, 'unpricedCalls': 0, 'costUsd': 1.0},
                             occurred='2026-10-16T00:00:00Z')
@@ -466,8 +508,9 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_leave_removes_only_the_enrollment(self):
         self.enroll()
         self.assertEqual(self.make().leave(), {'org': ORG, 'left': True})
-        self.assertFalse((self.node / 'orgs' / ORG).exists())
-        self.assertTrue((self.node / 'device' / 'device.json').exists())
+        self.assertFalse((self.node / 'orgs' / ORG).exists())   # its own keys went with it
+        self.assertEqual(self.make().tick(), {'org': ORG, 'result': 'not-enrolled'})
+        self.assertFalse((self.node / 'orgs' / ORG).exists())   # and nothing recreates it
 
     def test_an_unverified_revision_is_never_applied(self):
         from node import org
@@ -483,6 +526,251 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertIn('org:needs-enrollment', self.make().describe()['degraded'])
 
 
+    # -- fix cycle 1 (adversarial round 1 on PR #308) ----------------------------------------------------------
+    def _thread(self, fn, out):
+        import threading
+
+        def body():
+            try:
+                out.append(fn())
+            except Exception as error:                 # noqa: BLE001 — surfaced by the assertion below
+                out.append(error)
+        thread = threading.Thread(target=body, daemon=True)
+        thread.start()
+        return thread
+
+    def test_a_check_in_waits_for_a_rotation_in_flight(self):
+        import threading
+        self.enroll()
+        old = self.make().state()['certificate']['serial']
+        started, release = threading.Event(), threading.Event()
+        self.server.pause = ('/v1/devices/rotate', started, release)
+        rotated, checked = [], []
+        rotation = self._thread(lambda: self.make().rotate(), rotated)
+        self.assertTrue(started.wait(10))
+        check_in = self._thread(lambda: self.make().check_in(), checked)
+        check_in.join(0.5)
+        self.assertTrue(check_in.is_alive())           # it waits for the lock, not for the network
+        release.set()
+        rotation.join(10)
+        check_in.join(10)
+        self.assertTrue(rotated[0]['enrolled'], rotated)
+        self.assertTrue(checked[0]['ok'], checked)
+        state = self.make().state()
+        self.assertNotEqual(state['certificate']['serial'], old)   # the rotation's certificate survived the check-in
+        self.assertTrue(self.make().check_in()['ok'])               # and the next one is not certificate-revoked
+        self.assertEqual(self.server.sequences, [1, 2])
+
+    def test_two_check_ins_spend_two_sequence_numbers(self):
+        import threading
+        self.enroll()
+        started, release = threading.Event(), threading.Event()
+        self.server.pause = ('/v1/devices/check-in', started, release)
+        results = []
+        first = self._thread(lambda: self.make().check_in(), results)
+        self.assertTrue(started.wait(10))
+        second = self._thread(lambda: self.make().check_in(), results)
+        second.join(0.5)
+        release.set()
+        first.join(10)
+        second.join(10)
+        self.assertEqual([r['ok'] for r in results], [True, True])
+        self.assertEqual(self.server.sequences, [1, 2])
+        self.assertEqual(self.make().state()['sequenceNum'], 2)
+
+    def test_a_tick_in_flight_finishes_before_leave_and_nothing_comes_back(self):
+        import threading
+        self.enroll()
+        started, release = threading.Event(), threading.Event()
+        self.server.pause = ('/v1/devices/check-in', started, release)
+        ticked, left = [], []
+        tick = self._thread(lambda: self.make().tick(), ticked)
+        self.assertTrue(started.wait(10))
+        leave = self._thread(lambda: self.make().leave(), left)
+        leave.join(0.5)
+        self.assertTrue(leave.is_alive())
+        release.set()
+        tick.join(10)
+        leave.join(10)
+        self.assertEqual(left, [{'org': ORG, 'left': True}])
+        self.assertEqual(self.make().tick(), {'org': ORG, 'result': 'not-enrolled'})
+        self.assertFalse((self.node / 'orgs' / ORG).exists())
+
+    def test_a_rotation_lost_on_the_way_back_is_sent_again_unchanged(self):
+        from node.org import OrgError
+        self.enroll()
+        old = self.make().state()['certificate']['serial']
+        self.server.lose_rotation = True
+        with self.assertRaises(OrgError):
+            self.make().rotate()
+        self.assertEqual(self.make().state()['pendingRotation']['serial'], old)
+        self.make().rotate()
+        sent = [doc for path, doc in self.server.requests if path == '/v1/devices/rotate']
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0], sent[1])             # the same request, so the same certificate (CT-65)
+        state = self.make().state()
+        self.assertNotIn('pendingRotation', state)
+        self.assertEqual(state['previousCertificate']['serial'], old)
+        self.assertFalse(self.server.certs[old].get('revoked'))     # valid until the new serial is first presented
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotIn('previousCertificate', self.make().state())
+        self.assertTrue(self.server.certs[old].get('revoked'))
+
+    def test_the_check_in_replaces_the_protocol_list_and_registrations_follow(self):
+        self.enroll()
+        self.apply(share_record())
+        self.server.checkin_protocols = ['fabric-device/0.1', 'fabric-activity/0.1', 'share-registration/1']
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertIn('share-registration/1', self.make().state()['protocols'])
+        self.assertIn('/v1/devices/share-registrations', self.server.log)   # sent on the change, not at a tick
+        self.server.checkin_protocols = ['fabric-device/0.1']
+        self.make().check_in()
+        self.assertEqual(self.make().state()['protocols'], ['fabric-device/0.1'])
+
+    def test_a_file_held_key_is_declared_and_each_organization_has_its_own(self):
+        from node.org import Enrollment, OrgError
+        self.enroll()
+        (request,) = [doc for path, doc in self.server.requests if path == '/v1/devices/enroll']
+        self.assertEqual((request['key']['storage'], request['key']['exportable']), ('file', True))
+        self.assertTrue((self.node / 'orgs' / ORG / 'keys' / 'device.json').exists())
+        refusing = FakeServer(self.clock)
+        refusing.refuse_storage = ('file',)
+        with self.assertRaises(OrgError) as raised:
+            Enrollment(self.node, 'org_policy', transport=refusing, clock=self.clock).enroll(
+                'https://org.example', 'et_1.' + 'S' * 32)
+        self.assertEqual(raised.exception.code, 'key-storage-refused')
+        self.assertFalse((self.node / 'orgs' / 'org_policy' / 'enrollment.json').exists())
+        other = FakeServer(self.clock)
+        Enrollment(self.node, 'org_other', transport=other, clock=self.clock).enroll('https://org.example',
+                                                                                     'et_1.' + 'S' * 32)
+        (theirs,) = [doc for path, doc in other.requests if path == '/v1/devices/enroll']
+        self.assertNotEqual(theirs['device']['id'], request['device']['id'])
+        self.assertNotEqual(theirs['key']['publicKeySha256'], request['key']['publicKeySha256'])
+
+    def test_a_day_is_summed_only_once_none_of_its_calls_can_still_settle(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        conn = sqlite3.connect(self.meter)
+        conn.execute('INSERT INTO reservations(receipt, grant_id, created_at, expires_at, amount) VALUES (?, ?, ?, ?, ?)',
+                     ('r6', GRANT, T0 - 86400 + 40, T0 + 7200, 1.0))   # r1's ended day, still open now
+        conn.commit()
+        report = self.make().tick()
+        self.assertEqual(report['grantUsage'], {'enqueued': 0, 'heldGrants': 0, 'waitingDays': 1})
+        conn.execute("UPDATE reservations SET settled_usd = 1.0, settled_at = ? WHERE receipt = 'r6'", (T0 + 3600,))
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.make().tick()['grantUsage']['enqueued'], 1)
+        (event,) = self.server.events.values()
+        self.assertEqual((event['data']['calls'], event['data']['costUsd']), (3, 1.75))
+
+    def test_a_grant_registered_then_held_is_still_withdrawn(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'send'})
+        with self.make()._db() as conn:                # the weekly resend is due, and the server is away
+            conn.execute('UPDATE registrations SET sent_at = sent_at - 700000')
+        self.server.share_answer = (503, {'error': {'code': 'unavailable', 'message': 'away'}})
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'hold'})
+        self.apply(share_record(grants=(), revision=8, digest='sha256:' + 'c' * 64))   # the grant is gone
+        self.now[0] += 7200                            # past the backoff
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'hold'})    # the withdrawal, held too
+        self.server.share_answer = None
+        self.now[0] += 7200
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'send'})    # retried, taken
+        (last,) = [doc for path, doc in self.server.requests if path == '/v1/devices/share-registrations'][-1:]
+        self.assertEqual(last['state'], 'withdrawn')
+        self.assertEqual(self.make().register_shares()['sent'], 0)          # final once taken
+        with self.make()._db() as conn:
+            self.assertEqual(conn.execute('SELECT active_registered FROM registrations').fetchone()[0], 0)
+
+    def test_a_batch_refused_for_what_it_is_is_not_retried(self):
+        self.enroll()
+        self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.server.batch_answer = lambda doc: (422, {'error': {'code': 'batch-invalid', 'message': 'no'}})
+        self.assertEqual(self.make().flush()['rejected'], 1)
+        self.assertEqual(self.make().describe()['outbox']['pending'], 0)
+        self.assertEqual(self.make().flush()['batches'], 0)
+        self.assertEqual(len(self.server.batches), 1)
+        self.make().enqueue('meter.call', {'n': 2}, occurred='2026-10-18T00:00:00Z')
+        self.server.batch_answer = lambda doc: (409, {'error': {'code': 'activation-closed', 'message': 'later'}})
+        self.assertEqual(self.make().flush()['held'], 'activation-closed')
+        self.assertEqual(self.make().describe()['outbox']['pending'], 1)    # kept for a retry
+
+    def test_a_413_halves_the_batch(self):
+        self.enroll()
+        for n in range(4):
+            self.make().enqueue('meter.call', {'n': n}, occurred='2026-10-18T00:00:00Z')
+        self.server.batch_answer = lambda doc: (413, {'error': {'code': 'payload-too-large'}}) \
+            if len(doc['events']) > 2 else None
+        result = self.make().flush()
+        self.assertEqual((result['accepted'], result['rejected']), (4, 0))
+        self.assertEqual([len(seqs) for _, seqs, _ in self.server.batches], [4, 2, 2])
+
+    def test_an_answer_that_acknowledges_nothing_is_held_under_the_same_batch_id(self):
+        self.enroll()
+        self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.server.batch_answer = lambda doc: (200, {'protocol': 'fabric-activity/0.1', 'acks': []})
+        self.assertEqual(self.make().flush()['held'], 'not-acknowledged')
+        self.assertEqual(len(self.server.batches), 1)                       # not twenty fresh batch ids
+        enrollment = self.make()
+        self.assertEqual(enrollment.check_in_document(enrollment.state())['health']['state'], 'degraded')
+        self.server.batch_answer = None
+        self.now[0] += 3600
+        self.assertEqual(self.make().flush()['accepted'], 1)
+        self.assertEqual(self.server.batches[0][0], self.server.batches[1][0])
+
+    def test_a_burst_past_the_bound_ends_in_one_overflow(self):
+        from unittest import mock
+        from node import org
+        self.enroll()
+        with mock.patch.object(org, 'MAX_PENDING', 10), mock.patch.object(org, 'OVERFLOW_HEADROOM', 4):
+            for n in range(20):
+                self.make().enqueue('meter.call', {'n': n}, occurred='2026-10-18T00:00:00Z')
+        with self.make()._db() as conn:
+            overflows = [json.loads(r['body']) for r in conn.execute(
+                "SELECT body FROM events WHERE kind = 'buffer.overflow'")]
+            dropped = conn.execute("SELECT COUNT(*) FROM events WHERE state = 'dropped'").fetchone()[0]
+        self.assertEqual(len(overflows), 1)
+        ranges = overflows[0]['data']['dropped']['ranges']
+        self.assertEqual(overflows[0]['data']['dropped']['events'], dropped)
+        self.assertEqual(sum(r['toSeq'] - r['fromSeq'] + 1 for r in ranges), dropped)   # the overflow's own seq is not
+        enrollment = self.make()
+        collector = enrollment.check_in_document(enrollment.state())['collectors'][0]
+        self.assertEqual((collector['dropped'], collector['healthy']), (ranges, False))
+        self.make().flush()
+        enrollment = self.make()
+        self.assertEqual(enrollment.check_in_document(enrollment.state())['collectors'][0]['dropped'], [])
+
+    def test_grant_usage_is_gated_again_at_send(self):
+        self.enroll()
+        self.open_gate(GRANT)
+        key = 'grant.usage|2026-10-18|' + GRANT
+        data = {'day': '2026-10-18', 'grantId': GRANT, 'context': 'org:' + ORG, 'calls': 1, 'unpricedCalls': 0,
+                'costUsd': 1.0}
+        self.make().enqueue('grant.usage', data, occurred='2026-10-18T00:00:00Z', key=key)
+        self.open_gate(GRANT, 'hold')                  # the latest answer no longer lets it
+        self.make().flush()
+        self.assertEqual([kinds for _, _, kinds in self.server.batches], [['buffer.overflow']])
+        self.assertEqual(self.make().describe()['outbox']['dropped'], 1)
+        self.assertIsNotNone(self.make().enqueue('grant.usage', data, occurred='2026-10-18T00:00:00Z', key=key))
+
+    def test_requests_are_signed_on_the_servers_clock(self):
+        self.enroll()
+        self.server.skew = 200
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['skewSeconds'], 200)
+        self.server.skew = 450                         # 450 s from this clock, 250 s from the measured one
+        self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.assertEqual(self.make().flush()['accepted'], 1)
+        self.server.skew = 1200
+        self.make().enqueue('meter.call', {'n': 2}, occurred='2026-10-18T00:00:00Z')
+        self.assertEqual(self.make().flush()['held'], 'signature-stale')
+        state = self.make().state()
+        self.assertEqual((state['skewSeconds'], state['nextCheckInAt']), (0, 0))   # measure again at once
+
+
 class MaintenanceStep(unittest.TestCase):
     """The maintenance pass runs `full org tick` only on a machine with an enrollment, and records its failure."""
 
@@ -493,8 +781,9 @@ class MaintenanceStep(unittest.TestCase):
             def __init__(self, code, doc):
                 self.calls, self.code, self.doc = [], code, doc
 
-            def full(self, *args, timeout=0):
+            def full(self, *args, timeout=0, env=None):
                 self.calls.append(args)
+                self.env = env
                 return self.code, self.doc, 'tail line'
         base = Path(tmpdir.mkdtemp()).resolve()
         none = Commands(0, {})
@@ -506,6 +795,7 @@ class MaintenanceStep(unittest.TestCase):
         self.assertEqual(maintenance.step_org(base, ran), {'result': 'ran', 'organizations': [{'org': ORG,
                                                                                                 'result': 'ran'}]})
         self.assertEqual(ran.calls, [('org', 'tick')])
+        self.assertEqual(ran.env, {'OBSERVATORY_NODE': str(base / 'node')})   # the CLI reads the same folder
         failed = maintenance.step_org(base, Commands(1, {}))
         self.assertEqual((failed['result'], failed['detail']), ('error', 'tail line'))
 

@@ -887,11 +887,13 @@ def configuration_enabled(base: Path, name: str) -> bool:
 def step_org(base: Path, commands: "Commands") -> dict:
     """Organization enrollments (OBS-161): rotation before expiry, a signed check-in, share registrations, grant
     usage and the activity outbox, through `full org tick`. Nothing runs on a machine with no enrollment; a failure is
-    recorded, never raised."""
-    orgs = base / "node" / "orgs"
+    recorded, never raised. The node folder is the one `full org` resolves (`OBSERVATORY_NODE`, else `<base>/node`),
+    handed to the child explicitly so both read the same enrollments."""
+    node = Path(os.environ.get("OBSERVATORY_NODE") or base / "node").expanduser()
+    orgs = node / "orgs"
     if not orgs.is_dir() or not any((p / "enrollment.json").exists() for p in orgs.iterdir() if p.is_dir()):
         return {"result": "none"}
-    code, doc, tail = commands.full("org", "tick", timeout=300)
+    code, doc, tail = commands.full("org", "tick", timeout=300, env={"OBSERVATORY_NODE": str(node)})
     rows = doc.get("organizations") if isinstance(doc.get("organizations"), list) else []
     summary = [{"org": r.get("org"), "result": r.get("result") or ("error" if r.get("error") else "ran")}
                for r in rows if isinstance(r, dict)]

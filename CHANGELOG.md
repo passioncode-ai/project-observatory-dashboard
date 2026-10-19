@@ -9,14 +9,17 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 - **Organization enrollment: `full org`** (OBS-161; contract DEC-0031, DEC-0056, DEC-0082, DEC-0086). A machine
   enrolls in an organization server with a single-use enrollment token read from a vault slot (never from the command
-  line, never stored or logged), with a certificate request signed by its `#sig` device key; it keeps the certificate,
-  stream epoch and accepted protocols under `node/orgs/<org id>/`, rotates the certificate at two thirds of its life,
+  line, never stored or logged), with device keys of its own for each organization (declared as an owner-only key
+  file, `storage: file`) and a certificate request signed by that `#sig` key; it keeps the certificate,
+  stream epoch and accepted protocols under `node/orgs/<org id>/`, holds one lock per organization so no two commands
+  (or a command and the maintenance tick) interleave, rotates the certificate at two thirds of its life (a lost answer
+  resends the same request),
   checks in, and sends activity batches from a durable outbox (persisted events, contiguous slices of at most 1000,
   one `batchId` across retries, backoff, acks consumed, overflow bounded). Every request after enrollment carries the
   `fabric-device` HTTP signature. Share registrations are derived from the estate revision and delta this machine
   verified and applied (`org records apply`) and sent only to a server that lists `share-registration/1`;
-  `grant.usage` for a share grant goes only to its own organization and only while the registration answer allows
-  it. The maintenance job runs `org tick` on an enrolled machine. `org status` names expiry, the last check-in, the
+  `grant.usage` for a share grant goes only to its own organization, only while the registration answer allows it
+  (checked again at send), and only once none of the day's calls can still settle. The maintenance job runs `org tick` on an enrolled machine. `org status` names expiry, the last check-in, the
   outbox depth and anything degraded; `org leave` removes the local enrollment only. The contract's
   `http-signature.json` (54 cases) and `share-registration.json` (derive, grant id and gate cases) are vendored and
   run.
