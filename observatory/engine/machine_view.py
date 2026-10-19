@@ -93,7 +93,8 @@ def summary(explain_pid: int | None = None) -> dict:
     plan, d3 = _load("cleanup-plan.json", "cleanup")
     guard, d4 = _load("disk-guard.json", "disk-guard")
     degraded += [d for d in (d1, d2, d3, d4) if d]
-    out: dict = {"degraded": degraded}
+    import coverage_view
+    out: dict = {"degraded": degraded, "coverage": coverage_view.summary()}
     if machine:
         out["measuredAt"] = machine.get("measured_at")
         out["memory"] = machine.get("memory")
@@ -146,5 +147,12 @@ def summary(explain_pid: int | None = None) -> dict:
         sys.path.insert(0, str(paths.ROOT / "collectors"))
         import scan_machine
         out["explain"] = scan_machine.explain(int(explain_pid))
+    # The coverage block carries its own unmeasured sources; the overview's `degraded` names
+    # them too, once each, or an empty list would claim full coverage beside them.
+    seen = {(d.get("source"), d.get("code")) for d in degraded if isinstance(d, dict)}
+    for d in (out.get("coverage") or {}).get("degraded") or []:
+        if (d.get("source"), d.get("code")) not in seen:
+            seen.add((d.get("source"), d.get("code")))
+            degraded.append(d)
     out["degraded"] = degraded
     return out

@@ -385,6 +385,54 @@ class Migration(Base):
             vault.migrate(self.home)
 
 
+class BeforeUpdateInventory(Base):
+    def make_update(self, suffix='fixture'):
+        directory = self.home / 'backups' / ('before-update-' + suffix)
+        upgrade._snapshot(self.home, directory)
+        return directory
+
+    def test_local_update_is_counted_with_and_without_passphrase(self):
+        directory = self.make_update()
+        vault.after_snapshot(self.home, directory, 'before-update')
+        self.assertEqual(vault.status(self.home)['local_unencrypted_snapshots'], 1)
+        vault.set_passphrase(self.home, PASS)
+        report = vault.status(self.home)
+        self.assertEqual(report['local_unencrypted_snapshots'], 1)
+        self.assertTrue(any('1 unencrypted snapshot(s)' in w for w in report['warnings']))
+        self.assertTrue(directory.is_dir())  # status is read-only
+
+    def test_update_migrates_encrypted_and_restores_while_foreign_kind_stays(self):
+        directory = self.make_update()
+        foreign = self.home / 'backups' / 'foreign-kind-fixture'
+        upgrade._snapshot(self.home, foreign)
+        before = {p.relative_to(foreign): p.read_bytes() for p in foreign.rglob('*') if p.is_file()}
+        vault.set_passphrase(self.home, PASS)
+        report = vault.migrate(self.home)
+        self.assertEqual(report['exported'], 1)
+        self.assertEqual(report['removed'], 0)
+        self.assertFalse(directory.exists())
+        self.assertEqual(before, {p.relative_to(foreign): p.read_bytes() for p in foreign.rglob('*') if p.is_file()})
+        artifacts = vault.artifacts(self.target(), 'before-update', vault.SNAPSHOT_SUFFIX)
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(vault.verify_file(artifacts[0], PASS)['kind'], 'before-update')
+        restored = vault.extract_tree(artifacts[0], self.base / 'restored-update', PASS)
+        upgrade.verify_snapshot(restored)
+        self.assertEqual(vault.status(self.home)['local_unencrypted_snapshots'], 0)
+        self.assertEqual(vault.status(self.home)['artifacts']['before-update']['count'], 1)
+        self.assertIn(artifacts[0], [row['snapshot'] for row in vault.candidates(self.home)])
+
+    def test_invalid_update_is_reported_and_preserved(self):
+        directory = self.home / 'backups' / 'before-update-unverified'
+        directory.mkdir(parents=True)
+        (directory / 'only-copy').write_bytes(b'synthetic unverified data')
+        vault.set_passphrase(self.home, PASS)
+        report = vault.migrate(self.home)
+        self.assertEqual(report['exported'], 0)
+        self.assertEqual(report['removed'], 0)
+        self.assertEqual([row['path'] for row in report['skipped']], [str(directory)])
+        self.assertEqual((directory / 'only-copy').read_bytes(), b'synthetic unverified data')
+
+
 class Doctor(Base):
     def test_reports_backup_state_without_values(self):
         report = workspace.doctor(self.home)['backups']

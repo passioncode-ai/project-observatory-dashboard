@@ -807,6 +807,102 @@ class Pass(Base):
         self.assertTrue((big.parent / "maintenance.log.1").exists())
         self.assertTrue((hooks / "update-bridge.log.1").exists())
 
+    def test_log_retention_receipt_is_persisted_with_independent_scopes(self):
+        import log_policy
+        real = log_policy.sweep_report
+        update_events.directory().mkdir(parents=True, exist_ok=True)
+        def scope(directory, **kwargs):
+            if Path(directory) == self.home / "store" / "logs":
+                raise OSError("PRIVATE_LOG_ERROR")
+            return real(directory, **kwargs)
+        with patch.object(log_policy, "sweep_report", side_effect=scope), patch.object(M, "now", return_value=AT):
+            report = self.run_pass(FakeCommands(check=0))
+        receipt = report["log_retention"]
+        self.assertEqual(receipt, M.read_state(self.home)["log_retention"])
+        self.assertEqual(set(receipt["scopes"]), {"engine", "updater", "hooks"})
+        self.assertEqual(receipt["scopes"]["engine"]["status"], "unknown")
+        self.assertEqual(receipt["scopes"]["updater"]["status"], "complete")
+        self.assertNotIn("PRIVATE_LOG_ERROR", json.dumps(receipt))
+        with patch.object(M, "now", return_value=AT):
+            observed = M.status(self.home, schedule=FakeSchedule())["log_retention"]
+        self.assertFalse(observed["stale"])
+        for name, raw in receipt["scopes"].items():
+            self.assertEqual({k: observed["scopes"][name][k] for k in raw}, raw)
+            self.assertFalse(observed["scopes"][name]["stale"])
+        with patch.object(M, "now", return_value=AT + datetime.timedelta(hours=2)):
+            stale = M.status(self.home, schedule=FakeSchedule())["log_retention"]
+        self.assertTrue(stale["stale"])
+        self.assertEqual(stale["checked_at"], observed["checked_at"])
+
+    def test_a_fresh_install_without_log_folders_is_complete_not_unknown(self):
+        # No hook has run and no update was logged yet: those folders do not exist, which is
+        # nothing to retain, not missing evidence (it used to warn log-retention-incomplete forever).
+        state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+        for folder in (update_events.directory(), state_dir / "project-observatory", self.home / "store" / "logs"):
+            # Only ever inside this test's sandbox: never a real home's folders.
+            self.assertTrue(Path(os.path.realpath(folder)).is_relative_to(Path(os.path.realpath(self.base))), folder)
+            if folder.exists():
+                shutil.rmtree(folder)
+        receipt = M._rotate_logs(self.home, at=AT)
+        for name in ("engine", "updater", "hooks"):
+            self.assertEqual((receipt["scopes"][name]["status"], receipt["scopes"][name]["absent"]), ("complete", True), name)
+        projected = M.log_retention_status(receipt, at=AT)
+        self.assertEqual(projected["status"], "complete")
+        self.assertTrue(all(projected["scopes"][n]["absent"] for n in ("engine", "updater", "hooks")))
+
+    def test_lost_scope_receipt_does_not_claim_zero_effects(self):
+        import log_policy
+        logs = self.home / "store" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = logs / "gate.log"
+        log.write_bytes(b"x" * 100)
+        real = log_policy.sweep_report
+        def lose_receipt(directory, **kwargs):
+            result = real(directory, max_bytes=10)
+            if Path(directory) == logs:
+                raise RuntimeError("PRIVATE_AFTER_EFFECT")
+            return result
+        with patch.object(log_policy, "sweep_report", side_effect=lose_receipt):
+            receipt = M._rotate_logs(self.home, at=AT)
+        self.assertTrue((logs / "gate.log.1").exists())
+        self.assertIsNone(receipt["scopes"]["engine"]["rotated"])
+        self.assertEqual(receipt["scopes"]["engine"]["status"], "unknown")
+        self.assertNotIn("PRIVATE_AFTER_EFFECT", json.dumps(receipt))
+        projected = M.log_retention_status(receipt, at=AT)
+        self.assertIsNone(projected["scopes"]["engine"]["rotated"])
+
+    def test_log_retention_reader_sanitizes_malformed_receipt(self):
+        state = M.read_state(self.home)
+        state["log_retention"] = {"checked_at": "PRIVATE_LOG_PATH", "scopes": {
+            "engine": {"status": "PRIVATE_LOG_ERROR", "observed_count": -1,
+                       "reasons": {"PRIVATE_LOG_REASON": 1}, "path": "PRIVATE_LOG_PATH"}}}
+        M.write_state(self.home, state)
+        report = M.status(self.home, schedule=FakeSchedule())
+        self.assertNotIn("PRIVATE_LOG", json.dumps(report["log_retention"]))
+        self.assertEqual(report["log_retention"]["status"], "unknown")
+        self.assertTrue(report["log_retention"]["stale"])
+
+    def test_log_retention_reader_rejects_contradictory_and_missing_counts(self):
+        import log_policy
+        base = {"status": "complete", "observed_count": 0, "rotated": 0, "refused": 0,
+                "failed": 0, "reasons": {}, "checked_at": M.iso(AT)}
+        for change in ({"observed_count": None}, {"failed": 1}, {"rotated": True},
+                       {"reasons": {"PRIVATE_REASON": 1}}, {"checked_at": M.iso(AT + datetime.timedelta(hours=1))}):
+            row = {**base, **change}
+            result = M.log_retention_status({"schema": "log-retention/1", "checked_at": M.iso(AT),
+                "scopes": {name: row for name in ("engine", "updater", "hooks")}}, at=AT)
+            self.assertEqual(result["status"], "unknown", change)
+            self.assertNotIn("PRIVATE_REASON", json.dumps(result))
+        row = log_policy.unknown_report()
+        del row["observed_count"]
+        result = M.log_retention_status({"schema": "log-retention/1", "checked_at": M.iso(AT),
+                                        "scopes": {"engine": row}}, at=AT)
+        self.assertEqual(result["status"], "unknown")
+        complete = M.log_retention_status({"schema": "log-retention/1", "checked_at": M.iso(AT),
+            "scopes": {name: base for name in ("engine", "updater", "hooks")}}, at=AT)
+        self.assertEqual(complete["status"], "complete")
+        self.assertFalse(complete["stale"])
+
     def test_a_failed_update_is_retried_at_the_next_check_not_the_next_hour(self):
         commands = FakeCommands(check=10, apply=1)
         self.assertEqual(self.run_pass(commands)["update"]["result"], "failed-rolled-back")

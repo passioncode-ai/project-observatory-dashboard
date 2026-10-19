@@ -36,5 +36,28 @@ class ReleaseWorkflow(unittest.TestCase):
         self.assertIn("--resolve", body)
 
 
+class WindowsHolderWorkflow(unittest.TestCase):
+    def setUp(self):
+        self.body = job((ROOT / ".github/workflows/check.yml").read_text(encoding="utf-8"), "windows")
+        self.assertTrue(self.body)
+
+    def step(self, name):
+        match = re.search(rf"^      - id: {re.escape(name)}\n(.*?)(?=^      - |\Z)", self.body, re.M | re.S)
+        self.assertIsNotNone(match, name)
+        return match.group(1)
+
+    def test_holder_failure_is_not_suppressed_at_job_or_step_level(self):
+        self.assertIsNone(re.search(r"^    continue-on-error:\s*true\s*$", self.body, re.M))
+        strict = self.step("holder_safety")
+        self.assertIsNone(re.search(r"^        continue-on-error:\s*true\s*$", strict, re.M))
+        self.assertIn("if: always()", strict)
+        self.assertIn("python tests/test_disk_guard.py -v WindowsHolderUnknown", strict)
+
+    def test_historical_informative_steps_remain_separately_labelled(self):
+        for name in ("tests", "compile", "oslocks"):
+            self.assertRegex(self.step(name), r"continue-on-error:\s*true")
+        self.assertIn("steps.holder_safety.outcome", self.body)
+
+
 if __name__ == "__main__":
     unittest.main()

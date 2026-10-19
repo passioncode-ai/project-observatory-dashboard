@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
+from cleanup_safety import worktree_presence  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
 
@@ -192,8 +193,16 @@ def worktrees(repo: str, busy: set[str], now: float) -> list[dict] | None:
         path = w["worktree"]
         entry = {"path": path, "branch": str(w.get("branch", "")).replace("refs/heads/", "") or None,
                  "head": w.get("HEAD"), "locked": "locked" in w}
-        if not os.path.isdir(path):
+        presence = worktree_presence(path)
+        if presence == "absent":
             entry["state"] = "missing"
+            out.append(entry)
+            continue
+        if presence == "unknown" or not os.path.isdir(path):
+            # An unplugged drive, a renamed parent or a permission error is not a deleted
+            # worktree: its commits may exist nowhere else. The pass names it and plans nothing.
+            entry["state"] = "unreadable"
+            entry["presence"] = "unknown"
             out.append(entry)
             continue
         status = git(path, "status", "--porcelain", "--untracked-files=normal", timeout=120)

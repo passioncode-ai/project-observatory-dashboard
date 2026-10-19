@@ -1,0 +1,95 @@
+{
+  "status": "independent-scoped-source-pass",
+  "base": "25c375d5b9818fdcabbb1258814ae69116ef2d2e",
+  "source_sha256": {
+    "observatory/engine/holders.py": "3d36197197bf3c14c1082e53b63493100c4c0e4838d09eaf018c09626e411b5a",
+    "observatory/engine/tests/test_holder_capture.py": "4361fcb36357cadf4ce5f2fd4853f0dc2045bd1116caaf68030188d96dcf20ab",
+    "observatory/engine/tests/test_disk_guard.py": "f4a9d7444f3b18fe4c8bc3f72ca8607a2b9d091f87fe7888f089502e95d66bde",
+    "observatory/engine/tests/run_portable.py": "5eec190f5d64e62185e5a92b465d8859cfd6ee7180378ccd67ce9c491cd31ada"
+  },
+  "limits": {
+    "combined_pipe_bytes_per_child": 2097152,
+    "read_bytes": 65536,
+    "fields": 100000,
+    "hints": 10000,
+    "token_bytes": 4096
+  },
+  "initial_portable": {
+    "holder_capture": {
+      "cases": 16,
+      "passed": 16
+    },
+    "disk_guard": {
+      "cases": 154,
+      "failed": 1,
+      "skipped": 2,
+      "reason": "obsolete proc fallback fixture"
+    },
+    "git_hardening": {
+      "cases": 61,
+      "passed": 61
+    },
+    "osprivacy": {
+      "cases": 17,
+      "passed": 17
+    }
+  },
+  "root_checks": {
+    "doc_copies_and_inventory_cases": 11,
+    "exit_code": 0
+  },
+  "python_311_syntax_files": 4,
+  "owned_argv_controls": {
+    "count": 5,
+    "unknown_lossy_forms": 4,
+    "positive_plain_absolute": 1
+  },
+  "native_windows": "NOT_RUN",
+  "installed": "NOT_RUN",
+  "live_cleanup": false,
+  "host_ram_savings": "NOT_MEASURED",
+  "final_focused": {
+    "holder_capture": {
+      "cases": 17,
+      "passed": 17,
+      "skipped": 0,
+      "exit_code": 0
+    },
+    "disk_guard": {
+      "cases": 154,
+      "passed": 152,
+      "skipped": 2,
+      "exit_code": 0
+    },
+    "git_hardening": {
+      "cases": 61,
+      "passed": 61,
+      "skipped": 0,
+      "exit_code": 0,
+      "runtime_identical_to_initial_run": true
+    },
+    "osprivacy": {
+      "cases": 17,
+      "passed": 17,
+      "skipped": 0,
+      "exit_code": 0,
+      "runtime_identical_to_initial_run": true
+    }
+  },
+  "implementation_commit": "ef3612954ffe0be6de9bb49e2f92bf8c58a6d386",
+  "independent": {
+    "verdict": "PASS_SCOPED_SOURCE_AND_OWNED_SYNTHETIC",
+    "reexecuted_capture": 17,
+    "reexecuted_action_fresh": 6,
+    "additional_control_groups": 4,
+    "owned_argv_forms": 5,
+    "findings": []
+  },
+  "implementation_privacy": {
+    "exit_code": 0,
+    "files": 994,
+    "history_blobs": 13,
+    "effective_private_identifiers": 4055,
+    "findings": 0
+  }
+}

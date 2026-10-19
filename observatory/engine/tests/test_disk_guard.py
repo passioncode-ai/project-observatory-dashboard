@@ -8,6 +8,7 @@ every root the guard walks is pointed into it, and the cache commands are fakes.
 from __future__ import annotations
 import contextlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,6 +26,24 @@ for sub in ("collectors", "tools"):
 import workspace
 
 DAY = 86400
+
+
+@contextlib.contextmanager
+def captured_commands(**kwargs):
+    """Replay complete/failing capture at its boundary, never execute host tools."""
+    import holders
+    command = Mock(**kwargs)
+    def capture(*args, **options):
+        try:
+            p = command(*args, **options)
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            return {"stdout": b"", "returncode": None, "stderr_seen": False,
+                    "complete": False, "reason": "command-unavailable", "reaped": True}
+        raw = p.stdout if isinstance(p.stdout, bytes) else p.stdout.encode("utf-8")
+        return {"stdout": raw, "returncode": p.returncode, "stderr_seen": bool(p.stderr),
+                "complete": True, "reason": None, "reaped": True}
+    with patch.object(holders, "_capture", side_effect=capture):
+        yield command
 
 
 def git(repo, *args):
@@ -50,7 +69,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
         self.home = self.base / "workspace"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base)}, clear=True)
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base), "USERPROFILE": str(self.base)}, clear=True)
         self.env.start()
         workspace.initialize(self.home)
         import paths
@@ -66,6 +85,10 @@ class Base(unittest.TestCase):
         fresh = patch.object(self.g, "fresh_busy", return_value=False, create=True)
         fresh.start()
         self.addCleanup(fresh.stop)
+        import cleanup
+        final_worktree = patch.object(cleanup, "fresh_busy", return_value=False)
+        final_worktree.start()
+        self.addCleanup(final_worktree.stop)
         self.t1 = self.base / "t1"
         self.t1.mkdir()
         # NOTHING OUTSIDE THE TEMPORARY DIRECTORY: the clone root and the temporary
@@ -132,6 +155,67 @@ class Holding(Base):
         h = self.g.Holders(None)
         self.assertFalse(h.known)
         self.assertTrue(h.busy(self.t1))
+
+
+class CheapHolderAdmission(Base):
+    def no_inventory(self):
+        import holders
+        stack = contextlib.ExitStack()
+        for name in ("lsof_paths", "proc_paths", "argument_paths"):
+            stack.enter_context(patch.object(holders, name, side_effect=AssertionError("unexpected inventory")))
+        return stack
+
+    def test_explicit_unknown_admission_has_no_inventory_io(self):
+        import holders
+        with self.no_inventory():
+            observed = holders.Holders.take(0, collect_hints=False)
+        self.assertFalse(observed.known)
+        self.assertEqual(observed.observation, "not-attempted")
+        self.assertEqual(observed.names, [])
+        self.assertTrue(observed.busy(self.t1))
+
+    def test_cached_preliminary_cleanup_refusal_has_no_inventory_io(self):
+        import cleanup
+        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory():
+            self.assertTrue(cleanup.busy_now(str(self.t1)))
+            self.assertEqual(cleanup._LISTING[1].observation, "not-attempted")
+
+    def test_cleanup_plan_uses_unknown_without_collecting(self):
+        import cleanup
+        seen = []
+        def plan(cfg, busy, **kwargs):
+            seen.append(busy)
+            return {"counts": {}, "actions": [], "auto_enabled": False}
+        with self.no_inventory(), patch.object(cleanup, "load_config", return_value={}), \
+                patch.object(cleanup, "build_plan", side_effect=plan), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(["--json"]), 0)
+        self.assertEqual(len(seen), 1)
+        self.assertFalse(seen[0].known)
+        self.assertEqual(seen[0].observation, "not-attempted")
+
+    def test_guard_phases_have_no_inventory_or_measurement_claim(self):
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        phases = [v for k, v in doc["holders_by_phase"].items() if k != "cache-command"]
+        self.assertTrue(phases)
+        for row in phases:
+            self.assertFalse(row["known"])
+            self.assertEqual(row["observation"], "not-attempted")
+            self.assertIsNone(row["measured_at"])
+        self.assertTrue(self.t1.exists())
+
+    def test_default_positive_hint_contract_remains_incomplete(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=["/srv/held/file"]), \
+                patch.object(holders, "argument_paths", return_value=["/srv/script.py"]):
+            observed = holders.Holders.take()
+        self.assertFalse(observed.known)
+        self.assertIn("/srv/held/file", observed.names)
+        self.assertIn("/srv/script.py", observed.names)
 
 
 class Temp(Base):
@@ -279,6 +363,28 @@ class Acting(Base):
         with patch.object(self.g, "running", return_value=False):
             self.assertEqual(self.g.act(a, self.free())["result"], "skipped")
             self.assertEqual(self.g.act({**a, "busy_output": ""}, self.free())["result"], "failed")
+
+    def test_child_diagnostics_never_enter_receipts_or_journal(self):
+        marker = "SYNTHETIC_CREDENTIAL_SENTINEL"
+        for stream, busy, code in (("stderr", False, 2), ("stdout", False, 2),
+                                   ("stderr", True, 2), ("stdout", False, 0)):
+            with self.subTest(stream=stream, busy=busy, code=code):
+                child = self.t1 / "fake-cache.py"
+                message = ("in-use " if busy else "") + "Authorization: Bearer " + marker
+                child.write_text("import sys; sys." + stream + ".write(" + repr(message)
+                                 + "); sys.exit(" + str(code) + ")")
+                action = {"class": "cache-command", "target": "synthetic prune",
+                          "argv": [sys.executable, str(child)], "needs": [], "busy_if": [],
+                          "busy_output": "in-use", "timeout": 3}
+                with patch.object(self.g, "free_bytes", return_value=1000000000):
+                    row = self.g.act(action, self.free())
+                self.assertEqual(row["result"], "skipped" if busy else "failed" if code else "removed")
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+                    self.assertEqual(row["reason_code"], "cache-in-use" if busy else "command-failed")
+                self.assertNotIn(marker, json.dumps(row))
+                self.g.journal([row])
+                self.assertNotIn(marker, self.g.journal_file().read_text())
 
     def test_a_command_held_up_on_a_lock_is_skipped_quickly(self):
         a = {"class": "cache-command", "target": "tool prune", "busy_if": [], "needs": [], "timeout": 1,
@@ -603,37 +709,32 @@ class RunBudget(Base):
 
 
 class AnyDevice(Base):
-    """The guard on macOS, Linux and Windows: one rule, three ways to know what is held."""
+    """Supported holder observations and explicit unknown platforms preserve paths."""
 
-    def test_windows_probes_by_renaming_and_skips_what_is_held(self):
+    def test_legacy_rename_state_preserves_paths_without_trying_a_rename(self):
         (self.t1 / "held").mkdir()
-        (self.t1 / "free").mkdir()
+        (self.t1 / "apparently-free").mkdir()
         h = self.g.Holders([])
-        h.mode = "rename"
-        self.assertFalse(h.busy(self.t1 / "held"), "Windows cannot know beforehand; the rename decides")
-        real_rename = os.rename
+        h.mode = "rename"  # Even an old in-memory state cannot grant permission.
+        self.assertTrue(h.busy(self.t1 / "held"))
+        with patch.object(self.g.os, "rename") as rename:
+            for target in (self.t1 / "held", self.t1 / "apparently-free"):
+                result = self.g.act({"class": "temp", "target": str(target),
+                                     "identity": self.identity(target), "bytes": 0}, h)
+                self.assertEqual(result["result"], "skipped")
+                self.assertTrue(target.exists())
+            rename.assert_not_called()
 
-        def rename(src, dst):
-            if pathlib_name(src) == "held":
-                raise PermissionError(32, "being used by another process")
-            return real_rename(src, dst)
-        with patch.object(self.g.os, "rename", side_effect=rename):
-            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "identity": self.identity(self.t1 / "held"), "bytes": 0}, h)
-            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "identity": self.identity(self.t1 / "free"), "bytes": 0}, h)
-        self.assertEqual(held["result"], "skipped")
-        self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
-        self.assertEqual(free["result"], "removed")
-        self.assertFalse((self.t1 / "free").exists())
-        self.assertFalse(list(self.t1.glob("*.observatory-removing")))
-
-    def test_linux_without_lsof_reads_proc(self):
-        if not os.path.isdir("/proc/self/fd"):
-            self.skipTest("no /proc here")
-        here = os.getcwd()
-        with patch.object(self.g.shutil, "which", return_value=None):
+    def test_linux_without_lsof_preserves_unknown_without_proc(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=None), \
+                patch.object(holders, "proc_paths", side_effect=AssertionError("unbounded fallback")), \
+                patch.object(holders, "argument_paths", side_effect=AssertionError("no first observation")):
             h = self.g.Holders.take()
-        self.assertEqual(h.mode, "proc")
-        self.assertTrue(h.busy(here), "this process works inside its own cwd")
+        self.assertEqual(h.mode, "unknown")
+        self.assertFalse(h.known)
+        self.assertEqual(h.names, [])
+        self.assertTrue(h.busy(self.t1))
 
     def test_no_way_to_know_means_nothing_is_removed(self):
         with patch.object(self.g.shutil, "which", return_value=None), \
@@ -908,6 +1009,69 @@ class SecondIteration(Base):
         self.assertFalse(list(self.t1.glob("*.observatory-removing")))
 
 
+class WindowsHolderUnknown(Base):
+    """Rename success is not a holder inventory: FILE_SHARE_DELETE allows it."""
+
+    def test_owned_home_is_defined_for_windows_path_resolution(self):
+        import ntpath
+        self.assertEqual(ntpath.expanduser("~"), str(self.base))
+        self.assertEqual(Path.home(), self.base)
+
+    def test_windows_inventory_is_unknown_without_process_commands(self):
+        import holders
+        from types import SimpleNamespace
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(holders.subprocess, "run") as command:
+            observed = holders.Holders.take()
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy(str(self.t1)))
+            self.assertIsNone(holders.fresh_busy(str(self.t1)))
+            command.assert_not_called()
+
+    def test_legacy_rename_mode_cannot_authorize_a_path(self):
+        import holders
+        observed = holders.Holders([], "rename")
+        self.assertFalse(observed.known)
+        self.assertTrue(observed.busy(str(self.t1)))
+
+    def test_current_windows_unknown_preserves_target_even_with_old_free_snapshot(self):
+        import holders
+        from types import SimpleNamespace
+        target = self.t1 / "candidate"
+        target.mkdir()
+        data = target / "state"
+        data.write_text("preserve")
+        action = {"class": "temp", "target": str(target), "identity": self.identity(target), "bytes": 0}
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(self.g, "fresh_busy", holders.fresh_busy), \
+                patch.object(self.g, "remove") as remove:
+            result = self.g.act(action, self.free())
+        self.assertEqual(result["result"], "skipped")
+        remove.assert_not_called()
+        self.assertEqual(data.read_text(), "preserve")
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows FILE_SHARE_DELETE control")
+    def test_native_open_shared_delete_file_can_be_renamed(self):
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        api.CreateFileW.restype = wintypes.HANDLE
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        api.CloseHandle.restype = wintypes.BOOL
+        source = self.t1 / "open-file"
+        source.write_text("held")
+        handle = api.CreateFileW(str(source), 0x80000000, 1 | 2 | 4, None, 3, 0x80, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value)
+        try:
+            target = self.t1 / "renamed-file"
+            os.rename(source, target)
+            self.assertTrue(target.exists(), "rename is permitted while the handle remains open")
+        finally:
+            self.assertTrue(api.CloseHandle(handle))
+
+
 class HoldersModule(unittest.TestCase):
     def test_lsof_escapes_are_decoded(self):
         import holders
@@ -919,6 +1083,254 @@ class HoldersModule(unittest.TestCase):
         self.assertTrue(h.busy("/srv/cache/_npx/abc"))
         self.assertFalse(h.busy("/srv/cache/_npx/other"))
         self.assertFalse(h.busy("/srv/cache/_npx/ab"), "a sibling with a shared prefix is free")
+
+
+@unittest.skipIf(os.name == "nt", "POSIX holder inventory")
+class HoldersCompleteness(unittest.TestCase):
+    def test_partial_lsof_never_proves_worktree_free(self):
+        import holders
+        for code, err in ((1, "inspection failed"), (1, ""), (0, "inspection failed"), (2, "")):
+            with self.subTest(code=code, err=err), \
+                    patch.object(holders.shutil, "which", return_value="lsof"), \
+                    captured_commands(return_value=subprocess.CompletedProcess(
+                        [], code, "n/srv/unrelated-file\n", err)), \
+                    patch.object(holders, "proc_paths", return_value=None), \
+                    patch.object(holders, "argument_paths", return_value=[]):
+                observed = holders.Holders.take()
+                self.assertFalse(observed.known)
+                self.assertTrue(observed.busy("/srv/active-worktree"))
+
+    def test_ps_failure_is_unknown_for_paths_and_cache_tools(self):
+        import holders
+        for code, err in ((1, ""), (2, "inspection failed"), (0, "warning")):
+            with self.subTest(code=code, err=err), \
+                    captured_commands(return_value=subprocess.CompletedProcess(
+                        [], code, "/usr/bin/unrelated\n", err)):
+                self.assertIsNone(holders.argument_paths())
+                self.assertIsNone(holders.running(["npm"]))
+                with patch.object(holders, "lsof_paths", return_value=[]):
+                    self.assertFalse(holders.Holders.take().known)
+
+    def test_unparseable_global_lsof_output_is_unknown(self):
+        import holders
+        for output in ("unexpected output\n", "p123\n", "n/socket\\xff\n", ""):
+            with self.subTest(output=output), patch.object(holders.shutil, "which", return_value="lsof"), \
+                    captured_commands(return_value=subprocess.CompletedProcess(
+                        [], 0, output, "")), patch.object(holders, "proc_paths", return_value=None):
+                self.assertIsNone(holders.lsof_paths())
+                self.assertFalse(holders.Holders.take().known)
+
+    def test_undecodable_command_output_is_unknown(self):
+        import holders
+        with captured_commands(side_effect=UnicodeDecodeError(
+                "utf-8", b"\xff", 0, 1, "synthetic")):
+            self.assertIsNone(holders.argument_paths())
+            self.assertIsNone(holders.running(["npm"]))
+            with patch.object(holders.shutil, "which", return_value="lsof"):
+                self.assertIsNone(holders.lsof_paths())
+                self.assertIsNone(holders.fresh_busy("/srv/active-worktree"))
+
+    def test_complete_command_positive_controls(self):
+        import holders
+        with captured_commands(return_value=subprocess.CompletedProcess(
+                [], 0, "/usr/bin/node /srv/active-worktree/script.js\n", "")):
+            self.assertIn("/srv/active-worktree/script.js", holders.argument_paths())
+            self.assertTrue(holders.running(["node"]))
+            self.assertIsNone(holders.running(["npm"]))
+        with patch.object(holders.shutil, "which", return_value="lsof"), \
+                captured_commands(return_value=subprocess.CompletedProcess(
+                    [], 0, "p123\nn/srv/active-worktree/open\n", "")), \
+                patch.object(holders, "argument_paths", return_value=[]):
+            observed = holders.Holders.take()
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy("/srv/active-worktree"))
+            self.assertTrue(observed.busy("/srv/other-worktree"))
+
+    def test_retired_proc_never_enumerates_or_claims_coverage(self):
+        import holders
+        with patch.object(holders.os, "listdir", side_effect=AssertionError("no enumeration")), \
+                patch.object(holders.os, "readlink", side_effect=AssertionError("no links")), \
+                patch("builtins.open", side_effect=AssertionError("no reads")):
+            observed = holders.Holders(holders.proc_paths(), "proc")
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy("/srv/active-worktree"))
+
+
+@unittest.skipIf(os.name == "nt", "POSIX rendered argv contract")
+class LossyArgvEvidence(unittest.TestCase):
+    def test_rendered_argv_absence_is_unknown_for_four_path_forms(self):
+        import holders
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root).resolve()
+            for label in ("absolute-space", "relative-space", "relative-plain", "symlink"):
+                target = base / ("plain" if label == "relative-plain" else "project with space")
+                target.mkdir(exist_ok=True)
+                script = target / "app.py"
+                script.write_text("# synthetic closed script\n")
+                if label == "symlink":
+                    alias = base / "alias.py"
+                    alias.symlink_to(script)
+                    arg = str(alias)
+                elif label.startswith("relative"):
+                    arg = str(script.relative_to(base))
+                else:
+                    arg = str(script)
+                results = [subprocess.CompletedProcess([], 1, "", ""),
+                           subprocess.CompletedProcess([], 0, "python " + arg + "\n", "")]
+                with self.subTest(label=label), patch.object(holders.shutil, "which", return_value="lsof"), \
+                        captured_commands(side_effect=results):
+                    self.assertIsNone(holders.fresh_busy(str(target)))
+
+    def test_production_snapshot_retains_positives_but_is_incomplete(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=["/srv/open/file"]), \
+                patch.object(holders, "argument_paths", return_value=["/srv/script/app.py"]):
+            observed = holders.Holders.take()
+        self.assertFalse(observed.known)
+        self.assertIn("/srv/open/file", observed.names)
+        self.assertIn("/srv/script/app.py", observed.names)
+        self.assertTrue(observed.busy("/srv/open"))
+        self.assertTrue(observed.busy("/srv/unmatched"))
+
+    def test_native_file_positive_and_lexical_positive_remain_held(self):
+        import holders
+        for results in ([subprocess.CompletedProcess([], 0, "n/srv/target/file\n", "")],
+                        [subprocess.CompletedProcess([], 1, "", ""),
+                         subprocess.CompletedProcess([], 0, "python /srv/target/app.py\n", "")]):
+            with self.subTest(results=len(results)), patch.object(holders.shutil, "which", return_value="lsof"), \
+                    captured_commands(side_effect=results):
+                self.assertTrue(holders.fresh_busy("/srv/target"))
+
+    def test_unmatched_cache_tool_is_unknown_and_empty_request_is_vacuous(self):
+        import holders
+        with patch.object(holders, "_run", return_value="/usr/bin/editor\n"):
+            self.assertIsNone(holders.running(["npm"]))
+            self.assertTrue(holders.running(["editor"]))
+        with patch.object(holders, "_run", side_effect=AssertionError("must not inspect")):
+            self.assertFalse(holders.running([]))
+
+
+@unittest.skipIf(os.name == "nt", "POSIX rendered argv admission")
+class LossyArgvAdmission(Base):
+    def lsof_tool(self):
+        import holders
+        real_which = holders.shutil.which
+        return lambda name, *args, **kwargs: "lsof" if name == "lsof" else real_which(name, *args, **kwargs)
+
+    def ps_only(self, output="python relative/app.py\n"):
+        def run(argv, **kwargs):
+            if Path(argv[0]).name == "lsof":
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            if argv[0] == "ps":
+                return subprocess.CompletedProcess(argv, 0, output, "")
+            raise AssertionError("unexpected capture command")
+        return run
+
+    def test_disk_action_refuses_after_stale_free_snapshot(self):
+        import holders
+        target = self.t1 / "candidate"
+        target.mkdir()
+        (target / "kept").write_text("only copy")
+        with patch.object(self.g, "fresh_busy", holders.fresh_busy), \
+                patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
+                captured_commands(side_effect=self.ps_only()):
+            result = self.g.act({"class": "temp", "target": str(target),
+                                 "identity": self.identity(target)}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        self.assertEqual((target / "kept").read_text(), "only copy")
+
+    def test_clean_and_archived_dirty_worktrees_refuse_final_unknown(self):
+        import holders, cleanup
+        for dirty in (False, True):
+            with self.subTest(dirty=dirty):
+                repo = self.base / ("repo-" + str(dirty)); repo.mkdir()
+                git(repo, "init", "-q", "-b", "main")
+                (repo / "a").write_text("base\n")
+                git(repo, "add", "."); git(repo, "commit", "-qm", "init")
+                wt = self.base / ("worktree " + str(dirty))
+                git(repo, "worktree", "add", "-qb", "topic", str(wt))
+                if dirty: (wt / "a").write_text("only copy edit\n")
+                with patch.object(cleanup, "busy_now", return_value=False), \
+                        patch.object(cleanup, "fresh_busy", holders.fresh_busy), \
+                        patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
+                        captured_commands(side_effect=self.ps_only()):
+                    result = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
+                                          "tier": "manual" if dirty else "auto", "repo": str(repo),
+                                          "target": str(wt), "branch": "topic"}, self.base / "archive")
+                self.assertEqual(result["result"], "skipped", result)
+                self.assertTrue(wt.exists())
+                if dirty:
+                    self.assertIn("only copy edit", (Path(result["archive"]) / "tracked.patch").read_text())
+
+    def test_cache_busy_if_unknown_executes_no_cache_command(self):
+        import holders
+        with patch.object(self.g, "running", holders.running), \
+                patch.object(holders, "_run", return_value="/usr/bin/editor\n"), \
+                patch.object(self.g.subprocess, "run") as run:
+            result = self.g.act({"class": "cache-command", "target": "synthetic cache",
+                                 "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        run.assert_not_called()
+
+
+    def test_cache_busy_if_capped_capture_executes_no_cache_command(self):
+        import holders
+        result_capture = {"stdout": b"npm", "complete": False, "reason": "output-limit",
+                          "returncode": -15, "stderr_seen": False, "reaped": True}
+        with patch.object(self.g, "running", holders.running), \
+                patch.object(holders, "_capture", return_value=result_capture), \
+                patch.object(self.g.subprocess, "run") as run:
+            result = self.g.act({"class": "cache-command", "target": "synthetic cache",
+                                 "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        run.assert_not_called()
+
+
+class WorktreeFinalHolders(Base):
+    def test_final_fresh_check_preserves_clean_and_archived_dirty_worktrees(self):
+        import cleanup
+        for dirty in (False, True):
+            for outcome in (None, True, False):
+                with self.subTest(dirty=dirty, outcome=outcome):
+                    name = f"{dirty}-{outcome}"
+                    repo = self.base / ("repo-" + name)
+                    repo.mkdir()
+                    git(repo, "init", "-q", "-b", "main")
+                    (repo / "a").write_text("base\n")
+                    git(repo, "add", ".")
+                    git(repo, "commit", "-qm", "init")
+                    wt = self.base / ("worktree-" + name)
+                    git(repo, "worktree", "add", "-qb", "topic", str(wt))
+                    if dirty:
+                        (wt / "a").write_text("only copy edit\n")
+                    with patch.object(cleanup, "busy_now", return_value=False), \
+                            patch.object(cleanup, "fresh_busy", return_value=outcome, create=True) as fresh:
+                        rec = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
+                                           "tier": "manual" if dirty else "auto", "repo": str(repo),
+                                           "target": str(wt), "branch": "topic",
+                                           "_deadline": time.monotonic() + 10}, self.base / "archive")
+                    self.assertEqual(fresh.call_count, 1)
+                    self.assertGreater(fresh.call_args.args[1], 0)
+                    self.assertLessEqual(fresh.call_args.args[1], 5)
+                    self.assertEqual(rec["result"], "removed" if outcome is False else "skipped", rec)
+                    self.assertEqual(wt.exists(), outcome is not False)
+                    if dirty:
+                        self.assertIn("only copy edit", (Path(rec["archive"]) / "tracked.patch").read_text())
+
+    def test_expired_deadline_refuses_clean_worktree_without_probe(self):
+        import cleanup
+        # All source checks are synthetic successful receipts; no Git or holder command runs.
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "index_visibility_reason", return_value=""), \
+                patch.object(cleanup, "ignored_keepers", return_value=[]), \
+                patch.object(cleanup, "retain_worktree_head", return_value=""), \
+                patch.object(cleanup, "git", return_value=subprocess.CompletedProcess([], 0, "", "")) as git_call, \
+                patch.object(cleanup, "fresh_busy", return_value=False, create=True) as fresh:
+            rec = cleanup.act({"class": "worktree-clean", "tier": "auto", "repo": str(self.base),
+                               "target": str(self.t1), "_deadline": time.monotonic() - 1}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        fresh.assert_not_called()
+        self.assertFalse(any("remove" in c.args for c in git_call.call_args_list))
 
 
 class GitTierSafety(Base):
@@ -1101,6 +1513,66 @@ def stat_is_dir(st) -> bool:
 
 
 class JsonLine(Base):
+    def test_exception_details_are_not_returned_to_cli_consumers(self):
+        import io
+        marker = "SYNTHETIC_PRIVATE_EXCEPTION"
+        for args in ([], ["--json"]):
+            with self.subTest(args=args):
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(self.g, "run", side_effect=RuntimeError(marker)), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = self.g.main(args)
+                self.assertEqual(code, 2)
+                self.assertNotIn(marker, out.getvalue() + err.getvalue())
+                self.assertIn("RuntimeError", out.getvalue() + err.getvalue())
+
+    def test_invalid_git_child_receipt_is_failed_without_raw_output(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        for output in (marker, "[]", "null", "{}", "[1]", "true",
+                       json.dumps({"error": marker}), json.dumps({"result": "ran"})):
+            with self.subTest(output=output):
+                child = subprocess.CompletedProcess([], 0, stdout=output, stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertIsInstance(row, dict)
+                self.assertEqual(row["result"], "failed")
+                self.assertNotIn(marker, json.dumps(row))
+
+    def test_git_child_envelope_is_typed_and_exit_status_wins(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        good = {"result": "ran", "removed": 0, "skipped": 0, "failed": 0}
+        cases = [
+            ({**good, "reason": marker}, 0, "ran"),
+            ({"result": "busy", "reason": marker}, 0, "busy"),
+            ({"result": "plan-only", "counts": {marker: 1}}, 0, "failed"),
+            (good, 7, "failed"),
+            ({**good, "plan_seconds": float("nan")}, 0, "failed"),
+            ({**good, "plan_seconds": True}, 0, "failed"),
+            ({**good, "stopped": -1}, 0, "failed"),
+            ({**good, "level": marker}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": marker}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": True, "measured_at": None}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": None, "extra": marker}}, 0, "ran"),
+            ({"result": "plan-only", "counts": {"worktree-clean": 2},
+              "carried": {"checkouts": 1, "measured_at": None}}, 0, "plan-only"),
+        ]
+        for doc, code, expected in cases:
+            with self.subTest(doc=doc, code=code):
+                child = subprocess.CompletedProcess([], code, stdout=json.dumps(doc), stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertEqual(row["result"], expected)
+                self.assertNotIn(marker, json.dumps(row))
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+
+    def test_valid_git_child_summary_retains_failure_and_carried_counts(self):
+        expected = {"result": "ran", "removed": 0, "skipped": 2, "failed": 1,
+                    "carried": {"checkouts": 3, "measured_at": "2026-01-01T00:00:00Z"}}
+        child = subprocess.CompletedProcess([], 0, stdout=json.dumps(expected), stderr="")
+        with patch.object(self.g.subprocess, "run", return_value=child):
+            self.assertEqual(self.g._git_tier(False, "normal", 30), expected)
+
     def test_json_prints_one_line_the_maintenance_job_can_read(self):
         import io, contextlib
         out = io.StringIO()
@@ -1339,25 +1811,26 @@ class TargetRevalidation(Builds):
         self.assertTrue(entry.exists())
 
 
-@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows uses rename")
+@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows reports unknown")
 class FreshTargetProbe(Base):
     def test_target_probe_is_bounded_and_unknown_never_means_free(self):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
         command_results = [subprocess.CompletedProcess([], 1, "", ""),
                            subprocess.CompletedProcess([], 0, "/usr/bin/editor", "")]
+        started = time.monotonic()
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", side_effect=command_results) as call:
-            self.assertIs(self.real_fresh_busy(str(self.t1), 5), False)
+                captured_commands(side_effect=command_results) as call:
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
         self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
-        self.assertTrue(all(0 < c.kwargs["timeout"] <= 5 for c in call.call_args_list))
+        self.assertTrue(all(started < c.kwargs["deadline"] <= started + 5.05 for c in call.call_args_list))
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 5)):
+                captured_commands(side_effect=subprocess.TimeoutExpired("lsof", 5)):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
     def test_target_probe_refuses_partial_listing(self):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
+                captured_commands(return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
 

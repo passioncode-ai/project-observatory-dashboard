@@ -453,7 +453,8 @@ def from_store() -> dict:
                 "snapshot": (ms.get("snapshot") or {}).get("at"),
                 "snapshot_kind": (ms.get("snapshot") or {}).get("result"),
                 "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or [],
-                "warning_items": ms.get("warning_items") or []}
+                "warning_items": ms.get("warning_items") or [],
+                "log_retention": ms.get("log_retention")}
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["maintenance"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach

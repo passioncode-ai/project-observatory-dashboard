@@ -11,7 +11,7 @@ These supplement the original product scenarios. Approved scope: operator reques
 | OSS-05 | Upgrade | Supported legacy schema upgrades atomically with a WAL-aware backup; the live store is migrated in place, so sessions writing during the upgrade neither refuse it nor lose their rows, and the session hooks' receipts in `store/raw` may change meanwhile (`tests/test_workspace_upgrade.py` `test_a_write_while_the_upgrade_is_staged_is_kept_not_refused`, `test_the_session_hooks_receipts_may_change_while_staged`) | Unknown newer format is refused before mutation; failed migration rolls back. `tests/test_schema_compatibility.py` `test_legacy_upgrade_preserves_event_and_backup`, `test_wal_content_in_backup`, `test_partial_failure_rolls_back_ddl_and_dml`, `test_future_version_refused_without_write`; `tests/test_workspace_upgrade.py` `test_commit_failure_rolls_back_previous_files`, `test_future_workspace_refused_before_writes` |
 | OSS-06 | Return to the previous release | Restore a complete snapshot into a separate home and use its matching code | Never run an old writer against a newer schema; no silent database downgrade. Using the matching code is the operator's step; the engine does not enforce it. `tests/test_workspace_upgrade.py` `test_snapshot_restore_preserves_private_files_and_modes`, `test_restore_refuses_existing_data`, `test_future_snapshot_floor_refused` |
 | OSS-07 | Keep old agent clients working | Existing MCP tool names and supported schemas stay available | Breaking tool changes require a new version; unknown required capability is refused. The 44 published names are pinned exactly (`GOLDEN_TOOLS` in `tests/test_mcp_wire.py`): a rename, removal or addition fails the wire suite `must_understand`: `tests/test_workspace_profile.py` `test_unknown_major_format_and_requirements_are_refused` for a profile; for `config/settings.json`, no automated test |
-| OSS-08 | Schedule observations | Explicitly enabled job carries the chosen workspace and no secret values | One writer per workspace; existing installation jobs are not replaced silently. The maintenance job of OSS-42 is separate and is scheduled by `init` from a terminal. `tests/test_workspace_scheduler.py` `test_plist_is_instance_scoped_and_contains_no_credentials`, `test_background_install_is_opt_in`, `test_workspace_lock_blocks_parallel_tick`. On a slow machine a tick still ends with fresh findings and dashboard: the collectors stop 300 s (at most a fifth of the ceiling) before the tick's ceiling and leave that time to the steps from `merge` on, and the folder scan, told its own deadline, writes what it measured and carries each unreached folder's last row marked `carried_from` instead of being stopped with nothing written. `tests/test_lifecycle.py` `test_a_collector_leaves_the_tail_its_reserve`, `test_with_only_the_reserve_left_a_collector_waits_and_the_tail_runs`, `test_every_step_after_the_merge_is_a_tail_step`; `tests/test_filesystem_scan.py` `test_a_scan_out_of_time_carries_the_previous_rows_forward`, `test_out_of_time_with_no_earlier_scan_leaves_a_new_folder_out`. Every job runs on the engine's own interpreter whoever installs it, and a job file written with another one is repaired by the maintenance pass (a running tick waits for the next). `tests/test_lifecycle.py` `test_the_tick_runs_on_the_engines_venv_whoever_installs_it`, `test_an_installed_plist_on_another_interpreter_is_repaired_in_place`, `test_the_maintenance_pass_reloads_a_repaired_job_but_never_a_running_tick` |
+| OSS-08 | Schedule observations | Explicitly enabled job carries the chosen workspace and no secret values | One writer per workspace; existing installation jobs are not replaced silently. The maintenance job of OSS-42 is separate and is scheduled by `init` from a terminal. `tests/test_workspace_scheduler.py` `test_plist_is_instance_scoped_and_contains_no_credentials`, `test_background_install_is_opt_in`, `test_workspace_lock_blocks_parallel_tick`. On a slow machine a tick reserves time for fresh findings and dashboard, without guaranteeing completion: the collectors stop 300 s (at most a fifth of the ceiling) before the tick's ceiling and leave that time to the steps from `merge` on, and the folder scan, told its own deadline, writes what it measured and carries each unreached folder's last row marked `carried_from` instead of being stopped with nothing written. `tests/test_lifecycle.py` `test_a_collector_leaves_the_tail_its_reserve`, `test_with_only_the_reserve_left_a_collector_waits_and_the_tail_runs`, `test_every_step_after_the_merge_is_a_tail_step`; `tests/test_filesystem_scan.py` `test_a_scan_out_of_time_carries_the_previous_rows_forward`, `test_out_of_time_with_no_earlier_scan_leaves_a_new_folder_out`. Every job runs on the engine's own interpreter whoever installs it, and a job file written with another one is repaired by the maintenance pass (a running tick waits for the next). `tests/test_lifecycle.py` `test_the_tick_runs_on_the_engines_venv_whoever_installs_it`, `test_an_installed_plist_on_another_interpreter_is_repaired_in_place`, `test_the_maintenance_pass_reloads_a_repaired_job_but_never_a_running_tick` |
 | OSS-09 | Open the credential UI locally | Correct loopback Host/Origin accepted; authenticated operation logged without secret values | Lookalike origins, DNS rebinding and malformed requests are refused before effects. `tests/test_keyserver_boundary.py` `test_origin_prefix_and_different_port_refused_before_effects`, `test_rebinding_host_cannot_obtain_page_token`, `test_bad_json_and_body_bounds_do_not_reach_action`, `test_the_audit_names_the_caller` |
 | OSS-10 | Copy a command from the local dashboard | Absolute program paths and Python select the displayed workspace; project and secret roots can contain spaces and quotes | Arguments remain literal, including shell metacharacters; static ENV actions locate a named slot without printing its value; importing a value requires an explicitly chosen private input file. `tests/test_dashboard_portability.py` (see below) |
 | OSS-11 | See what a project runs where | The projects table groups each project's apps by the environment they serve. Production comes first, and the account is shown on hover. An app no override or provider placed in an environment is shown under "environment not stated" | Never inferred from an app's name. `config/environments.json` or a provider's own statement (a Heroku pipeline stage) places an app. `tests/test_hosting_groups.py` places apps through both and asserts the group order, the account on hover and a production-like name left unplaced; `tests/test_environments.py` covers the collector's rules |
@@ -30,7 +30,7 @@ These supplement the original product scenarios. Approved scope: operator reques
 | OSS-19 | Read the dashboard in one's own language | The page opens in Russian when the reader's first system language is Russian (`ru`, `ru-*`) and in English otherwise, whatever language the pages were built in (L10N-01). The rail's switch — System / English / Русский — overrides it for one reader, on every page at once, including pages opened as files, and survives a rebuild and an update; the pressed button names the choice. Precedence: the reader's choice, then the system's first language, then the build locale (`OBSERVATORY_LOCALE`, else `interface.locale`, else English), which is all a reader without a browser — the CLI, the session hook, the checks — gets. Counts use the language's plural forms; dates and numbers its format (`02.01.2026`, `1 234,5`); terms follow the organisation's glossary (a workflow is «задача», a backup «резервная копия») | An unsupported `interface.locale` is refused and nothing is written. An unknown stored choice reads as System. A browser that keeps no storage says so and follows the system language. A refusal or degraded reason the engine writes in English reads in Russian where the catalog holds it and as written otherwise, never as a key (L10N-04). Finding titles are translated; a finding's details and suggested action stay in English. `tests/test_i18n.py` `ReaderLanguage` (`ru-RU`, `ru`, `en-US`, an empty list, an unknown stored value), `Glossary`, `Formats`, `EngineText`, `test_a_page_built_in_one_language_reads_in_the_other`, `test_default_configure_and_refusals`, `test_lang_and_switch`; `tests/test_agents_page.py` and `tests/test_machine.py` render each page in one language and re-translate it into the other; `tests/test_dashboard_render.py` `test_a_finding_title_reads_in_the_readers_language`. The no-storage notice: no automated test |
 | OSS-20 | Recognise the product | Every page carries the Observatory glyph on the PassionCode tile, "by PassionCode.ai", one dark theme with gold for action, selection and focus, and a link to the PassionCode toolkit | State colour is always paired with words; the design tokens are the pinned PassionCode bytes (`dashboard/brand/manifest.json`). `tests/test_i18n.py` `test_brand`, `test_manifest_pins_the_vendored_bytes`, `test_dark_control_edge_meets_three_to_one`, `test_pages_stay_on_the_dark_contract`. Colour paired with words: no general automated check |
 | OSS-21 | See what runs and where memory and disk go | `features.machine_watch` on: the Machine page shows processes grouped by origin (agent session, launchd job, simulator by device name, app, detached), memory and swap, free disk, the largest cache/VM/history places with how each comes back, idle worktrees and branches holding the only copy. By hand, `full machine` refreshes and prints the processes, memory, volume and largest places; the worktrees and branches come from `full cleanup`, which writes the plan (`workspace.py` `_machine`). `full machine --explain PID` says why one process runs (witr detail when installed) | Read-only page; a process is shown by executable and script, never its environment or full command line; an unmeasured source is listed under Not measured with the command that measures it, never shown as zero. `tests/test_machine.py` Origins `test_explain_strips_environment_and_command_line`, `test_display_name_and_script_never_keep_secrets`; Unmeasured `test_nothing_measured_is_never_shown_as_all_clean`; Page `test_renders_every_section_in_both_languages_and_empty_states` |
-| OSS-22 | Get space back without losing work | `features.auto_cleanup` on: the maintenance job (`full maintain`, every 15 minutes, launchd/systemd/Task Scheduler) runs the disk guard FIRST in its pass — hourly while space is normal, every pass below the `low` line, before the update and the backup (`maintenance.step_guard`), whatever the tick does; `full disk-guard [--apply] [--level L]` runs it at once. The guard reads free space and picks a pressure — `normal`, `low` below 25 GB, `critical` below 10 GB (`config/cleanup.json` → `guard.levels`) — that moves every threshold: the cache tools' own cleanup (`uv`, `pnpm`, Homebrew, Docker only while its daemon already runs; `npm cache verify`, `uv cache clean`, Go and Yarn caches from `low`), build and dependency output git ignores in checkouts nobody worked in for 14 / 3 / 1 days (last checkout or commit, or an uncommitted file — never the index, which every `git status` rewrites), temporary entries untouched 3 / 1 / 1 days, application and tool cache folders untouched 7 / 2 / 1 days except downloaded browsers and SDKs (`cache_keep`), abandoned browser code-sign clones, Trash items older than 30 days (3 at `critical`); then the cleanup's git auto tier (merged or pushed branches, clean idle worktrees, stale records) with its idle thresholds lowered by the same pressure (3 days at `low`, 1 at `critical`). The Machine page shows the last run, the largest files under the home directory (daily, reported, never removed) and the simulators holding memory that swap writes to the disk, with the command that stops each; `full cleanup --apply --include manual` still archives unique branches and dirty worktrees first | **Nothing a process holds open or works inside is removed**: a holders listing per class for planning (`/proc` can supply planning on Linux), then a target-scoped POSIX `lsof` and command-path probe within five seconds before each path removal (unknown or missing `lsof` skips it; Windows uses a rename probe); without that listing no path is removed and `degraded` says so. No symlink is followed, no privacy-guarded place opened, no other user's file touched, no process stopped and no app started; a cache command is skipped while its own tool runs. Freed space is the free-space delta the disk reports (`freed_mb`), because `du` counts an APFS clone in full. Planning stops at `plan_budget_seconds` and says so. Every action is a line in `store/logs/cleanup.jsonl`; `machine.guard_idle` warns when the guard has not reported for three hours. `tests/test_disk_guard.py` (Holding, Temp, Clones, CacheDirs, Builds, Trash, Order, Acting, Run, RunBudget, Cadence, AnyDevice, GitTierPressure, GitTierSafety, SecondIteration, HoldersModule, LargeFiles — each guard watched failing against a planted defect); `tests/test_maintenance.py` Guard; `tests/test_machine.py` Estate `test_auto_removes_only_what_loses_nothing`, `test_recheck_skips_what_changed_since_the_survey`, `test_manual_archives_before_removing` |
+| OSS-22 | Get space back without losing work | `features.auto_cleanup` on: the maintenance job (`full maintain`, every 15 minutes, launchd/systemd/Task Scheduler) runs the disk guard FIRST in its pass — hourly while space is normal, every pass below the `low` line, before the update and the backup (`maintenance.step_guard`), whatever the tick does; `full disk-guard [--apply] [--level L]` runs it at once. The guard reads free space and picks a pressure — `normal`, `low` below 25 GB, `critical` below 10 GB (`config/cleanup.json` → `guard.levels`) — that moves every threshold: the cache tools' own cleanup (`uv`, `pnpm`, Homebrew, Docker only while its daemon already runs; `npm cache verify`, `uv cache clean`, Go and Yarn caches from `low`), build and dependency output git ignores in checkouts nobody worked in for 14 / 3 / 1 days (last checkout or commit, or an uncommitted file — never the index, which every `git status` rewrites), temporary entries untouched 3 / 1 / 1 days, application and tool cache folders untouched 7 / 2 / 1 days except downloaded browsers and SDKs (`cache_keep`), abandoned browser code-sign clones, Trash items older than 30 days (3 at `critical`); then the cleanup's git auto tier (merged or pushed branches, clean idle worktrees, stale records) with its idle thresholds lowered by the same pressure (3 days at `low`, 1 at `critical`). The Machine page shows the last run, the largest files under the home directory (daily, reported, never removed) and the simulators holding memory that swap writes to the disk, with the command that stops each; `full cleanup --apply --include manual` still archives unique branches and dirty worktrees first | **Observed holders and unknown holder coverage refuse removal**; the observation is not an atomic exclusion of external writers: an explicit not-attempted unknown snapshot for preliminary admission, then a target-scoped POSIX `lsof` and command-path probe within five seconds before each path removal (unknown or missing `lsof` skips it; Windows path actions refuse unknown holder coverage); without complete holder evidence no path is removed and `degraded` says so. No symlink is followed, no privacy-guarded place opened, no other user's file touched, no discovered process stopped and no app started; a cache command is skipped while its own tool runs. Freed space is the free-space delta the disk reports (`freed_mb`), because `du` counts an APFS clone in full. Planning stops at `plan_budget_seconds` and says so. Every action is a line in `store/logs/cleanup.jsonl`; `machine.guard_idle` warns when the guard has not reported for three hours. `tests/test_disk_guard.py` (Holding, Temp, Clones, CacheDirs, Builds, Trash, Order, Acting, Run, RunBudget, Cadence, AnyDevice, GitTierPressure, GitTierSafety, SecondIteration, HoldersModule, LargeFiles — each guard watched failing against a planted defect); `tests/test_maintenance.py` Guard; `tests/test_machine.py` Estate `test_auto_removes_only_what_loses_nothing`, `test_recheck_skips_what_changed_since_the_survey`, `test_manual_archives_before_removing` |
 | OSS-23 | Let an agent's workflow continue in another session, account or model | The agent writes a checkpoint after every step; when its account runs out, another session accepts a handoff pack (the latest checkpoint with its constraints first, a fresh git read, related records) and continues from the open step. Health shows the open workflows and the handoffs waiting for a session | One executor at a time by lease token; the old session's late write is refused and kept as a proposed episode, never lost; an unaccepted offer lapses and leaves the previous executor in place; nothing credential-shaped is stored ([AGENT-MEMORY.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/AGENT-MEMORY.md)). That the agent checkpoints after every step is the agent's behaviour; nothing enforces it. `tests/test_workflow_memory.py` `test_write_without_a_token_is_refused_and_kept`, `test_an_expired_offer_cannot_be_accepted_and_the_old_lease_stands`, `test_a_value_is_never_a_credential_address` |
 | OSS-24 | See which agents are working now and on what | The Agents page (Work group) opens on five counters — sessions with a turn in the last hour, open workflows, handoffs waiting, stalled, steps kept after a lost lease — then the open workflows by project with goal, current step, executor and last checkpoint age, then the agent sessions of the last day with their project and workflow | A session counts as working only by a recorded turn, with its time; a workflow's executor is its lease holder, never a guess; no lease token or key value appears anywhere on the page. `tests/test_agents_page.py` `test_counters_and_what_needs_a_person` (four of the five counters; handoffs waiting is not asserted), `test_no_token_and_no_value_reaches_the_page` |
 | OSS-25 | Follow one workflow across executors | A workflow card opens to a lane per executor that held it, a dot per checkpoint, and the handoff with its reason between them (dashed while offered, struck through when it lapsed or was replaced); constraints, next actions, checkouts and keys by name beside it | The same events are an ordered list for a screen reader; colour always comes with a word; a card needing attention opens by itself. `tests/test_agents_page.py` `test_the_lanes_follow_the_workflow_across_accounts`, `test_the_page_renders_both_languages_and_escapes_what_agents_wrote`, `test_a_card_that_needs_attention_opens_by_itself`; the dashed and struck styles: no automated test |
@@ -213,6 +213,196 @@ The bounded agent view retains carried Git evidence.
 Coverage: `tests/test_machine_findings.py`,
 `test_machine.Tool.test_the_overview_says_when_the_git_survey_is_partial`.
 Status: implemented; product outcome unobserved.
+
+### Engine-update backup inventory
+
+`full backups status` counts local `before-update` snapshots alongside snapshot,
+before-upgrade and daily copies. `full backups migrate` verifies and encrypts those
+known kinds under the existing retention policy; damaged copies remain with a skipped
+receipt, and foreign kinds remain untouched. Unknown kinds are outside the reported
+known-snapshot count. No automatic migration is added. Synthetic coverage:
+`test_backup_vault.BeforeUpdateInventory` checks count/warning, encrypted restoration,
+foreign-kind preservation and invalid-copy reporting. Live backup migration is unobserved.
+
+### OSS-22: incomplete holders and final worktree observation
+
+When a process survey returns partial output, diagnostics, undecodable or
+unparseable `lsof` names, or an unavailable collector, cleanup treats
+holder coverage as unknown. No omitted path is called free, and an incomplete
+`ps` observation does not authorize a cache-tool command. Before removing either
+a clean or an archived dirty worktree, a fresh target probe runs after all
+Git/archive checks on POSIX, bounded by five seconds and the remaining action budget.
+Held, unknown or exhausted outcomes keep the worktree and report the refusal;
+a valid free result retains ordinary removal behavior. The prior 20-second
+inventory cache cannot override this final observation. Age remains measured
+when planning, and later writers remain outside the cleanup lock's guarantee.
+Windows Git worktree removal refuses unknown holder coverage. Native shared-delete
+rename behavior is a separately selected Windows control, not a non-use probe.
+
+Evidence: `tests/test_disk_guard.py::HoldersCompleteness`,
+`WorktreeFinalHolders`, and `FreshTargetProbe` (synthetic listings plus disposable
+Git worktrees). `tests/test_git_hardening.py` injects both preliminary and final
+holder outcomes so its Git tests do not inspect the host process table.
+
+### Missing registration cleanup result
+
+When a worktree path is absent, the person and agent see one registration's entry
+moved to `.git/worktrees-retired/` (`retired_entry`, never a working directory, never a
+repository-wide prune) and the ref that keeps its HEAD (`retained_ref`: its branch, or
+a direct `archive/wt-<sha8>` for a detached HEAD). A directory that reappears at the
+last moment loses nothing and can be registered again with `git worktree repair`. A path on an unplugged drive,
+under a renamed parent or behind a permission error is unknown and nothing is pruned.
+An unknown or changed HEAD prunes nothing. Git failure or interruption produces a
+failed row with unknown effects, never `pruned`, and invents no registration count.
+A path that reappears is skipped. Raw command output is absent from reasons.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (eleven cases, real
+Git worktrees: renamed volume, permission-denied parent, detached and branch HEADs,
+a last-moment reappearance, a symbolic archive ref).
+
+### Open-deleted-file visibility
+
+When directory totals do not explain disk use, a person runs
+`full machine --open-unlinked` on macOS/Linux. The result is a bounded observation
+of logical bytes held through open handles. It never offers a delete or kill action.
+Shared inode references count once; incomplete visibility and unknown reclaimability
+remain visible. An agent reads the same saved result through
+`observatory_machine(section="coverage")`, without launching a new scan.
+Missing, unsupported, malformed and stale receipts are distinguishable from a
+current successful empty observation. `full doctor` carries the same saved state.
+Tests: `test_open_unlinked.py::Observation`, `test_open_unlinked.py::SavedObservation`.
+
+### Observed local checkout state
+
+A person runs the existing explicit-root checkout scan and reads saved coverage;
+an agent reads the same coverage section. Each sample separates recorded Git state
+from current state and exposes bounded status/index record counts. Ignored records
+do not stand for all nested files. Assume-unchanged/skip-worktree flags, malformed
+or partial output, changed bindings, stale evidence, and unsupported Windows pipes
+show unknown; bare repositories show not-applicable. A clean observation grants
+no cleanup authority and does not prove absence of a concurrent writer.
+Tests: `test_checkout_state.py::CheckoutState` (real Git changes and index flags,
+unchanged index, byte filenames, parser limits, binding change, incomplete reads,
+bare/unborn/Windows, saved-reader validation).
+
+
+### Partial-clone checkout observation
+
+An explicit checkout scan observes only locally available Git data. It does not
+fetch missing promisor objects, refresh remote refs or infer remote durability.
+Missing required objects leave local state unknown and non-actionable. Ordinary
+complete local checkouts remain observable. Proof:
+`test_checkout_state.py::OfflineGitObservation`, including the actual bounded
+checkout query and unchanged synthetic object-store contents.
+
+
+### Local upstream graph is not remote recovery evidence
+
+After publishing local-state results, the explicit checkout scan independently
+attempts bounded offline ahead/behind counts with a persistent phase cursor.
+Equal local remote-tracking commits do not establish current server contents:
+remote durability stays unknown and disposal remains unauthorized. Missing,
+shallow, promisor, replacement/grafted or alternate-backed history yields unknown
+counts. Saved CLI/MCP coverage projects only whitelisted counts/kind/scope and
+own age; source/binding changes and stale/future/bool counters refuse currentness.
+A graph timeout must not erase an already saved local-state result.
+
+Proof: `test_checkout_state.py::UpstreamGraph` and `GraphPhase`, using disposable
+local file remotes including a separately changed server branch after last fetch.
+
+### Current memory pressure independently of swap
+
+A person or agent reads the existing memory summary and sees a separately dated
+macOS pressure level alongside RAM and swap amounts. A normal pressure reading
+does not erase high swap or claim reclaimed memory. Failed, unsupported, stale,
+future or malformed pressure stays unknown. Extra saved fields are not projected.
+Pressure cannot refresh the timestamp of missing RAM/swap measurements and never
+authorizes stopping a process. The original swap finding retains its measured
+swap-based wording; it is not reclassified as an OS pressure notification.
+Tests: `test_memory_freshness.py::MemoryFreshness` pressure mapping, own age,
+malformed fields, unsupported source and independent timestamp controls.
+
+
+### Maintenance log-retention evidence
+
+After maintenance, the person or agent reads per-scope log-retention evidence
+through `full maintain status` and doctor; Health shows their incomplete/stale
+warning and retains the typed result in its payload. Engine, updater and hook log
+scopes have separate measured times, observed counts, completed rotations,
+refusals and failures. Missing/unreadable scopes are unknown, not measured empty;
+a failed scope does not suppress peers. A report older than one hour is stale
+and never presented as a new attempt. Reasons are bounded codes, without file
+paths, log contents or exception text. Existing rotation/list APIs retain their
+contracts. No new retention policy or filesystem-lock guarantee is introduced.
+
+Acceptance: synthetic small-file tests for empty/missing/unreadable directories,
+linked files/parents/generations, copy and fsync failure, independent peer scopes,
+persistence, stale/malformed receipt projection and private marker omission.
+Implementation acceptance and installed observation remain pending.
+
+### Scheduled stage diagnosis
+
+A person or agent inspecting a stopped scheduled pass reads `tick-run.json`
+`stage_progress` before assigning a cause. Only a matching run's validated stage
+metadata is included; missing/stale/invalid coverage is unknown. A stage without
+a terminal receipt has no inferred exit or duration. Explicit watchdog budget
+refusal is `not_started`; a whole-run timeout does not prove a particular stage
+timed out. The last completed `tick.json` top-level report stays available during
+a new run. Coverage: `tests/test_tick_progress.py` (silent tail, supervisor stop,
+write failures, stale input and exit preservation).
+
+### Offline verification reports executed tests
+
+A person or agent running `full check` receives an ERROR when a suite exits zero
+without the minimum evidence for its declared protocol. It retains the process
+exit separately, names the reason and preserves completed peer receipts. Explicit
+all-skipped suites stay SKIP. A PASS marker cannot fill in missing unittest cases;
+legacy assertion-line suites retain their reporting contract. Coverage:
+`tests/test_runner_evidence.py` (root suite), including malformed counters and
+swallowed failures. Well-formed forged reports remain outside this trusted-test
+protocol's proof; a minimum is not exhaustive test coverage.
+
+### Windows cleanup: unknown holder coverage
+
+A Windows operator or agent asks for path cleanup. Until a supported process-holder
+inventory is implemented, the collector returns unknown and path removal skips,
+even if a prior plan looked free. An open FILE_SHARE_DELETE handle can permit
+rename, so a successful rename is not non-use evidence. Generic tool cleanup
+commands retain their separate policy and do not gain authority from this result.
+Acceptance: engine `tests/test_disk_guard.py::WindowsHolderUnknown`; its native
+shared-delete case is explicitly skipped outside Windows.
+
+### POSIX cleanup: rendered argv does not prove absence
+
+An operator or agent requests cleanup while a script has closed its source file.
+Spaced absolute paths, relative paths and symlink aliases can be absent from the
+lexical process-path list even while that script runs. The system preserves path
+targets when argv coverage is incomplete; positive holds remain useful, and an
+empty lsof listing never upgrades unmatched rendered ps to a free target. A stale
+synthetic free snapshot cannot bypass the final unknown refusal for disk paths
+or clean/archived dirty worktrees. A cache command with an unmatched nonempty
+busy-tool precondition executes no child. Commands without holder preconditions
+retain their separate configured policy. The user keeps the target pending a
+supported observation and owner lifecycle contract; repeated scans alone do not
+resolve unsupported completeness. Tests: `LossyArgvEvidence` and
+`LossyArgvAdmission` in `tests/test_disk_guard.py` (synthetic only).
+
+Cleanup admission without collection: when current process observations cannot
+prove non-use, preliminary path admission stays unknown without reading the
+process table. Per-phase evidence marks `not-attempted` and no measurement time;
+there is no claim of zero holders or freed RAM. Explicit positive-hint readers
+and final refusal boundaries retain their behavior. `CheapHolderAdmission` in
+engine `tests/test_disk_guard.py` verifies these outcomes.
+
+Explicit holder observations: a requested positive-hint survey, final target probe
+or nonempty cache-tool condition receives bounded capture and parser input.
+Overflow, timeout, invalid encoding or read failure remains unknown; no partial
+listing grants absence. The caller does not launch a second probe after its
+shared budget expires. Only capture-owned process groups are stopped, never a
+discovered holder. Windows does not launch a collector. The old synchronous
+`/proc` entry point returns unknown without I/O. Existing positive holds and
+empty tool requests retain their meanings. `test_holder_capture.py` and
+`LossyArgvAdmission` cover these outcomes with owned children and synthetic
+process responses; no complete lifecycle inventory or host-RAM saving is claimed.
 
 ## SSH keys on this machine (PB-163, OBS-110)
 
