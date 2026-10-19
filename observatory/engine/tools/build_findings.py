@@ -2696,7 +2696,8 @@ def collect() -> list[dict]:
     # Fabric (detach a folder there, or move it), and until then no alias is kept for it.
     # Reads store/raw/fabric-attribution.json (collectors/scan_fabric_attribution.py).
     import fabric_attribution
-    out.extend(fabric_attribution.conflict_findings(fabric_attribution.load(), titled))
+    out.extend(fabric_attribution.conflict_findings(
+        fabric_attribution.load(), lambda **a: titled("{project} belongs to {count} Fabric projects", **a)))
 
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills

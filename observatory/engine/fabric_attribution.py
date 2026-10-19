@@ -403,19 +403,19 @@ def session_project(cwd: str, *, timeout: float = 2.0) -> dict:
     return {"source": None, "reason": reason, "local": answer}
 
 
-def conflict_findings(doc: dict, titled: Callable[..., dict]) -> list[dict]:
+def conflict_findings(doc: dict, title: Callable[..., dict]) -> list[dict]:
     """`fabric.attribution_conflict` rows: a project whose folders resolve to two Fabric projects.
 
     Reported, never merged: which Fabric project is right is decided in Fabric (detach a folder there,
-    or move it), and until then no alias is kept. `titled` is `finding_types.titled`."""
+    or move it), and until then no alias is kept. `title(project=, count=)` renders the title: the caller
+    holds the message id, where the translation catalogue's check looks for it."""
     rows = []
     for c in (doc.get("conflicts") or []) if isinstance(doc, dict) else []:
         if not isinstance(c, dict) or not isinstance(c.get("project"), str):
             continue
         rows.append({
             "type": "fabric.attribution_conflict", "subject": c["project"], "severity": "warning",
-            **titled("{project} belongs to {count} Fabric projects", project=c["project"],
-                     count=len(c.get("fabric") or [])),
+            **title(project=c["project"], count=len(c.get("fabric") or [])),
             "detail": ("Fabric attributes this project's folders to " + ", ".join(c.get("fabric") or [])
                        + "; Observatory keeps no Fabric alias for it until they agree."),
             "action": "in Fabric, detach the folder that belongs elsewhere or move it into one project; the next "

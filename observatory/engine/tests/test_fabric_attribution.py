@@ -250,12 +250,15 @@ class Findings(unittest.TestCase):
     def test_a_conflict_is_a_finding_naming_both_fabric_projects(self) -> None:
         sys.path.insert(0, str(ROOT / "dashboard"))
         from finding_types import titled
+        def title(**a):
+            return titled("{project} belongs to {count} Fabric projects", **a)
         rows = fat.conflict_findings({"conflicts": [{"project": "project:alpha-web",
-                                                     "fabric": ["fabric:" + UUID_A, "fabric:" + UUID_B]}]}, titled)
+                                                     "fabric": ["fabric:" + UUID_A, "fabric:" + UUID_B]}]}, title)
+        self.assertEqual(rows[0]["title"], "project:alpha-web belongs to 2 Fabric projects")
         self.assertEqual([r["type"] for r in rows], ["fabric.attribution_conflict"])
         self.assertEqual(rows[0]["subject"], "project:alpha-web")
         self.assertIn("fabric:" + UUID_B, rows[0]["detail"])
-        self.assertEqual(fat.conflict_findings({}, titled), [])
+        self.assertEqual(fat.conflict_findings({}, title), [])
 
 
 class SessionStart(unittest.TestCase):
