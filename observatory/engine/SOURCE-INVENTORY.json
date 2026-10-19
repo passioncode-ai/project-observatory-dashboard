@@ -4248,8 +4248,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8565a3db371a4f40e4cd63d37079bad1aecf067ba23a8a30b0cd50596e8f2bea",
-      "bytes": 88018
+      "export_sha256": "788a2a387069b228e611bd335eca71c1f0f2f74269bed3fd6735ea8b3374abc5",
+      "bytes": 88111
     },
     {
       "path": "tests/test_scan_ids.py",
