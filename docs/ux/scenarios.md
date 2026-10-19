@@ -121,3 +121,10 @@ POSIX cleanup argv coverage: a closed script with spaces, relative arguments or 
 symlink alias can evade rendered process text. The system keeps positive holds but
 refuses to turn absent matches into deletion or cache busy-tool admission. See
 [the full-engine scenario](../../observatory/engine/docs/ux/portable-scenarios.md#posix-cleanup-rendered-argv-does-not-prove-absence).
+
+Cleanup admission without collection: when current process observations cannot
+prove non-use, preliminary path admission stays unknown without reading the
+process table. Per-phase evidence marks `not-attempted` and no measurement time;
+there is no claim of zero holders or freed RAM. Explicit positive-hint readers
+and final refusal boundaries retain their behavior. `CheapHolderAdmission` in
+engine `tests/test_disk_guard.py` verifies these outcomes.

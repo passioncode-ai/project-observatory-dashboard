@@ -7,7 +7,7 @@ at processes' working directories, so a worktree whose files an editor or a dev 
 held open was "free". An independent review found both (docs/design/DISK-GUARD.md).
 
 A path is HELD when a process of this account
-  * has a file under it open or memory-mapped (lsof; /proc/<pid>/fd and maps),
+  * has a file under it open or memory-mapped (lsof),
   * works inside it (cwd) or runs from it (its executable), or
   * has a recognized path in rendered command text. Such text supplies positive
     hints only: closed scripts, relative paths, spaces and aliases can be missed.
@@ -15,7 +15,7 @@ A path is HELD when a process of this account
 How it is known, per system:
   lsof     macOS and Linux; run under a UTF-8 locale, and `\\xNN` escapes decoded, because
            without one lsof prints a non-ASCII name escaped and it matched nothing;
-  proc     Linux without lsof: /proc/<pid>/{fd,cwd,root,exe,maps};
+  unknown  Linux without lsof: the unbounded /proc fallback is retired;
   unknown  Windows: no supported holder inventory is implemented here. An open handle
            may allow rename/delete through FILE_SHARE_DELETE, so rename success cannot
            prove that a target is unused. Path removal therefore refuses unknown coverage;
@@ -32,12 +32,26 @@ from __future__ import annotations
 
 import bisect
 import codecs
+import math
 import os
 import re
+import selectors
+import signal
 import shutil
 import subprocess
 import sys
 import time
+
+import osproc
+
+# These bound captured payload and parser collections, not whole-process RSS.
+MAX_BYTES = 2 * 1024 * 1024
+READ_BYTES = 65536
+MAX_FIELDS = 100000
+MAX_HINTS = 10000
+MAX_TOKEN_BYTES = 4096
+CLEANUP_SECONDS = .2
+_read = os.read
 
 #: `\xNN` as lsof writes a byte outside its locale's printable set.
 _ESCAPE = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
@@ -51,15 +65,195 @@ def _decode_escapes(name: str) -> str:
     return _ESCAPE.sub(one, name)
 
 
-def _run(cmd: list[str], timeout: float, env: dict | None = None) -> str | None:
+def _deadline(timeout: float, maximum: float = 120) -> float | None:
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=max(1.0, timeout),
-                           errors="strict", env=env, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError, UnicodeError):
+        if isinstance(timeout, bool) or not math.isfinite(timeout) or timeout <= 0:
+            return None
+        return time.monotonic() + min(float(timeout), maximum)
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _capture(cmd: list[str], *, deadline: float, env: dict | None = None,
+             max_bytes: int = MAX_BYTES) -> dict:
+    """Capture only this owned POSIX group within payload and operation budgets.
+
+    Stderr is counted, never retained. Complete requires both pipe EOFs, observed
+    direct-child exit and no remaining owned group. Descendants that escape that
+    group and uninterruptible process creation/scheduling are outside this bound.
+    No holder or service discovered by the query is ever signalled.
+    """
+    result = {"stdout": b"", "returncode": None, "stderr_seen": False,
+              "bytes_seen": 0, "complete": False, "reason": None, "reaped": False}
+    try:
+        valid = (not isinstance(deadline, bool) and math.isfinite(deadline)
+                 and type(max_bytes) is int and 0 < max_bytes <= MAX_BYTES)
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid or deadline <= time.monotonic():
+        result["reason"] = "invalid-budget"
+        return result
+    if os.name == "nt":
+        result["reason"] = "unsupported-platform"
+        return result
+    remaining = deadline - time.monotonic()
+    reserve = min(CLEANUP_SECONDS, remaining / 4)
+    work_end = deadline - reserve
+    if work_end <= time.monotonic():
+        result["reason"] = "command-timeout"
+        return result
+    process = None
+    output = bytearray()
+    try:
+        process = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, env=env, **osproc.new_group())
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ, "out")
+            selector.register(process.stderr, selectors.EVENT_READ, "err")
+            while selector.get_map():
+                left = work_end - time.monotonic()
+                if left <= 0:
+                    result["reason"] = "command-timeout"
+                    break
+                for key, _ in selector.select(min(.05, left)):
+                    chunk = _read(key.fileobj.fileno(), READ_BYTES)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    result["bytes_seen"] += len(chunk)
+                    if key.data == "out":
+                        output.extend(chunk[:max(0, max_bytes - len(output))])
+                    else:
+                        result["stderr_seen"] = True
+                    if result["bytes_seen"] > max_bytes:
+                        result["reason"] = "output-limit"
+                        break
+                if result["reason"]:
+                    break
+                # A completed leader does not make a pipe-holding descendant
+                # harmless. Stop only the group launched by this capture.
+                if process.poll() is not None and osproc.group_alive(process.pid):
+                    result["reason"] = "owned-descendants-remain"
+                    break
+        if result["reason"] is None:
+            try:
+                process.wait(timeout=max(0, work_end - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                result["reason"] = "command-timeout"
+            if result["reason"] is None and osproc.group_alive(process.pid):
+                result["reason"] = "owned-descendants-remain"
+    except (OSError, ValueError, subprocess.SubprocessError):
+        result["reason"] = "command-unavailable"
+    finally:
+        if process is not None:
+            # No library cleanup routine may add a fresh grace period beyond
+            # the caller's absolute deadline. Signals target our new group only.
+            try:
+                active = process.poll() is None or osproc.group_alive(process.pid)
+                if active:
+                    osproc.signal_group(process.pid, signal.SIGTERM)
+                    grace_end = min(deadline, time.monotonic() + .03)
+                    while time.monotonic() < grace_end:
+                        process.poll()
+                        if not osproc.group_alive(process.pid):
+                            break
+                        time.sleep(min(.005, max(0, grace_end - time.monotonic())))
+                    if osproc.group_alive(process.pid):
+                        osproc.signal_group(process.pid, signal.SIGKILL)
+                try:
+                    result["returncode"] = process.wait(timeout=max(0, deadline - time.monotonic()))
+                    result["reaped"] = True
+                except subprocess.TimeoutExpired:
+                    result["reason"] = "cleanup-incomplete"
+            except OSError:
+                result["reason"] = "cleanup-incomplete"
+            finally:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            result["reason"] = "cleanup-incomplete"
+        result["stdout"] = bytes(output)
+    result["complete"] = result["reason"] is None and result["reaped"]
+    return result
+
+
+def _run(cmd: list[str], timeout: float, env: dict | None = None) -> str | None:
+    end = _deadline(timeout)
+    if end is None:
+        return None
+    p = _capture(cmd, deadline=end, env=env if env is not None else _utf8_env())
     # Partial output cannot prove the absence of a holder. Even exit-zero
     # diagnostics can report an inaccessible process or filesystem.
-    return p.stdout if p.returncode == 0 and not p.stderr and p.stdout else None
+    if not p["complete"] or p["returncode"] != 0 or p["stderr_seen"] or not p["stdout"]:
+        return None
+    try:
+        decoded = p["stdout"].decode("utf-8", errors="strict")
+        return decoded if time.monotonic() < end else None
+    except UnicodeError:
+        return None
+
+
+class _ParseLimit(ValueError):
+    pass
+
+
+def _lines(text: str):
+    # Reject cardinality before allocating split lists. Bytes are already bounded
+    # by capture; this validation also protects explicit synthetic callers.
+    if (not isinstance(text, str) or len(text) > MAX_BYTES
+            or text.count("\n") > MAX_FIELDS or text.count("\r") > MAX_FIELDS):
+        raise _ParseLimit()
+    try:
+        if len(text.encode("utf-8")) > MAX_BYTES:
+            raise _ParseLimit()
+    except UnicodeError:
+        raise _ParseLimit() from None
+    for count, field in enumerate(re.finditer(r"[^\r\n]+", text), 1):
+        if count > MAX_FIELDS:
+            raise _ParseLimit()
+        yield field.group()
+
+
+def _words(text: str):
+    count = 0
+    for line in _lines(text):
+        for position, match in enumerate(re.finditer(r"\S+", line)):
+            word = match.group()
+            count += 1
+            if count > MAX_FIELDS or len(word) > MAX_TOKEN_BYTES or len(word.encode("utf-8")) > MAX_TOKEN_BYTES:
+                raise _ParseLimit()
+            yield position, word
+
+
+def _argument_hints(text: str) -> list[str] | None:
+    paths = []
+    try:
+        for _, word in _words(text):
+            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
+            if word.startswith("/") and len(word) > 1:
+                paths.append(word.rstrip(",;:"))
+                if len(paths) > MAX_HINTS:
+                    raise _ParseLimit()
+    except _ParseLimit:
+        return None
+    return paths
+
+
+def _lsof_hints(text: str) -> list[str] | None:
+    names = []
+    try:
+        for line in _lines(text):
+            if len(line) > MAX_TOKEN_BYTES or len(line.encode("utf-8")) > MAX_TOKEN_BYTES:
+                raise _ParseLimit()
+            if line.startswith("n/"):
+                names.append(_decode_escapes(line[1:]))
+                if len(names) > MAX_HINTS:
+                    raise _ParseLimit()
+    except (UnicodeError, ValueError):
+        return None
+    return names or None
 
 
 def _utf8_env() -> dict:
@@ -71,46 +265,23 @@ def _utf8_env() -> dict:
 
 
 def lsof_paths(timeout: float = 120) -> list[str] | None:
+    end = _deadline(timeout)
+    if end is None:
+        return None
     if not shutil.which("lsof"):
         return None
-    out = _run(["lsof", "-n", "-P", "-Fn"], timeout, _utf8_env())
+    out = _run(["lsof", "-n", "-P", "-Fn"], max(0, end - time.monotonic()), _utf8_env())
     if out is None:
-        return None
-    try:
-        names = [_decode_escapes(line[1:]) for line in out.splitlines() if line.startswith("n/")]
-    except (UnicodeError, ValueError):
         return None
     # A successful global process inventory should name at least one absolute
     # path. Unexpected text (or only headers) is not proof of an empty machine.
-    return names or None
+    names = _lsof_hints(out)
+    return names if time.monotonic() < end else None
 
 
 def proc_paths() -> list[str] | None:
-    """All visible Linux processes; any unreadable entry makes coverage unknown.
-
-    Process/descriptor exit races also refuse this observation. A fresh complete
-    observation may succeed later; a partial inventory never grants removal.
-    """
-    if not os.path.isdir("/proc/self/fd"):
-        return None
-    found: list[str] = []
-    try:
-        for pid in os.listdir("/proc"):
-            if not pid.isdigit():
-                continue
-            base = f"/proc/{pid}"
-            for link in ("cwd", "root", "exe"):
-                found.append(os.readlink(f"{base}/{link}"))
-            for fd in os.listdir(f"{base}/fd"):
-                found.append(os.readlink(f"{base}/fd/{fd}"))
-            with open(f"{base}/maps", encoding="utf-8", errors="strict") as f:
-                for line in f:
-                    parts = line.split(None, 5)
-                    if len(parts) == 6 and parts[5].startswith("/"):
-                        found.append(parts[5].strip())
-    except (OSError, UnicodeError):
-        return None
-    return [p.removesuffix(" (deleted)") for p in found if p.startswith("/") and p != "/"]
+    """Legacy entry point: unbounded synchronous process enumeration is retired."""
+    return None
 
 
 def argument_paths(timeout: float = 20) -> list[str] | None:
@@ -121,16 +292,14 @@ def argument_paths(timeout: float = 20) -> list[str] | None:
     """
     if os.name == "nt":
         return []
-    out = _run(["ps", "-axww", "-o", "args="], timeout)
+    end = _deadline(timeout)
+    if end is None:
+        return None
+    out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
     if out is None:
         return None
-    paths: list[str] = []
-    for line in out.splitlines():
-        for word in line.split():
-            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
-            if word.startswith("/") and len(word) > 1:
-                paths.append(word.rstrip(",;:"))
-    return paths
+    names = _argument_hints(out)
+    return names if time.monotonic() < end else None
 
 
 class Holders:
@@ -141,26 +310,38 @@ class Holders:
         # consumers); production take() must supply its actual coverage condition.
         self.known = names is not None and mode != "rename" and complete is True
         self.mode = mode if self.known else "unknown"
+        self.observation = "unavailable" if names is None else "provided"
         self.names = sorted({os.path.normpath(n) for n in names or [] if n.startswith("/")})
 
     @classmethod
-    def take(cls, timeout: float = 120) -> "Holders":
+    def take(cls, timeout: float = 120, *, collect_hints: bool = True) -> "Holders":
+        # Admission cannot establish absence with today's collectors. Callers that
+        # only need refusal avoid a full process inventory and its output buffers.
+        # Explicit hint readers retain the existing incomplete observation path.
+        if collect_hints is False:
+            result = cls(None)
+            result.observation = "not-attempted"
+            return result
         if os.name == "nt":
             return cls(None)
-        files = lsof_paths(timeout)
-        mode = "lsof"
-        if files is None:
-            files, mode = proc_paths(), "proc"
-        if files is None:
+        end = _deadline(timeout)
+        if end is None:
             return cls(None)
-        args = argument_paths(min(20.0, timeout))
-        if args is None:
+        files = lsof_paths(max(0, end - time.monotonic()))
+        mode = "lsof"
+        # No unbounded synchronous /proc fallback in production observations.
+        if files is None or time.monotonic() >= end:
+            return cls(None)
+        args = argument_paths(min(20.0, max(0, end - time.monotonic())))
+        if args is None or len(files) + len(args) > MAX_HINTS or time.monotonic() >= end:
             # Without the command lines, a program running from a cache folder is invisible;
             # refuse to know rather than guess.
             return cls(None)
         # ps is a display, not a lossless argv protocol. Preserve positive hints,
         # but neither lsof nor /proc file lists cover a script closed after loading.
-        return cls(files + args, mode, complete=False)
+        result = cls(files + args, mode, complete=False)
+        result.observation = "partial"
+        return result
 
     def busy(self, path: str | os.PathLike) -> bool:
         if not self.known:
@@ -189,15 +370,23 @@ def running(names: list[str], timeout: float = 20) -> bool | None:
         return False
     if os.name == "nt":
         return None
-    out = _run(["ps", "-axww", "-o", "args="], timeout)
+    if len(names) > MAX_HINTS or any(not isinstance(n, str) or len(n) > MAX_TOKEN_BYTES for n in names):
+        return None
+    end = _deadline(timeout)
+    if end is None:
+        return None
+    out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
     if out is None:
         return None
     wanted = set(names)
-    for line in out.splitlines():
-        for word in line.split()[:3]:
-            if os.path.basename(word) in wanted:
-                return True
-    return None
+    matched = False
+    try:
+        for position, word in _words(out):
+            if position < 3 and os.path.basename(word) in wanted:
+                matched = True
+    except _ParseLimit:
+        return None
+    return True if matched and time.monotonic() < end else None
 
 
 def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
@@ -212,32 +401,24 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
     """
     if os.name == "nt":
         return None
+    end = _deadline(timeout, 5.0)
     tool = shutil.which("lsof")
-    if not tool or timeout <= 0:
+    if not tool or end is None:
         return None
-    end = time.monotonic() + min(5.0, timeout)
-    try:
-        selector = ["+D", target] if os.path.isdir(target) else ["--", target]
-        p = subprocess.run([tool, "-n", "-P", "-Fn", *selector], capture_output=True,
-                           text=True, errors="strict", timeout=max(0.001, end - time.monotonic()),
-                           env=_utf8_env(), stdin=subprocess.DEVNULL)
-        if p.returncode == 0 and p.stdout:
-            return True
-        if p.returncode != 1 or p.stdout or p.stderr:
+    selector = ["+D", target] if os.path.isdir(target) else ["--", target]
+    p = _capture([tool, "-n", "-P", "-Fn", *selector], deadline=end, env=_utf8_env())
+    if not p["complete"] or p["stderr_seen"] or time.monotonic() >= end:
+        return None
+    if p["returncode"] == 0 and p["stdout"]:
+        try:
+            hints = _lsof_hints(p["stdout"].decode("utf-8", errors="strict"))
+        except UnicodeError:
             return None
-        left = end - time.monotonic()
-        if left <= 0:
-            return None
-        p = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True,
-                           text=True, errors="strict", timeout=left, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return True if hints and time.monotonic() < end else None
+    if p["returncode"] != 1 or p["stdout"]:
         return None
-    if p.returncode or p.stderr or not p.stdout:
+    out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
+    paths_held = _argument_hints(out) if out is not None else None
+    if paths_held is None or time.monotonic() >= end:
         return None
-    paths_held = []
-    for line in p.stdout.splitlines():
-        for word in line.split():
-            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
-            if word.startswith("/") and len(word) > 1:
-                paths_held.append(word.rstrip(",;:"))
     return True if Holders(paths_held).busy(target) else None

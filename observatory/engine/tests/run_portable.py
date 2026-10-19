@@ -44,7 +44,7 @@ LEGACY = (
 )
 BOUNDARY = (
     'open_unlinked',
-    'heroku_scoped',
+    'heroku_scoped', 'holder_capture',
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
