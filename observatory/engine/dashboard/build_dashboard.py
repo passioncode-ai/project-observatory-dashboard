@@ -3322,13 +3322,13 @@ function anchorSlug(s) { return String(s).replace(/[^A-Za-z0-9_.:/-]+/g, "-"); }
 // Credentials read by a provider tool have a "door": the tool that can
 // issue, list and revoke them.
 const doorOf = c => {
-  const m = /^tools\/(openrouter|cloudflare)\.py$/.exec(c.read_by || "");
+  const m = /^tools\/(openrouter|cloudflare|heroku)\.py$/.exec(c.read_by || "");
   return m ? m[1] : null;
 };
 // The door's LEDGER of minted keys sits in the same store and names the same
 // reader, but it is not a door — nothing is minted from a ledger (audit A41).
 const ledgerOf = c => {
-  const m = /^(openrouter|cloudflare)-issued\.json$/.exec(String(c.name || ""));
+  const m = /^(openrouter|cloudflare|heroku)-issued\.json$/.exec(String(c.name || ""));
   return m && doorOf(c) === m[1] ? m[1] : null;
 };
 
@@ -3339,6 +3339,7 @@ const ledgerOf = c => {
 const ISSUE_CMD = {
   openrouter: toolCommand("openrouter.py", ["issue", "--name", "KEY_NAME", "--limit", "AMOUNT", "--to", "vault:PROJECT/prod/NAME"]),
   cloudflare: toolCommand("cloudflare.py", ["issue", "--account", "ACCOUNT_ID", "--preset", "analytics"]),
+  heroku: toolCommand("heroku.py", ["issue", "--preset", "read", "--vault", "PROJECT/prod/NAME"]),
 };
 function credVerbs(c) {
   const door = doorOf(c);

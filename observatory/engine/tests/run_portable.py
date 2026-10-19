@@ -192,6 +192,8 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+# The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
+BOUNDARY += ('heroku_door',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
 BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the
@@ -407,7 +409,7 @@ ASSERTION_LINE_SUITES = frozenset((
     'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
     'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
     'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
-    'manifest_urls', 'digitalocean_door'
+    'manifest_urls', 'digitalocean_door', 'heroku_door'
 ))
 # Per-suite positive minimums may strengthen the default of one executed check.
 # Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.
