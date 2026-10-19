@@ -56,20 +56,31 @@ class FakeHeroku:
     def __init__(self, m):
         self.m = m
         self.calls: list[tuple[str, str, str, dict | None]] = []
+        self.accepts: list[tuple[str, str, str | None]] = []
         self.auths: dict[str, dict] = {}
         self.n = 0
-        self.teams = {"example-team": {"id": "team-1", "name": "example-team", "role": "admin"},
-                      "other-team": {"id": "team-2", "name": "other-team", "role": "member"}}
-        self.members = {"example-team": [
-            {"email": "admin@example.invalid", "role": "admin", "two_factor_authentication": True},
-            {"email": "dev@example.invalid", "role": "member", "two_factor_authentication": False},
-            {"email": "boss@example.invalid", "role": "owner", "two_factor_authentication": True}]}
+        # example-team takes people by invitation (the feature on, as on every real
+        # team the door was measured against); direct-team adds them directly.
+        self.teams = {"example-team": {"id": "team-1", "name": "example-team", "role": "admin", "type": "team"},
+                      "other-team": {"id": "team-2", "name": "other-team", "role": "member", "type": "team"},
+                      "direct-team": {"id": "team-3", "name": "direct-team", "role": "admin", "type": "team"}}
+        self.features = {"example-team": [{"name": "team-invite-acceptance", "enabled": True},
+                                          {"name": "something-else", "enabled": True}],
+                         "other-team": [], "direct-team": [{"name": "team-invite-acceptance", "enabled": False}]}
+        self.invitations = {"example-team": [
+            {"id": "inv-0001", "user": {"email": "pending@example.invalid"}, "role": "member"}]}
+        roster = [{"email": "admin@example.invalid", "role": "admin", "two_factor_authentication": True},
+                  {"email": "dev@example.invalid", "role": "member", "two_factor_authentication": False},
+                  {"email": "boss@example.invalid", "role": "owner", "two_factor_authentication": True}]
+        self.members = {"example-team": [dict(r) for r in roster], "direct-team": [dict(r) for r in roster]}
         self.apps = {"example-team": [{"name": "alpha-web", "region": {"name": "eu"}, "locked": False,
                                        "updated_at": "2026-10-01T00:00:00Z"}],
                      "other-team": []}
         self.refuse: dict[str, int] = {}        # path prefix -> status, for the next matching call
         self.can_list_auths = True
         self.ignore_member_writes = False
+        self.slow = 0.0                         # seconds a mint takes, to force interleaving
+        self.lock = __import__("threading").Lock()
 
     def mint_value(self) -> str:
         self.n += 1
@@ -80,8 +91,10 @@ class FakeHeroku:
     def by_token(self, token: str) -> dict | None:
         return next((a for a in self.auths.values() if a["token"] == token), None)
 
-    def __call__(self, method, path, token, payload=None, rng=None):
-        self.calls.append((method, path, token, payload))
+    def __call__(self, method, path, token, payload=None, rng=None, accept=None):
+        with self.lock:
+            self.calls.append((method, path, token, payload))
+            self.accepts.append((method, path, accept))
         for prefix, status in list(self.refuse.items()):
             if path.startswith(prefix):
                 raise self.m.HerokuError(status, f"heroku answered HTTP {status} on {self.m._shape(path)}; "
@@ -97,18 +110,25 @@ class FakeHeroku:
                 raise self.m.HerokuError(403, "heroku answered HTTP 403")
             return [{k: v for k, v in a.items() if k != "token"} for a in self.auths.values()], None
         if path == "/oauth/authorizations" and method == "POST":
-            aid = f"auth-{len(self.auths) + 1:04d}-0000"
-            self.auths[aid] = {"id": aid, "description": payload.get("description"),
-                               "scope": list(payload["scope"]), "token": self.mint_value(),
-                               "expires_in": payload.get("expires_in")}
-            return self._full(aid), None
+            if self.slow:
+                __import__("time").sleep(self.slow)
+            with self.lock:
+                self.n_created = getattr(self, "n_created", 0) + 1
+                aid = f"auth-{self.n_created:04d}-0000"
+                self.auths[aid] = {"id": aid, "description": payload.get("description"),
+                                   "scope": list(payload["scope"]), "token": self.mint_value(),
+                                   "expires_in": payload.get("expires_in")}
+                return self._full(aid), None
         if path.startswith("/oauth/authorizations/"):
             aid = path.split("/")[3]
             if aid not in self.auths:
                 raise self.m.HerokuError(404, "heroku answered HTTP 404")
             if path.endswith("/actions/regenerate-tokens"):
-                self.auths[aid]["token"] = self.mint_value()
-                return self._full(aid), None
+                if self.slow:
+                    __import__("time").sleep(self.slow)
+                with self.lock:
+                    self.auths[aid]["token"] = self.mint_value()
+                    return self._full(aid), None
             if method == "DELETE":
                 return {"id": self.auths.pop(aid)["id"]}, None
         if path == "/teams":
@@ -124,6 +144,24 @@ class FakeHeroku:
                 return team, None
             if parts[3] == "apps":
                 return self.apps.get(team["name"], []), None
+            if parts[3] == "features":
+                return self.features.get(team["name"], []), None
+            if parts[3] == "invitations":
+                if accept != self.m.ACCEPT_INVITATIONS:
+                    raise self.m.HerokuError(406, "heroku answered HTTP 406")
+                rows = self.invitations.setdefault(team["name"], [])
+                if method == "GET":
+                    return list(rows), None
+                if self.ignore_member_writes:
+                    return {}, None
+                if method == "PUT":
+                    rows.append({"id": f"inv-{len(rows) + 9:04d}", "user": {"email": payload["email"]},
+                                 "role": payload["role"]})
+                    return {}, None
+                if method == "DELETE":
+                    gone = parts[4].replace("%40", "@")
+                    self.invitations[team["name"]] = [r for r in rows if gone not in (r["id"], r["user"]["email"])]
+                    return {}, None
             if parts[3] == "members":
                 rows = self.members.setdefault(team["name"], [])
                 if method == "GET":
@@ -230,7 +268,7 @@ def test_stash_keeps_the_admin_private_and_refuses_what_cannot_issue() -> None:
     check("at mode 600", stash.stat().st_mode & 0o777 == 0o600, oct(stash.stat().st_mode))
     meta = json.loads((m.ADMIN_STORE / "admin-example-invalid.meta.json").read_text())
     check("its record names the account and the teams it sees, and holds no value",
-          meta.get("account_id") == "user-1" and meta.get("teams") == 2 and ADMIN not in json.dumps(meta), str(meta))
+          meta.get("account_id") == "user-1" and meta.get("teams") == 3 and ADMIN not in json.dumps(meta), str(meta))
     check("and nothing printed the value", no_value(o + e), o + e)
 
 
@@ -249,6 +287,8 @@ def test_stash_from_cli_reads_the_session_token_without_argv() -> None:
         rc, o, e = run(lambda: m.cmd_stash(m.cli_token(), None))
     check("the CLI is asked for its token with no value in argv",
           seen["argv"] == ["heroku", "auth:token"] and seen["kw"].get("capture_output"), str(seen))
+    check("and with stdin closed, so a CLI prompt cannot wait on the terminal",
+          seen["kw"].get("stdin") is m.subprocess.DEVNULL, str(seen["kw"]))
     check("its last stdout line is what is stashed", rc == 0
           and (m.ADMIN_STORE / "admin-example-invalid").read_text().strip() == ADMIN, o + e)
     check("and neither the value nor the CLI's stderr is printed", no_value(o + e) and "CLI-STDERR" not in o + e, o + e)
@@ -404,32 +444,89 @@ def test_teams_members_and_apps_read_with_their_slots() -> None:
           and "role admin" in o and "apps 1" in o, o + e)
     check("and the slot issued for it", "slots alpha/prod/K" in o, o)
     rc, o, e = run(m.cmd_members, "example-team", None)
-    check("members reads every page", rc == 0 and "members of example-team (3)" in o
+    check("members reads every page", rc == 0 and "members of example-team (3, and 1 pending" in o
           and "dev@example.invalid" in o and "2fa off" in o, o + e)
+    check("and lists the pending invitation, marked pending",
+          any("pending@example.invalid" in ln and "pending invitation" in ln for ln in o.splitlines()), o)
+    check("read with the invitations Accept variant",
+          ("GET", "/teams/example-team/invitations", m.ACCEPT_INVITATIONS) in fake.accepts, "")
+    rc, o, e = run(m.cmd_members, "direct-team", None)
+    check("a team without the feature reads no invitations", rc == 0 and "pending" not in o
+          and not any(p.endswith("/invitations") for _m, p, _a in fake.accepts if "direct-team" in p), o)
     rc, o, e = run(m.cmd_apps, "example-team", None)
     check("apps lists the team's apps and their slots", rc == 0 and "alpha-web" in o and "alpha/prod/K" in o, o + e)
 
 
 def test_member_writes_are_a_plan_until_apply_and_are_verified() -> None:
+    """A team that adds members directly (`team-invite-acceptance` off)."""
     m, fake, delivered = setup()
-    rc, o, e = run(m.cmd_member, "add", "example-team", "new@example.invalid", "member", None, False)
+    rc, o, e = run(m.cmd_member, "add", "direct-team", "new@example.invalid", "member", None, False)
     writes = [c for c in fake.calls if c[0] in ("PUT", "PATCH", "DELETE") and "/members" in c[1]]
     check("a dry run prints the plan and writes nothing", rc == 0 and "add new@example.invalid as member" in o
           and "dry run" in o and not writes, o + e)
-    rc, o, e = run(m.cmd_member, "add", "example-team", "new@example.invalid", "member", None, True)
+    rc, o, e = run(m.cmd_member, "add", "direct-team", "new@example.invalid", "member", None, True)
     check("--apply adds and verifies", rc == 0 and "applied and verified" in o
-          and any(r["email"] == "new@example.invalid" for r in fake.members["example-team"]), o + e)
-    rc, o, e = run(m.cmd_member, "role", "example-team", "dev@example.invalid", "admin", None, True)
-    check("--apply changes a role", rc == 0 and next(r for r in fake.members["example-team"]
+          and any(r["email"] == "new@example.invalid" for r in fake.members["direct-team"]), o + e)
+    rc, o, e = run(m.cmd_member, "role", "direct-team", "dev@example.invalid", "admin", None, True)
+    check("--apply changes a role", rc == 0 and next(r for r in fake.members["direct-team"]
                                                      if r["email"] == "dev@example.invalid")["role"] == "admin", o + e)
-    rc, o, e = run(m.cmd_member, "remove", "example-team", "new@example.invalid", None, None, True)
+    rc, o, e = run(m.cmd_member, "remove", "direct-team", "new@example.invalid", None, None, True)
     check("--apply removes", rc == 0 and all(r["email"] != "new@example.invalid"
-                                             for r in fake.members["example-team"]), o + e)
-    rc, o, e = run(m.cmd_member, "role", "example-team", "dev@example.invalid", "admin", None, True)
+                                             for r in fake.members["direct-team"]), o + e)
+    rc, o, e = run(m.cmd_member, "role", "direct-team", "dev@example.invalid", "admin", None, True)
     check("a role already held is no change and no call", rc == 0 and "no change" in o, o)
     fake.ignore_member_writes = True
-    rc, o, e = run(m.cmd_member, "add", "example-team", "ghost@example.invalid", "member", None, True)
+    rc, o, e = run(m.cmd_member, "add", "direct-team", "ghost@example.invalid", "member", None, True)
     check("a write the team does not show afterwards fails", rc == 1 and "now reads" in e, e)
+
+
+def test_a_team_that_invites_gets_invitations_the_cli_way() -> None:
+    """`team-invite-acceptance` on: add is an invitation, remove of a pending invitee
+    cancels it, both under the invitations Accept variant, verified on the
+    invitations list; a pending invitee is not a member and manages nothing."""
+    m, fake, delivered = setup()
+    team = "example-team"
+    rc, o, e = run(m.cmd_member, "add", team, "new@example.invalid", "member", None, False)
+    writes = lambda: [c for c in fake.calls if c[0] in ("PUT", "PATCH", "DELETE")]
+    check("the plan says invite, and a dry run writes nothing",
+          rc == 0 and "invite new@example.invalid as member" in o and not writes(), o + e)
+    rc, o, e = run(m.cmd_member, "add", team, "new@example.invalid", "member", None, True)
+    check("--apply sends an invitation, not a membership",
+          rc == 0 and ("PUT", "/teams/example-team/invitations", m.ACCEPT_INVITATIONS) in fake.accepts
+          and not any(c[0] == "PUT" and c[1].endswith("/members") for c in fake.calls), o + e)
+    check("verified on the invitations list", "applied and verified" in o
+          and any(i["user"]["email"] == "new@example.invalid" for i in fake.invitations[team]), o)
+    check("the members list is unchanged until they accept",
+          all(r["email"] != "new@example.invalid" for r in fake.members[team]), "")
+    rc, o, e = run(m.cmd_member, "add", team, "pending@example.invalid", "member", None, True)
+    check("inviting someone already invited with that role is no change", rc == 0 and "no change" in o, o + e)
+    rc, o, e = run(m.cmd_member, "add", team, "pending@example.invalid", "admin", None, True)
+    check("and with another role is refused", rc == 1 and "pending invitation" in e, e)
+    rc, o, e = run(m.cmd_member, "role", team, "pending@example.invalid", "admin", None, True)
+    check("a pending invitee has no role to change", rc == 1 and "not a membership" in e, e)
+    rc, o, e = run(m.cmd_member, "remove", team, "pending@example.invalid", None, None, False)
+    check("remove of a pending invitee plans to cancel the invitation",
+          rc == 0 and "cancel the pending invitation" in o and not writes()[2:], o + e)
+    rc, o, e = run(m.cmd_member, "remove", team, "pending@example.invalid", None, None, True)
+    check("--apply cancels it through the invitations endpoint, by its id",
+          rc == 0 and ("DELETE", "/teams/example-team/invitations/inv-0001", m.ACCEPT_INVITATIONS) in fake.accepts
+          and all(i["user"]["email"] != "pending@example.invalid" for i in fake.invitations[team]), o + e)
+    rc, o, e = run(m.cmd_member, "remove", team, "dev@example.invalid", None, None, True)
+    check("a real member of an inviting team is removed as a membership",
+          rc == 0 and any(c[0] == "DELETE" and "/members/" in c[1] for c in fake.calls), o + e)
+    fake.ignore_member_writes = True
+    rc, o, e = run(m.cmd_member, "add", team, "ghost@example.invalid", "member", None, True)
+    check("an invitation the invitations list does not show afterwards fails",
+          rc == 1 and "pending invitations now read" in e, e)
+    invited_admin = [{"email": "solo@example.invalid", "role": "admin"}]
+    check("a pending invitee as admin does not count as a second admin",
+          "last admin" in (m.plan_membership("remove", invited_admin, "solo@example.invalid", None, None,
+                                             [{"email": "next@example.invalid", "role": "admin"}], True)[1] or ""), "")
+    fake.ignore_member_writes = False
+    fake.refuse["/teams/example-team/features"] = 500
+    rc, o, e = run(m.cmd_member, "add", team, "x@example.invalid", "member", None, True)
+    check("an unreadable feature list refuses rather than guessing the endpoint",
+          rc == 1 and not any(c[1].endswith("x@example.invalid") for c in fake.calls), e)
 
 
 def test_member_writes_refuse_what_would_lock_the_team() -> None:
@@ -455,6 +552,105 @@ def test_member_writes_refuse_what_would_lock_the_team() -> None:
 
 
 # ─────────────────────────── the wire ───────────────────────────────────────
+
+def test_concurrent_door_runs_keep_every_ledger_row() -> None:
+    """Two `issue` runs and a `rotate` at once (M1 of review round 1): without one
+    lock across read-modify-write, one issue's row was lost while both
+    authorizations lived, and a rotate racing an issue wrote back a stale row, so
+    `ping` called a live authorization a stray. Every row must survive, name a live
+    authorization, and `ping` must find nothing stray."""
+    import threading
+    m, fake, delivered = setup()
+    run(m.cmd_issue, "read", "beta/prod/K", None, None, None, None, wait=0)
+    fake.slow = 0.15
+    out, err = io.StringIO(), io.StringIO()
+    jobs = [threading.Thread(target=m.cmd_issue, args=("read", "alpha/prod/K", None, None, None, None),
+                             kwargs={"wait": 0}),
+            threading.Thread(target=m.cmd_issue, args=("deploy", "gamma/prod/K", None, None, None, None),
+                             kwargs={"wait": 0}),
+            threading.Thread(target=m.cmd_rotate, args=("beta/prod/K", False), kwargs={"wait": 0})]
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        for t in jobs:
+            t.start()
+        for t in jobs:
+            t.join(30)
+    fake.slow = 0
+    rows = json.loads(m.LEDGER.read_text())["issued"]
+    check("all three rows survive concurrent runs", sorted(rows) == ["alpha/prod/K", "beta/prod/K", "gamma/prod/K"],
+          str(sorted(rows)) + err.getvalue())
+    check("every row names a live authorization", all(r["authorization_id"] in fake.auths for r in rows.values()),
+          str({k: r["authorization_id"] for k, r in rows.items()}) + " live " + str(sorted(fake.auths)))
+    check("and the rotate counted on its own row", rows["beta/prod/K"]["rotations"] == 1, str(rows["beta/prod/K"]))
+    rc, o, e = run(m.cmd_ping)
+    check("ping then finds every row alive and nothing stray", rc == 0 and "stray" not in o, o + e)
+
+
+def test_a_held_lock_makes_another_process_wait_then_refuse() -> None:
+    """The lock is a file lock, so it binds another process too: while one holds it,
+    an `issue` waits LOCK_WAIT_S and then refuses having minted nothing."""
+    import subprocess as sp
+    m, fake, delivered = setup()
+    m.LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    holder = sp.Popen([sys.executable, "-c", (
+        "import os, sys, time; sys.path.insert(0, sys.argv[1]); import oslocks; "
+        "fd = os.open(sys.argv[2], os.O_RDWR | os.O_CREAT, 0o600); oslocks.flock(fd, oslocks.LOCK_EX); "
+        "print('held', flush=True); time.sleep(5)"),
+        str(ROOT), str(m.LEDGER.parent / ".heroku-ledger.lock")], stdout=sp.PIPE, text=True)
+    try:
+        check("the other process holds the lock", holder.stdout.readline().strip() == "held", "")
+        m.LOCK_WAIT_S = 0.3
+        rc, o, e = run(m.cmd_issue, "read", "alpha/prod/K", None, None, None, None, wait=0)
+        check("issue refuses after waiting", rc == 1 and "ledger lock" in e, o + e)
+        check("and minted nothing", not fake.auths and not delivered, str(fake.auths))
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_issue_proves_every_target_it_names_and_claims_no_more() -> None:
+    m, fake, delivered = setup()
+    rc, o, e = run(m.cmd_issue, "read", "alpha/prod/K", "example-team", "alpha-web", None, None, wait=0)
+    new = next(iter(fake.auths.values()))["token"]
+    read = {p for _m, p, t, _x in fake.calls if t == new}
+    check("with --team and --app both are read by the new value",
+          rc == 0 and {"/apps/alpha-web", "/teams/example-team/apps"} <= read, str(read))
+    check("and the output names both as proved",
+          "it read app alpha-web, team example-team's apps" in o and "cannot read them" not in o, o)
+    m, fake, delivered = setup()
+    rc, o, e = run(m.cmd_issue, "identity", "alpha/prod/K", "example-team", None, None, None, wait=0)
+    check("an identity value proves the account only, and says the team was not proved by it",
+          rc == 0 and "it read the account" in o and "team example-team exist for the admin but this scope "
+          "cannot read them" in o, o)
+    m, fake, delivered = setup()
+    fake.apps["example-team"] = []
+    rc, o, e = run(m.cmd_issue, "read", "alpha/prod/K", "example-team", None, None, None, wait=0)
+    check("a team proof reads the team's apps even when it has none", rc == 0, o + e)
+
+
+def test_ping_counts_authorizations_per_admin() -> None:
+    m, fake, delivered = setup()
+    run(m.cmd_issue, "read", "alpha/prod/K", None, None, None, None, wait=0)
+    private_io.write(m.ADMIN_STORE / "second-admin", ADMIN + "\n")
+    rc, o, e = run(m.cmd_ping)
+    counts = [ln for ln in o.splitlines() if ln.strip().startswith("admin/")]
+    check("each admin line counts its own authorizations, not a running total",
+          len(counts) == 2 and all("alive, 1 authorization(s)" in ln for ln in counts), o)
+
+
+def test_a_dropped_connection_is_named_not_raised_raw() -> None:
+    import http.client
+    m = door()
+
+    def drop(req, timeout):
+        raise http.client.RemoteDisconnected("Remote end closed connection without response")
+    try:
+        with patched(m.urllib.request, "urlopen", drop):
+            m._request("GET", "/teams", ADMIN)
+        check("a dropped connection raises", False, "no exception")
+    except m.HerokuError as exc:
+        check("a dropped connection is a named transport failure",
+              exc.status == "transport" and "RemoteDisconnected" in str(exc), str(exc))
+
 
 def test_errors_carry_status_and_endpoint_only() -> None:
     m = door()
@@ -515,6 +711,12 @@ if __name__ == "__main__":
                test_teams_members_and_apps_read_with_their_slots,
                test_member_writes_are_a_plan_until_apply_and_are_verified,
                test_member_writes_refuse_what_would_lock_the_team,
+               test_a_team_that_invites_gets_invitations_the_cli_way,
+               test_concurrent_door_runs_keep_every_ledger_row,
+               test_a_held_lock_makes_another_process_wait_then_refuse,
+               test_issue_proves_every_target_it_names_and_claims_no_more,
+               test_ping_counts_authorizations_per_admin,
+               test_a_dropped_connection_is_named_not_raised_raw,
                test_errors_carry_status_and_endpoint_only,
                test_delivery_goes_through_the_vault_on_stdin,
                test_the_door_source_keeps_the_rules):

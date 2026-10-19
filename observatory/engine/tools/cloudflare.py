@@ -59,10 +59,13 @@ THE TEAM SIDE READS LIKE THE HEROKU DOOR'S. `accounts` lists every stashed
 account with the tokens Cloudflare holds there (the managed ones with the vault
 slot their name records) and the plugin tokens issued for it; `members` reads an
 account's members. `member add|role|remove` is a plan until `--apply`, then one
-call and a fresh read that must show the result. It changes legacy roles only
-(a member whose access is set by permission policies is refused, with the
-reason), refuses to remove or demote the last Super Administrator, and refuses
-the stashed admin's own membership when this token can read its user.
+call and a fresh read that must show the result. Super Administrator is read
+from both places it lives, legacy roles and permission policies. Refused: any
+write while some member's Super Administrator state cannot be read; removing, or
+changing the role of, a member who holds Super Administrator unless another
+accepted member holds it on the whole account; a role change of a member whose
+access is set by policies (this door writes legacy roles only); and the stashed
+admin's own membership when this token can read its user.
 """
 from __future__ import annotations
 import argparse
@@ -1425,16 +1428,39 @@ _SLOT_IN_NAME = re.compile(r"\s([A-Za-z0-9._-]+/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)
 SUPER_ADMIN = "Super Administrator - All Privileges"
 
 
+#: Pages `_all` reads before it refuses rather than truncate: 5,000 rows at 50 a page.
+PAGES_MAX = 100
+
+
 def _all(path: str, token: str) -> list:
-    """Every page of a v4 collection: page one alone looks exactly like a small account."""
-    out, page = [], 1
+    """Every page of a v4 collection: page one alone looks exactly like a small account.
+
+    Not every list carries `result_info.total_pages` (the members and token lists
+    may answer with `count`, `total_count` and `per_page` only), so the end is read
+    from whichever the answer has: `total_pages`, else `total_count`, else a page
+    shorter than the page size. A collection that is still going at PAGES_MAX, or
+    that ends short of its own `total_count`, is an error, never a silent cut."""
+    out, page, size = [], 1, 50
     sep = "&" if "?" in path else "?"
     while True:
-        d = _request(f"{path}{sep}per_page=50&page={page}", token)
-        out += d.get("result") or []
+        d = _request(f"{path}{sep}per_page={size}&page={page}", token)
+        rows = d.get("result") or []
+        out += rows
         info = d.get("result_info") or {}
-        if page >= (info.get("total_pages") or 1) or page >= 100:
+        if info.get("total_pages"):
+            done = page >= info["total_pages"]
+        elif info.get("total_count") is not None:
+            done = len(out) >= info["total_count"]
+            if not done and not rows:
+                raise RuntimeError(f"cloudflare ended {path.split('?')[0]} at {len(out)} of the "
+                                   f"{info['total_count']} rows it counts")
+        else:
+            done = len(rows) < (info.get("per_page") or size)
+        if done:
             return out
+        if page >= PAGES_MAX:
+            raise RuntimeError(f"{path.split('?')[0]} did not end after {PAGES_MAX} pages; "
+                               f"refusing a partial list")
         page += 1
 
 
@@ -1510,6 +1536,54 @@ def _member_roles(mb: dict) -> list[str]:
     return [r.get("name", "?") for r in mb.get("roles") or []]
 
 
+def super_admin_state(mb: dict, account_id: str) -> tuple[bool | None, bool | None]:
+    """(holds Super Administrator anywhere, holds it on the whole account), each
+    None when the member's record does not say.
+
+    Super Administrator reaches a member two ways: a legacy role (always the
+    whole account), or a permission policy whose permission group is that role,
+    which may be scoped to the whole account or to some of its resources. A record
+    with neither `roles` nor `policies`, a role or group without a name, or a
+    policy whose scope cannot be read is undetermined, never assumed not to be."""
+    roles, policies = mb.get("roles"), mb.get("policies")
+    if roles is None and policies is None:
+        return None, None
+    if not isinstance(roles or [], list) or not isinstance(policies or [], list):
+        return None, None
+    anywhere = whole = False
+    for r in roles or []:
+        if not isinstance(r, dict) or not r.get("name"):
+            return None, None
+        if r["name"] == SUPER_ADMIN:
+            anywhere = whole = True
+    for pol in policies or []:
+        groups = pol.get("permission_groups") if isinstance(pol, dict) else None
+        if not isinstance(groups, list):
+            return None, None
+        if pol.get("access", "allow") != "allow":
+            continue
+        names = [g.get("name") if isinstance(g, dict) else None for g in groups]
+        if any(not n for n in names):
+            return None, None
+        if SUPER_ADMIN not in names:
+            continue
+        anywhere = True
+        scopes = []
+        for rg in pol.get("resource_groups") or [None]:
+            sc = (rg or {}).get("scope") if isinstance(rg, dict) else None
+            if sc is None:
+                return True, None
+            scopes += sc if isinstance(sc, list) else [sc]
+        # Whole account: a scope on this account's own resource with every object.
+        if any(isinstance(sc, dict) and sc.get("key") == f"com.cloudflare.api.account.{account_id}"
+               and all(isinstance(o, dict) and o.get("key") == "*" for o in sc.get("objects") or [{"key": "*"}])
+               for sc in scopes):
+            whole = True
+        elif not all(isinstance(sc, dict) and sc.get("key") for sc in scopes):
+            return True, None
+    return anywhere, whole
+
+
 def cmd_members(account_label: str | None) -> int:
     try:
         _stash, admin, account = find_account(account_label)
@@ -1526,12 +1600,26 @@ def cmd_members(account_label: str | None) -> int:
 
 
 def plan_account_member(action: str, members: list[dict], email: str,
-                        role_name: str | None, me: str | None) -> tuple[str, str | None]:
-    """(what would happen, refusal or None), read from the account as it is."""
+                        role_name: str | None, me: str | None,
+                        account_id: str = "") -> tuple[str, str | None]:
+    """(what would happen, refusal or None), read from the account as it is.
+
+    Refused: any write while some member's Super Administrator state cannot be
+    read (`super_admin_state` returns None for them); removing, or changing the
+    role of, a member who holds Super Administrator unless another ACCEPTED member
+    holds it on the whole account; a role change of a member whose access is set
+    by permission policies (this door writes legacy roles only); the stashed
+    admin's own membership when this token can read its user; removing a
+    non-member; inviting an existing member."""
     email = email.strip().lower()
     by = {_member_email(mb): mb for mb in members}
     target = by.get(email)
-    supers = [e for e, mb in by.items() if SUPER_ADMIN in _member_roles(mb)]
+    states = {e: super_admin_state(mb, account_id) for e, mb in by.items()}
+    unknown = sorted(e or "(no email)" for e, (anywhere, whole) in states.items()
+                     if anywhere is None or (anywhere and whole is None))
+    if unknown:
+        return "", (f"cannot tell who holds {SUPER_ADMIN} on this account (unreadable for "
+                    f"{len(unknown)} member(s)); nothing is changed while that is unknown")
     if me and email == me.lower() and action != "add":
         return "", "that is the stashed admin's own membership; change it in the dashboard"
     if action == "add":
@@ -1544,9 +1632,14 @@ def plan_account_member(action: str, members: list[dict], email: str,
     if action == "role" and not target.get("roles") and target.get("policies"):
         return "", (f"{email}'s access is set by permission policies, not roles; this door "
                     f"changes roles only")
-    losing_super = SUPER_ADMIN in current and (action == "remove" or role_name != SUPER_ADMIN)
-    if losing_super and len(supers) <= 1:
-        return "", f"{email} is the last {SUPER_ADMIN}; nobody could manage the account"
+    holds_super = states[email][0]
+    keeps_super = action == "role" and role_name == SUPER_ADMIN and not target.get("policies")
+    if holds_super and not keeps_super:
+        others = [e for e, mb in by.items() if e != email and mb.get("status", "accepted") == "accepted"
+                  and states[e][1]]
+        if not others:
+            return "", (f"no other accepted member holds {SUPER_ADMIN} on the whole account, so "
+                        f"{email} is the last who can manage it")
     if action == "role":
         if current == [role_name]:
             return f"no change: {email} is already {role_name}", None
@@ -1577,7 +1670,7 @@ def cmd_member(action: str, account_label: str | None, email: str, role: str | N
     except RuntimeError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
-    plan, refusal = plan_account_member(action, members, email, role, me)
+    plan, refusal = plan_account_member(action, members, email, role, me, aid)
     if refusal:
         print(f"refused: {refusal}", file=sys.stderr)
         return 1

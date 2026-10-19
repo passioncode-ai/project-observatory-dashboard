@@ -57,17 +57,34 @@ one call, reads the team again and checks the result. It refuses `owner` (a
 transfer of ownership is not a membership edit), removing or demoting the last
 admin, and changing the stashed admin's own membership: a door that can lock its
 own operator out of a team is not a door.
+
+A TEAM THAT INVITES IS WRITTEN THE CLI'S WAY. When the team's
+`team-invite-acceptance` feature is on, `member add` sends an invitation
+(`PUT /teams/{t}/invitations`, Accept `version=3.team-invitations`) the person
+must accept, `members` lists pending invitations marked as such, `member remove`
+of a pending invitee cancels the invitation, and the read-back that verifies an
+invitation write is the invitations list. A pending invitee is never counted as
+an admin who could manage the team.
+
+ONE OPERATION ON THE LEDGER AT A TIME. `issue`, `rotate`, `revoke` and `ping`
+hold an exclusive lock beside `heroku-issued.json` from their first read to
+their last write, and each write replaces only its own row in the ledger as read
+under that lock.
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import datetime
+import http.client
 import json
+import os
 import pathlib
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -75,11 +92,18 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import oslocks
+import osprivacy
 import private_io
 import paths
 
 API = "https://api.heroku.com"
 ACCEPT = "application/vnd.heroku+json; version=3"
+#: Team invitations answer only under their own variant (heroku-cli 10.16,
+#: lib/members/util.js and commands/members/remove.js).
+ACCEPT_INVITATIONS = "application/vnd.heroku+json; version=3.team-invitations"
+#: The team feature that turns `member add` into an invitation the person must accept.
+INVITE_FEATURE = "team-invite-acceptance"
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / "heroku-admin"
 LEDGER = paths.source_path("secret_store", paths.SECRETS) / "heroku-issued.json"
 
@@ -165,13 +189,13 @@ def _journal(event: str, secret: str, **detail) -> None:
 # ─────────────────────────── the wire ───────────────────────────────────────
 
 def _call(method: str, path: str, token: str, payload: dict | None = None,
-          rng: str | None = None) -> tuple[object, str | None]:
+          rng: str | None = None, accept: str = ACCEPT) -> tuple[object, str | None]:
     """One request: (decoded body, Next-Range or None).
 
     Never the headers, never the body we sent, never the provider's body: an
     error that echoed a request is how a credential reaches a transcript."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    head = {"Accept": ACCEPT, "Authorization": f"Bearer {token}",
+    head = {"Accept": accept, "Authorization": f"Bearer {token}",
             "Content-Type": "application/json", "User-Agent": "project-observatory"}
     if rng:
         head["Range"] = rng
@@ -184,7 +208,9 @@ def _call(method: str, path: str, token: str, payload: dict | None = None,
         e.close()
         raise HerokuError(e.code, f"heroku answered HTTP {e.code} on {_shape(path)}; "
                                   "provider response withheld") from None
-    except OSError as e:
+    except (OSError, http.client.HTTPException) as e:
+        # A dropped connection mid-answer (RemoteDisconnected, IncompleteRead) is an
+        # HTTPException, not an OSError: named the same way, never echoed.
         raise HerokuError("transport", f"heroku unreachable: {type(e).__name__}") from None
 
 
@@ -192,20 +218,21 @@ def _shape(path: str) -> str:
     """The endpoint without its identifiers: `/teams/<id>/members`."""
     parts = path.split("?")[0].split("/")
     keep = {"", "account", "apps", "teams", "members", "oauth", "authorizations",
-            "actions", "regenerate-tokens", "config-vars"}
+            "actions", "regenerate-tokens", "config-vars", "features", "invitations"}
     return "/".join(p if p in keep else "<id>" for p in parts)
 
 
-def _request(method: str, path: str, token: str, payload: dict | None = None):
-    return _call(method, path, token, payload)[0]
+def _request(method: str, path: str, token: str, payload: dict | None = None,
+             accept: str = ACCEPT):
+    return _call(method, path, token, payload, None, accept)[0]
 
 
-def _list(path: str, token: str) -> list:
+def _list(path: str, token: str, accept: str = ACCEPT) -> list:
     """A collection to the end of its `Next-Range`: page one alone looks exactly
     like a small team."""
     out, rng = [], None
     for _ in range(100):
-        body, rng = _call("GET", path, token, None, rng)
+        body, rng = _call("GET", path, token, None, rng, accept)
         if not isinstance(body, list):
             raise HerokuError("shape", f"heroku answered {_shape(path)} with no list")
         out.extend(body)
@@ -280,7 +307,7 @@ def cli_token() -> str:
         raise RuntimeError("the heroku CLI is not on PATH")
     try:
         p = subprocess.run(["heroku", "auth:token"], capture_output=True, text=True,
-                           timeout=90)
+                           stdin=subprocess.DEVNULL, timeout=90)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"heroku auth:token could not run: {type(exc).__name__}") from None
     if p.returncode != 0:
@@ -348,6 +375,87 @@ def save_ledger(doc: dict) -> None:
     write_secret(LEDGER, json.dumps(doc, ensure_ascii=False, indent=2))
 
 
+#: How long a second door operation waits for the ledger lock before it refuses:
+#: long enough for an issue whose proof and vault delivery take their full time.
+LOCK_WAIT_S = 150.0
+_LOCK_STATE = threading.local()
+#: The verbs that read the ledger, call Heroku and write the ledger back.
+LOCKED_VERBS = ("issue", "rotate", "revoke", "ping")
+
+
+@contextlib.contextmanager
+def _ledger_lock():
+    """One door operation on the ledger at a time, across processes and threads.
+
+    WHY. Each verb reads `heroku-issued.json`, calls Heroku and writes it back.
+    Unlocked, two `issue` runs each wrote the copy they had read, so one row was
+    lost while both authorizations lived; an `issue` racing a `rotate` left a row
+    naming a deleted authorization, and `ping` then called the live one a stray.
+    The lock is an exclusive `flock` on a file beside the ledger, held from the
+    first read to the last write (the OpenRouter door's `_ledger_lock`), and every
+    write still re-reads the ledger and replaces only its own row (`put_row`).
+    Re-entrant within a thread; a second operation waits LOCK_WAIT_S, then refuses."""
+    depth = getattr(_LOCK_STATE, "depth", 0)
+    if depth:
+        _LOCK_STATE.depth = depth + 1
+        try:
+            yield
+        finally:
+            _LOCK_STATE.depth = depth
+        return
+    private_io.parent(LEDGER.parent)
+    fd = osprivacy.open(LEDGER.parent / ".heroku-ledger.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        give_up = time.monotonic() + LOCK_WAIT_S
+        while True:
+            try:
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= give_up:
+                    raise RuntimeError(f"another Heroku door operation ({', '.join(LOCKED_VERBS)}) has held "
+                                       f"the ledger lock for {LOCK_WAIT_S:.0f} s; nothing was read or "
+                                       f"changed: run again when it is done") from None
+                time.sleep(0.05)
+        _LOCK_STATE.depth = 1
+        try:
+            yield
+        finally:
+            _LOCK_STATE.depth = 0
+            oslocks.flock(fd, oslocks.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _locked(fn):
+    """Run a door verb under `_ledger_lock`; a lock refusal is a refusal, exit 1."""
+    import functools
+
+    @functools.wraps(fn)
+    def inner(*a, **k):
+        try:
+            with _ledger_lock():
+                return fn(*a, **k)
+        except RuntimeError as exc:
+            if "ledger lock" not in str(exc):
+                raise
+            print(f"refused: {exc}", file=sys.stderr)
+            return 1
+    return inner
+
+
+def put_row(slot: str, row: dict | None) -> None:
+    """Replace ONE slot's row (None deletes it) in the ledger as it is now: read
+    again under the lock, so a write never carries a stale copy of other rows."""
+    with _ledger_lock():
+        doc = ledger()
+        if row is None:
+            doc["issued"].pop(slot, None)
+        else:
+            doc["issued"][slot] = row
+        save_ledger(doc)
+
+
 def find_row(doc: dict, wanted: str) -> tuple[str, dict]:
     """A ledger row by its slot or by its authorization id."""
     issued = doc["issued"]
@@ -389,16 +497,18 @@ def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
                            f"(exit {r.returncode}); child output withheld")
 
 
-def probe_path(preset: dict, team: str | None, app: str | None) -> str:
-    """What the new value must read: the app if one is named, else the team's
-    apps, else the user's apps; the account for `identity`."""
+def probe_paths(preset: dict, team: str | None, app: str | None) -> list[tuple[str, str]]:
+    """What the new value must read, as (path, what a person reads): every target
+    named, the app AND the team's apps when both are, else the user's apps; the
+    account for `identity`, whose scope reads no app and no team."""
     if preset["probe"] == "account":
-        return "/account"
+        return [("/account", "the account")]
+    out = []
     if app:
-        return f"/apps/{q(app)}"
+        out.append((f"/apps/{q(app)}", f"app {app}"))
     if team:
-        return f"/teams/{q(team)}/apps"
-    return "/apps"
+        out.append((f"/teams/{q(team)}/apps", f"team {team}'s apps"))
+    return out or [("/apps", "the user's apps")]
 
 
 #: Attempts and the pause between them while a fresh value is honoured.
@@ -442,6 +552,7 @@ def _delete_fresh(admin: str, auth_id: str | None) -> str:
     return f"; the authorization this call created ({auth_id}) was deleted again"
 
 
+@_locked
 def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | None,
               admin_label: str | None, expire_days: int | None, wait: float = 2.0) -> int:
     preset = PRESETS.get(preset_key)
@@ -497,10 +608,12 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
             fresh = (auth or {}).get("id")
         auth_id = (auth or {}).get("id") or (existing or {}).get("id")
         value = _token_of(auth)
-        path = probe_path(preset, team, app)
-        why = prove(value, path, wait)
-        if why is not None:
-            raise HerokuError("proof", f"the issued authorization cannot read {_shape(path)} ({why})")
+        proved = []
+        for path, what in probe_paths(preset, team, app):
+            why = prove(value, path, wait)
+            if why is not None:
+                raise HerokuError("proof", f"the issued authorization cannot read {what} ({why})")
+            proved.append(what)
         deliver_to_vault(value, project, env, name)
     except (HerokuError, RuntimeError) as exc:
         tail = _delete_fresh(admin, fresh) if admin else ""
@@ -521,7 +634,7 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
             if exc.status != 404:
                 retired += (f"; the slot's previous authorization {old} could NOT be deleted "
                             f"({exc}): `revoke {old}`")
-    doc["issued"][slot] = {
+    put_row(slot, {
         "authorization_id": auth_id, "preset": preset_key, "scopes": scopes,
         "description": description, "team": team, "app": app, "admin": label,
         "expires_in": ((auth or {}).get("access_token") or {}).get("expires_in"),
@@ -529,15 +642,20 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
         "rotated_on": today() if rolled else (prior or {}).get("rotated_on"),
         "rotations": ((prior or {}).get("rotations") or 0) + (1 if rolled else 0),
         "issued_by": "tools/heroku.py",
-    }
-    save_ledger(doc)
+    })
     _journal("rotate" if rolled else "issue", slot, preset=preset_key,
              authorization=auth_id, team=team, app=app)
     print(f"  {slot}: {'regenerated' if rolled else 'issued'} authorization {auth_id}, "
           f"scope {', '.join(scopes)}{retired}")
+    # Exactly what was proved, and nothing more: an `identity` value reads the
+    # account and no team, so a team named beside it is a stated purpose only.
+    print(f"  proved with its own value before delivery: it read {', '.join(proved)}")
+    unproved = [w for w, given in ((f"team {team}", team), (f"app {app}", app))
+                if given and not any(w in p for p in proved)]
     print("  Heroku cannot narrow an authorization to a team or an app: the scope is the grant, "
-          "and" + (f"{where} is its stated purpose, proved before delivery" if where
-                   else " it reaches every app this user reaches"))
+          "and it reaches every app this user reaches"
+          + (f"; {' and '.join(unproved)} exist for the admin but this scope cannot read them"
+             if unproved else ""))
     print(f"  use: python \"$(project-observatory full-path)/tools/use_secret.py\" run "
           f"--env {env} {project} {name} -- <command>")
     return 0
@@ -569,6 +687,7 @@ def cmd_list() -> int:
     return 0
 
 
+@_locked
 def cmd_ping() -> int:
     """Is every admin alive, and does every ledger row still exist at Heroku with
     the scopes it was issued with? No value is printed or read from the vault."""
@@ -583,9 +702,10 @@ def cmd_ping() -> int:
         try:
             value = private_io.read(path).strip()
             _request("GET", "/account", value)
-            for auth in _list("/oauth/authorizations", value):
+            mine = _list("/oauth/authorizations", value)
+            for auth in mine:
                 live[auth.get("id")] = auth
-            print(f"  admin/{label}: alive, {len(live)} authorization(s) at Heroku")
+            print(f"  admin/{label}: alive, {len(mine)} authorization(s) at Heroku")
         except HerokuError as exc:
             print(f"  admin/{label}: DEAD: {exc}", file=sys.stderr)
             bad += 1
@@ -630,6 +750,7 @@ def leaked_slots(doc: dict) -> set[str]:
     return out
 
 
+@_locked
 def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
     try:
         doc = ledger()
@@ -659,10 +780,11 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
             continue
         try:
             value = _token_of(auth)
-            path = probe_path(PRESETS.get(row.get("preset"), PRESETS["read"]), row.get("team"), row.get("app"))
-            why = prove(value, path, wait)
-            if why is not None:
-                raise HerokuError("proof", f"the regenerated value cannot read {_shape(path)} ({why})")
+            for path, what in probe_paths(PRESETS.get(row.get("preset"), PRESETS["read"]),
+                                          row.get("team"), row.get("app")):
+                why = prove(value, path, wait)
+                if why is not None:
+                    raise HerokuError("proof", f"the regenerated value cannot read {what} ({why})")
             project, env, name = slot.split("/")
             deliver_to_vault(value, project, env, name)
         except (HerokuError, RuntimeError, ValueError) as exc:
@@ -672,7 +794,7 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
             continue
         row["rotated_on"] = today()
         row["rotations"] = (row.get("rotations") or 0) + 1
-        save_ledger(doc)
+        put_row(slot, row)
         _journal("rotate", slot, authorization=row.get("authorization_id"))
         print(f"  {slot}: regenerated in place and delivered (authorization {row.get('authorization_id')})")
     if leaked and not bad:
@@ -680,6 +802,7 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
     return 1 if bad else 0
 
 
+@_locked
 def cmd_revoke(wanted: str) -> int:
     try:
         doc = ledger()
@@ -702,8 +825,7 @@ def cmd_revoke(wanted: str) -> int:
               f"authorization live at Heroku is the worst of both", file=sys.stderr)
         return 1
     if slot:
-        del doc["issued"][slot]
-        save_ledger(doc)
+        put_row(slot, None)
     _journal("revoke", slot or f"heroku/authorization/{auth_id}", authorization=auth_id)
     print(f"revoked at Heroku: authorization {auth_id}"
           + (f"; slot {slot} now holds a dead value and can be removed from the vault" if slot else ""))
@@ -743,18 +865,43 @@ def cmd_teams(admin_label: str | None) -> int:
     return 1 if bad else 0
 
 
+def team_invites_by_email(team: str, admin: str) -> tuple[bool, list[dict]]:
+    """(does this team invite rather than add, its pending invitations).
+
+    Mirrors heroku-cli 10.16 (commands/members/add.js, remove.js, index.js): a
+    team of type `team` with the `team-invite-acceptance` feature enabled takes
+    new people by invitation, which they must accept, and lists the pending ones
+    under `/teams/{t}/invitations` with their own Accept variant. Any other team
+    adds members directly. A feature list that cannot be read is an error, never
+    a guess: a guess picks the wrong endpoint for the write."""
+    info = _request("GET", f"/teams/{q(team)}", admin) or {}
+    if info.get("type") != "team":
+        return False, []
+    features = _list(f"/teams/{q(team)}/features", admin)
+    if not any(f.get("name") == INVITE_FEATURE and f.get("enabled") for f in features):
+        return False, []
+    rows = _list(f"/teams/{q(team)}/invitations", admin, accept=ACCEPT_INVITATIONS)
+    return True, [{"email": str((r.get("user") or {}).get("email") or ""),
+                   "role": r.get("role"), "id": r.get("id")} for r in rows]
+
+
 def cmd_members(team: str, admin_label: str | None) -> int:
     try:
         _l, admin = read_admin(admin_label)
         members = _list(f"/teams/{q(team)}/members", admin)
+        invite_mode, invites = team_invites_by_email(team, admin)
     except (HerokuError, RuntimeError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
-    print(f"members of {team} ({len(members)}):")
-    for mb in sorted(members, key=lambda m: m.get("email") or ""):
-        print(f"  {mb.get('email', '?'):40s} {mb.get('role') or '?':13s} "
-              f"2fa {'on' if mb.get('two_factor_authentication') else 'off'}"
-              + ("  federated" if mb.get("federated") else ""))
+    print(f"members of {team} ({len(members)}"
+          + (f", and {len(invites)} pending invitation(s); this team invites" if invite_mode else "")
+          + "):")
+    rows = [(str(m.get("email") or "?"), m.get("role") or "?",
+             f"2fa {'on' if m.get('two_factor_authentication') else 'off'}"
+             + ("  federated" if m.get("federated") else "")) for m in members]
+    rows += [(i["email"] or "?", i.get("role") or "?", "pending invitation") for i in invites]
+    for email, role, note in sorted(rows):
+        print(f"  {email:40s} {role:13s} {note}")
     return 0
 
 
@@ -776,25 +923,42 @@ def cmd_apps(team: str, admin_label: str | None) -> int:
 
 
 def plan_membership(action: str, members: list[dict], email: str, role: str | None,
-                    me: str | None) -> tuple[str, str | None]:
-    """(what would happen, refusal or None). Pure: read from the team as it is."""
+                    me: str | None, invites: list[dict] | None = None,
+                    invite_mode: bool = False) -> tuple[str, str | None]:
+    """(what would happen, refusal or None). Pure: read from the team as it is,
+    its members and, on a team that invites, its pending invitations."""
     email = email.strip().lower()
     by = {str(m.get("email") or "").lower(): m for m in members}
+    pending = {str(i.get("email") or "").lower(): i for i in invites or []}
     current = (by.get(email) or {}).get("role")
+    invited = (pending.get(email) or {}).get("role") if email in pending else None
+    # Who can still manage the team: admins and the owner. A pending invitee
+    # manages nothing until they accept, so is never counted.
     admins_now = [e for e, m in by.items() if m.get("role") in ("admin", "owner")]
     if action in ("add", "role"):
         if role not in ROLES:
             return "", f"role must be one of {', '.join(ROLES)}; `owner` is a transfer, not a membership"
     if me and email == me.lower() and action != "add":
         return "", "that is the stashed admin's own membership; change it in the team's settings"
+    if email in pending and not current:
+        if action == "add":
+            if invited == role:
+                return f"no change: an invitation for {email} as {role} is pending", None
+            return "", (f"{email} already has a pending invitation as {invited}; cancel it with "
+                        f"`member remove` and invite again")
+        if action == "role":
+            return "", f"{email} has a pending invitation, not a membership; cancel it and invite again"
+        return f"cancel the pending invitation for {email} (invited as {invited})", None
     if action == "add":
         if current == role:
             return f"no change: {email} is already {role}", None
         if current:
             return "", f"{email} is already {current}; use `member role` to change it"
+        if invite_mode:
+            return f"invite {email} as {role}; they become a member once they accept", None
         return f"add {email} as {role}", None
     if not current:
-        return "", f"{email} is not a member of this team"
+        return "", f"{email} is not a member of this team and has no pending invitation"
     if current == "owner":
         return "", f"{email} owns the team; ownership is not changed by this door"
     losing_admin = current == "admin" and (action == "remove" or role != "admin")
@@ -809,15 +973,21 @@ def plan_membership(action: str, members: list[dict], email: str, role: str | No
 
 def cmd_member(action: str, team: str, email: str, role: str | None,
                admin_label: str | None, apply: bool) -> int:
+    """One membership change, the CLI's way: a team that invites gets an
+    invitation (and `remove` cancels a pending one); any other team is written
+    directly. A plan until --apply; then one call and a fresh read that must show
+    the result: the members list, or for an invitation the invitations list."""
+    key = email.strip().lower()
     try:
         label, admin = read_admin(admin_label)
         me = read_meta(ADMIN_STORE / label).get("email") or (
             _request("GET", "/account", admin) or {}).get("email")
         members = _list(f"/teams/{q(team)}/members", admin)
+        invite_mode, invites = team_invites_by_email(team, admin)
     except (HerokuError, RuntimeError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
-    plan, refusal = plan_membership(action, members, email, role, me)
+    plan, refusal = plan_membership(action, members, email, role, me, invites, invite_mode)
     if refusal:
         print(f"refused: {refusal}", file=sys.stderr)
         return 1
@@ -827,26 +997,40 @@ def cmd_member(action: str, team: str, email: str, role: str | None,
     if not apply:
         print("dry run: nothing changed; repeat with --apply to make this change")
         return 0
+    pending = next((i for i in invites if i["email"].lower() == key), None)
+    is_member = any(str(m.get("email") or "").lower() == key for m in members)
+    via = "invitation" if (action == "add" and invite_mode) or (
+        action == "remove" and pending and not is_member) else "membership"
     try:
-        if action == "add":
+        if via == "invitation" and action == "add":
+            _request("PUT", f"/teams/{q(team)}/invitations", admin,
+                     {"email": email, "role": role}, accept=ACCEPT_INVITATIONS)
+        elif via == "invitation":
+            _request("DELETE", f"/teams/{q(team)}/invitations/{q(pending.get('id') or email)}",
+                     admin, accept=ACCEPT_INVITATIONS)
+        elif action == "add":
             _request("PUT", f"/teams/{q(team)}/members", admin, {"email": email, "role": role})
         elif action == "role":
             _request("PATCH", f"/teams/{q(team)}/members", admin, {"email": email, "role": role})
         else:
             _request("DELETE", f"/teams/{q(team)}/members/{q(email)}", admin)
-        after = {str(m.get("email") or "").lower(): m.get("role")
-                 for m in _list(f"/teams/{q(team)}/members", admin)}
+        if via == "invitation":
+            after = {i["email"].lower(): i.get("role") for i in team_invites_by_email(team, admin)[1]}
+        else:
+            after = {str(m.get("email") or "").lower(): m.get("role")
+                     for m in _list(f"/teams/{q(team)}/members", admin)}
     except HerokuError as exc:
         print(f"refused: {exc}; read the team with `members --team {team}` before repeating, "
               f"the change may or may not have happened", file=sys.stderr)
         return 1
     want = None if action == "remove" else role
-    got = after.get(email.strip().lower())
+    got = after.get(key)
     if got != want:
-        print(f"applied, but the team now reads {email} as {got or 'absent'}, not "
+        where = "pending invitations now read" if via == "invitation" else "team now reads"
+        print(f"applied, but the {where} {email} as {got or 'absent'}, not "
               f"{want or 'absent'}", file=sys.stderr)
         return 1
-    _journal("membership", f"heroku/team/{team}", action=action, member=email, role=want)
+    _journal("membership", f"heroku/team/{team}", action=action, member=email, role=want, via=via)
     print(f"applied and verified: {plan}")
     return 0
 

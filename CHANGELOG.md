@@ -27,8 +27,22 @@ while the major version is 0, a minor release may change behaviour and says so h
     own membership.
   - `tools/cloudflare.py` gains `accounts` (every stashed account, the tokens Cloudflare holds in it and the vault slot
     each managed one names), `members --account`, and `member add|role|remove --account` with the same plan, `--apply`
-    and verification. It changes legacy roles only, and refuses the last Super Administrator and a member whose
-    access is set by permission policies.
+    and verification. It reads Super Administrator from both places it lives, legacy roles and permission policies,
+    and refuses: any write while some member's Super Administrator state cannot be read (a record with neither
+    roles nor policies, a role or permission group without a name, a policy scope it cannot read); removing, or
+    changing the role of, a member who holds Super Administrator unless another accepted member holds it on the
+    whole account (a policy scoped to a zone or to some objects does not count); a role change of a member whose
+    access is set by policies, since it writes legacy roles only; and the stashed admin's own membership when the
+    token can read its user. Lists are read to their end whether they report `total_pages`, `total_count` or
+    only a page size, and one still going after 100 pages is an error, not a cut.
+  - A team that takes people by invitation (its `team-invite-acceptance` feature on) is written the Heroku CLI's
+    way: `member add` sends an invitation, `members` lists pending invitations as pending, `member remove` of a
+    pending invitee cancels the invitation, and the read-back that verifies such a write is the invitations list.
+    A feature list that cannot be read refuses the write rather than guess the endpoint.
+  - `issue`, `rotate`, `revoke` and `ping` hold one lock beside `heroku-issued.json` from their first read to
+    their last write, and each write replaces only its own row, so concurrent runs keep every row.
+  - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
+    what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
 
 ## 0.25.0 (2026-10-19)
 

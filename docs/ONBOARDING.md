@@ -372,10 +372,14 @@ only, never to a team or an app: `--team` and `--app` are its stated purpose and
 reads. `teams`, `members --team` and `apps --team` read the teams with the slots issued for each;
 `member add|role|remove --team TEAM --email ADDRESS [--role admin|member|collaborator]` prints
 its plan and changes nothing until `--apply`, then reads the team again to verify. It refuses
-`owner`, the last admin and the admin's own membership. The Cloudflare door reads the same way:
-`cloudflare.py accounts` lists every stashed account with its tokens and the vault slot each
-managed one names, `members --account` reads its members, and `member add|role|remove --account`
-is a plan until `--apply`.
+`owner`, the last admin and the admin's own membership. On a team whose `team-invite-acceptance`
+feature is on, as the Heroku CLI does, `member add` sends an invitation, `members` shows pending
+invitations, and `member remove` of a pending invitee cancels the invitation. The Cloudflare door
+reads the same way: `cloudflare.py accounts` lists every stashed account with its tokens and the
+vault slot each managed one names, `members --account` reads its members, and `member
+add|role|remove --account` is a plan until `--apply`. It counts Super Administrators from both
+roles and permission policies, refuses to leave the account without one on the whole account, and
+refuses any write while it cannot read who holds that role.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and

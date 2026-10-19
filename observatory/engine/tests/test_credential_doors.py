@@ -1333,6 +1333,14 @@ def test_cf_r2_lifecycle_command_line() -> None:
     check("the usage lists the lifecycle command", "cloudflare.py\" lifecycle" in m.__doc__, "")
 
 
+def _cf_policy(group, scope_key="com.cloudflare.api.account.a1", objects=None, access="allow"):
+    """A member permission policy in the shape the members API answers with."""
+    return {"id": "p-" + group[:4], "access": access,
+            "permission_groups": [{"id": "g-" + group[:4], "name": group}],
+            "resource_groups": [{"id": "rg1", "scope": [{"key": scope_key,
+                                                         "objects": objects or [{"key": "*"}]}]}]}
+
+
 def _cf_team_fake(m, log, members=None, me="admin@example.invalid"):
     """An account with two pages of tokens and members, and the legacy role list."""
     state = {"members": members if members is not None else [
@@ -1341,7 +1349,7 @@ def _cf_team_fake(m, log, members=None, me="admin@example.invalid"):
         {"id": "m2", "user": {"email": "dev@example.invalid"}, "status": "accepted",
          "roles": [{"id": "r-ro", "name": "Administrator Read Only"}]},
         {"id": "m3", "user": {"email": "policy@example.invalid"}, "status": "accepted",
-         "roles": [], "policies": [{"id": "p1"}]}]}
+         "roles": [], "policies": [_cf_policy("Administrator Read Only")]}]}
 
     def fake(path, token, payload=None, method=None):
         log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
@@ -1448,6 +1456,96 @@ def test_cf_member_writes_refuse_what_would_lock_the_account() -> None:
           plan("remove", state["members"], "nobody@example.invalid", None, None)[1] is not None, "")
     rc, o, e = _cf_run(m.cmd_member, "remove", None, "dev@example.invalid", None, False)
     check("an unreadable admin user is said in the plan", rc == 0 and "only the last Super Administrator" in o, o)
+
+
+def test_cf_super_admins_are_counted_from_roles_and_policies() -> None:
+    """M2 of review round 1: on an account whose members hold their rights through
+    permission policies, the last Super Administrator was removable, because only
+    legacy roles were counted. Both shapes count; an unreadable record refuses."""
+    m = cf()
+    sa = m.SUPER_ADMIN
+    by_policy = [
+        {"id": "m1", "user": {"email": "owner@example.invalid"}, "status": "accepted", "policies": [_cf_policy(sa)]},
+        {"id": "m2", "user": {"email": "dev@example.invalid"}, "status": "accepted",
+         "policies": [_cf_policy("Administrator Read Only")]}]
+    plan = lambda action, members, email, role=None: m.plan_account_member(action, members, email, role, None, "a1")
+    check("a policy-only last Super Administrator cannot be removed",
+          "no other accepted member" in (plan("remove", by_policy, "owner@example.invalid")[1] or ""), "")
+    check("a policy member who is not one can be",
+          plan("remove", by_policy, "dev@example.invalid")[1] is None, "")
+    second = by_policy + [{"id": "m3", "user": {"email": "two@example.invalid"}, "status": "accepted",
+                           "policies": [_cf_policy(sa)]}]
+    check("with a second whole-account Super Administrator by policy, the first may go",
+          plan("remove", second, "owner@example.invalid")[1] is None, "")
+    scoped = by_policy + [{"id": "m3", "user": {"email": "zone@example.invalid"}, "status": "accepted",
+                           "policies": [_cf_policy(sa, "com.cloudflare.api.account.zone.z1")]}]
+    check("a Super Administrator scoped to one zone does not count as the account's",
+          plan("remove", scoped, "owner@example.invalid")[1] is not None, "")
+    partial = by_policy + [{"id": "m3", "user": {"email": "part@example.invalid"}, "status": "accepted",
+                            "policies": [_cf_policy(sa, objects=[{"key": "some-object"}])]}]
+    check("nor one scoped to some of the account's objects",
+          plan("remove", partial, "owner@example.invalid")[1] is not None, "")
+    pending = by_policy + [{"id": "m3", "user": {"email": "new@example.invalid"}, "status": "pending",
+                            "policies": [_cf_policy(sa)]}]
+    check("nor a pending invitee", plan("remove", pending, "owner@example.invalid")[1] is not None, "")
+    denied = by_policy + [{"id": "m3", "user": {"email": "deny@example.invalid"}, "status": "accepted",
+                           "policies": [_cf_policy(sa, access="deny")]}]
+    check("nor a deny policy", plan("remove", denied, "owner@example.invalid")[1] is not None, "")
+    mixed = [{"id": "m1", "user": {"email": "legacy@example.invalid"}, "status": "accepted",
+              "roles": [{"id": "r", "name": sa}]}] + by_policy
+    check("a legacy Super Administrator and a policy one cover each other",
+          plan("remove", mixed, "legacy@example.invalid")[1] is None
+          and plan("remove", mixed, "owner@example.invalid")[1] is None, "")
+    check("a legacy role change of the last one is refused",
+          plan("role", mixed[:1] + by_policy[1:], "legacy@example.invalid", "Administrator Read Only")[1] is not None, "")
+    for label, odd in (("a policy group without a name", {"permission_groups": [{"id": "g"}]}),
+                       ("a policy without its groups", {"id": "p"}),
+                       ("a scope that cannot be read", {"access": "allow", "permission_groups": [{"name": sa}],
+                                                       "resource_groups": [{"id": "rg"}]})):
+        members = by_policy + [{"id": "m9", "user": {"email": "odd@example.invalid"}, "status": "accepted",
+                                "policies": [odd]}]
+        check(f"{label} refuses every write", all(
+            "cannot tell" in (plan(a, members, e, r)[1] or "")
+            for a, e, r in (("remove", "dev@example.invalid", None), ("add", "x@example.invalid", "Administrator Read Only"),
+                            ("role", "odd@example.invalid", "Administrator Read Only"))), "")
+    bare = by_policy + [{"id": "m9", "user": {"email": "bare@example.invalid"}, "status": "accepted"}]
+    check("a member record with neither roles nor policies refuses writes",
+          "cannot tell" in (plan("remove", bare, "dev@example.invalid")[1] or ""), "")
+
+
+def test_cf_all_reads_every_page_whatever_the_list_says_about_itself() -> None:
+    """L1: lists that carry `total_count` or only `per_page` are read to their end;
+    one that never ends, or ends short of its own count, is an error."""
+    m = cf()
+
+    def serve(shape, rows_total, stop_early=False):
+        def fake(path, token, payload=None, method=None):
+            page = int(path.rsplit("page=", 1)[1])
+            start = (page - 1) * 50
+            rows = [{"id": i} for i in range(start, min(start + 50, rows_total))]
+            if stop_early and page > 1:
+                rows = []
+            info = {"count_only": {"count": len(rows), "total_count": rows_total},
+                    "per_page_only": {"per_page": 50, "count": len(rows)},
+                    "none": {}}[shape]
+            return {"result": rows, "result_info": info}
+        m._request = fake
+    serve("count_only", 120)
+    check("total_count without total_pages reads all 120", len(m._all("/accounts/a1/members", "t")) == 120, "")
+    serve("per_page_only", 120)
+    check("per_page alone reads to the short page", len(m._all("/accounts/a1/members", "t")) == 120, "")
+    serve("none", 50 * (m.PAGES_MAX + 3))
+    try:
+        m._all("/accounts/a1/tokens", "t")
+        check("a list still going at the page cap raises", False, "returned")
+    except RuntimeError as exc:
+        check("a list still going at the page cap raises", "did not end" in str(exc), str(exc))
+    serve("count_only", 120, stop_early=True)
+    try:
+        m._all("/accounts/a1/members", "t")
+        check("a list that ends short of its own count raises", False, "returned")
+    except RuntimeError as exc:
+        check("a list that ends short of its own count raises", "of the 120" in str(exc), str(exc))
 
 
 def test_cf_groups_lists_names_and_levels_and_never_a_value() -> None:
@@ -3280,6 +3378,8 @@ if __name__ == "__main__":
                test_cf_accounts_names_every_account_its_tokens_and_their_slots,
                test_cf_members_and_member_writes_are_a_plan_until_apply,
                test_cf_member_writes_refuse_what_would_lock_the_account,
+               test_cf_super_admins_are_counted_from_roles_and_policies,
+               test_cf_all_reads_every_page_whatever_the_list_says_about_itself,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
                test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects,
