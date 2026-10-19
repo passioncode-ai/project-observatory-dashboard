@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Vendors the contract files organization enrollment (OBS-161) is pinned to, in one step.
+
+    python3 tools/vendor_org_vectors.py --contract <fabric-agent-contract checkout> --commit <sha>
+
+Copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch do not
+matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
+`schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, then rewrites the commit and
+the three digest rows of that folder's README. `tests/test_node_foundation.py` checks the digests and
+`tests/test_node_org.py` runs the files, so a re-vendored commit is checked by the next test run. Prints what changed;
+exits 1 when the commit or a file cannot be read, and changes nothing then.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib.util
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
+FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
+         "share-registration.json": "fixtures/vectors/share-registration.json",
+         "device-enrollment.schema.json": "schemas/device-enrollment.schema.json"}
+#: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
+PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
+
+
+def _safe_git():
+    spec = importlib.util.spec_from_file_location("observatory_vendor_safe_git",
+                                                  ROOT / "observatory" / "engine" / "safe_git.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def vendor(contract: Path, commit: str) -> dict:
+    git = _safe_git()
+    resolved = git.run(["rev-parse", "--verify", commit + "^{commit}"], repo=contract)
+    if resolved.returncode != 0:
+        raise SystemExit(json.dumps({"error": "commit-unreadable", "commit": commit}))
+    full = resolved.stdout.strip()
+    blobs = {}
+    for name, path in FILES.items():
+        shown = git.run(["show", "%s:%s" % (full, path)], repo=contract, text=False)
+        if shown.returncode != 0:
+            raise SystemExit(json.dumps({"error": "file-unreadable", "file": path, "commit": full}))
+        blobs[name] = shown.stdout
+    readme_path = VECTORS / "README.md"
+    readme = readme_path.read_text(encoding="utf-8")
+    if not PIN.search(readme):
+        raise SystemExit(json.dumps({"error": "readme-pin-missing"}))
+    readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme, count=1)
+    changed = []
+    for name, data in blobs.items():
+        digest = hashlib.sha256(data).hexdigest()
+        row = "| `%s` | `%s` |" % (name, digest)
+        pattern = re.compile(r"^\| `%s` \| `[0-9a-f]{64}` \|$" % re.escape(name), re.M)
+        readme = pattern.sub(row, readme) if pattern.search(readme) else readme.rstrip("\n") + "\n" + row + "\n"
+        target = VECTORS / name
+        if not target.exists() or target.read_bytes() != data:
+            changed.append(name)
+        target.write_bytes(data)
+    readme_path.write_text(readme, encoding="utf-8")
+    return {"commit": full, "changed": changed}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--contract", type=Path, required=True, help="a fabric-agent-contract checkout")
+    parser.add_argument("--commit", required=True, help="the contract commit to pin")
+    args = parser.parse_args(argv)
+    print(json.dumps(vendor(args.contract.expanduser().resolve(), args.commit), indent=1))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

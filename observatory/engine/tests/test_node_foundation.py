@@ -57,7 +57,7 @@ def key_of(value):
 class VendoredVectors(unittest.TestCase):
     def test_digests_match_the_readme(self):
         readme = (VECTORS / 'README.md').read_text(encoding='utf-8')
-        listed = dict(re.findall(r'\| `([a-z0-9-]+\.json)` \| `([0-9a-f]{64})` \|', readme))
+        listed = dict(re.findall(r'\| `([a-z0-9][a-z0-9.-]*\.json)` \| `([0-9a-f]{64})` \|', readme))
         on_disk = {path.name for path in VECTORS.glob('*.json')}
         self.assertEqual(set(listed), on_disk)
         for name, digest in listed.items():

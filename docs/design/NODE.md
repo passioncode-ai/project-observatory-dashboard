@@ -379,6 +379,14 @@ included (`"ok": true`).
 
 ## Organization enrollment (OBS-161)
 
+**Merge order: this lands only after the contract's CT-65 (DEC-0094).** The merged contract (`0704218`) admits a device
+key only in `secure-enclave`, `tpm` or `platform-keystore` with `exportable: false`; this node declares its owner-only
+key file truthfully as `storage: file`, `exportable: true`, which only CT-65 admits. A server on the older contract
+answers a 422 schema refusal naming the key fields, which the node reports as `key-storage-refused`. When CT-65 is
+merged, `python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>` re-vendors the transport vectors,
+the share-registration vectors and `device-enrollment.schema.json` at that commit in one step, and
+`test_node_org.py`'s schema test then expects the enrollment to succeed.
+
 `node/org.py`, `node/http_signature.py`, `node/share_registration.py`, `tools/org.py` (`full org`). One enrollment per
 organization (DEC-0082) in `node/orgs/<org.id>/`, with device keys of its own in `node/orgs/<org.id>/keys/` (devices.md:
 each organization enrollment of a machine gets keys of its own), so no two organizations see one device id or key:
@@ -413,8 +421,11 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   while the outbox retries or dropped events are undelivered. Rotation sends a new request from the same key under the
   current serial at two thirds of the lifetime or when asked; the request is persisted before it is sent and sent
   again unchanged after a lost answer, which the server answers with the same certificate (CT-65), and the previous
-  certificate is kept until the new serial is first accepted. An expired certificate, a `re-enroll` action or a
-  revoked certificate stops the schedule until the machine is enrolled again.
+  certificate is kept until a 2xx under the new serial proves the server took it. A `certificate-unknown` before that
+  goes back to the previous certificate and sends the request once more under it (a check-in rebuilt to name it, with
+  a fresh sequence number); only a refusal of that one ends the enrollment. An expired certificate, a `re-enroll`
+  action or a revoked certificate stops the schedule until the machine is enrolled again. `org status` reads the
+  outbox read-only and creates nothing, so a status during `leave` never brings the folder back.
 - **Outbox**: events persisted once with a ULID and the next seq before they are sent; batches are the oldest stream's
   consecutive run of at most 1000, keep their `batchId` across retries of the same slice, back off from 30 s to an
   hour, and are consumed by the ack (`seq`, `held`, `rejected`). A 200 that acknowledges none of the batch is held and

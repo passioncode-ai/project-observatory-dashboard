@@ -1141,8 +1141,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c8556991259eeee66c78419cac01fe44a4aaa851f44da5a066484725928c00c0",
-      "bytes": 3143
+      "export_sha256": "87a9c59a72d9868d346ef69277f0f577146bd619fdb71705284db2c1e8cdfed7",
+      "bytes": 3535
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1150,6 +1150,13 @@
       "upstream_modified": true,
       "export_sha256": "e63411c0e1b615773d20c8c82b34a0c5ef7fc367fffc04d106b537c2628e5663",
       "bytes": 14561
+    },
+    {
+      "path": "fabric/node-vectors/device-enrollment.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "964b809237b6b6fa376f5e848c4bfc4821365bb0ec3f31f974783681b6a44687",
+      "bytes": 11338
     },
     {
       "path": "fabric/node-vectors/enroll-token.json",
@@ -2070,8 +2077,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f50f2a970aae068ef854e299ebecd8383f7279048f6b5934b5ecec96d4c4c596",
-      "bytes": 64458
+      "export_sha256": "3639ece8fb4ebd3b0be7dfb1db2a721235476e18eb9e37870dc2906b54098946",
+      "bytes": 67259
     },
     {
       "path": "node/p256.py",
@@ -4006,15 +4013,15 @@
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c92ad81f6dd510c7c60bce1d7ddb8dd9b670b0dfcd7a30c6950ead0b68ba7a7c",
-      "bytes": 36323
+      "export_sha256": "04791f1c48be2131a77f1e113e74059992420fe2f655d86e301964561af74472",
+      "bytes": 36332
     },
     {
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e7386cf42fcc1da299895e6bb4016f5ae1a6c01f3d0abfa977524283282a980d",
-      "bytes": 45183
+      "export_sha256": "f76680de59c06254bb2075f554b5b268ba75e00427d5dbeb1cdb55a1096b9214",
+      "bytes": 49856
     },
     {
       "path": "tests/test_node_pairing.py",
@@ -5789,7 +5796,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 763,
+  "file_count": 764,
   "excluded": [
     "git-history",
     "operator-registries",

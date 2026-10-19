@@ -40,7 +40,34 @@ ORG = 'org_7kq2m4xw'
 GRANT = 'urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8'
 OTHER_GRANT = 'urn:fabric:share:0123456789abcdef0123456789abcdef'
 AGENT = 'urn:fabric:agent:example:inbox-digest'
-T0 = 1792396800                                        # 2026-10-19T00:00:00Z
+T0 = 1792396800                                        # 2026-10-19T08:00:00Z (its UTC day began at T0 - 28800)
+
+
+def pinned_key_admits(storage: str, exportable: bool) -> bool:
+    """Whether the vendored device-enrollment schema (the contract commit this engine is pinned to) admits the key
+    declaration: `storage` in its enum and `exportable` as its const, or its if/then/else for `file` (CT-65)."""
+    doc = json.loads((VECTORS / 'device-enrollment.schema.json').read_text(encoding='utf-8'))
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get('properties'), dict) and 'storage' in node['properties'] \
+                    and 'exportable' in node['properties']:
+                found.append(node)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+    walk(doc)
+    (key,) = found
+    if storage not in key['properties']['storage']['enum']:
+        return False
+    rule = key['properties']['exportable']
+    if 'if' in key:
+        is_file = storage == key['if']['properties']['storage']['const']
+        rule = key['then' if is_file else 'else']['properties']['exportable']
+    return 'const' not in rule or rule['const'] is exportable
 
 
 def vectors(name: str) -> dict:
@@ -173,7 +200,7 @@ class FakeServer:
         self.used, self.certs, self.nonces, self.events, self.registrations = set(), {}, set(), {}, {}
         self.batches, self.sequences, self.requests = [], [], []
         self.epoch, self.fail_batches, self.log, self.share_answer = 0, 0, [], None
-        self.refuse_storage, self.skew, self.org = (), 0, ORG
+        self.refuse_storage, self.skew, self.org, self.strict_schema = (), 0, ORG, False
         self.checkin_protocols, self.batch_answer, self.lose_rotation, self.rotations = None, None, False, {}
         self.pause = None                                  # (path, started Event, release Event): hold one request
         self._hashes = hashes
@@ -233,6 +260,8 @@ class FakeServer:
             return 422, {'error': {'code': 'key-mismatch'}}
         assert [k['kid'].split('#')[1] for k in doc['deviceKeys']] == ['sig', 'kem']
         assert (doc['key']['storage'], doc['key']['exportable']) in (('file', True), ('platform-keystore', False))
+        if self.strict_schema and not pinned_key_admits(doc['key']['storage'], doc['key']['exportable']):
+            return 422, {'error': {'code': 'schema-invalid', 'pointer': '/key/storage', 'message': 'not in enum'}}
         if doc['key']['storage'] in self.refuse_storage:
             return 403, {'error': {'code': 'key-storage-refused', 'message': 'policy'}}
         self.used.add(token_id)
@@ -769,6 +798,67 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(self.make().flush()['held'], 'signature-stale')
         state = self.make().state()
         self.assertEqual((state['skewSeconds'], state['nextCheckInAt']), (0, 0))   # measure again at once
+
+
+    # -- fix cycle 2 (confirming round on PR #308) -------------------------------------------------------------
+    def test_a_forgotten_rotation_falls_back_and_the_enrollment_goes_on(self):
+        self.enroll()
+        first = self.make().state()['certificate']['serial']
+        self.make().rotate()
+        second = self.make().state()['certificate']['serial']
+        del self.server.certs[second]                  # the server lost the rotated certificate
+        self.assertTrue(self.make().check_in()['ok'])  # resent once under the previous one
+        state = self.make().state()
+        self.assertEqual((state['certificate']['serial'], state['reEnroll']), (first, False))
+        self.assertNotIn('previousCertificate', state)
+        self.now[0] += 301
+        self.assertNotEqual(self.make().tick().get('result'), 'needs-enrollment')
+
+    def test_only_a_2xx_lets_the_previous_certificate_go(self):
+        self.enroll()
+        self.make().rotate()
+        self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.server.fail_batches = 1
+        self.assertEqual(self.make().flush()['held'], 'unavailable')        # a 503 under the new serial
+        self.assertIn('previousCertificate', self.make().state())
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotIn('previousCertificate', self.make().state())
+
+    def test_a_schema_refusal_of_the_key_is_named_until_the_contract_admits_it(self):
+        from node.org import Enrollment, OrgError
+        strict = FakeServer(self.clock)
+        strict.strict_schema = True
+        enrollment = Enrollment(self.node, 'org_strict', transport=strict, clock=self.clock)
+        if pinned_key_admits('file', True):            # pinned at CT-65 (DEC-0094) or later
+            self.assertTrue(enrollment.enroll('https://org.example', 'et_1.' + 'S' * 32)['enrolled'])
+            return
+        with self.assertRaises(OrgError) as raised:   # pinned before it: what a current server answers
+            enrollment.enroll('https://org.example', 'et_1.' + 'S' * 32)
+        self.assertEqual(raised.exception.code, 'key-storage-refused')
+        self.assertFalse((self.node / 'orgs' / 'org_strict' / 'enrollment.json').exists())
+
+    def test_status_after_leave_creates_nothing(self):
+        self.enroll()
+        self.make().leave()
+        self.assertEqual(self.make().describe(), {'org': ORG, 'enrolled': False})
+        self.assertFalse((self.node / 'orgs' / ORG).exists())
+
+    def test_one_object_shared_by_two_threads_still_excludes(self):
+        import threading
+        self.enroll()
+        shared = self.make()
+        started, release = threading.Event(), threading.Event()
+        self.server.pause = ('/v1/devices/check-in', started, release)
+        results = []
+        first = self._thread(shared.check_in, results)
+        self.assertTrue(started.wait(10))
+        second = self._thread(shared.check_in, results)
+        second.join(0.5)
+        self.assertTrue(second.is_alive())             # re-entry is per thread, not per object
+        release.set()
+        first.join(10)
+        second.join(10)
+        self.assertEqual(self.server.sequences, [1, 2])
 
 
 class MaintenanceStep(unittest.TestCase):

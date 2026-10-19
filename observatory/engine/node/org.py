@@ -37,12 +37,14 @@ import secrets
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import osprivacy
 import private_io
 
 from . import http_signature, share_registration
@@ -135,6 +137,17 @@ def _protocols(doc: Any) -> Optional[List[str]]:
     a list that arrives (DEC-0094)."""
     value = doc.get('protocols') if isinstance(doc, dict) else None
     return [p for p in value if isinstance(p, str)] if isinstance(value, list) else None
+
+
+def _key_schema_refusal(status: int, code: str, answer: Any) -> bool:
+    """A 422 schema refusal that names the request's `key` fields: what a server on a contract before CT-65
+    (DEC-0094, which admits `storage: file`) answers a file-held key. Named `key-storage-refused`, not a generic
+    enrollment refusal, because a new token would not help: the server or its contract has to change."""
+    if status != 422 or ('schema' not in code and code not in ('invalid-request', 'request-invalid', 'validation')):
+        return False
+    error = answer.get('error') if isinstance(answer, dict) else None
+    detail = json.dumps({k: v for k, v in error.items() if k != 'code'}) if isinstance(error, dict) else ''
+    return bool(re.search(r'/key\b|\b(storage|exportable)\b', detail))
 
 
 def _error_code(doc: Any) -> Optional[str]:
@@ -248,7 +261,7 @@ class Enrollment:
         self.folder = self.node / 'orgs' / org_id
         self._keys, self.transport, self.clock, self.meter_db = keys, transport, clock, meter_db
         self.paths = dict(PATHS, **(paths or {}))
-        self._depth = 0
+        self._held = threading.local()                     # re-entry is per thread: another thread waits
 
     # -- the lock ----------------------------------------------------------------------------------------------
     @contextlib.contextmanager
@@ -257,19 +270,20 @@ class Enrollment:
         changes the state or the outbox runs under it and reads the state again inside it, so a check-in can never save
         a copy older than a rotation's certificate, and a tick never recreates what `leave` removed. The lock file is
         outside the enrollment's folder, so removing the folder never frees a lock another process waits on."""
-        if self._depth:
-            self._depth += 1
+        depth = getattr(self._held, 'depth', 0)
+        if depth:
+            self._held.depth = depth + 1
             try:
                 yield
             finally:
-                self._depth -= 1
+                self._held.depth = depth
             return
         with private_io.lock(self.node / 'orgs' / '.locks' / (self.org_id + '.lock')):
-            self._depth = 1
+            self._held.depth = 1
             try:
                 yield
             finally:
-                self._depth = 0
+                self._held.depth = 0
 
     # -- state -------------------------------------------------------------------------------------------------
     @property
@@ -301,7 +315,7 @@ class Enrollment:
             if path.exists() and path.stat().st_size > JOURNAL_BYTES:
                 kept = path.read_text(encoding='utf-8').splitlines()[-200:]
                 private_io.write(path, '\n'.join(kept) + '\n')
-            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            fd = osprivacy.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(fd, 'a', encoding='utf-8') as stream:
                 stream.write(line + '\n')
         except OSError:
@@ -355,7 +369,8 @@ class Enrollment:
             return 0, None
         return status, _json(raw)
 
-    def _signed(self, state: dict, path: str, doc: dict) -> Tuple[int, Any]:
+    def _signed(self, state: dict, path: str, doc: dict,
+                rebuild: Optional[Callable[[dict], dict]] = None) -> Tuple[int, Any]:
         """A device request signed afresh (DEC-0056): a new nonce and `created` on every attempt, `created` on the
         server's clock as the last check-in measured it (`skewSeconds`). A `signature-stale` refusal forgets that
         measure and asks for a check-in now, which measures it again. The first answer past the signature check under
@@ -382,11 +397,14 @@ class Enrollment:
                 self._save(state)
             elif code == 'certificate-unknown' and isinstance(previous, dict) \
                     and self.clock() < strict_time(previous['notAfter']) / 1000:
+                # The server does not know the rotated certificate; the previous one is still valid (CT-65). Back to
+                # it, and the same request once more under it: only a refusal of that one can end the enrollment.
                 state['certificate'] = state.pop('previousCertificate')
                 self._save(state)
                 self.journal('certificate-fallback', serial=state['certificate']['serial'])
-        elif 0 < status < 500 and state.get('previousCertificate'):
-            state.pop('previousCertificate', None)
+                return self._signed(state, path, rebuild(state) if rebuild else doc)
+        elif 200 <= status < 300 and state.get('previousCertificate'):
+            state.pop('previousCertificate', None)         # a 2xx proves the server took the new serial
             self._save(state)
         return status, answer
     def _certificate(self, response: Any, epoch_expected: Optional[int] = None) -> dict:
@@ -445,7 +463,7 @@ class Enrollment:
             if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'enrollment-response':
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 self.journal('enroll-refused', status=status, code=code)
-                if code in STORAGE_REFUSALS or 'storage' in code:
+                if code in STORAGE_REFUSALS or 'storage' in code or _key_schema_refusal(status, code, answer):
                     raise OrgError('key-storage-refused', "the server's policy refuses this machine's %s-held device "
                                    'key: %s (HTTP %s)' % (getattr(self.keys, 'storage', 'file'), code, status))
                 raise OrgError('enroll-refused', 'the server refused the enrollment: %s (HTTP %s)' % (code, status))
@@ -553,7 +571,13 @@ class Enrollment:
             doc = self.check_in_document(state)
             state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
             self._save(state)
-            status, answer = self._signed(state, self.paths['check-in'], doc)
+            def again(current: dict) -> dict:              # resent under the previous certificate: it names that one
+                current['sequenceNum'] += 1
+                self._save(current)
+                return dict(doc, sequenceNum=current['sequenceNum'],
+                            certificate={'serial': current['certificate']['serial'],
+                                         'notAfter': current['certificate']['notAfter']})
+            status, answer = self._signed(state, self.paths['check-in'], doc, again)
             if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
@@ -585,7 +609,7 @@ class Enrollment:
                 state['skewSeconds'] = skew
             state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'ok', 'skewSeconds': skew}
             self._save(state)
-            self.journal('checked-in', sequenceNum=doc['sequenceNum'], action=action, flags=flags)
+            self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags)
             newly_listed = self.accepts_shares(state) and not listed_before
         if newly_listed:                                   # the server began to take registrations: send them now
             self._register_quietly()
@@ -982,15 +1006,26 @@ class Enrollment:
                'collectionStart': state.get('collectionStart'), 'lastCheckIn': state.get('lastCheckIn'),
                'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': self.expired(state)
                or bool(state.get('reEnroll')), 'rotationPending': isinstance(state.get('pendingRotation'), dict),
-               'key': {'storage': getattr(self.keys, 'storage', 'file'),
-                       'exportable': bool(getattr(self.keys, 'exportable', True))}}
-        with self._db() as conn:
-            counts = {r['state']: r['n'] for r in conn.execute('SELECT state, COUNT(*) AS n FROM events GROUP BY state')}
-            out['outbox'] = {'pending': counts.get('pending', 0), 'acked': counts.get('acked', 0),
-                             'rejected': counts.get('rejected', 0), 'dropped': counts.get('dropped', 0),
-                             'lastBatch': self._meta(conn, 'lastBatch'), 'retry': self._meta(conn, 'retry')}
-            out['registrations'] = {r['gate']: r['n'] for r in conn.execute(
-                'SELECT gate, COUNT(*) AS n FROM registrations GROUP BY gate')}
+               'key': self._key_declaration()}
+        out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
+        out['registrations'] = {}
+        path = self.folder / 'outbox.sqlite'
+        # Read-only, and nothing is created: a status read while `leave` runs never brings the folder back.
+        if path.is_file():
+            import paths as _paths
+            conn = sqlite3.connect(_paths.sqlite_uri(path), uri=True, timeout=30)
+            conn.row_factory = sqlite3.Row
+            try:
+                counts = {r['state']: r['n'] for r in conn.execute(
+                    'SELECT state, COUNT(*) AS n FROM events GROUP BY state')}
+                out['outbox'].update({k: counts.get(k, 0) for k in ('pending', 'acked', 'rejected', 'dropped')})
+                out['outbox'].update(lastBatch=self._meta(conn, 'lastBatch'), retry=self._meta(conn, 'retry'))
+                out['registrations'] = {r['gate']: r['n'] for r in conn.execute(
+                    'SELECT gate, COUNT(*) AS n FROM registrations GROUP BY gate')}
+            except sqlite3.Error:
+                out['outbox']['unreadable'] = True
+            finally:
+                conn.close()
         degraded = []
         if out['needsEnrollment']:
             degraded.append('org:needs-enrollment')
@@ -1002,6 +1037,15 @@ class Enrollment:
             degraded.append('org:outbox-retrying')
         out['degraded'] = degraded
         return out
+
+    def _key_declaration(self) -> dict:
+        """What the enrollment request declares about the key, read without loading or creating a key."""
+        if self._keys is None:
+            from .device_keys import DeviceKeys
+            source = DeviceKeys
+        else:
+            source = self._keys
+        return {'storage': getattr(source, 'storage', 'file'), 'exportable': bool(getattr(source, 'exportable', True))}
 
     def leave(self) -> dict:
         """Removes what enrollment created, locally: this organization's folder, its own device keys with it (they

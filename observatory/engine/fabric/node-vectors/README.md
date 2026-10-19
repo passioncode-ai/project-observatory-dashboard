@@ -16,10 +16,13 @@ The same commit (the merge of contract pull request #113, DEC-0084) carries the 
 `test_node_pairing.py` and `test_node_enroll.py` run the node's ports over every
 case; the first checks the digests below.
 
-`http-signature.json` (the device transport binding, DEC-0056) and `share-registration.json` (DEC-0086) are copied
-byte for byte from the contract at commit `07042181bfae2a481aa0da1a5651f24c76669c48` (`fixtures/vectors/`);
-`tests/test_node_org.py` runs the receiver's check over every transport case and the node's derivation and sender gate
-over every `derive`, `grantId` and `gate` case (OBS-161).
+`http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
+`device-enrollment.schema.json` (DEC-0031) are copied byte for byte (OBS-161 pin) from the contract at commit
+`07042181bfae2a481aa0da1a5651f24c76669c48` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
+`gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors all three at another
+commit and rewrites the commit and digests here: `python3 tools/vendor_org_vectors.py --contract <checkout> --commit
+<sha>`.
 
 Do not edit them here. When the contract changes, copy the files again from the new commit and update the commit and
 the digests below.
@@ -37,3 +40,4 @@ the digests below.
 | `revocation-delta.json` | `cdb1fb989808bf0bc7843ef39571c1aa2a27d2f2dd2281572e921fc77bfb7217` |
 | `share-registration.json` | `43678e29f6246a8b66d7d88befb60118e25540e676c315f19e1c1c39d7e78f5f` |
 | `secret-envelope.json` | `3ed14f7f95857b10a8d7ec97ded697ea65ea564c9f4c731e11c221e9ef03a3b3` |
+| `device-enrollment.schema.json` | `964b809237b6b6fa376f5e848c4bfc4821365bb0ec3f31f974783681b6a44687` |
