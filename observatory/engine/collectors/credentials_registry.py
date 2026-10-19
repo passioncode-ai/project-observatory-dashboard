@@ -192,6 +192,8 @@ MACHINE_READERS = {
     "openrouter-admin": "tools/openrouter.py",
     "openrouter-issued.json": "tools/openrouter.py",
     "cloudflare-admin": "tools/cloudflare.py",
+    "heroku-admin": "tools/heroku.py",
+    "heroku-issued.json": "tools/heroku.py",
 }
 
 

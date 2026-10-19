@@ -360,6 +360,27 @@ limit local access; this is not a claim that the default files are encrypted at
 rest. Protect private backups just as carefully. A configured external store
 is not included in workspace backup snapshots.
 
+**A Heroku credential for one purpose, and the teams behind it.** `tools/heroku.py` is
+the Cloudflare door's twin on the Heroku Platform API. `heroku auth:token | python
+"$(project-observatory full-path)/tools/heroku.py" stash` (or `stash --from-cli`) keeps the
+CLI session's token as the admin, read by the door alone. `issue --preset read|deploy|identity
+--vault PROJECT/ENV/NAME [--team TEAM] [--app APP]` mints a direct OAuth authorization with that
+scope only (`config-read` and `config-write` reach config vars and need `--app`), proves it with
+its own value, and delivers it on stdin; `rotate` regenerates it in place, `revoke` deletes it
+first at Heroku, `list` and `ping` name what exists. Heroku narrows an authorization by scope
+only, never to a team or an app: `--team` and `--app` are its stated purpose and what the proof
+reads. `teams`, `members --team` and `apps --team` read the teams with the slots issued for each;
+`member add|role|remove --team TEAM --email ADDRESS [--role admin|member|collaborator]` prints
+its plan and changes nothing until `--apply`, then reads the team again to verify. It refuses
+`owner`, the last admin and the admin's own membership. On a team whose `team-invite-acceptance`
+feature is on, as the Heroku CLI does, `member add` sends an invitation, `members` shows pending
+invitations, and `member remove` of a pending invitee cancels the invitation. The Cloudflare door
+reads the same way: `cloudflare.py accounts` lists every stashed account with its tokens and the
+vault slot each managed one names, `members --account` reads its members, and `member
+add|role|remove --account` is a plan until `--apply`. It counts Super Administrators from both
+roles and permission policies, refuses to leave the account without one on the whole account, and
+refuses any write while it cannot read who holds that role.
+
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
 `db consumers CLUSTER` show metadata; the latter lists only apps whose spec binds the
