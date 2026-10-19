@@ -1906,8 +1906,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9d89de1f0ac0531fcdd596433253936f40322d89432a3ce08c9dfadf23a3f765",
-      "bytes": 88165
+      "export_sha256": "6ba9819c976bb73f302d179968224d16ec92b1a82ea8a503a022e4c3af34de21",
+      "bytes": 88612
     },
     {
       "path": "machine_view.py",

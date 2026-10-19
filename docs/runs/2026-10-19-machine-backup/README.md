@@ -24,7 +24,7 @@ on that branch.
   declared local folders) unless `roots` is set: no machine-specific default in public code.
 - **Caps, then names.** 16 MB per file, 128 MB per entry, 320 MB of file copies (raised in
   fix cycle 1 so a normal machine's skills are carried, not warned about daily), 16 MB per
-  checkout bundle (estimated with `rev-list --disk-usage` before it is written), 8 MB per patch or untracked set, 64 MB for checkouts. What a cap leaves out
+  checkout bundle (estimated with `rev-list --objects` and `cat-file` sizes before it is written), 8 MB per patch or untracked set, 64 MB for checkouts. What a cap leaves out
   is named once per top-level folder of its entry (the first measurement listed 5,888 files
   one by one; aggregated it is 205 lines).
 - **Schedule.** Daily from the maintenance pass after the workspace snapshot, with every job

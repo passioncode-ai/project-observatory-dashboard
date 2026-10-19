@@ -684,8 +684,16 @@ def _bundle_repository(path: Path, rec: dict, heads: dict, work: Path, cid: str)
     # Full ref names and `^<object>` exclusions on stdin: `--branches`/`--remotes` hand git short
     # names to resolve again, and a name that is also a remote branch was refused as a bad object.
     revs = "\n".join([*positive, *(f"^{sha}" for sha in sorted(negative))]) + "\n"
-    p = safe_git.run(["rev-list", "--disk-usage", "--objects", "--stdin"], repo=tmp, input=revs, timeout=300)
-    estimate = int((p.stdout or "").strip()) if p.returncode == 0 and (p.stdout or "").strip().isdigit() else None
+    # The objects' size on disk, before anything is written: every object the bundle would
+    # carry, sized by `cat-file` (`objectsize:disk`), summed.
+    p = safe_git.run(["rev-list", "--objects", "--stdin"], repo=tmp, input=revs, timeout=300)
+    estimate = None
+    if p.returncode == 0:
+        names = "\n".join(line.split(" ", 1)[0] for line in (p.stdout or "").splitlines() if line) + "\n"
+        q = safe_git.run(["cat-file", "--batch-check=%(objectsize:disk)"], repo=tmp, input=names, timeout=300)
+        if q.returncode == 0:
+            sizes = [line for line in (q.stdout or "").split() if line.isdigit()]
+            estimate = sum(int(n) for n in sizes)
     return tmp, revs, estimate
 
 
