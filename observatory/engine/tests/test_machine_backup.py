@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -62,6 +63,15 @@ class Base(unittest.TestCase):
         import paths
         importlib.reload(paths)
         self.fake_tools()
+        # Hermetic (L6): free space is the test's, not the machine's.
+        # The key derivation's cost is the format's, not under test here: the header records the
+        # parameters, so a reader follows them. Keeps the suite inside the runner's 120 s.
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        free = patch.object(MB, 'free_bytes', lambda path: 100 * 1024 ** 3)
+        free.start()
+        self.addCleanup(free.stop)
 
     def tearDown(self):
         self.env.stop()
@@ -143,11 +153,36 @@ class Machine(Base):
         (alpha / 'local.txt').write_text('unpushed\n')
         git('add', '.', cwd=alpha, env=env)
         git('commit', '-qm', 'unpushed', cwd=alpha, env=env)
+        git('tag', 'local-only', cwd=alpha, env=env)
+        git('tag', 'pushed-tag', 'HEAD~1', cwd=alpha, env=env)
+        # Two stash entries, the older first (M1).
+        for n in (1, 2):
+            (alpha / 'local.txt').write_text(f'stashed {n}\n')
+            git('stash', 'push', '-q', '-m', f'stash {n}', cwd=alpha, env=env)
+        self.stashes = git('reflog', 'show', '--format=%H', 'refs/stash', cwd=alpha).splitlines()
+        # A person's diff configuration must not change the carried patch (L2).
+        git('config', 'diff.noprefix', 'true', cwd=alpha, env=env)
         (alpha / 'README.md').write_text('alpha, changed\n')
         (alpha / 'notes').mkdir()
         (alpha / 'notes' / 'draft.md').write_text('untracked\n')
+        (alpha / 'notes' / 'run.sh').write_text('#!/bin/sh\n')
+        (alpha / 'notes' / 'run.sh').chmod(0o755)
         self.alpha_head = git('rev-parse', 'HEAD', cwd=alpha)
         git('worktree', 'add', '-q', '-b', 'feature', str(self.user / 'src' / 'alpha-feature'), cwd=alpha, env=env)
+        # A detached worktree whose commits are on no branch and no remote (M1).
+        detached = self.user / 'src' / 'alpha-detached'
+        git('worktree', 'add', '-q', '--detach', str(detached), cwd=alpha, env=env)
+        for n in (1, 2):
+            (detached / f'experiment-{n}.txt').write_text(f'{n}\n')
+            git('add', '.', cwd=detached, env=env)
+            git('commit', '-qm', f'experiment {n}', cwd=detached, env=env)
+        self.detached_head = git('rev-parse', 'HEAD', cwd=detached)
+        # A repository with no commit yet, holding staged work (M1).
+        gamma = self.user / 'src' / 'gamma-new'
+        gamma.mkdir()
+        git('init', '-q', '-b', 'main', cwd=gamma, env=env)
+        (gamma / 'staged.txt').write_text('staged, never committed\n')
+        git('add', 'staged.txt', cwd=gamma, env=env)
         beta = self.user / 'src' / 'beta-api'
         beta.mkdir()
         git('init', '-q', '-b', 'main', cwd=beta, env=env)
@@ -206,15 +241,38 @@ class Taking(Machine):
         stage, manifest = self.open(MB.newest(self.ws))
         self.addCleanup(shutil.rmtree, stage, True)
         records = {r['path']: r for r in manifest['checkouts']}
-        self.assertEqual(set(records), {'~/src/alpha-web', '~/src/alpha-feature', '~/src/beta-api'},
+        self.assertEqual(set(records), {'~/src/alpha-web', '~/src/alpha-feature', '~/src/alpha-detached',
+                                        '~/src/beta-api', '~/src/gamma-new'},
                          'a dependency tree is never searched')
         alpha = records['~/src/alpha-web']
         self.assertEqual((alpha['branch'], alpha['head'], alpha['ahead'], alpha['behind']),
                          ('main', self.alpha_head, 1, 0))
         self.assertEqual(alpha['remotes']['mirror'], 'https://example.invalid/alpha-web.git')
         self.assertTrue(alpha['dirty'])
-        self.assertEqual(alpha['untracked_count'], 1)
-        self.assertEqual(sorted(alpha['carried']), ['bundle', 'patch', 'untracked'])
+        self.assertEqual(alpha['untracked_count'], 2)
+        self.assertEqual(sorted(alpha['carried']), ['bundle', 'patch', 'untracked', 'untracked_modes'])
+        self.assertEqual(alpha['carried']['untracked_modes']['notes/run.sh'], 0o755)
+        # Every local tip counts: branches, tags, every stash entry; the detached worktree its HEAD too.
+        tips = ['--branches', '--tags', *self.stashes]
+        repo = self.user / 'src' / 'alpha-web'
+        self.assertEqual(alpha['unpushed'], int(git('rev-list', '--count', *tips, '--not', '--remotes', cwd=repo)))
+        self.assertEqual(records['~/src/alpha-detached']['unpushed'],
+                         int(git('rev-list', '--count', *tips, self.detached_head, '--not', '--remotes', cwd=repo)))
+        self.assertEqual(records['~/src/alpha-detached']['unpushed'] - alpha['unpushed'], 2)
+        self.assertEqual([e['sha'] for e in alpha['stashes']], self.stashes)
+        self.assertIn('local-only', alpha['tags'])
+        detached = records['~/src/alpha-detached']
+        self.assertEqual((detached['branch'], detached['head'], detached['worktree']), (None, self.detached_head, True))
+        heads = git('bundle', 'list-heads', str(stage / alpha['carried']['bundle']), cwd=self.user / 'src' / 'alpha-web')
+        for sha in (self.detached_head, *self.stashes):
+            self.assertIn(sha, heads, 'the detached HEAD and every stash travel in the bundle')
+        self.assertIn('refs/tags/local-only', heads)
+        patch_text = (stage / alpha['carried']['patch']).read_text()
+        self.assertIn('--- a/README.md', patch_text, 'fixed prefixes whatever diff.noprefix says')
+        gamma = records['~/src/gamma-new']
+        self.assertIsNone(gamma['head'])
+        self.assertEqual(gamma['carried']['patch'], f"checkouts/{gamma['id']}/staged.patch")
+        self.assertIn('staged, never committed', (stage / gamma['carried']['patch']).read_text())
         self.assertTrue(records['~/src/alpha-feature']['worktree'])
         self.assertNotIn('bundle', records['~/src/alpha-feature'].get('carried', {}),
                          'one bundle per repository: the worktree shares it')
@@ -241,6 +299,24 @@ class Taking(Machine):
         self.assertEqual(len(bulky), 1)
         self.assertIn('limits.entry_mb', bulky[0]['reason'])
         self.assertGreater(bulky[0]['files'], 30)
+
+    def test_a_bundle_over_its_cap_is_named_before_it_is_written(self):
+        self.settings({'roots': ['~/src'], 'limits': {'bundle_mb': 0.0001}})
+        self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        missed = [m for m in manifest['not_carried'] if 'limits.bundle_mb' in m['reason']]
+        self.assertEqual({m['source'] for m in missed}, {'~/src/alpha-web', '~/src/beta-api'})
+        self.assertFalse(any('bundle' in (r.get('carried') or {}) for r in manifest['checkouts']))
+
+    def test_a_submodule_is_not_a_worktree(self):
+        sub_dir = self.base / 'kinds' / 'lib'
+        sub_dir.mkdir(parents=True)
+        (sub_dir / '.git').write_text('gitdir: ../.git/modules/lib\n')
+        self.assertEqual(MB._checkout_kind(sub_dir), 'submodule')
+        (sub_dir / '.git').write_text('gitdir: /x/repo/.git/worktrees/lib\n')
+        self.assertEqual(MB._checkout_kind(sub_dir), 'worktree')
+        self.assertEqual(MB._checkout_kind(self.user / 'src' / 'beta-api'), 'repository')
 
     def test_rotation_keeps_three(self):
         for day in range(5):
@@ -363,15 +439,94 @@ class Restore(Machine):
         self.assertEqual(rows['~/src/alpha-web']['result'], 'cloned', rows)
         self.assertEqual(rows['~/src/beta-api']['result'], 'cloned', rows)
         self.assertEqual(rows['~/src/alpha-feature']['result'], 'cloned', rows)
+        self.assertEqual(rows['~/src/alpha-detached']['result'], 'cloned', rows)
+        self.assertEqual(rows['~/src/gamma-new']['result'], 'cloned', rows)
         alpha = self.fresh / 'src' / 'alpha-web'
         self.assertEqual(git('rev-parse', 'HEAD', cwd=alpha), self.alpha_head, 'the unpushed commit is back')
         self.assertEqual((alpha / 'README.md').read_text(), 'alpha, changed\n', 'the uncommitted change is back')
         self.assertEqual((alpha / 'notes' / 'draft.md').read_text(), 'untracked\n')
+        self.assertEqual(stat.S_IMODE((alpha / 'notes' / 'run.sh').stat().st_mode), 0o755, 'L3: its mode too')
+        self.assertEqual(git('reflog', 'show', '--format=%H', 'refs/stash', cwd=alpha).splitlines(), self.stashes,
+                         'both stashes, newest first')
+        self.assertEqual(git('rev-parse', 'local-only', cwd=alpha), self.alpha_head)
+        self.assertTrue(git('rev-parse', 'pushed-tag', cwd=alpha))
+        self.assertEqual(git('for-each-ref', 'refs/carried', cwd=alpha), '', 'the carried names are removed')
+        detached = self.fresh / 'src' / 'alpha-detached'
+        self.assertEqual(git('rev-parse', 'HEAD', cwd=detached), self.detached_head, 'the detached commits are back')
+        self.assertEqual(subprocess.run(['git', 'symbolic-ref', '-q', 'HEAD'], cwd=detached).returncode, 1,
+                         'and HEAD is detached again')
+        gamma = self.fresh / 'src' / 'gamma-new'
+        self.assertEqual(git('diff', '--cached', '--name-only', cwd=gamma), 'staged.txt', 'staged work is staged again')
         self.assertEqual(git('remote', 'get-url', 'mirror', cwd=alpha), 'https://example.invalid/alpha-web.git')
         self.assertEqual(git('rev-parse', 'HEAD', cwd=self.fresh / 'src' / 'beta-api'), self.beta_head,
                          'a repository with no remote comes back from its bundle')
         again = MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True)
         self.assertEqual({r['result'] for r in again['clone']}, {'exists'}, 'an existing checkout is never touched')
+
+    def test_no_decrypted_copy_is_left_in_the_home(self):
+        MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', do_clone=True, base=self.ws)
+        self.assertFalse(list(self.fresh.glob('.decrypted-*')))
+        self.assertEqual([p.name for p in MB.stage_root(self.ws).iterdir()], ['.lock'])
+        self.assertEqual(stat.S_IMODE(MB.stage_root(self.ws).stat().st_mode), 0o700)
+
+    def killed_restore(self, sig):
+        code = (f"import sys, time; sys.path[:0] = [{str(ROOT)!r}, {str(Path(__file__).resolve().parent)!r}]\n"
+                "import machine_backup as MB\nfrom pathlib import Path\n"
+                "MB.raise_on_signals()\n"
+                f"MB.restore(Path({str(self.bundle)!r}), Path({str(self.fresh)!r}), base=Path({str(self.ws)!r}), "
+                f"secret={PASS!r}, mode='apply', hold=lambda stage: (print('ready', flush=True), time.sleep(60)))\n")
+        child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True, env=dict(os.environ))
+        self.assertEqual(child.stdout.readline().strip(), 'ready')
+        root = MB.stage_root(self.ws)
+        self.assertTrue(list(root.rglob('id_example')), 'the plaintext exists while the restore runs')
+        child.send_signal(sig)
+        child.wait(30)
+        child.stdout.close()
+        return root
+
+    def test_a_restore_killed_by_sigterm_or_sighup_leaves_no_plaintext(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            root = self.killed_restore(sig)
+            self.assertEqual([p.name for p in root.iterdir()], ['.lock'], sig)
+
+    def test_a_restore_killed_outright_is_swept_by_the_next_run(self):
+        root = self.killed_restore(signal.SIGKILL)
+        self.assertTrue(list(root.rglob('id_example')), 'SIGKILL cannot be caught')
+        MB.restore(self.bundle, self.fresh, secret=PASS, base=self.ws)
+        self.assertEqual([p.name for p in root.iterdir()], ['.lock'])
+
+    def test_a_backup_sweeps_what_a_killed_one_left(self):
+        root = MB.stage_root(self.ws)
+        left = root / 'backup-killed'
+        left.mkdir(parents=True)
+        (left / 'abcdef012345.bundle').write_bytes(b'plaintext commits')
+        legacy = self.ws / 'store' / '.machine-backup-old'
+        legacy.mkdir()
+        (legacy / 'x.bundle').write_bytes(b'plaintext commits')
+        self.take(at=AT + datetime.timedelta(days=1))
+        self.assertEqual([p.name for p in root.iterdir()], ['.lock'])
+        self.assertFalse(legacy.exists())
+
+    def test_a_record_from_a_bundle_is_validated_before_use(self):
+        good = {'id': 'abcdef012345', 'path': '~/src/x', 'branch': 'main', 'head': 'a' * 40}
+        self.assertIsNone(MB.validate_checkout(good, self.fresh))
+        for bad in ({'id': '../x'}, {'path': '~/../escape'}, {'branch': '--upload-pack=x'}, {'head': 'HEAD'},
+                    {'remotes': {'origin': '--upload-pack=x'}}, {'remotes': {'-o': 'x'}},
+                    {'stashes': [{'sha': 'nope'}]}, {'tags': {'-d': 'a' * 40}},
+                    {'carried': {'bundle': '../../.ssh/id'}}, {'carried': {'patch': '/etc/passwd'}},
+                    {'carried': {'untracked': ['../outside']}}):
+            self.assertIsNotNone(MB.validate_checkout({**good, **bad}, self.fresh), bad)
+        manifest = {'items': [{'kind': 'file', 'source': '~/x', 'arcname': '../x', 'sha256': '0' * 64, 'size': 1}]}
+        done = MB.apply(manifest, self.base, self.fresh)
+        self.assertEqual(len(done['failed']), 1)
+        self.assertFalse((self.fresh / 'x').exists())
+
+    def test_a_destination_never_leaves_its_home(self):
+        for source in ('~/../outside', '~/a/../../b', '~/a/../b', 'relative/path', '/abs/../escape', ''):
+            with self.assertRaises(MB.MachineBackupError, msg=source):
+                MB._destination(source, self.fresh)
+        self.assertEqual(MB._destination('~/.ssh/id', self.fresh), self.fresh / '.ssh/id')
+        self.assertEqual(MB._destination('~', self.fresh), self.fresh)
 
     def test_packages_installs_each_inventory_with_its_tool(self):
         calls = []

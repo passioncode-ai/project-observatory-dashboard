@@ -1414,18 +1414,24 @@ What one bundle holds, by category:
 | CLI logins | `~/.config/gh/`, doctl's configuration, `~/.config/heroku/`, `~/.netrc` |
 | Jobs and services | `~/Library/LaunchAgents/*.plist` (macOS) or `~/.config/systemd/user/` (Linux); the Fabric service descriptors directory |
 | Inventories | Homebrew (`brew bundle dump`), global npm, pipx and uv tools; this engine's workspace path, version and newest snapshot |
-| Checkouts | every Git checkout under the `projects` source and the declared local folders (or `roots`, below): remote URLs without user information, branch, HEAD, dirty and ahead/behind; a `git bundle` of the commits no remote has, a patch of uncommitted changes and the untracked files, each under a cap |
+| Checkouts | every Git checkout under the `projects` source and the declared local folders (or `roots`, below): remote URLs without user information, branch, HEAD, dirty and ahead/behind; one `git bundle` per repository of every commit no remote has (on branches, local tags, a detached HEAD of any of its worktrees, and every stash entry) plus its tag names, a patch of uncommitted changes (for a repository with no commit yet, its staged changes) and the untracked files with their modes, each under a cap; a shallow clone keeps its boundary |
 
 A symbolic link is recorded as a link with its target, never followed. Left out on purpose
 and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
 (`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
 Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
 belong in the vault, which the workspace snapshot carries. Anything over a cap (16 MB per
-file, 32 MB per entry, 160 MB of file copies, 16 MB per checkout bundle, 8 MB per patch or
+file, 128 MB per entry, 320 MB of file copies, 16 MB per checkout bundle (estimated before it is written), 8 MB per patch or
 set of untracked files, 64 MB for all checkouts) is **not carried** and named, per folder, in
 `MANIFEST.json`, in the command's answer, in `doctor` (`machine_backup.not_carried`) and on the
-Health page. Measured on a working agent machine (2026-10-19): 47 MB, 8,232 items, 453
-checkouts, about a minute. Three bundles are kept.
+Health page. Measured on a working agent machine (2026-10-19): 69 MB, 14,221 items, 517
+checkouts, under two minutes. Three bundles are kept.
+
+Every decrypted or temporary copy, during a backup or a restore, lives in one private folder,
+`<home>/store/.machine-stage/` (mode 700; before a workspace exists,
+`${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-stage/`). A restore decrypts only
+what its current step needs and removes it before the next step; SIGTERM and SIGHUP remove it
+too, and whatever a killed run left is swept when the next backup or restore starts.
 
 Nothing is written without a passphrase: a bundle holds `~/.ssh` and CLI logins, so it is
 never written unencrypted, not even inside the workspace. A write is also refused when the
@@ -1471,9 +1477,11 @@ stops the daily and pre-update bundles.
    install --no-upgrade`) and the npm, pipx and uv tools. Install Homebrew first.
 6. `full machine-restore --latest --clone` clones every recorded checkout that is not there
    yet (with your own Git configuration and the SSH keys step 4 put back), adds its other
-   remotes, fetches its carried unpushed commits, checks out its branch and HEAD, applies its
-   patch and writes its untracked files. A checkout that exists is never touched; a worktree
-   is added to its restored main checkout.
+   remotes, fetches its carried commits and tags, puts back its stash entries in order, checks
+   out its branch (or detaches HEAD where it was detached), applies its patch and writes its
+   untracked files with their modes. A repository that had no commit yet is initialised and
+   its staged changes are staged again. A checkout that exists is never touched; a worktree is
+   added to its restored main checkout, detached where it was.
 7. `project-observatory full init` (or `full restore --latest`) brings back the workspace
    itself from its own snapshot, then `full maintain ensure` schedules the job.
 

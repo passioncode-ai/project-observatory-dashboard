@@ -12,13 +12,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
   settings, CLI logins, launchd or systemd user jobs, the Fabric service descriptors, the Homebrew, npm, pipx and uv
   inventories, and every checkout's remotes (without user information), branch, HEAD, dirty and ahead/behind state
-  with a git bundle of its unpushed commits, a patch of its uncommitted changes and its untracked files. The
+  with a git bundle of every commit no remote has (branches, local tags, detached HEADs, stash entries), a patch of
+  its uncommitted changes (staged changes for a repository with no commit yet) and its untracked files. The
   maintenance job takes one a day, `full update` one before it stops the jobs (unless one is under an hour old), and
   `full machine-backup` one now. `config/machine-backup.json` adds an operator's own paths, excludes and checkout
   roots. `full machine-restore [BUNDLE | --latest]` prints the plan; `--apply` writes only what is missing,
   `--overwrite` moves a conflict aside first, `--packages` installs the inventories and `--clone` clones the checkouts
-  and puts back their carried work. Measured on a working agent machine: 47 MB, 8,232 items, 453 checkouts, about a
-  minute.
+  and puts back their carried work. Measured on a working agent machine: 69 MB, 14,221 items, 517 checkouts, under
+  two minutes.
+  - Decrypted and temporary copies live only in the workspace's private `store/.machine-stage/`, one restore
+    step at a time; SIGTERM and SIGHUP remove them and the next run sweeps what a killed one left.
   - Nothing is written without a passphrase; a disk that would keep under 2 GB free refuses the write, recorded and
     shown in `doctor`, `maintain status` and Health; three bundles are kept.
   - What a cap leaves out is not carried and named per folder in the bundle's `MANIFEST.json`, the answer, `doctor`

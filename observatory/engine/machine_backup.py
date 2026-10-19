@@ -64,6 +64,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -94,8 +95,8 @@ STATE_NAME = "machine-backup.json"
 #: Every limit, and the key that changes it in machine-backup.json → `limits`.
 LIMITS = {
     "file_mb": 16,          # one file
-    "entry_mb": 32,         # one manifest entry (a directory such as ~/.claude/skills)
-    "total_mb": 160,        # every file copy together; the target is a bundle well under 200 MB
+    "entry_mb": 128,        # one manifest entry (a directory such as ~/.claude/skills)
+    "total_mb": 320,        # every file copy together; measured: 69 MB compressed with every skill carried
     "bundle_mb": 16,        # one checkout's git bundle of unpushed commits
     "patch_mb": 8,          # one checkout's patch of uncommitted changes
     "untracked_mb": 8,      # one checkout's untracked files together
@@ -564,9 +565,41 @@ def _status_v2(raw: bytes) -> dict:
     return out
 
 
+HEX = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+#: A ref name a bundle may hand to git: no option, no traversal, no control or space.
+REF_NAME = re.compile(r"(?!-)(?!.*\.\.)[A-Za-z0-9._/+@-]{1,200}")
+REMOTE_NAME = re.compile(r"(?!-)[A-Za-z0-9._-]{1,64}")
+CID = re.compile(r"[0-9a-f]{12}")
+#: A repository's tags recorded by name, so a tag on a pushed commit (which no bundle carries)
+#: is put back too. A repository with more is named, not recorded in full.
+MAX_TAGS = 500
+
+
+def _checkout_kind(path: Path) -> str:
+    """`repository`, `worktree` (a `.git` file into `<common>/worktrees/`) or `submodule`
+    (a `.git` file into `<superproject>/.git/modules/`)."""
+    marker = path / ".git"
+    if not marker.is_file():
+        return "repository"
+    try:
+        text = marker.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return "repository"
+    target = text[len("gitdir:"):].strip().replace("\\", "/") if text.startswith("gitdir:") else ""
+    if "/worktrees/" in target:
+        return "worktree"
+    if "/modules/" in target:
+        return "submodule"
+    return "repository"
+
+
 def inspect_checkout(path: Path, home: Path) -> dict:
-    """What a checkout holds that no remote does. Reads only; runs no hook or filter (safe_git)."""
-    rec = {"path": display(path, home), "worktree": (path / ".git").is_file()}
+    """What a checkout holds that no remote does. Reads only; runs no hook or filter (safe_git).
+
+    Local-only commits are counted over every local tip: branches, tags, a detached HEAD and
+    every stash entry (round 1 of #305: a detached worktree with 14 commits counted none)."""
+    kind = _checkout_kind(path)
+    rec = {"path": display(path, home), "worktree": kind == "worktree", "submodule": kind == "submodule"}
     p = _git(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], path, text=False)
     if p.returncode != 0:
         lines = (p.stderr or b"").decode("utf-8", "replace").strip().splitlines()
@@ -578,78 +611,173 @@ def inspect_checkout(path: Path, home: Path) -> dict:
     remotes = {}
     for line in (p.stdout or "").splitlines():
         parts = line.split()
-        if len(parts) >= 2 and parts[0] not in remotes:
+        if len(parts) >= 2 and parts[0] not in remotes and REMOTE_NAME.fullmatch(parts[0]):
             remotes[parts[0]] = redact_url(parts[1])
     rec["remotes"] = remotes
     p = _git(["rev-parse", "--path-format=absolute", "--git-common-dir"], path)
     rec["common_dir"] = (p.stdout or "").strip() if p.returncode == 0 else None
-    if rec["head"]:
-        p = _git(["rev-list", "--count", "--branches", "--not", "--remotes"], path)
+    p = _git(["reflog", "show", "--format=%H %gs", "refs/stash", "--"], path)
+    stashes = []
+    for line in (p.stdout or "").splitlines() if p.returncode == 0 else []:
+        sha, _, message = line.partition(" ")
+        if HEX.fullmatch(sha):
+            stashes.append({"sha": sha, "message": message[:200]})
+    rec["stashes"] = stashes
+    p = _git(["for-each-ref", "--format=%(refname:strip=2) %(objectname) %(*objectname)", "refs/tags"], path)
+    tags = {}
+    for line in (p.stdout or "").splitlines() if p.returncode == 0 else []:
+        parts = line.split()
+        if len(parts) >= 2 and REF_NAME.fullmatch(parts[0]):
+            tags[parts[0]] = parts[2] if len(parts) > 2 and HEX.fullmatch(parts[2]) else parts[1]
+    if len(tags) > MAX_TAGS:
+        rec["tags_over"] = len(tags)
+        tags = dict(sorted(tags.items())[:MAX_TAGS])
+    rec["tags"] = tags
+    tips = ["--branches", "--tags", *(s["sha"] for s in stashes)]
+    if rec["head"] and not rec["branch"]:
+        tips.append(rec["head"])
+    if rec["head"] or stashes or tags:
+        p = _git(["rev-list", "--count", *tips, "--not", "--remotes", "--"], path)
         rec["unpushed"] = int((p.stdout or "0").strip() or 0) if p.returncode == 0 else None
     else:
         rec["unpushed"] = 0
     return rec
 
 
+def _bundle_repository(path: Path, rec: dict, heads: dict, work: Path, cid: str):
+    """A temporary bare repository that borrows the checkout's objects (alternates) and names
+    every local tip: branches, tags, remote-tracking refs, each detached HEAD of the repository
+    (`refs/carried/head/<id>`) and each stash entry (`refs/carried/stash/<n>`). The source is
+    never written. Returns (its path, the estimated size in bytes or None)."""
+    common = Path(rec["common_dir"]) if rec.get("common_dir") else path / ".git"
+    tmp = work / f"{cid}.git"
+    p = _git(["init", "-q", "--bare", str(tmp)], work)
+    if p.returncode != 0:
+        raise MachineBackupError(f"git init failed: {(p.stderr or '').strip()[:120]}")
+    (tmp / "objects" / "info").mkdir(parents=True, exist_ok=True)
+    (tmp / "objects" / "info" / "alternates").write_text(str(common / "objects") + "\n", encoding="utf-8")
+    # A shallow clone's boundary travels with it: without it the walk runs into parents the
+    # source never had (measured: six shallow checkouts failed or counted an empty bundle).
+    if (common / "shallow").is_file():
+        shutil.copyfile(common / "shallow", tmp / "shallow")
+    p = _git(["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags", "refs/remotes"], path)
+    lines, positive, negative = [], [], set()
+    for line in (p.stdout or "").splitlines():
+        sha, _, ref = line.partition(" ")
+        if not HEX.fullmatch(sha) or not ref or ref.endswith("/HEAD"):
+            continue
+        if ref.startswith("refs/remotes/"):
+            negative.add(sha)   # an exclusion by object, never by a short name git must resolve
+        else:
+            lines.append(f"update {ref} {sha}")
+            positive.append(ref)
+    for other, head in sorted(heads.items()):
+        lines.append(f"update refs/carried/head/{other} {head}")
+        positive.append(f"refs/carried/head/{other}")
+    for n, entry in enumerate(rec.get("stashes") or []):
+        lines.append(f"update refs/carried/stash/{n} {entry['sha']}")
+        positive.append(f"refs/carried/stash/{n}")
+    import safe_git
+    p = safe_git.run(["update-ref", "--stdin"], repo=tmp, input="\n".join(lines) + "\n", timeout=GIT_TIMEOUT)
+    if p.returncode != 0:
+        raise MachineBackupError(f"naming the local tips failed: {(p.stderr or '').strip()[:120]}")
+    # Full ref names and `^<object>` exclusions on stdin: `--branches`/`--remotes` hand git short
+    # names to resolve again, and a name that is also a remote branch was refused as a bad object.
+    revs = "\n".join([*positive, *(f"^{sha}" for sha in sorted(negative))]) + "\n"
+    p = safe_git.run(["rev-list", "--disk-usage", "--objects", "--stdin"], repo=tmp, input=revs, timeout=300)
+    estimate = int((p.stdout or "").strip()) if p.returncode == 0 and (p.stdout or "").strip().isdigit() else None
+    return tmp, revs, estimate
+
+
 def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Path, cid: str,
-                   bundled_dirs: set, budget: list) -> list[dict]:
-    """The members this checkout adds: a bundle of unpushed commits (once per repository), a
-    patch of uncommitted changes, untracked files. Over a cap, the part is named instead."""
+                   bundled_dirs: set, budget: list, heads: dict | None = None) -> list[dict]:
+    """The members this checkout adds: one bundle per repository of every commit no remote has
+    (branches, tags, detached HEADs, stashes), a patch of uncommitted changes (a staged patch
+    for a repository with no commit yet), untracked files with their modes. Over a cap, or
+    when the disk would cross its floor, the part is named instead of written."""
     members, shown, limits = [], rec["path"], col.limits
     carried = rec.setdefault("carried", {})
+    floor = int(limits["min_free_gb"] * 1024 ** 3)
 
-    def fits(size: int, cap_key: str, what: str) -> bool:
+    def room(size: int, cap_key: str, what: str, charge: bool = True) -> bool:
         if size > col.mb(cap_key):
-            col.miss(shown, f"{what}: over the cap of {limits[cap_key]} MB", size)
+            col.miss(shown, f"{what}: over the cap of {limits[cap_key]} MB (limits.{cap_key})", size)
             return False
         if budget[0] + size > col.mb("checkouts_mb"):
-            col.miss(shown, f"{what}: over the checkouts' cap of {limits['checkouts_mb']} MB", size)
+            col.miss(shown, f"{what}: over the checkouts' cap of {limits['checkouts_mb']} MB (limits.checkouts_mb)", size)
             return False
-        budget[0] += size
+        if free_bytes(work) - size < floor:
+            col.miss(shown, f"{what}: writing it would leave under {limits['min_free_gb']} GB free", size)
+            return False
+        if charge:
+            budget[0] += size
         return True
 
-    # One bundle per repository: a worktree shares its main checkout's branches.
     repository = rec.get("common_dir") or str(path)
     if rec.get("unpushed") and repository not in bundled_dirs:
         bundled_dirs.add(repository)
-        target = work / f"{cid}.bundle"
-        p = _git(["bundle", "create", str(target), "--branches", "--not", "--remotes"], path, timeout=300)
-        if p.returncode != 0 or not target.is_file():
-            col.miss(shown, f"unpushed commits: git bundle failed ({(p.stderr or '').strip()[:120]})")
-        else:
-            size = target.stat().st_size
-            if fits(size, "bundle_mb", f"{rec['unpushed']} unpushed commit(s)"):
-                data = target.read_bytes()
-                members.append({"arcname": f"checkouts/{cid}/unpushed.bundle", "data": data})
+        what = f"{rec['unpushed']} commit(s) no remote has"
+        try:
+            tmp, revs, estimate = _bundle_repository(path, rec, heads or {}, work, cid)
+        except MachineBackupError as exc:
+            col.miss(shown, f"{what}: {exc}")
+            tmp = None
+        # L1: the size is known before anything is written.
+        if tmp is not None and (estimate is None or room(estimate, "bundle_mb", what, charge=False)):
+            target = work / f"{cid}.bundle"
+            import safe_git
+            p = safe_git.run(["bundle", "create", "-q", str(target), "--stdin"], repo=tmp, input=revs, timeout=300)
+            if target.exists():
+                os.chmod(target, 0o600)
+            if p.returncode != 0 or not target.is_file():
+                col.miss(shown, f"{what}: git bundle failed ({(p.stderr or '').strip()[:120]})")
+            elif room(target.stat().st_size, "bundle_mb", what):
+                members.append({"arcname": f"checkouts/{cid}/unpushed.bundle", "data": target.read_bytes()})
                 carried["bundle"] = f"checkouts/{cid}/unpushed.bundle"
             target.unlink(missing_ok=True)
-    if rec.get("changed") and rec.get("head"):
-        p = _git(["diff", "--binary", "HEAD"], path, text=False, timeout=300)
+        if tmp is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+    if rec.get("changed"):
+        # L2: fixed prefixes, no external diff or textconv (safe_git adds those), whatever the
+        # person's configuration says.
+        args = ["diff", "--binary", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"]
+        unborn = not rec.get("head")
+        name = "staged.patch" if unborn else "changes.patch"
+        p = _git([*args, "--cached"] if unborn else [*args, "HEAD"], path, text=False, timeout=300)
         if p.returncode != 0:
             col.miss(shown, "uncommitted changes: git diff failed")
-        elif p.stdout and fits(len(p.stdout), "patch_mb", "uncommitted changes"):
-            members.append({"arcname": f"checkouts/{cid}/changes.patch", "data": p.stdout})
-            carried["patch"] = f"checkouts/{cid}/changes.patch"
+        elif p.stdout and room(len(p.stdout), "patch_mb", "uncommitted changes"):
+            members.append({"arcname": f"checkouts/{cid}/{name}", "data": p.stdout})
+            carried["patch"] = f"checkouts/{cid}/{name}"
     if rec.get("untracked"):
         files, size = [], 0
         for rel in rec["untracked"]:
             f = path / rel
-            if f.is_symlink() or not f.is_file() or ".." in Path(rel).parts:
+            if f.is_symlink() or not f.is_file() or not _safe_rel(rel):
                 continue
             files.append((rel, f))
             size += f.stat().st_size
-        if files and fits(size, "untracked_mb", f"{len(files)} untracked file(s)"):
-            carried["untracked"] = []
+        if files and room(size, "untracked_mb", f"{len(files)} untracked file(s)"):
+            carried["untracked"], carried["untracked_modes"] = [], {}
             for rel, f in files:
                 try:
                     data = f.read_bytes()
+                    mode = stat.S_IMODE(f.stat().st_mode)
                 except OSError as exc:
                     col.miss(f"{shown}/{rel}", f"unreadable: {type(exc).__name__}")
                     continue
-                members.append({"arcname": f"checkouts/{cid}/untracked/{rel}", "data": data,
-                                "mode": stat.S_IMODE(f.stat().st_mode)})
+                members.append({"arcname": f"checkouts/{cid}/untracked/{rel}", "data": data, "mode": mode})
                 carried["untracked"].append(rel)
+                carried["untracked_modes"][rel] = mode
     return members
+
+
+def _safe_rel(rel) -> bool:
+    """A relative path a bundle may name inside a destination: no root, no `..`, no NUL."""
+    if not isinstance(rel, str) or not rel or "\x00" in rel or "\\" in rel:
+        return False
+    parts = Path(rel).parts
+    return not Path(rel).is_absolute() and ".." not in parts and not rel.startswith("-")
 
 
 # --- state -----------------------------------------------------------------------------------
@@ -704,6 +832,76 @@ def _lock(base: Path):
         os.close(fd)
 
 
+STAGE_DIR = ".machine-stage"
+
+
+def stage_root(base: Path | None) -> Path:
+    """The one private folder every decrypted or temporary copy lives in: under the workspace's
+    store, or, before a workspace exists on a new machine, under the per-user data directory.
+    Never a visible folder of the home (round 1 of #305: a restore killed mid-way left a
+    plaintext `~/.decrypted-*` holding every secret)."""
+    if base is not None:
+        return base / "store" / STAGE_DIR
+    return backup_vault.data_dir() / "project-observatory" / "machine-stage"
+
+
+def _sweep(root: Path) -> list[str]:
+    removed = []
+    for entry in root.iterdir():
+        if entry.name == ".lock":
+            continue
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            entry.unlink(missing_ok=True)
+        removed.append(entry.name)
+    return removed
+
+
+@contextlib.contextmanager
+def _staging(root: Path):
+    """Hold the stage: 0700, locked against a second backup or restore, swept of whatever a
+    killed run left (SIGKILL cannot be caught; the next run removes it), and swept again on
+    the way out. Also removes the stages releases before this one left in the store."""
+    import osprivacy
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(root, 0o700)
+    fd = osprivacy.open(root / ".lock", os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
+    try:
+        try:
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+        except BlockingIOError:
+            raise MachineBackupError("another machine backup or restore is running") from None
+        _sweep(root)
+        for old in root.parent.glob(".machine-backup-*"):
+            if old.is_dir() and not old.is_symlink():
+                shutil.rmtree(old, ignore_errors=True)
+        yield root
+    finally:
+        try:
+            _sweep(root)
+        finally:
+            os.close(fd)
+
+
+@contextlib.contextmanager
+def _phase(root: Path):
+    folder = Path(tempfile.mkdtemp(prefix="restore-", dir=root))  # paths-check: allow: inside the swept 0700 stage
+    try:
+        yield folder
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def raise_on_signals() -> None:
+    """SIGTERM and SIGHUP raise, so every `finally` that removes a stage runs."""
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):
+        if sig is not None:
+            signal.signal(sig, stop)
+
+
 def iso(moment: datetime.datetime) -> str:
     return moment.astimezone(datetime.timezone.utc).isoformat(timespec="seconds")
 
@@ -754,13 +952,13 @@ def take(base: Path, *, trigger: str = "manual", home: Path | None = None, runne
     at = at or datetime.datetime.now(datetime.timezone.utc)
     started = time.monotonic()
     try:
-        with _lock(base):
-            result = _take(base, trigger, home or Path.home(), runner, path, at, started)
+        with _lock(base), _staging(stage_root(base)) as root:
+            result = _take(base, trigger, home or Path.home(), runner, path, at, started, root)
     except DiskRefused as exc:
         _record(base, {"at": iso(at), "result": "refused-disk", "trigger": trigger, "detail": str(exc)[:300]})
         raise
     except MachineBackupError as exc:
-        if "another machine backup is running" not in str(exc):
+        if "is running" not in str(exc):
             _record(base, {"at": iso(at), "result": "failed", "trigger": trigger, "detail": str(exc)[:300]})
         raise
     except (OSError, tarfile.TarError, subprocess.SubprocessError) as exc:
@@ -771,7 +969,7 @@ def take(base: Path, *, trigger: str = "manual", home: Path | None = None, runne
     return result
 
 
-def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, started) -> dict:
+def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, started, stage: Path) -> dict:
     settings = load_settings(base)
     limits = settings["limits"]
     secret = backup_vault.passphrase(base)
@@ -795,7 +993,7 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
     roots = [Path(r).expanduser() for r in settings["roots"]] if settings["roots"] is not None else default_roots(base)
     deadline = started + float(limits["checkout_seconds"])
     found, notes = find_checkouts(roots, int(limits["depth"]), deadline)
-    work = Path(tempfile.mkdtemp(prefix=".machine-backup-", dir=base / "store"))  # paths-check: allow: removed in the finally below
+    work = Path(tempfile.mkdtemp(prefix="backup-", dir=stage))  # paths-check: allow: inside the swept 0700 stage
     try:
         def inspect(p: Path) -> dict:
             if time.monotonic() > deadline:
@@ -807,6 +1005,12 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
         with ThreadPoolExecutor(max_workers=4) as pool:
             records = list(pool.map(inspect, found))
         members, bundled, budget = [], set(), [0]
+        # Every detached HEAD of a repository goes into that repository's one bundle.
+        heads: dict[str, dict] = {}
+        for rec in records:
+            if rec.get("head") and not rec.get("branch") and not rec.get("error"):
+                rid = hashlib.sha256(rec["path"].encode()).hexdigest()[:12]
+                heads.setdefault(rec.get("common_dir") or rec["path"], {})[rid] = rec["head"]
         # A main checkout before its worktrees, so the repository's one bundle is the main
         # checkout's, which a restore clones first and adds the worktrees to.
         for p, rec in sorted(zip(found, records), key=lambda pair: bool(pair[1].get("worktree"))):
@@ -814,7 +1018,8 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
             if rec.get("error"):
                 col.miss(rec["path"], f"checkout not read: {rec['error']}")
                 continue
-            members += carry_checkout(rec, p, home, col, work, rec["id"], bundled, budget)
+            members += carry_checkout(rec, p, home, col, work, rec["id"], bundled, budget,
+                                      heads.get(rec.get("common_dir") or rec["path"], {}))
         for rec in records:
             if "untracked" in rec:
                 rec["untracked_count"] = len(rec.pop("untracked"))
@@ -1086,6 +1291,69 @@ def _link_target(target: str, home: Path) -> str:
     return str(home / target[2:]) if target.startswith("~/") else (str(home) if target == "~" else target)
 
 
+ARC_PREFIXES = ("files/", "abs/", "inventories/", "checkouts/")
+
+
+def _safe_arcname(name) -> bool:
+    return (isinstance(name, str) and name.startswith(ARC_PREFIXES) and _safe_rel(name)
+            and "//" not in name)
+
+
+def extract(bundle: Path, secret: str, dest: Path, want) -> int:
+    """Decrypt only the members `want(name)` accepts into `dest` (inside the stage), each 0600.
+    The whole file was authenticated by the caller; any unsafe entry refuses the bundle."""
+    import osprivacy
+    count = 0
+    with bundle.open("rb") as stream:
+        reader = backup_vault._Reader(stream, secret)
+        with tarfile.open(fileobj=io.BufferedReader(reader, backup_vault.CHUNK), mode="r|gz") as tar:
+            for member in tar:
+                name = Path(member.name)
+                if member.issym() or member.islnk() or not (member.isfile() or member.isdir()) \
+                        or name.is_absolute() or ".." in name.parts:
+                    raise MachineBackupError("the machine bundle contains an unsafe entry")
+                if not member.isfile() or not want(member.name):
+                    continue
+                target = dest / name
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                with os.fdopen(osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+                    shutil.copyfileobj(tar.extractfile(member), out, backup_vault.CHUNK)
+                count += 1
+    return count
+
+
+def validate_checkout(rec: dict, home: Path) -> str | None:
+    """Why a checkout record read from a bundle may not be used as paths or git arguments, or
+    None. A bundle is the person's own, but it is a file from another machine (L5)."""
+    if not isinstance(rec, dict) or not CID.fullmatch(str(rec.get("id", ""))):
+        return "an invalid record id"
+    try:
+        _destination(rec.get("path", ""), home)
+    except MachineBackupError as exc:
+        return str(exc)
+    if rec.get("branch") is not None and not REF_NAME.fullmatch(str(rec["branch"])):
+        return "an invalid branch name"
+    if rec.get("head") is not None and not HEX.fullmatch(str(rec["head"])):
+        return "an invalid HEAD"
+    for name, url in (rec.get("remotes") or {}).items():
+        if not REMOTE_NAME.fullmatch(str(name)) or not isinstance(url, str) or not url or url.startswith("-"):
+            return "an invalid remote"
+    for entry in rec.get("stashes") or []:
+        if not HEX.fullmatch(str((entry or {}).get("sha", ""))):
+            return "an invalid stash entry"
+    for name, sha in (rec.get("tags") or {}).items():
+        if not REF_NAME.fullmatch(str(name)) or not HEX.fullmatch(str(sha)):
+            return "an invalid tag"
+    carried, cid = rec.get("carried") or {}, rec["id"]
+    if carried.get("bundle") not in (None, f"checkouts/{cid}/unpushed.bundle"):
+        return "an invalid carried bundle"
+    if carried.get("patch") not in (None, f"checkouts/{cid}/changes.patch", f"checkouts/{cid}/staged.patch"):
+        return "an invalid carried patch"
+    if not all(_safe_rel(r) for r in carried.get("untracked") or []):
+        return "an invalid untracked path"
+    return None
+
+
 def open_bundle(bundle: Path, secret: str, parent: Path) -> tuple[Path, dict]:
     """Authenticate, extract into a new private directory under `parent`, read MANIFEST.json."""
     stage = backup_vault.extract_tree(bundle, parent, secret)
@@ -1166,6 +1434,8 @@ def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False) -
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 os.symlink(_link_target(item["target"], home), dest)
             else:
+                if not _safe_arcname(item.get("arcname")):
+                    raise MachineBackupError("an unsafe name in the manifest")
                 source = stage / item["arcname"]
                 data = source.read_bytes()
                 if _sha256(data) != item["sha256"]:
@@ -1235,38 +1505,46 @@ def packages(stage: Path, *, runner=subprocess.run, which=shutil.which) -> list[
 
 
 def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git: str = "git") -> list[dict]:
-    """Clone each recorded checkout that is not on this machine, then put back its carried
-    unpushed commits, uncommitted changes and untracked files. Plain git with the person's own
-    configuration: a clone needs their SSH keys and credential helpers."""
+    """Clone each recorded checkout that is not on this machine, then put back what was
+    carried: every commit no remote had (branches, tags, a detached HEAD, stashes), the
+    uncommitted patch and the untracked files with their modes. A repository that had no commit
+    yet is initialised and its staged patch applied to the index. Plain git with the person's
+    own configuration: a clone needs their SSH keys and credential helpers."""
     out = []
-    records = sorted(manifest.get("checkouts", []), key=lambda r: bool(r.get("worktree")))
+    records = sorted(manifest.get("checkouts", []), key=lambda r: (bool(r.get("worktree")), bool(r.get("submodule"))))
     mains: dict[str, Path] = {}
+    restored: list[Path] = []
     for rec in records:
         if rec.get("error"):
+            continue
+        problem = validate_checkout(rec, home)
+        if problem:
+            out.append({"checkout": str(rec.get("path"))[:200], "result": "refused", "detail": problem})
             continue
         dest = _destination(rec["path"], home)
         row = {"checkout": display(dest, home)}
         out.append(row)
         carried = rec.get("carried") or {}
         bundle = stage / carried["bundle"] if carried.get("bundle") else None
-        if dest.exists():
+        if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
             row["result"] = "exists"
             if rec.get("common_dir") and not rec.get("worktree"):
                 mains[rec["common_dir"]] = dest
             continue
         remotes = rec.get("remotes") or {}
         url = remotes.get("origin") or next(iter(remotes.values()), None)
-        if rec.get("worktree"):
-            main = mains.get(rec.get("common_dir"))
-            if main is None or not rec.get("branch"):
-                row["result"] = "worktree-not-recreated"
-                row["detail"] = "its main checkout is not on this machine, or it had no branch"
-                continue
-            step_ = _run([git, "-C", str(main), "worktree", "add", str(dest), rec["branch"]], runner=runner)
+        main = mains.get(rec.get("common_dir")) if rec.get("worktree") else None
+        detached = bool(rec.get("head")) and not rec.get("branch")
+        if main is not None:
+            ref = ["--detach", str(dest), rec["head"]] if detached else [str(dest), rec.get("branch") or rec["head"]]
+            step_ = _run([git, "-C", str(main), "worktree", "add", *ref], runner=runner)
+        elif not rec.get("head"):
+            dest.mkdir(parents=True, exist_ok=True)
+            step_ = _run([git, "init", "-q", "-b", rec.get("branch") or "main", str(dest)], runner=runner)
         elif url:
-            step_ = _run([git, "clone", url, str(dest)], runner=runner)
+            step_ = _run([git, "clone", "--", url, str(dest)], runner=runner)
         elif bundle is not None and bundle.is_file():
-            step_ = _run([git, "clone", str(bundle), str(dest)], runner=runner)
+            step_ = _run([git, "clone", "--", str(bundle), str(dest)], runner=runner)
         else:
             row["result"] = "nothing-to-clone-from"
             row["detail"] = "no remote, and no commits were carried"
@@ -1274,30 +1552,47 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
         if step_["exit"] != 0:
             row.update(result="clone-failed", detail=step_.get("detail", ""))
             continue
-        if rec.get("common_dir") and not rec.get("worktree"):
-            mains[rec["common_dir"]] = dest
-        for name, remote in remotes.items():
-            if name != "origin" or not url:
-                _run([git, "-C", str(dest), "remote", "add", name, remote], runner=runner)
+        if main is None:
+            restored.append(dest)
+            if rec.get("common_dir"):
+                mains[rec["common_dir"]] = dest
+            for name, remote in remotes.items():
+                if name != "origin" or not url or not rec.get("head"):
+                    _run([git, "-C", str(dest), "remote", "add", name, remote], runner=runner)
         steps = []
-        if bundle is not None and bundle.is_file() and not rec.get("worktree"):
+        if main is None and bundle is not None and bundle.is_file():
             steps.append(_run([git, "-C", str(dest), "fetch", "--update-head-ok", str(bundle),
-                               "+refs/heads/*:refs/heads/*"], runner=runner))
-        if rec.get("branch") and not rec.get("worktree"):
-            steps.append(_run([git, "-C", str(dest), "checkout", rec["branch"]], runner=runner))
+                               "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*",
+                               "+refs/carried/*:refs/carried/*"], runner=runner))
+        if main is None:
+            for name, sha in sorted((rec.get("tags") or {}).items()):
+                _run([git, "-C", str(dest), "tag", name, sha], runner=runner)
+            # Oldest first, so the newest is stash@{0} again.
+            for n in reversed(range(len(rec.get("stashes") or []))):
+                entry = rec["stashes"][n]
+                steps.append(_run([git, "-C", str(dest), "stash", "store", "-m",
+                                   entry.get("message") or "restored stash", entry["sha"]], runner=runner))
+            if rec.get("head"):
+                target = ["--detach", rec["head"]] if detached else [rec["branch"]]
+                steps.append(_run([git, "-C", str(dest), "checkout", "-q", *target, "--"], runner=runner))
         if rec.get("head"):
-            steps.append(_run([git, "-C", str(dest), "reset", "--hard", rec["head"]], runner=runner))
+            steps.append(_run([git, "-C", str(dest), "reset", "-q", "--hard", rec["head"], "--"], runner=runner))
         if carried.get("patch"):
-            steps.append(_run([git, "-C", str(dest), "apply", "--binary", str(stage / carried["patch"])], runner=runner))
+            index = ["--index"] if not rec.get("head") else []
+            steps.append(_run([git, "-C", str(dest), "apply", "--binary", *index, str(stage / carried["patch"])],
+                              runner=runner))
         written = 0
+        modes = carried.get("untracked_modes") or {}
         for rel in carried.get("untracked") or []:
             target = dest / rel
-            if ".." in Path(rel).parts or target.exists():
+            if target.exists():
                 continue
             source = stage / "checkouts" / rec["id"] / "untracked" / rel
             if source.is_file():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
+                mode = modes.get(rel)
+                os.chmod(target, (mode if isinstance(mode, int) else 0o644) & 0o777)
                 written += 1
         failed = [s for s in steps if s["exit"] != 0]
         row["result"] = "cloned" if not failed else "cloned-with-problems"
@@ -1305,12 +1600,21 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
             row["problems"] = failed
         if written:
             row["untracked_written"] = written
+    # The carried names did their work: the commits are on branches, tags, HEADs and stashes.
+    for dest in restored:
+        p = subprocess.run([git, "-C", str(dest), "for-each-ref", "--format=delete %(refname)", "refs/carried"],
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if p.returncode == 0 and p.stdout.strip():
+            subprocess.run([git, "-C", str(dest), "update-ref", "--stdin"], input=p.stdout,
+                           capture_output=True, text=True)
     return out
 
 
 def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "plan", overwrite: bool = False,
             do_packages: bool = False, do_clone: bool = False, secret: str | None = None,
-            runner=subprocess.run, which=shutil.which, git: str = "git") -> dict:
+            runner=subprocess.run, which=shutil.which, git: str = "git", hold=None) -> dict:
+    """Plan, and each requested step in its own phase: only what that step needs is decrypted,
+    into the private stage, and removed before the next step starts (round 1 of #305)."""
     if not bundle.is_file():
         raise MachineBackupError(f"no machine bundle at {bundle}")
     if secret:
@@ -1319,42 +1623,61 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
         secret, header = secret_for(bundle, base)
     if header.get("kind") != KIND:
         raise MachineBackupError(f"{bundle.name} is a {header.get('kind')} backup, not a machine bundle")
-    need = bundle.stat().st_size * 3
-    if free_bytes(home) < need:
-        raise DiskRefused(f"{home} has too little free space to unpack {bundle.name} (needs about "
-                          f"{need / 1024 ** 2:.0f} MB)")
-    stage, manifest = open_bundle(bundle, secret, home)
-    try:
-        rows = plan(manifest, stage, home)
+    with _staging(stage_root(base)) as root:
+        need = bundle.stat().st_size * 3
+        if free_bytes(root) < need:
+            raise DiskRefused(f"too little free space to unpack {bundle.name} (needs about {need / 1024 ** 2:.0f} MB)")
+        with _phase(root) as stage:
+            extract(bundle, secret, stage, lambda n: n in ("MANIFEST.json", "inventories/observatory.json"))
+            try:
+                manifest = json.loads((stage / "MANIFEST.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise MachineBackupError(f"{bundle.name} holds no readable MANIFEST.json") from None
+            if not isinstance(manifest, dict) or manifest.get("format") != FORMAT:
+                raise MachineBackupError(f"{bundle.name} is not a machine bundle this engine reads")
+            pointer = stage / "inventories" / "observatory.json"
+            workspace_doc = json.loads(pointer.read_text(encoding="utf-8")) if pointer.is_file() else None
+        rows = plan(manifest, None, home)
         counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("missing", "same", "conflict")}
+
+        def here(rec):
+            try:
+                return _destination(rec["path"], home).exists()
+            except (MachineBackupError, KeyError, TypeError):
+                return None
         result = {"bundle": bundle.name, "created_at": manifest.get("created_at"), "trigger": manifest.get("trigger"),
                   "from_platform": manifest.get("platform"), "mode": mode, "counts": counts, "plan": rows,
                   "not_carried": manifest.get("not_carried", []),
                   "checkouts": [{"path": r.get("path"), "branch": r.get("branch"), "unpushed": r.get("unpushed"),
-                                 "dirty": r.get("dirty"), "carried": sorted((r.get("carried") or {}).keys()),
-                                 "remotes": sorted((r.get("remotes") or {}).keys()),
-                                 "exists_here": _destination(r["path"], home).exists() if r.get("path") else None}
-                                for r in manifest.get("checkouts", [])],
+                                 "dirty": r.get("dirty"), "stashes": len(r.get("stashes") or []),
+                                 "carried": sorted(k for k in (r.get("carried") or {}) if k != "untracked_modes"),
+                                 "remotes": sorted((r.get("remotes") or {}).keys()), "exists_here": here(r)}
+                                for r in manifest.get("checkouts", []) if isinstance(r, dict)],
                   "inventories": manifest.get("inventories", [])}
+        if workspace_doc is not None:
+            result["workspace"] = workspace_doc
         if mode == "apply":
-            result["applied"] = apply(manifest, stage, home, overwrite=overwrite)
+            with _phase(root) as stage:
+                extract(bundle, secret, stage, lambda n: n.startswith(("files/", "abs/")))
+                if hold:
+                    hold(stage)
+                result["applied"] = apply(manifest, stage, home, overwrite=overwrite)
         if do_packages:
-            result["packages"] = packages(stage, runner=runner, which=which)
+            with _phase(root) as stage:
+                extract(bundle, secret, stage, lambda n: n.startswith("inventories/"))
+                result["packages"] = packages(stage, runner=runner, which=which)
         if do_clone:
-            result["clone"] = clone(manifest, stage, home, runner=runner, git=git)
-        pointer = stage / "inventories" / "observatory.json"
-        if pointer.is_file():
-            result["workspace"] = json.loads(pointer.read_text(encoding="utf-8"))
-        result["next"] = [s for s in (
-            None if mode == "apply" else "project-observatory full machine-restore --apply  (writes only what is missing)",
-            "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"
-            if counts["conflict"] and not overwrite else None,
-            None if do_packages else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
-            None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts)",
-            "project-observatory full restore --latest  (the workspace itself, from its own snapshot)") if s]
-        return result
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
+            with _phase(root) as stage:
+                extract(bundle, secret, stage, lambda n: n.startswith("checkouts/"))
+                result["clone"] = clone(manifest, stage, home, runner=runner, git=git)
+    result["next"] = [s for s in (
+        None if mode == "apply" else "project-observatory full machine-restore --apply  (writes only what is missing)",
+        "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"
+        if counts["conflict"] and not overwrite else None,
+        None if do_packages else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
+        None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts)",
+        "project-observatory full restore --latest  (the workspace itself, from its own snapshot)") if s]
+    return result
 
 
 # --- the command line ---------------------------------------------------------------------------
@@ -1397,6 +1720,7 @@ def _home_or_none() -> Path | None:
 
 def backup_main(argv: list[str]) -> int:
     a = backup_parser().parse_args(argv)
+    raise_on_signals()
     try:
         base = config.home()
         config.validate_workspace(base, required=True)
@@ -1410,6 +1734,7 @@ def backup_main(argv: list[str]) -> int:
 
 def restore_main(argv: list[str]) -> int:
     a = restore_parser().parse_args(argv)
+    raise_on_signals()
     try:
         if a.overwrite and not a.apply:
             raise MachineBackupError("--overwrite replaces files, so it needs --apply as well")

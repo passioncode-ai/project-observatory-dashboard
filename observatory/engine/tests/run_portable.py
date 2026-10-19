@@ -370,7 +370,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
                  # 128 cases, each driving the real hooks and git: ~70 s idle, ~310 s at a
                  # load average of 300 (OBS-135 tracks making it cheaper).
-                 'ask_why': 600}
+                 'ask_why': 600,
+                 # 32 cases with real git checkouts, restores and three killed subprocesses:
+                 # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner.
+                 'machine_backup': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

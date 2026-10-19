@@ -22,8 +22,9 @@ on that branch.
   `exclude`, `roots`, `transcripts`, `enabled`, `limits`), validated by name.
 - **Checkout roots come from the engine's own configuration** (`sources.projects` and the
   declared local folders) unless `roots` is set: no machine-specific default in public code.
-- **Caps, then names.** 16 MB per file, 32 MB per entry, 160 MB of file copies, 16 MB per
-  checkout bundle, 8 MB per patch or untracked set, 64 MB for checkouts. What a cap leaves out
+- **Caps, then names.** 16 MB per file, 128 MB per entry, 320 MB of file copies (raised in
+  fix cycle 1 so a normal machine's skills are carried, not warned about daily), 16 MB per
+  checkout bundle (estimated with `rev-list --disk-usage` before it is written), 8 MB per patch or untracked set, 64 MB for checkouts. What a cap leaves out
   is named once per top-level folder of its entry (the first measurement listed 5,888 files
   one by one; aggregated it is 205 lines).
 - **Schedule.** Daily from the maintenance pass after the workspace snapshot, with every job
@@ -34,7 +35,9 @@ on that branch.
   home and never with `OBSERVATORY_SYSTEM_SETUP=0`, so a test or sandbox never backs up a
   machine.
 - **Disk floor.** `min_free_gb` 2: checked before collecting and again with the estimated size.
-- **KEEP 3.** A measured bundle is 47 MB; three are about 140 MB.
+- **KEEP 3.** A measured bundle is 69 MB; three are about 210 MB.
+- **Backups root follows `root_info`** (operator decision O15: the root moves to the per-user
+  data directory in REL-BK/OBS-20); the `machine` kind never names a folder of its own.
 - **Restore uses plain git** with the person's own configuration (SSH keys, credential
   helpers); the backup side reads checkouts through `safe_git`.
 - **Adjacent defect.** `backup_vault.SNAPSHOT_KINDS` lacked `before-update`, so `backups
@@ -81,7 +84,29 @@ on that branch.
   private-identifier hit in `collectors/merge.py` already on main).
 - Measured on a working agent machine into a throwaway root, removed afterwards: 46.9 MB,
   8,235 items, 456 checkouts, 205 not-carried lines (skill folders over the per-entry cap),
-  65 to 98 seconds.
+  65 to 98 seconds. After fix cycle 1: 68.9 MB, 14,221 items, 517 checkouts, 21 not-carried
+  lines (over the per-checkout caps, and one repository whose source lacks an object), 106 s.
+
+## Fix cycle 1 (adversarial round 1 on #305)
+
+- M1, commits outside branches: one bundle per repository is built in a temporary bare
+  repository that borrows the checkout's objects (alternates, plus its `shallow` file) and
+  names every local tip: branches, tags, each worktree's detached HEAD
+  (`refs/carried/head/<id>`) and each stash entry (`refs/carried/stash/<n>`); full ref names
+  and `^object` exclusions go to git on stdin. Tag names are recorded so a tag on a pushed
+  commit comes back too. A repository with no commit carries `git diff --cached` as
+  `staged.patch`. Restore fetches the carried refs, stores the stashes oldest first, detaches
+  HEAD where it was detached, restages an unborn repository's index, then deletes
+  `refs/carried`. On this machine 99 of 100 repositories with local-only commits bundle; the
+  one left names an object missing from its own source as not carried.
+- M2, plaintext left by a killed run: every decrypted or temporary copy lives in
+  `<home>/store/.machine-stage/` (0700, locked, swept at the start and end of every backup and
+  restore, legacy `store/.machine-backup-*` too); a restore decrypts one step's members at a
+  time; SIGTERM and SIGHUP raise; bundle temp files are 0600.
+- LOWs: L1 size estimate before writing and against the free floor; L2 fixed patch prefixes;
+  L3 untracked modes; L4 submodules told from worktrees; L5 every record, arcname, ref, remote
+  and path from a bundle validated before use; L6 the suite stubs free space and makes the KDF
+  cheap; L7 caps raised; L8 `_destination` traversal tests.
 
 ## Open
 
