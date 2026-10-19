@@ -882,6 +882,13 @@
       "upstream_modified": true
     },
     {
+      "path": "ed25519_order.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "382212874ffec32cae1f23c9cb8b6e0c62d895f2b54f0ec032a45c87971b822b",
+      "bytes": 1998
+    },
+    {
       "path": "embedding_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5782,7 +5789,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 762,
+  "file_count": 763,
   "excluded": [
     "git-history",
     "operator-registries",
