@@ -1063,7 +1063,8 @@ def cmd_stash(from_doctl: str | None) -> int:
         # doctl writes its config 0600; a wider file is still readable, but say so. Opened without
         # following a link, and only as a regular file.
         import stat as _stat
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        import osprivacy
+        fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
         with os.fdopen(fd, encoding="utf-8") as f:
             if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 raise DoorError("doctl's config is not a regular file") from None

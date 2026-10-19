@@ -5108,8 +5108,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c8700f993b6f61eb7691a99b172975ab04151c221a732f32846871e48931b2ad",
-      "bytes": 83762
+      "export_sha256": "226bf6f81b2fb91047ebce2fe37ebceb35d129f6cb5f4580d31bb8d45ef30358",
+      "bytes": 83805
     },
     {
       "path": "tools/digitalocean_findings.py",
