@@ -1,0 +1,304 @@
+{
+  "source": "69056ec1611efa6937383ab52e57a06c1a289212",
+  "status": "PARTIAL",
+  "portable_original_exit": 1,
+  "portable_suites": [
+    {
+      "file": "tests/test_disk_guard.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 120.06,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 148,
+      "unittest_skipped": 2,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 146,
+      "skipped_checks": 2
+    },
+    {
+      "file": "tests/test_git_hardening.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 50.42,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 61,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 61,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_open_unlinked.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 2.65,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 12,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 12,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_checkout_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 13.15,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 12,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 12,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_checkout_state.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 83.7,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 28,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 28,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_coverage_view.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 13.59,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 8,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 8,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_memory_freshness.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 18.76,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 24,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 24,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_lifecycle.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 65.08,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 66,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 66,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_maintenance.py",
+      "status": "TIMEOUT",
+      "exit_code": 124,
+      "seconds": 481.87,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": null,
+      "unittest_skipped": null,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": null,
+      "skipped_checks": null,
+      "count_coverage": "unknown: no terminal unittest summary; original parser zeros are not measured execution counts"
+    },
+    {
+      "file": "tests/test_tick_progress.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 5.15,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 16,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 16,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_tick_py.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 64.74,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 38,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 38,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_lifecycle_watch.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 11.29,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 18,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 18,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_cli_compatibility.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 4.65,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 19,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 19,
+      "skipped_checks": 0
+    }
+  ],
+  "portable_passed_executed_checks": 448,
+  "portable_explicit_skips": 2,
+  "root_checks": [
+    {
+      "suite": "test_runner_evidence",
+      "exit": 0,
+      "cases": 20
+    },
+    {
+      "suite": "test_runner_error_receipts",
+      "exit": 0,
+      "cases": 4
+    },
+    {
+      "suite": "test_engine_doc_copies",
+      "exit": 0,
+      "cases": 6
+    },
+    {
+      "suite": "test_release_workflow",
+      "exit": 0,
+      "cases": 4
+    },
+    {
+      "suite": "test_update_inventory",
+      "exit": 0,
+      "cases": 5
+    },
+    {
+      "suite": "test_plugin_manifests",
+      "exit": 0,
+      "cases": 4
+    },
+    {
+      "suite": "test_version_consistency",
+      "exit": 0,
+      "cases": 4
+    },
+    {
+      "suite": "test_full_cli",
+      "exit": 0,
+      "cases": 13
+    }
+  ],
+  "root_executed_cases": 60,
+  "syntax": {
+    "python": "3.11",
+    "changed_files": 27,
+    "exit": 0
+  },
+  "docs_copies_exit": 0,
+  "inventory_exit": 0,
+  "runner_structural": {
+    "functions_classes_identical_to": "476d3927d30e319a223cb997ed9eb0742560ac5f",
+    "suite_count": 260,
+    "unique": true,
+    "added_suite_protocol": "unittest",
+    "required_copy_modules_present": true
+  },
+  "maintenance_retry": {
+    "source": "69056ec1611efa6937383ab52e57a06c1a289212",
+    "selection": [
+      "Pass.test_log_retention_receipt_is_persisted_with_independent_scopes",
+      "Pass.test_lost_scope_receipt_does_not_claim_zero_effects",
+      "Pass.test_log_retention_reader_sanitizes_malformed_receipt",
+      "Pass.test_log_retention_reader_rejects_contradictory_and_missing_counts",
+      "Pass.test_the_pass_rotates_its_own_logs_and_the_hooks"
+    ],
+    "exit": 0,
+    "seconds": 12.157,
+    "source_unchanged": true,
+    "supersedes_timeout": false,
+    "cases": 5
+  },
+  "not_established": [
+    "full maintenance suite completion",
+    "combined native Windows",
+    "full hosted combined checks",
+    "current main integration",
+    "financial acceptance",
+    "installed behavior",
+    "live cleanup or provider acceptance"
+  ],
+  "maintenance_reinstall_diagnostic": {
+    "source": "69056ec1611efa6937383ab52e57a06c1a289212",
+    "selection": [
+      "Reinstall"
+    ],
+    "exit": 0,
+    "seconds": 102.032,
+    "source_unchanged": true,
+    "supersedes_timeout": false,
+    "cases": 12
+  },
+  "independent_review": {
+    "source": "69056ec1611efa6937383ab52e57a06c1a289212",
+    "verdict": "PASS_SCOPED_SOURCE_COMPOSITION",
+    "controls": 7,
+    "validation": "PARTIAL",
+    "full_maintenance_timeout_remains": true
+  }
+}

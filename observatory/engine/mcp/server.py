@@ -536,9 +536,11 @@ def observatory_machine(
     and the largest cache/VM/history locations, worktrees and branches by class,
     the cleanup plan with its journal, and the disk guard's last run (pressure,
     what it freed by the disk's own count, the largest files, who holds the swap).
-    Coverage summarizes saved checkout/cache inventories with source ages, bounded
+    Coverage summarizes saved checkout/cache and open-deleted-file observations with source ages, bounded
     rows, snapshot counts and null reclaimable bytes. It never refreshes inventories
     or marks a candidate actionable.
+    Open-deleted logical sizes are command-visible only; refresh with
+    `full machine --open-unlinked` on macOS/Linux. They never prove reclaimable bytes.
     Missing swap remains null with its reason/time; largest-file coverage carries
     completeness and error counts even when the bounded file list is empty.
 
