@@ -1,0 +1,60 @@
+{
+  "status": "PASS_FOCUSED",
+  "observed_at": "2026-10-13T07:43:37.075098+00:00",
+  "suites": [
+    {
+      "file": "tests/test_memory_freshness.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.88,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 24,
+      "unittest_skipped": 0,
+      "log": "memory_freshness/run.log"
+    },
+    {
+      "file": "tests/test_machine.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 25.72,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 59,
+      "unittest_skipped": 0,
+      "log": "machine/run.log"
+    },
+    {
+      "file": "tests/test_machine_findings.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.37,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 4,
+      "unittest_skipped": 0,
+      "log": "machine_findings/run.log"
+    },
+    {
+      "file": "tests/test_machine_mcp_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.99,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 18,
+      "unittest_skipped": 0,
+      "log": "machine_mcp_inventory/run.log"
+    }
+  ],
+  "scope": "offline fixtures; no installed acceptance",
+  "earlier_failure": "Existing command fixture lacked added sysctl. Corrected explicit fixture only; first failed receipt retained privately.",
+  "source_hashes": {
+    "observatory/engine/memory_snapshot.py": "952190b9144893e8472577a3f9a9ed1f1eb807794810d6947660d9c17b3afcf6",
+    "observatory/engine/tests/test_memory_freshness.py": "2f2f92dbbf7dbdcf04d2715c667b66b341a4bcf52523ccb358e7ffda8b295e0c"
+  }
+}

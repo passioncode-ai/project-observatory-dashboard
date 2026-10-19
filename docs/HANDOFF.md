@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+2026-10-19, release 0.25.0 integration: the 2026-10-13 recovery work of #260, #278 and #280 merged onto current
+main in one pull request (#303), with main's M-8 (#289) merged in. Versions are 0.25.0, the `observatory-log` plugin
+included (M-8 changed its hooks and skill). Main's OpenRouter door is kept: the branch's rotation-exposure, policy-provenance, consumer-evidence revoke
+and spend code, its six OpenRouter suites and their text were left out (OBS-150); the wave-8 rotation-capacity stack
+is OBS-149. Fix cycle 1 (missing-worktree HEAD retention, coverage `degraded`, local upstreams, log links, absent log folders) landed; M-8's last LOWs are OBS-152 and OBS-153. Root tests and every complete-engine suite pass locally. Next: hosted checks on the pull request,
+review and merge, then the 0.25.0 tag and installed acceptance with automatic cleanup off.
+
 2026-10-18, automatic project registration follow-up: a remoteless worktree joins its main checkout's project
 instead of becoming a sibling (`collectors/scan_filesystem.py` `worktree_main`, `collectors/merge.py`;
 `tests/test_local_folders.py` fails without the fix). Root tests and `project-observatory full check` exit 0 locally.

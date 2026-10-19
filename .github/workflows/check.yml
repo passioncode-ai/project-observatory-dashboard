@@ -70,7 +70,8 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
         run: |
           npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR
           claude --version
           for dir in . observatory/engine/skill observatory/engine/skill/plugins/observatory-log; do
             claude plugin validate --strict "$dir"
@@ -138,10 +139,9 @@ jobs:
 
   windows:
     # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
-    # change. Informative until W3 — each step runs whatever the one before it did, and the
-    # summary lists every outcome — so it is not one of the required checks yet.
+    # change. Historical informative steps remain explicitly allowed to fail.
+    # Holder safety is enforced at both step and job level; its failure fails this job.
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
@@ -241,6 +241,12 @@ jobs:
         name: Synthetic runtime and privacy tests
         continue-on-error: true
         run: python -m unittest discover -s tests
+      - id: holder_safety
+        name: Unknown Windows holders preserve paths; shared-delete rename is not evidence
+        if: always()
+        run: |
+          cd observatory/engine
+          python tests/test_disk_guard.py -v WindowsHolderUnknown
       - name: Outcomes
         if: always()
         run: |
@@ -261,4 +267,5 @@ jobs:
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| OpenRouter ledger lock | ${{ steps.ledgerlock.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
+            echo "| Holder safety (enforced) | ${{ steps.holder_safety.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

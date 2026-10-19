@@ -96,3 +96,39 @@ def protected_tree_reason(root: str, *, max_entries: int = 50_000, timeout: floa
         except OSError:
             return "artifact contents could not be completely inspected"
     return ""
+
+
+#: Folders whose children are mount points: a worktree directly inside one is a whole volume,
+#: and a volume that is not mounted looks exactly like a folder that was deleted.
+MOUNT_CONTAINERS = frozenset({"/Volumes", "/media", "/mnt", "/run/media"})
+
+
+def worktree_presence(path: str) -> str:
+    """`present`, `absent` or `unknown` for a registered worktree's directory.
+
+    `absent` is claimed only when the parent directory can be listed and lacks the entry. An
+    unplugged drive, a renamed parent folder, a permission error or an unmounted volume all
+    make `os.path.isdir` false while the worktree and its commits may still exist; those are
+    `unknown`, and nothing that would lose the registration or its HEAD may follow from them.
+    """
+    try:
+        os.lstat(path)
+        return "present"
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return "unknown"
+    parent, name = os.path.split(os.path.normpath(path))
+    if not parent or not name or not os.path.isabs(path):
+        return "unknown"
+    try:
+        real_parent = os.path.realpath(parent)
+        if real_parent in MOUNT_CONTAINERS or os.path.dirname(real_parent) in MOUNT_CONTAINERS:
+            return "unknown"
+        if not stat.S_ISDIR(os.lstat(real_parent).st_mode):
+            return "unknown"
+        if name in os.listdir(real_parent):
+            return "unknown"                  # listed but not stat-able: changing or unreadable
+    except OSError:
+        return "unknown"                      # a missing or unreadable ancestor
+    return "absent"

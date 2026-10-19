@@ -33,6 +33,20 @@ while the major version is 0, a minor release may change behaviour and says so h
     `digitalocean.app_down` (an App Platform app with no active deployment; its project named only through a
     repository the registry already ties to one), plus `digitalocean.snapshot_stale` past two days.
 
+## 0.25.0 (2026-10-19)
+
+The recovery work of 2026-10-13 lands on this line. Cleanup keeps local work it cannot verify, rechecks every target
+just before removal and refuses when it cannot tell whether a process holds a path. The machine survey records what
+it could not measure: checkout state and upstream relation under explicit roots, cache coverage, open files whose
+path is gone and memory pressure apart from swap, each read-only and none of it cleanup authority. Each tick stage
+leaves a receipt, and an offline check passes only on tests that actually ran. 0.25.0 reclaims less disk than
+0.24.5: with holder coverage unknown, nothing that needs a holder check is removed. On the main line since 0.24.5:
+each project's OpenRouter spend, the agent-network node, SSH keys and external checkouts declared by SessionStart.
+The companion plugin `observatory-log` moves to 0.25.0: it asks for a turn's `why` once per record, with the next
+prompt, and measures the answers.
+
+### Added
+
 - **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
   service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
   the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.
@@ -136,6 +150,42 @@ while the major version is 0, a minor release may change behaviour and says so h
   output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
   [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
+- **Survey gaps stay visible** (OBS-87): bounded checkout registration and fairer scans
+  preserve older measurements with their dates. Unknown swap, failed file walks and
+  incomplete registration are not reported as measured zero or fresh coverage.
+  `full machine --checkouts --root PATH` records read-only checkout candidates under
+  explicit roots, with bounded traversal and honest unknown/stale rows. A candidate is
+  not an abandoned checkout or permission to delete it; no cleanup planner consumes it.
+- **Cache coverage separates declarations from measurements** (OBS-87):
+  `full machine --cache-coverage` records configured roots, available executables and
+  previously measured sizes with their original dates. Unreadable sources, protected
+  system areas and missing ownership or regeneration evidence stay explicitly unknown.
+  The command does not scan contents, run cache tools or authorize deletion; reclaimable
+  bytes and current use remain unmeasured.
+- **Saved coverage is readable from the CLI and MCP**: `full machine --coverage` and
+  `observatory_machine(section="coverage")` return bounded checkout/cache summaries
+  without starting scans. Missing, partial, stale and invalid receipts remain explicit;
+  sample rows never claim whole-machine totals or permission to clean up.
+- **Open files whose path is gone are observed, not cleaned** (OBS-87). `full machine --open-unlinked` records, on
+  macOS and Linux, files a process still holds open after their directory entry was removed: bounded metadata only,
+  no contents and no command lines. The receipt, `full doctor` and the saved-coverage reader say what was not read;
+  no row authorizes an action, and whole-machine coverage stays unknown.
+- **A checkout's local state and its relation to its upstream** (OBS-87). The explicit-root checkout inventory now
+  records a clean Git status apart from changes, hidden index flags and incomplete reads, and the local HEAD's
+  ahead/behind counts against its locally resolved upstream. Every Git read uses an offline profile
+  (`GIT_NO_LAZY_FETCH=1`), so observing a partial clone never downloads objects. A remote-tracking ref is not a new
+  remote observation, and no count is cleanup authority.
+- **Memory pressure, dated apart from swap** (OBS-87). On macOS the memory collector reads the platform's pressure
+  level (`normal`, `warning`, `critical`) with its own timestamp and source, beside swap use and process memory. An
+  absent interface, an unsupported code or a failed read stays unknown.
+- **Log retention says what it did**. The maintenance sweep reports, per scope, whether its coverage was
+  complete, partial or unknown, how many entries it saw, rotations completed, refusals and failures, as counts with
+  fixed reasons and never paths or file contents. A receipt lost mid-sweep keeps its action counts null, because the
+  effects may already have happened.
+- **Each tick stage leaves a receipt** (OBS-89). `tick_progress` records which stage is running and how each ended
+  (not started, stopped, failed, completed) before and after every streamed or captured step, keeping the previous
+  completed report. A silent tail stage that consumed the tick is now named, and a failed receipt write never
+  changes the supervised command's outcome.
 ### Changed
 
 - **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
@@ -249,6 +299,64 @@ while the major version is 0, a minor release may change behaviour and says so h
   repository pass already did this; a worktree whose main checkout was not scanned stays visible as its own project.
   Found by the automatic project registration run's isolated cross-product scenario
   (org-index `docs/runs/2026-10-17-automatic-project-registration/`).
+
+- **Cleanup preserves unverified local state** (OBS-84, OBS-86): ignored files, nested
+  repositories, hidden index flags and unresolved worktree state prevent automatic
+  removal. A manual dirty-worktree removal verifies its archive against current tracked,
+  staged and untracked content. Branch cleanup binds archive/proof and deletion to the
+  same commit and refuses symbolic refs. Disk-guard actions recheck target identity and
+  safety evidence before removal; the legacy unverified build-artifact action is refused.
+  Log rotation also refuses symbolic links, linked directories and hardlinks before
+  rotating or changing permissions. External writers can still race the final filesystem
+  check: use an idle workspace. Copy/truncate can still lose a concurrent append.
+  Incomplete or unreadable process listings cannot declare an omitted target free;
+  clean and archived dirty worktrees repeat a bounded holder check immediately
+  before removal. A missing worktree's registration goes only when its directory is
+  proven absent (an unplugged drive, a renamed parent folder or a permission error is
+  unknown and prunes nothing) and after its HEAD is kept by its branch or an
+  `archive/wt-<sha8>` branch; only that registration's `.git/worktrees/<name>` entry is
+  moved aside to `.git/worktrees-retired/`, never a working directory and never a
+  repository-wide `git worktree prune`, which could make a detached worktree's commits
+  unreachable. Failed removal reports unknown effects instead of claiming success. A
+  branch whose upstream is local (`branch.X.remote` set to `.`) is no longer deleted as
+  pushed. Log rotation follows links above the workspace (macOS `/tmp`, `/var`, a linked
+  home) and still refuses them inside it, a dangling link or a `..` included, and a log
+  folder that does not exist yet is reported absent, not unknown.
+- **0.25.0 reclaims less disk than 0.24.5.** With holder coverage unknown (no complete
+  process inventory on any platform), the disk guard and worktree cleanup now remove
+  nothing that needs a holder check: build output, caches tied to a running tool and
+  worktrees are kept and reported, where 0.24.5 removed them. This is deliberate: a
+  path a process may still hold is not deleted on a guess.
+- **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
+  failures produce error evidence without losing completed suite results. Unknown
+  completion fails the run instead of becoming a passing or empty summary.
+- **Findings follow the measured cause**: collector deadlines distinguish work not started
+  from interrupted work; partial leak scans retain sightings; memory and swap findings use
+  their own measurement freshness and preserve unreadable-source degradation.
+- **Engine-update snapshots stay visible**: backup status and verified migration now
+  include local `before-update` snapshots. Recognized snapshots share one kind list;
+  damaged copies remain reported and retained, while foreign kinds remain untouched.
+- **Cleanup child receipts are validated before use**: failed commands and malformed
+  summaries remain failures. Valid summaries retain only known structured fields;
+  exception details, child output and extra fields do not enter persisted diagnostics.
+- **Scoped Heroku refreshes preserve the rest of the survey** (OBS-80): `scan_heroku --only`
+  updates only successfully measured apps, retains unrequested rows and the global survey
+  timestamp, and records per-scope results. Missing apps, malformed responses and invalid
+  costs preserve old measurements with degradation. Provider-only refreshes retain local
+  checkout information and its unknown state until a full scan measures it. Full and scoped
+  collector invocations share a writer lock; no provider state is changed by the collector.
+- **An offline check passes only on executed tests** (OBS-85). A unittest suite that defined cases but never ran
+  them exited 0 and passed with zero tests. Suites now declare their reporting protocol: unittest suites need a
+  complete summary with at least one executed case, the legacy PASS/FAIL scripts keep theirs, and an earlier failure
+  is never hidden by a later clean summary.
+- **Cleanup refuses when a process might still hold the path** (OBS-86). On Windows there is no holder inventory and
+  a successful rename no longer counts as proof that nothing holds a folder (a handle opened with shared delete
+  allows the rename), so path removal there is refused; older rename-mode state refuses too. On POSIX, `ps` renders
+  arguments with spaces in place of their boundaries, so a missing match is no proof of absence: positive matches
+  still hold a path, but an absent one no longer admits deletion or a cache tool's busy check. Preliminary admission
+  no longer captures the process table it cannot use; explicit holder captures are bounded (2 MiB per child, a
+  shared deadline, only the capture's own process group stopped), and the old synchronous `/proc` fallback is retired.
+  A process starting after the final check remains a race.
 
 ### Documentation
 

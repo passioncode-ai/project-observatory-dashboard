@@ -13,6 +13,18 @@ release. A checkout has the lock at its root; a wheel carries it at
 extra against that file). Without `-c`, pip resolves newer transitive releases
 this release was not tested with.
 
+## Read verification results
+
+`project-observatory full check` keeps a process's `exit_code` separate from the
+checks it observed. A selected suite that exits zero without reporting executed
+tests is `ERROR`, not PASS. The JSON gives its `test_protocol`,
+`minimum_executed`, `executed_checks`, `skipped_checks` and reason code. Repair a
+missing test entry point or reporting contract and rerun the affected suite.
+An explicit full skip remains `SKIP`; reported failures remain `FAIL` even when
+the script exits zero. A trusted script can forge well-formed output, so this
+contract does not authenticate tests or establish complete coverage.
+The repository-root test module `test_runner_evidence.py` exercises these boundaries.
+
 ## SQLite runtime prerequisite
 
 The full engine requires Python 3.11+ with SQLite 3.37+ **and loadable SQLite
@@ -878,8 +890,22 @@ ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
 run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
 stopped step is a failed step in the log and on the board, never a hung tick.
 
-The ceiling is shared out so the tick always ends with fresh findings and a fresh
-dashboard: the collectors stop 5 minutes before it (at most a fifth of the
+For stage diagnosis, `store/raw/tick.json` adds `progress`: a run ID and bounded
+stage rows with start, end, wall duration, exit and outcome. It includes silent
+tail commands such as merge and emit. During a run the top-level `finished_at`
+and failed-step report still describe the previous completed report. After the
+child stops, the supervisor copies only matching, validated stage metadata into
+`tick-run.json` and its history as `stage_progress`. Read `coverage` first:
+`unknown` means missing, stale or invalid evidence; `partial` includes a start
+without a terminal receipt or a failed receipt write. Such a stage has unknown
+outcome and no inferred exit or duration, even when the whole run timed out.
+`not_started` requires the watchdog's explicit budget refusal. A row's start and
+duration cover the watchdog call, including overhead; an absent row proves
+nothing about whether a stage ran. These fields contain no child output or
+command arguments. Receipt failures preserve the command's original exit.
+
+The ceiling reserves time for fresh findings and a fresh dashboard, without
+guaranteeing that those stages complete: the collectors stop 5 minutes before it (at most a fifth of the
 ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
@@ -1131,9 +1157,26 @@ without that identity is skipped and must be planned again. Build cleanup rechec
 activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
-last probe requires `lsof`; without it the plan is available but path removal
-waits. Windows retains the rename probe. See [the preservation contract](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+last probe uses `lsof` for positive holds. An empty listing plus unmatched
+rendered `ps` arguments cannot prove a closed script is inactive: spaces, relative
+paths and symlink aliases can hide its checkout. Current POSIX production holder
+snapshots therefore remain incomplete, and path removal is refused. Windows reports unknown holder coverage and preserves path targets.
+See [the preservation contract](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
+On POSIX, clean and archived dirty worktrees repeat this target check immediately
+before removal, after Git/archive verification. The preliminary admission snapshot never grants final removal. Planning now
+requests an explicit unknown snapshot without collecting a full process listing;
+per-phase `observation=not-attempted` and `measured_at=null` disclose that choice. Nonzero, diagnostic or undecodable `lsof`/`ps`
+output and unparseable global `lsof` names mean
+unknown, so cleanup can conservatively skip
+work even if a partial survey showed no holder. Cache-tool commands likewise
+skip when their process survey is unknown. In particular, a nonempty `busy_if`
+request cannot be cleared by an unmatched `ps` display. Commands without holder
+preconditions retain their separate configured policy. Worktree idle age is still a planning
+condition, not a fresh action-time measurement. A process starting after the
+final check remains a race; these checks are not an exclusive filesystem lock.
+Windows worktree removal also refuses unknown holder coverage. A successful
+rename can coexist with an open FILE_SHARE_DELETE handle; it never proves non-use.
 
 Build planning first refreshes explicit Git worktree registrations within a
 reserved budget. Root attempts rotate across passes with a persisted cursor and
@@ -1141,19 +1184,25 @@ a five-second default quantum. Registration lists membership, not abandoned or
 safe-to-delete status. Failed path-holder readings remain visible per phase.
 See [registration and fairness](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
-**On every system.** What a process holds is read with `lsof` on macOS and Linux, from
-`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
-removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
-and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+**On every system.** Cleanup admission currently skips process-table collection
+because its negative result cannot authorize a path action. Explicit positive-hint
+readers use bounded `lsof`/`ps` capture: 2 MiB combined pipe output, bounded
+parsing and one shared deadline. The unbounded Linux `/proc` fallback is retired.
+Limit or capture failures remain unknown; this is not a measurement of RAM saved.
+[Capture limits and regression cases](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#bounded-explicit-holder-observations)
+explain the owned-child cleanup and timing limits. Windows has no supported holder inventory
+here, so path actions skip instead of treating rename as proof. The
+schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
 
-What it never does: remove anything a process holds open or works inside (one
-`lsof` listing per run, re-checked at each removal; without it no path goes),
-follow a symlink, open a privacy-guarded folder, touch another user's file, stop a
-process, start an app (Docker commands run only while the daemon already runs),
-or run a cache command while that tool is running. Memory is reported, not
+Observed holds and incomplete holder coverage refuse path removal. These
+observations do not establish lifecycle ownership or exclude future writers.
+Cleanup also refuses symlinks, privacy-guarded folders and another user's files.
+It does not stop a process or start an app; daemon-dependent commands require a
+positive observation. A configured busy-tool precondition requires proven absence,
+which the current rendered process display does not provide. Memory is reported, not
 freed: the Machine page names who holds the memory that swap writes to this disk,
 and each running simulator with the command that stops it.
 
@@ -1280,8 +1329,12 @@ elsewhere.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
-`before-upgrade-*.obsnap`); a new one is decrypted in full before anything
-older is pruned.
+`before-upgrade-*.obsnap`, `before-update-*.obsnap` and `daily-*.obsnap`); a new
+one is decrypted in full before anything older is pruned. Local status and migration
+use the same snapshot kinds, including snapshots left by engine updates. Migration
+exports verified copies under the existing three-per-kind policy; an unverifiable
+copy is reported and retained. Unrecognized kinds are outside this inventory and
+remain untouched by migration; the count is not a survey of every backup-like directory.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
@@ -1426,6 +1479,26 @@ Nothing needs to be run after a release. One job per workspace runs every 15 min
   tick or an update is running, the backup waits for the next pass; a failed backup is tried again an hour later. Snapshots you take yourself
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
+
+After a maintenance pass, `project-observatory full maintain status` and
+`full doctor` include `log_retention`: separate engine, updater and hook-log
+scope receipts. Each scope has its attempt time, directory-entry count and
+counts of completed rotations, refusals and failures. Missing/unreadable scopes
+have unknown coverage and `observed_count: null`; an observed empty directory
+has zero entries. Action counts describe only attempted work, not remaining
+logs or reclaimed bytes. A lost whole-scope receipt also keeps action counts null,
+since effects may have occurred before the error. A failed scope does not suppress peer results.
+
+The receipt is saved in the workspace store as `maintenance.json`; its readers retain the original
+measurement time and mark evidence older than one hour stale. The Health page
+shows the same incomplete/stale warning, and its payload contains the typed
+scope result. Reasons are fixed codes, without paths, log contents or exception
+text. This adds evidence to the existing five-generation size policy; it does
+not enable automatic cleanup or change retention limits. A failed operation may
+already have moved older generations; no rollback is claimed. Copy/truncate
+still has its concurrent-append race, and external directory writers are not
+excluded. Synthetic evidence: `test_lifecycle.LogRetentionEvidence` and the
+`test_maintenance.Pass.test_log_retention_*` cases.
 
 **The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
 home. Without it, updates are on; only the word `off` in it turns them off. The commands
@@ -1709,3 +1782,173 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+### Inspect checkout candidates beneath explicit roots
+
+```sh
+project-observatory full machine --checkouts --root /path/to/checkouts --root /path/to/other-checkouts
+```
+
+This read-only command writes `store/raw/checkout-candidates.json` with a persisted
+cursor. The default pass allows 20 seconds overall, 2 seconds and 250 entries per
+root, depth 8, and at most 10,000 retained candidates. Repeating the command resumes
+unfinished roots and rotates the root last attempted before expensive work. Symlinks
+are not traversed; Git metadata for a linked checkout may reference its common Git
+directory outside these roots. Repository contents are not recursively surveyed.
+
+The receipt distinguishes clones, linked worktrees, bare repositories and unknown
+Git results. A fresh registration receipt may establish listed path membership;
+missing, partial or old registration evidence leaves absence unknown. Allocated and
+reclaimable bytes, local changes, ownership, upstream containment and active use are
+not measured here. No candidate is actionable and none enters cleanup planning.
+Depth/time/entry limits and source failures keep a pass incomplete. Directory offsets
+are resumable hints; a changed directory identity resets its position, and huge
+or continually changing directories can need additional passes. Filesystem calls
+are checked between operations; a kernel-blocked filesystem read is not a hard
+real-time deadline. Git probes run in owned bounded child groups.
+
+A competing inventory writer refuses while the receipt lock is held; it never resets
+another scan's cursor. The command is not scheduled automatically.
+
+### Read cache and runtime coverage without cleaning
+
+```sh
+project-observatory full machine --cache-coverage
+```
+
+The receipt is `store/raw/cache-coverage.json`. It reads machine/cleanup declarations,
+checks non-protected root metadata, and locates executable tools without running them.
+It does not enumerate directory contents or start application-managed cleanup commands.
+Protected app containers and uncovered OS cache areas have unknown presence and size.
+A configured `regenerable` label remains an unverified declaration; tool availability
+means only that an executable was found, not that its daemon runs or the cache is idle.
+
+Old `du` figures retain their own dates as rounded reported sizes with unknown
+completeness. Exact allocated bytes, reclaimable bytes, owner, current use, restoration
+cost and regeneration proof remain unknown. Neither command estimates of zero nor
+APFS clone/private-size hints are promoted into reclamation promises by this adapter.
+The receipt always says coverage is partial. `measurement_complete` describes only
+completion of this narrow metadata pass, and never lifecycle safety.
+
+The default pass allows three seconds, capped at ten, and 128 attempted rows. Its
+persisted cursor advances before each probe so repeated bounded passes rotate through
+locations and tools. Input documents are capped at 1 MiB and source collections at 128
+rows; omissions are explicit. A kernel-blocked metadata read is not preempted. A failed
+source preserves old observations and dates; a missing current policy leaves those rows
+stale and does not authorize probing them again. A single-writer lock protects cursor
+progress. Nothing schedules this command or adds its rows to a cleanup planner.
+
+
+### Read saved checkout, cache and open-deleted-file coverage
+
+On macOS/Linux, the explicit checkout scan also records bounded local Git state.
+Its counters are status/index records, not recursive file totals. Hidden index
+flags, changed metadata and incomplete reads remain unknown. The saved coverage
+view shows current versus recorded state and age; a clean observation does not
+authorize removal. Windows currently reports this additional probe as unavailable.
+
+`project-observatory full machine --coverage` summarizes saved inventory
+receipts without running their collectors. The agent tool is
+`observatory_machine(section="coverage")`; its default overview includes the same
+summary. Each source retains its own attempt age and partial state. Snapshot counts
+count validated saved rows within the declared scope, never every checkout or cache
+on the machine. Current snapshot counts remain null for stale, partial or invalid
+sources. Cache lifecycle coverage remains partial even after all metadata probes finish.
+
+The reader caps each source at 4 MiB, each collection at 10,000 inspected rows, and
+returns ten rows per source. Its stale threshold is 30 minutes. Oversized or malformed
+receipts show an explicit unknown state; malformed rows do not erase valid peers.
+Read time is separate from measurement time. Reclaimable/allocated totals remain null,
+command arguments are omitted and all rows remain non-actionable. Refresh evidence
+with the separate `--checkouts --root ...` or `--cache-coverage` command when needed.
+
+### Missing worktree registration receipts
+
+For a missing worktree, cleanup first proves the directory absent: its parent folder
+is listed and lacks the entry. An unplugged drive, a renamed parent folder or a
+permission error is `unknown` instead; the survey marks that worktree `unreadable`
+and nothing is pruned. When the directory is absent, the worktree's HEAD is kept
+reachable first: by its branch, or for a detached HEAD by an
+`archive/wt-<sha8>` branch (a symbolic ref there does not count). Then only that
+registration's entry, `.git/worktrees/<name>`, found by the path its own `gitdir`
+records, is moved to `.git/worktrees-retired/` with its index and reflog: never a
+working directory, never a repository-wide `git worktree prune`. A directory that
+comes back loses nothing; move the entry back and run `git worktree repair` to
+register it again. An unknown, changed or unreadable HEAD, or a locked or ambiguous
+entry, moves nothing. A `pruned` journal row names the kept ref (`retained_ref`) and
+the moved entry (`retired_entry`); `registration_changes` stays null. A failed or
+interrupted move is `failed` with an unknown effect. Reasons omit Git output and exception bodies.
+Inspect `git worktree list --porcelain` in the owning repository before retrying.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
+
+### Open files absent from directory scans
+
+`project-observatory full machine --open-unlinked` records files that have been
+unlinked but remain open on macOS or Linux when `lsof` is available. It never
+stops a process, removes data or changes cleanup settings. Windows and a missing
+source return unknown, not zero. There is no scheduled observation.
+
+The bounded receipt `store/raw/open-unlinked.json` stores numeric process IDs and
+snapshot-local device/inode identities, logical sizes, source start/end times and
+the parser source hash. It collects no paths, process commands or environment.
+The command has a five-second deadline, a combined two-MiB output ceiling,
+100,000 fields and 10,000 distinct file records. Missing sizes, conflicting sizes
+for a shared identity, diagnostics, malformed output and partial execution remain
+degraded. Known-size peers survive as a separately labelled subtotal.
+
+`full machine --coverage`, `full doctor` and
+`observatory_machine(section="coverage")` read the saved observation only. The
+reader exposes up to ten size/PID-count samples and marks snapshots older than
+30 minutes stale. Shared files count once, so process totals must not be added.
+A successful command does not establish visibility of every process or namespace.
+Logical bytes are neither allocated blocks nor reclaimable memory or disk space:
+allocated/reclaimable values stay null and every observation remains non-actionable.
+Ownership and any supported supervisor action require separate evidence.
+
+Contract tests: `tests/test_open_unlinked.py`, including a
+disposable open-then-unlinked file owned by the test; no host process is stopped.
+
+
+### Checkout observation does not fetch missing objects
+
+Checkout inventory and local-state Git queries explicitly use the offline
+observation profile. Partial clones can omit objects that an ordinary Git read
+would download on demand; this observation refuses that download and keeps an
+unreadable state unknown. It does not fetch upstream refs or establish remote
+backup durability. Explicit fetch and remote-query operations outside this
+profile retain their existing behavior. This is not a new cleanup permission.
+
+Proof: `tests/test_checkout_state.py::OfflineGitObservation` in the engine uses
+only disposable local file remotes, checks object-store contents before/after,
+and includes a positive complete local observation and explicit remote controls.
+
+
+### Read local upstream graph evidence
+
+An explicit checkout scan saves local-state results before a separately budgeted
+upstream graph phase. That phase reserves up to a quarter of the scan's time
+budget, at most five seconds, with its own persistent round-robin cursor and
+bounded child per checkout. Failures preserve the saved local-state observation.
+
+For a supported complete local graph, the receipt records ahead/behind commit
+counts and whether the upstream is another local branch or a remote-tracking
+ref. These are local resolved commits only: a remote-tracking ref can be stale,
+so `remote_durability` remains `unknown`, and `actionable` remains false. No
+fetch, deletion, pruning or owner inference follows. Detached/unborn/missing
+upstream, shallow or promisor history, replacement refs, grafts and alternate
+object stores produce unknown counts. Those exclusions preserve uncertainty
+rather than silently interpreting a different graph.
+
+The saved coverage view uses the graph's own measurement time and source binding;
+it never refreshes graph evidence from another phase's success. After 30 minutes,
+a malformed receipt or a source/binding mismatch, counts are unknown. Git output,
+remote URLs, commit subjects and ref names are absent from this aggregate view.
+Proof: `tests/test_checkout_state.py::UpstreamGraph` and `GraphPhase` in the engine.
+
+### Memory pressure observation
+
+The saved memory summary includes an independently dated macOS pressure level.
+It reads the platform's read-only sysctl; unknown codes, failed commands and
+unsupported platforms stay unknown. Swap usage remains a separate measurement.
+Saved pressure observations expire after30minutes and never authorize a lifecycle
+action. RAM/swap timestamps are not refreshed by a successful pressure-only read.

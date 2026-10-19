@@ -186,13 +186,14 @@ class PortableRunnerTests(unittest.TestCase):
             self.assertEqual(result['log'], 'fixture/run.log')
             self.assertGreater((base / result['log']).stat().st_size, 7000)
 
-    def run_fixture(self, name, source):
+    def run_fixture(self, name, source, *, assertion_lines=False):
         import run_portable as runner
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             template = base / 'template'; (template / 'tests').mkdir(parents=True)
             (template / f'tests/test_{name}.py').write_text(source)
-            with contextlib.redirect_stderr(io.StringIO()):
+            reporters = runner.ASSERTION_LINE_SUITES | ({name} if assertion_lines else set())
+            with contextlib.redirect_stderr(io.StringIO()), patch.object(runner, 'ASSERTION_LINE_SUITES', reporters):
                 return runner.run_suite(name, base, template, 30)
 
     def test_a_long_suite_is_given_its_measured_time(self):
@@ -209,7 +210,7 @@ class PortableRunnerTests(unittest.TestCase):
         # Audit A46: without `node`, test_action_outcomes printed SKIP and exited 0, and
         # test_dashboard_portability skipped all nine cases; both were receipted PASS.
         import run_portable as runner
-        printed = self.run_fixture('printed', 'print("  SKIP  node is not installed here")\n')
+        printed = self.run_fixture('printed', 'print("  SKIP  node is not installed here")\n', assertion_lines=True)
         self.assertEqual((printed['status'], printed['skip_reason']), ('SKIP', 'node is not installed here'))
         skipped = self.run_fixture('cases', (
             'import unittest\n'
@@ -219,7 +220,7 @@ class PortableRunnerTests(unittest.TestCase):
             '    def test_b(self): pass\n'
             'unittest.main()\n'))
         self.assertEqual((skipped['status'], skipped['unittest_cases'], skipped['unittest_skipped']), ('SKIP', 2, 2))
-        partly = self.run_fixture('partly', 'print("  PASS  built")\nprint("  SKIP  node missing")\n')
+        partly = self.run_fixture('partly', 'print("  PASS  built")\nprint("  SKIP  node missing")\n', assertion_lines=True)
         self.assertEqual((partly['status'], partly['skip_assertions']), ('PASS', 1))
         some = self.run_fixture('some', (
             'import unittest\n'

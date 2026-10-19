@@ -1,0 +1,136 @@
+{
+  "status": "SCOPED_PASS_REVIEW_PENDING",
+  "source_sha256": "621204e19bd6c03f45e7709f8da24083e0b29b8c4d9d495798f12f9a336fcb43",
+  "root_runner_tests": {
+    "command": "python -m unittest discover -s tests -p 'test_runner*.py'",
+    "exit_code": 0,
+    "cases": 24
+  },
+  "compatibility": [
+    {
+      "file": "tests/test_tick_health.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.35,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 9,
+      "unittest_skipped": 0,
+      "test_protocol": "unittest",
+      "minimum_executed": 1,
+      "executed_checks": 9,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_tick_failures.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 2.06,
+      "pass_assertions": 22,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0,
+      "test_protocol": "assertion-lines",
+      "minimum_executed": 1,
+      "executed_checks": 22,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_time.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.73,
+      "pass_assertions": 23,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0,
+      "test_protocol": "assertion-lines",
+      "minimum_executed": 1,
+      "executed_checks": 23,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_env_page.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 2.09,
+      "pass_assertions": 22,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0,
+      "test_protocol": "assertion-lines",
+      "minimum_executed": 1,
+      "executed_checks": 22,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_provider_boundary.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.93,
+      "pass_assertions": 34,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0,
+      "test_protocol": "assertion-lines",
+      "minimum_executed": 1,
+      "executed_checks": 34,
+      "skipped_checks": 0
+    },
+    {
+      "file": "tests/test_manifest_urls.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.35,
+      "pass_assertions": 17,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0,
+      "test_protocol": "assertion-lines",
+      "minimum_executed": 1,
+      "executed_checks": 17,
+      "skipped_checks": 0
+    }
+  ],
+  "tests_first": {
+    "missing_main": "original runner returns PASS at exit0 with zero cases",
+    "silent_direct_assertions": "original runner returns PASS without execution evidence",
+    "stderr_failed_check": "original runner accepts FAIL output when interpreter exits0"
+  },
+  "docs_copies_exit": 0,
+  "docs_checker_exit": 0,
+  "not_run": [
+    "all257suites",
+    "hosted-CI",
+    "installed-runtime",
+    "live-providers"
+  ],
+  "review_correction": {
+    "initial_source": "266e237d7dcac34bbc069bb2478a378ba02960c3",
+    "verdict": "CHANGES_REQUIRED",
+    "tests_first_failures": 3,
+    "findings": [
+      "earlier FAILED overwritten by later PASS or SKIP",
+      "incomplete final summary borrowed prior cases"
+    ],
+    "corrected_root_cases": 24
+  },
+  "hosted_followup": {
+    "source": "469d316b5cb92063cbbe4d245ca8650ceed5a007",
+    "job": 115189358208,
+    "verdict": "FAIL",
+    "failures": [
+      "inherited credential_doors: 518 pass/5 fail",
+      "cli_compatibility synthetic line reporter lacks declaration"
+    ],
+    "correction": "test-only explicit protocol for printed/partly fixtures",
+    "cli_cases": 19,
+    "cli_exit": 0
+  }
+}

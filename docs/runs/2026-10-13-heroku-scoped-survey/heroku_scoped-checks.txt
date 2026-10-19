@@ -1,0 +1,52 @@
+...usage: test_heroku_scoped.py [-h] [--only APP [APP ...]] [output]
+test_heroku_scoped.py: error: argument --only: expected at least one argument
+..heroku: survey not saved (OSError); previous output retained
+.heroku: survey not saved (BlockingIOError); previous output retained
+....heroku: scoped refresh refused: previous survey unreadable
+heroku: scoped refresh refused: previous survey invalid
+heroku: scoped refresh refused: previous survey invalid
+heroku: scoped refresh refused: previous survey invalid
+........heroku: survey not saved (BlockingIOError); previous output retained
+.......
+----------------------------------------------------------------------
+Ran 25 tests in 0.066s
+
+OK
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 0 refreshed, 1 unavailable; global survey timestamp unchanged
+heroku: scoped refresh: 1 refreshed, 0 unavailable; global survey timestamp unchanged
