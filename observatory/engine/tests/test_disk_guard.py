@@ -8,6 +8,7 @@ every root the guard walks is pointed into it, and the cache commands are fakes.
 from __future__ import annotations
 import contextlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,10 @@ class Base(unittest.TestCase):
         fresh = patch.object(self.g, "fresh_busy", return_value=False, create=True)
         fresh.start()
         self.addCleanup(fresh.stop)
+        import cleanup
+        final_worktree = patch.object(cleanup, "fresh_busy", return_value=False)
+        final_worktree.start()
+        self.addCleanup(final_worktree.stop)
         self.t1 = self.base / "t1"
         self.t1.mkdir()
         # NOTHING OUTSIDE THE TEMPORARY DIRECTORY: the clone root and the temporary
@@ -279,6 +284,28 @@ class Acting(Base):
         with patch.object(self.g, "running", return_value=False):
             self.assertEqual(self.g.act(a, self.free())["result"], "skipped")
             self.assertEqual(self.g.act({**a, "busy_output": ""}, self.free())["result"], "failed")
+
+    def test_child_diagnostics_never_enter_receipts_or_journal(self):
+        marker = "SYNTHETIC_CREDENTIAL_SENTINEL"
+        for stream, busy, code in (("stderr", False, 2), ("stdout", False, 2),
+                                   ("stderr", True, 2), ("stdout", False, 0)):
+            with self.subTest(stream=stream, busy=busy, code=code):
+                child = self.t1 / "fake-cache.py"
+                message = ("in-use " if busy else "") + "Authorization: Bearer " + marker
+                child.write_text("import sys; sys." + stream + ".write(" + repr(message)
+                                 + "); sys.exit(" + str(code) + ")")
+                action = {"class": "cache-command", "target": "synthetic prune",
+                          "argv": [sys.executable, str(child)], "needs": [], "busy_if": [],
+                          "busy_output": "in-use", "timeout": 3}
+                with patch.object(self.g, "free_bytes", return_value=1000000000):
+                    row = self.g.act(action, self.free())
+                self.assertEqual(row["result"], "skipped" if busy else "failed" if code else "removed")
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+                    self.assertEqual(row["reason_code"], "cache-in-use" if busy else "command-failed")
+                self.assertNotIn(marker, json.dumps(row))
+                self.g.journal([row])
+                self.assertNotIn(marker, self.g.journal_file().read_text())
 
     def test_a_command_held_up_on_a_lock_is_skipped_quickly(self):
         a = {"class": "cache-command", "target": "tool prune", "busy_if": [], "needs": [], "timeout": 1,
@@ -627,13 +654,13 @@ class AnyDevice(Base):
         self.assertFalse(list(self.t1.glob("*.observatory-removing")))
 
     def test_linux_without_lsof_reads_proc(self):
-        if not os.path.isdir("/proc/self/fd"):
-            self.skipTest("no /proc here")
-        here = os.getcwd()
-        with patch.object(self.g.shutil, "which", return_value=None):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=None), \
+                patch.object(holders, "proc_paths", return_value=[str(self.t1 / "held")]), \
+                patch.object(holders, "argument_paths", return_value=[]):
             h = self.g.Holders.take()
         self.assertEqual(h.mode, "proc")
-        self.assertTrue(h.busy(here), "this process works inside its own cwd")
+        self.assertTrue(h.busy(self.t1))
 
     def test_no_way_to_know_means_nothing_is_removed(self):
         with patch.object(self.g.shutil, "which", return_value=None), \
@@ -921,6 +948,143 @@ class HoldersModule(unittest.TestCase):
         self.assertFalse(h.busy("/srv/cache/_npx/ab"), "a sibling with a shared prefix is free")
 
 
+@unittest.skipIf(os.name == "nt", "POSIX holder inventory")
+class HoldersCompleteness(unittest.TestCase):
+    def test_partial_lsof_never_proves_worktree_free(self):
+        import holders
+        for code, err in ((1, "inspection failed"), (1, ""), (0, "inspection failed"), (2, "")):
+            with self.subTest(code=code, err=err), \
+                    patch.object(holders.shutil, "which", return_value="lsof"), \
+                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], code, "n/srv/unrelated-file\n", err)), \
+                    patch.object(holders, "proc_paths", return_value=None), \
+                    patch.object(holders, "argument_paths", return_value=[]):
+                observed = holders.Holders.take()
+                self.assertFalse(observed.known)
+                self.assertTrue(observed.busy("/srv/active-worktree"))
+
+    def test_ps_failure_is_unknown_for_paths_and_cache_tools(self):
+        import holders
+        for code, err in ((1, ""), (2, "inspection failed"), (0, "warning")):
+            with self.subTest(code=code, err=err), \
+                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], code, "/usr/bin/unrelated\n", err)):
+                self.assertIsNone(holders.argument_paths())
+                self.assertIsNone(holders.running(["npm"]))
+                with patch.object(holders, "lsof_paths", return_value=[]):
+                    self.assertFalse(holders.Holders.take().known)
+
+    def test_unparseable_global_lsof_output_is_unknown(self):
+        import holders
+        for output in ("unexpected output\n", "p123\n", "n/socket\\xff\n", ""):
+            with self.subTest(output=output), patch.object(holders.shutil, "which", return_value="lsof"), \
+                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, output, "")), patch.object(holders, "proc_paths", return_value=None):
+                self.assertIsNone(holders.lsof_paths())
+                self.assertFalse(holders.Holders.take().known)
+
+    def test_undecodable_command_output_is_unknown(self):
+        import holders
+        with patch.object(holders.subprocess, "run", side_effect=UnicodeDecodeError(
+                "utf-8", b"\xff", 0, 1, "synthetic")):
+            self.assertIsNone(holders.argument_paths())
+            self.assertIsNone(holders.running(["npm"]))
+            with patch.object(holders.shutil, "which", return_value="lsof"):
+                self.assertIsNone(holders.lsof_paths())
+                self.assertIsNone(holders.fresh_busy("/srv/active-worktree"))
+
+    def test_complete_command_positive_controls(self):
+        import holders
+        with patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                [], 0, "/usr/bin/node /srv/active-worktree/script.js\n", "")):
+            self.assertIn("/srv/active-worktree/script.js", holders.argument_paths())
+            self.assertTrue(holders.running(["node"]))
+            self.assertFalse(holders.running(["npm"]))
+        with patch.object(holders.shutil, "which", return_value="lsof"), \
+                patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, "p123\nn/srv/active-worktree/open\n", "")), \
+                patch.object(holders, "argument_paths", return_value=[]):
+            observed = holders.Holders.take()
+            self.assertTrue(observed.known)
+            self.assertTrue(observed.busy("/srv/active-worktree"))
+            self.assertFalse(observed.busy("/srv/other-worktree"))
+
+    def test_proc_partial_reads_are_unknown_and_complete_reads_hold_paths(self):
+        import holders
+        seams = (None, "/proc", "/proc/123/cwd", "/proc/123/root", "/proc/123/exe",
+                 "/proc/123/fd", "/proc/123/fd/4", "/proc/123/maps")
+        for seam in seams:
+            def listing(path):
+                if path == seam:
+                    raise PermissionError("SYNTHETIC_PRIVATE_INSPECTION")
+                return ["self", "123"] if path == "/proc" else ["4"]
+            def link(path):
+                if path == seam:
+                    raise FileNotFoundError("SYNTHETIC_PRIVATE_INSPECTION")
+                return "/srv/active-worktree/open"
+            def opened(path, **kwargs):
+                if path == seam:
+                    raise PermissionError("SYNTHETIC_PRIVATE_INSPECTION")
+                return io.StringIO("100-200 r-xp 0 00:00 1 /srv/mapped/file\n")
+            with self.subTest(seam=seam), patch.object(holders.os.path, "isdir", return_value=True), \
+                    patch.object(holders.os, "listdir", side_effect=listing), \
+                    patch.object(holders.os, "readlink", side_effect=link), \
+                    patch("builtins.open", side_effect=opened):
+                observed = holders.Holders(holders.proc_paths(), "proc")
+                self.assertEqual(observed.known, seam is None)
+                self.assertTrue(observed.busy("/srv/active-worktree"))
+                if seam is None:
+                    self.assertTrue(observed.busy("/srv/mapped"))
+                    self.assertFalse(observed.busy("/srv/other"))
+
+
+class WorktreeFinalHolders(Base):
+    def test_final_fresh_check_preserves_clean_and_archived_dirty_worktrees(self):
+        import cleanup
+        for dirty in (False, True):
+            for outcome in (None, True, False):
+                with self.subTest(dirty=dirty, outcome=outcome):
+                    name = f"{dirty}-{outcome}"
+                    repo = self.base / ("repo-" + name)
+                    repo.mkdir()
+                    git(repo, "init", "-q", "-b", "main")
+                    (repo / "a").write_text("base\n")
+                    git(repo, "add", ".")
+                    git(repo, "commit", "-qm", "init")
+                    wt = self.base / ("worktree-" + name)
+                    git(repo, "worktree", "add", "-qb", "topic", str(wt))
+                    if dirty:
+                        (wt / "a").write_text("only copy edit\n")
+                    with patch.object(cleanup, "busy_now", return_value=False), \
+                            patch.object(cleanup, "fresh_busy", return_value=outcome, create=True) as fresh:
+                        rec = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
+                                           "tier": "manual" if dirty else "auto", "repo": str(repo),
+                                           "target": str(wt), "branch": "topic",
+                                           "_deadline": time.monotonic() + 2}, self.base / "archive")
+                    self.assertEqual(fresh.call_count, 1)
+                    self.assertGreater(fresh.call_args.args[1], 0)
+                    self.assertLessEqual(fresh.call_args.args[1], 2)
+                    self.assertEqual(rec["result"], "removed" if outcome is False else "skipped", rec)
+                    self.assertEqual(wt.exists(), outcome is not False)
+                    if dirty:
+                        self.assertIn("only copy edit", (Path(rec["archive"]) / "tracked.patch").read_text())
+
+    def test_expired_deadline_refuses_clean_worktree_without_probe(self):
+        import cleanup
+        # All source checks are synthetic successful receipts; no Git or holder command runs.
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "index_visibility_reason", return_value=""), \
+                patch.object(cleanup, "ignored_keepers", return_value=[]), \
+                patch.object(cleanup, "retain_worktree_head", return_value=""), \
+                patch.object(cleanup, "git", return_value=subprocess.CompletedProcess([], 0, "", "")) as git_call, \
+                patch.object(cleanup, "fresh_busy", return_value=False, create=True) as fresh:
+            rec = cleanup.act({"class": "worktree-clean", "tier": "auto", "repo": str(self.base),
+                               "target": str(self.t1), "_deadline": time.monotonic() - 1}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        fresh.assert_not_called()
+        self.assertFalse(any("remove" in c.args for c in git_call.call_args_list))
+
+
 class GitTierSafety(Base):
     def test_manual_removal_preserves_ignored_local_data(self):
         import cleanup
@@ -1101,6 +1265,66 @@ def stat_is_dir(st) -> bool:
 
 
 class JsonLine(Base):
+    def test_exception_details_are_not_returned_to_cli_consumers(self):
+        import io
+        marker = "SYNTHETIC_PRIVATE_EXCEPTION"
+        for args in ([], ["--json"]):
+            with self.subTest(args=args):
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(self.g, "run", side_effect=RuntimeError(marker)), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = self.g.main(args)
+                self.assertEqual(code, 2)
+                self.assertNotIn(marker, out.getvalue() + err.getvalue())
+                self.assertIn("RuntimeError", out.getvalue() + err.getvalue())
+
+    def test_invalid_git_child_receipt_is_failed_without_raw_output(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        for output in (marker, "[]", "null", "{}", "[1]", "true",
+                       json.dumps({"error": marker}), json.dumps({"result": "ran"})):
+            with self.subTest(output=output):
+                child = subprocess.CompletedProcess([], 0, stdout=output, stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertIsInstance(row, dict)
+                self.assertEqual(row["result"], "failed")
+                self.assertNotIn(marker, json.dumps(row))
+
+    def test_git_child_envelope_is_typed_and_exit_status_wins(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        good = {"result": "ran", "removed": 0, "skipped": 0, "failed": 0}
+        cases = [
+            ({**good, "reason": marker}, 0, "ran"),
+            ({"result": "busy", "reason": marker}, 0, "busy"),
+            ({"result": "plan-only", "counts": {marker: 1}}, 0, "failed"),
+            (good, 7, "failed"),
+            ({**good, "plan_seconds": float("nan")}, 0, "failed"),
+            ({**good, "plan_seconds": True}, 0, "failed"),
+            ({**good, "stopped": -1}, 0, "failed"),
+            ({**good, "level": marker}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": marker}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": True, "measured_at": None}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": None, "extra": marker}}, 0, "ran"),
+            ({"result": "plan-only", "counts": {"worktree-clean": 2},
+              "carried": {"checkouts": 1, "measured_at": None}}, 0, "plan-only"),
+        ]
+        for doc, code, expected in cases:
+            with self.subTest(doc=doc, code=code):
+                child = subprocess.CompletedProcess([], code, stdout=json.dumps(doc), stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertEqual(row["result"], expected)
+                self.assertNotIn(marker, json.dumps(row))
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+
+    def test_valid_git_child_summary_retains_failure_and_carried_counts(self):
+        expected = {"result": "ran", "removed": 0, "skipped": 2, "failed": 1,
+                    "carried": {"checkouts": 3, "measured_at": "2026-01-01T00:00:00Z"}}
+        child = subprocess.CompletedProcess([], 0, stdout=json.dumps(expected), stderr="")
+        with patch.object(self.g.subprocess, "run", return_value=child):
+            self.assertEqual(self.g._git_tier(False, "normal", 30), expected)
+
     def test_json_prints_one_line_the_maintenance_job_can_read(self):
         import io, contextlib
         out = io.StringIO()

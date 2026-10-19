@@ -721,7 +721,8 @@ class Estate(Base):
         # here sees whatever indexes a fresh temporary checkout (Spotlight, an editor's watcher).
         held = holders.Holders(list((busy or {}).values()))
         with patch("scan_machine.working_dirs", return_value=busy or {}), \
-                patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: held)):
+                patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: held)), \
+                patch.object(cleanup, "fresh_busy", side_effect=lambda target, timeout: held.busy(target)):
             return cleanup.main(["cleanup.py", *args])
 
     def test_the_recheck_reuses_a_listing_younger_than_twenty_seconds(self):

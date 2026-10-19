@@ -54,6 +54,7 @@ import paths  # noqa: E402
 import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
 from cleanup_safety import protected_tree_reason  # noqa: E402
+from holders import fresh_busy  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
@@ -513,16 +514,11 @@ def still_safe_branch(a: dict, expected: str | None = None) -> str:
 
 
 def busy_now(path: str) -> bool:
-    """Whether a process holds anything under `path` RIGHT NOW: a fresh listing of open
-    files, maps, executables, command lines and working directories (holders.py). Before
-    2026-10-12 only working directories counted, so a worktree whose files an editor or a dev
-    server held open was removed. When the listing cannot be taken, everything is held."""
+    """Preliminary cached refusal; only the final target probe may grant removal."""
     import holders
     global _LISTING
-    # ONE LISTING PER 20 SECONDS, not one per worktree: at load 300-700 on 2026-10-12 each full
-    # listing took tens of seconds, and the guard's git tier spent its whole share re-checking
-    # the first worktrees without removing anything. Twenty seconds old is still "right now"
-    # next to the hours a worktree has to be idle before it is planned at all.
+    # Share the expensive full inventory for preliminary refusals. Every actual
+    # worktree removal also needs an uncached bounded target probe below.
     taken, listing = _LISTING
     if listing is None or time.monotonic() - taken > RECHECK_FRESH_SECONDS:
         listing = holders.Holders.take(60)
@@ -530,7 +526,7 @@ def busy_now(path: str) -> bool:
     return listing.busy(path)
 
 
-#: How old a listing of what processes hold may be when a removal re-checks its target.
+#: Maximum age of the preliminary refusal cache; never the final removal proof.
 RECHECK_FRESH_SECONDS = 20
 _LISTING: tuple = (0.0, None)
 
@@ -644,8 +640,20 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls == "worktree-missing":
         if os.path.exists(target):
             return {**rec, "result": "skipped", "reason": "the directory exists again"}
-        git(repo, "worktree", "prune")
-        return {**rec, "result": "pruned"}
+        # Git prunes eligible administrative records across this repository. Its
+        # exit status proves command completion, never a target-only change count.
+        detail = {"scope": "repository-missing-registrations", "registration_changes": None}
+        try:
+            done = git(repo, "worktree", "prune")
+        except (OSError, subprocess.SubprocessError):
+            return {**rec, **detail, "result": "failed", "effect": "unknown",
+                    "reason_code": "registration-prune-incomplete",
+                    "reason": "registration pruning did not complete; inspect current registrations before retrying"}
+        if done.returncode:
+            return {**rec, **detail, "result": "failed", "exit_code": done.returncode,
+                    "effect": "unknown", "reason_code": "registration-prune-failed",
+                    "reason": "Git reported a registration pruning failure; inspect current registrations before retrying"}
+        return {**rec, **detail, "result": "pruned", "exit_code": 0}
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}
@@ -690,10 +698,6 @@ def act(a: dict, archive: pathlib.Path) -> dict:
                     "preserve or move them first, then rerun full cleanup --apply --include manual"}
         if cls == "worktree-dirty":
             try:
-                global _LISTING
-                _LISTING = (0.0, None)  # archiving may outlive the shared holders observation
-                if busy_now(target):
-                    raise ArchiveRefused("a process holds the worktree after archiving")
                 revalidate_manual(target, dest, rec["head"], status.stdout, patch, staged, manifest, deadline)
                 if ignored_keepers(target, set()):
                     raise ArchiveRefused("ignored files appeared during archive verification")
@@ -704,6 +708,15 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         why = index_visibility_reason(target) or retain_worktree_head(repo, target, rec["head"])
         if why:
             return {**rec, "result": "skipped", "reason": why}
+        # Do not let the preliminary cache or time spent verifying an archive
+        # grant deletion. This shared target probe is the final external check.
+        end = deadline if cls == "worktree-dirty" else a.get("_deadline")
+        left = min(5.0, end - time.monotonic()) if end is not None else 5.0
+        if left <= 0:
+            return {**rec, "result": "skipped", "reason": "holder recheck budget exhausted; nothing removed"}
+        held = fresh_busy(target, left)
+        if held is not False:
+            return {**rec, "result": "skipped", "reason": "worktree is held or holder coverage is unknown; nothing removed"}
         args = ["worktree", "remove", target] + (["--force", "--force"] if cls == "worktree-dirty" else [])
         done = git(repo, *args)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",

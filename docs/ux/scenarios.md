@@ -75,3 +75,37 @@ disk timestamps rather than presenting the whole machine as freshly measured. A 
 new memory attempt shows unknown swap, never zero or a newly dated old measurement.
 Process RSS totals are labelled as sums that can count shared pages more than once.
 The bounded packet is [memory freshness](../runs/2026-10-13-memory-freshness/README.md).
+
+### OBS-87: inspect checkout candidates beneath explicit roots
+
+The operator supplies each search root to the read-only checkout inventory command.
+The receipt identifies its budgets, independent source times, omissions and cursor;
+missing or failed observations remain unknown. A discovered checkout, including an
+unregistered or old one, is never presented as abandoned or safe to remove. Unmeasured
+allocated/reclaimable bytes stay null. The command grants no cleanup authority.
+
+### OBS-87: understand cache coverage without cleaning
+
+`full machine --cache-coverage` reports configured cache/runtime roots and command
+availability without walking their contents or running those commands. Presence, prior
+size evidence and source age are separate. Owner/use/regeneration and reclaimable bytes
+stay unknown until separately proved. Protected containers and OS-managed caches remain
+explicitly uncovered, and no inventory row authorizes removal.
+
+### OBS-87: read saved coverage without rescanning
+
+Persona: operator or agent inspecting the last explicit checkout/cache inventory.
+Entry: `full machine --coverage` or `observatory_machine(section="coverage")`.
+Preconditions: a workspace exists; either saved receipt may be absent or partial.
+Steps: request coverage, inspect each source's own attempt age and snapshot counts,
+then inspect the bounded rows and unknown ownership/reclaimable bytes.
+Expected result: no collector runs; at most ten rows per source are returned. The
+machine overview includes the same bounded summary. A saved count never becomes an
+estate-wide total or permission to delete, and stale counts are labelled as snapshots.
+Alternate paths and recovery: missing, malformed, oversized, future-dated or stale
+receipts show unknown current counts and explicit source reasons; valid peers survive
+malformed rows. Run the separate explicit inventory command to obtain new evidence.
+UI elements: CLI flag, MCP section enum and JSON result; no template changes.
+States covered: absent, partial, fresh saved snapshot, stale, invalid and bounded.
+Status: draft. Coverage: `tests/test_coverage_view.py` (eight cases),
+`tests/test_mcp_wire.py` (coverage schema and real stdio call). Product: unobserved.
