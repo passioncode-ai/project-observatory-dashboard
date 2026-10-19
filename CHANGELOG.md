@@ -7,6 +7,32 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **DigitalOcean teams in the DigitalOcean door, and a collector of what each team runs and costs** (OBS-155).
+  `tools/digitalocean.py` gains an account half beside its database half, symmetric to the Cloudflare door:
+  `stash` (a team's own token on stdin, or `--from-doctl CONTEXT|all` reading doctl's config directly, nothing
+  printed), `teams`, `members --team`, `team create` (plans by default, writes with `--apply`), `presets`, `issue`,
+  `install`, `list`, `ping`, `rotate` and `revoke`. Team tokens live in `secrets/digitalocean-admin/` (0600), the
+  collector's read tokens in `secrets/digitalocean-read.d/`, and a record per installed token in
+  `secrets/digitalocean-issued/` (team, preset, slot, declared scopes, dates; never a value).
+  - What DigitalOcean's public API cannot do, measured on 2026-10-19 and handled rather than faked: it has no
+    endpoint to create, roll or list personal access tokens ([API reference](https://docs.digitalocean.com/reference/api/digitalocean/);
+    `GET /v2/tokens` answers 403 to a full-access personal token), so `issue` refuses with the control-panel recipe
+    (the preset's [custom scopes](https://docs.digitalocean.com/reference/api/scopes/)) and `install` takes the minted
+    token on stdin, checks its team and its preset's reads, then delivers it. It has no endpoint to list, invite,
+    remove or re-role members; `members` says so, and `team create` is the one documented write
+    (`POST /v2/organizations/team`, in an organization context). Revocation uses the documented
+    [OAuth revocation endpoint](https://docs.digitalocean.com/reference/api/oauth/) and counts only when
+    `/v2/account` then answers 401 to the old value.
+  - `collectors/scan_digitalocean.py` (`full scan-digitalocean`, daily in the tick, behind
+    `integrations.digitalocean`) writes `store/raw/digitalocean.json`: per team the balance and month-to-date usage,
+    Droplets with their monthly price, App Platform apps with the repositories they deploy from, databases without
+    their credentials, volumes and domains. It reads with the team's `observatory-read` token when one is installed,
+    else its stashed token, and says which. A 401 (the team), 403 (a resource) or 429 (a resource, with the wait) is
+    named in `degraded`; the rest still lands.
+  - Two findings: `digitalocean.droplet_off_billed` (a powered-off Droplet is billed in full until destroyed) and
+    `digitalocean.app_down` (an App Platform app with no active deployment; its project named only through a
+    repository the registry already ties to one), plus `digitalocean.snapshot_stale` past two days.
+
 - **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
   service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
   the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.

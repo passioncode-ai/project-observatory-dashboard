@@ -1665,6 +1665,23 @@ def collect() -> list[dict]:
     _hd = paths.REGISTRY / "heroku-apps.json"
     out.extend(heroku_findings.findings(
         json.loads(_hd.read_text(encoding="utf-8")) if _hd.is_file() else None))
+    # WHAT DIGITALOCEAN BILLS FOR NOTHING (OBS-155): a Droplet powered off is billed in full,
+    # an app with no active deployment serves nothing. Read from the raw scan; an app's project
+    # comes only from a repository the registry already ties to one.
+    import digitalocean_findings
+    _dof = paths.SCRATCH / "digitalocean.json"
+    try:
+        _dodoc = json.loads(_dof.read_text(encoding="utf-8")) if _dof.is_file() else None
+    except (OSError, ValueError):
+        _dodoc = None
+    _dorepos, _dorels = [], []
+    for _name, _key in (("repositories.json", "repositories"), ("relations.json", "relations")):
+        try:
+            _rows = json.loads((paths.REGISTRY / _name).read_text(encoding="utf-8")).get(_key) or []
+        except (OSError, ValueError, AttributeError):
+            _rows = []
+        (_dorepos if _key == "repositories" else _dorels).extend(r for r in _rows if isinstance(r, dict))
+    out.extend(digitalocean_findings.findings(_dodoc, _dorepos, _dorels))
     # WHAT THE CREDENTIAL INVENTORY OWES. `secret.leaked_unrotated` below reads
     # the leak register; these read its neighbours — a lifetime cap, an account
     # nothing claims, a credential known only from its leak.

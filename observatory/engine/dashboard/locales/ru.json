@@ -118,6 +118,9 @@
  "Heavy memory use by one origin": "Один источник занимает много памяти",
  "Heroku $/mo": "Heroku $/мес",
  "Heroku app billed with nothing running": "Приложение Heroku оплачивается, но ничего не запущено",
+ "DigitalOcean app with no active deployment": "Приложение DigitalOcean без активного развёртывания",
+ "DigitalOcean Droplet off and still billed": "Droplet DigitalOcean выключен, но оплачивается",
+ "DigitalOcean scan out of date": "Данные DigitalOcean устарели",
  "Heroku app down": "Приложение Heroku не работает",
  "Heroku apps with no code here": "Приложения Heroku без кода на этой машине",
  "Heroku apps without a project": "Приложения Heroku без проекта",
@@ -820,6 +823,12 @@
   "many": "снимку Heroku {n} дней, поэтому по нему ничего не сообщается",
   "other": "снимку Heroku {n} дня, поэтому по нему ничего не сообщается"
  },
+ "the DigitalOcean snapshot is {n} days old, so nothing is being said about it": {
+  "one": "снимку DigitalOcean {n} день, поэтому по нему ничего не сообщается",
+  "few": "снимку DigitalOcean {n} дня, поэтому по нему ничего не сообщается",
+  "many": "снимку DigitalOcean {n} дней, поэтому по нему ничего не сообщается",
+  "other": "снимку DigitalOcean {n} дня, поэтому по нему ничего не сообщается"
+ },
  "the agent could not interpret {n} projects it took": {
   "few": "агент не смог интерпретировать {n} взятых проекта",
   "many": "агент не смог интерпретировать {n} взятых проектов",
@@ -1115,6 +1124,8 @@
  "writing and rotating a project secret from here is {refused} — the value travels only through stdin": "запись и ротация секрета проекта отсюда {refused}: значение передаётся только через stdin",
  "zone": "зона",
  "{app} is paid for and not serving": "{app} оплачивается, но не обслуживает запросы",
+ "{app} has no active deployment": "{app}: нет активного развёртывания",
+ "{droplet} is powered off and still billed": "{droplet} выключен, но по-прежнему оплачивается",
  "{app} is still running the value retired from {slot} on {date}": "{app} всё ещё использует значение, выведенное из {slot} {date}",
  "{app} pays for resources it cannot use": "{app} платит за ресурсы, которые не может использовать",
  "{crit} critical / {warn} warning": "{crit} критично / {warn} внимание",
