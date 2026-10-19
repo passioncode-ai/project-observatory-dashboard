@@ -18,7 +18,7 @@ expectation. It changes test evidence and documentation, not the published engin
 ## Latest run
 
 2026-10-19, release 0.25.0 integration: the 2026-10-13 recovery work of #260, #278 and #280 merged onto current
-main in one pull request (PRNUM). Versions are 0.25.0; the `observatory-log` plugin stays 0.24.5 (its content did not
+main in one pull request (#303). Versions are 0.25.0; the `observatory-log` plugin stays 0.24.5 (its content did not
 change). Main's OpenRouter door is kept: the branch's rotation-exposure, policy-provenance, consumer-evidence revoke
 and spend code, its six OpenRouter suites and their text were left out (OBS-150); the wave-8 rotation-capacity stack
 is OBS-149. Root tests (236) and every complete-engine suite pass locally. Next: hosted checks on the pull request,
