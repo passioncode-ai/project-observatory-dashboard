@@ -17,6 +17,7 @@
     python "$T/cloudflare.py" issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
@@ -246,6 +247,22 @@ PRESETS: dict[str, dict] = {
         "why": "onboards one zone's domain to Email Sending and reads its records, for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/sending/subdomains",
+    # CACHE PURGE, ONE ZONE, INTO THE VAULT. A site that deploys from CI (a
+    # Heroku app behind a proxied zone) purges the zone's edge cache after each
+    # release, so the next visitor reads the new build rather than a cached page.
+    # That is `Cache Purge` on one zone and nothing else: not DNS, not the zone's
+    # settings, not a second zone. Listing the zone proves nothing about purging,
+    # so the proof IS a purge — of one URL that does not exist on the site, which
+    # costs nothing and changes nothing a visitor sees. The body names the zone,
+    # so its strings are formatted with it. Named after the zone AND the slot,
+    # like email-routing.
+    "cache-purge": {
+        "name": "observatory-cache-purge {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Cache Purge"),
+        "why": "purges one zone's edge cache after a deploy for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/purge_cache",
+        "probe_body": {"files": ["https://{zone}/.well-known/observatory-purge-probe"]},
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
@@ -890,9 +907,23 @@ def until_honoured(attempt, wait: float):
     return reason
 
 
+def _zone_body(body, zone: str):
+    """A zone preset's probe body with every string formatted with the zone's name
+    (cache-purge purges one URL on that zone); None stays None, so a GET stays a GET."""
+    if body is None:
+        return None
+    if isinstance(body, str):
+        return body.format(zone=zone)
+    if isinstance(body, list):
+        return [_zone_body(v, zone) for v in body]
+    if isinstance(body, dict):
+        return {k: _zone_body(v, zone) for k, v in body.items()}
+    return body
+
+
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
-    """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects) into a vault slot."""
+    """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects, cache purge) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "zone":
         print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
@@ -919,13 +950,14 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
         probe = preset.get("probe", "").format(zone_id=zid)
+        probe_body = _zone_body(preset.get("probe_body"), zone)
         analytics = preset.get("verify") == "analytics"
 
         def read_zone():
             try:
                 if analytics:
                     return can_read_analytics(value, [zid]) or None
-                _request(probe, value)
+                _request(probe, value, probe_body)
                 return None
             except RuntimeError as exc:
                 # Only a preset that declared it: its probe reads a thing the zone may

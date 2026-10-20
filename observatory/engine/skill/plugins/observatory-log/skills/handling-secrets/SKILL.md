@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.25.0"
+  version: "0.26.0"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -30,7 +30,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.25.0`
+3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.26.0`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old).
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
@@ -245,7 +245,8 @@ Adding an Email Routing rule in one zone — one address to a Worker — is
 namespace is `--preset workers-edit --account <slug>`; putting a Worker in front of
 a hostname (`example.com/*`) is the zone right `--preset workers-routes --zone <zone>`;
 sending one hostname to another at the edge (a Single Redirect, `www.` to the apex) is
-the zone right `--preset redirect-rules --zone <zone>`.
+the zone right `--preset redirect-rules --zone <zone>`; purging a zone's edge cache after a
+deploy is `--preset cache-purge --zone <zone>`, proved by purging one URL the site does not serve.
 Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.

@@ -495,6 +495,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         step("env", PY, "collectors/scan_env.py", SCRATCH / "env.json")
 
     step("scan-cloudflare", PY, "collectors/scan_cloudflare.py", SCRATCH / "cloudflare_zones.json")
+    # DigitalOcean's teams: what runs and what it costs (OBS-155); a day is fresh enough for money.
+    if stale(SCRATCH / "digitalocean.json", 24):
+        log("digitalocean: refreshing (older than 24h or absent)")
+        step("scan-digitalocean", PY, "collectors/scan_digitalocean.py", SCRATCH / "digitalocean.json")
     step("scan-mcp", PY, "collectors/scan_mcp.py", SCRATCH / "mcp.json", "--declarations-only")
     step("scan-agents", PY, "collectors/scan_agents.py", SCRATCH / "agents.json")
     # THE HARNESS: what every agent session loads, what it costs, which skills match a security rule

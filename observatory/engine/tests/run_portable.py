@@ -233,6 +233,9 @@ HELPERS += (
 HELPERS += ('lesson_emitter_fixture.json',)
 # The synthetic transcript the reach canary reads (M-8).
 HELPERS += ('ask_why_transcript.json',)
+# The DigitalOcean door's account half and collector (OBS-155): run from `test_digitalocean_door.py`,
+# the `test-digitalocean` step, so one step covers one door.
+HELPERS += ('test_digitalocean_account.py',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -315,6 +318,7 @@ def copy_source(target: Path) -> None:
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
     selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
+    selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
     for source in sorted(selected):
         if not source.is_file():
             # Optional root modules/skill docs are not needed by every release.

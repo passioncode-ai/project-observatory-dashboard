@@ -1,5 +1,27 @@
 #!/usr/bin/env python3
-"""DigitalOcean door: managed-database credentials go to the vault, never the transcript.
+"""DigitalOcean door: team tokens, narrow tokens and database credentials, never in the transcript.
+
+Two halves. The ACCOUNT half (OBS-155) keeps one token per team and the narrow tokens
+installed from the control panel, the way `tools/cloudflare.py` keeps Cloudflare's:
+
+  digitalocean.py stash < token-file                # a team's own token, on stdin, once per team
+  digitalocean.py stash --from-doctl CONTEXT|all    # or read from doctl's config; nothing printed
+  digitalocean.py teams [--probe]                   # teams, roles, which vault slots belong to each
+  digitalocean.py members --team T                  # role and member count; the API lists no members
+  digitalocean.py team create NAME --org T [--invite EMAIL:ROLE ...] [--apply]   # plans by default
+  digitalocean.py presets                           # the custom scopes each preset is minted with
+  digitalocean.py issue --preset P --team T --vault PROJECT/ENV/NAME   # refused: prints the recipe
+  pbpaste | digitalocean.py install --preset P --team T --vault PROJECT/ENV/NAME
+  digitalocean.py list | ping
+  pbpaste | digitalocean.py rotate LABEL            # new value in, old one revoked and proved dead
+  digitalocean.py revoke LABEL                      # revoked and proved dead, then removed here
+
+DigitalOcean's public API cannot mint, roll or list personal access tokens, nor list,
+invite, remove or re-role team members (measured 2026-10-19; see the account half below).
+So `issue` names the control-panel step and `install` takes what it minted; a revocation
+counts only when `/v2/account` then answers 401 to the old value.
+
+The DATABASE half: managed-database credentials go to the vault, never the transcript.
 
 Why a door. A call of the DigitalOcean MCP tool `db-cluster-list` asked only for
 names can return every cluster's passwords: DigitalOcean's API puts a password in
@@ -675,6 +697,889 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
     return 0
 
 
+# ══ teams and tokens (OBS-155) ═════════════════════════════════════════════════
+#
+# The account half of the door: one token per TEAM stashed and never handed out, narrow
+# tokens installed with a record, rotation and revocation that count only when the
+# provider is seen refusing the old value. Talks to the API over HTTPS directly, not
+# through doctl: doctl prints whatever the API answers, and this half needs the status
+# code to tell "no such scope" (403) from "dead token" (401) from "slow down" (429).
+#
+# WHAT THE PUBLIC API CANNOT DO, measured on 2026-10-19 and written where it binds:
+#  - mint, roll or list personal access tokens: the API reference has no token endpoint,
+#    and `GET /v2/tokens` answers 403 to a full-access personal token. So `issue` refuses
+#    and names the control-panel step, and `install` takes the minted token on stdin;
+#  - list, invite, remove or re-role team members: no such endpoint in the reference. Only
+#    `POST /v2/organizations/team` (a NEW team with invitations, in an organization context)
+#    exists, and `team create` is that;
+#  - revoke a personal token: the documented revocation endpoint is OAuth's. The door calls
+#    it and then asks `/v2/account` with the old value: only a 401 counts as revoked.
+
+API_DEFAULT = "https://api.digitalocean.com"
+OAUTH_REVOKE = "https://cloud.digitalocean.com/v1/oauth/revoke"
+PANEL_TOKENS = "https://cloud.digitalocean.com/account/api/tokens"
+PANEL_TEAM = "https://cloud.digitalocean.com/account/team"
+API_REFERENCE = "https://docs.digitalocean.com/reference/api/digitalocean/"
+SCOPES_REFERENCE = "https://docs.digitalocean.com/reference/api/scopes/"
+
+sys.path.insert(0, str(ROOT))
+import paths  # noqa: E402
+import private_io  # noqa: E402
+
+_STORE = paths.source_path("secret_store", paths.SECRETS)
+#: One file per team: the team's own token (full access, from the operator), mode 600.
+ADMIN_STORE = _STORE / "digitalocean-admin"
+#: The collector's read tokens, one per team (`install --preset observatory-read`).
+READ_STORE = _STORE / "digitalocean-read.d"
+#: One record per installed token: team, preset, where it went, dates. Never a value.
+RECORDS = _STORE / "digitalocean-issued"
+
+#: Roles an invitation may carry (the API reference's `team_invitation.role`); `owner` cannot be invited.
+INVITE_ROLES = ("member", "biller", "billing viewer", "resource viewer", "modifier")
+
+#: A narrow token is MINTED in the control panel with these custom scopes (scope names from
+#: the scopes reference) and then installed. `probes` are the reads the door makes with the new
+#: value before it is delivered; write scopes are declared, never proven, and the record says so.
+PRESETS: dict[str, dict] = {
+    "observatory-read": {
+        "scopes": ("account:read", "actions:read", "app:read", "billing:read", "block_storage:read",
+                   "database:read", "domain:read", "droplet:read", "project:read", "regions:read",
+                   "sizes:read"),
+        "probes": ("/v2/account", "/v2/droplets?per_page=1"),
+        "why": "what the collector reads: Droplets, apps, databases, volumes, domains and the balance",
+        "destination": "read-store",
+    },
+    "read-only": {
+        "scopes": ("account:read", "actions:read", "app:read", "billing:read", "block_storage:read",
+                   "database:read", "domain:read", "droplet:read", "image:read", "project:read",
+                   "regions:read", "registry:read", "sizes:read", "snapshot:read", "tag:read", "vpc:read"),
+        "probes": ("/v2/account", "/v2/droplets?per_page=1"),
+        "why": "reads a team's resources for a project; no database credentials (no database:view_credentials)",
+    },
+    "app-deploy": {
+        "scopes": ("account:read", "actions:read", "app:read", "app:create", "app:update"),
+        "probes": ("/v2/account", "/v2/apps?per_page=1"),
+        "why": "deploys and updates App Platform apps of one team",
+    },
+    "droplet-deploy": {
+        "scopes": ("account:read", "actions:read", "droplet:read", "droplet:create", "droplet:update",
+                   "image:read", "regions:read", "sizes:read", "ssh_key:read", "tag:read", "tag:create",
+                   "vpc:read"),
+        "probes": ("/v2/account", "/v2/droplets?per_page=1"),
+        "why": "creates and changes Droplets of one team",
+    },
+    "dns-edit": {
+        "scopes": ("account:read", "domain:read", "domain:create", "domain:update", "domain:delete"),
+        "probes": ("/v2/account", "/v2/domains/{domain}"),
+        "needs": "domain",
+        "why": "edits DNS records; DigitalOcean scopes are per team, so it reaches EVERY domain of the team",
+    },
+    "registry": {
+        "scopes": ("account:read", "registry:read", "registry:update"),
+        "probes": ("/v2/account", "/v2/registry"),
+        "absent_ok": ("/v2/registry",),
+        "why": "pushes to and reads the team's container registry",
+    },
+    "spaces-keys": {
+        "scopes": ("account:read", "spaces_key:read", "spaces_key:create_credentials"),
+        "probes": ("/v2/account", "/v2/spaces/keys?per_page=1"),
+        "why": "lists and mints Spaces access keys of one team",
+    },
+    "billing-read": {
+        "scopes": ("account:read", "billing:read"),
+        "probes": ("/v2/account", "/v2/customers/my/balance"),
+        "why": "reads the team's balance and month-to-date usage",
+    },
+}
+
+#: Vault slot names that hold a DigitalOcean token, by convention; `teams` matches them by value.
+TOKEN_SLOT = re.compile(r"^(DIGITALOCEAN|DO)_(API_|ACCESS_)?TOKEN$")
+
+
+class ApiError(DoorError):
+    def __init__(self, status: int, endpoint: str, retry_after: str | None = None):
+        self.status, self.endpoint, self.retry_after = status, endpoint, retry_after
+        wait = f", retry after {retry_after} s" if retry_after else ""
+        what = {401: "token not accepted", 403: "token lacks the scope", 404: "not found",
+                412: "precondition not met", 429: "rate limited"}.get(status, "refused")
+        super().__init__(f"DigitalOcean answered HTTP {status} on {endpoint} ({what}{wait}); "
+                         f"provider response withheld")
+
+
+def api_base() -> str:
+    """The API's origin. An override (tests) must be loopback: a token is never sent elsewhere."""
+    base = os.environ.get("OBSERVATORY_DO_API", "").rstrip("/")
+    if not base:
+        return API_DEFAULT
+    host = urllib.parse.urlsplit(base).hostname or ""
+    if urllib.parse.urlsplit(base).scheme != "http" or host not in ("127.0.0.1", "localhost", "::1"):
+        raise DoorError("OBSERVATORY_DO_API must be a loopback http:// origin; a token is never sent elsewhere")
+    return base
+
+
+def revoke_url() -> str:
+    base = api_base()
+    return OAUTH_REVOKE if base == API_DEFAULT else f"{base}/v1/oauth/revoke"
+
+
+def _endpoint(path: str) -> str:
+    return path.split("?", 1)[0]
+
+
+#: What a token may contain: printable ASCII, no space. A value with a newline or a control
+#: character makes http.client raise an error whose MESSAGE quotes the header, value included,
+#: so such a value is refused before any header is built.
+TOKEN_SHAPE = re.compile(r"[\x21-\x7e]{1,512}")
+
+
+def token_ok(value: object) -> bool:
+    return isinstance(value, str) and TOKEN_SHAPE.fullmatch(value) is not None
+
+
+def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
+          content_type: str = "application/json") -> dict:
+    """One call. The error names the endpoint and the status, never a header or a body."""
+    import urllib.error
+    import urllib.request
+    endpoint = _endpoint(urllib.parse.urlsplit(url).path)
+    if not token_ok(token):
+        raise DoorError(f"a value meant for {endpoint} is not shaped like a token (whitespace or a "
+                        "control character inside it); it was not sent")
+    try:
+        req = urllib.request.Request(url, data=body, method=method,
+                                     headers={"Authorization": f"Bearer {token}", "Content-Type": content_type,
+                                              "User-Agent": "project-observatory"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        # Retry-After is the provider's RESPONSE header, a number of seconds: no credential.
+        wait = e.headers.get("Retry-After") if e.code == 429 and e.headers else None
+        e.close()
+        raise ApiError(e.code, endpoint, wait if (wait or "").isdigit() else None) from None
+    except OSError as e:
+        raise DoorError(f"DigitalOcean unreachable on {endpoint}: {type(e).__name__}") from None
+    except Exception as e:  # noqa: BLE001  any other message may quote the request; only the class leaves
+        raise DoorError(f"the call to {endpoint} failed ({type(e).__name__}); details withheld") from None
+    try:
+        doc = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        raise DoorError(f"DigitalOcean answered {endpoint} with something that is not JSON") from None
+    return doc if isinstance(doc, dict) else {}
+
+
+def _api(path: str, token: str, payload: dict | None = None, method: str | None = None) -> dict:
+    data = json.dumps(payload).encode() if payload is not None else None
+    return _wire(method or ("POST" if data is not None else "GET"), api_base() + path, token, body=data)
+
+
+def _pages(path: str, token: str, key: str, limit: int = 50) -> list[dict]:
+    """Every row of a listing, page by page, until the API stops naming a next page."""
+    out: list[dict] = []
+    sep = "&" if "?" in path else "?"
+    for page in range(1, limit + 1):
+        doc = _api(f"{path}{sep}page={page}&per_page=200", token)
+        rows = doc.get(key) or []
+        out.extend(r for r in rows if isinstance(r, dict))
+        if not ((doc.get("links") or {}).get("pages") or {}).get("next") or not rows:
+            return out
+    raise DoorError(f"{_endpoint(path)} has more than {limit} pages; refusing to read further")
+
+
+def account_of(token: str) -> dict:
+    """{user_uuid, team_uuid, team_name, status} of a token. Never the email."""
+    a = _api("/v2/account", token).get("account") or {}
+    team = a.get("team") or {}
+    return {"user_uuid": a.get("uuid"), "team_uuid": team.get("uuid"), "team_name": team.get("name"),
+            "status": a.get("status")}
+
+
+def user_teams(token: str) -> list[dict]:
+    """The user's teams with their role. `GET /v2/teams` answers this but is NOT in the API
+    reference (measured 2026-10-19), so a failure is a note, never a refusal."""
+    rows = _api("/v2/teams?per_page=200", token).get("teams") or []
+    return [{"uuid": t.get("uuid"), "name": t.get("name"), "role": t.get("user_role")}
+            for t in rows if isinstance(t, dict)]
+
+
+def slug(text: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-") or "personal"
+
+
+def one_value(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        raise DoorError("nothing arrived on stdin")
+    if len(value.split()) > 1:
+        raise DoorError(f"{len(value.split())} whitespace-separated pieces arrived on stdin, not one token")
+    if not token_ok(value):
+        raise DoorError("what arrived on stdin has a character a token cannot have")
+    return value
+
+
+def write_secret(path: pathlib.Path, value: str) -> None:
+    private_io.write(path, value + "\n")
+
+
+def _meta(path: pathlib.Path) -> pathlib.Path:
+    return path.with_name(path.name + ".meta.json")
+
+
+def read_record(path: pathlib.Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(private_io.read(path))
+    except (OSError, ValueError, RuntimeError):
+        raise DoorError(f"record {path.name} is unreadable; refusing to replace it") from None
+    if not isinstance(doc, dict):
+        raise DoorError(f"record {path.name} is not an object")
+    return doc
+
+
+def write_record(path: pathlib.Path, doc: dict) -> None:
+    private_io.write(path, json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+
+
+def today() -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def stashes() -> list[tuple[str, pathlib.Path, dict]]:
+    """(label, value file, record) for every stashed team token."""
+    if any(p.is_symlink() for p in (ADMIN_STORE, *ADMIN_STORE.parents)):
+        raise DoorError("the DigitalOcean stash must not contain symbolic links")
+    if not ADMIN_STORE.is_dir():
+        return []
+    return [(p.name, p, read_record(_meta(p))) for p in sorted(ADMIN_STORE.iterdir())
+            if p.is_file() and not p.name.startswith(".") and not p.name.endswith(".meta.json")]
+
+
+def stash_of(label: str) -> tuple[pathlib.Path, dict]:
+    for name, path, meta in stashes():
+        if name == label:
+            return path, meta
+    have = ", ".join(n for n, _p, _m in stashes()) or "none"
+    raise DoorError(f"no stashed team called {label!r} (have: {have}); `digitalocean.py stash` first")
+
+
+def records_lock():
+    """One writer at a time over the records, the read store and the slots they name: held from
+    the first read of a record to its last write (install, rotate, revoke)."""
+    return private_io.lock(RECORDS / ".lock")
+
+
+def records() -> list[tuple[str, pathlib.Path, dict]]:
+    if not RECORDS.is_dir():
+        return []
+    return [(p.name.removesuffix(".meta.json"), p, read_record(p))
+            for p in sorted(RECORDS.glob("*.meta.json"))]
+
+
+def _journal(event: str, secret: str, **detail) -> None:
+    """The vault's movements journal. Never raises: a journal failure must not undo a change."""
+    try:
+        private_files.journal(event, secret, tool="digitalocean.py", **detail)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  (movement not journaled: {type(exc).__name__})", file=sys.stderr)
+
+
+# ── doctl's config, read directly ─────────────────────────────────────────────
+
+def doctl_config_path() -> pathlib.Path:
+    if os.environ.get("DOCTL_CONFIG"):
+        return pathlib.Path(os.environ["DOCTL_CONFIG"]).expanduser()
+    home = pathlib.Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "doctl" / "config.yaml"
+    if os.name == "nt":
+        return pathlib.Path(os.environ.get("APPDATA", home)) / "doctl" / "config" / "config.yaml"
+    return pathlib.Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "doctl" / "config.yaml"
+
+
+def doctl_contexts(text: str) -> dict[str, str]:
+    """{context: token} from doctl's YAML: `default` is the top-level `access-token` (as doctl
+    reads it), the rest are `auth-contexts` entries. Two keys only, so no YAML library."""
+    top, ctxs, inblock = "", {}, False
+    for line in text.splitlines():
+        if re.match(r"^\S", line):
+            inblock = line.startswith("auth-contexts:")
+            m = re.match(r"^access-token:\s*(.*?)\s*$", line)
+            if m:
+                top = m.group(1).strip("'\"")
+        elif inblock:
+            m = re.match(r"^\s+([^\s:#][^:]*?)\s*:\s*(.*?)\s*$", line)
+            if m:
+                ctxs[m.group(1).strip("'\"")] = m.group(2).strip("'\"")
+    out = {k: v for k, v in ctxs.items() if v and k != "default"}
+    if top:
+        out["default"] = top
+    return out
+
+
+# ── commands ───────────────────────────────────────────────────────────────────
+
+def _stash_value(value: str, source: str) -> str:
+    try:
+        acct = account_of(value)
+    except ApiError as e:
+        raise DoorError(f"not stashed: {e}") from None
+    if not acct.get("team_uuid"):
+        raise DoorError("not stashed: the token answers, but names no team")
+    role, teams_note = None, None
+    try:
+        role = next((t["role"] for t in user_teams(value) if t["uuid"] == acct["team_uuid"]), None)
+    except DoorError as e:
+        teams_note = f"role unknown: {e}"
+    label = slug(acct["team_name"])
+    ADMIN_STORE.mkdir(parents=True, exist_ok=True)
+    for name, _path, meta in stashes():
+        if name == label and meta.get("team_uuid") not in (None, acct["team_uuid"]):
+            label = f"{label}-{acct['team_uuid'][:8]}"
+            break
+    dest = ADMIN_STORE / label
+    existed = dest.is_file()
+    write_secret(dest, value)
+    write_record(_meta(dest), {
+        "kind": "team", "label": label, "team_uuid": acct["team_uuid"], "team_name": acct["team_name"],
+        "role": role, "role_note": teams_note, "source": source,
+        "stashed_on": today(), "why": "the team's own token: reads teams, verifies installs; never handed out"})
+    _journal("stash", f"digitalocean/{label}", team=acct["team_uuid"], source=source)
+    return f"{'replaced' if existed else 'stashed'}: team {acct['team_name']!r} as {label!r} (role {role or 'unknown'})"
+
+
+def cmd_stash(from_doctl: str | None) -> int:
+    if not from_doctl:
+        if sys.stdin.isatty():
+            raise DoorError("give the team's token on stdin, from a protected file: "
+                            "`digitalocean.py stash < token-file`, or `stash --from-doctl CONTEXT`")
+        print(_stash_value(one_value(sys.stdin.read()), "stdin"))
+        return 0
+    path = doctl_config_path()
+    if path.is_symlink():
+        raise DoorError("doctl's config is a symbolic link; refusing to follow it")
+    try:
+        ctxs = doctl_contexts(private_io.read(path) if path.is_file() else "")
+    except RuntimeError:
+        # doctl writes its config 0600; a wider file is still readable, but say so. Opened without
+        # following a link, and only as a regular file.
+        import stat as _stat
+        import osprivacy
+        fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+        with os.fdopen(fd, encoding="utf-8") as f:
+            if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                raise DoorError("doctl's config is not a regular file") from None
+            ctxs = doctl_contexts(f.read())
+        print("note: doctl's config is readable beyond its owner; `chmod 600` it", file=sys.stderr)
+    if not ctxs:
+        raise DoorError(f"no doctl context holds a token (looked in doctl's config: {path.name})")
+    wanted = sorted(ctxs) if from_doctl == "all" else [from_doctl]
+    for name in wanted:
+        if name not in ctxs:
+            raise DoorError(f"doctl has no context {name!r}; it has: {', '.join(sorted(ctxs))}")
+    seen: dict[str, str] = {}
+    bad = 0
+    for name in wanted:
+        value = ctxs[name]
+        try:
+            acct = account_of(value)
+        except ApiError as e:
+            print(f"  doctl:{name}: not stashed: {e}", file=sys.stderr)
+            bad += 1
+            continue
+        if acct.get("team_uuid") in seen:
+            print(f"  doctl:{name}: same team as doctl:{seen[acct['team_uuid']]}; stashed once")
+            continue
+        seen[acct.get("team_uuid")] = name
+        print(f"  doctl:{name}: " + _stash_value(value, f"doctl:{name}"))
+    return 1 if bad else 0
+
+
+def _vault_slots() -> list[tuple[str, pathlib.Path]]:
+    """(PROJECT/ENV/NAME, file) of every vault slot whose name says DigitalOcean token."""
+    store = private_files.STORE
+    if not store.is_dir():
+        return []
+    out = []
+    for slot in sorted(store.glob("*/*/*")):
+        if slot.is_file() and TOKEN_SLOT.match(slot.name) and not slot.name.endswith(".meta.json"):
+            out.append(("/".join(slot.relative_to(store).parts), slot))
+    return out
+
+
+def _same(a: str, b: str) -> bool:
+    import hmac
+    return hmac.compare_digest(a.encode(), b.encode())
+
+
+def cmd_teams(probe: bool) -> int:
+    st = stashes()
+    if not st:
+        print("no team stashed; `digitalocean.py stash < token-file` or `stash --from-doctl all`")
+        return 0
+    values = {label: private_io.read(path).strip() for label, path, _m in st}
+    by_team: dict[str, list[str]] = {label: [] for label, _p, _m in st}
+    for _label, _p, rec in records():
+        owner = next((l for l, _p2, m in st if m.get("team_uuid") == rec.get("team_uuid")), None)
+        where = rec.get("vault") or rec.get("destination")
+        if owner and where:
+            by_team[owner].append(f"{where} ({rec.get('preset')})")
+    unknown = []
+    for name, slot in _vault_slots():
+        try:
+            held = private_files._read_private(slot).strip()
+        except (private_files.VaultBoundaryError, OSError):
+            continue
+        hit = next((l for l, v in values.items() if _same(held, v)), None)
+        if hit:
+            by_team[hit].append(f"{name} (the team token itself)")
+            continue
+        if any(name in entry for entries in by_team.values() for entry in entries):
+            continue
+        if probe:
+            try:
+                team = account_of(held).get("team_uuid")
+                owner = next((l for l, _p, m in st if m.get("team_uuid") == team), None)
+                if owner:
+                    by_team[owner].append(f"{name} (same team, by the provider)")
+                    continue
+                unknown.append(f"{name} (a team with no stash here)")
+            except DoorError as e:
+                unknown.append(f"{name} ({e.status if isinstance(e, ApiError) else 'unreadable'})")
+        else:
+            unknown.append(name)
+    listed: set[str] = set()
+    for label, path, meta in st:
+        listed.add(meta.get("team_uuid") or "")
+        print(f"{label:24} {meta.get('team_name')!s:24} {meta.get('team_uuid')}  role {meta.get('role') or 'unknown'}"
+              f"  stashed {meta.get('stashed_on', '?')} from {meta.get('source', '?')}  "
+              f"mode {oct(path.stat().st_mode)[-3:]}")
+        for s in by_team[label] or ["(no vault slot is known to belong to it)"]:
+            print(f"    {s}")
+    # The user's other teams, from any live stash (the listing is not in the API reference).
+    others: dict[str, dict] = {}
+    for label, _p, _m in st:
+        try:
+            for t in user_teams(values[label]):
+                if t["uuid"] not in listed:
+                    others.setdefault(t["uuid"], t)
+            break
+        except DoorError as e:
+            print(f"  (team listing through {label}: {e})", file=sys.stderr)
+    for t in others.values():
+        print(f"{'-':24} {t['name']!s:24} {t['uuid']}  role {t.get('role') or 'unknown'}  no token stashed")
+    if unknown:
+        print("DigitalOcean-named vault slots of no stashed team"
+              + ("" if probe else " (`teams --probe` asks the provider which team each is)") + ":")
+        for s in unknown:
+            print(f"    {s}")
+    return 0
+
+
+def cmd_members(team: str) -> int:
+    path, meta = stash_of(team)
+    value = private_io.read(path).strip()
+    print(f"team {meta.get('team_name')} ({meta.get('team_uuid')})")
+    try:
+        role = next((t["role"] for t in user_teams(value) if t["uuid"] == meta.get("team_uuid")), None)
+        print(f"  your role: {role or 'unknown'}")
+    except DoorError as e:
+        print(f"  your role: unknown ({e})")
+    try:
+        rows = _api("/v2/organizations/teams", value).get("teams") or []
+        hit = next((t for t in rows if t.get("uuid") == meta.get("team_uuid")), None)
+        if hit:
+            print(f"  {hit.get('member_count')} member(s), organisation status {hit.get('status')}")
+        else:
+            print("  the organisation's listing does not name this team")
+    except ApiError as e:
+        print("  member count: this token is not in an organization context "
+              f"(HTTP {e.status}); the count comes only from an organization's team listing")
+    print("  names, roles and invitations: DigitalOcean's public API has no endpoint for them "
+          f"({API_REFERENCE}); manage members at {PANEL_TEAM}")
+    return 0
+
+
+def _masked(email: str) -> str:
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
+def cmd_team_create(name: str, org: str, invites: list[str], apply: bool) -> int:
+    if not re.fullmatch(r"[\w .-]{1,64}", name):
+        raise DoorError("a team name is 1-64 letters, digits, spaces, dots or dashes")
+    invitations = []
+    for item in invites:
+        email, sep, role = item.rpartition(":")
+        if not sep or "@" not in email:
+            raise DoorError(f"--invite takes EMAIL:ROLE, got {_masked(item) if '@' in item else item!r}")
+        if role not in INVITE_ROLES:
+            raise DoorError(f"role {role!r} cannot be invited; one of: {', '.join(INVITE_ROLES)}"
+                            + (" (the owner role is never given by invitation)" if role == "owner" else ""))
+        invitations.append({"email": email, "role": role})
+    path, meta = stash_of(org)
+    roles: dict[str, int] = {}
+    for i in invitations:
+        roles[i["role"]] = roles.get(i["role"], 0) + 1
+    plan = (f"create team {name!r} in the organization of {meta.get('team_name')}"
+            + (f", inviting {len(invitations)}: " + ", ".join(f"{_masked(i['email'])} as {i['role']}"
+                                                              for i in invitations) if invitations else ""))
+    if not apply:
+        print(f"dry run: {plan}\n  nothing was sent; repeat with --apply to create it")
+        return 0
+    body: dict = {"name": name}
+    if invitations:
+        body["invitations"] = invitations
+    try:
+        doc = _api("/v2/organizations/team", private_io.read(path).strip(), body)
+    except ApiError as e:
+        if e.status == 412:
+            raise DoorError(f"not created: {org} is not an organization context (HTTP 412); "
+                            "teams are created inside an organization") from None
+        raise DoorError(f"not created: {e}") from None
+    team = doc.get("team") or {}
+    statuses = [i.get("status") for i in doc.get("invitations") or [] if isinstance(i, dict)]
+    print(f"created team {team.get('name')!r} ({team.get('uuid')})"
+          + (f"; invitations: " + ", ".join(f"{statuses.count(s)} {s}" for s in sorted(set(statuses)))
+             if statuses else ""))
+    _journal("team-create", f"digitalocean/{org}", team=team.get("uuid"), invitations=len(invitations))
+    return 0
+
+
+def cmd_presets() -> int:
+    for key, p in PRESETS.items():
+        print(f"{key}: {p['why']}")
+        print(f"    scopes: {', '.join(p['scopes'])}")
+        print(f"    proven on install by: {', '.join(_endpoint(x) for x in p['probes'])}"
+              + (f"  (needs --{p['needs']})" if p.get("needs") else ""))
+    print(f"scope names: {SCOPES_REFERENCE}")
+    return 0
+
+
+def _vault_spec(target: str | None) -> str | None:
+    if target is None:
+        return None
+    parts = target.removeprefix("vault:").split("/")
+    if len(parts) != 3 or not all(parts):
+        raise DoorError("--vault must be PROJECT/ENV/NAME")
+    return "vault:" + "/".join(parts)
+
+
+def _label(preset: str, team: str, where: dict | None) -> str:
+    if where is None:
+        return f"{preset}--{team}"
+    return f"{preset}--{where['project']}-{where['env']}-{where['name']}".lower()
+
+
+def cmd_issue(preset: str, team: str, target: str | None, domain: str | None) -> int:
+    p = PRESETS[preset]
+    stash_of(team)
+    print(f"digitalocean: DigitalOcean's public API cannot create personal access tokens: its reference "
+          f"has no token endpoint ({API_REFERENCE}) and GET /v2/tokens answers 403 to a personal token.\n"
+          f"  mint it in the control panel ({PANEL_TOKENS}) while signed in to team {team}:\n"
+          f"    name: observatory {_label(preset, team, None) if not target else preset + ' ' + target}\n"
+          f"    custom scopes: {', '.join(p['scopes'])}\n"
+          f"  then install it from the clipboard, never through argv:\n"
+          f"    pbpaste | python \"$(project-observatory full-path)/tools/digitalocean.py\" install "
+          f"--preset {preset} --team {team}" + (f" --vault {target}" if target else "")
+          + (f" --domain {domain}" if domain else ""), file=sys.stderr)
+    return 3
+
+
+def _prove(value: str, preset: str, domain: str | None) -> None:
+    p = PRESETS[preset]
+    for probe in p["probes"]:
+        path = probe.format(domain=urllib.parse.quote(domain or "", safe=""))
+        try:
+            _api(path, value)
+        except ApiError as e:
+            if e.status == 404 and _endpoint(probe) in p.get("absent_ok", ()):
+                continue
+            raise DoorError(f"the token cannot do its preset's read {_endpoint(path)}: {e}") from None
+
+
+#: Reads OUTSIDE a preset's scopes: a token that can do one of them is broader than declared.
+#: Reads only; a 200 is the evidence (a 404 proves nothing either way).
+BREADTH_PROBES = (("ssh_key:read", "/v2/account/keys?per_page=1"), ("tag:read", "/v2/tags?per_page=1"),
+                  ("billing:read", "/v2/customers/my/balance"), ("droplet:read", "/v2/droplets?per_page=1"),
+                  ("app:read", "/v2/apps?per_page=1"), ("domain:read", "/v2/domains?per_page=1"),
+                  ("database:read", "/v2/databases?per_page=1"))
+
+
+def _refuse_broad(value: str, preset: str) -> None:
+    """A narrow preset must not carry a team's own token, nor any token wider than its scopes."""
+    for label, path, _meta in stashes():
+        if _same(private_io.read(path).strip(), value):
+            raise DoorError(f"refused: this is the stashed token of team {label}, not a narrow token; mint a "
+                            f"new one with the preset's scopes (`digitalocean.py presets`)")
+    scopes = set(PRESETS[preset]["scopes"])
+    for scope, path in BREADTH_PROBES:
+        if scope in scopes:
+            continue
+        try:
+            _api(path, value)
+        except ApiError as e:
+            # Only the provider saying "no" (401, 403) or "nothing there" (404) proves the token cannot
+            # read it. A 429, a 5xx or a broken transport proves nothing, so the install stops.
+            if e.status in (401, 403, 404):
+                continue
+            raise DoorError(f"could not prove the token is narrow: {_endpoint(path)} answered HTTP {e.status}; "
+                            f"nothing was written and the installed value is kept; retry") from None
+        except DoorError:
+            raise DoorError(f"could not prove the token is narrow: {_endpoint(path)} could not be read; "
+                            f"nothing was written and the installed value is kept; retry") from None
+        raise DoorError(f"refused: the token can read {_endpoint(path)} ({scope}), which preset {preset} does "
+                        f"not include; it is broader than declared (full access?). Mint it with only the "
+                        f"preset's scopes")
+
+
+def _verify_team(value: str, team_uuid: str | None, team: str) -> dict:
+    try:
+        acct = account_of(value)
+    except ApiError as e:
+        raise DoorError(f"refused: {e}") from None
+    if not team_uuid or acct.get("team_uuid") != team_uuid:
+        raise DoorError(f"refused: the token belongs to another team than {team!r} "
+                        f"(it answers for {acct.get('team_name')!r})")
+    return acct
+
+
+def _deliver(value: str, rec: dict) -> str:
+    if rec.get("vault"):
+        return deliver(value, plan("vault:" + rec["vault"]))
+    dest = READ_STORE / rec["team_label"]
+    write_secret(dest, value)
+    return f"collector token for {rec['team_label']} written (mode 600)"
+
+
+def _current(rec: dict) -> str | None:
+    if rec.get("vault"):
+        slot = private_files._slot(*rec["vault"].split("/"))
+        return _read_slot(slot, rec["vault"]) if slot.is_file() else None
+    dest = READ_STORE / rec["team_label"]
+    return private_io.read(dest).strip() if dest.is_file() else None
+
+
+def cmd_install(preset: str, team: str, target: str | None, domain: str | None,
+                project: str | None, expires_on: str | None) -> int:
+    p = PRESETS[preset]
+    if p.get("needs") == "domain" and not domain:
+        raise DoorError(f"preset {preset} needs --domain (the one it is proven against)")
+    vault_spec = _vault_spec(target)
+    if p.get("destination") == "read-store":
+        if vault_spec:
+            raise DoorError("observatory-read goes to the collector's folder; drop --vault")
+    elif not vault_spec:
+        raise DoorError(f"preset {preset} is a project's credential: give --vault PROJECT/ENV/NAME")
+    if sys.stdin.isatty():
+        raise DoorError("give the token on stdin (e.g. `pbpaste | digitalocean.py install ...`)")
+    value = one_value(sys.stdin.read())
+    with records_lock():
+        return _install_locked(value, preset, team, vault_spec, domain, project, expires_on)
+
+
+def _install_locked(value: str, preset: str, team: str, vault_spec: str | None, domain: str | None,
+                    project: str | None, expires_on: str | None) -> int:
+    p = PRESETS[preset]
+    _path, meta = stash_of(team)
+    where = plan(vault_spec) if vault_spec else None       # the vault's own refusals, before anything
+    label = _label(preset, team, where)
+    rec_path = RECORDS / f"{label}.meta.json"
+    prior = read_record(rec_path)
+    if prior or (not where and (READ_STORE / team).exists()):
+        # Installing over a live token would orphan it: still valid at DigitalOcean, no longer known here.
+        raise DoorError(f"{label} is already installed; replace it with `digitalocean.py rotate {label}` "
+                        f"(the old token is then revoked and proved dead)")
+    acct = _verify_team(value, meta.get("team_uuid"), team)
+    _prove(value, preset, domain)
+    _refuse_broad(value, preset)
+    rec = {"kind": "installed", "label": label, "preset": preset, "team_label": team,
+           "team_uuid": acct["team_uuid"], "team_name": acct["team_name"],
+           "vault": f"{where['project']}/{where['env']}/{where['name']}" if where else None,
+           "destination": None if where else f"digitalocean-read.d/{team}",
+           "project": project or prior.get("project"), "domain": domain,
+           "scopes_declared": list(p["scopes"]),
+           "proven_reads": [_endpoint(x) for x in p["probes"]],
+           "note": "minted in the control panel; scopes are declared by the installer, reads are proven",
+           "expires_on": expires_on or prior.get("expires_on"),
+           "installed_on": prior.get("installed_on") or today(),
+           "rotated_on": prior.get("rotated_on"), "rotations": prior.get("rotations") or 0,
+           "issued_by": "tools/digitalocean.py"}
+    said = _deliver(value, rec)
+    RECORDS.mkdir(parents=True, exist_ok=True)
+    write_record(rec_path, rec)
+    _journal("issue", rec["vault"] or f"digitalocean/{team}/read", preset=preset, team=acct["team_uuid"])
+    print(f"installed {label}: {preset} for team {acct['team_name']}; {said}")
+    if rec["vault"]:
+        project_, env, name = rec["vault"].split("/")
+        print(f"  use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} "
+              f"{project_} {name} -- <command>")
+    return 0
+
+
+def revoke_and_prove(value: str) -> bool:
+    """Ask the OAuth revocation endpoint, then the API: True only when the API refuses the value."""
+    try:
+        _wire("POST", revoke_url(), value, body=urllib.parse.urlencode({"token": value}).encode(),
+              content_type="application/x-www-form-urlencoded")
+    except DoorError:
+        pass                                  # the proof below decides, not this answer
+    try:
+        account_of(value)
+    except ApiError as e:
+        return e.status == 401
+    except DoorError:
+        return False
+    return False
+
+
+def _record(label: str) -> tuple[pathlib.Path, dict]:
+    path = RECORDS / f"{label}.meta.json"
+    rec = read_record(path)
+    if not rec:
+        have = ", ".join(l for l, _p, _r in records()) or "none"
+        raise DoorError(f"no installed token called {label!r} (have: {have})")
+    return path, rec
+
+
+def cmd_token_rotate(label: str) -> int:
+    if sys.stdin.isatty():
+        raise DoorError("give the NEW token on stdin; mint it in the control panel with the preset's scopes "
+                        f"(`digitalocean.py presets`) at {PANEL_TOKENS}")
+    value = one_value(sys.stdin.read())
+    with records_lock():
+        return _rotate_locked(label, value)
+
+
+def _rotate_locked(label: str, value: str) -> int:
+    rec_path, rec = _record(label)
+    old = _current(rec)
+    if old is not None and _same(old, value):
+        raise DoorError("the new value is the one already installed; mint a new token")
+    _verify_team(value, rec.get("team_uuid"), rec["team_label"])
+    _prove(value, rec["preset"], rec.get("domain"))
+    _refuse_broad(value, rec["preset"])
+    said = _deliver(value, rec)
+    rec.update(rotated_on=today(), rotations=(rec.get("rotations") or 0) + 1)
+    write_record(rec_path, rec)
+    _journal("rotate", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
+    print(f"rotated {label}; {said}")
+    if old is None:
+        print("  old value: none was installed")
+        return 0
+    if not token_ok(old):
+        # It was never sent, so nothing is known about it at DigitalOcean.
+        print(f"  old value: could not be checked, the stored value was malformed (never sent); delete the old "
+              f"token in the control panel ({PANEL_TOKENS})", file=sys.stderr)
+        return 2
+    if revoke_and_prove(old):
+        print("  old value: revoked (DigitalOcean now refuses it)")
+        return 0
+    print(f"  old value: STILL ACCEPTED by DigitalOcean; delete it in the control panel ({PANEL_TOKENS})",
+          file=sys.stderr)
+    return 2
+
+
+def cmd_revoke(label: str, forget: bool = False) -> int:
+    with records_lock():
+        return _revoke_locked(label, forget)
+
+
+def _revoke_locked(label: str, forget: bool) -> int:
+    rec_path, rec = _record(label)
+    value = _current(rec)
+    where = rec.get("vault") or rec.get("destination")
+    if value is None:
+        # No value, no proof: DigitalOcean has no endpoint to revoke a personal token by id, so the
+        # door cannot say whether the token still lives. The record is the only trace of it.
+        if not forget:
+            raise DoorError(f"{label}: its value is gone from {where}, so the door cannot revoke it or prove it "
+                            f"dead; the record is kept. Delete the token in the control panel ({PANEL_TOKENS}), "
+                            f"then `digitalocean.py revoke {label} --forget` drops the record")
+        rec_path.unlink()
+        _journal("forget", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
+        print(f"forgot {label}: record removed; this door did NOT observe a revocation (its value was gone)")
+        return 0
+    if not token_ok(value):
+        raise DoorError(f"{label}: the stored value is malformed and was never sent, so it could not be checked; "
+                        f"nothing was removed here. Delete the token in the control panel ({PANEL_TOKENS}), "
+                        f"then `digitalocean.py revoke {label} --forget`")
+    if not revoke_and_prove(value):
+        raise DoorError(f"DigitalOcean still accepts {label}; nothing was removed here. Delete the token in "
+                        f"the control panel ({PANEL_TOKENS}), then run revoke again")
+    if rec.get("vault"):
+        project, env, name = rec["vault"].split("/")
+        p = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "remove", project, env, name],
+                           capture_output=True, text=True, timeout=60)
+        if p.returncode != 0 and private_files._slot(project, env, name).is_file():
+            raise DoorError(f"revoked at DigitalOcean, but the vault kept {rec['vault']} (exit {p.returncode}; "
+                            f"an open leak must be settled first); the record is kept")
+    else:
+        (READ_STORE / rec["team_label"]).unlink(missing_ok=True)
+    rec_path.unlink()
+    _journal("revoke", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
+    print(f"revoked {label} at DigitalOcean (now refused) and removed it here")
+    return 0
+
+
+def cmd_tokens_list() -> int:
+    st, rs = stashes(), records()
+    print(f"team tokens ({len(st)}), read by this door only:")
+    for label, path, meta in st:
+        print(f"  {label:24} {meta.get('team_name')!s:24} role {meta.get('role') or 'unknown':10} "
+              f"stashed {meta.get('stashed_on', '?')} from {meta.get('source', '?')} mode {oct(path.stat().st_mode)[-3:]}")
+    print(f"installed tokens ({len(rs)}):")
+    for label, _p, rec in rs:
+        print(f"  {label:40} {rec.get('preset'):16} team {rec.get('team_label')}  "
+              f"-> {rec.get('vault') or rec.get('destination')}  {rec.get('project') or '(no project)'}  "
+              f"installed {rec.get('installed_on')} rotated {rec.get('rotated_on') or '-'} x{rec.get('rotations', 0)}"
+              + (f" expires {rec['expires_on']}" if rec.get("expires_on") else ""))
+    if not st:
+        print("start with `digitalocean.py stash < token-file` or `stash --from-doctl all`")
+    return 0
+
+
+def cmd_ping() -> int:
+    bad = 0
+    for label, path, meta in stashes():
+        try:
+            acct = account_of(private_io.read(path).strip())
+            same = acct.get("team_uuid") == meta.get("team_uuid")
+            print(f"  team/{label}: alive" + ("" if same else " but answers for ANOTHER team"))
+            bad += 0 if same else 1
+        except DoorError as e:
+            print(f"  team/{label}: DEAD: {e}", file=sys.stderr)
+            bad += 1
+    for label, _p, rec in records():
+        value = _current(rec)
+        if value is None:
+            print(f"  {label}: its value is missing at {rec.get('vault') or rec.get('destination')}", file=sys.stderr)
+            bad += 1
+            continue
+        try:
+            _verify_team(value, rec.get("team_uuid"), rec["team_label"])
+            _prove(value, rec["preset"], rec.get("domain"))
+            print(f"  {label}: alive, proven reads pass (last change {rec.get('rotated_on') or rec.get('installed_on')})")
+        except DoorError as e:
+            print(f"  {label}: DEAD: {e}", file=sys.stderr)
+            bad += 1
+    if not stashes() and not records():
+        print("nothing stashed and nothing installed")
+    return 1 if bad else 0
+
+
+def team_tokens() -> list[tuple[str, dict, str, str]]:
+    """(label, record, value, kind) per stashed team, for the collector: the team's
+    observatory-read token where one is installed, else its stashed token. Values stay in memory."""
+    out = []
+    for label, path, meta in stashes():
+        read = READ_STORE / label
+        if read.is_file():
+            out.append((label, meta, private_io.read(read).strip(), "observatory-read"))
+        else:
+            out.append((label, meta, private_io.read(path).strip(), "stash"))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="area", required=True)
@@ -700,19 +1605,83 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--spec-env", action="append", default=[],
                            help="APP_ID:KEY — plain literal proven by current provider credential; encrypted values refused")
             p.add_argument("--wait", type=float, default=900)
+    # The account half (OBS-155): teams, their tokens, and the narrow tokens installed from them.
+    p = sub.add_parser("stash", help="a team's own token on stdin (or from a doctl context); never handed out")
+    p.add_argument("--from-doctl", metavar="CONTEXT", help="import doctl's context by name, or `all`")
+    p = sub.add_parser("teams", help="every stashed team: role, record, the vault slots that belong to it")
+    p.add_argument("--probe", action="store_true", help="ask the provider which team an unmatched slot is")
+    p = sub.add_parser("members", help="what the public API says about a team's members")
+    p.add_argument("--team", required=True)
+    team = sub.add_parser("team", help="team management").add_subparsers(dest="cmd", required=True)
+    p = team.add_parser("create", help="a new team in an organization, with invitations; plans unless --apply")
+    p.add_argument("name")
+    p.add_argument("--org", required=True, help="the stashed team whose token is in the organization context")
+    p.add_argument("--invite", action="append", default=[], metavar="EMAIL:ROLE",
+                   help=f"repeatable; ROLE one of: {', '.join(INVITE_ROLES)}")
+    p.add_argument("--apply", action="store_true", help="send it; without it the plan is printed")
+    sub.add_parser("presets", help="the scopes each preset is minted with")
+    for name, text in (("issue", "mint a narrow token (refused: the public API cannot; prints the panel recipe)"),
+                       ("install", "a narrow token minted in the control panel, on stdin: verified, delivered, recorded")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--preset", required=True, choices=sorted(PRESETS))
+        p.add_argument("--team", required=True, help="the stashed team it must belong to")
+        p.add_argument("--vault", help="PROJECT/ENV/NAME the token is delivered to")
+        p.add_argument("--domain", help="dns-edit: the domain it is proven against")
+        if name == "install":
+            p.add_argument("--project", help="the project this token serves")
+            p.add_argument("--expires-on", help="the expiry set in the control panel (YYYY-MM-DD), recorded")
+    sub.add_parser("list", help="stashed and installed tokens, with dates; never values")
+    sub.add_parser("ping", help="does every token still answer for its team and do its reads")
+    p = sub.add_parser("rotate", help="a NEW token on stdin replaces an installed one; the old is revoked and proved dead")
+    p.add_argument("label")
+    p = sub.add_parser("revoke", help="revoke at DigitalOcean, prove it, then remove here")
+    p.add_argument("label")
+    p.add_argument("--forget", action="store_true",
+                   help="only when the value is gone and the token was deleted in the control panel: drop the record")
     a = ap.parse_args(argv)
     try:
-        if a.cmd == "list":
-            return cmd_list()
-        if a.cmd == "consumers":
-            return cmd_consumers(a.cluster)
-        if a.cmd == "credential":
-            return cmd_credential(a.cluster, a.user, a.db, a.to)
-        return cmd_rotate(a.cluster, a.user, a.db, a.to, a.app, a.spec_env, a.wait)
+        if a.area == "db":
+            if a.cmd == "list":
+                return cmd_list()
+            if a.cmd == "consumers":
+                return cmd_consumers(a.cluster)
+            if a.cmd == "credential":
+                return cmd_credential(a.cluster, a.user, a.db, a.to)
+            return cmd_rotate(a.cluster, a.user, a.db, a.to, a.app, a.spec_env, a.wait)
+        api_base()                     # an override that is not loopback stops here, before any token is read
+        if a.area == "stash":
+            return cmd_stash(a.from_doctl)
+        if a.area == "teams":
+            return cmd_teams(a.probe)
+        if a.area == "members":
+            return cmd_members(a.team)
+        if a.area == "team":
+            return cmd_team_create(a.name, a.org, a.invite, a.apply)
+        if a.area == "presets":
+            return cmd_presets()
+        if a.area == "issue":
+            return cmd_issue(a.preset, a.team, a.vault, a.domain)
+        if a.area == "install":
+            return cmd_install(a.preset, a.team, a.vault, a.domain, a.project, a.expires_on)
+        if a.area == "list":
+            return cmd_tokens_list()
+        if a.area == "ping":
+            return cmd_ping()
+        if a.area == "rotate":
+            return cmd_token_rotate(a.label)
+        return cmd_revoke(a.label, a.forget)
     except DoorError as e:
         print(f"digitalocean: {e}", file=sys.stderr)
         return 1
-
+    except RuntimeError:
+        # private_io's refusals (a wide or symlinked credential file) carry no value; say which class.
+        print("digitalocean: a private credential file was refused (mode or symlink); values hidden",
+              file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001  a message can quote a value: only the class is shown
+        print(f"digitalocean: failed ({type(e).__name__}); details withheld so no value can be printed",
+              file=sys.stderr)
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())

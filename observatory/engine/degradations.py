@@ -33,6 +33,7 @@ import paths
 RECEIPT_INTEGRATIONS = {
     "bitbucket.json": "bitbucket", "domains_live.json": "domains", "heroku.json": "heroku",
     "openrouter.json": "openrouter", "cloudflare_zones.json": "cloudflare", "mcp.json": "mcp",
+    "digitalocean.json": "digitalocean",
     "remote-env.json": "remote_env", "google.json": "google", "sessions.json": "sessions",
     "remotes.json": "git_remotes", "vault.json": "wiki",
     # `tools/record_lost_projects.py` reads the sessions collector's output (0.19.3).

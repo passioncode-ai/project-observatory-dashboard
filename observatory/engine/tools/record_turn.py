@@ -33,6 +33,8 @@ import atomic
 import paths                                                                     
 import safe_git                                                                  
 import why_asks                                                                  
+sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))
+import turn_state                                                                
 
 OWNER = "agent:claude-code"
 MAX_SUBJECTS = 8
@@ -55,7 +57,19 @@ NOT_A_FAULT = (
     # a checked-out external project raised `companion.not_recording`, and a
     # durable line was appended for every one of those turns as well.
     "project ownership is",
+    # A BOUNDED HOOK, not a broken one. The recorder's git calls share one budget
+    # (`GIT_SECONDS`) so a slow checkout cannot hold the Stop hook to its 20-second
+    # kill; a turn that runs out is left unrecorded, silently, with the reason in the
+    # receipt. The next turn compares against the last snapshot it kept, so nothing
+    # the skipped turn changed is lost: it is counted then.
+    "git timed out",
 )
+
+#: The whole recorder's git budget, and one call's ceiling within it. Measured
+#: 2026-10-20 on one machine: median Stop 838 ms, p90 2.4 s, max 20 s (the hook's
+#: own kill), with `git status` alone at 0.45-1.9 s in a checkout with submodules.
+GIT_SECONDS = 8.0
+GIT_CALL_SECONDS = 5.0
 
 
 #: Set by `main` before anything is written, so `out` can stamp them on
@@ -64,6 +78,10 @@ NOT_A_FAULT = (
 #: the outer handler has no arguments left to read it from.
 _session_id = ""
 _cwd = ""
+#: Set by `main`: the monotonic time the git budget ends, and whether a call ran
+#: into it. None outside a run (a caller importing `git`).
+_git_deadline: float | None = None
+_git_timed_out = False
 
 
 def out(payload: dict, receipt: dict | None = None) -> int:
@@ -154,9 +172,25 @@ def _fault(exc: BaseException) -> int:
 def git(cwd: pathlib.Path, *args: str) -> str:
     """stdout, or "" — through `safe_git`. This runs from the Stop hook on every
     agent turn, and bare git there ran the operator's gpg (signature display),
-    fsmonitor, clean filters and index hooks each time."""
+    fsmonitor, clean filters and index hooks each time.
+
+    BOUNDED: every call takes what is left of `GIT_SECONDS`, at most
+    `GIT_CALL_SECONDS`. A call with no time left, or one that runs out, answers ""
+    and sets `_git_timed_out`, which `main` turns into an unrecorded turn rather than
+    a record built from half the facts."""
+    global _git_timed_out
+    timeout = GIT_CALL_SECONDS
+    if _git_deadline is not None:
+        left = _git_deadline - time.monotonic()
+        if left <= 0.05:
+            _git_timed_out = True
+            return ""
+        timeout = min(timeout, left)
     try:
-        p = safe_git.run(args, repo=cwd, timeout=20)
+        p = safe_git.run(args, repo=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _git_timed_out = True
+        return ""
     except Exception:
         return ""
     return p.stdout if p.returncode == 0 else ""
@@ -248,21 +282,33 @@ def project_for(repo_id: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _numstat(raw: str) -> dict[str, tuple[int, int]]:
+    """`{path: (insertions, deletions)}` from `git diff --numstat -z --no-renames`;
+    a binary file counts 0/0."""
+    out: dict[str, tuple[int, int]] = {}
+    for rec in raw.split("\0"):
+        parts = rec.split("\t", 2)
+        if len(parts) == 3 and parts[2]:
+            out[parts[2]] = (int(parts[0]) if parts[0].isdigit() else 0,
+                             int(parts[1]) if parts[1].isdigit() else 0)
+    return out
+
+
 def diff_facts(cwd: pathlib.Path) -> dict:
-    """What changed, from git rather than from anything the agent says."""
-    porcelain = [l for l in git(cwd, "status", "--porcelain").splitlines() if l.strip()]
-    numstat = [l for l in git(cwd, "diff", "HEAD", "--numstat").splitlines() if l.strip()]
-    ins = dele = 0
-    for line in numstat:
-        parts = line.split("\t")
-        if len(parts) >= 2:
-            ins += int(parts[0]) if parts[0].isdigit() else 0
-            dele += int(parts[1]) if parts[1].isdigit() else 0
-    files = sorted({l[3:].split(" -> ")[-1].strip() for l in porcelain})
+    """What changed, from git rather than from anything the agent says.
+
+    `files` is every entry of `git status` here; `main` narrows it to the entries
+    this session changed (`turn_state`) and recounts the lines with `numstat`."""
+    entries = turn_state.parse_status(git(cwd, *turn_state.STATUS_ARGS))
+    numstat = _numstat(git(cwd, "diff", "HEAD", "--numstat", "-z", "--no-renames",
+                           "--ignore-submodules=dirty"))
+    ins = sum(a for a, _ in numstat.values())
+    dele = sum(d for _, d in numstat.values())
+    files = sorted({p for _, p in entries})
     # A deleted file holds no rationale: removing `docs/DECISIONS.md` is not
     # writing one, so a `D` in either column takes the file out of the reading.
-    deleted = sorted({l[3:].split(" -> ")[-1].strip() for l in porcelain if "D" in l[:2]})
-    untracked = sorted({l[3:].strip() for l in porcelain if l.startswith("??")})
+    deleted = sorted({p for xy, p in entries if "D" in xy})
+    untracked = sorted({p for xy, p in entries if xy == turn_state.UNTRACKED})
     if any(u.endswith("/") for u in untracked):
         # `status` folds an untracked directory into one `?? docs/` line, which
         # hides the register inside it. Only the files a rationale can live in are
@@ -272,6 +318,7 @@ def diff_facts(cwd: pathlib.Path) -> dict:
             ":(glob,icase)**/decisions.md", ":(glob,icase)**/adr/**",
             ".task-pipeline/run.md").splitlines() if l.strip()})
     head = git(cwd, "rev-parse", "--short", "HEAD").strip()
+    head_full = git(cwd, "rev-parse", "HEAD").strip()
     branch = git(cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
     upstream = bool(git(cwd, "rev-parse", "--abbrev-ref", "@{u}").strip())
     unpushed = [l for l in git(cwd, "log", "--oneline", "@{u}..HEAD").splitlines() if l.strip()] \
@@ -284,7 +331,8 @@ def diff_facts(cwd: pathlib.Path) -> dict:
     return {"files": files, "insertions": ins, "deletions": dele, "head": head,
             "branch": branch, "unpushed": [u[:120] for u in unpushed[:MAX_SUBJECTS]],
             "untracked": untracked, "committed": committed, "deleted": deleted,
-            "base": "@{u}" if unpushed else "HEAD"}
+            "base": "@{u}" if unpushed else "HEAD",
+            "entries": entries, "numstat": numstat, "headFull": head_full}
 
 
 def statement_of(facts: dict, repo_id: str) -> str:
@@ -1077,9 +1125,10 @@ def main() -> int:
     # BEFORE THE FIRST GUARD, not beside the one that checks it. The assignment
     # sat after the git-repository check, so the earliest returns — the common
     # case on an unwatched directory — wrote a receipt with an empty session.
-    global _session_id, _cwd
+    global _session_id, _cwd, _git_deadline
     _session_id = args.session_id or ""
     _cwd = args.cwd or ""
+    _git_deadline = time.monotonic() + GIT_SECONDS
 
     cwd = pathlib.Path(args.cwd)
     if not cwd.is_dir():
@@ -1088,18 +1137,61 @@ def main() -> int:
         return out({"recorded": False, "reason": "not a git repository"})
 
     repo_id, top = repo_id_for(cwd)
+    if _git_timed_out:
+        return out({"recorded": False, "reason": f"git timed out after {GIT_SECONDS:g} s"})
     if repo_id is None:
         return out({"recorded": False,
                     "reason": "this repository is not in the registry; run "
                               "`project-observatory full local` to add it"})
-    facts = diff_facts(pathlib.Path(top or cwd))
+    top_path = pathlib.Path(top or cwd)
+    facts = diff_facts(top_path)
+    if _git_timed_out:
+        # Nothing is saved either: the next turn compares against the last snapshot
+        # this session kept, so what this turn changed is counted then.
+        return out({"recorded": False, "reason": f"git timed out after {GIT_SECONDS:g} s"})
+
+    # THIS TURN'S CHANGES, NOT THE TREE'S STATE (`turn_state`). The recorder took
+    # every `git status` entry as the turn's work, so standing untracked files made
+    # every turn of a session "changed": 35 asks in one session about the same
+    # "4 files changed, +0/-0" (measured 2026-10-20). Now the session's files are
+    # those that differ from its baseline, a turn counts only when something
+    # differs from the previous turn's snapshot, and only a change to TRACKED
+    # content (or a moved HEAD) is asked about.
+    turn: dict = {"changed": None, "tracked": None}
+    keep = None
+    if args.session_id:
+        current = turn_state.snapshot(top_path, facts["entries"], facts["headFull"])
+        held = turn_state.load(args.session_id, top_path)
+        if held is None:
+            baseline = turn_state.fallback(current)
+            turn = turn_state.compare({"head": None, "entries": baseline}, current,
+                                      head_moved=bool(facts["unpushed"]))
+        else:
+            baseline = held["baseline"]
+            turn = turn_state.compare(held["last"], current)
+        keep = (baseline, current)
+        facts["files"] = turn_state.session_paths(baseline, current, facts["entries"])
+        mine = [facts["numstat"][f] for f in facts["files"] if f in facts["numstat"]]
+        facts["insertions"] = sum(a for a, _ in mine)
+        facts["deletions"] = sum(d for _, d in mine)
+
+    def settle() -> None:
+        """Keep this turn's snapshot as the next turn's comparison point."""
+        if keep is not None:
+            turn_state.save(args.session_id, top_path, *keep)
+
     if not facts["files"] and not facts["unpushed"]:
+        settle()
         return out({"recorded": False, "reason": "nothing changed"})
+    if turn["changed"] == 0:
+        settle()
+        return out({"recorded": False, "reason": "nothing changed this turn"})
 
     from store import db as store_db
     from store import ledger as L
     project_id, ownership = project_for(repo_id)
     if not estate.records_events(ownership):
+        settle()
         return out({"recorded": False,
                     "reason": f"project ownership is {ownership!r}; only "
                               f"{sorted(estate.RECORDED_OWNERSHIP)} are recorded"})
@@ -1188,6 +1280,7 @@ def main() -> int:
             # Nothing moved since the last turn. Appending here would add a
             # revision that says exactly what the previous one said, and
             # append-only is a reason to be careful about what gets appended.
+            settle()
             return out({"recorded": False, "reason": "unchanged since the last turn",
                         "memoryId": prior["memory_id"], "revision": prior["revision"],
                         "hasWhy": bool(prior["why"]), "project": project_id},
@@ -1225,6 +1318,7 @@ def main() -> int:
                          **({"rationale": "carried"} if carried else {}),
                          **({"continues": continues} if continues else {})}])
         has_why = bool(prior and prior["why"])
+        settle()                          # the record holds this turn; the next compares to it
         # THE RECORD FIRST, the attribution after it. Reading the session's transcript
         # is best-effort and bounded (`ATTRIBUTION_SECONDS`); when it ran before the
         # append, a large transcript cost the turn its record — the Stop hook was
@@ -1278,8 +1372,10 @@ def main() -> int:
         # ask ran after every changed turn — 3,593 times in fourteen days on one
         # machine for 34 answers — although a session is ONE record revised per
         # turn, so every ask after the first was the same question again.
+        # AND ONLY FOR TRACKED CONTENT THIS TURN CHANGED: a new untracked file is
+        # recorded with the facts but not asked about until it is added or committed.
         ask = {"ask": False}
-        if not has_why and rationale is None:
+        if not has_why and rationale is None and turn["tracked"]:
             ask = why_asks.ask_once(result["memoryId"], args.session_id, project_id)
         return out({"recorded": True, "memoryId": result["memoryId"],
                     "revision": result["revision"], "hasWhy": has_why,
@@ -1290,6 +1386,7 @@ def main() -> int:
                     **({"journal": str(why_asks.JOURNAL)} if ask["ask"] else {}),
                     "rationale": rationale,
                     "continues": continues,
+                    "turnChanged": turn["changed"], "turnTracked": turn["tracked"],
                     "project": project_id, "files": len(facts["files"]),
                     "insertions": facts["insertions"], "deletions": facts["deletions"],
                     "unpushed": len(facts["unpushed"]),

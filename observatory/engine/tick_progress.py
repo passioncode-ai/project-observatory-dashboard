@@ -22,7 +22,7 @@ MAX_BYTES = 262144
 MAX_STAGES = 128
 # A finite vocabulary prevents arbitrary argv/exception values becoming metadata.
 STAGES = frozenset("""integrity scan-fs scan-gh scan-vault scan-sessions remotes bitbucket
-    domains backup-due backup heroku openrouter env scan-cloudflare scan-mcp scan-harness
+    domains backup-due backup heroku openrouter env scan-cloudflare scan-digitalocean scan-mcp scan-harness
     scan-spend remote-env google leaks scrub-companion machine scan-agents git-hygiene lifecycle cleanup
     merge emit validate events snapshot diff fabric-attribution index retention sweep corroborate ledger lost plugins
     rollup agent findings dashboard smoke findings-recheck notify registry project-into-vault
