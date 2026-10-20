@@ -98,6 +98,21 @@ def test_the_digitalocean_door_keeps_the_same_rules() -> None:
           "provider diagnostics withheld" in source_reader.code_keeping_strings(src) and "p.stderr.strip()" not in code, "")
     check(f"{rel} prints no password variable",
           not any(f"print({v}" in code or f"{{{v}}}" in code for v in ("pw", "url", "value")), "")
+    # The account half (OBS-155): a stashed team token is written 0600 like the other doors',
+    # and its records name the team and dates, never the value.
+    module = load(rel, "private_writer_digitalocean")
+    target = pathlib.Path(tmpdir.mkdtemp()).resolve() / "synthetic-team"
+    module.write_secret(target, "synthetic-value")
+    check(f"{rel} writes a team token 0600 with atomic replacement",
+          target.read_text().strip() == "synthetic-value" and target.stat().st_mode & 0o777 == 0o600
+          and "private_io.write" in code, "")
+    keeping = source_reader.code_keeping_strings(src)
+    for f in ("team_uuid", "stashed_on", "installed_on", "rotations", "scopes_declared"):
+        check(f"{rel} records `{f}`", f'"{f}"' in keeping, "")
+    check(f"{rel} never serialises a value into a record",
+          '"value": value' not in keeping and "'value': value" not in keeping, "")
+    check(f"{rel} sends a token only to DigitalOcean or a loopback test server",
+          "loopback" in keeping and "OBSERVATORY_DO_API" in keeping, "")
 
 
 # ─────────────────────────── cloudflare ──────────────────────────────────────

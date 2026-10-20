@@ -131,7 +131,7 @@ UPDATE_SETTINGS = ("auto", "scheduled")
 #: the tick's step gates, every `configure ...` command the engine prints) and
 #: fails when one is missing here. A metric plugin's `integration:KEY` adds itself.
 KNOWN_INTEGRATIONS = frozenset({
-    "bitbucket", "cloudflare", "cloudflare_analytics", "domains", "ga4", "git_remotes",
+    "bitbucket", "cloudflare", "cloudflare_analytics", "digitalocean", "domains", "ga4", "git_remotes",
     "github", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
     "sessions", "wiki"})
 KNOWN_FEATURES = frozenset({

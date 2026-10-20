@@ -47,6 +47,7 @@ checks={
  'tools/vault.py':['STORE','LEAKS','MOVES'],
  'tools/openrouter.py':['ADMIN_STORE','LEGACY','LEDGER'],
  'tools/cloudflare.py':['ADMIN_STORE'],
+ 'tools/digitalocean.py':['ADMIN_STORE','READ_STORE','RECORDS'],
  'tools/revoke_key.py':['SECRET'],
  'tools/install_key.py':['DESTINATIONS','PROVISIONING'],
  'tools/scan_leaks.py':['VAULT','SESSIONS','DESTINATIONS'],

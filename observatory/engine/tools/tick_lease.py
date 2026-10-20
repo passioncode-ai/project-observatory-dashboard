@@ -363,6 +363,7 @@ INTEGRATION_STEPS = {
     "scan-gh": "github", "scan-vault": "wiki", "scan-sessions": "sessions",
     "remotes": "git_remotes", "bitbucket": "bitbucket", "domains": "domains",
     "heroku": "heroku", "openrouter": "openrouter", "scan-cloudflare": "cloudflare",
+    "scan-digitalocean": "digitalocean",
     "scan-mcp": "mcp", "scan-harness": "harness", "scan-spend": "openrouter", "remote-env": "remote_env", "google": "google",
     # Not a collector, but it reads only what the sessions collector writes
     # (store/raw/sessions.json): with sessions off it failed every tick (0.19.3).

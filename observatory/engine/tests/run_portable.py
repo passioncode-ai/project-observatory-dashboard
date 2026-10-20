@@ -233,6 +233,9 @@ HELPERS += (
 HELPERS += ('lesson_emitter_fixture.json',)
 # The synthetic transcript the reach canary reads (M-8).
 HELPERS += ('ask_why_transcript.json',)
+# The DigitalOcean door's account half and collector (OBS-155): run from `test_digitalocean_door.py`,
+# the `test-digitalocean` step, so one step covers one door.
+HELPERS += ('test_digitalocean_account.py',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',

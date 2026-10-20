@@ -108,6 +108,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-gh":   {"writes": ["store/raw/gh"], "reads": []},                      # a directory, not one file
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
+    # Reads the DigitalOcean door's stores and the API, neither written by a step (OBS-155).
+    "scan-digitalocean": {"writes": ["store/raw/digitalocean.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
     # Reads the Fabric services directory and launchd, neither written by a step here.
     "scan-agents": {"writes": ["store/raw/agents.json"], "reads": []},
@@ -266,7 +268,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                   # graph, so they add no ordering edge — declared so the read
                   # is known.
                   "reads": ["registry/google-properties.json", "registry/remote-env.json",
-                            "store/raw/heroku.json",
+                            "store/raw/heroku.json", "store/raw/digitalocean.json",
+                            # an app's project, through the registry's own repository edges (OBS-155)
+                            "registry/repositories.json", "registry/relations.json",
                             "store/raw/serverd.json", "store/raw/skill-sessions.json",
                             "registry/heroku-apps.json", "registry/env-inventory.json",
                             "store/raw/leak-scan.json",
