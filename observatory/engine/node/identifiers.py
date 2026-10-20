@@ -52,7 +52,7 @@ def _percent(text: str, keep_encoded: bool = False) -> str:
     def one(match):
         hexa = match.group(1)
         char = chr(int(hexa, 16))
-        return char if not keep_encoded and _UNRESERVED_CHAR.match(char) else '%' + hexa.upper()
+        return char if not keep_encoded and _UNRESERVED_CHAR.fullmatch(char) else '%' + hexa.upper()
     return re.sub(r'%([0-9A-Fa-f]{2})', one, text)
 
 
@@ -88,25 +88,25 @@ def _authority_parts(authority: str):
     colon = host_port.find(':', 0 if bracket == -1 else bracket)
     host = host_port if colon == -1 else host_port[:colon]
     port = None if colon == -1 else host_port[colon + 1:]
-    if userinfo is not None and not _USERINFO.match(userinfo):
+    if userinfo is not None and not _USERINFO.fullmatch(userinfo):
         return None
-    if port is not None and not _PORT.match(port):
+    if port is not None and not _PORT.fullmatch(port):
         return None
-    if not (_IP_LITERAL.match(host) if host.startswith('[') else _REG_NAME.match(host)):
+    if not (_IP_LITERAL.fullmatch(host) if host.startswith('[') else _REG_NAME.fullmatch(host)):
         return None
     return userinfo, host, port
 
 
 def _parse(text: str):
-    match = _SPLIT.match(text)
+    match = _SPLIT.fullmatch(text)
     if not match:
         return None
     scheme, authority, path, query, fragment = match.groups()
-    if not _SCHEME.match(scheme) or not _PATH.match(path):
+    if not _SCHEME.fullmatch(scheme) or not _PATH.fullmatch(path):
         return None
-    if query is not None and not _QUERY.match(query):
+    if query is not None and not _QUERY.fullmatch(query):
         return None
-    if fragment is not None and not _QUERY.match(fragment):
+    if fragment is not None and not _QUERY.fullmatch(fragment):
         return None
     if authority is not None and _authority_parts(authority) is None:
         return None
@@ -117,7 +117,7 @@ def _parse(text: str):
 
 def _urn_form(parts) -> str:
     _, authority, path, query, _ = parts
-    name = _URN_NAME.match(path)
+    name = _URN_NAME.fullmatch(path)
     path = f'{name.group(1).lower()}:{_percent(name.group(2), True)}' if name else _percent(path, True)
     query = '?' + _percent(query, True) if query is not None and not re.match(r'^[+=]', query) else ''
     authority = '//' + _percent(authority, True) if authority is not None else ''

@@ -5,6 +5,54 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Security
+
+- **The delegation verifier follows the contract's DEC-0045 ("Delegation sealed")** (OBS-162). `delegation.py` was
+  a port of fabric-agent-contract `src/delegation.ts` at `8e49fbd`, which predates it; it now follows the contract at
+  `07042181`, and `tests/test_delegation_sealed.py` ports `test/delegation-sealed.test.ts` case by case over the
+  contract's own fixtures (`fabric/delegation-vectors/`).
+  - **A small-order Ed25519 key is refused** (CT-29, critical). A key set publishing one of libsodium's seven
+    small-order encodings let anyone forge a token with no private key: the contract's vector
+    `delegation-small-order.json` verified as `ok`. The key is now the issuer's unusable key,
+    `issuer-unavailable` (`small-order-key`), before anything is verified under it. The same predicate
+    (`is_small_order_key` in the engine's `ed25519_order.py`, which `node/ed25519.py` re-exports) now guards the release-signature check as well, in both its
+    `cryptography` and its plain-Python path.
+  - **The trusted issuer is required.** `verify_delegation` and `verify_meter_token` take `issuer` with no default;
+    none or empty is `issuer-unavailable` (`no-trusted-issuer`), never "any key in the set".
+  - **The meter's token is exact**: scope exactly `grant.check` (`meter-scope-not-exact`) and effect exactly
+    `["none"]` (`meter-effect-not-none`); a wider token is `principal-unproven`.
+  - **Strict types in the contract's order** (DL-13 row 5): actors' agent ids and session ids, URIs for `iss`,
+    `sub` and `project`, `aud` an agent id, the `scope` and `jti` grammars, each effect once, one grant, `spend`,
+    `task` and `nbf` are checked before the lifetime, audience and depth rows, so a malformed chain is
+    `unauthenticated` whatever else is wrong.
+  - A published key of another `use` or `alg` is now `issuer-unavailable` (`key-not-for-signing`), not
+    `unauthenticated`.
+  - Every grammar (agent ids, session and task ids, URIs, `scope`, `jti`) must match the whole value: Python's `$`
+    let a trailing newline through where the contract's regular expressions do not. The same full-match rule now
+    applies to the meter's request and grant-reference checks and to the agent-network node's identifier,
+    envelope, passkey, estate and blob checks. `NaN` and `Infinity` in a token are `malformed`, a signature segment
+    no base64url encoder writes is `bad-signature` (it raised before), and an integer-valued time such as
+    `1791720000.0` is read as the integer the contract reads.
+  - White space in a grammar is ECMAScript's, as in the contract: a URI holding U+FEFF is refused, one holding
+    U+001F or U+0085 is accepted, and the meter's timestamps and the node's relay origins take ASCII digits only.
+    An integer no double can hold (2^1024 - 2^970 and above, 309 digits or more) in a time or an amount is a claim
+    of the wrong type (`malformed-claims`), as the contract reads the infinity `JSON.parse` makes of it.
+
+**Behaviour change for existing installs.** A meter that verified tokens without a trusted issuer now denies every
+grant check and every token-bearing slot or keyserver call as `principal-unproven`
+(`issuer-unavailable:no-trusted-issuer`). An install with no `config/meter.json` and no hub keys denied them before
+too (no estate keys); nothing changes there. If `config/meter.json` names keys (`jwks` or `hubJson`) but no issuer,
+add the estate issuer Fabric names:
+
+```json
+"issuer": "urn:fabric:estate:<id>"
+```
+
+or point `hubJson` at a `hub.json` that names its `issuer` beside its `jwks`; the meter takes the hub's issuer only
+with the hub's own keys. `full doctor` reports it under `meter` (`degraded`: `meter:no-trusted-issuer`, and the line
+that fixes it), and `full grant --status` lists it in `degraded`. The contract defines no default issuer, so the
+meter sets none: trusting whichever key signed would be the forgery this fix closes.
+
 ### Added
 
 - **Organization enrollment: `full org`** (OBS-161; contract DEC-0031, DEC-0056, DEC-0082, DEC-0086). A machine
@@ -23,6 +71,31 @@ while the major version is 0, a minor release may change behaviour and says so h
   outbox depth and anything degraded; `org leave` removes the local enrollment only. The contract's
   `http-signature.json` (54 cases) and `share-registration.json` (derive, grant id and gate cases) are vendored and
   run.
+- **A daily encrypted backup of this machine's agent setup, and a restore onto a new machine** (OBS-157).
+  One `machine-<stamp>-<id>.obmachine` per run goes to the same backups root as the workspace snapshots, in the same
+  `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
+  settings, CLI logins, launchd or systemd user jobs, the Fabric service descriptors, the Homebrew, npm, pipx and uv
+  inventories, and every checkout's remotes (without user information), branch, HEAD, dirty and ahead/behind state
+  with a git bundle of every commit no remote has (branches, local tags, detached HEADs, stash entries), a patch of
+  its uncommitted changes (staged changes for a repository with no commit yet) and its untracked files. The
+  maintenance job takes one a day, `full update` one before it stops the jobs (unless one is under an hour old), and
+  `full machine-backup` one now. `config/machine-backup.json` adds an operator's own paths, excludes and checkout
+  roots. `full machine-restore [BUNDLE | --latest]` prints the plan; `--apply` writes only what is missing,
+  `--overwrite` moves a conflict aside first, `--packages` installs the inventories and `--clone` clones the checkouts
+  and puts back their carried work. Measured on a working agent machine: 69 MB, 14,221 items, 517 checkouts, under
+  two minutes.
+  - Decrypted and temporary copies live only in the workspace's private `store/.machine-stage/`, one restore
+    step at a time; SIGTERM and SIGHUP remove them and the next run sweeps what a killed one left; a run refused while another
+    holds the stage touches nothing. A checkout not restored is named and `full machine-restore` exits 1.
+  - Nothing is written without a passphrase; a disk that would keep under 2 GB free refuses the write, recorded and
+    shown in `doctor`, `maintain status` and Health; three bundles are kept.
+  - What a cap leaves out is not carried and named per folder in the bundle's `MANIFEST.json`, the answer, `doctor`
+    and Health; transcripts (opt-in) and plugin caches are skipped and named. No value reaches the manifest, the
+    state file or an answer.
+  - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
+    Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
+    Scenario OSS-68.
+
 - **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
   `tools/cloudflare.py` does for Cloudflare, on the Platform API:
   - `stash` keeps an admin token read by the door alone: the CLI session's, piped in (`heroku auth:token | heroku.py
@@ -59,6 +132,26 @@ while the major version is 0, a minor release may change behaviour and says so h
     their last write, and each write replaces only its own row, so concurrent runs keep every row.
   - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
     what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
+
+### Changed
+
+- **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
+  session's Observatory server answered `stale-server` until a person restarted that session, and the
+  maintenance job installs releases by itself. Now the server notices at its next request that its code was
+  replaced, holds that request, lets the running ones answer, starts the installed release once to check it
+  (`mcp/server.py --reload-check`) and replaces itself in place with `os.execv`: same process id, same pipes,
+  same session. The new release takes over the client's handshake without a second `initialize` and answers
+  the held request exactly once; a changed tool set is announced with `notifications/tools/list_changed`
+  (the server now declares `tools.listChanged`). The session's stdio is served by `mcp/stdio_relay.py`
+  instead of the SDK's own transport on POSIX.
+  - Where the move is impossible the server keeps answering `stale-server`, now with the reason: Windows,
+    an update holding the workspace or requests still running after a minute (both retried at a later
+    request), an installed release that fails its check
+    or speaks another MCP revision, code that is gone, or a failed `execv`. The pipe stays open and no
+    request is answered twice.
+  - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
+    reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
+    servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
 
 ## 0.25.0 (2026-10-19)
 

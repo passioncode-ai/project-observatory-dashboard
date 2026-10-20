@@ -516,11 +516,17 @@ def doctor(base: Path) -> dict:
             "tracked": __import__("tracked").health(),
             "open_unlinked": __import__("open_unlinked").saved_summary(base=base),
             "backups": __import__("backup_vault").status(base),
+            # The machine's agent setup (OBS-157): the newest bundle, its age and size, and
+            # what it did not carry. Its warnings are also in `maintenance.warnings`.
+            "machine_backup": __import__("machine_backup").status(base),
             # Updates that arrive by themselves and the daily encrypted backup: whether the
             # job is scheduled, what it last found, and what needs a person (maintenance.py).
             "maintenance": __import__("maintenance").status(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
+            # OBS-159: which session MCP servers moved onto an installed release by
+            # themselves, and which were refused (they answer `stale-server` with the reason).
+            "session_servers": __import__("session_reload").summary(base),
             "credentials": "values are never returned", "network_calls": 0,
             # PB-137 N-003: whether any memory text may leave for a remote embedding
             # model, and for which projects — read-only, names and dates only.
@@ -530,6 +536,9 @@ def doctor(base: Path) -> dict:
             "vector_namespaces": _vector_namespaces(base),
             # PB-137 N-008: who may reach memory over HTTP besides the local stdio agent.
             "access_bindings": _access_bindings(base),
+            # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
+            # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
+            "meter": _meter_readiness(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -551,6 +560,12 @@ def _access_bindings(base: Path) -> dict:
     sys.path.insert(0, str(config.SOURCE))
     import memory_access
     return memory_access.status(base / "config", base / "store")
+
+
+def _meter_readiness(base: Path) -> dict:
+    sys.path.insert(0, str(config.SOURCE))
+    import meter
+    return meter.readiness_at(base / "config" / "meter.json")
 
 
 def _vector_namespaces(base: Path) -> list[dict]:
@@ -683,6 +698,10 @@ def parse(argv: list[str]) -> argparse.Namespace:
         import workspace_upgrade
         return workspace_upgrade.parser().parse_args(
             ["backup" if name == "workspace-backup" else name, *rest])
+    if name in {"machine-backup", "machine-restore"}:
+        import machine_backup
+        return (machine_backup.backup_parser() if name == "machine-backup"
+                else machine_backup.restore_parser()).parse_args(rest)
     return _parser().parse_args(argv)
 
 
@@ -707,6 +726,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
         return workspace_upgrade.main(["backup" if argv[0] == "workspace-backup" else argv[0], *argv[1:]])
+    if argv and argv[0] in {"machine-backup", "machine-restore"}:
+        import machine_backup
+        return (machine_backup.backup_main if argv[0] == "machine-backup" else machine_backup.restore_main)(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()

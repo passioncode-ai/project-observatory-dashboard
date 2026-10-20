@@ -319,6 +319,23 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         after={str(p.relative_to(base)):p.read_bytes() for p in base.rglob('*') if p.is_file()}
         self.assertEqual(before,after)
 
+    def test_doctor_reports_the_meters_trusted_issuer(self):
+        """OBS-162 (contract DEC-0045): with no issuer the meter denies every check, and doctor names the fix."""
+        base=self.root/'home'
+        workspace.initialize(base)
+        meter=workspace.doctor(base)['meter']
+        self.assertEqual((meter['configured'],meter['issuer']),(False,None))
+        self.assertIn('meter:no-trusted-issuer',meter['degraded'])
+        self.assertIn('"issuer"',meter['next'])
+        (base/'jwks.json').write_text(json.dumps({'keys':[{'kty':'OKP','crv':'Ed25519','x':'A'*43,'kid':'k'}]}))
+        (base/'grants').mkdir()
+        (base/'config/meter.json').write_text(json.dumps({'issuer':'urn:fabric:estate:example',
+                                                          'jwks':str(base/'jwks.json'),'grantsDir':str(base/'grants')}))
+        meter=workspace.doctor(base)['meter']
+        self.assertEqual((meter['configured'],meter['issuer'],meter['degraded'],meter['next']),(True,'config',[],None))
+        (base/'config/meter.json').write_text('[]')
+        self.assertEqual(workspace.doctor(base)['meter']['degraded'],['meter:config-unreadable'])
+
     def test_migration_parse_error_never_prints_source_line(self):
         source=self.original()
         marker='SYNTHETIC_PRIVATE_MARKER'

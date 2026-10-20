@@ -31,10 +31,11 @@ the Python environment, the background jobs and the workspace:
 8. name the per-session MCP servers still running the previous release
    (`session_servers`, lifecycle LC-11). They are NOT signalled: each belongs to a
    live agent session, and a stdio server that dies under its client is a failed
-   connection the client does not restart on its own, while a server left running
-   answers its next call `stale-server` (mcp/capability_tools.py) and the agent
-   knows exactly what happened and what to do. The report lists their pids as
-   the processes this update could not reach.
+   connection the client does not restart on its own. Each moves itself onto the
+   installed release at its next request instead (OBS-159, session_reload.py and
+   mcp/stdio_relay.py: same pid, same pipes, same session); where that is refused it
+   answers `stale-server` with the reason (mcp/capability_tools.py). The report lists
+   their pids as the processes this update did not touch.
 
 A release whose wheel declares a step that needs a person (RELEASE_MEMBER, below) is
 fetched and verified like any other; `--unattended` (the maintenance job) then stops there
@@ -919,6 +920,16 @@ def session_servers() -> list[dict]:
     return found
 
 
+def machine_backup_before_update(base: Path) -> dict:
+    """The machine bundle before an update (machine_backup.before_update, OBS-157): taken
+    unless one younger than an hour exists; it never raises and never holds the update back."""
+    try:
+        import machine_backup
+    except Exception as exc:  # noqa: BLE001: a missing module is reported, the update goes on
+        return {"result": "failed", "detail": f"{type(exc).__name__}"}
+    return machine_backup.before_update(base)
+
+
 @dataclasses.dataclass
 class Dependencies:
     fetcher: Fetcher = dataclasses.field(default_factory=Fetcher)
@@ -928,6 +939,7 @@ class Dependencies:
     origin: Callable[[], dict] = install_origin
     idle_timeout: float = 60.0
     sessions: Callable[[], list[dict]] = session_servers
+    machine_backup: Callable[[Path], dict] = machine_backup_before_update
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -1296,6 +1308,16 @@ class Transaction:
                     "unconstrained, at the newest releases the index offers rather than the tested set")
             rollback = self.rollback_wheel(work)
             self.report["rollback_available"] = rollback is not None
+            if self.has_ws:
+                # The machine's agent setup, before anything is stopped (OBS-157): it reads the
+                # home and the checkouts, not the workspace, so the jobs stay up meanwhile.
+                try:
+                    self.report["machine_backup"] = self.deps.machine_backup(self.base)
+                except Exception as exc:  # noqa: BLE001: the update never fails on it
+                    self.report["machine_backup"] = {"result": "failed", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                if self.report["machine_backup"].get("result") in ("failed", "refused-disk"):
+                    self.report["degraded"].append("the machine backup before this update was not taken: "
+                                                   + str(self.report["machine_backup"].get("detail", ""))[:200])
             self.stop_writers()
             snapshot = before = None
             try:
@@ -1373,8 +1395,11 @@ class Transaction:
         report["session_servers"] = {
             "running_previous_release": len(running), "pids": [r.get("pid") for r in running],
             "signalled": 0,
-            "why": ("each belongs to a live agent session; it answers its next call `stale-server` "
-                    "and is replaced when that session restarts or reconnects the server")}
+            "why": ("each belongs to a live agent session; at its next request it moves itself onto the "
+                    "installed release in place (same process, same session, OBS-159). Where it cannot "
+                    "(Windows, an installed release that fails its start check) it answers `stale-server` "
+                    "with the reason until that session reconnects the server; `full doctor` lists both "
+                    "under session_servers")}
         self.step("updated", services_not_restarted=[f["service"] for f in failed],
                   session_servers_left=len(running))
         report["next"] = plugin_advice()
@@ -1399,6 +1424,10 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+#: How many times `update_lock` tries, 0.1 s apart, before it reports the lock as taken.
+UPDATE_LOCK_TRIES = 20
+
+
 def _update_lock_path(base: Path) -> Path:
     return base.parent / f".{base.name}.observatory-update.lock"
 
@@ -1415,9 +1444,17 @@ def update_lock(base: Path):
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
-        try:
-            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
-        except BlockingIOError:
+        # `update_lock_held` (maintenance, and a session's MCP server deciding whether it may
+        # move onto a new release, OBS-159) probes this lock by taking it for an instant; a
+        # few short retries keep such a probe from refusing a real update.
+        for attempt in range(UPDATE_LOCK_TRIES):
+            try:
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt + 1 < UPDATE_LOCK_TRIES:
+                    time.sleep(0.1)
+        else:
             raise UpdateError("Another `full update --apply` is running for this workspace, or the daily "
                               "backup holds the jobs stopped; nothing was changed — try again in a few "
                               "minutes") from None

@@ -456,6 +456,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
+                      "machine-backup", "machine-restore",
                       "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
@@ -479,6 +480,13 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                encrypted into the backups root once a passphrase is set
   backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
+  machine-backup [now|status]  this machine's agent setup (Claude Code, Codex, SSH, Git, shell, CLI
+                               logins, launchd, Fabric descriptors, package inventories, unpushed and
+                               uncommitted work) into one encrypted .obmachine in the backups root;
+                               daily from `maintain` and before each update
+  machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
+                               put a machine bundle back: the plan by default; --apply writes only
+                               what is missing; --overwrite moves a conflict aside first
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left

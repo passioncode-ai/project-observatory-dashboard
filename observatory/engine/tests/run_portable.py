@@ -117,6 +117,8 @@ BOUNDARY += ('osschedule',)
 BOUNDARY += ('harness',)
 # OBS-55: the meter and the delegation verifier (contract DEC-0039).
 BOUNDARY += ('meter', 'meter_wire', 'spend')
+# OBS-162: the verifier as contract DEC-0045 sealed it, over the contract's own fixtures.
+BOUNDARY += ('delegation_sealed',)
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_progress', 'tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
 # ENG-003: the agent's deadline reaches providers.complete().
@@ -199,6 +201,10 @@ BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the
 # canary that it reaches the model, read from a synthetic transcript.
 BOUNDARY += ('ask_why', 'ask_why_reach')
+# The machine bundle and its restore onto an empty home (OBS-157).
+BOUNDARY += ('machine_backup',)
+# A session MCP server moving itself onto the installed release over real pipes (OBS-159).
+BOUNDARY += ('session_reload',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -231,16 +237,20 @@ ROOT_FILES = (
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
     'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
-    'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
+    'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py',
+    # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
+    'machine_backup.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
+    # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
+    'ed25519_order.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
@@ -284,6 +294,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')
+    selected.add(ROOT / 'fabric/delegation-vectors/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -296,7 +307,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'schemas', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/delegation-vectors', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
@@ -369,7 +380,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
                  # 128 cases, each driving the real hooks and git: ~70 s idle, ~310 s at a
                  # load average of 300 (OBS-135 tracks making it cheaper).
-                 'ask_why': 600}
+                 'ask_why': 600,
+                 # 36 cases with real git checkouts, restores and three killed subprocesses:
+                 # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner.
+                 'machine_backup': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
