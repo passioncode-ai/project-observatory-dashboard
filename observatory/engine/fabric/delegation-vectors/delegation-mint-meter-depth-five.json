@@ -1,0 +1,164 @@
+{
+  "grant": {
+    "kind": "standing-grant",
+    "meta": {
+      "id": "urn:grant:project-a:example-media-writer",
+      "revision": 3,
+      "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "createdAt": "2026-10-11T09:00:00Z",
+      "createdBy": "urn:person:operator"
+    },
+    "project": "urn:project:a",
+    "principal": {
+      "id": "urn:agent:example-media",
+      "revision": 1,
+      "contentHash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "effects": [
+      "send"
+    ],
+    "resourcePatterns": [
+      "urn:project:a:drafts/*"
+    ],
+    "dataClasses": [
+      "project-internal"
+    ],
+    "startsAt": "2026-10-11T09:00:00Z",
+    "expiresAt": "2026-11-11T09:00:00Z",
+    "idempotency": "required",
+    "issuer": "urn:person:operator",
+    "state": "active",
+    "principalKind": "agent",
+    "audience": "example-writer",
+    "capabilities": [
+      "writer.write",
+      "writer.check",
+      "writer.send"
+    ],
+    "effectCeiling": [
+      "draft",
+      "send"
+    ],
+    "spend": {
+      "mode": "limited",
+      "limits": [
+        {
+          "window": "task",
+          "limitUsd": 2
+        },
+        {
+          "window": "day",
+          "limitUsd": 5
+        },
+        {
+          "window": "month",
+          "limitUsd": 50
+        }
+      ],
+      "perCallMaxUsd": 0.5,
+      "payer": "owner",
+      "credentialSource": {
+        "kind": "capability",
+        "agent": "urn:agent:example-writer",
+        "capability": "writer.write"
+      }
+    }
+  },
+  "parent": {
+    "iss": "urn:fabric:estate:example",
+    "sub": "urn:person:operator",
+    "act": {
+      "sub": "example-media",
+      "act": {
+        "sub": "example-agent.default",
+        "act": {
+          "sub": "example-planner",
+          "act": {
+            "sub": "example-host"
+          }
+        }
+      }
+    },
+    "aud": "example-writer",
+    "scope": "writer.write writer.check",
+    "effect": [
+      "draft"
+    ],
+    "grant": [
+      "urn:grant:project-a:example-media-writer#3"
+    ],
+    "spend": {
+      "mode": "limited",
+      "remaining": [
+        {
+          "window": "task",
+          "remainingUsd": 1.5
+        },
+        {
+          "window": "day",
+          "remainingUsd": 4.2
+        },
+        {
+          "window": "month",
+          "remainingUsd": 38
+        }
+      ]
+    },
+    "project": "urn:project:a",
+    "iat": 1791720000,
+    "exp": 1791720540,
+    "jti": "01JA7Y5Q3C2K9M8N4P6R0S1T2V"
+  },
+  "token": {
+    "iss": "urn:fabric:estate:example",
+    "sub": "urn:person:operator",
+    "act": {
+      "sub": "example-writer",
+      "act": {
+        "sub": "example-media",
+        "act": {
+          "sub": "example-agent.default",
+          "act": {
+            "sub": "example-planner",
+            "act": {
+              "sub": "example-host"
+            }
+          }
+        }
+      }
+    },
+    "aud": "example-meter",
+    "scope": "grant.check",
+    "effect": [
+      "none"
+    ],
+    "grant": [
+      "urn:grant:project-a:example-media-writer#3"
+    ],
+    "spend": {
+      "mode": "limited",
+      "remaining": [
+        {
+          "window": "task",
+          "remainingUsd": 1.5
+        },
+        {
+          "window": "day",
+          "remainingUsd": 4.2
+        },
+        {
+          "window": "month",
+          "remainingUsd": 38
+        }
+      ]
+    },
+    "project": "urn:project:a",
+    "iat": 1791720030,
+    "exp": 1791720540,
+    "jti": "01JA7Y9M2N4P6Q8R0S2T4V6W8X"
+  },
+  "meter": {
+    "audience": "example-meter",
+    "capability": "grant.check"
+  }
+}

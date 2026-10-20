@@ -28,6 +28,8 @@ import base64
 import hashlib
 import struct
 
+from ed25519_order import is_small_order_key
+
 #: The organization's release keys, by fingerprint. The fingerprint is recomputed from the
 #: key packet and must match: a pasted key with another fingerprint is refused at load.
 PINNED = (
@@ -237,8 +239,8 @@ _G = (_recover_x(_GY, 0), _GY, 1, _recover_x(_GY, 0) * _GY % _P)
 
 
 def _ed25519_verify(public: bytes, signature: bytes, message: bytes) -> bool:
-    """RFC 8032 §5.1.7, cofactorless; True only for a valid signature."""
-    if len(public) != 32 or len(signature) != 64:
+    """RFC 8032 §5.1.7, cofactorless; True only for a valid signature. A small-order key is refused first (CT-29)."""
+    if len(public) != 32 or len(signature) != 64 or is_small_order_key(public):
         return False
     a, r = _decode_point(public), _decode_point(signature[:32])
     if a is None or r is None:
@@ -251,6 +253,11 @@ def _ed25519_verify(public: bytes, signature: bytes, message: bytes) -> bool:
 
 
 def _check(public: bytes, signature: bytes, message: bytes) -> bool:
+    # Contract DEC-0045 item 10 (CT-29): a key of small order verifies signatures forged without a private key under
+    # some Ed25519 implementations, so it is refused before either implementation is asked. The pinned keys are of
+    # full order; the check makes the answer independent of the library underneath.
+    if is_small_order_key(public):
+        return False
     try:
         from cryptography.exceptions import InvalidSignature
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey

@@ -102,6 +102,12 @@ them as a multi-tenant service. The always-on dashboard server's events feed
 `Authorization: Bearer`; its pages and its `/.well-known/fabric-service` identity
 document stay open to local reads. See [the service design](docs/design/FABRIC-SERVICE.md).
 
+The meter and the vault-slot and keyserver doors accept a Fabric delegation token only from the estate issuer
+`config/meter.json` names (or the issuer the hub's `hub.json` names beside its own keys), checked in the order of
+the contract's verifier table with its DEC-0045 rules: an Ed25519 key of small order is never used to verify
+anything, here or in the release-signature check. With no trusted issuer every token is refused and `full doctor`
+says so. See [the meter design](docs/design/METER.md).
+
 The retained 0.1 `serve` command remains a separate read-only local overview,
 without the full keyserver's reveal or provisioning features. Its child-secret
 runner suppresses output rather than using the full engine's streaming filter.

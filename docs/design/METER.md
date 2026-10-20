@@ -5,7 +5,7 @@ Observatory is the estate's **meter** in Fabric's delegation model
 step 3 of [its plan](https://github.com/passioncode-ai/fabric/blob/812876cf/docs/evidence/plans/2026-10-11-delegation-model/README.md)).
 Fabric's hub issues identity and holds the grants. Observatory issues neither: it answers the contract's
 `grant-check` (fabric-agent-contract DEC-0037/0038/0039, `docs/specification/spend-policy.md` and
-`delegation.md` at `8e49fbd`). Code: `observatory/engine/delegation.py` (the verifier),
+`delegation.md` at `8e49fbd`; the verifier follows DEC-0045 at `07042181`, OBS-162). Code: `observatory/engine/delegation.py` (the verifier),
 `observatory/engine/meter.py` (the check and the ledger), `tools/grant.py` (the CLI), `grant.check` in
 `mcp/capability_tools.py`, and the door in `mcp/http_service.py`.
 
@@ -36,11 +36,17 @@ project. It calls `grant.check` on the memory-http door (`project-observatory fu
 47313) with that token in `Authorization: Bearer`, or the hub forwards it in `Fabric-Delegation`.
 
 `delegation.py` checks the token offline against the estate's Ed25519 keys, in the order of the contract's
-verifier table DL-13: the key set, the compact form and header (no duplicate member, `typ`
-`fabric-delegation+jwt`, no `jku`/`jwk`/`x5u`/`x5c`/`crit`), the key, the signature, the claims and issuer, the
-lifetime (at most 600 s) and clock (60 s leeway both ways), the audience, the chain depth (at most four), the
-scope and the effect at a read-only door. Any refusal of the meter's token is `principal-unproven`, with the
-verifier's code in the reason (`verifyMeterToken`).
+verifier table DL-13 as DEC-0045 sealed it: the trusted issuer and the key set (row 1: no issuer is
+`issuer-unavailable`, `no-trusted-issuer`), the compact form and header (no duplicate member, `typ`
+`fabric-delegation+jwt`, no `jku`/`jwk`/`x5u`/`x5c`/`crit`), the key (an unknown `kid` is the token's fault; a
+published key of another `use` or `alg`, not 32 bytes, **of small order** (`small-order-key`, CT-29) or carrying a
+private member is the issuer's, `issuer-unavailable`), the signature, the claims' types (row 5: actors' agent ids
+and session ids, URIs, the `scope` and `jti` grammars, each effect once, exactly one grant, `spend`, `task`, `nbf`)
+and then the issuer, the lifetime (at most 600 s) and clock (60 s leeway both ways), the audience, the chain depth
+(at most four, five on the meter's own token only), the scope and the effect. The meter's token must carry scope
+exactly `grant.check` (`meter-scope-not-exact`) and effect exactly `["none"]` (`meter-effect-not-none`). Any refusal
+of the meter's token is `principal-unproven`, with the verifier's code and detail in the reason
+(`verifyMeterToken`).
 
 **The token travels in a header and nowhere else** (DL-11). It opens `grant.check` alone: the door puts it on
 a `delegation` channel that every memory tool refuses (`unknown-channel`) and every other tool answers
@@ -235,14 +241,14 @@ chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
 
 ## M4 — Configuration
 
-`config/meter.json`, every field optional:
+`config/meter.json`; every field is optional except that the meter needs a trusted issuer from one of two places:
 
 | Field | Default | Meaning |
 |---|---|---|
 | `audience` | `project-observatory` | the meter's agent id: the onward token's `aud` |
 | `capability` | `grant.check` | the scope the onward token must carry |
-| `issuer` | none (any) | the `iss` to trust (`urn:fabric:estate:<id>`) |
-| `hubJson` | none | the hub's `hub.json`: its `jwks` and `grantsDir` |
+| `issuer` | the hub's, else none | the `iss` to trust (`urn:fabric:estate:<id>`). Without it the meter takes the `issuer` that `hubJson` names, only when the keys come from that same file (no `jwks` override). With neither, every token is refused (`issuer-unavailable`, `no-trusted-issuer`): the contract defines no default, and "any key in the set" is not one |
+| `hubJson` | none | the hub's `hub.json`: its `issuer`, `jwks` and `grantsDir` |
 | `jwks`, `grantsDir` | from `hubJson` | a JWK Set file and the grant directory, overriding `hubJson` |
 | `estateMonthUsd` | 1000 | L0, the estate's monthly total |
 | `alertRatio` | 0.8 | where `--status` raises `alert` |
@@ -250,6 +256,15 @@ chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
 | `reservationSeconds` | 3600 | how long an unsettled reservation holds |
 
 The keys are cached for ten minutes and re-read at most once a minute on an unknown `kid` (DL-15).
+
+One deliberate difference from the contract's Node verifier: a published key whose `x` carries a character outside
+base64url (a trailing newline, padding) is refused as unusable (`issuer-unavailable`), where Node's decoder skips
+it. The difference only refuses; it never accepts a key the contract refuses.
+
+`full doctor` reports the meter's readiness under `meter` without opening its ledger: `issuer` (`config`, `hub` or
+`null`), `keys`, `grantDirectory`, `degraded` (`meter:no-trusted-issuer`, `meter:no-estate-keys`,
+`meter:no-grant-directory`) and `next`, the one line that fixes the first gap. `full grant --status` carries the
+same `degraded` codes.
 
 ## M5 — Vault slots under a grant (OBS-57)
 
