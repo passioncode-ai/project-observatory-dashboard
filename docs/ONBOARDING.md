@@ -111,6 +111,23 @@ for one name, or a name that contradicts a measured repository, deployment or do
 a conflict in `registry/identifiers.json` and withheld. `project.resolve` answers any of these
 names with the one canonical id ([design](design/IDENTITY.md)).
 
+**Which Fabric project each project is** is Fabric's to say: Fabric owns the canonical project id
+(fabric-agent-contract DEC-0089). Each tick, and `project-observatory full fabric-attribution`,
+asks Fabric's hub for every folder the registry holds and records the answer as a `fabric:<uuid>`
+alias (owner `fabric`) in `store/raw/fabric-attribution.json`, with when and from which Fabric
+process it came. Fabric writes nothing into the workspace. The first pass asks Fabric once for
+access to `project.resolve`; on your own machine Fabric allows it at once and journals it. The
+credential it hands over stays in an owner-only file under the workspace state and goes only to
+the hub `hub.json` names, only while that process is alive and owns the hub's listening port as
+you, and never through a proxy. A folder Fabric later detaches
+withdraws the alias, a different answer replaces it, and both stay in the file's `history`. A
+project whose folders sit in two Fabric projects is a `fabric.attribution_conflict` finding until
+you settle it in Fabric. When Fabric is not running nothing recorded changes, and `degraded` says
+why (`hub-absent`, `hub-dead`, `hub-origin-refused`, `hub-unverified`, `access-pending`, `access-refused`,
+`tool-absent`, `hub-error`, `budget`). `project.resolve` answers `fabric:<uuid>` and an absolute
+folder too: a folder by the contract's own rules over the registry's folders, with the `_*`
+folders under the projects root and `config/folder_exclusions.json` as declared containers.
+
 **Which environment an app serves** comes from the provider (a Heroku pipeline stage) or from you:
 `config/environments.json` holds `{"deployments": {"heroku:<app>": "production"}}`. The names
 `production`, `staging`, `review`, `development`, `test` and `local` are recognised (`prod` and
@@ -670,10 +687,23 @@ use the CLI and MCP without those hooks. It declares three, and none of them can
 block a turn or a prompt:
 
 - **SessionStart** prints at most two lines about the project, only when one is
-  actionable.
+  actionable. It also keeps a snapshot of the checkout (each `git status` entry's
+  status, size and modification time, and HEAD) as the session's baseline.
 - **Stop** records the facts of a turn that changed a watched repository as a
-  `proposed` ledger record, one per session, revised per turn. It writes the
-  record first, then asks for the `why` of that record **once**. It does not ask
+  `proposed` ledger record, one per session, revised per turn. Only this session's
+  changes count: the record's files are those that differ from the baseline, so a
+  file that was already untracked or dirty when the session opened is never
+  reported as its work, and a turn that changed nothing since the previous turn's
+  snapshot writes nothing. A session with no baseline (it started before this
+  engine was installed) takes the untracked files it first sees as already there.
+  It writes the record first, then asks for the `why` of that record **once**, and
+  only when the turn changed tracked content (an edit, a staged or intent-to-add
+  file, a deletion, a commit): a new untracked file is recorded but not asked
+  about until it is added. The snapshots live in
+  `$XDG_STATE_HOME/project-observatory/turns/` (mode 0600, keyed by digests, no
+  path inside, pruned after seven days). The recorder's git calls share an
+  8-second budget and skip dirty submodule trees; a turn that runs out is left
+  unrecorded, silently, and counted at the next turn. It does not ask
   when this session's own tools already wrote the rationale. That is checked
   after the record exists, within 2 seconds, from one pass over the last 4 MB of
   the session's transcript (the Stop payload names it). The pass collects the
@@ -1235,6 +1265,45 @@ the disk meanwhile, so a single row can read negative; a run's total (`freed_gb`
 files under the home directory, walked once a day within a time budget, and never
 removes one. If the guard has not reported for three hours while
 `auto_cleanup` is on, the finding `machine.guard_idle` says so.
+
+## Join an organization server (device enrollment)
+
+An organization that runs a `fabric-device/0.1` server (contract DEC-0031) can enroll this machine so that its
+activity for that organization (the daily `grant.usage` of agents you share into it) reaches the organization's
+server, signed by this machine. An administrator issues a single-use enrollment token; put it in a vault slot, never on
+a command line:
+
+```bash
+python "$(project-observatory full-path)/tools/vault.py" put my-org prod ENROLLMENT_TOKEN   # the token on stdin
+project-observatory full org enroll --server https://org.example --org org_example --token-slot my-org/prod/ENROLLMENT_TOKEN
+project-observatory full org status
+```
+
+The token is read from the slot for that one request and is never stored, printed or logged. Enrollment creates
+device keys for this organization alone (in `node/orgs/<org id>/keys/`: no other organization sees them), declared as
+what they are, an owner-only key file (`storage: file`); a server whose policy wants a hardware key refuses with
+`key-storage-refused`. It sends a certificate request signed by that `#sig` key, and
+keeps the 7-day certificate, the stream epoch and the protocols the server accepts under the workspace's
+`node/orgs/<org id>/`, owner-only. From then on the hourly maintenance job runs `full org tick`: it rotates the
+certificate at two thirds of its life, checks in, sends share registrations, collects `grant.usage` and empties the
+outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
+
+- `org status` shows each organization's server, certificate expiry and whether rotation is due, the last check-in,
+  the outbox depth and the last batch's result, and `degraded` lines: `org:needs-enrollment` (the certificate expired
+  or the server asked for re-enrollment: enroll again with a new token), `org:share-registration-not-listed` (the
+  server does not accept `share-registration/1` yet, so neither registrations nor `grant.usage` are sent),
+  `org:share-registration-refused` (a typed refusal that waits for your estate record to change) and
+  `org:outbox-retrying`.
+- `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
+- `org leave --org <id>` removes this machine's local state for that organization, its own device keys with it. The
+  organization keeps its records until an administrator retires the device.
+- Two `org` commands for one organization never run at once: each waits for the other (the maintenance job's tick
+  included), so a command can take as long as a tick in flight.
+- Share registrations come only from the estate revision this machine verified and applied
+  (`org records apply --record FILE`, and `--delta FILE` for revocation-delta pages); a draft is never sent.
+
+Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
+offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.
 
 ## Organizations and resources
 

@@ -192,6 +192,9 @@ MACHINE_READERS = {
     "openrouter-admin": "tools/openrouter.py",
     "openrouter-issued.json": "tools/openrouter.py",
     "cloudflare-admin": "tools/cloudflare.py",
+    # The DigitalOcean door's team tokens, and the collector's read tokens (OBS-155).
+    "digitalocean-admin": "tools/digitalocean.py",
+    "digitalocean-read.d": "collectors/scan_digitalocean.py",
     "heroku-admin": "tools/heroku.py",
     "heroku-issued.json": "tools/heroku.py",
 }

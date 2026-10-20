@@ -363,6 +363,7 @@ INTEGRATION_STEPS = {
     "scan-gh": "github", "scan-vault": "wiki", "scan-sessions": "sessions",
     "remotes": "git_remotes", "bitbucket": "bitbucket", "domains": "domains",
     "heroku": "heroku", "openrouter": "openrouter", "scan-cloudflare": "cloudflare",
+    "scan-digitalocean": "digitalocean",
     "scan-mcp": "mcp", "scan-harness": "harness", "scan-spend": "openrouter", "remote-env": "remote_env", "google": "google",
     # Not a collector, but it reads only what the sessions collector writes
     # (store/raw/sessions.json): with sessions off it failed every tick (0.19.3).
@@ -408,7 +409,7 @@ STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
 #: the tail's time. `test_every_step_after_the_merge_is_a_tail_step` derives the
 #: set from `tools/tick.py` and fails when the two disagree.
 TAIL_STEPS = frozenset({
-    "merge", "emit", "validate", "events", "snapshot", "diff", "plugins", "rollup",
+    "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "plugins", "rollup",
     "agent", "index", "retention", "sweep", "corroborate", "ledger", "lost", "findings",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",

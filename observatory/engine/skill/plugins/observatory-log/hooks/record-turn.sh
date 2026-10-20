@@ -52,30 +52,39 @@ py="${OBSERVATORY_PYTHON:-$root/.venv/bin/python}"   # set by `full agent instal
 [ -x "$py" ] || py="$(command -v python3 2>/dev/null)"
 [ -n "$py" ] || exit 0                         # no interpreter: silent
 
-read_field() {                     # read_field <key>
+# ONE PARSE of the payload, not one interpreter start per field: four starts cost
+# 0.1-0.4 s of every turn's Stop before the recorder ran. A value holding a line
+# break is dropped rather than split across the fields that follow it.
+read_fields() {                    # stop_hook_active, cwd, session_id, transcript_path
   [ -n "$payload" ] || return 0
   printf '%s' "$payload" | "$py" -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
-    sys.exit(0)
-print(d.get(sys.argv[1]) or "")
-' "$1" 2>/dev/null
+    d = {}
+if not isinstance(d, dict):
+    d = {}
+for k in ("stop_hook_active", "cwd", "session_id", "transcript_path"):
+    v = d.get(k)
+    v = "" if v is None or v is False else str(v)
+    print("" if ("\n" in v or "\r" in v) else v)
+' 2>/dev/null
 }
+fields="$(read_fields)"
+active=""; cwd=""; session=""; transcript=""
+{ IFS= read -r active; IFS= read -r cwd; IFS= read -r session; IFS= read -r transcript; } <<EOF_FIELDS || true
+$fields
+EOF_FIELDS
 
+[ "$active" = "True" ] && exit 0
+[ "$active" = "true" ] && exit 0
 
-
-
-[ "$(read_field stop_hook_active)" = "True" ] && exit 0
-[ "$(read_field stop_hook_active)" = "true" ] && exit 0
-
-cwd="$(read_field cwd)"; [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-session="$(read_field session_id)"
-# The session's own transcript, so a register another session is editing in the same
-# checkout does not silence this session's ask. Passed only to a recorder that reads
-# it: an older engine's argument parser would refuse the flag and record nothing.
-transcript="$(read_field transcript_path)"
+[ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
+# `transcript` is the session's own transcript, so a register another session is
+# editing in the same checkout does not silence this session's ask. Passed only to a
+# recorder that reads it: an older engine's argument parser would refuse the flag
+# and record nothing.
 extra=()
 if [ -n "$transcript" ] && [ -f "$transcript" ] && grep -q -- '--transcript' "$root/tools/record_turn.py" 2>/dev/null; then
   extra=(--transcript "$transcript")

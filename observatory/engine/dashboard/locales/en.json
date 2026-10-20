@@ -44,6 +44,10 @@
   "one": "the Heroku snapshot is {n} day old, so nothing is being said about it",
   "other": "the Heroku snapshot is {n} days old, so nothing is being said about it"
  },
+ "the DigitalOcean snapshot is {n} days old, so nothing is being said about it": {
+  "one": "the DigitalOcean snapshot is {n} day old, so nothing is being said about it",
+  "other": "the DigitalOcean snapshot is {n} days old, so nothing is being said about it"
+ },
  "the agent could not interpret {n} projects it took": {
   "one": "the agent could not interpret {n} project it took",
   "other": "the agent could not interpret {n} projects it took"

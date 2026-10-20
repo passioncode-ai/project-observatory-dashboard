@@ -377,6 +377,83 @@ waits for. The fix is the relay's contract bump.
 Second run, 2026-10-18, against relay `00937e0` (relay#11, the contract bump to `bf3fd6b`): every step passed, presence
 included (`"ok": true`).
 
+## Organization enrollment (OBS-161)
+
+**Contract pin: CT-65 (DEC-0094), merged at `de9eae4d`.** The contract admits the node's owner-only key file as
+`storage: file` with `exportable: true` (and no attestation); every other store stays `exportable: false`. The schema
+and the CT-65 device fixtures (`fabric/node-vectors/device/`: the file-key request, its three negatives, the check-in
+answer with `protocols`) are vendored at that commit and run by `test_node_org.py`. A server still on an older
+contract answers a 422 schema refusal pointing at `/key/storage` or `/key/exportable`, which the node reports as
+`key-storage-refused`. `python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>` re-pins every
+OBS-161 file at another commit in one step. The rotation-replay fixtures are the receiver's rule (FAC-SEM-125); the
+node's half, the same request sent again after a lost answer, is `test_a_rotation_lost_on_the_way_back_is_sent_again_unchanged`.
+
+`node/org.py`, `node/http_signature.py`, `node/share_registration.py`, `tools/org.py` (`full org`). One enrollment per
+organization (DEC-0082) in `node/orgs/<org.id>/`, with device keys of its own in `node/orgs/<org.id>/keys/` (devices.md:
+each organization enrollment of a machine gets keys of its own), so no two organizations see one device id or key:
+
+- **One writer at a time**: every command that changes an enrollment (enroll, rotate, check-in, enqueue, flush,
+  registrations, grant usage, tick, leave), from the CLI or the maintenance job, holds the exclusive lock
+  `node/orgs/.locks/<org.id>.lock` and reads the state again under it. Without it a check-in in flight during a
+  rotation saved its older copy over the new certificate and the next check-in was refused `certificate-revoked`
+  (adversarial round 1, reproduced); two check-ins spent one sequence number; a tick during `leave` recreated the folder.
+  The lock file is outside the enrollment folder, so `leave` removing the folder never frees a lock another waits on.
+- **Enrollment** (DEC-0031): `enrollment-request` with the opaque device id, `deviceKeys` (`#sig`, `#kem`), a PKCS#10
+  request for the `#sig` key signed by it, `publicKeySha256` of its SubjectPublicKeyInfo, the key's `storage` as it
+  is (`file`, `exportable: true` for the owner-only PKCS#8 file; CT-65, DEC-0094; a hardware store such as the Keychain
+  helper of DEC-0053 plugs in through `Enrollment(keys=...)` with its own `storage`), and `auth.method`
+  `enrollment-token` with the token id; the token itself goes in `Authorization: EnrollmentToken <id>.<secret>` and is
+  read from a vault slot. The answer's certificate must bind this organization and device, certify this machine's
+  `#sig` key, live at most 30 days, and come with an epoch above the one held. A server whose policy refuses a
+  file-held key answers with a refusal the node names `key-storage-refused`. The receiver's paths are its own; the
+  node uses the first organization server's (`/v1/devices/enroll`, `/check-in`, `/rotate`, `/v1/activity/batches`,
+  `/v1/devices/share-registrations`), overridable per enrollment.
+- **Transport** (DEC-0056): every later request carries `Content-Digest` and the `fabric-device` signature over
+  `@method`, `@target-uri`, `content-digest` with `created`, a fresh 22-character `nonce`, `keyid` the certificate's
+  serial and `alg` `ecdsa-p256-sha256`; a retry is signed afresh. `created` is on the server's clock as the last
+  check-in measured it (`skewSeconds`); a `signature-stale` refusal forgets that measure and asks for a check-in at
+  once. `verify_request` is the receiver's check in the
+  contract's order, used by the tests' fake server; it answers all 54 cases of `http-signature.json` as the contract
+  does.
+- **Check-in and rotation**: a signed `check-in` with the sequence number, the collector stream (`observatory-node`,
+  the server's epoch, `lastSeq`, `bufferedFrom`, unacknowledged dropped ranges) and the certificate; the answer sets the
+  next interval, `collectionStart`, `report_full_state`, `certificate.action` and, when present, `protocols`, which
+  replaces the held list as an enrollment or rotation answer does (DEC-0094). The check-in's `health` is `degraded`
+  while the outbox retries or dropped events are undelivered. Rotation sends a new request from the same key under the
+  current serial at two thirds of the lifetime or when asked; the request is persisted before it is sent and sent
+  again unchanged after a lost answer, which the server answers with the same certificate (CT-65), and the previous
+  certificate is kept until a 2xx under the new serial proves the server took it. A `certificate-unknown` before that
+  goes back to the previous certificate and sends the request once more under it (a check-in rebuilt to name it, with
+  a fresh sequence number); only a refusal of that one ends the enrollment. An expired certificate, a `re-enroll`
+  action or a revoked certificate stops the schedule until the machine is enrolled again. `org status` reads the
+  outbox read-only and creates nothing, so a status during `leave` never brings the folder back.
+- **Outbox**: events persisted once with a ULID and the next seq before they are sent; batches are the oldest stream's
+  consecutive run of at most 1000, keep their `batchId` across retries of the same slice, back off from 30 s to an
+  hour, and are consumed by the ack (`seq`, `held`, `rejected`). A 200 that acknowledges none of the batch is held and
+  retried under the same `batchId`. A batch refused for what it is (400, 422, `device-mismatch`) is consumed as
+  rejected and never retried; a 413 halves the batch size first; 409 `activation-closed`, 429, 5xx and no answer are
+  retried. Past 10 000 pending events the oldest are dropped down to 9 000 and named in one `buffer.overflow`: a later
+  drop joins the newest overflow not yet sent, so a burst ends in one event.
+- **Share registrations** (DEC-0086): derived by `share_registration.derive` (the contract's
+  `deriveShareRegistrations`, all 51 derive cases) from `records/estate-record.json` and `records/delta-state.json`,
+  which only `org records apply` writes after `verify_estate_record` and `apply_delta`. Sent only when the enrollment
+  response lists `share-registration/1`; on change, after an enrollment, at least weekly; a typed refusal waits for the
+  record to change, anything else (a held withdrawal included) retries with backoff. The answers are kept per grant.
+  `previouslyRegistered` is what share-registration.md says: the grants this node registered active toward this
+  enrollment, so a grant the server took, then a resend left held, is still withdrawn when it leaves the record.
+  Registrations go out on a change (an enrollment, `org records apply`, a newly listed protocol), not only on the tick.
+- **`grant.usage`**: one event per ended UTC day and share grant the applied revision places in `org:<org.id>`, from
+  the meter's settled receipts (`calls`, `unpricedCalls` 0, `costUsd` their sum), from the collection start on, and
+  only while `share_registration.gate` on the grant's latest answer says `send`. A day is summed only once none of its
+  reservations can still settle (each is settled or past its expiry, `meter.RESERVATION_SECONDS` after it was made),
+  so a call settled after midnight is counted. The gate is checked again at send: a `grant.usage` whose gate closed
+  is dropped (named in a `buffer.overflow`) and its day enqueued again once the gate opens.
+
+Not built here: verifying and applying the server's signed policy and key sets (OE-06; the check-in reports server
+revision 0), a check-in scheduler at the server's interval (the maintenance job runs hourly), and the per-context
+`kid` and `iss` (CX-CON-06 in the contract). A settlement the meter accepts after its reservation expired lands after
+its day was sent and is not counted (the meter does not refuse late settlements).
+
 ## What comes next
 
 | Slice | What |

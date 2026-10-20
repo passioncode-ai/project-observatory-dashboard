@@ -18,6 +18,10 @@ checkout, an unreadable registry: silence, exit 0. It never blocks a session
 and never raises; a failure goes to `hooks.jsonl` under the state logs with its
 reason, which is how a silent hook is told apart from a broken one.
 
+Which project the folder is: Fabric's hub is asked first (`fabric.project.resolve`, its answer
+mapped through the `fabric:<uuid>` aliases Observatory recorded), then the Fabric contract's
+folder rules over Observatory's own facts (DEC-0089), then the older registry match.
+
 What it prints:
 
   known project     "observatory: <name> · N critical / M warning · keys by
@@ -42,6 +46,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))   # turn_state
 import paths              
 import safe_git           
 
@@ -70,6 +75,30 @@ def git_top(cwd: pathlib.Path) -> pathlib.Path | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return pathlib.Path(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+
+
+def baseline(top: pathlib.Path, session_id: str) -> None:
+    """Take the session's baseline of this checkout for the Stop hook's recorder.
+
+    `tools/record_turn.py` counts as a session's work only what differs from this
+    snapshot (`turn_state`), so files that were already untracked or dirty when the
+    session opened are never reported, and never asked about, as its turn's change.
+    A session that already has one (a resume, a `/clear`, a compaction) keeps it:
+    its comparison point is its own last turn, not this moment. Bounded and silent:
+    a checkout git cannot read in time simply has no baseline, and the recorder
+    then takes its untracked files as already there."""
+    if not session_id:
+        return
+    import turn_state
+    if turn_state.load(session_id, top) is not None:
+        return
+    st = safe_git.run(list(turn_state.STATUS_ARGS), repo=top, timeout=5, git=GIT)
+    if st.returncode != 0:
+        return
+    head = safe_git.run(["rev-parse", "HEAD"], repo=top, timeout=5, git=GIT)
+    current = turn_state.snapshot(top, turn_state.parse_status(st.stdout),
+                                  head.stdout.strip() if head.returncode == 0 else "")
+    turn_state.save(session_id, top, current["entries"], current)
 
 
 def remote_of(top: pathlib.Path) -> str:
@@ -134,6 +163,27 @@ def resolve(top: pathlib.Path, remote: str) -> dict | None:
             if linked:
                 return _one(linked)
     return None
+
+
+def attributed(cwd: pathlib.Path) -> dict | None:
+    """The session folder's project, asked of Fabric first and by the contract's rules second.
+
+    Fabric owns the canonical project id and serves folder attribution (fabric-agent-contract
+    DEC-0089, D4): Observatory asks it instead of deciding. While Fabric is not running, or has
+    no project for the folder, the contract's own rules (`folder_attribution.py`) answer over
+    Observatory's projects, its `_*` container folders and `folder_exclusions.json`. Only when
+    neither attaches the folder does the older registry match below answer (a repository by its
+    GitHub name); it retires once the registry records every checkout's Git facts."""
+    try:
+        import fabric_attribution
+        found = fabric_attribution.session_project(str(cwd))
+    except Exception as exc:  # the hook never fails a session; the reason goes to hooks.jsonl
+        log({"cwd": str(cwd), "attribution": f"{type(exc).__name__}"})
+        return None
+    projects = {p.get("id"): p for p in load("projects.json").get("projects") or [] if isinstance(p, dict)}
+    if found.get("ambiguous"):
+        return {"resolution": "ambiguous", "candidates": sorted(found["ambiguous"])}
+    return projects.get(found.get("project")) if found.get("project") else None
 
 
 def checkout_registered(top: pathlib.Path) -> bool:
@@ -283,10 +333,14 @@ def main(argv: list[str]) -> int:
         top = git_top(cwd)
         if top is None:
             return 0
+        try:
+            baseline(top, session_id)
+        except Exception as exc:                                                   # noqa: BLE001
+            log({"cwd": str(cwd), "error": f"baseline: {type(exc).__name__}: {str(exc)[:200]}"})
         if top.resolve() in {ROOT.resolve(), ROOT.parent.resolve(), ROOT.parent.parent.resolve()}:
             return 0
         remote = remote_of(top)
-        p = resolve(top, remote)
+        p = attributed(cwd) or resolve(top, remote)
         if p and p.get("resolution") == "ambiguous":
             line = unknown_line(top, remote, session_id,
                                 {"status": "ambiguous", "reason": ", ".join(p["candidates"])})

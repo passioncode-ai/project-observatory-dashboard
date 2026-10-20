@@ -1665,6 +1665,23 @@ def collect() -> list[dict]:
     _hd = paths.REGISTRY / "heroku-apps.json"
     out.extend(heroku_findings.findings(
         json.loads(_hd.read_text(encoding="utf-8")) if _hd.is_file() else None))
+    # WHAT DIGITALOCEAN BILLS FOR NOTHING (OBS-155): a Droplet powered off is billed in full,
+    # an app with no active deployment serves nothing. Read from the raw scan; an app's project
+    # comes only from a repository the registry already ties to one.
+    import digitalocean_findings
+    _dof = paths.SCRATCH / "digitalocean.json"
+    try:
+        _dodoc = json.loads(_dof.read_text(encoding="utf-8")) if _dof.is_file() else None
+    except (OSError, ValueError):
+        _dodoc = None
+    _dorepos, _dorels = [], []
+    for _name, _key in (("repositories.json", "repositories"), ("relations.json", "relations")):
+        try:
+            _rows = json.loads((paths.REGISTRY / _name).read_text(encoding="utf-8")).get(_key) or []
+        except (OSError, ValueError, AttributeError):
+            _rows = []
+        (_dorepos if _key == "repositories" else _dorels).extend(r for r in _rows if isinstance(r, dict))
+    out.extend(digitalocean_findings.findings(_dodoc, _dorepos, _dorels))
     # WHAT THE CREDENTIAL INVENTORY OWES. `secret.leaked_unrotated` below reads
     # the leak register; these read its neighbours — a lifetime cap, an account
     # nothing claims, a credential known only from its leak.
@@ -2689,6 +2706,19 @@ def collect() -> list[dict]:
                           "`openrouter.py list`; lower or disable a key's ceiling through the door, or raise "
                           "`estateMonthUsd` in config/meter.json if the operator decided a higher limit",
                 "evidence": ["store/raw/spend.json"]})
+
+    # FABRIC ATTRIBUTION (OBS-160; fabric-agent-contract DEC-0089). Fabric owns the canonical project id and
+    # Observatory records each project's `fabric:<uuid>` alias (collectors/scan_fabric_attribution.py). A project
+    # whose folders resolve to two Fabric projects is reported, never merged: which one is right is a decision in
+    # Fabric (detach a folder there, or move it), and until then no alias is kept for it.
+    # Reads store/raw/fabric-attribution.json (collectors/scan_fabric_attribution.py).
+    import fabric_attribution
+    out.extend(fabric_attribution.conflict_findings(
+        fabric_attribution.load(),
+        lambda project, count, ambiguous: (titled("Fabric cannot tell which project {project} is", project=project)
+                                           if ambiguous else
+                                           titled("{project} belongs to {count} Fabric projects",
+                                                  project=project, count=count))))
 
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills

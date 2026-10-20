@@ -176,7 +176,12 @@ def main() -> int:
     review_round_four()
     review_round_five()
     print(f"{len(FAILURES)} failed" if FAILURES else "all passed")
-    return 1 if FAILURES else 0
+    # The door's account half and its collector (OBS-155) run in the same step, `test-digitalocean`,
+    # so one step covers one door; the suite is its own file and is run here, not twice.
+    sys.path.insert(0, str(ROOT / "tests"))
+    import test_digitalocean_account
+    account = test_digitalocean_account.main()
+    return 1 if FAILURES or account else 0
 
 
 def put(env: dict, project: str, name: str, value: str) -> None:

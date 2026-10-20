@@ -75,6 +75,9 @@ def watched_build(dirty: bool = True) -> tuple[pathlib.Path, pathlib.Path, dict]
         # An uncommitted file is what the hook calls a change; a commit would
         # need an upstream to be "unpushed" against.
         (repo / "worked-on.txt").write_text("the turn's work\n", encoding="utf-8")
+        # TRACKED (intent-to-add): the recorder asks only about tracked content a turn
+        # changed, and takes a session's untracked files at its first turn as already there.
+        _watched_git(repo, "add", "-N", "worked-on.txt")
     top = _watched_git(repo, "rev-parse", "--show-toplevel").strip()
     repo_id, project_id = "repository:fixture/alpha-web", "project:alpha-web"
     (reg / "repositories.json").write_text(json.dumps({
@@ -159,7 +162,8 @@ def test_the_payload_parser_uses_the_interpreter_the_script_checked() -> None:
     # by `full agent install`) before falling back to the checkout's venv, so
     # the assignment is located by its variable, not by one literal default.
     py_at = body.index('py="${OBSERVATORY_PYTHON:-$root/.venv/bin/python}"')
-    read_at = body.index("read_field() {")
+    # ONE parser for every field (`read_fields`): it was one interpreter start per field.
+    read_at = body.index("read_fields() {")
     check("and the interpreter is resolved BEFORE the parser is defined",
           py_at < read_at, f"py at {py_at}, read_field at {read_at}")
     check("with a silent exit when there is none",
@@ -180,9 +184,16 @@ def test_the_reentry_guard_still_comes_before_any_work() -> None:
     # `read_field` is an invocation too — the guard calls it, and it is that
     # function which reaches the interpreter. Requiring `"$py"` on the line
     # itself found nothing, because the guard delegates.
-    markers = ('"$py"', "read_field")
-    guard = tick_reader.first_invocation(src, "stop_hook_active", markers)
+    markers = ('"$py"', "read_fields")
+    parse = tick_reader.first_invocation(src, 'fields="$(read_fields)"', markers)
     record_at = tick_reader.first_invocation(src, "tools/record_turn.py", markers)
+    # The guard reads the parsed field: a pure `[ … ]` test, located by its text.
+    lines = src.splitlines()
+    guard = next((i for i, l in enumerate(lines)
+                  if l.strip().startswith('[ "$active" = "true" ] && exit 0')), -1)
+    check("the payload is parsed before the guard reads it",
+          parse != -1 and guard != -1 and parse < guard,
+          f"parse at line {parse + 1}, guard at line {guard + 1}")
     check("the re-entry guard precedes the recording",
           guard != -1 and record_at != -1 and guard < record_at,
           f"guard at line {guard + 1}, record at line {record_at + 1}")
@@ -217,7 +228,7 @@ def test_one_session_revises_one_memory() -> None:
     check("the first turn records", first.get("recorded") is True, str(first)[:200])
     again = record(db, "iso-session-1")
     check("an unchanged second turn adds no revision",
-          again.get("recorded") is False and "unchanged" in again.get("reason", ""),
+          again.get("recorded") is False and "nothing changed this turn" in again.get("reason", ""),
           str(again)[:200])
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     mems = con.execute("SELECT count(DISTINCT memory_id) FROM ledger").fetchone()[0]

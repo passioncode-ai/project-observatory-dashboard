@@ -321,7 +321,14 @@ class Registry:
     """The four registry documents `resolve` reads, indexed once."""
 
     def __init__(self, projects: list[dict], products: list[dict], relations: list[dict],
-                 identifiers_doc: dict, degraded: list[dict] | None = None) -> None:
+                 identifiers_doc: dict, degraded: list[dict] | None = None, *,
+                 fabric_aliases: dict[str, dict] | None = None, attribute=None) -> None:
+        # Fabric's names for the registry's projects (OBS-160): `project id -> {"alias": "fabric:<uuid>"}`,
+        # measured by collectors/scan_fabric_attribution.py and owned by Fabric. `attribute(path)` answers a
+        # folder by the contract's rules (fabric_attribution.attribute_local); None answers no folder.
+        self.fabric = {pid: rec["alias"] for pid, rec in (fabric_aliases or {}).items()
+                       if isinstance(rec, dict) and isinstance(rec.get("alias"), str)}
+        self.attribute = attribute
         self.projects = {p["id"]: p for p in projects}
         self.products = {p["id"]: p for p in products}
         self.relations = relations
@@ -355,12 +362,14 @@ class Registry:
                 "domains": sorted(got.get("domains", ()))}
 
     def aliases_of(self, canonical: str) -> list[dict]:
-        return sorted(({"id": a["id"], "owner": a["owner"]} for a in self.aliases.values()
-                       if a["resolves_to"] == canonical), key=lambda x: x["id"])
+        rows = [{"id": a["id"], "owner": a["owner"]} for a in self.aliases.values() if a["resolves_to"] == canonical]
+        if canonical in self.fabric:
+            rows.append({"id": self.fabric[canonical], "owner": "fabric"})
+        return sorted(rows, key=lambda x: x["id"])
 
 
 def _refusal(code: str, query: str, reg: Registry, **extra: Any) -> dict:
-    hints = {"not-found": "names are matched exactly; estate.survey lists the registry's ids",
+    hints = {"not-found": extra.pop("why", None) or "names are matched exactly; estate.survey lists the registry's ids",
              "ambiguous": "the name is measured on several projects; ask by one of their ids",
              "conflict": "config/identifiers.json gives this name several targets; the operator decides"}
     return {"error": code, "query": _shown(query), "hint": hints[code], **extra,
@@ -373,6 +382,16 @@ def resolve(query: str, reg: Registry) -> dict:
     # surrounding whitespace rather than quietly trimming it.
     if not isinstance(query, str) or not query or query != query.strip() or any(c.isspace() for c in query):
         return _refusal("not-found", str(query), reg)
+    if query.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", query):
+        return _folder(query, reg)
+    if query.startswith("fabric:") and query not in reg.aliases:
+        owners = sorted(pid for pid, alias in reg.fabric.items() if alias == query)
+        if len(owners) > 1:
+            return _refusal("ambiguous", query, reg, candidates=owners)
+        if not owners:
+            return _refusal("not-found", query, reg, why="no project of this registry is recorded against this "
+                                                         "Fabric project; the next fabric-attribution pass asks again")
+        return _answer(owners[0], query, "alias", reg)
     if query in reg.conflicts:
         c = reg.conflicts[query]
         return _refusal("conflict", query, reg, candidates=sorted({x["resolves_to"] for x in c["claims"]}))
@@ -392,6 +411,31 @@ def resolve(query: str, reg: Registry) -> dict:
         canonical = next(iter(owners))
     else:
         return _refusal("not-found", query, reg)
+    return _answer(canonical, query, via, reg)
+
+
+def _folder(query: str, reg: Registry) -> dict:
+    """A folder path -> its project by the Fabric contract's rules (DEC-0089), or a typed refusal."""
+    if reg.attribute is None:
+        return _refusal("not-found", query, reg, why="folder attribution is not available on this surface")
+    explained = reg.attribute(query)
+    answer = explained.get("answer") or {}
+    if answer.get("outcome") == "attached" and answer.get("project") in reg.projects:
+        return _answer(answer["project"], query, "alias", reg)
+    if answer.get("outcome") == "ambiguous":
+        return _refusal("ambiguous", query, reg, candidates=sorted(answer.get("projects") or []))
+    if answer.get("outcome") == "new":
+        why = "the folder is in no project of this registry (DEC-0089 would start a new one at its root)"
+    elif answer.get("outcome") == "refused":
+        why = f"the folder is attributed to no project: refused as {answer.get('reason')} (DEC-0089)"
+    elif answer.get("fault") == "git-probe-failed":
+        why = "Git could not be read in that folder, so it is not attributed now; ask again"
+    else:
+        why = "not an absolute, existing folder"
+    return _refusal("not-found", query, reg, why=why)
+
+
+def _answer(canonical: str, query: str, via: str, reg: Registry) -> dict:
     out: dict[str, Any] = {"canonical": canonical, "matched": {"query": _shown(query), "via": via},
                            "aliases": reg.aliases_of(canonical), "degraded": list(reg.degraded)}
     if canonical in reg.products:

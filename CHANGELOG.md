@@ -5,6 +5,68 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Organization enrollment: `full org`** (OBS-161; contract DEC-0031, DEC-0056, DEC-0082, DEC-0086). A machine
+  enrolls in an organization server with a single-use enrollment token read from a vault slot (never from the command
+  line, never stored or logged), with device keys of its own for each organization (declared as an owner-only key
+  file, `storage: file`) and a certificate request signed by that `#sig` key; it keeps the certificate,
+  stream epoch and accepted protocols under `node/orgs/<org id>/`, holds one lock per organization so no two commands
+  (or a command and the maintenance tick) interleave, rotates the certificate at two thirds of its life (a lost answer
+  resends the same request),
+  checks in, and sends activity batches from a durable outbox (persisted events, contiguous slices of at most 1000,
+  one `batchId` across retries, backoff, acks consumed, overflow bounded). Every request after enrollment carries the
+  `fabric-device` HTTP signature. Share registrations are derived from the estate revision and delta this machine
+  verified and applied (`org records apply`) and sent only to a server that lists `share-registration/1`;
+  `grant.usage` for a share grant goes only to its own organization, only while the registration answer allows it
+  (checked again at send), and only once none of the day's calls can still settle. The maintenance job runs `org tick` on an enrolled machine. `org status` names expiry, the last check-in, the
+  outbox depth and anything degraded; `org leave` removes the local enrollment only. The contract's
+  `http-signature.json` (54 cases) and `share-registration.json` (derive, grant id and gate cases) are vendored and
+  run.
+
+- **DigitalOcean teams in the DigitalOcean door, and a collector of what each team runs and costs** (OBS-155).
+  `tools/digitalocean.py` gains an account half beside its database half, symmetric to the Cloudflare door:
+  `stash` (a team's own token on stdin, or `--from-doctl CONTEXT|all` reading doctl's config directly, nothing
+  printed), `teams`, `members --team`, `team create` (plans by default, writes with `--apply`), `presets`, `issue`,
+  `install`, `list`, `ping`, `rotate` and `revoke`. Team tokens live in `secrets/digitalocean-admin/` (0600), the
+  collector's read tokens in `secrets/digitalocean-read.d/`, and a record per installed token in
+  `secrets/digitalocean-issued/` (team, preset, slot, declared scopes, dates; never a value).
+  - What DigitalOcean's public API cannot do, measured on 2026-10-19 and handled rather than faked: it has no
+    endpoint to create, roll or list personal access tokens ([API reference](https://docs.digitalocean.com/reference/api/digitalocean/);
+    `GET /v2/tokens` answers 403 to a full-access personal token), so `issue` refuses with the control-panel recipe
+    (the preset's [custom scopes](https://docs.digitalocean.com/reference/api/scopes/)) and `install` takes the minted
+    token on stdin, checks its team and its preset's reads, then delivers it. It has no endpoint to list, invite,
+    remove or re-role members; `members` says so, and `team create` is the one documented write
+    (`POST /v2/organizations/team`, in an organization context). Revocation uses the documented
+    [OAuth revocation endpoint](https://docs.digitalocean.com/reference/api/oauth/) and counts only when
+    `/v2/account` then answers 401 to the old value.
+  - `collectors/scan_digitalocean.py` (`full scan-digitalocean`, daily in the tick, behind
+    `integrations.digitalocean`) writes `store/raw/digitalocean.json`: per team the balance and month-to-date usage,
+    Droplets with their monthly price, App Platform apps with the repositories they deploy from, databases without
+    their credentials, volumes and domains. It reads with the team's `observatory-read` token when one is installed,
+    else its stashed token, and says which. A 401 (the team), 403 (a resource) or 429 (a resource, with the wait) is
+    named in `degraded`; the rest still lands, as does every row but a malformed one, and a team not
+    reached before the step's deadline is named while what was read is written.
+  - What the door refuses: a team's own stashed token, or any token that can read outside its preset's
+    scopes, installed as a narrow token; an install over a label already installed (`rotate` replaces it and
+    revokes the old one); a value with whitespace or a control character, before any header is built. `revoke` of
+    a token whose value is gone claims nothing and keeps the record (`revoke LABEL --forget` drops it, saying no
+    revocation was observed). Install, rotate and revoke hold one lock beside the records.
+  - Two findings: `digitalocean.droplet_off_billed` (a powered-off Droplet is billed in full until destroyed) and
+    `digitalocean.app_down` (an App Platform app with no active deployment; its project named only through a
+    repository the registry already ties to one), plus `digitalocean.snapshot_stale` past two days.
+
+
+## 0.26.0 (2026-10-20)
+
+The companion's Stop hook records and asks about what a turn changed, not what the working tree already held: a
+session's baseline is taken at SessionStart, standing untracked files never count, and the `why` is asked only for
+tracked content. A session's MCP server moves itself onto the installed release instead of answering `stale-server`.
+New on this line: a daily encrypted backup of the machine's agent setup with a restore onto a new machine, a Heroku
+door with team management and the team side of the Cloudflare door, Fabric's project id on every project, and the
+delegation verifier and meter brought to the contract's DEC-0045. The companion plugin `observatory-log` moves to
+0.26.0.
+
 ### Security
 
 - **The delegation verifier follows the contract's DEC-0045 ("Delegation sealed")** (OBS-162). `delegation.py` was
@@ -78,7 +140,7 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
     state file or an answer.
   - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
     Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
-    Scenario OSS-68.
+    Scenario OSS-70.
 
 - **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
   `tools/cloudflare.py` does for Cloudflare, on the Platform API:
@@ -116,6 +178,20 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
     their last write, and each write replaces only its own row, so concurrent runs keep every row.
   - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
     what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
+- **Fabric's project id on every project** (OBS-160; Fabric CO-331, fabric-agent-contract DEC-0089). Fabric owns
+  the canonical project id. A new tick step, `fabric-attribution` (and `full fabric-attribution`), asks Fabric's
+  hub `fabric.project.resolve` for every folder the registry holds and records `fabric:<uuid>` on the project in
+  `store/raw/fabric-attribution.json`, with its provenance (Fabric, the hub's pid, the time) and a history of
+  every addition, replacement and withdrawal. The hub is reached only at the origin `hub.json` names, only on
+  `127.0.0.1`, never through a proxy, and only while its pid is alive and is the process listening on the
+  hub's port as this user since before the hub started; access is asked once with `fabric.access.request`, and the binding
+  credential stays in an owner-only file and goes nowhere else. A project whose folders resolve to two Fabric
+  projects is the finding `fabric.attribution_conflict`, never a merge. An unreachable hub is named in
+  `degraded` and changes nothing recorded.
+- **`project.resolve` answers `fabric:<uuid>` and absolute folders.** A folder is attributed by the contract's
+  folder rules (`folder_attribution.py`, a port checked against all of the contract's vectors), with the `_*`
+  folders under the projects root and `config/folder_exclusions.json` as declared containers. Both answer
+  with `matched.via` `alias`, so the published output schema is unchanged.
 
 ### Changed
 
@@ -123,6 +199,10 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   engine copy `observatory/engine/requirements-full.lock` moved to the same pin, so `pip install -c
   requirements-full.lock '.[full]'` resolves (supersedes Dependabot #283, which bumped `pyproject.toml` alone). No other
   pin moves.
+
+- **The SessionStart hook asks Fabric which project a session's folder is**, then the contract's folder rules
+  while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
+  project on its own rules first.
 
 - **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
   session's Observatory server answered `stale-server` until a person restarted that session, and the
@@ -141,6 +221,22 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
     reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
     servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
+- **The Stop hook records and asks about what the turn changed, not what the tree holds.** The recorder took every
+  `git status` entry as the turn's work, so standing untracked files (a pasted log, a `.worktrees/` folder) made
+  every turn "changed": measured 2026-10-20 on one machine, every recorded turn of 21 sessions was asked about, and
+  one session was asked 35 times about the same "4 files changed, +0/-0" it had not touched.
+  - SessionStart keeps a snapshot of the checkout as the session's baseline (`tools/turn_state.py`); the record's
+    files are those that differ from it, and a turn that changed nothing since the previous turn's snapshot writes
+    nothing. A session without a baseline takes the untracked files it first sees as already there.
+  - The `why` is asked only when the turn changed tracked content (an edit, a staged or intent-to-add file, a
+    deletion, a commit). A new untracked file is recorded but not asked about until it is added.
+  - The corroborator leaves a session record whose newest revision is under six hours old to settle
+    (`settling` in `store/raw/corroboration.json`): promoting a live record made the session's next changed turn
+    start another record and ask again, one record per tick.
+  - The recorder's git calls share an 8-second budget and skip dirty submodule trees
+    (`--ignore-submodules=dirty`; `git status` went from 0.45-1.9 s to 0.01-0.3 s in a checkout with eleven
+    submodules); a turn that runs out is unrecorded, silently, and counted at the next turn. The hook parses its
+    payload once instead of starting the interpreter once per field.
 
 ## 0.25.0 (2026-10-19)
 
