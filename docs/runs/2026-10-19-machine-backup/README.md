@@ -108,6 +108,17 @@ on that branch.
   and path from a bundle validated before use; L6 the suite stubs free space and makes the KDF
   cheap; L7 caps raised; L8 `_destination` traversal tests.
 
+## Fix cycle 2 (confirming round on #305)
+
+- A run refused the stage lock (a second restore, even `--plan`, the daily step, the
+  pre-update bundle) swept the live restore's stage: `_staging` now locks first and sweeps
+  only with the lock. `clone` names a carried file missing from the unpacked bundle
+  (`carried-missing`), `restore` lists every checkout not restored in `failed`, and
+  `full machine-restore` exits 1 when there is one.
+- The stage used before a workspace exists is swept too, under its own lock, at the start of
+  every run. A main checkout already on the new machine gets the carried commits (under
+  `refs/carried` only) before a detached worktree is added to it.
+
 ## Open
 
 - The Health row is not rendered by an automated test.

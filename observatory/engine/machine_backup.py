@@ -866,24 +866,44 @@ def _sweep(root: Path) -> list[str]:
     return removed
 
 
-@contextlib.contextmanager
-def _staging(root: Path):
-    """Hold the stage: 0700, locked against a second backup or restore, swept of whatever a
-    killed run left (SIGKILL cannot be caught; the next run removes it), and swept again on
-    the way out. Also removes the stages releases before this one left in the store."""
+def _hold(root: Path) -> int | None:
+    """Open and lock the stage's lock file; None when another run holds it."""
     import osprivacy
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
     fd = osprivacy.open(root / ".lock", os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
-        try:
-            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
-        except BlockingIOError:
-            raise MachineBackupError("another machine backup or restore is running") from None
+        oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    return fd
+
+
+@contextlib.contextmanager
+def _staging(root: Path):
+    """Hold the stage: 0700, locked against a second backup or restore, swept of whatever a
+    killed run left (SIGKILL cannot be caught; the next run removes it), and swept again on
+    the way out. A run that does not get the lock touches nothing: it raises before any sweep
+    (round 2 of #305: a refused run emptied a live restore's stage). Also sweeps the stages
+    releases before this one left in the store, and the other stage location (the one used
+    before a workspace exists) when no run holds it."""
+    fd = _hold(root)
+    if fd is None:
+        raise MachineBackupError("another machine backup or restore is running")
+    try:
         _sweep(root)
         for old in root.parent.glob(".machine-backup-*"):
             if old.is_dir() and not old.is_symlink():
                 shutil.rmtree(old, ignore_errors=True)
+        other = stage_root(None)
+        if other != root and other.is_dir():
+            other_fd = _hold(other)
+            if other_fd is not None:
+                try:
+                    _sweep(other)
+                finally:
+                    os.close(other_fd)
         yield root
     finally:
         try:
@@ -1522,6 +1542,8 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
     records = sorted(manifest.get("checkouts", []), key=lambda r: (bool(r.get("worktree")), bool(r.get("submodule"))))
     mains: dict[str, Path] = {}
     restored: list[Path] = []
+    repo_bundle: dict[str, Path] = {}
+    fetched: set[str] = set()
     for rec in records:
         if rec.get("error"):
             continue
@@ -1534,6 +1556,16 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
         out.append(row)
         carried = rec.get("carried") or {}
         bundle = stage / carried["bundle"] if carried.get("bundle") else None
+        # Every file the record says was carried must be here; a missing one is a failure,
+        # named, never a clone that quietly lacks its commits (round 2 of #305).
+        missing = [name for name in ([carried.get("bundle"), carried.get("patch")]
+                                     + [f"checkouts/{rec['id']}/untracked/{r}" for r in carried.get("untracked") or []])
+                   if name and not (stage / name).is_file()]
+        if missing:
+            row.update(result="carried-missing", detail=f"not in the unpacked bundle: {', '.join(missing[:3])}")
+            continue
+        if bundle is not None and rec.get("common_dir"):
+            repo_bundle.setdefault(rec["common_dir"], bundle)
         if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
             row["result"] = "exists"
             if rec.get("common_dir") and not rec.get("worktree"):
@@ -1544,6 +1576,19 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
         main = mains.get(rec.get("common_dir")) if rec.get("worktree") else None
         detached = bool(rec.get("head")) and not rec.get("branch")
         if main is not None:
+            # The main checkout may have been here before the restore: give it the carried
+            # commits first, under refs/carried only, so its own branches are never moved.
+            carry = repo_bundle.get(rec.get("common_dir"))
+            if carry is not None and rec["common_dir"] not in fetched:
+                fetched.add(rec["common_dir"])
+                got = _run([git, "-C", str(main), "fetch", "-q", str(carry), "+refs/carried/*:refs/carried/*",
+                            "refs/tags/*:refs/tags/*"], runner=runner)
+                if got["exit"] != 0:
+                    row.update(result="clone-failed", detail="the carried commits could not be fetched into "
+                                                             f"{display(main, home)}: {got.get('detail', '')}")
+                    continue
+                if main not in restored:
+                    restored.append(main)
             ref = ["--detach", str(dest), rec["head"]] if detached else [str(dest), rec.get("branch") or rec["head"]]
             step_ = _run([git, "-C", str(main), "worktree", "add", *ref], runner=runner)
         elif not rec.get("head"):
@@ -1668,7 +1713,7 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith(("files/", "abs/")))
                 if hold:
-                    hold(stage)
+                    hold("apply", stage)
                 result["applied"] = apply(manifest, stage, home, overwrite=overwrite)
         if do_packages:
             with _phase(root) as stage:
@@ -1677,7 +1722,10 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
         if do_clone:
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith("checkouts/"))
+                if hold:
+                    hold("clone", stage)
                 result["clone"] = clone(manifest, stage, home, runner=runner, git=git)
+            result["failed"] = [r for r in result["clone"] if r.get("result") not in ("cloned", "exists")]
     result["next"] = [s for s in (
         None if mode == "apply" else "project-observatory full machine-restore --apply  (writes only what is missing)",
         "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"
@@ -1756,7 +1804,9 @@ def restore_main(argv: list[str]) -> int:
         result = restore(bundle, Path.home(), base=base, mode="apply" if a.apply else "plan",
                          overwrite=a.overwrite, do_packages=a.packages, do_clone=a.clone)
         print(json.dumps(result, indent=2, ensure_ascii=False))
-        failed = (result.get("applied") or {}).get("failed")
+        failed = (result.get("applied") or {}).get("failed") or result.get("failed")
+        if failed:
+            print(f"Observatory: {len(failed)} item(s) were not restored; each is named in the answer", file=sys.stderr)
         return 1 if failed else 0
     except (config.ConfigurationError, OSError) as exc:
         print(f"Observatory: {exc}", file=sys.stderr)

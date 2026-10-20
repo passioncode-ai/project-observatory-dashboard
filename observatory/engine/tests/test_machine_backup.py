@@ -474,7 +474,7 @@ class Restore(Machine):
                 "import machine_backup as MB\nfrom pathlib import Path\n"
                 "MB.raise_on_signals()\n"
                 f"MB.restore(Path({str(self.bundle)!r}), Path({str(self.fresh)!r}), base=Path({str(self.ws)!r}), "
-                f"secret={PASS!r}, mode='apply', hold=lambda stage: (print('ready', flush=True), time.sleep(60)))\n")
+                f"secret={PASS!r}, mode='apply', hold=lambda step, stage: (print('ready', flush=True), time.sleep(60)))\n")
         child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True, env=dict(os.environ))
         self.assertEqual(child.stdout.readline().strip(), 'ready')
         root = MB.stage_root(self.ws)
@@ -506,6 +506,70 @@ class Restore(Machine):
         self.take(at=AT + datetime.timedelta(days=1))
         self.assertEqual([p.name for p in root.iterdir()], ['.lock'])
         self.assertFalse(legacy.exists())
+
+    def test_a_refused_run_leaves_a_live_restores_stage_alone(self):
+        # Round 2 of #305: a second restore, even --plan, or a backup, refused while a restore
+        # held the stage, swept it anyway; the restore's later checkouts lost their commits.
+        go = self.base / 'go'
+        code = (f"import sys, time, json; sys.path[:0] = [{str(ROOT)!r}, {str(Path(__file__).resolve().parent)!r}]\n"
+                "import machine_backup as MB\nfrom pathlib import Path\n"
+                f"go = Path({str(go)!r})\n"
+                "def hold(step, stage):\n"
+                "    print('ready', flush=True)\n"
+                "    while not go.exists(): time.sleep(0.1)\n"
+                f"r = MB.restore(Path({str(self.bundle)!r}), Path({str(self.fresh)!r}), base=Path({str(self.ws)!r}), "
+                f"secret={PASS!r}, do_clone=True, hold=hold)\n"
+                "print(json.dumps(r.get('failed')))\n")
+        child = subprocess.Popen([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True, env=dict(os.environ))
+        self.assertEqual(child.stdout.readline().strip(), 'ready')
+        root = MB.stage_root(self.ws)
+        before = sorted(p.relative_to(root).as_posix() for p in root.rglob('*'))
+        with self.assertRaisesRegex(MB.MachineBackupError, 'is running'):
+            MB.restore(self.bundle, self.fresh, secret=PASS, base=self.ws)
+        with self.assertRaisesRegex(MB.MachineBackupError, 'is running'):
+            self.take(at=AT + datetime.timedelta(days=1))
+        self.assertEqual(sorted(p.relative_to(root).as_posix() for p in root.rglob('*')), before,
+                         'the refused runs touched nothing')
+        go.write_text('')
+        out, _ = child.communicate(timeout=120)
+        self.assertEqual(child.returncode, 0)
+        self.assertEqual(json.loads(out.strip().splitlines()[-1]), [])
+        self.assertEqual(git('rev-parse', 'HEAD', cwd=self.fresh / 'src' / 'alpha-detached'), self.detached_head)
+
+    def test_a_missing_carried_file_fails_by_name_and_the_command_exits_1(self):
+        real = MB.extract
+        def lossy(bundle, secret, dest, want):
+            return real(bundle, secret, dest, lambda n: want(n) and not n.endswith('unpushed.bundle'))
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(MB, 'extract', lossy), patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = MB.restore_main(['--latest', '--clone'])
+        self.assertEqual(code, 1)
+        rows = {r['checkout']: r for r in json.loads(out.getvalue())['clone']}
+        self.assertEqual(rows['~/src/alpha-web']['result'], 'carried-missing')
+        self.assertIn('unpushed.bundle', rows['~/src/alpha-web']['detail'])
+        self.assertIn('not restored', err.getvalue())
+
+    def test_the_stage_used_before_a_workspace_exists_is_swept_too(self):
+        other = MB.stage_root(None)
+        left = other / 'restore-killed' / 'files'
+        left.mkdir(parents=True)
+        (left / 'id_example').write_bytes(SECRET_MARKER)
+        MB.restore(self.bundle, self.fresh, secret=PASS, base=self.ws)
+        self.assertFalse((other / 'restore-killed').exists())
+
+    def test_a_detached_worktree_joins_a_main_checkout_already_here(self):
+        MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True)
+        detached = self.fresh / 'src' / 'alpha-detached'
+        shutil.rmtree(detached)
+        git('worktree', 'prune', cwd=self.fresh / 'src' / 'alpha-web')
+        git('gc', '-q', '--prune=now', cwd=self.fresh / 'src' / 'alpha-web')
+        again = MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True)
+        rows = {r['checkout']: r for r in again['clone']}
+        self.assertEqual(rows['~/src/alpha-web']['result'], 'exists')
+        self.assertEqual(rows['~/src/alpha-detached']['result'], 'cloned', rows)
+        self.assertEqual(git('rev-parse', 'HEAD', cwd=detached), self.detached_head)
+        self.assertEqual(git('for-each-ref', 'refs/carried', cwd=self.fresh / 'src' / 'alpha-web'), '')
 
     def test_a_record_from_a_bundle_is_validated_before_use(self):
         good = {'id': 'abcdef012345', 'path': '~/src/x', 'branch': 'main', 'head': 'a' * 40}

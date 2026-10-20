@@ -1452,7 +1452,8 @@ Every decrypted or temporary copy, during a backup or a restore, lives in one pr
 `<home>/store/.machine-stage/` (mode 700; before a workspace exists,
 `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-stage/`). A restore decrypts only
 what its current step needs and removes it before the next step; SIGTERM and SIGHUP remove it
-too, and whatever a killed run left is swept when the next backup or restore starts.
+too, and whatever a killed run left is swept when the next backup or restore starts. A second
+backup or restore while one runs is refused before it touches anything.
 
 Nothing is written without a passphrase: a bundle holds `~/.ssh` and CLI logins, so it is
 never written unencrypted, not even inside the workspace. A write is also refused when the
@@ -1502,7 +1503,8 @@ stops the daily and pre-update bundles.
    out its branch (or detaches HEAD where it was detached), applies its patch and writes its
    untracked files with their modes. A repository that had no commit yet is initialised and
    its staged changes are staged again. A checkout that exists is never touched; a worktree is
-   added to its restored main checkout, detached where it was.
+   added to its restored main checkout, detached where it was. A checkout that could not be
+   restored, or whose carried files are missing, is named in `failed` and the command exits 1.
 7. `project-observatory full init` (or `full restore --latest`) brings back the workspace
    itself from its own snapshot, then `full maintain ensure` schedules the job.
 
