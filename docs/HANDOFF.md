@@ -17,6 +17,10 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-20: release 0.26.0](runs/2026-10-20-release-0.26.0/README.md): engine and `observatory-log` 0.26.0,
+carrying OBS-169 (#315) and everything merged since 0.25.0. Next: merge, tag `v0.26.0`, verify the release, re-pin
+Observatory Log in `passioncode-ai/passioncode`, update the installed set and engine.
+
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
 counts only what differs from the previous turn's snapshot, only tracked content asks for a `why`, a live session's

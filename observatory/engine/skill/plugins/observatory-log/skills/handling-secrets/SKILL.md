@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.25.0"
+  version: "0.26.0"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally

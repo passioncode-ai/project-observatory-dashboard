@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.26.0 (2026-10-20)
+
+The companion's Stop hook records and asks about what a turn changed, not what the working tree already held: a
+session's baseline is taken at SessionStart, standing untracked files never count, and the `why` is asked only for
+tracked content. A session's MCP server moves itself onto the installed release instead of answering `stale-server`.
+New on this line: a daily encrypted backup of the machine's agent setup with a restore onto a new machine, a Heroku
+door with team management and the team side of the Cloudflare door, Fabric's project id on every project, and the
+delegation verifier and meter brought to the contract's DEC-0045. The companion plugin `observatory-log` moves to
+0.26.0.
 
 ### Security
 
@@ -136,8 +144,6 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
 - **The SessionStart hook asks Fabric which project a session's folder is**, then the contract's folder rules
   while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
   project on its own rules first.
-
-### Changed
 
 - **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
   session's Observatory server answered `stale-server` until a person restarted that session, and the
