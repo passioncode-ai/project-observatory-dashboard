@@ -406,8 +406,10 @@ def observatory_project(
 def observatory_resolve(
     id: Annotated[str, Field(min_length=3, max_length=300,
                              description="Any name of a project or product: its registry id, another system's "
-                                         "name for it (a store id, a hosting app, an agent's own slug), or a "
-                                         "repository:, deployment or domain: id. Matched exactly.")],
+                                         "name for it (a store id, a hosting app, an agent's own slug, a "
+                                         "fabric:<uuid>), a repository:, deployment or domain: id, or an "
+                                         "absolute folder (attributed by the Fabric contract's rules). "
+                                         "Matched exactly.")],
 ) -> dict[str, Any]:
     """Any name of a project or product -> the ONE canonical Observatory id.
 
@@ -445,7 +447,19 @@ def observatory_resolve(
     except (OSError, ValueError) as exc:
         idoc = {}
         degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
-    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded))
+    # Fabric owns the canonical project id (OBS-160, DEC-0089): its `fabric:<uuid>` for each project, as
+    # Observatory last pulled it, and folders answered by the contract's rules over Observatory's facts.
+    import fabric_attribution
+    fdoc = fabric_attribution.load()
+    if not fdoc:
+        degraded.append({"source": "store/raw/fabric-attribution.json",
+                         "reason": "absent: no Fabric aliases read; run `project-observatory full fabric-attribution`"})
+    else:
+        degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
+                        for d in fdoc.get("degraded") or [] if isinstance(d, dict))
+    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
+                                                        fabric_aliases=fabric_attribution.aliases(fdoc),
+                                                        attribute=fabric_attribution.attribute_local))
 
 
 @server.tool()

@@ -113,6 +113,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-agents": {"writes": ["store/raw/agents.json"], "reads": []},
     "scan-harness": {"writes": ["store/raw/harness.json"], "reads": ["registry/projects.json"]},
     "scan-spend": {"writes": ["store/raw/spend.json"], "reads": []},
+    # Reads the registry `emit` wrote this tick, and Fabric's hub (outside the step graph).
+    "fabric-attribution": {"writes": ["store/raw/fabric-attribution.json"],
+                           "reads": ["registry/projects.json", "registry/repositories.json", "registry/relations.json"]},
     # READS the registry it will later help write, and that is a fixpoint over
     # ticks rather than a cycle: attribution needs the project list, so a
     # project's first sessions attach on the NEXT tick after the project itself
@@ -273,6 +276,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the lifecycle watch (collectors/scan_lifecycle.py),
                             # written by the tick's `lifecycle` step before this one
                             "store/raw/lifecycle.json", "store/raw/harness.json", "store/raw/spend.json",
+                            # Fabric attribution conflicts (OBS-160)
+                            "store/raw/fabric-attribution.json",
                             # the SSH-key inventory, written by `full ssh-keys list`
                             # outside the step graph (PB-163): declared so the read is known
                             "store/raw/ssh-keys.json",

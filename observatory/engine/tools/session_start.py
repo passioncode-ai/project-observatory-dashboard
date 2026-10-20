@@ -18,6 +18,10 @@ checkout, an unreadable registry: silence, exit 0. It never blocks a session
 and never raises; a failure goes to `hooks.jsonl` under the state logs with its
 reason, which is how a silent hook is told apart from a broken one.
 
+Which project the folder is: Fabric's hub is asked first (`fabric.project.resolve`, its answer
+mapped through the `fabric:<uuid>` aliases Observatory recorded), then the Fabric contract's
+folder rules over Observatory's own facts (DEC-0089), then the older registry match.
+
 What it prints:
 
   known project     "observatory: <name> · N critical / M warning · keys by
@@ -134,6 +138,27 @@ def resolve(top: pathlib.Path, remote: str) -> dict | None:
             if linked:
                 return _one(linked)
     return None
+
+
+def attributed(cwd: pathlib.Path) -> dict | None:
+    """The session folder's project, asked of Fabric first and by the contract's rules second.
+
+    Fabric owns the canonical project id and serves folder attribution (fabric-agent-contract
+    DEC-0089, D4): Observatory asks it instead of deciding. While Fabric is not running, or has
+    no project for the folder, the contract's own rules (`folder_attribution.py`) answer over
+    Observatory's projects, its `_*` container folders and `folder_exclusions.json`. Only when
+    neither attaches the folder does the older registry match below answer (a repository by its
+    GitHub name); it retires once the registry records every checkout's Git facts."""
+    try:
+        import fabric_attribution
+        found = fabric_attribution.session_project(str(cwd))
+    except Exception as exc:  # the hook never fails a session; the reason goes to hooks.jsonl
+        log({"cwd": str(cwd), "attribution": f"{type(exc).__name__}"})
+        return None
+    projects = {p.get("id"): p for p in load("projects.json").get("projects") or [] if isinstance(p, dict)}
+    if found.get("ambiguous"):
+        return {"resolution": "ambiguous", "candidates": sorted(found["ambiguous"])}
+    return projects.get(found.get("project")) if found.get("project") else None
 
 
 def checkout_registered(top: pathlib.Path) -> bool:
@@ -286,7 +311,7 @@ def main(argv: list[str]) -> int:
         if top.resolve() in {ROOT.resolve(), ROOT.parent.resolve(), ROOT.parent.parent.resolve()}:
             return 0
         remote = remote_of(top)
-        p = resolve(top, remote)
+        p = attributed(cwd) or resolve(top, remote)
         if p and p.get("resolution") == "ambiguous":
             line = unknown_line(top, remote, session_id,
                                 {"status": "ambiguous", "reason": ", ".join(p["candidates"])})

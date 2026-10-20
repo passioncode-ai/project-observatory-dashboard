@@ -2690,6 +2690,19 @@ def collect() -> list[dict]:
                           "`estateMonthUsd` in config/meter.json if the operator decided a higher limit",
                 "evidence": ["store/raw/spend.json"]})
 
+    # FABRIC ATTRIBUTION (OBS-160; fabric-agent-contract DEC-0089). Fabric owns the canonical project id and
+    # Observatory records each project's `fabric:<uuid>` alias (collectors/scan_fabric_attribution.py). A project
+    # whose folders resolve to two Fabric projects is reported, never merged: which one is right is a decision in
+    # Fabric (detach a folder there, or move it), and until then no alias is kept for it.
+    # Reads store/raw/fabric-attribution.json (collectors/scan_fabric_attribution.py).
+    import fabric_attribution
+    out.extend(fabric_attribution.conflict_findings(
+        fabric_attribution.load(),
+        lambda project, count, ambiguous: (titled("Fabric cannot tell which project {project} is", project=project)
+                                           if ambiguous else
+                                           titled("{project} belongs to {count} Fabric projects",
+                                                  project=project, count=count))))
+
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills
     # can no longer be matched to a request — then instruction files every session reads whole, the

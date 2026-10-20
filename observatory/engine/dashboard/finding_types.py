@@ -196,6 +196,7 @@ LABELS: dict[str, str] = {
     "store.integrity_stale": "Store integrity not checked",
     "store.integrity_unmeasured": "Store integrity check ran out of time",
     "spend.estate_month": "Estate spend near its monthly limit",
+    "fabric.attribution_conflict": "Project in two Fabric projects",
     "tick.standing_down": "Scheduled run standing down",
     "tick.collector_starved": "Collector waiting too long",
     "tick.rotation_degraded": "Collector scheduling coverage unknown",

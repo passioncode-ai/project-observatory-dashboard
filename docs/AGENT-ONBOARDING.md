@@ -11,6 +11,10 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 6. Explain how to update, preview a migration and restore a backup. Say that the maintenance job also keeps a daily encrypted bundle of this machine's agent setup (`full machine-backup`, `full machine-backup status`) and that `full machine-restore --latest` previews moving it to a new machine; `--apply`, `--packages` and `--clone` are mine to run. If this is an existing installation, stop writers before migration and keep the original until the new copy is verified. Do not start a second scheduler over the same data.
 7. Finish with the local dashboard address, commands for another scan, and the list of enabled integrations. Keep the public marketing site separate from the private dashboard.
 
+## Fabric project ids
+
+Fabric owns the canonical project id. Observatory pulls it from Fabric's hub and records `fabric:<uuid>` against each `project:<slug>` in its own store; it never creates a Fabric project and writes nothing to Fabric but one access request (`fabric.access.request`, capability `project.resolve`, allowed at once on the operator's own machine). `observatory_resolve` answers a `fabric:<uuid>` (via `alias`, owner `fabric`) and an absolute folder (also via `alias`, by the fabric-agent-contract's DEC-0089 rules). The SessionStart hook asks Fabric which project a session's folder is, and applies those rules itself only while Fabric is not running. A refusal names its reason in `degraded`; run `project-observatory full fabric-attribution` to ask again now.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

@@ -542,6 +542,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # take seconds — the index, the erasure, the review machinery — were `not started`
     # tick after tick. Now they run first and the heavy ones take what is left; what the
     # agent proposes this tick is indexed and exported on the next.
+    # Which Fabric project each project is (OBS-160): asked of Fabric's hub, recorded here.
+    # After `validate`, because it reads the registry this tick wrote; a hub that is down is
+    # named in its own output, never a failed step.
+    step("fabric-attribution", PY, "collectors/scan_fabric_attribution.py", SCRATCH / "fabric-attribution.json")
     step("index", PY, "store/indexer.py", "index")
     step("retention", PY, "store/retention.py", "apply")
     step("sweep", PY, "tools/sweep_fixtures.py")

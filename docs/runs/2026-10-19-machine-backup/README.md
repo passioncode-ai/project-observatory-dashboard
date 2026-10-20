@@ -62,7 +62,7 @@ on that branch.
 - `workspace.py`, `observatory.py`: the two commands, `doctor.machine_backup`.
 - Dashboard Health: a "machine backup" row and five warning codes, in English and Russian.
 - Docs: ONBOARDING (what a bundle holds, the settings file, moving step by step),
-  AGENT-ONBOARDING, COMPATIBILITY (`.obmachine`), CLI-COMPATIBILITY, scenario OSS-68.
+  AGENT-ONBOARDING, COMPATIBILITY (`.obmachine`), CLI-COMPATIBILITY, scenario OSS-70.
 
 ## Checks run
 

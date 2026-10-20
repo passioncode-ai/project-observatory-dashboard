@@ -408,7 +408,7 @@ STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
 #: the tail's time. `test_every_step_after_the_merge_is_a_tail_step` derives the
 #: set from `tools/tick.py` and fails when the two disagree.
 TAIL_STEPS = frozenset({
-    "merge", "emit", "validate", "events", "snapshot", "diff", "plugins", "rollup",
+    "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "plugins", "rollup",
     "agent", "index", "retention", "sweep", "corroborate", "ledger", "lost", "findings",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",
