@@ -1,0 +1,809 @@
+{
+  "attempted": 128,
+  "cases": [
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000000,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000001,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000002,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000003,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000004,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000005,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000006,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000007,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000008,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000009,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000010,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000011,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000012,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000013,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000014,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000015,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-missing) -> 1"
+      ],
+      "seed": 7000016,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000017,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'over-limit']"
+      ],
+      "seed": 7000018,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000019,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000020,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (not-in-policy) -> 1"
+      ],
+      "seed": 7000021,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000022,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000023,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000024,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000025,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000026,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000027,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000028,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'over-limit']"
+      ],
+      "seed": 7000029,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-missing) -> 1"
+      ],
+      "seed": 7000030,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000031,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000032,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000033,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000034,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (not-in-policy) -> 1"
+      ],
+      "seed": 7000035,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000036,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000037,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1"
+      ],
+      "seed": 7000038,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000039,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000040,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000041,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000042,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000043,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000044,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1"
+      ],
+      "seed": 7000045,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000046,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000047,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000048,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000049,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000050,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000051,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000052,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000053,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000054,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000055,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000056,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000057,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000058,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000059,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000060,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000061,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000062,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000063,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000064,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000065,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000066,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000067,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000068,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000069,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000070,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000071,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000072,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000073,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000074,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000075,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000076,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000077,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000078,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (not-in-policy) -> 1"
+      ],
+      "seed": 7000079,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000080,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000081,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000082,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-pending) -> 1"
+      ],
+      "seed": 7000083,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000084,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000085,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000086,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000087,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000088,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000089,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000090,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000091,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000092,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-pending) -> 1"
+      ],
+      "seed": 7000093,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000094,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000095,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-missing) -> 1"
+      ],
+      "seed": 7000096,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000097,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000098,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000099,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1"
+      ],
+      "seed": 7000100,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000101,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000102,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000103,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000104,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000105,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000106,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000107,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000108,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000109,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000110,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000111,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000112,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000113,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000114,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000115,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000116,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000117,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000118,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000119,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000120,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (not-in-policy) -> 1"
+      ],
+      "seed": 7000121,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000122,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000123,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000124,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000125,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000126,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (not-in-policy) -> 1"
+      ],
+      "seed": 7000127,
+      "status": "FAIL"
+    }
+  ],
+  "completed": 128,
+  "requested": 128,
+  "schema": "synthetic-adversary/1",
+  "source_commit": "1536adddaadb427a6830fa2343774801f87a60c8",
+  "sources": [
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6"
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "sha256": "cad91eb2029563733eab1cfdeac4d4aa487440aa240747deb44646c129cab079"
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "eda88faa0e7948b9189ad670b19e8b7fb6f9a7c5e5063d9ab4259179dcfbc93f"
+    },
+    {
+      "path": "observatory/engine/tests/adversarial_runner.py",
+      "sha256": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+    }
+  ],
+  "status": "FAIL",
+  "variant": "adv_j1_property"
+}

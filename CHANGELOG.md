@@ -5,6 +5,54 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Security
+
+- **The delegation verifier follows the contract's DEC-0045 ("Delegation sealed")** (OBS-162). `delegation.py` was
+  a port of fabric-agent-contract `src/delegation.ts` at `8e49fbd`, which predates it; it now follows the contract at
+  `07042181`, and `tests/test_delegation_sealed.py` ports `test/delegation-sealed.test.ts` case by case over the
+  contract's own fixtures (`fabric/delegation-vectors/`).
+  - **A small-order Ed25519 key is refused** (CT-29, critical). A key set publishing one of libsodium's seven
+    small-order encodings let anyone forge a token with no private key: the contract's vector
+    `delegation-small-order.json` verified as `ok`. The key is now the issuer's unusable key,
+    `issuer-unavailable` (`small-order-key`), before anything is verified under it. The same predicate
+    (`is_small_order_key` in the engine's `ed25519_order.py`, which `node/ed25519.py` re-exports) now guards the release-signature check as well, in both its
+    `cryptography` and its plain-Python path.
+  - **The trusted issuer is required.** `verify_delegation` and `verify_meter_token` take `issuer` with no default;
+    none or empty is `issuer-unavailable` (`no-trusted-issuer`), never "any key in the set".
+  - **The meter's token is exact**: scope exactly `grant.check` (`meter-scope-not-exact`) and effect exactly
+    `["none"]` (`meter-effect-not-none`); a wider token is `principal-unproven`.
+  - **Strict types in the contract's order** (DL-13 row 5): actors' agent ids and session ids, URIs for `iss`,
+    `sub` and `project`, `aud` an agent id, the `scope` and `jti` grammars, each effect once, one grant, `spend`,
+    `task` and `nbf` are checked before the lifetime, audience and depth rows, so a malformed chain is
+    `unauthenticated` whatever else is wrong.
+  - A published key of another `use` or `alg` is now `issuer-unavailable` (`key-not-for-signing`), not
+    `unauthenticated`.
+  - Every grammar (agent ids, session and task ids, URIs, `scope`, `jti`) must match the whole value: Python's `$`
+    let a trailing newline through where the contract's regular expressions do not. The same full-match rule now
+    applies to the meter's request and grant-reference checks and to the agent-network node's identifier,
+    envelope, passkey, estate and blob checks. `NaN` and `Infinity` in a token are `malformed`, a signature segment
+    no base64url encoder writes is `bad-signature` (it raised before), and an integer-valued time such as
+    `1791720000.0` is read as the integer the contract reads.
+  - White space in a grammar is ECMAScript's, as in the contract: a URI holding U+FEFF is refused, one holding
+    U+001F or U+0085 is accepted, and the meter's timestamps and the node's relay origins take ASCII digits only.
+    An integer no double can hold (2^1024 - 2^970 and above, 309 digits or more) in a time or an amount is a claim
+    of the wrong type (`malformed-claims`), as the contract reads the infinity `JSON.parse` makes of it.
+
+**Behaviour change for existing installs.** A meter that verified tokens without a trusted issuer now denies every
+grant check and every token-bearing slot or keyserver call as `principal-unproven`
+(`issuer-unavailable:no-trusted-issuer`). An install with no `config/meter.json` and no hub keys denied them before
+too (no estate keys); nothing changes there. If `config/meter.json` names keys (`jwks` or `hubJson`) but no issuer,
+add the estate issuer Fabric names:
+
+```json
+"issuer": "urn:fabric:estate:<id>"
+```
+
+or point `hubJson` at a `hub.json` that names its `issuer` beside its `jwks`; the meter takes the hub's issuer only
+with the hub's own keys. `full doctor` reports it under `meter` (`degraded`: `meter:no-trusted-issuer`, and the line
+that fixes it), and `full grant --status` lists it in `degraded`. The contract defines no default issuer, so the
+meter sets none: trusting whichever key signed would be the forgery this fix closes.
+
 ### Added
 
 - **A Cloudflare preset that onboards a domain to Email Sending** (`email-sending-domain`). Until a zone's domain is
@@ -14,6 +62,130 @@ while the major version is 0, a minor release may change behaviour and says so h
   Zone Read and DNS Write on the zone's own resource plus Email Sending on its account, as two policies, verifies the
   new value by listing the zone's sending subdomains, and delivers it to a vault slot:
   `cloudflare.py issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME`.
+
+- **A daily encrypted backup of this machine's agent setup, and a restore onto a new machine** (OBS-157).
+  One `machine-<stamp>-<id>.obmachine` per run goes to the same backups root as the workspace snapshots, in the same
+  `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
+  settings, CLI logins, launchd or systemd user jobs, the Fabric service descriptors, the Homebrew, npm, pipx and uv
+  inventories, and every checkout's remotes (without user information), branch, HEAD, dirty and ahead/behind state
+  with a git bundle of every commit no remote has (branches, local tags, detached HEADs, stash entries), a patch of
+  its uncommitted changes (staged changes for a repository with no commit yet) and its untracked files. The
+  maintenance job takes one a day, `full update` one before it stops the jobs (unless one is under an hour old), and
+  `full machine-backup` one now. `config/machine-backup.json` adds an operator's own paths, excludes and checkout
+  roots. `full machine-restore [BUNDLE | --latest]` prints the plan; `--apply` writes only what is missing,
+  `--overwrite` moves a conflict aside first, `--packages` installs the inventories and `--clone` clones the checkouts
+  and puts back their carried work. Measured on a working agent machine: 69 MB, 14,221 items, 517 checkouts, under
+  two minutes.
+  - Decrypted and temporary copies live only in the workspace's private `store/.machine-stage/`, one restore
+    step at a time; SIGTERM and SIGHUP remove them and the next run sweeps what a killed one left; a run refused while another
+    holds the stage touches nothing. A checkout not restored is named and `full machine-restore` exits 1.
+  - Nothing is written without a passphrase; a disk that would keep under 2 GB free refuses the write, recorded and
+    shown in `doctor`, `maintain status` and Health; three bundles are kept.
+  - What a cap leaves out is not carried and named per folder in the bundle's `MANIFEST.json`, the answer, `doctor`
+    and Health; transcripts (opt-in) and plugin caches are skipped and named. No value reaches the manifest, the
+    state file or an answer.
+  - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
+    Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
+    Scenario OSS-70.
+
+- **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
+  `tools/cloudflare.py` does for Cloudflare, on the Platform API:
+  - `stash` keeps an admin token read by the door alone: the CLI session's, piped in (`heroku auth:token | heroku.py
+    stash`) or read inside the process with `--from-cli`, never in argv.
+  - `issue --preset identity|read|deploy|config-read|config-write --vault PROJECT/ENV/NAME [--team T] [--app A]
+    [--expire-days N]` mints a direct OAuth authorization with that preset's scopes only (never `global`), described
+    after its preset, slot, team and app. It proves the new value can read the app, the team's apps or the account,
+    then writes it to the slot on stdin. A failed proof or vault write deletes what the call created. Issuing again
+    regenerates the same authorization; a changed preset makes a new one and deletes the old only after delivery.
+  - Heroku narrows an authorization by scope only, never to a team or an app, so `--team` and `--app` are its stated
+    purpose and what the proof reads; every issue says so. The `config-` presets reach config vars and need `--app`.
+  - `rotate` regenerates in place (`--leaked` for every slot an open leak names), `revoke` deletes at Heroku before the
+    ledger row, `list` and `ping` report from `heroku-issued.json` (ids, scopes, slot, team, app, dates; never a value
+    or the refresh token), and `ping` names a gone or widened authorization and managed strays.
+  - `teams`, `members --team` and `apps --team` read every page, with the slots issued for each team and app.
+    `member add|role|remove --team T --email E [--role admin|member|collaborator]` prints its plan and changes nothing
+    until `--apply`, then reads the team again to verify. It refuses `owner`, the last admin and the stashed admin's
+    own membership.
+  - `tools/cloudflare.py` gains `accounts` (every stashed account, the tokens Cloudflare holds in it and the vault slot
+    each managed one names), `members --account`, and `member add|role|remove --account` with the same plan, `--apply`
+    and verification. It reads Super Administrator from both places it lives, legacy roles and permission policies,
+    and refuses: any write while some member's Super Administrator state cannot be read (a record with neither
+    roles nor policies, a role or permission group without a name, a policy scope it cannot read); removing, or
+    changing the role of, a member who holds Super Administrator unless another accepted member holds it on the
+    whole account (a policy scoped to a zone or to some objects does not count); a role change of a member whose
+    access is set by policies, since it writes legacy roles only; and the stashed admin's own membership when the
+    token can read its user. Lists are read to their end whether they report `total_pages`, `total_count` or
+    only a page size, and one still going after 100 pages is an error, not a cut.
+  - A team that takes people by invitation (its `team-invite-acceptance` feature on) is written the Heroku CLI's
+    way: `member add` sends an invitation, `members` lists pending invitations as pending, `member remove` of a
+    pending invitee cancels the invitation, and the read-back that verifies such a write is the invitations list.
+    A feature list that cannot be read refuses the write rather than guess the endpoint.
+  - `issue`, `rotate`, `revoke` and `ping` hold one lock beside `heroku-issued.json` from their first read to
+    their last write, and each write replaces only its own row, so concurrent runs keep every row.
+  - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
+    what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
+- **Fabric's project id on every project** (OBS-160; Fabric CO-331, fabric-agent-contract DEC-0089). Fabric owns
+  the canonical project id. A new tick step, `fabric-attribution` (and `full fabric-attribution`), asks Fabric's
+  hub `fabric.project.resolve` for every folder the registry holds and records `fabric:<uuid>` on the project in
+  `store/raw/fabric-attribution.json`, with its provenance (Fabric, the hub's pid, the time) and a history of
+  every addition, replacement and withdrawal. The hub is reached only at the origin `hub.json` names, only on
+  `127.0.0.1`, never through a proxy, and only while its pid is alive and is the process listening on the
+  hub's port as this user since before the hub started; access is asked once with `fabric.access.request`, and the binding
+  credential stays in an owner-only file and goes nowhere else. A project whose folders resolve to two Fabric
+  projects is the finding `fabric.attribution_conflict`, never a merge. An unreachable hub is named in
+  `degraded` and changes nothing recorded.
+- **`project.resolve` answers `fabric:<uuid>` and absolute folders.** A folder is attributed by the contract's
+  folder rules (`folder_attribution.py`, a port checked against all of the contract's vectors), with the `_*`
+  folders under the projects root and `config/folder_exclusions.json` as declared containers. Both answer
+  with `matched.via` `alias`, so the published output schema is unchanged.
+
+### Changed
+
+- **The SessionStart hook asks Fabric which project a session's folder is**, then the contract's folder rules
+  while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
+  project on its own rules first.
+
+### Changed
+
+- **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
+  session's Observatory server answered `stale-server` until a person restarted that session, and the
+  maintenance job installs releases by itself. Now the server notices at its next request that its code was
+  replaced, holds that request, lets the running ones answer, starts the installed release once to check it
+  (`mcp/server.py --reload-check`) and replaces itself in place with `os.execv`: same process id, same pipes,
+  same session. The new release takes over the client's handshake without a second `initialize` and answers
+  the held request exactly once; a changed tool set is announced with `notifications/tools/list_changed`
+  (the server now declares `tools.listChanged`). The session's stdio is served by `mcp/stdio_relay.py`
+  instead of the SDK's own transport on POSIX.
+  - Where the move is impossible the server keeps answering `stale-server`, now with the reason: Windows,
+    an update holding the workspace or requests still running after a minute (both retried at a later
+    request), an installed release that fails its check
+    or speaks another MCP revision, code that is gone, or a failed `execv`. The pipe stays open and no
+    request is answered twice.
+  - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
+    reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
+    servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
+
+## 0.25.0 (2026-10-19)
+
+The recovery work of 2026-10-13 lands on this line. Cleanup keeps local work it cannot verify, rechecks every target
+just before removal and refuses when it cannot tell whether a process holds a path. The machine survey records what
+it could not measure: checkout state and upstream relation under explicit roots, cache coverage, open files whose
+path is gone and memory pressure apart from swap, each read-only and none of it cleanup authority. Each tick stage
+leaves a receipt, and an offline check passes only on tests that actually ran. 0.25.0 reclaims less disk than
+0.24.5: with holder coverage unknown, nothing that needs a holder check is removed. On the main line since 0.24.5:
+each project's OpenRouter spend, the agent-network node, SSH keys and external checkouts declared by SessionStart.
+The companion plugin `observatory-log` moves to 0.25.0: it asks for a turn's `why` once per record, with the next
+prompt, and measures the answers.
+
+### Added
+
+- **`registry/agents.json`: the agents installed on this machine** (L-11, OBS-83, #288), generated from the Fabric
+  service descriptors, each one's manifest, launchd's job list and the MCP inventory by origin, and projected into
+  the wiki unchanged. No token path, no credential-shaped URL and no absolute home path reaches either copy.
+  - A home written in an equivalent lexical form (doubled separators, `.` segments, `x/..` detours, backslashes,
+    JSON and percent escapes, fullwidth characters, `~user`) is caught by the independent check: the scan is
+    refused and the last document is kept stale (round 8 of #288).
+
 - **Each project's spend, this month and over the last 30 days** (J-11, OBS-93). The spend scan now reads every
   key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
   `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are
@@ -110,6 +282,147 @@ while the major version is 0, a minor release may change behaviour and says so h
   output for it. Clouds are refused with the gap named (OBS-112); the dashboard section is OBS-111.
   [Design](docs/design/SSH-KEYS.md), scenarios OSS-62–67.
 
+- **Survey gaps stay visible** (OBS-87): bounded checkout registration and fairer scans
+  preserve older measurements with their dates. Unknown swap, failed file walks and
+  incomplete registration are not reported as measured zero or fresh coverage.
+  `full machine --checkouts --root PATH` records read-only checkout candidates under
+  explicit roots, with bounded traversal and honest unknown/stale rows. A candidate is
+  not an abandoned checkout or permission to delete it; no cleanup planner consumes it.
+- **Cache coverage separates declarations from measurements** (OBS-87):
+  `full machine --cache-coverage` records configured roots, available executables and
+  previously measured sizes with their original dates. Unreadable sources, protected
+  system areas and missing ownership or regeneration evidence stay explicitly unknown.
+  The command does not scan contents, run cache tools or authorize deletion; reclaimable
+  bytes and current use remain unmeasured.
+- **Saved coverage is readable from the CLI and MCP**: `full machine --coverage` and
+  `observatory_machine(section="coverage")` return bounded checkout/cache summaries
+  without starting scans. Missing, partial, stale and invalid receipts remain explicit;
+  sample rows never claim whole-machine totals or permission to clean up.
+- **Open files whose path is gone are observed, not cleaned** (OBS-87). `full machine --open-unlinked` records, on
+  macOS and Linux, files a process still holds open after their directory entry was removed: bounded metadata only,
+  no contents and no command lines. The receipt, `full doctor` and the saved-coverage reader say what was not read;
+  no row authorizes an action, and whole-machine coverage stays unknown.
+- **A checkout's local state and its relation to its upstream** (OBS-87). The explicit-root checkout inventory now
+  records a clean Git status apart from changes, hidden index flags and incomplete reads, and the local HEAD's
+  ahead/behind counts against its locally resolved upstream. Every Git read uses an offline profile
+  (`GIT_NO_LAZY_FETCH=1`), so observing a partial clone never downloads objects. A remote-tracking ref is not a new
+  remote observation, and no count is cleanup authority.
+- **Memory pressure, dated apart from swap** (OBS-87). On macOS the memory collector reads the platform's pressure
+  level (`normal`, `warning`, `critical`) with its own timestamp and source, beside swap use and process memory. An
+  absent interface, an unsupported code or a failed read stays unknown.
+- **Log retention says what it did**. The maintenance sweep reports, per scope, whether its coverage was
+  complete, partial or unknown, how many entries it saw, rotations completed, refusals and failures, as counts with
+  fixed reasons and never paths or file contents. A receipt lost mid-sweep keeps its action counts null, because the
+  effects may already have happened.
+- **Each tick stage leaves a receipt** (OBS-89). `tick_progress` records which stage is running and how each ended
+  (not started, stopped, failed, completed) before and after every streamed or captured step, keeping the previous
+  completed report. A silent tail stage that consumed the tick is now named, and a failed receipt write never
+  changes the supervised command's outcome.
+### Changed
+
+- **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
+  measures the answers on what was delivered** (M-8, INB-004). The Stop hook printed the request as a
+  Stop `systemMessage` after every changed turn. On one machine over fourteen days that was 3,593
+  requests and 34 answers. A Stop `systemMessage` is a notice for the person and is not rendered into
+  the model's input. Now:
+  - **Once per record.** A session is one record revised per turn, so a session is asked once.
+    `store/raw/why-asks.jsonl` (new, append-only) journals each request and each delivery. It rotates
+    to `why-asks.jsonl.1` past 1 MB, under a lock, and both are read, so a record is not asked again
+    when it scrolls.
+  - **The record first.** The Stop hook writes the record before anything else.
+  - **Not when this session wrote the rationale.** Within 2 seconds after the record is written, one
+    pass over the last 4 MB of the session's transcript (named by the Stop payload) collects this
+    session's writing calls:
+    - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+    - Bash commands that write through `>`, `>>` (also `cat > file <<EOF`), `tee` or `sed -i`, with
+      the files they write.
+
+    No request is made in two cases:
+    - one of those calls targets a decision register (a `decisions.md`, or a `.md`, `.markdown` or
+      `.txt` file under `adr/`, outside vendored trees and submodules, not deleted, with at least one
+      non-blank added line, whitespace ignored), and its text carries the entry's own heading (the
+      shallowest heading the work added, never a repeated `### Consequences`), or, with no heading,
+      more than half of its added lines; that heading must appear in the register exactly once, as a
+      heading line outside fenced code;
+    - one of those calls wrote `.task-pipeline/run.md` (or ran `stage_checkpoint.py`), and a
+      `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
+      git ignores it, has its text in what those calls wrote.
+
+    The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
+    not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
+    `&` and newlines, so the scan is linear in the command's length.
+
+    A second revision of the same record then links the file, and its `why` stays empty. The link
+    stores the repository's id, the register's path, the entry heading as `anchor`, the exact raw
+    heading line at full length, and the length and SHA-256 of the whole register file; no entry
+    boundary is guessed. A heading over 120 characters is never linked. A later revision carries the
+    link only while it holds by bytes: this hook wrote it, it names the current repository, the raw
+    line occurs exactly once as a whole line, and the file is byte-identical or its linked bytes are
+    unchanged and what follows starts, at its first non-blank line, with a column-0 heading no
+    deeper than the entry's own (accepted only when the linked file ended in a newline outside any
+    code fence and HTML comment). Appending a later entry keeps the link. So the record stays explained, with no request and no
+    extra revision, after the register is committed and pushed and after the write scrolls out of the
+    transcript. Any other change to the file drops the link: an edit to any entry, a paragraph or a
+    deeper heading appended, a change of line endings, or an edit below a `# comment` line inside a
+    code block or HTML comment. So does a move to another repository. A dropped link is attributed
+    afresh only from the session's writes after it was made (the mark is carried in every later
+    revision), and asked about when there are none. A turn
+    that touches a register is attributed again, and a newer decision replaces the anchor.
+
+    Every read of a register or the run ledger, fresh or carried, passes one gate: inside the
+    checkout, not a symbolic link and not under one, opened once without following a link or
+    blocking, a regular file with one hard link, read up to its limit plus one byte. A fresh anchor
+    is chosen by a linear Markdown heading scan (newline split only, fences and multi-line comments
+    skipped, `## Use C#` keeps its `#`), and an added block whose heading syntax the scan rejects is
+    asked about, never matched line by line. The attribution's `git diff` gets only the time left in
+    the 2 seconds.
+
+    The turn is asked about in every other case:
+    - another session's edit in the same checkout;
+    - a file the session only read or grepped;
+    - a pull-request body that shares a heading;
+    - a write by a tool the pass does not know (`cp`, a script, `perl -i`);
+    - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script containing `|`
+      or `;`;
+    - a relative path written after a `cd` in the same command;
+    - a path whose letter case differs from the file's on a case-insensitive volume;
+    - a subagent's edit, a failed call, or a command longer than 65,536 characters;
+    - no transcript;
+    - a pass that runs out of its 2 seconds.
+  - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
+    pending request to the model as `additionalContext` with the next prompt, once, and records the
+    delivery. The context is capped at 4,000 characters, and a request that does not fit waits for the
+    following prompt without being marked delivered. It prints nothing when nothing is pending, never
+    writes through a symbolic link, and reaches no file for a session id that is not a plain name.
+    - The request waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` (0600). An
+      undelivered one older than seven days is pruned by either hook.
+    - If that file cannot be written, the request falls back to the Stop notice. An older engine whose
+      recorder does not decide whether to ask also gets the Stop notice, never an injected prompt. A
+      fault to record is still a Stop notice: the recorder's output to the hook now carries `fault`,
+      which only its receipt carried before.
+  - **Answering keeps the session recorded.** The answer the request asks for,
+    `observatory_record(owner, memory_id, expected_revision, statement, why)`, is written as a note with
+    no session id. The next turn revises the record from its latest revision, whoever wrote it, and
+    keeps the `why`; before, it revised from its own last revision and every later turn of the session
+    failed with a revision conflict. A latest revision that names another project is not revised: the
+    turn starts a new record that `continues` it.
+  - **One new record, not one per turn.** The Stop hook picks the session's record by the newest row
+    the session wrote, not by the highest revision number. A record it starts after a promotion, a
+    rejection or a takeover by another project begins at revision 1, so it lost to the old record, and
+    every later changed turn started another record and asked again.
+  - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
+    `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
+    model, such as a headless single-prompt session, is pending and never unanswered.
+    - `why_asks.py` prints the same.
+    - `why_asks.py reached <transcript> <memory id>` says whether a request reached the model in a
+      session transcript.
+    - The new finding `observatory.why_unanswered` fires below a 10 % rate over seven days with at
+      least 20 delivered requests.
+
+  `tests/test_skill.py` T8 now expects the `UserPromptSubmit` hook it used to forbid, and runs it to
+  show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
+  `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
+
 ### Fixed
 
 - **A worktree of a repository with no remote is no longer a second project.** The filesystem scan records the
@@ -118,6 +431,64 @@ while the major version is 0, a minor release may change behaviour and says so h
   repository pass already did this; a worktree whose main checkout was not scanned stays visible as its own project.
   Found by the automatic project registration run's isolated cross-product scenario
   (org-index `docs/runs/2026-10-17-automatic-project-registration/`).
+
+- **Cleanup preserves unverified local state** (OBS-84, OBS-86): ignored files, nested
+  repositories, hidden index flags and unresolved worktree state prevent automatic
+  removal. A manual dirty-worktree removal verifies its archive against current tracked,
+  staged and untracked content. Branch cleanup binds archive/proof and deletion to the
+  same commit and refuses symbolic refs. Disk-guard actions recheck target identity and
+  safety evidence before removal; the legacy unverified build-artifact action is refused.
+  Log rotation also refuses symbolic links, linked directories and hardlinks before
+  rotating or changing permissions. External writers can still race the final filesystem
+  check: use an idle workspace. Copy/truncate can still lose a concurrent append.
+  Incomplete or unreadable process listings cannot declare an omitted target free;
+  clean and archived dirty worktrees repeat a bounded holder check immediately
+  before removal. A missing worktree's registration goes only when its directory is
+  proven absent (an unplugged drive, a renamed parent folder or a permission error is
+  unknown and prunes nothing) and after its HEAD is kept by its branch or an
+  `archive/wt-<sha8>` branch; only that registration's `.git/worktrees/<name>` entry is
+  moved aside to `.git/worktrees-retired/`, never a working directory and never a
+  repository-wide `git worktree prune`, which could make a detached worktree's commits
+  unreachable. Failed removal reports unknown effects instead of claiming success. A
+  branch whose upstream is local (`branch.X.remote` set to `.`) is no longer deleted as
+  pushed. Log rotation follows links above the workspace (macOS `/tmp`, `/var`, a linked
+  home) and still refuses them inside it, a dangling link or a `..` included, and a log
+  folder that does not exist yet is reported absent, not unknown.
+- **0.25.0 reclaims less disk than 0.24.5.** With holder coverage unknown (no complete
+  process inventory on any platform), the disk guard and worktree cleanup now remove
+  nothing that needs a holder check: build output, caches tied to a running tool and
+  worktrees are kept and reported, where 0.24.5 removed them. This is deliberate: a
+  path a process may still hold is not deleted on a guess.
+- **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
+  failures produce error evidence without losing completed suite results. Unknown
+  completion fails the run instead of becoming a passing or empty summary.
+- **Findings follow the measured cause**: collector deadlines distinguish work not started
+  from interrupted work; partial leak scans retain sightings; memory and swap findings use
+  their own measurement freshness and preserve unreadable-source degradation.
+- **Engine-update snapshots stay visible**: backup status and verified migration now
+  include local `before-update` snapshots. Recognized snapshots share one kind list;
+  damaged copies remain reported and retained, while foreign kinds remain untouched.
+- **Cleanup child receipts are validated before use**: failed commands and malformed
+  summaries remain failures. Valid summaries retain only known structured fields;
+  exception details, child output and extra fields do not enter persisted diagnostics.
+- **Scoped Heroku refreshes preserve the rest of the survey** (OBS-80): `scan_heroku --only`
+  updates only successfully measured apps, retains unrequested rows and the global survey
+  timestamp, and records per-scope results. Missing apps, malformed responses and invalid
+  costs preserve old measurements with degradation. Provider-only refreshes retain local
+  checkout information and its unknown state until a full scan measures it. Full and scoped
+  collector invocations share a writer lock; no provider state is changed by the collector.
+- **An offline check passes only on executed tests** (OBS-85). A unittest suite that defined cases but never ran
+  them exited 0 and passed with zero tests. Suites now declare their reporting protocol: unittest suites need a
+  complete summary with at least one executed case, the legacy PASS/FAIL scripts keep theirs, and an earlier failure
+  is never hidden by a later clean summary.
+- **Cleanup refuses when a process might still hold the path** (OBS-86). On Windows there is no holder inventory and
+  a successful rename no longer counts as proof that nothing holds a folder (a handle opened with shared delete
+  allows the rename), so path removal there is refused; older rename-mode state refuses too. On POSIX, `ps` renders
+  arguments with spaces in place of their boundaries, so a missing match is no proof of absence: positive matches
+  still hold a path, but an absent one no longer admits deletion or a cache tool's busy check. Preliminary admission
+  no longer captures the process table it cannot use; explicit holder captures are bounded (2 MiB per child, a
+  shared deadline, only the capture's own process group stopped), and the old synchronous `/proc` fallback is retired.
+  A process starting after the final check remains a race.
 
 ### Documentation
 

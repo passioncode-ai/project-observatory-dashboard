@@ -40,7 +40,8 @@ def _home_argument(argv: list[str]) -> None:
     """`--home PATH` selects the workspace, for a host that starts this server from
     the per-install manifest: a manifest's stdio connection carries arguments and
     no environment, so `OBSERVATORY_HOME` cannot travel in it. Read before any
-    engine module resolves its paths. `--stdio` is accepted and means the default."""
+    engine module resolves its paths. `--stdio` is accepted and means the default;
+    `--reload-check` is the preflight of a swap onto this release (OBS-159)."""
     if "--home" in argv:
         at = argv.index("--home")
         if at + 1 >= len(argv) or not argv[at + 1] or not pathlib.Path(argv[at + 1]).is_absolute():
@@ -65,6 +66,7 @@ import credential_shape
 import interop                                                                    
 import memory_access as MA
 import retrieval_audit as RA
+import session_reload
 import paths
 import proposals                                                                  
 import survey as survey_mod                                                       
@@ -404,8 +406,10 @@ def observatory_project(
 def observatory_resolve(
     id: Annotated[str, Field(min_length=3, max_length=300,
                              description="Any name of a project or product: its registry id, another system's "
-                                         "name for it (a store id, a hosting app, an agent's own slug), or a "
-                                         "repository:, deployment or domain: id. Matched exactly.")],
+                                         "name for it (a store id, a hosting app, an agent's own slug, a "
+                                         "fabric:<uuid>), a repository:, deployment or domain: id, or an "
+                                         "absolute folder (attributed by the Fabric contract's rules). "
+                                         "Matched exactly.")],
 ) -> dict[str, Any]:
     """Any name of a project or product -> the ONE canonical Observatory id.
 
@@ -443,7 +447,19 @@ def observatory_resolve(
     except (OSError, ValueError) as exc:
         idoc = {}
         degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
-    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded))
+    # Fabric owns the canonical project id (OBS-160, DEC-0089): its `fabric:<uuid>` for each project, as
+    # Observatory last pulled it, and folders answered by the contract's rules over Observatory's facts.
+    import fabric_attribution
+    fdoc = fabric_attribution.load()
+    if not fdoc:
+        degraded.append({"source": "store/raw/fabric-attribution.json",
+                         "reason": "absent: no Fabric aliases read; run `project-observatory full fabric-attribution`"})
+    else:
+        degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
+                        for d in fdoc.get("degraded") or [] if isinstance(d, dict))
+    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
+                                                        fabric_aliases=fabric_attribution.aliases(fdoc),
+                                                        attribute=fabric_attribution.attribute_local))
 
 
 @server.tool()
@@ -527,15 +543,20 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage"],
                        Field(description="overview = totals and the top few of each (default); "
-                                         "a named section = that section in full.")] = "overview",
+                                         "a named section = that section in full, except coverage which always stays bounded.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
     and the largest cache/VM/history locations, worktrees and branches by class,
     the cleanup plan with its journal, and the disk guard's last run (pressure,
     what it freed by the disk's own count, the largest files, who holds the swap).
+    Coverage summarizes saved checkout/cache and open-deleted-file observations with source ages, bounded
+    rows, snapshot counts and null reclaimable bytes. It never refreshes inventories
+    or marks a candidate actionable.
+    Open-deleted logical sizes are command-visible only; refresh with
+    `full machine --open-unlinked` on macOS/Linux. They never prove reclaimable bytes.
     Missing swap remains null with its reason/time; largest-file coverage carries
     completeness and error counts even when the bounded file list is empty.
 
@@ -548,6 +569,10 @@ def observatory_machine(
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
     """
+    if section == "coverage" and explainPid is None:
+        import coverage_view
+        coverage = coverage_view.summary()
+        return {"measuredAt": None, "degraded": coverage["degraded"], "coverage": coverage}
     import machine_view
     full = machine_view.summary(explainPid)
     base = {"measuredAt": full.get("measuredAt"), "degraded": full["degraded"]}
@@ -560,7 +585,8 @@ def observatory_machine(
     if section != "overview":
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
-           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
+           "coverage": full.get("coverage"),
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {**{key: procs.get(key) for key in
@@ -620,6 +646,12 @@ def observatory_ssh_keys(
 
 
 MACHINE_TOP = 10
+
+
+# Publish the additive bounded coverage contract on the actual tool, not only prose.
+import coverage_view as _coverage_contract
+server._tool_manager.get_tool("observatory_machine").fn_metadata.output_schema = {
+    "type": "object", "properties": {"coverage": _coverage_contract.OUTPUT_SCHEMA}}
 
 
 @server.capability("machine.mcp.inventory")
@@ -1855,7 +1887,29 @@ def main() -> int:
     missing = server.missing_handlers()
     if missing:
         raise SystemExit(f"capabilities without a handler: {', '.join(missing)}")
-    asyncio.run(server.run_stdio_async())
+    if "--reload-check" in sys.argv[1:]:
+        # The preflight a running server of an earlier release asks before it moves onto
+        # this one (OBS-159): everything imported, the workspace valid, and what it serves.
+        tools = sorted(t.name for t in asyncio.run(server.list_tools()))
+        print(json.dumps({"reload": session_reload.RELOAD_PROTOCOL, "version": VERSION,
+                          "protocol": PROTOCOL_REVISION, "tools": tools}))
+        return 0
+    home = configuration.home()
+    resumed, unread = session_reload.take_state()
+    if unread:
+        session_reload.record(home, "resume-failed", to=VERSION, reason=unread)
+    cannot = session_reload.platform_can_swap()
+    if cannot:
+        # Windows: the SDK's own transport, and `stale-server` names this reason after an update.
+        session_reload.REFUSAL = cannot
+        asyncio.run(server.run_stdio_async())
+        return 0
+    import capability_tools
+    from stdio_relay import Relay
+    relay = Relay(server, script=pathlib.Path(__file__).resolve(), argv=sys.argv[1:],
+                  protocol=PROTOCOL_REVISION, freshness=capability_tools.FRESHNESS, home=home,
+                  resumed=resumed)
+    asyncio.run(relay.run())
     return 0
 
 

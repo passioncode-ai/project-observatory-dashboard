@@ -43,6 +43,8 @@ LEGACY = (
     'agent', 'agent_queue', 'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history', 'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure', 'temporary_block', 'traps', 'write_surface',
 )
 BOUNDARY = (
+    'open_unlinked',
+    'heroku_scoped', 'holder_capture',
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
@@ -115,8 +117,10 @@ BOUNDARY += ('osschedule',)
 BOUNDARY += ('harness',)
 # OBS-55: the meter and the delegation verifier (contract DEC-0039).
 BOUNDARY += ('meter', 'meter_wire', 'spend')
+# OBS-162: the verifier as contract DEC-0045 sealed it, over the contract's own fixtures.
+BOUNDARY += ('delegation_sealed',)
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
-BOUNDARY += ('tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
+BOUNDARY += ('tick_progress', 'tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
 # ENG-003: the agent's deadline reaches providers.complete().
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -165,7 +169,7 @@ BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
 BOUNDARY += ('embedding_enforcement',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
-BOUNDARY += ('memory_access', 'memory_freshness')
+BOUNDARY += ('memory_access', 'memory_freshness', 'checkout_inventory', 'checkout_state', 'cache_coverage', 'coverage_view')
 # Scope and validity filtered before the candidate window (PB-137 N-009).
 BOUNDARY += ('search_scope',)
 # A lesson as its own record kind, and search filtered by kind before the window (M-7).
@@ -190,6 +194,19 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+# The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
+BOUNDARY += ('heroku_door',)
+# The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
+BOUNDARY += ('scan_agents',)
+# The request for a why (M-8): once per record, with the next prompt, measured; and the
+# canary that it reaches the model, read from a synthetic transcript.
+BOUNDARY += ('ask_why', 'ask_why_reach')
+# OBS-160: the Fabric contract's folder-attribution vectors (DEC-0089) and the pull from Fabric's hub.
+BOUNDARY += ('folder_attribution', 'fabric_attribution')
+# The machine bundle and its restore onto an empty home (OBS-157).
+BOUNDARY += ('machine_backup',)
+# A session MCP server moving itself onto the installed release over real pipes (OBS-159).
+BOUNDARY += ('session_reload',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -214,20 +231,28 @@ HELPERS += (
 )
 # task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
 HELPERS += ('lesson_emitter_fixture.json',)
+# The synthetic transcript the reach canary reads (M-8).
+HELPERS += ('ask_why_transcript.json',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
-    'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
+    'identity_map.py', 'identifiers.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'workspace.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
+    # The companion's request for a why: journal, measurement, reach (M-8).
+    'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py',
+    # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
+    'machine_backup.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
+    # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
+    'ed25519_order.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
@@ -241,6 +266,7 @@ SKILL_FILES = (
     # The companion suites drive the hook scripts themselves.
     'skill/plugins/observatory-log/hooks/record-turn.sh',
     'skill/plugins/observatory-log/hooks/ask-why.py',
+    'skill/plugins/observatory-log/hooks/prompt-why.py',
 
     # Merged from the parallel port streams.
     'skill/plugins/observatory-log/hooks/session-start.sh',
@@ -270,6 +296,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')
+    selected.add(ROOT / 'fabric/delegation-vectors/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -281,8 +308,9 @@ def copy_source(target: Path) -> None:
                      if p.suffix in {'.py', '.sh', '.js', '.css', '.html', '.svg'}
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
-    for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
+    for folder in ('defaults', 'plugins', 'schemas', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/delegation-vectors', 'fabric/node-vectors',
+                   'fabric/attribution-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
@@ -351,11 +379,58 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
 SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
-                 'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300}
+                 'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
+                 # 128 cases, each driving the real hooks and git: ~70 s idle, ~310 s at a
+                 # load average of 300 (OBS-135 tracks making it cheaper).
+                 'ask_why': 600,
+                 # 36 cases with real git checkouts, restores and three killed subprocesses:
+                 # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner.
+                 'machine_backup': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
     return max(timeout, SUITE_SECONDS.get(name, 0))
+
+
+# Bootstrap groups above are not test protocols: some LEGACY suites use unittest.
+# New suites default to unittest, requiring a complete summary and at least one
+# executed case. These audited compatibility suites report PASS/FAIL/SKIP lines,
+# including direct assertions and the ENV JavaScript helper. Silence is never a
+# compatibility exemption. Add a reporter here only with an exercised contract.
+ASSERTION_LINE_SUITES = frozenset((
+    'ledger', 'time', 'provider_boundary', 'provider_health', 'credential_doors', 'vault',
+    'plugins', 'wire_contract', 'metric_series', 'analytics_plugins', 'mcp_wire', 'wire_inputs',
+    'retention', 'provenance', 'events', 'fingerprints', 'pages', 'dashboard_render',
+    'atomic_writers', 'ack', 'rollup', 'runtime_identity', 'remote_env', 'project_identity',
+    'sessions', 'env_page', 'metric_labels', 'hosting_groups', 'action_outcomes', 'absent_fields',
+    'agent_faults', 'api_listings', 'caller_identity', 'clone_sync', 'companion', 'companion_hook',
+    'dark_domain_cost', 'docs_current', 'export_scope', 'filesystem_scan', 'finding_rules',
+    'heroku', 'interpretation_contract', 'keyserver', 'page_omission', 'plugin_reporting',
+    'projection_mirror', 'queue_order', 'rdap_keys', 'recall', 'recount', 'release_cadence',
+    'remedy_fits', 'render_surface', 'review_queue', 'serverd', 'stale_is_expected', 'store_modes',
+    'tick_standdown', 'trace_opens', 'two_surfaces', 'work_tiles', 'agent', 'agent_queue',
+    'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history',
+    'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure',
+    'temporary_block', 'traps', 'write_surface', 'local_folders', 'delta_fold', 'mcp_inventory',
+    'openrouter_keys', 'scan_ids', 'secrets', 'signature', 'skill_check', 'use_secret',
+    'validator_rules', 'cause_and_symptom', 'collector_state', 'corroboration', 'credentials',
+    'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key',
+    'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets',
+    'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures',
+    'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness', 'activity',
+    'at_stake', 'backup_store', 'checkout_subject', 'companion_faults', 'conformance_receipt',
+    'dead_data', 'delivery', 'emit_purity', 'env_inventory', 'estate_surfaces', 'fixture_sweep',
+    'foreign_vocabulary', 'freshness', 'gate_purity', 'gate_skips', 'git_locale', 'horizon',
+    'indexer_load', 'interpretation', 'key', 'ledger_pointer', 'lost_projects', 'merge_membership',
+    'no_silent_truncation', 'pipeline', 'plugin_pair', 'policy_residue', 'registry_shape',
+    'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
+    'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
+    'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
+    'manifest_urls', 'digitalocean_door', 'heroku_door'
+))
+# Per-suite positive minimums may strengthen the default of one executed check.
+# Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.
+SUITE_MINIMUMS: dict[str, int] = {}
 
 
 def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
@@ -380,9 +455,9 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
               'pass_assertions': len(re.findall(r'^\s*PASS\b',output,re.M)),
               'fail_assertions': len(re.findall(r'^\s*FAIL\b',output,re.M)),
               'skip_assertions': len(re.findall(r'^\s*SKIP\b',output,re.M)),
-              'unittest_cases': sum(map(int,re.findall(r'Ran (\d+) tests? in',output))),
-              'unittest_skipped': sum(map(int,re.findall(r'\bskipped=(\d+)',output)))}
-    if code == 0 and nothing_ran(result):
+              'unittest_cases': 0, 'unittest_skipped': 0}
+    assess_evidence(name, output, result)
+    if result['status'] == 'SKIP':
         # A suite that exits 0 having run nothing — every check printed SKIP, or every
         # unittest case was skipped (no `node` on PATH, audit A46) — did not pass.
         result['status'] = 'SKIP'
@@ -395,11 +470,66 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
     return result
 
 
+# A counter mentioned in a log is not a unittest result. The final summary start
+# must have a complete block; earlier failures remain binding across later runs.
+UNITTEST_SUMMARY_START = re.compile(r'^Ran \d+ tests? in\b', re.M)
+UNITTEST_SUMMARY = re.compile(
+    r'^Ran (\d+) tests? in [0-9.eE+-]+s[ \t]*\r?\n[ \t]*\r?\n'
+    r'(OK(?: \([^\r\n]*\))?|FAILED(?: \([^\r\n]*\))?)[ \t]*$', re.M)
+
+
+def assess_evidence(name: str, output: str, result: dict) -> None:
+    """Retain interpreter exit separately from observed test evidence.
+
+    This is a reporting contract for trusted repository tests, not authentication:
+    a script can forge a complete summary. It detects missing entry points, silent
+    exits, incompatible/contradictory counts and reported failures, not adversarial
+    test authors or complete assertion coverage.
+    """
+    protocol = 'assertion-lines' if name in ASSERTION_LINE_SUITES else 'unittest'
+    minimum = SUITE_MINIMUMS.get(name, 1)
+    summaries = list(UNITTEST_SUMMARY.finditer(output))
+    starts = list(UNITTEST_SUMMARY_START.finditer(output))
+    terminal = summaries[-1] if summaries else None
+    incomplete_final = bool(starts and (terminal is None or starts[-1].start() != terminal.start()))
+    reported_failure = any(summary.group(2).startswith('FAILED') for summary in summaries)
+    if incomplete_final:
+        terminal = None
+    invalid_counter = False
+    if terminal:
+        result['unittest_cases'] = int(terminal.group(1))
+        skip_fields = re.findall(r'\bskipped=([^,)]+)', terminal.group(2))
+        invalid_counter = len(skip_fields) > 1 or any(not value.isdecimal() for value in skip_fields)
+        result['unittest_skipped'] = int(skip_fields[0]) if skip_fields and not invalid_counter else 0
+    executed = (result['pass_assertions'] + result['fail_assertions'] if protocol == 'assertion-lines'
+                else result['unittest_cases'] - result['unittest_skipped'])
+    skipped = result['skip_assertions'] if protocol == 'assertion-lines' else result['unittest_skipped']
+    result.update(test_protocol=protocol, minimum_executed=minimum,
+                  executed_checks=executed, skipped_checks=skipped)
+    if result['exit_code'] != 0:
+        return                              # preserve nonzero/timeout and the actual code
+    if type(minimum) is not int or minimum < 1:
+        result.update(status='ERROR', reason_code='invalid_evidence_contract',
+                      reason='suite evidence minimum must be a positive integer')
+    elif ((protocol == 'assertion-lines' and result['fail_assertions'])
+          or (protocol == 'unittest' and reported_failure)):
+        result.update(status='FAIL', reason_code='reported_test_failure',
+                      reason='suite reported failed checks despite a successful interpreter exit')
+    elif protocol == 'unittest' and (incomplete_final or invalid_counter
+                                   or result['unittest_skipped'] > result['unittest_cases']):
+        result.update(status='ERROR', reason_code='invalid_test_evidence',
+                      reason='final summary is incomplete or its skipped count is invalid')
+    elif nothing_ran(result):
+        result['status'] = 'SKIP'
+    elif executed < minimum:
+        result.update(status='ERROR',
+                      reason_code='no_test_evidence' if executed == 0 else 'insufficient_test_evidence',
+                      reason='suite did not report the minimum executed checks for its test protocol')
+
+
 def nothing_ran(result: dict) -> bool:
-    """No check executed, and at least one said it was skipped."""
-    executed = result['pass_assertions'] + result['fail_assertions'] \
-        + result['unittest_cases'] - result['unittest_skipped']
-    return executed <= 0 and (result['skip_assertions'] + result['unittest_skipped']) > 0
+    """Every check of the declared protocol was explicitly skipped."""
+    return result['executed_checks'] == 0 and result['skipped_checks'] > 0
 
 
 def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> dict:

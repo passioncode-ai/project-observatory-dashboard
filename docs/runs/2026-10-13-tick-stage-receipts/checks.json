@@ -1,0 +1,198 @@
+{
+  "schema": 1,
+  "status": "SCOPED_CHECKS_PASS_REVIEW_PENDING",
+  "base": "795b01cec5fdaf7e8343aebcc472a8bcb2a943b4",
+  "source_sha256": {
+    "observatory/engine/tick_progress.py": "aefe3feb2d14e85c259fa595bdcaddf83fce9c636ec21a1a22294b3e4a28154c",
+    "observatory/engine/tools/tick.py": "a1bfda0e105c1ac9db82d7e2bf8bfdf8a9469f260a93419d304a1dae35091f0f",
+    "observatory/engine/tools/tick_lease.py": "ef5eaf048bb83f4717c5c1eac4d2708344bb389fce1695aff8df380aed92cddd",
+    "observatory/engine/tests/test_tick_progress.py": "093b11e471c4a93ca0009962b68fca227401d95305d5eea7d373d28412fa2b87",
+    "observatory/engine/tests/run_portable.py": "0d367b3138eff60a921680283f4562d277a3b4b3cbe734eaa21f0d6ed524a3f0"
+  },
+  "checks": [
+    {
+      "status": "PASS",
+      "coverage": "synthetic-offline",
+      "exit_code": 0,
+      "suites": [
+        {
+          "file": "tests/test_tick_progress.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 1.44,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 10,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_tick_py.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 6.61,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 38,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_tick_failures.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 1.96,
+          "pass_assertions": 22,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 0,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_tick_health.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.25,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 9,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_lifecycle.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 29.0,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 60,
+          "unittest_skipped": 0
+        }
+      ]
+    },
+    {
+      "status": "PASS",
+      "coverage": "synthetic-offline",
+      "exit_code": 0,
+      "suites": [
+        {
+          "file": "tests/test_tick_progress.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 1.5,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 11,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_pipeline.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 2.41,
+          "pass_assertions": 37,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 0,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_osprivacy.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.44,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 17,
+          "unittest_skipped": 0
+        }
+      ]
+    },
+    {
+      "status": "PASS",
+      "coverage": "synthetic-offline",
+      "exit_code": 0,
+      "suites": [
+        {
+          "file": "tests/test_tick_progress.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 1.57,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 15,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_lifecycle.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 33.91,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 60,
+          "unittest_skipped": 0
+        },
+        {
+          "file": "tests/test_osprivacy.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.82,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 17,
+          "unittest_skipped": 0
+        }
+      ]
+    },
+    {
+      "command": "python observatory/engine/tests/test_tick_progress.py",
+      "exit_code": 0,
+      "unittest_cases": 16,
+      "unittest_skipped": 0
+    }
+  ],
+  "early_failure": {
+    "tests_first": "7 cases fail on original source (missing stage receipts/module)",
+    "sandbox": "First portable run failed because tick_progress.py was absent from explicit ROOT_FILES; dependency registered, affected suites re-run PASS."
+  },
+  "docs_copies_exit": 0,
+  "docs_checker_exit": 0,
+  "diff_check_exit": 0,
+  "not_run": [
+    "installed-runtime",
+    "live-provider-acceptance",
+    "full-hosted-suite",
+    "latency-improvement-measurement"
+  ],
+  "prior_source_sha256": {
+    "d370dab2cad6610f0cc4742d9605e726c82d7bcf": {
+      "observatory/engine/tick_progress.py": "7c1cc30ad0331c9192d13bae4f17e849c1a3b54d9921159dfcbf092e9183fafb",
+      "observatory/engine/tools/tick.py": "a1bfda0e105c1ac9db82d7e2bf8bfdf8a9469f260a93419d304a1dae35091f0f",
+      "observatory/engine/tools/tick_lease.py": "2860d81a74a6261a62582f40fca577b6736f0acb4e944c26c1482f22156685d3",
+      "observatory/engine/tests/test_tick_progress.py": "e71705545c04eabe29e3c0965712bb725af636ffa5f0e606766725119ee95372",
+      "observatory/engine/tests/run_portable.py": "0d367b3138eff60a921680283f4562d277a3b4b3cbe734eaa21f0d6ed524a3f0"
+    }
+  },
+  "review_corrections": {
+    "prior_status": "CHANGES_REQUIRED",
+    "findings": [
+      "FIFO receipt blocked outside watchdog",
+      "huge duration suppressed whole-run receipt",
+      "diagnostic logger failure replaced command exit"
+    ],
+    "tests_first": "FIFO failure, numeric overflow, missing terminal receipt, and logger exception reproduced before correction",
+    "fixes": [
+      "nonblocking nofollow regular-file input",
+      "safe numeric rejection and independently guarded optional projection",
+      "best-effort fixed diagnostic"
+    ]
+  }
+}

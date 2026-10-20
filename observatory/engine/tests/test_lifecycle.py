@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import contextlib
 import os
 import pathlib
 import plistlib
@@ -513,6 +514,70 @@ class OneRotationPolicy(Workspace):
         for p in self.logs.iterdir():
             self.assertEqual(p.stat().st_mode & 0o777, 0o600, p.name)
 
+    def test_broken_generation_link_never_redirects_copy_or_truncates_log(self):
+        f = self.logs / "serverd.err"
+        f.write_bytes(b"keep" * 100)
+        outside = self.base / "outside-secret"
+        generation = self.logs / "serverd.err.1"
+        generation.symlink_to(outside)
+        self.assertFalse(self.lp.rotate(f, max_bytes=100, generations=2))
+        self.assertFalse(outside.exists())
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertTrue(generation.is_symlink())
+
+    def test_sweep_never_enters_a_symlink_directory(self):
+        outside = self.base / "outside-logs"
+        outside.mkdir()
+        f = outside / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        linked = self.base / "linked-logs"
+        linked.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(self.lp.sweep(linked, max_bytes=100), [])
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertFalse((outside / "tick.log.1").exists())
+
+    def test_hardlinked_log_is_never_truncated_or_chmodded(self):
+        f = self.logs / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        f.chmod(0o644)
+        other = self.base / "other-link"
+        os.link(f, other)
+        self.assertFalse(self.lp.rotate(f, max_bytes=100))
+        self.assertEqual(other.read_bytes(), b"keep" * 100)
+        self.assertEqual(other.stat().st_mode & 0o777, 0o644)
+
+    def test_explicit_log_beneath_linked_parent_is_preserved(self):
+        outside = self.base / "extra-logs"
+        outside.mkdir()
+        f = outside / "extra.log"
+        f.write_bytes(b"keep" * 100)
+        linked = self.base / "linked-extra"
+        linked.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(self.lp.sweep(self.logs, files=(linked / "extra.log",), max_bytes=100), [])
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+
+    def test_hardlinked_small_file_and_generation_keep_permissions(self):
+        for name in ("small.log", "old.log.1"):
+            f = self.logs / name
+            f.write_bytes(b"keep")
+            f.chmod(0o644)
+            os.link(f, self.base / name)
+        self.lp.sweep(self.logs, max_bytes=100)
+        for name in ("small.log", "old.log.1"):
+            self.assertEqual((self.base / name).stat().st_mode & 0o777, 0o644)
+
+    def test_bad_late_generation_preserves_entire_chain(self):
+        f = self.logs / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        first = self.logs / "tick.log.1"
+        first.write_bytes(b"old")
+        last = self.logs / "tick.log.3"
+        last.symlink_to(self.base / "missing")
+        self.assertFalse(self.lp.rotate(f, max_bytes=100, generations=3))
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertEqual(first.read_bytes(), b"old")
+        self.assertTrue(last.is_symlink())
+
     def test_the_policy_is_the_lifecycle_default(self):
         self.assertEqual((self.lp.MAX_BYTES, self.lp.GENERATIONS), (5 * 1024 * 1024, 5))
 
@@ -529,6 +594,133 @@ class OneRotationPolicy(Workspace):
         with patch.object(rl.log_policy, "MAX_BYTES", 100):
             self.assertEqual(rl.main([]), 0)
         self.assertTrue((self.paths.SCRATCH / "store-faults.jsonl.1").exists())
+
+
+class LogRetentionEvidence(Workspace):
+    def setUp(self):
+        super().setUp()
+        self.lp = self.reload("log_policy")
+        self.logs = self.paths.STATE / "logs"
+        self.logs.mkdir(parents=True, exist_ok=True)
+
+    def test_a_folder_that_does_not_exist_is_absent_and_complete(self):
+        # A fresh install has no hooks or updater log folder yet: nothing to retain, measured.
+        absent = self.lp.sweep_report(self.base / "absent")
+        empty = self.lp.sweep_report(self.logs)
+        self.assertEqual((absent["status"], absent["observed_count"], absent["absent"]), ("complete", 0, True))
+        self.assertEqual((absent["rotated"], absent["refused"], absent["failed"], absent["reasons"]), (0, 0, 0, {}))
+        self.assertEqual(empty["status"], "complete")
+        self.assertEqual(empty["observed_count"], 0)
+        self.assertNotIn("absent", empty)
+
+    def test_links_above_the_root_rotate_and_links_below_it_refuse(self):
+        # macOS's /tmp and /var, or a home on a linked volume, sit above the workspace.
+        real = self.base / "real-volume"
+        (real / "ws" / "store" / "logs").mkdir(parents=True)
+        linked_home = self.base / "linked-home"
+        linked_home.symlink_to(real, target_is_directory=True)
+        logs = linked_home / "ws" / "store" / "logs"
+        (logs / "gate.log").write_bytes(b"x" * 100)
+        receipt = self.lp.sweep_report(logs, max_bytes=10, root=linked_home / "ws")
+        self.assertEqual((receipt["status"], receipt["rotated"]), ("complete", 1), receipt)
+        self.assertTrue((real / "ws" / "store" / "logs" / "gate.log.1").exists())
+        # Below the root a link still refuses: the store folder points elsewhere.
+        other = self.base / "other-store"
+        (other / "logs").mkdir(parents=True)
+        (other / "logs" / "gate.log").write_bytes(b"y" * 100)
+        ws2 = real / "ws2"
+        ws2.mkdir()
+        (ws2 / "store").symlink_to(other, target_is_directory=True)
+        refused = self.lp.sweep_report(linked_home / "ws2" / "store" / "logs", max_bytes=10, root=linked_home / "ws2")
+        self.assertEqual(refused["status"], "unknown")
+        self.assertFalse((other / "logs" / "gate.log.1").exists())
+        self.assertFalse(self.lp.rotate(linked_home / "ws2" / "store" / "logs" / "gate.log", max_bytes=10,
+                                        root=linked_home / "ws2"))
+
+    def test_a_dangling_link_or_dotdot_below_the_root_is_unverified(self):
+        root = self.base / "lp-root"
+        root.mkdir()
+        (root / "dangling").symlink_to(self.base / "nowhere", target_is_directory=True)
+        dangling = self.lp.sweep_report(root / "dangling" / "logs", root=root)
+        self.assertEqual((dangling["status"], dangling["reasons"]), ("unknown", {"directory_unverified": 1}))
+        self.assertNotIn("absent", dangling)
+        # `root/link/../logs`: the system follows the link first, so `..` lands outside the root.
+        elsewhere = self.base / "elsewhere"
+        (elsewhere / "x").mkdir(parents=True)
+        (elsewhere / "logs").mkdir()
+        (elsewhere / "logs" / "a.log").write_bytes(b"x" * 2000)
+        (root / "lnk").symlink_to(elsewhere / "x", target_is_directory=True)
+        (root / "logs").mkdir()
+        dotdot = self.lp.sweep_report(root / "lnk" / ".." / "logs", root=root, max_bytes=100)
+        self.assertEqual(dotdot["status"], "unknown")
+        self.assertEqual(sorted(os.listdir(elsewhere / "logs")), ["a.log"], "nothing rotated outside the root")
+        self.assertFalse(self.lp.rotate(root / "lnk" / ".." / "logs" / "a.log", max_bytes=100, root=root))
+
+    def test_unreadable_and_linked_scopes_are_unknown(self):
+        linked = self.base / "linked"
+        linked.symlink_to(self.logs, target_is_directory=True)
+        self.assertEqual(self.lp.sweep_report(linked)["status"], "unknown")
+        with patch.object(Path, "iterdir", side_effect=PermissionError("PRIVATE_LOG_MARKER")):
+            receipt = self.lp.sweep_report(self.logs)
+        self.assertEqual(receipt["status"], "unknown")
+        self.assertIsNone(receipt["observed_count"])
+        self.assertNotIn("PRIVATE_LOG_MARKER", json.dumps(receipt))
+
+    def test_refusals_and_failures_preserve_content_and_report_no_paths(self):
+        for mode in ("hardlink", "generation", "copy", "fsync"):
+            folder = self.logs / mode
+            folder.mkdir()
+            log = folder / "serverd.err"
+            log.write_bytes(b"PRIVATE_LOG_CONTENT" * 10)
+            log.chmod(0o644)
+            before = log.read_bytes()
+            with contextlib.ExitStack() as stack:
+                if mode == "hardlink":
+                    os.link(log, self.base / "alias")
+                elif mode == "generation":
+                    (folder / "serverd.err.1").symlink_to(self.base / "missing")
+                else:
+                    stack.enter_context(patch.object(self.lp.shutil if mode == "copy" else self.lp.os,
+                                                    "copyfileobj" if mode == "copy" else "fsync",
+                                                    side_effect=OSError("PRIVATE_LOG_ERROR")))
+                receipt = self.lp.sweep_report(folder, max_bytes=10)
+            self.assertEqual(log.read_bytes(), before)
+            self.assertEqual(log.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(receipt["status"], "partial")
+            self.assertGreater(receipt["refused"] + receipt["failed"], 0)
+            for private in (str(folder), "serverd.err", "PRIVATE_LOG"):
+                self.assertNotIn(private, json.dumps(receipt))
+
+    def test_permission_failure_is_partial_even_below_rotation_cap(self):
+        log = self.logs / "small.log"
+        log.write_bytes(b"keep")
+        log.chmod(0o644)
+        with patch.object(self.lp.osprivacy, "make_private", side_effect=OSError("PRIVATE_PERMISSION")):
+            receipt = self.lp.sweep_report(self.logs)
+        self.assertEqual(receipt["status"], "partial")
+        self.assertEqual(receipt["failed"], 1)
+        self.assertEqual(log.read_bytes(), b"keep")
+        self.assertEqual(log.stat().st_mode & 0o777, 0o644)
+        self.assertNotIn("PRIVATE_PERMISSION", json.dumps(receipt))
+
+    def test_external_same_named_log_does_not_skip_local_generation_permissions(self):
+        local = self.logs / "same.log.1"
+        local.write_bytes(b"old")
+        local.chmod(0o644)
+        external = self.base / "same.log"
+        external.write_bytes(b"x" * 100)
+        self.lp.sweep_report(self.logs, files=(external,), max_bytes=10)
+        self.assertEqual(local.stat().st_mode & 0o777, 0o600)
+
+    def test_normal_rotation_observed_once_and_legacy_list_preserved(self):
+        log = self.logs / "gate.log"
+        log.write_bytes(b"x" * 100)
+        receipt = self.lp.sweep_report(self.logs, max_bytes=10)
+        self.assertEqual(receipt["status"], "complete")
+        self.assertEqual(receipt["rotated"], 1)
+        self.assertEqual((self.logs / "gate.log.1").read_bytes(), b"x" * 100)
+        log.write_bytes(b"y" * 100)
+        self.assertEqual(self.lp.sweep(self.logs, max_bytes=10), ["gate.log"])
 
 
 class MigrationBackupsAreRetained(Workspace):

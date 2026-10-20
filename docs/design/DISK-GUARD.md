@@ -8,7 +8,7 @@ the design that replaces those patches with one set of rules. The run record is
 
 ## What the guard promises
 
-1. **Nothing a process holds is removed** — open, mapped, executed from, or worked inside — and
+1. **Observed holders refuse removal** — open, mapped, executed from, or worked inside — and
    the check is fresh when the removal happens, not when the run began.
 2. **Nothing that is somebody's only copy is removed.** Regenerable things only (caches, build
    output git ignores, temporary entries, old Trash), and the git tier that loses nothing (merged
@@ -30,7 +30,7 @@ the design that replaces those patches with one set of rules. The run record is
 | The git tier checked only working directories; "clean" worktree removal deleted ignored files (`.env.local`, local databases) | The git tier uses **the same holders** (open files, maps, executables) and a worktree with **ignored files outside the artifact directories is not clean** |
 | Programs run from a cache folder (an `npx` MCP server) hold no file open | Holders include every running process's **executable and the absolute paths in its arguments** |
 | `lsof` printed non-ASCII names escaped without a UTF-8 locale | `lsof` runs under a UTF-8 locale and `\xNN` escapes are decoded |
-| `/proc` without `maps`/`exe`; Windows checkout not protected; a failed removal after the rename left `*.observatory-removing` | `/proc` reads fd, cwd, root, exe and maps; Windows renames aside and **renames back** when removal fails |
+| `/proc` without `maps`/`exe`; Windows checkout not protected; a failed removal after the rename left `*.observatory-removing` | Historical `/proc` read fd, cwd, root, exe and maps (retired below); historical rename rollback preserved a failed staged removal; superseded for Windows authorization by the unknown-holder refusal below |
 | Files of another account inside a folder this account owns | The walk refuses a tree with **any** entry another account owns |
 | Force-tracked files inside an ignored folder | Build output is removed only when `git ls-files -- <dir>` is empty |
 | The budget was not checked inside long walks; a SIGKILL repeated on every pass | Every walk, `lsof` and git call takes the **deadline**; the class order no longer lets one class starve the rest (**a fair share per class**) |
@@ -104,8 +104,27 @@ queries `lsof` for this target only, then refreshes command-line paths with `ps`
 sharing at most five seconds (and never beyond the action deadline). Warnings,
 partial output, a missing tool or timeout are unknown, so nothing is removed.
 There is deliberately no unbounded per-action `/proc` fallback: on a POSIX host
-without `lsof`, planning remains available but path actions skip. Windows keeps
-the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
+without `lsof`, planning remains available but path actions skip. Windows holder coverage is unknown and path deletion is refused; successful
+rename does not prove absence of open handles. `FreshTargetProbe` pins the bounded and unknown outcomes.
+
+The shared full listing accepts only exit-zero, diagnostic-free, decodable
+`lsof`/`ps` output. `lsof` warnings are no longer suppressed. A nonzero partial
+listing cannot declare an omitted worktree free, and `running()` returns unknown
+for an incomplete cache-command process survey. The unbounded synchronous Linux `/proc` fallback is retired. Its legacy
+entry point returns unknown without enumeration or file reads; missing `lsof`
+cannot trigger a second unbounded inventory. No external diagnostic text is retained.
+`HoldersCompleteness` covers these negative and complete positive observations.
+
+Both clean and archived dirty worktrees now use the same target-scoped
+`holders.fresh_busy` after Git/archive validation and immediately before removal.
+The shared 20-second inventory is only a preliminary refusal cache. The final
+probe has at most five seconds or the smaller remaining action/archive budget;
+held, unknown or exhausted observations preserve the worktree. The disk tier
+already used this strict final probe; the change closes the git tier's cached
+observation gap. `WorktreeFinalHolders` exercises both tiers with held, unknown,
+free and expired-budget outcomes. Worktree age remains a planning-time condition;
+this change does not add an action-time idle-age measurement. Windows now preserves path targets because holder coverage is unknown;
+rename/delete sharing cannot supply the missing evidence.
 
 These checks reduce the planning-to-action race; they are not an exclusive
 filesystem lock against an arbitrary writer starting after the final probe.
@@ -171,3 +190,79 @@ flags must be booleans. Unknown flags never authorize a root. The dated hygiene
 fallback also rejects malformed nested rows. `RegistrationMalformed` exercises
 null/scalar collections, mixed valid/invalid peers, malformed metadata and the
 whole guard run continuing through later phases after a damaged receipt.
+
+## Windows holder coverage correction
+
+`FILE_SHARE_DELETE` permits an open Windows handle to coexist with rename/delete
+access. Therefore the old rename-probe convention cannot establish non-use.
+`holders.Holders.take()` returns unknown on Windows; `fresh_busy()` returns `None`.
+An old `rename` mode also refuses path actions. Generic cache commands keep their
+separate tool policy; this is not a claim that every Windows maintenance operation
+is disabled. Native inventory support remains unimplemented.
+
+Evidence: `WindowsHolderUnknown` and the legacy-mode case in engine
+`tests/test_disk_guard.py`; the native shared-delete control runs only on Windows.
+[Microsoft CreateFile sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+
+## POSIX argv completeness correction
+
+Rendered `ps` text is not a lossless argument protocol. A closed script can remain
+active while a target-specific lsof query is empty; spaces, relative paths and
+symlink aliases defeat the existing lexical path heuristic. Positive file or
+command hints still refuse removal, but unmatched text is unknown. Production
+`Holders.take()` retains its observed paths with `known=false`; `fresh_busy()`
+returns true for a positive hold and otherwise unknown. Consequently current
+production path-removal tiers refuse instead of inferring lifecycle inactivity.
+The legacy manually constructed `Holders([...])` complete snapshot remains an
+explicit test/consumer input, not the completeness state returned by production.
+
+`running(nonempty_names)` returns true for a recognized tool and otherwise unknown.
+An empty requested set is vacuously false. Cache commands with a nonempty `busy_if`
+refuse unknown; positive daemon requirements and commands without holder preconditions
+retain their existing separate policy. No native argv collector, owner lease or
+extra process/environment persistence is introduced here. Native argv could improve
+positive evidence but would not recover a process's launch cwd or prove universal
+non-use after arguments are modified.
+
+Acceptance: `tests/test_disk_guard.py::LossyArgvEvidence` and `LossyArgvAdmission`
+cover four missing path forms, positive holds, incomplete snapshots, stale-free
+path/clean-worktree/archived-dirty-worktree admission and cache child suppression.
+The source-bound research and original failing assertions are described in
+[the run packet](../runs/2026-10-13-posix-holder-argv/README.md).
+
+## Avoid process inventories that cannot admit cleanup
+
+The three preliminary callers (guard class admission, cleanup planning and cached
+cleanup refusal) request `Holders.take(collect_hints=False)`. This performs no
+lsof/ps/proc collection and returns unknown with `observation=not-attempted`.
+Guard phase metadata carries a null measurement time rather than inventing a
+process observation. Unknown still preserves paths; it does not enable cleanup.
+Default take() retains positive hints and incomplete coverage. Final target probes
+and cache-command preconditions preserve unknown refusal. Explicit captures use
+the bounded contract below; avoided calls are not measured host RAM reclaimed.
+Five `CheapHolderAdmission` cases in `tests/test_disk_guard.py` exercise the API,
+all three callers and unchanged positive-hint behavior.
+
+## Bounded explicit holder observations
+
+`holders._capture` reads POSIX child pipes incrementally, with a combined stdout
+and stderr cap of 2 MiB and reads of at most 64 KiB. Retained stdout stays within
+the cap; stderr contributes only a flag/count and is discarded. Parsers accept at
+most 100000 fields, 10000 retained path hints and 4096 bytes per token/path. These
+limits bound payload and collections, not total Python or child RSS. A limit,
+decode/read error, diagnostic or incomplete exit produces unknown, never free.
+
+Each operation shares one monotonic deadline across lsof and ps. Cleanup time is
+reserved inside that budget; a final target probe uses at most five seconds or
+the caller's smaller remainder. Expired or invalid budgets spawn nothing. Only
+the newly created POSIX process group is signalled on incomplete capture or
+unexpected surviving descendants; the direct child is reaped and pipes closed.
+Escaped descendants, uninterruptible process creation and scheduler delays are
+outside this normal-execution bound. No discovered holder or service is stopped.
+Windows remains unknown without a capture. No raw command text or diagnostics
+are persisted. The existing lossy-argv and lifecycle limits still apply.
+
+`tests/test_holder_capture.py` exercises actual owned flood, deadline, pipe-holding
+descendant, outside-child survival, descriptor and parser boundaries.
+`tests/test_disk_guard.py::LossyArgvAdmission` retains action/cache refusal tests.
+See [source and validation packet](../runs/2026-10-13-bounded-holder-capture/README.md).

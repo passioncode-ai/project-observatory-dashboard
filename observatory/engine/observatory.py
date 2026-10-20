@@ -107,8 +107,12 @@ STEPS = {
     "heroku":    [PY, "collectors/scan_heroku.py", "store/raw/heroku.json"],
     "scan-cloudflare": [PY, "collectors/scan_cloudflare.py", "store/raw/cloudflare_zones.json"],
     "scan-mcp":  [PY, "collectors/scan_mcp.py", "store/raw/mcp.json"],
+    # The agents installed here: Fabric service descriptors and launchd (OBS-83).
+    "scan-agents": [PY, "collectors/scan_agents.py", "store/raw/agents.json"],
     "scan-harness": [PY, "collectors/scan_harness.py", "store/raw/harness.json"],
     "scan-spend": [PY, "collectors/scan_spend.py", "store/raw/spend.json"],
+    # Which Fabric project each project is, asked of Fabric's hub (OBS-160).
+    "fabric-attribution": [PY, "collectors/scan_fabric_attribution.py", "store/raw/fabric-attribution.json"],
     "harness":   [PY, "tools/harness.py"],
     "grant":     [PY, "tools/grant.py"],
     "node":      [PY, "tools/node.py"],
@@ -199,6 +203,7 @@ STEPS = {
     "test-heroku": [PY, "tests/test_heroku.py"],
     "test-openrouter": [PY, "tests/test_openrouter_keys.py"],
     "test-digitalocean": [PY, "tests/test_digitalocean_door.py"],
+    "test-heroku-door": [PY, "tests/test_heroku_door.py"],
     "test-credentials": [PY, "tests/test_credentials.py"],
     "test-remote-env": [PY, "tests/test_remote_env.py"],
     "test-google": [PY, "tests/test_google.py"],
@@ -362,9 +367,9 @@ GROUPS = {
     # somebody else can fix.
     "check": ["validate", "fabric", "ledger-current", "dashboard", "design", "smoke", "smoke-pages", "test-pages",
               "test", "test-ledger", "test-skill", "test-agent", "test-key", "test-install-key", "test-vault", "test-analytics", "test-doors", "test-surfaces", "test-mcp-inventory", "test-ack", "test-serverd", "test-skill-check", "test-index",
-              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
+              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-heroku-door", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
               "probes-check", "contract"],
-    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
+    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "scan-agents", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
               "scan-events", "plugins", "rollup", "corroborate", "export-ledger", "lost",
               # `index` BEFORE the page, and the position is a measurement: it
               # charges the wallet through the provider boundary, and the page
@@ -453,6 +458,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
+                      "machine-backup", "machine-restore",
                       "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
@@ -476,6 +482,13 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                encrypted into the backups root once a passphrase is set
   backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
+  machine-backup [now|status]  this machine's agent setup (Claude Code, Codex, SSH, Git, shell, CLI
+                               logins, launchd, Fabric descriptors, package inventories, unpushed and
+                               uncommitted work) into one encrypted .obmachine in the backups root;
+                               daily from `maintain` and before each update
+  machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
+                               put a machine bundle back: the plan by default; --apply writes only
+                               what is missing; --overwrite moves a conflict aside first
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
@@ -511,6 +524,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   scan-spend                   this month's provider spend across every account the doors hold, for the
                                L0 limit and its 80 % warning, and each project's month and last 30 days
                                by key hash (tools/spend.py project; integration openrouter)
+  fabric-attribution           which Fabric project each project is: asks Fabric's hub (hub.json, a live pid,
+                               loopback only) and records fabric:<uuid> aliases in store/raw/fabric-attribution.json;
+                               a hub that is down or refuses is named in degraded, nothing recorded is lost
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
@@ -917,6 +933,18 @@ FOREIGN_WRITES_IGNORED = {
         "with the gate, for the same reason its receipt is exempted below. "
         "Append-only by design, so a neighbouring session losing a "
         "turn mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl":
+        "appended by the companion's Stop hook the first time it asks about a record's "
+        "`why` — in every session of every watched project, concurrently with the gate, "
+        "like the receipt below. Append-only by design, so a neighbouring session's "
+        "ask mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl.1":
+        "the previous generation of the journal above, renamed into place by whichever "
+        "session's hook first finds the journal past its size — concurrently with the "
+        "gate, for the same reason",
+    "store/raw/why-asks.jsonl.lock":
+        "the lock that journal rotation takes so two sessions do not rotate at once; "
+        "created by the first session's hook to rotate, concurrently with the gate",
     "store/raw/record-turn.json":
         "written by the companion's Stop hook — in EVERY session of EVERY watched "
         "project on this machine, concurrently with the gate. Forty-nine Claude "

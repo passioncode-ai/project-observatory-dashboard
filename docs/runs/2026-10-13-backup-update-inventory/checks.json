@@ -1,0 +1,57 @@
+{
+  "schema": "backup-update-inventory/1",
+  "baseline": "8aff34f801a4154882d536bba0472b6549b041e7",
+  "before": {
+    "class": "BeforeUpdateInventory",
+    "cases": 3,
+    "failures": 3,
+    "exit_code": 1
+  },
+  "after": {
+    "schema_version": 1,
+    "coverage": "synthetic-offline",
+    "status": "PASS",
+    "suites": [
+      {
+        "file": "tests/test_backup_vault.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 23.02,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 36,
+        "unittest_skipped": 0,
+        "log": "backup_vault/run.log"
+      }
+    ],
+    "not_run": [
+      {
+        "scope": "live-provider-acceptance",
+        "status": "NOT_RUN",
+        "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+      },
+      {
+        "scope": "external-mcp-host-admission",
+        "status": "NOT_RUN",
+        "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+      },
+      {
+        "scope": "live-secret-rotation-and-delivery",
+        "status": "NOT_RUN",
+        "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+      }
+    ],
+    "suite_count": 1,
+    "python": "3.14.7"
+  },
+  "doc_copy_cases": 6,
+  "doc_copy_exit_code": 0,
+  "inventory_exit_code": 0,
+  "diff_exit_code": 0,
+  "source_sha256": {
+    "observatory/engine/backup_vault.py": "64c738bd9655896a693b2eb574ccb2c8198ec49ea24fef682bff831dd4d6dc10",
+    "observatory/engine/tests/test_backup_vault.py": "ab71d524e1942e1dfca43ad0e192d45a7ffd3c3280a6feb5ac5009a970389274"
+  },
+  "scope": "Synthetic only; no operational backup/credential read or migration"
+}

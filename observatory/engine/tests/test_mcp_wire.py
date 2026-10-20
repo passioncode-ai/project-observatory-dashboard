@@ -112,6 +112,16 @@ async def run() -> None:
                   f"{len(disc.instructions or '')} characters")
 
             listed = await session.list_tools()
+            machine_tool = next(t for t in listed.tools if t.name == "observatory_machine")
+            check("machine coverage is advertised in the actual input enum",
+                  "coverage" in machine_tool.input_schema["properties"]["section"]["enum"])
+            check("machine coverage has a published bounded output schema",
+                  machine_tool.output_schema["properties"]["coverage"]["properties"]["checkouts"]["properties"]["rows"]["maxItems"] == 10)
+            coverage_result = payload(await session.call_tool("observatory_machine", {"section": "coverage"}))
+            check("machine coverage reads absent saved receipts as unknown over stdio",
+                  not coverage_result["coverage"]["actionable"]
+                  and coverage_result["coverage"]["checkouts"]["snapshot_count"] is None
+                  and coverage_result["coverage"]["caches"]["reclaimable_bytes"] is None)
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")

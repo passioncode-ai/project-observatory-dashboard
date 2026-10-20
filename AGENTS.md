@@ -91,6 +91,13 @@ git diff --exit-code                                   # the checks left no trac
 - The runner's receipt marks a suite that exited 0 having run nothing (every check printed
   `SKIP`, or every unittest case skipped, as without `node`) as `SKIP`, names it in `not_run`,
   and never reports a selection in which nothing ran as `PASS`.
+- A successful interpreter exit alone is not a test result. New suites default to
+  the `unittest` protocol and require its complete summary with at least one
+  executed case. Existing line-reporting scripts are explicitly listed in
+  `ASSERTION_LINE_SUITES`; they require executed `PASS`/`FAIL` lines. Silent direct
+  assertions have no exemption. `SUITE_MINIMUMS` may raise a suite's positive
+  minimum. Missing/insufficient evidence is `ERROR`, while the actual exit code
+  stays separate; genuine all-skipped suites remain `SKIP`.
 - After changing any engine file run `python tools/update_inventory.py` and commit the
   inventory with the change.
 - Behaviour changes are test-first: the failing test, then the change, then green.
@@ -179,12 +186,12 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
 | tick: `tools/tick_lease.py run -- python tools/tick.py` (`tools/tick.sh` is the wrapper launchd names), launchd `org.project-observatory.<sha16 of the workspace path>.tick` | `python "$(project-observatory full-path)/tools/install_launchd.py" install` | `StartInterval 1800`, `RunAtLoad false`, Background, Nice 5 | runs every 30 min after the last one ended | `install_launchd.py uninstall`; `full update` stops and restarts it | none between ticks; each step under a watchdog (`DEFAULT_STEP_SECONDS` 900 s), the whole tick under a 1500 s ceiling below the interval, `ExitTimeOut` 30 s above the supervisor's 10 s + 5 s grace |
 | server: `tools/serverd.py --run`, launchd `org.project-observatory.<sha16>.server`, HTTP on `127.0.0.1:47311` (`OBSERVATORY_SERVER_PORT`) | `serverd.py --install` | `RunAtLoad` + `KeepAlive`, `ExitTimeOut` 40 s above its 30 s drain | always up; beat 20 s while a client asked within 5 min, else 120 s; receipt written on change, at least every 300 s | `serverd.py --uninstall` (stays off); `full update` restarts it | ~0.2 CPU-s/min measured before the change, ~40 MB RSS; no subprocess on a timer |
 | maintenance: `tools/maintain.py run`, launchd `org.project-observatory.<sha16>.maintain` (macOS) or systemd user timer `project-observatory-<sha16>-maintain.timer` (Linux) | `full maintain ensure`, `install_launchd.py install`, `full init` in a terminal, `full update --apply` (the new release), the `observatory-log` SessionStart hook | `StartInterval 900`, `RunAtLoad true` with `--first-check-delay 90`, Standard (not Background: its throttling timed the pass out on a loaded machine), Nice 10; systemd `OnStartupSec=90s`, `OnUnitActiveSec=15min`, `Persistent=true`; Task Scheduler every 15 min with a 59-min limit | every 15 minutes: first the disk guard when `features.auto_cleanup` is on (hourly at normal pressure, every pass below `low`, a 600 s ceiling, `tools/disk_guard.py`); a network check every 6 h (the first 90 s after the job starts, one retry within the hour after a failed check), an update activated only when the local server and memory-http have had no client for 5 min, a full snapshot once a day (tick and server stopped for the copy, then started again), the app swapped only while it is not running | `full maintain uninstall` (stays off until `maintain ensure`); `full auto-update off` (the file `<home>/auto-update`) stops only the updates | one short process an hour when nothing is due; never one of `managed_jobs()`, so `full update` does not stop it (docs/runs/2026-10-05-auto-update, D3) |
-| per-session MCP server `mcp/server.py` | each agent session that declares it (`claude mcp add observatory …`) | one per session | lives as long as its session | the session (stdin EOF); answers `stale-server` once an update replaced its code | ~18 MB idle; no timer |
+| per-session MCP server `mcp/server.py` | each agent session that declares it (`claude mcp add observatory …`) | one per session | lives as long as its session | the session (stdin EOF); moves itself onto an installed release at its next request (OBS-159), else answers `stale-server` with the reason | ~18 MB idle; no timer |
 | job runner `tools/run_job.py <id>` (`machine.mcp.refresh`, `agent.ask`) | the MCP server or the app, on a request | per request | until the job ends | the job ends; `fabric.job.cancel` stops its process group | — |
 | on-demand MCP probe (`claude mcp list` and the servers it starts) | `full scan-mcp` or `machine.mcp.refresh` only — never the tick | per request | until the CLI answers or 180 s | its own process group is killed on exit or timeout | — |
 | keyserver `tools/keyserver.py` on `127.0.0.1:7717` | a person, by hand | — | while the terminal runs it | Ctrl-C | — |
 | memory over HTTP: `mcp/http_service.py`, Streamable HTTP on `127.0.0.1:47313` (`--port`) | `full memory-http`, by a person or the caller's own supervisor; no job is ever installed for it | — | while the process runs | Ctrl-C or its supervisor; nothing to clean up, it keeps no state | stateless; per-binding rate `--rate` (default 120/min); bodies over 4 MiB refused 413 by the MCP SDK's session manager (`DEFAULT_MAX_REQUEST_BODY_SIZE`) |
-| plugin `observatory-log` hooks | Claude Code: `SessionStart` (15 s), `Stop` (20 s) | per session start and per agent turn | nothing resident | the hook's own timeout | — |
+| plugin `observatory-log` hooks | Claude Code: `SessionStart` (15 s), `Stop` (20 s), `UserPromptSubmit` (5 s) | per session start, per agent turn, per prompt | nothing resident; a request for a why waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` until the next prompt takes it, or 7 days | the hook's own timeout | `UserPromptSubmit` is one `stat` and exit 0 when nothing is pending |
 | `Project Observatory.app` | the person (not a login item); its own update helper reopens it after *Restart to update* (in front) or an idle restart (`--background`: no window, no focus) | reads `store/maintenance.json` at launch and every 15 min, and badges its Dock icon `↑` while an update waits; an idle check every 60 s | stays in the Dock after its window closes; no polling at idle beyond those two | Quit; `install-app.sh` quits it before replacing it. A staged update is activated only at the person's *Restart to update*, the person's quit, or 30 min with no window on screen, no input and no work in flight (LC-16): a detached `/bin/sh` helper waits for the app to exit, runs `full maintain app`, reopens it (≤ 60 s wait, ≤ 15 min run) | ~80 MB, 0% CPU |
 
 - **No background job touches a protected place** (LC-06): disk sizing skips Documents, Downloads,
@@ -356,3 +363,28 @@ In the same run: update this repository's docs with the change; if a cross-repos
 that owns it; land both; publish (`node scripts/workspace.mjs sync` from a Fabric checkout) or
 leave it to the scheduled sync. Leave a handoff with the exact next task — here, the run record
 in `docs/runs/<date>-<slug>/README.md` and the pointer in [docs/HANDOFF.md](docs/HANDOFF.md).
+<!-- SSHLG:PROJECT:BEGIN managed by npx sshlg-skills enroll. To opt out, replace the whole block with one SSHLG:PROJECT:OPTOUT comment line. -->
+## Family routes in this project
+
+Surface: `public-web` (detected).
+Signals:
+- robots.txt: `site/robots.txt`
+- sitemap: `site/sitemap.xml`
+- string catalogue: `desktop/ui/i18n/ru.json`, `macos/Sources/ObservatoryCore/Resources/en.lproj/Localizable.stringsdict`, `macos/Sources/ObservatoryCore/Resources/ru.lproj/Localizable.strings` and 3 more
+
+Routes that apply here (the global routing block says what each one owns):
+
+| Router | Answers | Setup here |
+|---|---|---|
+| `super-ux` | what the interface must do | scenarios and their linter: partial (`/ux-init`) |
+| `sheleg-design` | how it looks and moves | nothing to seed |
+| `copywriting` | how it sounds | brand pack: present |
+| `sheleg-dev` | what it runs on to charge, track and sign in | added by dependency `google-auth` |
+| `seo-llmo` | whether a machine will find it | SEO brief or audit: present |
+| `evidence-docs` | what proves it | nothing to seed |
+| `task-pipeline` | how the change reaches the repository | DOCMAP: missing (`/task-pipeline setup`) |
+
+Remaining setup:
+- `/ux-init`: scenarios and their linter for `super-ux`, missing `docs/ux/lint.py`
+- `/task-pipeline setup`: DOCMAP for `task-pipeline`, missing `docs/DOCMAP.md`
+<!-- SSHLG:PROJECT:END -->

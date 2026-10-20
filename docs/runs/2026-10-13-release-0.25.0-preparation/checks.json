@@ -1,0 +1,801 @@
+{
+  "schema": "release-preparation/2",
+  "application_version": "0.25.0",
+  "plugin_version": "0.22.1",
+  "state": "local integrated source candidate; publication and installed acceptance pending",
+  "accepted_wave4": "7d260bcd5b44e75a31468b76783a369454cf1593",
+  "accepted_wave5": "5aa9eac9477398e39eb60466c695a9363e290df5",
+  "local_wave4_merge": "91b8ca241b37789a3175243a7a1d20d6c1bb08bf",
+  "local_wave5_cherry_pick": "7bea749e9606b1dcb71316edb5ef1d253c16e786",
+  "checks": [
+    {
+      "name": "versions",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_version_consistency.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_manifests",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_plugin_manifests.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "desktop_contract",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_desktop_app.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "doc_copies",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_engine_doc_copies.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "release_workflow",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_release_workflow.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "python3",
+        "tools/update_inventory.py",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "manifest",
+      "command": [
+        "python3",
+        "observatory/engine/tools/check_manifest_urls.py",
+        "--release",
+        "0.25.0"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "desktop_signing",
+      "command": [
+        "python3",
+        "tools/desktop_release.py",
+        "preflight",
+        "--tag",
+        "v0.25.0",
+        "--signing",
+        "true"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "brand",
+      "command": [
+        "python3",
+        "docs/brand/lint.py",
+        "--brief"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_strict_0",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "."
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_strict_1",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_strict_2",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill/plugins/observatory-log"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "reader_portable",
+      "command": [
+        "python3",
+        "observatory/engine/tests/run_portable.py",
+        "--suite",
+        "coverage_view",
+        "--suite",
+        "machine",
+        "--suite",
+        "mcp_wire",
+        "--jobs",
+        "1",
+        "--timeout",
+        "120",
+        "--report-dir",
+        "REPORT_DIR"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "privacy",
+      "command": [
+        "python3",
+        "tools/check_public_release.py",
+        "--private-denylist",
+        "PRIVATE_DENYLIST",
+        "--history",
+        "--history-ref",
+        "fadba69ff3d7438aadd97c6b98c3b9e2bf83702f..HEAD"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "root_focused_cases": 27,
+  "portable": {
+    "status": "PASS",
+    "coverage": "synthetic-offline",
+    "unittest_cases": 67,
+    "legacy_assertions": 131,
+    "skips": 0,
+    "suites": [
+      "coverage_view",
+      "machine",
+      "mcp_wire"
+    ]
+  },
+  "privacy": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 956,
+    "history_blobs_checked": 67,
+    "private_denylist_entries": 4055,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 49
+  },
+  "history_scope": "fadba69ff3d7438aadd97c6b98c3b9e2bf83702f..HEAD before final release-doc commit",
+  "checked_source_sha256": {
+    "observatory/engine/SOURCE-INVENTORY.json": "fa5098c122466493a540575e32ecf300bd85c09ae0f59742a761e2e920435ab6",
+    "observatory/engine/coverage_view.py": "6f8d37cd346a8edf5e57c5f8137647a7e9e0559565c98a3310a0f901b719364d",
+    "observatory/engine/machine_view.py": "0f08dbf7435deb7b1e0831473e2341fe53c04db6d5a0e94a31299c6b7051c674",
+    "observatory/engine/mcp/server.py": "41eca85606a7dd4026a26d0461855738b97683f5710a1e134d3b2d6cbebd4a9b",
+    "observatory/engine/workspace.py": "a4e1e0c3e2cf5743029a911807f367fdc218e8e91ed0efb2ac4d0b54a069b3d9",
+    "observatory/engine/tests/run_portable.py": "f2271c2a8cbe566154bc5f00a2ec5eb867193ba602f4daba5e5bf122ecccf634",
+    "observatory/engine/tests/test_coverage_view.py": "b8de623f560cd36e0bbf779c0d26220d5a542cba116cf3d4b73661393b111d9b",
+    "observatory/engine/tests/test_mcp_wire.py": "267f6b5d393d3b19589871cdf1a4b0d943e2f5e115030504721a4a945688f60a"
+  },
+  "signing_setting": "AZURE_SIGNING_ENABLED=true readback; signed preflight passes, actual asset signature not yet checked",
+  "remote_v0250_tags_at_check": [],
+  "brand_lint": {
+    "errors": 0,
+    "warnings": 2043
+  },
+  "excluded": [
+    "Retired-key and project-wide spend aggregation; full J-11 remains separate"
+  ],
+  "not_run": [
+    "hosted exact-release-SHA acceptance",
+    "native installer build/signature verification",
+    "release tag/publish",
+    "installation and scheduled-runtime acceptance",
+    "live providers"
+  ],
+  "initial_preparation": {
+    "schema": "release-preparation/1",
+    "application_version": "0.25.0",
+    "plugin_version": "0.22.1",
+    "base": "fadba69ff3d7438aadd97c6b98c3b9e2bf83702f",
+    "state": "local preparation, not a release",
+    "requires_integration": [
+      "f07ff79beefafb45741511654864786e5f7c9498",
+      "aafcfd5d78f38d5fb41813cb04473bb78cec0985",
+      "da10f4c0c3cd177dbdd2c03c3e9b1222f1929057"
+    ],
+    "checks": [
+      {
+        "name": "versions",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_version_consistency.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "plugin_manifests",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_plugin_manifests.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "desktop_contract",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_desktop_app.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "doc_copies",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_engine_doc_copies.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "release_workflow",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_release_workflow.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "python3",
+          "tools/update_inventory.py",
+          "--check"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "manifest",
+        "command": [
+          "python3",
+          "observatory/engine/tools/check_manifest_urls.py",
+          "--release",
+          "0.25.0"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "desktop_signing",
+        "command": [
+          "python3",
+          "tools/desktop_release.py",
+          "preflight",
+          "--tag",
+          "v0.25.0",
+          "--signing",
+          "true"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "brand",
+        "command": [
+          "python3",
+          "docs/brand/lint.py",
+          "--brief"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "diff",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "test_counts": {
+      "version": 4,
+      "plugin": 4,
+      "desktop": 11,
+      "doc_copies": 6,
+      "release_workflow": 2
+    },
+    "brand_lint": {
+      "errors": 0,
+      "warnings": 2043,
+      "claim": "warnings remain; not a clean brand pack"
+    },
+    "windows_signing_readback": {
+      "command": "gh api repos/passioncode-ai/project-observatory-dashboard/environments/release/variables/AZURE_SIGNING_ENABLED",
+      "name": "AZURE_SIGNING_ENABLED",
+      "value": "true",
+      "checked_on": "2026-10-13"
+    },
+    "manifest": {
+      "urls": 25,
+      "problems": 0,
+      "network_resolved": false
+    },
+    "not_run": [
+      "final integrated exact-SHA hosted checks",
+      "native release builds",
+      "asset signatures/digests/attestations",
+      "installed update acceptance"
+    ],
+    "release_marker": "No RELEASE.json introduced: no required manual upgrade step established in this preparation; reassess after final source integration.",
+    "plugin_validation": [
+      {
+        "target": ".",
+        "command": [
+          "claude",
+          "plugin",
+          "validate",
+          "--strict",
+          "."
+        ],
+        "exit_code": 0
+      },
+      {
+        "target": "observatory/engine/skill",
+        "command": [
+          "claude",
+          "plugin",
+          "validate",
+          "--strict",
+          "observatory/engine/skill"
+        ],
+        "exit_code": 0
+      },
+      {
+        "target": "observatory/engine/skill/plugins/observatory-log",
+        "command": [
+          "claude",
+          "plugin",
+          "validate",
+          "--strict",
+          "observatory/engine/skill/plugins/observatory-log"
+        ],
+        "exit_code": 0
+      }
+    ]
+  },
+  "post_source_followup": {
+    "guard_source": "da3299321dc987b5c61c2ab15d27da41c7648f34",
+    "guard_local": "7926ffb3e3866f5ec8dc069ef9ecaef801c7e008",
+    "guidance_correction": "0741e46b730f097de66d0945b4c62c8ee1dfa51e",
+    "tests": [
+      {
+        "name": "Acting.test_child_diagnostics_never_enter_receipts_or_journal",
+        "cases": 1,
+        "subcases": 4,
+        "exit_code": 0
+      },
+      {
+        "name": "test_version_consistency",
+        "cases": 4,
+        "exit_code": 0
+      },
+      {
+        "name": "test_plugin_manifests",
+        "cases": 4,
+        "exit_code": 0
+      }
+    ],
+    "strict_plugin_validation": 0,
+    "inventory_check": 0,
+    "diff_check": 0,
+    "hashes": {
+      "observatory/engine/tools/disk_guard.py": "51e9804b1461ee47badbd25aa320d7b6cd0b7edd2b3d225dc3567eb5be0eedaa",
+      "observatory/engine/tests/test_disk_guard.py": "d8c848612ebaa9bbe752e326cd734b4f157c5f396a084cff7a3659734ac9ae3a",
+      "observatory/engine/skill/plugins/observatory-log/skills/handling-secrets/SKILL.md": "477d66534ad25d493cfbb389165a64ae9d24853467af42113020bc91a32841c2",
+      "observatory/engine/SOURCE-INVENTORY.json": "22fd6b4ddd6e737c4a3bf8c4eccbd6c90eb7d49d0ea9e7a29a598908b520fa6b"
+    }
+  },
+  "issued_spend_integration": {
+    "accepted_source": "3c3510ea2eaa34aa8d9403d56e2e714160ac379c",
+    "local_commit": "063e4dc08712396910ab6573f9c9bdf08541f84e",
+    "ci_fixture_source": "1d2161019a89ca4a5988f19b66189bba83172dbc",
+    "cli_help_correction": "a0452763918ed5d88a8d6d371f2efde48b9bf543",
+    "portable": {
+      "schema_version": 1,
+      "coverage": "synthetic-offline",
+      "status": "PASS",
+      "suites": [
+        {
+          "file": "tests/test_issued_spend.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.61,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 10,
+          "unittest_skipped": 0,
+          "log": "issued_spend/run.log"
+        },
+        {
+          "file": "tests/test_rotation_accounting.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.93,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 19,
+          "unittest_skipped": 0,
+          "log": "rotation_accounting/run.log"
+        },
+        {
+          "file": "tests/test_credential_doors.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 88.27,
+          "pass_assertions": 486,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 0,
+          "unittest_skipped": 0,
+          "log": "credential_doors/run.log"
+        },
+        {
+          "file": "tests/test_provider_secret_boundaries.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.51,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 12,
+          "unittest_skipped": 0,
+          "log": "provider_secret_boundaries/run.log"
+        }
+      ],
+      "not_run": [
+        {
+          "scope": "live-provider-acceptance",
+          "status": "NOT_RUN",
+          "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+        },
+        {
+          "scope": "external-mcp-host-admission",
+          "status": "NOT_RUN",
+          "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+        },
+        {
+          "scope": "live-secret-rotation-and-delivery",
+          "status": "NOT_RUN",
+          "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+        }
+      ],
+      "suite_count": 4,
+      "python": "3.14.7"
+    },
+    "root_focused_cases": 14,
+    "version_plugin_doc_copy_checks": 0,
+    "manifest_check": 0,
+    "inventory_check": 0,
+    "diff_check": 0,
+    "source_hashes": {
+      "observatory/engine/tools/openrouter.py": "68aa510b4127e80149bfb0630963d70f45da99797ef0780b82702132d51547b0",
+      "observatory/engine/tests/test_issued_spend.py": "dd9e9c1c6e6d0bc9332f89a15a8fb0128457f4ce45e3ea48fe286530058e7910",
+      "observatory/engine/tests/test_provider_secret_boundaries.py": "17969f40dfd7494b89debd885bcdb94fbd4f30700e0e015552418642c228c04f",
+      "observatory/engine/SOURCE-INVENTORY.json": "8f77f1d3185f0b2af0c788e0bd70f8b7ad4551ae286d055799977cd9a254ef23"
+    }
+  },
+  "review_corrections_wave7": {
+    "status": "PASS_SCOPED",
+    "integrated_source_head": "ab3ddfc50e592865c21b44c114510d66418d7185",
+    "application_version": "0.25.0",
+    "plugin_version": "0.22.1",
+    "accepted_sources": [
+      "77866893bcef182df163113b933ec509c4ef00f1",
+      "ee2a56c3b51570e8c377b4fe857b322fe69c8514",
+      "23b4249f23d5b4ebc469fcdcc95b022c7deac0f8",
+      "e22f46fa877c72cf3d97c542d2ae2c3ad133896a",
+      "c5d39b81d74ec185445b4937f34c270d86ac6868",
+      "bd64afbdf55e29ee91385f7af14c062ef4bfedac"
+    ],
+    "suite_results": [
+      {
+        "name": "j3_adversary",
+        "unittest_cases": 8,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "revoke_consumers",
+        "unittest_cases": 12,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "issued_spend",
+        "unittest_cases": 10,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "rotation_accounting",
+        "unittest_cases": 19,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "provider_secret_boundaries",
+        "unittest_cases": 12,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "credential_doors",
+        "unittest_cases": 0,
+        "assertions": 486,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "disk_guard",
+        "unittest_cases": 128,
+        "assertions": 0,
+        "skips": 2,
+        "exit_code": 0
+      }
+    ],
+    "focused_checks": [
+      {
+        "name": "versions",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_version_consistency.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "plugin_manifests",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_plugin_manifests.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "doc_copies",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_engine_doc_copies.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "python3",
+          "tools/update_inventory.py",
+          "--check"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "diff",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "source_hashes": {
+      "observatory/engine/tools/openrouter.py": "b76935b0ef971da92ddf6f1124d0aa21abd73f265b9f47c0252db9844bd49d87",
+      "observatory/engine/tools/disk_guard.py": "8d14b3d9129636bf0c289d8a76ed1e59a50439b9a03239782cf29d1977c970bc",
+      "observatory/engine/tests/adv_j1_property.py": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
+      "observatory/engine/tests/run_portable.py": "03d728ef65104b900337864aeb258fcad4822dd0df5628a6edddaca96a162841"
+    },
+    "full_rotation_baseline": {
+      "source": "23b4249f23d5b4ebc469fcdcc95b022c7deac0f8",
+      "requested": 128,
+      "completed": 128,
+      "PASS": 28,
+      "FAIL": 100,
+      "full_5200": "NOT_RUN",
+      "scope": "Retained source-bound baseline; not rerun on integration tree"
+    },
+    "remaining": [
+      "full reconciliation and strict ceiling convergence",
+      "full consumer holder proofs",
+      "live provider acceptance",
+      "native/installed acceptance",
+      "final combined independent review and protected CI"
+    ]
+  },
+  "log_rotation_followup": {
+    "source_commit": "931c1d659a5f794a9abb5ba646a2e2a4ef9075ac",
+    "integrated_commit": "ac2db7d24e9eeff1d776ec173d82373b679d6f63",
+    "source_hashes": {
+      "observatory/engine/log_policy.py": "6b88aaab99aa469e9ac1192a4c6476b41efddcbbff8810592eae622e32ee2de5",
+      "observatory/engine/tests/test_lifecycle.py": "c09e4c360eaa8ca0403a747fa3c847ff3589690ab16bf92ecce9f580c7fa5191"
+    },
+    "portable_receipt": {
+      "schema_version": 1,
+      "coverage": "synthetic-offline",
+      "status": "PASS",
+      "suites": [
+        {
+          "file": "tests/test_lifecycle.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 29.26,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 60,
+          "unittest_skipped": 0,
+          "log": "lifecycle/run.log"
+        },
+        {
+          "file": "tests/test_maintenance.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 49.9,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 142,
+          "unittest_skipped": 1,
+          "log": "maintenance/run.log"
+        }
+      ],
+      "not_run": [
+        {
+          "scope": "live-provider-acceptance",
+          "status": "NOT_RUN",
+          "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+        },
+        {
+          "scope": "external-mcp-host-admission",
+          "status": "NOT_RUN",
+          "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+        },
+        {
+          "scope": "live-secret-rotation-and-delivery",
+          "status": "NOT_RUN",
+          "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+        }
+      ],
+      "suite_count": 2,
+      "python": "3.14.7"
+    },
+    "version_cases": 4,
+    "version_exit_code": 0,
+    "inventory_exit_code": 0,
+    "diff_exit_code": 0,
+    "scope": "Synthetic filesystem tests only; no live logs mutated",
+    "remaining": [
+      "concurrent append during copy/truncate",
+      "external directory writer check/effect race",
+      "maintenance refusal observability",
+      "combined independent review and protected checks"
+    ]
+  }
+}

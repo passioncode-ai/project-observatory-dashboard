@@ -1,0 +1,70 @@
+{
+  "schema": "holder-completeness-checks/1",
+  "base_sha": "93223f5c095b9c688f24214aeb38f16bb9bc3e90",
+  "coverage": "synthetic-only isolated HOME and resolved TMPDIR; no live process inventories or cleanup",
+  "source_sha256": {
+    "observatory/engine/holders.py": "0a59bfd18d465f2373974a4bb2627214830582edb17dbac6e773c3df90ce54cc",
+    "observatory/engine/tools/cleanup.py": "13770d956ad2eed7eb3adc3d5ef11861eb3565e35727a3b7c9975d48ebe9c597",
+    "observatory/engine/tools/disk_guard.py": "3e5548d7173817edd3a39817508935814c824a7b4a1712cb619f566a41cae3ad",
+    "observatory/engine/tests/test_disk_guard.py": "269d5779a31459dfa54f26e71fbf1fadc4924323851fac9b4a359b5ded0a7b67",
+    "observatory/engine/tests/test_git_hardening.py": "c667cce974aeada27d2c6564e036573c4a8de1f149f87e00dd2b3c37e4d8edd1",
+    "observatory/engine/tests/test_machine.py": "b7f1981f9d07a0ffd639409e26ae4e7268391fd6ebaa272ab7af0d022d93a0da"
+  },
+  "checks": [
+    {
+      "name": "disk_guard",
+      "cases": 136,
+      "skips": 0,
+      "exit_code": 0
+    },
+    {
+      "name": "osprivacy.Boundary",
+      "cases": 3,
+      "skips": 0,
+      "exit_code": 0
+    },
+    {
+      "name": "documentation-contracts",
+      "command": "python3 observatory/engine/tools/check_docs.py",
+      "exit_code": 0
+    },
+    {
+      "name": "source-inventory",
+      "command": "python3 tools/update_inventory.py --check",
+      "exit_code": 0
+    },
+    {
+      "name": "engine-doc-copies",
+      "command": "python3 tools/sync_engine_docs.py --check",
+      "exit_code": 0
+    },
+    {
+      "name": "diff-whitespace",
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "name": "git_hardening",
+      "cases": 56,
+      "skips": 0,
+      "exit_code": 0
+    },
+    {
+      "name": "machine.Estate",
+      "cases": 10,
+      "skips": 0,
+      "exit_code": 0
+    }
+  ],
+  "independent_review": "PENDING",
+  "hosted_ci": "NOT_RUN",
+  "installed_acceptance": "NOT_RUN",
+  "baseline_test_attempt": {
+    "methods": 6,
+    "failures": 20,
+    "errors": 1,
+    "exit_code": 1,
+    "qualification": "Includes two synthetic /tmp path-alias fixture failures, corrected to /srv before final checks; not 20 independent defects."
+  },
+  "fixture_correction": "First Git-hardening run exposed local patch variable shadowing (one ERROR); renamed archived_patch; final full suite passed. Existing machine estate fixture now injects the same synthetic holder outcome into final probe."
+}

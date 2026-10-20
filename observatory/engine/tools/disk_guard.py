@@ -366,44 +366,9 @@ def git_ancestry(path: str) -> bool:
 
 
 def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
-    """Fresh, target-scoped holder check. Unknown is never a free target.
-
-    POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
-    avoids another full-machine open-file inventory per action. Missing lsof, warnings,
-    partial output or timeout preserve the target; there is no unbounded /proc fallback.
-    Windows keeps the rename probe. This is a point-in-time check, not a filesystem lock.
-    """
-    if os.name == "nt":
-        return False
-    tool = shutil.which("lsof")
-    if not tool or timeout <= 0:
-        return None
-    end = time.monotonic() + min(5.0, timeout)
-    try:
-        selector = ["+D", target] if os.path.isdir(target) else ["--", target]
-        p = subprocess.run([tool, "-n", "-P", "-Fn", *selector], capture_output=True,
-                           text=True, errors="replace", timeout=max(0.001, end - time.monotonic()),
-                           env=_utf8_env(), stdin=subprocess.DEVNULL)
-        if p.returncode == 0 and p.stdout:
-            return True
-        if p.returncode != 1 or p.stdout or p.stderr:
-            return None
-        left = end - time.monotonic()
-        if left <= 0:
-            return None
-        p = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True,
-                           text=True, errors="replace", timeout=left, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if p.returncode or p.stderr or not p.stdout:
-        return None
-    paths_held = []
-    for line in p.stdout.splitlines():
-        for word in line.split():
-            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
-            if word.startswith("/") and len(word) > 1:
-                paths_held.append(word.rstrip(",;:"))
-    return Holders(paths_held).busy(target)
+    """Compatibility entry point for the shared action-time holder probe."""
+    from holders import fresh_busy as probe
+    return probe(target, timeout)
 
 
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
@@ -999,10 +964,13 @@ def act(a: dict, holders: Holders) -> dict:
             return {**rec, "result": "failed", "reason": f"{type(exc).__name__}"}
         said = (p.stderr or p.stdout or "").strip()
         if p.returncode and a.get("busy_output") and a["busy_output"] in said:
-            return {**rec, "result": "skipped", "reason": f"its cache is in use: {said[:120]}"}
+            return {**rec, "result": "skipped", "reason": "its cache is in use",
+                    "reason_code": "cache-in-use", "exit_code": p.returncode}
         rec["result"] = "removed" if p.returncode == 0 else "failed"
         if p.returncode:
-            rec["reason"] = f"exit {p.returncode}: {said[:160]}"
+            rec["reason"] = f"exit {p.returncode}"
+            rec["reason_code"] = "command-failed"
+            rec["exit_code"] = p.returncode
     else:
         target = a["target"]
         if not os.path.lexists(target):
@@ -1141,12 +1109,58 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
         return {"result": "stopped", "reason": f"past {seconds:.0f} s"}
     except (OSError, subprocess.SubprocessError) as exc:
         return {"result": "failed", "reason": type(exc).__name__}
+    failure = {"result": "failed", "reason": "cleanup child receipt is invalid",
+               "reason_code": "invalid-child-receipt", "exit_code": p.returncode}
+    if p.returncode:
+        return {**failure, "reason": "cleanup child failed", "reason_code": "child-exit"}
     line = (p.stdout.strip().splitlines() or [""])[-1]
     try:
         doc = json.loads(line) if line.startswith("{") else {}
     except ValueError:
-        doc = {}
-    return doc or {"result": "failed" if p.returncode else "ran", "reason": line[:200]}
+        return failure
+    if not isinstance(doc, dict) or doc.get("result") not in ("busy", "plan-only", "ran"):
+        return failure
+    # Reconstruct the producer's typed envelope. Unknown fields and arbitrary count
+    # names never become durable output, even when the surrounding JSON looks valid.
+    out = {"result": doc["result"]}
+    if doc["result"] == "busy":
+        return out
+    integer = lambda value: type(value) is int and value >= 0
+    if doc["result"] == "ran":
+        for key in ("removed", "skipped", "failed"):
+            if not integer(doc.get(key)):
+                return failure
+            out[key] = doc[key]
+        if "stopped" in doc:
+            if not integer(doc["stopped"]):
+                return failure
+            out["stopped"] = doc["stopped"]
+        if "level" in doc:
+            if doc["level"] not in LEVELS:
+                return failure
+            out["level"] = doc["level"]
+        if "plan_seconds" in doc:
+            value = doc["plan_seconds"]
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                return failure
+            out["plan_seconds"] = value
+    else:
+        keys = {"branch-merged", "branch-pushed", "worktree-missing", "worktree-clean",
+                "build-artifacts", "branch-unique", "worktree-dirty"}
+        counts = doc.get("counts")
+        if not isinstance(counts, dict) or not counts or not set(counts) <= keys or not all(
+                integer(value) for value in counts.values()):
+            return failure
+        out["counts"] = counts
+    if "carried" in doc:
+        carried = doc["carried"]
+        if not isinstance(carried, dict) or not integer(carried.get("checkouts")) or "measured_at" not in carried:
+            return failure
+        stamp = carried["measured_at"]
+        if stamp is not None and (not isinstance(stamp, str) or parse_stamp(stamp) is None):
+            return failure
+        out["carried"] = {"checkouts": carried["checkouts"], "measured_at": stamp}
+    return out
 
 
 def run(argv: list[str]) -> dict:
@@ -1221,11 +1235,13 @@ def run(argv: list[str]) -> dict:
                                                                     f"the rest is looked at next pass"})
                     break
                 mark = time.monotonic()
-                # A FRESH LISTING for every class: one taken at the start was minutes old by the
-                # time the last removal used it (review, 2026-10-12).
-                holders = (Holders([], "none") if name == "cache-command"      # a command needs no listing
-                           else Holders.take(min(120.0, max(5.0, share / 2))))
-                holders_by_phase[name] = {"mode": holders.mode, "known": holders.known, "measured_at": now()}
+                # Current holder observations cannot prove non-use. Path admission
+                # stays unknown without repeatedly buffering a full process listing.
+                holders = (Holders([], "none") if name == "cache-command"
+                           else Holders.take(collect_hints=False))
+                holders_by_phase[name] = {"mode": holders.mode, "known": holders.known,
+                                          "observation": holders.observation,
+                                          "measured_at": now() if holders.observation == "partial" else None}
                 if name != "cache-command":
                     holders_mode = "unavailable" if not holders.known or holders_mode == "unavailable" else holders.mode
                 if not holders.known and name != "cache-command":
@@ -1318,9 +1334,9 @@ def main(argv: list[str]) -> int:
         doc = run(argv)
     except Exception as exc:  # noqa: BLE001 — the job must get a line, never a silent crash
         if "--json" in argv:
-            print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:200]}"}))
+            print(json.dumps({"error": type(exc).__name__, "reason_code": "guard-failed"}))
         else:
-            print(f"disk guard: failed — {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr)
+            print(f"disk guard: failed — {type(exc).__name__}", file=sys.stderr)
         return 2
     if "--json" in argv:
         # The maintenance job reads this line instead of the report file: the file's
