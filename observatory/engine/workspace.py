@@ -516,6 +516,9 @@ def doctor(base: Path) -> dict:
             "tracked": __import__("tracked").health(),
             "open_unlinked": __import__("open_unlinked").saved_summary(base=base),
             "backups": __import__("backup_vault").status(base),
+            # The machine's agent setup (OBS-157): the newest bundle, its age and size, and
+            # what it did not carry. Its warnings are also in `maintenance.warnings`.
+            "machine_backup": __import__("machine_backup").status(base),
             # Updates that arrive by themselves and the daily encrypted backup: whether the
             # job is scheduled, what it last found, and what needs a person (maintenance.py).
             "maintenance": __import__("maintenance").status(base),
@@ -695,6 +698,10 @@ def parse(argv: list[str]) -> argparse.Namespace:
         import workspace_upgrade
         return workspace_upgrade.parser().parse_args(
             ["backup" if name == "workspace-backup" else name, *rest])
+    if name in {"machine-backup", "machine-restore"}:
+        import machine_backup
+        return (machine_backup.backup_parser() if name == "machine-backup"
+                else machine_backup.restore_parser()).parse_args(rest)
     return _parser().parse_args(argv)
 
 
@@ -719,6 +726,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
         return workspace_upgrade.main(["backup" if argv[0] == "workspace-backup" else argv[0], *argv[1:]])
+    if argv and argv[0] in {"machine-backup", "machine-restore"}:
+        import machine_backup
+        return (machine_backup.backup_main if argv[0] == "machine-backup" else machine_backup.restore_main)(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()

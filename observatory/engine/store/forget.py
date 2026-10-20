@@ -409,7 +409,7 @@ def _backups() -> list[dict]:
     try:
         import backup_vault
         home = pathlib.Path(paths.HOME)
-        snaps = [p for kind in ("snapshot", "before-upgrade", "before-update", "daily")
+        snaps = [p for kind in backup_vault.SNAPSHOT_KINDS
                  for p in backup_vault.local_snapshots(home, kind)]
         out.append({"backend": "workspace-snapshots", "status": "retained" if snaps else "absent",
                     "detail": f"{len(snaps)} plaintext snapshot folder(s) under backups/ keep the text "

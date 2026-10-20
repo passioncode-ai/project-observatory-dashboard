@@ -55,6 +55,31 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
 
 ### Added
 
+- **A daily encrypted backup of this machine's agent setup, and a restore onto a new machine** (OBS-157).
+  One `machine-<stamp>-<id>.obmachine` per run goes to the same backups root as the workspace snapshots, in the same
+  `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
+  settings, CLI logins, launchd or systemd user jobs, the Fabric service descriptors, the Homebrew, npm, pipx and uv
+  inventories, and every checkout's remotes (without user information), branch, HEAD, dirty and ahead/behind state
+  with a git bundle of every commit no remote has (branches, local tags, detached HEADs, stash entries), a patch of
+  its uncommitted changes (staged changes for a repository with no commit yet) and its untracked files. The
+  maintenance job takes one a day, `full update` one before it stops the jobs (unless one is under an hour old), and
+  `full machine-backup` one now. `config/machine-backup.json` adds an operator's own paths, excludes and checkout
+  roots. `full machine-restore [BUNDLE | --latest]` prints the plan; `--apply` writes only what is missing,
+  `--overwrite` moves a conflict aside first, `--packages` installs the inventories and `--clone` clones the checkouts
+  and puts back their carried work. Measured on a working agent machine: 69 MB, 14,221 items, 517 checkouts, under
+  two minutes.
+  - Decrypted and temporary copies live only in the workspace's private `store/.machine-stage/`, one restore
+    step at a time; SIGTERM and SIGHUP remove them and the next run sweeps what a killed one left; a run refused while another
+    holds the stage touches nothing. A checkout not restored is named and `full machine-restore` exits 1.
+  - Nothing is written without a passphrase; a disk that would keep under 2 GB free refuses the write, recorded and
+    shown in `doctor`, `maintain status` and Health; three bundles are kept.
+  - What a cap leaves out is not carried and named per folder in the bundle's `MANIFEST.json`, the answer, `doctor`
+    and Health; transcripts (opt-in) and plugin caches are skipped and named. No value reaches the manifest, the
+    state file or an answer.
+  - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
+    Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
+    Scenario OSS-68.
+
 - **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
   `tools/cloudflare.py` does for Cloudflare, on the Platform API:
   - `stash` keeps an admin token read by the door alone: the CLI session's, piped in (`heroku auth:token | heroku.py

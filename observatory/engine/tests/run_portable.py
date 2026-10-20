@@ -201,6 +201,8 @@ BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the
 # canary that it reaches the model, read from a synthetic transcript.
 BOUNDARY += ('ask_why', 'ask_why_reach')
+# The machine bundle and its restore onto an empty home (OBS-157).
+BOUNDARY += ('machine_backup',)
 # A session MCP server moving itself onto the installed release over real pipes (OBS-159).
 BOUNDARY += ('session_reload',)
 SUITES = LEGACY + BOUNDARY
@@ -241,6 +243,8 @@ ROOT_FILES = (
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py',
+    # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
+    'machine_backup.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
@@ -375,7 +379,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
                  # 128 cases, each driving the real hooks and git: ~70 s idle, ~310 s at a
                  # load average of 300 (OBS-135 tracks making it cheaper).
-                 'ask_why': 600}
+                 'ask_why': 600,
+                 # 36 cases with real git checkouts, restores and three killed subprocesses:
+                 # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner.
+                 'machine_backup': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
