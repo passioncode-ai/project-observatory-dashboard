@@ -613,6 +613,29 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(self.events(), [("update_download", "started"), ("update_download", "done"),
                                          ("update_check", "needs_migration")])
 
+    def test_the_machine_backup_is_taken_before_the_jobs_stop_and_never_holds_the_update(self):
+        # OBS-157: a machine bundle before every update, while the tick and server still run.
+        self.gh.publish(NEWER)
+        seen = []
+
+        def taken(base):
+            seen.append(list(self.services.calls))
+            return {"result": "taken", "file": "machine-x.obmachine"}
+        code, doc = self.run_cli("--apply", machine_backup=taken)
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        self.assertEqual(doc["machine_backup"]["result"], "taken")
+        self.assertFalse([c for c in seen[0] if c[0] == "stop"], "taken before any job was stopped")
+
+    def test_a_failed_machine_backup_is_degraded_and_the_update_goes_on(self):
+        self.gh.publish(NEWER)
+
+        def broken(base):
+            raise OSError("synthetic disk error")
+        code, doc = self.run_cli("--apply", machine_backup=broken)
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        self.assertEqual(doc["machine_backup"]["result"], "failed")
+        self.assertTrue(any("machine backup" in d for d in doc["degraded"]))
+
     def test_a_person_may_still_install_a_held_release_after_seeing_the_step(self):
         step = "back up the store by hand first"
         self.gh.publish(NEWER, wheel=self.held_wheel({"version": NEWER, "needs_person": step}))
