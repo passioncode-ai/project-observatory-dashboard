@@ -65,12 +65,12 @@ def credential_key(public_key: Any, alg: str) -> dict:
     if alg not in ASSERTION_ALGORITHMS:
         return {'problem': 'unusable-key'}
     if not isinstance(public_key, dict) or 'd' in public_key or not isinstance(public_key.get('x'), str) \
-            or not _B64URL.match(public_key['x']) or not _canonical(public_key['x']):
+            or not _B64URL.fullmatch(public_key['x']) or not _canonical(public_key['x']):
         return {'problem': 'unusable-key'}
     if alg == 'ES256':
         y = public_key.get('y')
         if public_key.get('kty') != 'EC' or public_key.get('crv') != 'P-256' or not isinstance(y, str) \
-                or not _B64URL.match(y) or not _canonical(y):
+                or not _B64URL.fullmatch(y) or not _canonical(y):
             return {'problem': 'unusable-key'}
         x, yb = node_b64url(public_key['x']), node_b64url(y)
         octets = b'\x04' + x + yb
@@ -111,7 +111,7 @@ def verify_assertion(assertion: Any, credential: Mapping[str, Any], challenge: b
     if not all(isinstance(field, str) for field in fields):
         return _fail('malformed')
     credential_id, alg, authenticator_data, client_data_json, sig = fields
-    if not all(_B64URL.match(field) for field in (credential_id, authenticator_data, client_data_json, sig)):
+    if not all(_B64URL.fullmatch(field) for field in (credential_id, authenticator_data, client_data_json, sig)):
         return _fail('malformed')
     if credential_id != credential.get('credentialId'):
         return _fail('malformed')
@@ -235,12 +235,12 @@ def signing_challenge(kind: str, fields: Any) -> Optional[bytes]:
 
 def is_signing_rp_id(rp_id: Any) -> bool:
     """`sign.` followed by at least two more lower-case labels: a dedicated signing RP (v4 §7, DEC-0063)."""
-    return isinstance(rp_id, str) and len(rp_id) <= 253 and _SIGNING_RP.match(rp_id) is not None
+    return isinstance(rp_id, str) and len(rp_id) <= 253 and _SIGNING_RP.fullmatch(rp_id) is not None
 
 
 def origin_within(origin: Any, rp_id: str) -> bool:
     """https, no port and no path, its host the RP ID or a subdomain of it, lower case."""
-    match = _ORIGIN_HOST.match(origin) if isinstance(origin, str) else None
+    match = _ORIGIN_HOST.fullmatch(origin) if isinstance(origin, str) else None
     return match is not None and (match.group(1) == rp_id or match.group(1).endswith('.' + rp_id))
 
 

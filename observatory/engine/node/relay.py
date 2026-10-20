@@ -131,7 +131,7 @@ RELAY_ORIGIN_PATTERN = (
     rf'^(?:https://(?:{_IPV4}|\[(?:{_IPV6})\]|{_NAME})(?::(?!443$){_PORT})?'
     rf'|http://(?:127\.{_OCTET}\.{_OCTET}\.{_OCTET}|\[::1\])(?::(?!80$){_PORT})?)$'
 )
-_ORIGIN = re.compile(RELAY_ORIGIN_PATTERN)
+_ORIGIN = re.compile(RELAY_ORIGIN_PATTERN, re.ASCII)   # `\d` as JavaScript reads it: ASCII digits only
 
 
 def is_relay_origin(value: Any) -> bool:

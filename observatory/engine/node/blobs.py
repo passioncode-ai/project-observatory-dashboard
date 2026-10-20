@@ -56,7 +56,7 @@ _LOCAL_OPENER = urllib.request.build_opener(_NoRedirect, urllib.request.ProxyHan
 def _request(origin: str, method: str, digest: str, header: str, data: Optional[bytes]) -> Tuple[int, bytes]:
     if not relay.is_relay_origin(origin):
         raise ValueError('not a relay origin')
-    if not _DIGEST.match(digest):
+    if not _DIGEST.fullmatch(digest):
         raise ValueError('a blob digest is sha256: and 64 lowercase hex digits')
     request = urllib.request.Request(origin + '/v1/blobs/' + digest, data=data, method=method)
     request.add_header(relay.REQUEST_HEADER, header)

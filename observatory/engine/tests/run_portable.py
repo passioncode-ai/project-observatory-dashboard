@@ -117,6 +117,8 @@ BOUNDARY += ('osschedule',)
 BOUNDARY += ('harness',)
 # OBS-55: the meter and the delegation verifier (contract DEC-0039).
 BOUNDARY += ('meter', 'meter_wire', 'spend')
+# OBS-162: the verifier as contract DEC-0045 sealed it, over the contract's own fixtures.
+BOUNDARY += ('delegation_sealed',)
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_progress', 'tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
 # ENG-003: the agent's deadline reaches providers.complete().
@@ -241,6 +243,8 @@ ROOT_FILES = (
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
+    # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
+    'ed25519_order.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
@@ -284,6 +288,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')
+    selected.add(ROOT / 'fabric/delegation-vectors/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -296,7 +301,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'schemas', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/delegation-vectors', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).

@@ -5,6 +5,54 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Security
+
+- **The delegation verifier follows the contract's DEC-0045 ("Delegation sealed")** (OBS-162). `delegation.py` was
+  a port of fabric-agent-contract `src/delegation.ts` at `8e49fbd`, which predates it; it now follows the contract at
+  `07042181`, and `tests/test_delegation_sealed.py` ports `test/delegation-sealed.test.ts` case by case over the
+  contract's own fixtures (`fabric/delegation-vectors/`).
+  - **A small-order Ed25519 key is refused** (CT-29, critical). A key set publishing one of libsodium's seven
+    small-order encodings let anyone forge a token with no private key: the contract's vector
+    `delegation-small-order.json` verified as `ok`. The key is now the issuer's unusable key,
+    `issuer-unavailable` (`small-order-key`), before anything is verified under it. The same predicate
+    (`is_small_order_key` in the engine's `ed25519_order.py`, which `node/ed25519.py` re-exports) now guards the release-signature check as well, in both its
+    `cryptography` and its plain-Python path.
+  - **The trusted issuer is required.** `verify_delegation` and `verify_meter_token` take `issuer` with no default;
+    none or empty is `issuer-unavailable` (`no-trusted-issuer`), never "any key in the set".
+  - **The meter's token is exact**: scope exactly `grant.check` (`meter-scope-not-exact`) and effect exactly
+    `["none"]` (`meter-effect-not-none`); a wider token is `principal-unproven`.
+  - **Strict types in the contract's order** (DL-13 row 5): actors' agent ids and session ids, URIs for `iss`,
+    `sub` and `project`, `aud` an agent id, the `scope` and `jti` grammars, each effect once, one grant, `spend`,
+    `task` and `nbf` are checked before the lifetime, audience and depth rows, so a malformed chain is
+    `unauthenticated` whatever else is wrong.
+  - A published key of another `use` or `alg` is now `issuer-unavailable` (`key-not-for-signing`), not
+    `unauthenticated`.
+  - Every grammar (agent ids, session and task ids, URIs, `scope`, `jti`) must match the whole value: Python's `$`
+    let a trailing newline through where the contract's regular expressions do not. The same full-match rule now
+    applies to the meter's request and grant-reference checks and to the agent-network node's identifier,
+    envelope, passkey, estate and blob checks. `NaN` and `Infinity` in a token are `malformed`, a signature segment
+    no base64url encoder writes is `bad-signature` (it raised before), and an integer-valued time such as
+    `1791720000.0` is read as the integer the contract reads.
+  - White space in a grammar is ECMAScript's, as in the contract: a URI holding U+FEFF is refused, one holding
+    U+001F or U+0085 is accepted, and the meter's timestamps and the node's relay origins take ASCII digits only.
+    An integer no double can hold (2^1024 - 2^970 and above, 309 digits or more) in a time or an amount is a claim
+    of the wrong type (`malformed-claims`), as the contract reads the infinity `JSON.parse` makes of it.
+
+**Behaviour change for existing installs.** A meter that verified tokens without a trusted issuer now denies every
+grant check and every token-bearing slot or keyserver call as `principal-unproven`
+(`issuer-unavailable:no-trusted-issuer`). An install with no `config/meter.json` and no hub keys denied them before
+too (no estate keys); nothing changes there. If `config/meter.json` names keys (`jwks` or `hubJson`) but no issuer,
+add the estate issuer Fabric names:
+
+```json
+"issuer": "urn:fabric:estate:<id>"
+```
+
+or point `hubJson` at a `hub.json` that names its `issuer` beside its `jwks`; the meter takes the hub's issuer only
+with the hub's own keys. `full doctor` reports it under `meter` (`degraded`: `meter:no-trusted-issuer`, and the line
+that fixes it), and `full grant --status` lists it in `degraded`. The contract defines no default issuer, so the
+meter sets none: trusting whichever key signed would be the forgery this fix closes.
+
 ### Added
 
 - **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
