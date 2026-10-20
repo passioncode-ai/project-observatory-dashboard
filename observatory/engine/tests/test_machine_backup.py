@@ -608,6 +608,20 @@ class Restore(Machine):
                              which=lambda name: None)
         self.assertIn('install Homebrew first', missing['packages'][0]['detail'])
 
+    def test_a_restore_never_starts_a_background_gc(self):
+        """Every git command a restore runs carries gc.auto=0 and maintenance.auto=false, as safe_git does:
+        a detached `gc --auto` outlived the restore and broke a test's temporary folder on Linux CI."""
+        calls = []
+
+        def runner(argv, **kw):
+            calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, '', '')
+        MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True, runner=runner)
+        gits = [c for c in calls if Path(c[0]).name == 'git']
+        self.assertTrue(gits, 'the restore ran no git command')
+        for argv in gits:
+            self.assertEqual(argv[1:5], ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false'], argv[:6])
+
     def test_a_wrong_passphrase_or_kind_is_refused(self):
         with self.assertRaises(vault.BackupError):
             MB.restore(self.bundle, self.fresh, secret='another passphrase entirely')

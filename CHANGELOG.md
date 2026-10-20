@@ -3,6 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
+  --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
+  carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
+  restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+
 ## 0.27.0 (2026-10-20)
 
 Two new provider capabilities, both data-private: the DigitalOcean door gains a team side (stash a team's token, list teams

@@ -1538,6 +1538,10 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
     uncommitted patch and the untracked files with their modes. A repository that had no commit
     yet is initialised and its staged patch applied to the index. Plain git with the person's
     own configuration: a clone needs their SSH keys and credential helpers."""
+    # No background `gc --auto` or maintenance in a restored repository, as in safe_git: a restore writes
+    # objects and refs into checkouts a person owns, and a detached gc outlives the restore (and a test's
+    # temporary folder).
+    gitc = [git, "-c", "gc.auto=0", "-c", "maintenance.auto=false"]
     out = []
     records = sorted(manifest.get("checkouts", []), key=lambda r: (bool(r.get("worktree")), bool(r.get("submodule"))))
     mains: dict[str, Path] = {}
@@ -1581,7 +1585,7 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
             carry = repo_bundle.get(rec.get("common_dir"))
             if carry is not None and rec["common_dir"] not in fetched:
                 fetched.add(rec["common_dir"])
-                got = _run([git, "-C", str(main), "fetch", "-q", str(carry), "+refs/carried/*:refs/carried/*",
+                got = _run([*gitc, "-C", str(main), "fetch", "-q", str(carry), "+refs/carried/*:refs/carried/*",
                             "refs/tags/*:refs/tags/*"], runner=runner)
                 if got["exit"] != 0:
                     row.update(result="clone-failed", detail="the carried commits could not be fetched into "
@@ -1590,14 +1594,14 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
                 if main not in restored:
                     restored.append(main)
             ref = ["--detach", str(dest), rec["head"]] if detached else [str(dest), rec.get("branch") or rec["head"]]
-            step_ = _run([git, "-C", str(main), "worktree", "add", *ref], runner=runner)
+            step_ = _run([*gitc, "-C", str(main), "worktree", "add", *ref], runner=runner)
         elif not rec.get("head"):
             dest.mkdir(parents=True, exist_ok=True)
-            step_ = _run([git, "init", "-q", "-b", rec.get("branch") or "main", str(dest)], runner=runner)
+            step_ = _run([*gitc, "init", "-q", "-b", rec.get("branch") or "main", str(dest)], runner=runner)
         elif url:
-            step_ = _run([git, "clone", "--", url, str(dest)], runner=runner)
+            step_ = _run([*gitc, "clone", "--", url, str(dest)], runner=runner)
         elif bundle is not None and bundle.is_file():
-            step_ = _run([git, "clone", "--", str(bundle), str(dest)], runner=runner)
+            step_ = _run([*gitc, "clone", "--", str(bundle), str(dest)], runner=runner)
         else:
             row["result"] = "nothing-to-clone-from"
             row["detail"] = "no remote, and no commits were carried"
@@ -1611,28 +1615,28 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
                 mains[rec["common_dir"]] = dest
             for name, remote in remotes.items():
                 if name != "origin" or not url or not rec.get("head"):
-                    _run([git, "-C", str(dest), "remote", "add", name, remote], runner=runner)
+                    _run([*gitc, "-C", str(dest), "remote", "add", name, remote], runner=runner)
         steps = []
         if main is None and bundle is not None and bundle.is_file():
-            steps.append(_run([git, "-C", str(dest), "fetch", "--update-head-ok", str(bundle),
+            steps.append(_run([*gitc, "-C", str(dest), "fetch", "--update-head-ok", str(bundle),
                                "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*",
                                "+refs/carried/*:refs/carried/*"], runner=runner))
         if main is None:
             for name, sha in sorted((rec.get("tags") or {}).items()):
-                _run([git, "-C", str(dest), "tag", name, sha], runner=runner)
+                _run([*gitc, "-C", str(dest), "tag", name, sha], runner=runner)
             # Oldest first, so the newest is stash@{0} again.
             for n in reversed(range(len(rec.get("stashes") or []))):
                 entry = rec["stashes"][n]
-                steps.append(_run([git, "-C", str(dest), "stash", "store", "-m",
+                steps.append(_run([*gitc, "-C", str(dest), "stash", "store", "-m",
                                    entry.get("message") or "restored stash", entry["sha"]], runner=runner))
             if rec.get("head"):
                 target = ["--detach", rec["head"]] if detached else [rec["branch"]]
-                steps.append(_run([git, "-C", str(dest), "checkout", "-q", *target, "--"], runner=runner))
+                steps.append(_run([*gitc, "-C", str(dest), "checkout", "-q", *target, "--"], runner=runner))
         if rec.get("head"):
-            steps.append(_run([git, "-C", str(dest), "reset", "-q", "--hard", rec["head"], "--"], runner=runner))
+            steps.append(_run([*gitc, "-C", str(dest), "reset", "-q", "--hard", rec["head"], "--"], runner=runner))
         if carried.get("patch"):
             index = ["--index"] if not rec.get("head") else []
-            steps.append(_run([git, "-C", str(dest), "apply", "--binary", *index, str(stage / carried["patch"])],
+            steps.append(_run([*gitc, "-C", str(dest), "apply", "--binary", *index, str(stage / carried["patch"])],
                               runner=runner))
         written = 0
         modes = carried.get("untracked_modes") or {}
@@ -1655,10 +1659,10 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
             row["untracked_written"] = written
     # The carried names did their work: the commits are on branches, tags, HEADs and stashes.
     for dest in restored:
-        p = subprocess.run([git, "-C", str(dest), "for-each-ref", "--format=delete %(refname)", "refs/carried"],
+        p = subprocess.run([*gitc, "-C", str(dest), "for-each-ref", "--format=delete %(refname)", "refs/carried"],
                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if p.returncode == 0 and p.stdout.strip():
-            subprocess.run([git, "-C", str(dest), "update-ref", "--stdin"], input=p.stdout,
+            subprocess.run([*gitc, "-C", str(dest), "update-ref", "--stdin"], input=p.stdout,
                            capture_output=True, text=True)
     return out
 
