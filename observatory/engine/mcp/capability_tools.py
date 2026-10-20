@@ -41,10 +41,12 @@ import credential_shape
 import interop
 import jobs
 import memory_access
+import session_reload
 
 #: The version file this server process was started from (lifecycle LC-10). A
-#: call after an update replaced it answers `stale-server` instead of running
-#: previous-release code against the new release's workspace.
+#: call after an update replaced it moves the server onto the installed release
+#: (OBS-159, mcp/stdio_relay.py) or, where that is refused, answers `stale-server`
+#: instead of running previous-release code against the new release's workspace.
 FRESHNESS = code_freshness.Freshness(configuration.SOURCE / "configuration.py", configuration.VERSION)
 
 
@@ -52,8 +54,12 @@ def stale_answer() -> CallToolResult | None:
     stale = FRESHNESS.check()
     if stale is None:
         return None
+    # OBS-159: a server moves itself onto the installed release at its next request
+    # (mcp/stdio_relay.py). It answers here only when that was refused, and says why.
+    refused = session_reload.REFUSAL
+    why = (f" It could not move itself onto the installed release: {refused}." if refused else "")
     return _error("stale-server",
-                  f"{stale['reason']}; this server still runs {stale['running']}. Restart the "
+                  f"{stale['reason']}; this server still runs {stale['running']}.{why} Restart the "
                   f"session (or reconnect this MCP server) so it starts from the installed code.")
 
 

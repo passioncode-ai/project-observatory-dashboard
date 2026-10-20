@@ -1585,9 +1585,22 @@ A running Claude Code session is never stopped by an update. Its MCP server
 (`mcp/server.py`) is a Python process that imported the engine when the session started.
 `pip` replaces the files on disk in place; the process keeps the code it already loaded, but
 a module it imports for the first time afterwards comes from the new release. The server
-therefore checks the installed version on each call and answers `stale-server` once the code
-under it changed, and the session gets the new release when it restarts or reconnects the
-server. `full update` lists those servers in its report and never signals them.
+therefore checks the installed version at each request, and once the code under it changed
+it moves itself onto the installed release (OBS-159): it holds that request, lets the
+requests already running answer, starts the installed release once to check it
+(`--reload-check`), then replaces itself in place with `os.execv`. The process id, the pipes
+and the session stay; the new release takes over the handshake the client already made, so
+the client sends no second `initialize`, and it answers the held request exactly once. When
+the tool list changed, the client receives `notifications/tools/list_changed`.
+
+Where it cannot move, it answers `stale-server` and names why, and the session gets the new
+release when it restarts or reconnects the server: on Windows (`os.execv` starts a new
+process there), while a `full update --apply` holds the workspace or the requests already
+running take longer than a minute to answer (it tries again at a later request), when the installed release fails its check, speaks another MCP revision or no
+longer exists, or when the replacement itself fails. Each move and each refusal is one line
+in `store/logs/mcp-reload.jsonl` (from, to, pid, and the reason for a refusal) and on the
+server's stderr; `full doctor` lists them under `session_servers`. `full update` lists the
+servers in its report and never signals them.
 
 #### A release that needs a person
 

@@ -12,7 +12,8 @@ against the product that owns the process or the file:
   orphan        a product's child or per-session server whose parent died
                 (ppid 1) and which no launchd job explains — LC-02, LC-10
   stale-code    a per-session server started before its product's code was
-                replaced on disk, or whose code is gone — LC-10, LC-11
+                replaced on disk, or whose code is gone — LC-10, LC-11 (a server
+                that swapped onto the installed release since, OBS-159, is not)
   overrun       a launchd job of a product running longer than its own
                 StartInterval — LC-03
   log-over-cap  a product's log larger than the cap, and log-readable for one
@@ -174,7 +175,7 @@ def descriptors() -> list[dict]:
     try:
         import fabric_service
         return [doc for _path, doc in fabric_service.read_descriptors()]
-    except Exception:                                           # noqa: BLE001 — a host may have none
+    except Exception:                                           # noqa: BLE001: a host may have none
         return []
 
 
@@ -205,7 +206,15 @@ def snapshot() -> dict:
             if len(cols) == 3 and cols[0].isdigit():
                 launchd[int(cols[0])] = cols[2]
     import time
-    return {"now": time.time(), "processes": procs, "launchd": launchd}
+    # OBS-159: a session server that moved onto the installed release kept its pid and its
+    # start time, so the age of the code it runs is read from the reload log: the machine's
+    # (every workspace's servers) and this home's.
+    try:
+        import session_reload
+        reloads = {str(pid): at for pid, at in session_reload.reload_times(paths.HOME).items()}
+    except Exception:  # noqa: BLE001: without the log a swapped server reads as stale, as before
+        reloads = {}
+    return {"now": time.time(), "processes": procs, "launchd": launchd, "reloads": reloads}
 
 
 # --- evaluation ------------------------------------------------------------------
@@ -247,6 +256,7 @@ def _log_files(entry: str) -> list[pathlib.Path]:
 def evaluate(snap: dict, products: list[dict]) -> dict:
     now = float(snap.get("now") or 0)
     launchd = {int(k): v for k, v in (snap.get("launchd") or {}).items()}
+    reloads = {int(k): float(v) for k, v in (snap.get("reloads") or {}).items()}
     obs: list[dict] = []
     for proc in snap.get("processes") or []:
         owned = _owner(proc, products)
@@ -258,6 +268,8 @@ def evaluate(snap: dict, products: list[dict]) -> dict:
                 obs.append({"kind": "orphan", **base, "role": role, "elapsed_s": proc.get("elapsed_s")})
             if role == "session" and proc.get("elapsed_s") is not None:
                 started = now - proc["elapsed_s"]
+                if reloads.get(proc["pid"], 0.0) >= started:
+                    started = reloads[proc["pid"]]          # it swapped onto newer code since
                 for server in product["session_servers"]:
                     if server["match"] not in f"{proc.get('exe') or ''} {proc.get('script') or ''}" \
                             or not server.get("code"):

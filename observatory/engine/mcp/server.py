@@ -40,7 +40,8 @@ def _home_argument(argv: list[str]) -> None:
     """`--home PATH` selects the workspace, for a host that starts this server from
     the per-install manifest: a manifest's stdio connection carries arguments and
     no environment, so `OBSERVATORY_HOME` cannot travel in it. Read before any
-    engine module resolves its paths. `--stdio` is accepted and means the default."""
+    engine module resolves its paths. `--stdio` is accepted and means the default;
+    `--reload-check` is the preflight of a swap onto this release (OBS-159)."""
     if "--home" in argv:
         at = argv.index("--home")
         if at + 1 >= len(argv) or not argv[at + 1] or not pathlib.Path(argv[at + 1]).is_absolute():
@@ -65,6 +66,7 @@ import credential_shape
 import interop                                                                    
 import memory_access as MA
 import retrieval_audit as RA
+import session_reload
 import paths
 import proposals                                                                  
 import survey as survey_mod                                                       
@@ -1871,7 +1873,29 @@ def main() -> int:
     missing = server.missing_handlers()
     if missing:
         raise SystemExit(f"capabilities without a handler: {', '.join(missing)}")
-    asyncio.run(server.run_stdio_async())
+    if "--reload-check" in sys.argv[1:]:
+        # The preflight a running server of an earlier release asks before it moves onto
+        # this one (OBS-159): everything imported, the workspace valid, and what it serves.
+        tools = sorted(t.name for t in asyncio.run(server.list_tools()))
+        print(json.dumps({"reload": session_reload.RELOAD_PROTOCOL, "version": VERSION,
+                          "protocol": PROTOCOL_REVISION, "tools": tools}))
+        return 0
+    home = configuration.home()
+    resumed, unread = session_reload.take_state()
+    if unread:
+        session_reload.record(home, "resume-failed", to=VERSION, reason=unread)
+    cannot = session_reload.platform_can_swap()
+    if cannot:
+        # Windows: the SDK's own transport, and `stale-server` names this reason after an update.
+        session_reload.REFUSAL = cannot
+        asyncio.run(server.run_stdio_async())
+        return 0
+    import capability_tools
+    from stdio_relay import Relay
+    relay = Relay(server, script=pathlib.Path(__file__).resolve(), argv=sys.argv[1:],
+                  protocol=PROTOCOL_REVISION, freshness=capability_tools.FRESHNESS, home=home,
+                  resumed=resumed)
+    asyncio.run(relay.run())
     return 0
 
 
