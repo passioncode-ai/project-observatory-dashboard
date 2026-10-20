@@ -34,7 +34,7 @@ def b64url_encode(raw: bytes) -> str:
 
 def b64url_decode(text: str) -> Optional[bytes]:
     """The bytes of an unpadded base64url string, or None when it is not one."""
-    if not isinstance(text, str) or not _B64URL.match(text) or len(text) % 4 == 1:
+    if not isinstance(text, str) or not _B64URL.fullmatch(text) or len(text) % 4 == 1:
         return None
     try:
         return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
