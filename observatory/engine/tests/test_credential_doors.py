@@ -3424,6 +3424,7 @@ if __name__ == "__main__":
                test_cf_all_reads_every_page_whatever_the_list_says_about_itself,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
+               test_cf_cache_purge_preset_proves_its_grant_by_purging_one_unserved_url,
                test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects,
                test_cf_email_routing_token_is_one_per_slot,
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
