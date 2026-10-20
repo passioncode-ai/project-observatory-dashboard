@@ -3365,8 +3365,8 @@
       "path": "tests/test_digitalocean_account.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "393ab7238732cff9ee4b80939d42d6d7d60070df7359bc465fe76ddb57fd01c5",
-      "bytes": 38224
+      "export_sha256": "434538cf5b69c10f2979ad248f5dd8c45a8d2dbec26f94c9d33f83e49eab1fb9",
+      "bytes": 39914
     },
     {
       "path": "tests/test_digitalocean_door.py",
@@ -5178,8 +5178,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "226bf6f81b2fb91047ebce2fe37ebceb35d129f6cb5f4580d31bb8d45ef30358",
-      "bytes": 83805
+      "export_sha256": "846f23e0781cb34838bea6090e0dde462eae6c21cd61e2c0be90242e8c99d0d3",
+      "bytes": 85142
     },
     {
       "path": "tools/digitalocean_findings.py",
