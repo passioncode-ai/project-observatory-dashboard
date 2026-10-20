@@ -17,11 +17,10 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
-[2026-10-20: release 0.26.0](runs/2026-10-20-release-0.26.0/README.md): engine and `observatory-log` 0.26.0
-published and verified (tag `v0.26.0` on `83ae5682`, release run 39385168595), carrying OBS-169 (#315) and everything
-merged since 0.25.0. The PassionCode set 0.2.16 pins Observatory Log `v0.26.0`; both are installed on the operator's
-machine and match the tag byte for byte. Next: OBS-170 (a macOS timing bound in `test_session_reload.py`), and the
-owners of OBS-156/157/159/160/162 close their rows.
+[2026-10-20: release 0.27.0](runs/2026-10-20-release-0.27.0/README.md): engine and `observatory-log` 0.27.0,
+carrying OBS-155 (#306, DigitalOcean teams and costs), OBS-161 (#308, organization enrollment), the Cloudflare
+presets `cache-purge` (#292) and `email-sending-domain` (#302), and `google-auth` 2.61.0 (#316). Next: merge, tag
+`v0.27.0`, verify the release, re-pin Observatory Log in the PassionCode set, update the installed set and engine.
 
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
