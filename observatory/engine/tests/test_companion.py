@@ -104,6 +104,9 @@ def watched_build(dirty: bool = True) -> tuple[pathlib.Path, pathlib.Path, dict]
         # An uncommitted file is what the hook calls a change; a commit would
         # need an upstream to be "unpushed" against.
         (repo / "worked-on.txt").write_text("the turn's work\n", encoding="utf-8")
+        # TRACKED (intent-to-add): the recorder asks only about tracked content a turn
+        # changed, and takes a session's untracked files at its first turn as already there.
+        _watched_git(repo, "add", "-N", "worked-on.txt")
     top = _watched_git(repo, "rev-parse", "--show-toplevel").strip()
     repo_id, project_id = "repository:fixture/alpha-web", "project:alpha-web"
     (reg / "repositories.json").write_text(json.dumps({
@@ -174,6 +177,10 @@ def test_a_corroborated_session_keeps_being_recorded() -> None:
         conn.execute("UPDATE ledger SET state = 'observed' WHERE memory_id = ?", (mid,))
     conn.close()
 
+    # THE NEXT TURN CHANGES SOMETHING: a turn that changed nothing is not recorded
+    # at all (`turn_state`), so it could not show the continuation.
+    with (_CHECKOUT[id(env)] / "worked-on.txt").open("a", encoding="utf-8") as fh:
+        fh.write("the next turn's work\n")
     second = record(env, "s-1")
     got2 = json.loads(second.stdout or "{}")
     check("the next turn is still recorded", got2.get("recorded") is True,
@@ -201,19 +208,16 @@ def test_a_second_turn_of_a_live_record_still_revises_it() -> None:
     revisions of one memory."""
     d, env = workspace()
     a = json.loads(record(env, "s-2").stdout or "{}")
-    # Change the tree's summary without changing the tree: the statement is
-    # built from a git diff, so a second call with the same tree is refused as
-    # "unchanged since the last turn" — which is itself the right answer.
+    # A second call with the same tree is a turn that changed nothing: refused as
+    # "nothing changed this turn" before the ledger is read, which is itself the
+    # right answer.
     b = json.loads(record(env, "s-2").stdout or "{}")
     check("an unchanged tree is not appended again",
-          b.get("recorded") is False and "unchanged" in (b.get("reason") or ""),
+          b.get("recorded") is False and "nothing changed this turn" in (b.get("reason") or ""),
           str(b))
     check("and it is not reported as a fault", b.get("fault") in (None, False), str(b))
-    conn = sqlite3.connect(d / "observatory.db")
-    with conn:
-        conn.execute("UPDATE ledger SET statement = 'something else'"
-                     " WHERE memory_id = ?", (a.get("memoryId"),))
-    conn.close()
+    with (_CHECKOUT[id(env)] / "worked-on.txt").open("a", encoding="utf-8") as fh:
+        fh.write("a later turn's work\n")
     c = json.loads(record(env, "s-2").stdout or "{}")
     check("a changed tree revises the SAME record",
           c.get("memoryId") == a.get("memoryId"), f"{a.get('memoryId')} vs {c.get('memoryId')}")

@@ -205,8 +205,19 @@ class Fixture:
         return hso.get("additionalContext", "") if hso.get("hookEventName") == "UserPromptSubmit" else ""
 
     def change(self, name: str = "src.py") -> None:
-        """A real code change beside whatever else the case plants."""
+        """A real code change beside whatever else the case plants: a new file the
+        repository tracks (intent-to-add), which is a change to TRACKED content."""
         (self.repo / name).write_text(f"print('{name}')\n", encoding="utf-8")
+        _git(self.repo, "add", "-N", "--", name)
+
+    def session_start(self, session: str = "sess-1") -> subprocess.CompletedProcess:
+        """The SessionStart hook's engine half, which takes the session's baseline."""
+        payload = {"session_id": session, "cwd": str(self.repo), "hook_event_name": "SessionStart"}
+        return subprocess.run([PY, str(ROOT / "tools/session_start.py")], input=json.dumps(payload),
+                              text=True, capture_output=True, env=self.env, timeout=120)
+
+    def turn_state(self) -> pathlib.Path:
+        return self.state / "project-observatory" / "turns"
 
     def commit_all(self, message: str = "base") -> None:
         _git(self.repo, "add", "-A")
@@ -348,7 +359,7 @@ class AskOncePerRecord(unittest.TestCase):
         took = fx.ledger("SELECT max(revision) FROM ledger WHERE memory_id=?", mid)[0][0]
         seen, revisions = set(), []
         for i in range(3):
-            (fx.repo / f"b{i}.txt").write_text("x\n", encoding="utf-8")
+            fx.change(f"b{i}.txt")                # tracked: the new record is asked about
             p = fx.stop()
             self.assertEqual(p.returncode, 0, p.stderr[-400:])
             r = fx.receipt()
@@ -637,6 +648,7 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         _git(other, "add", "-A")
         _git(other, "commit", "-qm", "first")
         (other / "work.py").write_text("x = 1\n", encoding="utf-8")
+        _git(other, "add", "-N", "work.py")       # tracked content: what is asked about
         # The other repository even holds a register with the same anchor.
         (other / "docs").mkdir()
         (other / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
@@ -1854,6 +1866,151 @@ class TheFinding(unittest.TestCase):
             self.assertIn("30 further ask(s)", got[0]["detail"])
         finally:
             journal.unlink()
+
+
+#: What a checkout that has been worked in for a while carries: files and a folder
+#: nobody in the session touched (measured 2026-10-20: "4 files changed, +0/-0",
+#: asked 35 times in one session).
+STANDING = ("2026-10-07-pasted.txt", "2026-10-13-continued.txt", "notes.md", ".worktrees/wt/a.txt")
+
+
+class OnlyThisTurnsChanges(unittest.TestCase):
+    """A turn is recorded and asked about for what IT changed, not for what the tree
+    already held: standing untracked files never ask, a tracked edit asks once, and
+    every later turn revises the one record."""
+
+    def clean_with_standing(self, *, baseline: bool) -> Fixture:
+        fx = Fixture()
+        fx.commit_all("the planted change, committed")          # nothing tracked is dirty
+        for rel in STANDING:
+            (fx.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (fx.repo / rel).write_text("standing\n", encoding="utf-8")
+        if baseline:
+            p = fx.session_start()
+            self.assertEqual(p.returncode, 0, p.stderr[-300:])
+        return fx
+
+    def quiet(self, fx: Fixture, turns: int = 3) -> None:
+        for _ in range(turns):
+            p = fx.stop()
+            self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-300:])
+            r = fx.receipt()
+            self.assertFalse(r.get("recorded"), r)
+            self.assertFalse(r.get("fault"), r)
+
+    def test_pre_existing_untracked_files_never_ask(self):
+        for baseline in (True, False):
+            with self.subTest(baseline=baseline):
+                fx = self.clean_with_standing(baseline=baseline)
+                self.quiet(fx)
+                self.assertEqual(fx.journal(), [], "nothing asked")
+                self.assertEqual(fx.context(fx.prompt()), "", "nothing pending")
+                db = fx.work / "observatory.db"
+                self.assertEqual(fx.ledger("SELECT memory_id FROM ledger WHERE kind='session'")
+                                 if db.exists() else [], [],
+                                 "nothing recorded either: the session changed nothing")
+                self.assertIn("nothing changed", fx.receipt().get("reason", ""))
+
+    def test_a_new_untracked_file_is_recorded_but_not_asked_about(self):
+        fx = self.clean_with_standing(baseline=True)
+        fx.stop()
+        (fx.repo / "scratch-output.log").write_text("made this turn\n", encoding="utf-8")
+        p = fx.stop()
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-300:])
+        r = fx.receipt()
+        self.assertTrue(r.get("recorded"), r)
+        self.assertIs(r.get("ask"), False, r)
+        self.assertIs(r.get("turnTracked"), False, r)
+        self.assertEqual(r.get("files"), 1, f"the session's one new file, not the standing ones: {r}")
+        self.assertEqual(fx.journal(), [], "an untracked file is not tracked content")
+
+    def test_a_real_tracked_edit_asks_exactly_once(self):
+        for baseline in (True, False):
+            with self.subTest(baseline=baseline):
+                fx = self.clean_with_standing(baseline=baseline)
+                self.quiet(fx, 1)
+                with (fx.repo / "README.md").open("a", encoding="utf-8") as fh:
+                    fh.write("one more line\n")
+                p = fx.stop()
+                self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-300:])
+                r = fx.receipt()
+                self.assertTrue(r.get("recorded"), r)
+                self.assertIs(r.get("ask"), True, r)
+                self.assertEqual((r.get("files"), r.get("insertions"), r.get("deletions")),
+                                 (1, 1, 0), f"README.md alone, standing files excluded: {r}")
+                statement = fx.ledger("SELECT statement FROM ledger WHERE kind='session'")[0][0]
+                self.assertIn("README.md", statement)
+                for rel in STANDING:
+                    self.assertNotIn(rel.split("/")[0], statement)
+                self.assertEqual(len(fx.journal()), 1, "exactly one ask")
+                delivered = fx.context(fx.prompt())
+                self.assertIn("1 file changed, +1/-0", delivered)
+                self.quiet(fx, 2)                               # no change: no more asks
+                self.assertEqual(len(fx.journal()), 1)
+
+    def test_repeated_turns_supersede_one_record(self):
+        fx = self.clean_with_standing(baseline=True)
+        for i in range(4):
+            with (fx.repo / "README.md").open("a", encoding="utf-8") as fh:
+                fh.write(f"turn {i}\n")
+            p = fx.stop()
+            self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-300:])
+            fx.prompt()
+            self.quiet(fx, 1)                                   # a turn that changed nothing
+        rows = fx.ledger("SELECT memory_id, revision FROM ledger WHERE kind='session'"
+                         " ORDER BY revision")
+        self.assertEqual(len({r["memory_id"] for r in rows}), 1, "one record for the session")
+        self.assertEqual([r["revision"] for r in rows], [1, 2, 3, 4], "superseded turn by turn")
+        self.assertEqual(len(fx.journal()), 1, "asked once")
+
+    def test_a_commit_made_in_the_turn_is_tracked_content_and_old_ones_are_not(self):
+        fx = Fixture()
+        fx.commit_all("the planted change, committed")
+        bare = fx.work / "origin.git"
+        _git(fx.work, "init", "-q", "--bare", str(bare))
+        _git(fx.repo, "remote", "add", "upstream-fixture", str(bare))
+        _git(fx.repo, "push", "-q", "-u", "upstream-fixture", "main")
+        (fx.repo / "README.md").write_text("an unpushed commit from before the session\n",
+                                           encoding="utf-8")
+        _git(fx.repo, "commit", "-qam", "before the session")
+        fx.session_start()
+        self.quiet(fx, 2)                         # an unpushed commit the session did not make
+        (fx.repo / "README.md").write_text("this turn's commit\n", encoding="utf-8")
+        _git(fx.repo, "commit", "-qam", "this turn")
+        p = fx.stop()
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), p.stderr[-300:])
+        r = fx.receipt()
+        self.assertTrue(r.get("recorded"), r)
+        self.assertIs(r.get("turnTracked"), True, r)
+        self.assertIs(r.get("ask"), True, r)
+        self.assertEqual(len(fx.journal()), 1)
+        self.quiet(fx, 1)
+
+    def test_the_state_names_no_path(self):
+        fx = self.clean_with_standing(baseline=True)
+        fx.change("secret-name-of-a-module.py")
+        fx.stop()
+        files = list(fx.turn_state().glob("*.json"))
+        self.assertEqual(len(files), 1, files)
+        text = files[0].read_text(encoding="utf-8")
+        for needle in ("secret-name-of-a-module", "notes.md", str(fx.repo), "sess-1"):
+            self.assertNotIn(needle, text)
+        mode = stat.S_IMODE(files[0].stat().st_mode)
+        self.assertEqual(mode, 0o600, oct(mode))
+        self.assertEqual(stat.S_IMODE(fx.turn_state().stat().st_mode), 0o700)
+
+    def test_a_git_call_past_the_budget_answers_empty_and_is_not_a_fault(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import record_turn
+        record_turn._git_deadline = 0.0                         # long past
+        record_turn._git_timed_out = False
+        try:
+            self.assertEqual(record_turn.git(ROOT, "rev-parse", "--git-dir"), "")
+            self.assertTrue(record_turn._git_timed_out)
+        finally:
+            record_turn._git_deadline = None
+            record_turn._git_timed_out = False
+        self.assertTrue(any(k in "git timed out after 8 s" for k in record_turn.NOT_A_FAULT))
 
 
 if __name__ == "__main__":

@@ -136,6 +136,22 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
     reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
     servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
+- **The Stop hook records and asks about what the turn changed, not what the tree holds.** The recorder took every
+  `git status` entry as the turn's work, so standing untracked files (a pasted log, a `.worktrees/` folder) made
+  every turn "changed": measured 2026-10-20 on one machine, every recorded turn of 21 sessions was asked about, and
+  one session was asked 35 times about the same "4 files changed, +0/-0" it had not touched.
+  - SessionStart keeps a snapshot of the checkout as the session's baseline (`tools/turn_state.py`); the record's
+    files are those that differ from it, and a turn that changed nothing since the previous turn's snapshot writes
+    nothing. A session without a baseline takes the untracked files it first sees as already there.
+  - The `why` is asked only when the turn changed tracked content (an edit, a staged or intent-to-add file, a
+    deletion, a commit). A new untracked file is recorded but not asked about until it is added.
+  - The corroborator leaves a session record whose newest revision is under six hours old to settle
+    (`settling` in `store/raw/corroboration.json`): promoting a live record made the session's next changed turn
+    start another record and ask again, one record per tick.
+  - The recorder's git calls share an 8-second budget and skip dirty submodule trees
+    (`--ignore-submodules=dirty`; `git status` went from 0.45-1.9 s to 0.01-0.3 s in a checkout with eleven
+    submodules); a turn that runs out is unrecorded, silently, and counted at the next turn. The hook parses its
+    payload once instead of starting the interpreter once per field.
 
 ## 0.25.0 (2026-10-19)
 

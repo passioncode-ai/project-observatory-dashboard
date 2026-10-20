@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
+standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
+counts only what differs from the previous turn's snapshot, only tracked content asks for a `why`, a live session's
+record settles six hours before it is corroborated, and the recorder's git calls are bounded. Next: merge, release
+with an `observatory-log` bump, re-pin Observatory Log in `passioncode-ai/passioncode` (it is at `v0.18.0`, which
+ignores the recorder's `ask`), and update the installed set and engine.
+
 2026-10-19, release 0.25.0 integration: the 2026-10-13 recovery work of #260, #278 and #280 merged onto current
 main in one pull request (#303), with main's M-8 (#289) merged in. Versions are 0.25.0, the `observatory-log` plugin
 included (M-8 changed its hooks and skill). Main's OpenRouter door is kept: the branch's rotation-exposure, policy-provenance, consumer-evidence revoke
