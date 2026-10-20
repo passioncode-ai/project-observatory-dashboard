@@ -920,6 +920,16 @@ def session_servers() -> list[dict]:
     return found
 
 
+def machine_backup_before_update(base: Path) -> dict:
+    """The machine bundle before an update (machine_backup.before_update, OBS-157): taken
+    unless one younger than an hour exists; it never raises and never holds the update back."""
+    try:
+        import machine_backup
+    except Exception as exc:  # noqa: BLE001: a missing module is reported, the update goes on
+        return {"result": "failed", "detail": f"{type(exc).__name__}"}
+    return machine_backup.before_update(base)
+
+
 @dataclasses.dataclass
 class Dependencies:
     fetcher: Fetcher = dataclasses.field(default_factory=Fetcher)
@@ -929,6 +939,7 @@ class Dependencies:
     origin: Callable[[], dict] = install_origin
     idle_timeout: float = 60.0
     sessions: Callable[[], list[dict]] = session_servers
+    machine_backup: Callable[[Path], dict] = machine_backup_before_update
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -1297,6 +1308,16 @@ class Transaction:
                     "unconstrained, at the newest releases the index offers rather than the tested set")
             rollback = self.rollback_wheel(work)
             self.report["rollback_available"] = rollback is not None
+            if self.has_ws:
+                # The machine's agent setup, before anything is stopped (OBS-157): it reads the
+                # home and the checkouts, not the workspace, so the jobs stay up meanwhile.
+                try:
+                    self.report["machine_backup"] = self.deps.machine_backup(self.base)
+                except Exception as exc:  # noqa: BLE001: the update never fails on it
+                    self.report["machine_backup"] = {"result": "failed", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+                if self.report["machine_backup"].get("result") in ("failed", "refused-disk"):
+                    self.report["degraded"].append("the machine backup before this update was not taken: "
+                                                   + str(self.report["machine_backup"].get("detail", ""))[:200])
             self.stop_writers()
             snapshot = before = None
             try:

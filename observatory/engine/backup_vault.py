@@ -70,6 +70,9 @@ SNAPSHOT_SUFFIX, DB_SUFFIX = ".obsnap", ".obsdb"
 #: The updater emits `before-update`; use this allowlist for local inventory,
 #: migration and encrypted discovery alike. Unknown kinds are not ours to migrate.
 SNAPSHOT_KINDS = ("snapshot", "before-upgrade", "before-update", "daily")
+#: The machine's agent setup (machine_backup.py, OBS-157): a kind of its own in the same
+#: root, so its rotation and a workspace snapshot's never touch each other.
+MACHINE_KIND, MACHINE_SUFFIX = "machine", ".obmachine"
 #: Written into each workspace's folder in the root: the workspace path the copies belong
 #: to, so a reinstall at that path finds its own backups and never another's.
 OWNER_FILE = ".workspace-path"
@@ -735,6 +738,14 @@ def _publish(dest: Path, fill, secret: str, meta: dict) -> Path:
     return dest
 
 
+def encrypt_stream(dest: Path, fill, secret: str, *, kind: str, content: str) -> Path:
+    """Encrypt whatever `fill(writer)` writes, prove it decrypts, then rename it into place.
+
+    The machine bundle (machine_backup.py) streams its tar straight into the writer, so no
+    plaintext copy of the files it carries is ever written next to the root."""
+    return _publish(dest, fill, secret, {"kind": kind, "content": content})
+
+
 def encrypt_file(source: Path, dest: Path, secret: str, *, kind: str) -> Path:
     def fill(writer):
         with source.open("rb") as inp:
@@ -975,7 +986,8 @@ def status(base: Path) -> dict:
         warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
                         "run `project-observatory full backups migrate`")
     latest = {}
-    for kind, suffix in ((DB_KIND, DB_SUFFIX), *((kind, SNAPSHOT_SUFFIX) for kind in SNAPSHOT_KINDS)):
+    for kind, suffix in ((DB_KIND, DB_SUFFIX), *((k, SNAPSHOT_SUFFIX) for k in SNAPSHOT_KINDS),
+                         (MACHINE_KIND, MACHINE_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
     return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],

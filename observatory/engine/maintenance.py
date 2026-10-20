@@ -17,7 +17,9 @@ timer on Linux — and each pass does only what is due:
    succeeds;
 3. macOS: the app follows the engine (app_update.py), never while it runs;
 4. once a day: a full encrypted snapshot of the workspace (settings, registry, vault,
-   store), with this workspace's tick and server stopped for the copy.
+   store), with this workspace's tick and server stopped for the copy;
+5. once a day: the machine's agent setup into one encrypted `.obmachine` bundle in the same
+   root (machine_backup.py, OBS-157), with every job running.
 
 The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the
@@ -788,6 +790,17 @@ def _snapshot_with_jobs_stopped(base: Path, state: dict, at: datetime.datetime, 
             state.pop("services_not_restarted", None)
 
 
+def step_machine(base: Path, at: datetime.datetime, machine=None) -> dict:
+    """The machine's agent setup, once a day (machine_backup.py, OBS-157). After the workspace
+    snapshot, with every job running: it reads the home and the checkouts, not the workspace.
+    Its own state file records each attempt, so `status` reads it whatever this pass does."""
+    try:
+        import machine_backup
+        return (machine or machine_backup.step)(base, at)
+    except Exception as exc:  # noqa: BLE001: the machine backup never stops a pass
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
 def _tick_busy(base: Path) -> bool:
     """Whether a tick or another workspace operation holds its lock right now."""
     import workspace_upgrade
@@ -886,7 +899,7 @@ def configuration_enabled(base: Path, name: str) -> bool:
 
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
-             clock=time.monotonic, guard=step_guard) -> dict:
+             clock=time.monotonic, guard=step_guard, machine=None) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
     is recorded in store/maintenance.json and named in the answer.
 
@@ -944,6 +957,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                 except Exception as exc:  # noqa: BLE001 — the app never stops a backup
                     report["app"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
+            report["machine"] = step_machine(base, at, machine)
             if services is not None:
                 report["jobs"] = step_jobs()
         state["pass"] = {"at": iso(at)}
@@ -1450,6 +1464,15 @@ def status(base: Path, *, schedule=None) -> dict:
     if retention["stale"] or retention["status"] != "complete":
         warn("log-retention-incomplete", "log retention evidence is incomplete or older than one hour; "
              "inspect scope results with `project-observatory full maintain status`")
+    # The machine bundle (OBS-157): its warnings join the job's, with their own codes.
+    try:
+        import machine_backup
+        machine = machine_backup.status(base)
+    except Exception as exc:  # noqa: BLE001: a status never fails doctor
+        machine = {"error": f"{type(exc).__name__}"}
+    for item in machine.get("warning_items") or []:
+        warnings.append(item["text"])
+        items.append(item)
     versions = {"engine": config.VERSION}
     if sys.platform == "darwin":
         try:
@@ -1465,6 +1488,7 @@ def status(base: Path, *, schedule=None) -> dict:
             "last_pass": (state.get("pass") or {}).get("at"), "check": state.get("check"),
             "update": state.get("update"), "update_in_flight": state.get("update_in_flight"),
             "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
+            "machine_backup": machine,
             "app": state.get("app"), "log_retention": retention,
             "warnings": warnings, "warning_items": items}
 
