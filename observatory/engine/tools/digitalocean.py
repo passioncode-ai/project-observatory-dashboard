@@ -1317,8 +1317,16 @@ def _refuse_broad(value: str, preset: str) -> None:
             continue
         try:
             _api(path, value)
+        except ApiError as e:
+            # Only the provider saying "no" (401, 403) or "nothing there" (404) proves the token cannot
+            # read it. A 429, a 5xx or a broken transport proves nothing, so the install stops.
+            if e.status in (401, 403, 404):
+                continue
+            raise DoorError(f"could not prove the token is narrow: {_endpoint(path)} answered HTTP {e.status}; "
+                            f"nothing was written and the installed value is kept; retry") from None
         except DoorError:
-            continue
+            raise DoorError(f"could not prove the token is narrow: {_endpoint(path)} could not be read; "
+                            f"nothing was written and the installed value is kept; retry") from None
         raise DoorError(f"refused: the token can read {_endpoint(path)} ({scope}), which preset {preset} does "
                         f"not include; it is broader than declared (full access?). Mint it with only the "
                         f"preset's scopes")
@@ -1458,6 +1466,11 @@ def _rotate_locked(label: str, value: str) -> int:
     if old is None:
         print("  old value: none was installed")
         return 0
+    if not token_ok(old):
+        # It was never sent, so nothing is known about it at DigitalOcean.
+        print(f"  old value: could not be checked, the stored value was malformed (never sent); delete the old "
+              f"token in the control panel ({PANEL_TOKENS})", file=sys.stderr)
+        return 2
     if revoke_and_prove(old):
         print("  old value: revoked (DigitalOcean now refuses it)")
         return 0
@@ -1486,6 +1499,10 @@ def _revoke_locked(label: str, forget: bool) -> int:
         _journal("forget", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
         print(f"forgot {label}: record removed; this door did NOT observe a revocation (its value was gone)")
         return 0
+    if not token_ok(value):
+        raise DoorError(f"{label}: the stored value is malformed and was never sent, so it could not be checked; "
+                        f"nothing was removed here. Delete the token in the control panel ({PANEL_TOKENS}), "
+                        f"then `digitalocean.py revoke {label} --forget`")
     if not revoke_and_prove(value):
         raise DoorError(f"DigitalOcean still accepts {label}; nothing was removed here. Delete the token in "
                         f"the control panel ({PANEL_TOKENS}), then run revoke again")

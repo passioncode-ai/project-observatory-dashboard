@@ -80,6 +80,7 @@ class Provider:
         }
         self.revocable = True           # does the OAuth revoke endpoint kill a PAT?
         self.rate_limited: set[str] = set()
+        self.unavailable: set[str] = set()      # paths answering 503
         self.delay = 0.0                # seconds per request, to widen a race window
         self.calls: list[tuple[str, str, str]] = []   # (method, path, team uuid or "?")
         self.created_teams: list[dict] = []
@@ -162,6 +163,8 @@ def serve(provider: Provider) -> tuple[http.server.ThreadingHTTPServer, str]:
                 return self._send(401, {"id": "Unauthorized", "message": "Unable to authenticate you"})
             if any(path.startswith(p) for p in tok["forbid"]):
                 return self._send(403, {"id": "Forbidden", "message": "You are not authorized"})
+            if path in provider.unavailable:
+                return self._send(503, {"id": "service_unavailable"})
             if path in provider.rate_limited:
                 return self._send(429, {"id": "too_many_requests"}, {"Retry-After": "30"})
             team = tok["team"]
@@ -446,6 +449,23 @@ def case_review_round_1(tmp: pathlib.Path, env: dict, provider: Provider) -> Non
     check("the doors hold one records lock around install, rotate and revoke",
           DOOR.read_text().count("with records_lock():") == 3)
 
+    # Confirming round: a probe that answers 429 or 503 proves nothing; a broad token is not let in.
+    before = slot.read_text()
+    for kind, bucket in (("429", provider.rate_limited), ("503", provider.unavailable)):
+        bucket.update({"/v2/account/keys", "/v2/tags"})
+        r = door(env, "rotate", label, stdin=BROAD_A + "\n")
+        bucket.clear()
+        check(f"a breadth probe answering {kind} refuses the rotate and keeps the installed value",
+              r.returncode != 0 and "could not prove the token is narrow" in r.stderr and kind in r.stderr
+              and slot.read_text() == before and provider.tokens[BROAD_A]["alive"]
+              and clean(r.stdout + r.stderr), (r.stdout + r.stderr)[-300:])
+    provider.rate_limited.update({"/v2/account/keys", "/v2/tags"})
+    r = door(env, "install", "--preset", "observatory-read", "--team", "other-team", stdin=FOREIGN + "\n")
+    provider.rate_limited.clear()
+    check("and refuses the install, writing nothing",
+          r.returncode != 0 and "could not prove" in r.stderr
+          and not (tmp / "secrets" / "digitalocean-read.d" / "other-team").exists(), r.stderr[-300:])
+
     # HIGH 1: with its value gone, revoke claims nothing and keeps the record.
     slot.unlink()
     r = door(env, "revoke", label)
@@ -474,6 +494,10 @@ def case_review_round_1(tmp: pathlib.Path, env: dict, provider: Provider) -> Non
         r = door(env, *args, stdin=stdin)
         check(f"{args[0]} over that slot prints no value and no traceback",
               clean(r.stdout + r.stderr) and "Traceback" not in r.stderr, (r.stdout + r.stderr)[-300:])
+        if args[0] in ("revoke", "rotate"):
+            check(f"{args[0]} says the malformed old value could not be checked, not that DigitalOcean accepts it",
+                  "malformed" in r.stderr and "STILL ACCEPTED" not in r.stderr and "still accepts" not in r.stderr
+                  and "cloud.digitalocean.com" in r.stderr, r.stderr[-300:])
     r = door(env, "stash", stdin="dop_v1_" + "ab" * 8 + "\x07" + "cd" * 8 + "\n")
     check("a control character on stdin is refused before anything is sent",
           r.returncode != 0 and "cannot have" in r.stderr, r.stderr[-200:])
