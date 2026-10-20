@@ -530,6 +530,9 @@ def doctor(base: Path) -> dict:
             "vector_namespaces": _vector_namespaces(base),
             # PB-137 N-008: who may reach memory over HTTP besides the local stdio agent.
             "access_bindings": _access_bindings(base),
+            # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
+            # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
+            "meter": _meter_readiness(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -551,6 +554,12 @@ def _access_bindings(base: Path) -> dict:
     sys.path.insert(0, str(config.SOURCE))
     import memory_access
     return memory_access.status(base / "config", base / "store")
+
+
+def _meter_readiness(base: Path) -> dict:
+    sys.path.insert(0, str(config.SOURCE))
+    import meter
+    return meter.readiness_at(base / "config" / "meter.json")
 
 
 def _vector_namespaces(base: Path) -> list[dict]:

@@ -27,16 +27,22 @@ receipt (`settle`), and an unsettled reservation lapses at `expiresAt`. A settle
 not what was reserved. The meter keeps no caller identity: a reservation records the grant, the project, the
 task key, the key reference and the token's jti, never the principal or the chain (DL-22).
 
-Configuration is `config/meter.json`; every field is optional:
+Configuration is `config/meter.json`; every field but the trusted issuer is optional:
 
     {"audience": "project-observatory", "capability": "grant.check", "issuer": "urn:fabric:estate:<id>",
-     "hubJson": "<path to the hub's hub.json: its jwks and grantsDir>",
+     "hubJson": "<path to the hub's hub.json: its issuer, jwks and grantsDir>",
      "jwks": "<path to a JWK Set file>", "grantsDir": "<path>",
      "estateMonthUsd": 1000, "alertRatio": 0.8, "keyCeilingsUsd": {"<project-key ref>": 100},
      "reservationSeconds": 3600}
 
 `jwks` and `grantsDir` override what `hubJson` names. The keys are re-read at most every 10 minutes, and at most
 once a minute on an unknown `kid` (DL-15).
+
+The issuer the meter trusts (the token's `iss`, contract DEC-0045 item 7) is required: `issuer` when set, else the
+`issuer` the hub's `hub.json` names beside its `jwks` (DL-16 declares the two together), and only when the keys come
+from that same file. Keys from a separate `jwks` file need `issuer` set beside them. With no issuer every check is
+`principal-unproven` (`issuer-unavailable:no-trusted-issuer`), and `readiness()` and `full doctor` say so: the meter
+never accepts a token merely because a key in the set signed it.
 """
 from __future__ import annotations
 
@@ -83,13 +89,13 @@ _JTI = re.compile(r"^[A-Za-z0-9._~-]{16,128}$")
 _GRANT_REF = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._:-]{0,199})#(0|[1-9][0-9]{0,15})$")
 MAX_PROJECTED_GRANT_BYTES = 1_048_576
 #: An RFC 3339 date-time with `Z` or a numeric offset; a local time is not one.
-_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$")
+_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$", re.ASCII)  # ASCII digits
 _SCHEMAS = Path(__file__).resolve().parent / "fabric" / "delegation-schemas"
 _GRANT_VALIDATOR: Any = None
 
 
 def rfc3339(value: Any) -> Optional[int]:
-    if not isinstance(value, str) or not _RFC3339.match(value):
+    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
         return None
     return parse_time(value.replace("t", "T").replace("z", "Z"))
 
@@ -165,7 +171,7 @@ def validate_request(request: Any) -> dict:
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount < 0 or amount != amount \
             or amount == float("inf"):
         raise RequestError("amountUsd must be a number of USD at least 0")
-    if not isinstance(request.get("tokenJti"), str) or not _JTI.match(request["tokenJti"]):
+    if not isinstance(request.get("tokenJti"), str) or not _JTI.fullmatch(request["tokenJti"]):
         raise RequestError("tokenJti must be the jti of the token the callee was called with")
     ref = request.get("grantRef")
     if ref is not None and (not isinstance(ref, str) or not 1 <= len(ref) <= 256):
@@ -226,7 +232,6 @@ class Meter:
         self.base = base or Path.cwd()
         self.audience = self.config.get("audience", AUDIENCE)
         self.capability = self.config.get("capability", CAPABILITY)
-        self.issuer = self.config.get("issuer")
         self.estate_month = float(self.config.get("estateMonthUsd", ESTATE_MONTH_USD))
         self.alert_ratio = float(self.config.get("alertRatio", ALERT_RATIO))
         self.key_ceilings = {str(k): float(v) for k, v in (self.config.get("keyCeilingsUsd") or {}).items()}
@@ -261,6 +266,52 @@ class Meter:
         if path is not None:
             return json.loads(path.read_text(encoding="utf-8"))
         return self._hub().get("jwks")
+
+    def trusted_issuer(self) -> tuple[Optional[str], Optional[str]]:
+        """(the issuer this meter trusts, where it came from: `config` or `hub`), or (None, None).
+
+        `issuer` in config/meter.json wins. Otherwise the hub's own `hub.json` may name it beside the keys it
+        publishes (DL-16, `auth.delegation: {issuer, jwks}`), and it is taken only when the keys are that file's
+        too: an issuer one file names does not vouch for keys another file holds. Read on every call, as the keys
+        are, so a hub that starts after the meter is picked up."""
+        configured = self.config.get("issuer")
+        if configured is not None:
+            return (configured, "config") if isinstance(configured, str) and configured else (None, None)
+        if self.config.get("jwks"):
+            return None, None
+        try:
+            named = self._hub().get("issuer")
+        except (OSError, ValueError):
+            return None, None
+        return (named, "hub") if isinstance(named, str) and named else (None, None)
+
+    @property
+    def issuer(self) -> Optional[str]:
+        return self.trusted_issuer()[0]
+
+    def readiness(self) -> dict:
+        """What the meter needs to answer anything but a denial, read without touching its ledger: the trusted
+        issuer and where it came from, the estate's keys and the grant directory, each missing one named in
+        `degraded`, and the one line that fixes the first of them."""
+        _issuer, source = self.trusted_issuer()
+        try:
+            keys_ok = delegation.has_keys(self._read_jwks())
+        except (OSError, ValueError):
+            keys_ok = False
+        directory = self.grants_dir()
+        grants_ok = directory is not None and directory.is_dir()
+        degraded = [code for code, ok in (("meter:no-trusted-issuer", source is not None),
+                                          ("meter:no-estate-keys", keys_ok),
+                                          ("meter:no-grant-directory", grants_ok)) if not ok]
+        nxt = None
+        if source is None:
+            nxt = ('set "issuer" in config/meter.json to the estate issuer Fabric names '
+                   '("urn:fabric:estate:<id>"), or point "hubJson" at a hub.json that names its "issuer" and "jwks"')
+        elif not keys_ok:
+            nxt = 'point "jwks" or "hubJson" in config/meter.json at the estate\'s published keys'
+        elif not grants_ok:
+            nxt = 'point "grantsDir" or "hubJson" in config/meter.json at the hub\'s grant projection'
+        return {"issuer": source, "keys": keys_ok, "grantDirectory": grants_ok, "degraded": degraded, "next": nxt}
 
     def grants_dir(self) -> Optional[Path]:
         path = self._path(self.config.get("grantsDir"))
@@ -358,7 +409,7 @@ class Meter:
         directory = self.grants_dir()
         if directory is None:
             return deny("unknown-state", "no grant directory is configured")
-        match = _GRANT_REF.match(ref)
+        match = _GRANT_REF.fullmatch(ref)
         if not match:
             return deny("no-grant", "malformed-reference")
         grant_id, revision = match.group(1), int(match.group(2))
@@ -449,6 +500,8 @@ class Meter:
         accepted = delegation.verify_meter_token(token, meter=self.audience, capability=self.capability,
                                                  jwks=self.keys.get(_token_kid(token)), now=now,
                                                  issuer=self.issuer)
+        # verify_meter_token keeps the verifier's code and detail in its detail ("issuer-unavailable:no-trusted-
+        # issuer"), so a meter with no issuer configured says why it denies.
         if not accepted.ok:
             return self._denied(now, "principal-unproven", f"the meter's token was refused ({accepted.detail})")
         request = validate_request(request)
@@ -616,16 +669,7 @@ class Meter:
             keys = {r["key_ref"]: float(r["used"]) for r in conn.execute(
                 f"SELECT key_ref, SUM({self._counted()}) AS used FROM reservations WHERE created_at >= :since "
                 "AND key_ref IS NOT NULL GROUP BY key_ref", month)}
-        directory = self.grants_dir()
-        try:
-            keys_ok = delegation.has_keys(self._read_jwks())
-        except (OSError, ValueError):
-            keys_ok = False
-        degraded = []
-        if not keys_ok:
-            degraded.append("meter:no-estate-keys")
-        if directory is None or not directory.is_dir():
-            degraded.append("meter:no-grant-directory")
+        degraded = self.readiness()["degraded"]
         ratio = estate / self.estate_month if self.estate_month > 0 else 1.0
         return {"audience": self.audience, "capability": self.capability,
                 "month": iso(window_start("month", now))[:7], "estateUsd": round(estate, 6),
@@ -634,6 +678,17 @@ class Meter:
                 "keys": {k: {"usedUsd": round(v, 6), "ceilingUsd": self.key_ceilings.get(k)}
                          for k, v in sorted(keys.items())},
                 "degraded": degraded}
+
+
+def readiness_at(config_path: Path) -> dict:
+    """The meter's readiness as `full doctor` reports it, from a config/meter.json path; never opens the ledger."""
+    try:
+        config = load_config(config_path)
+        meter = Meter(db_path=config_path.parent / "meter.db", config=config, base=config_path.parent)
+    except (OSError, ValueError) as exc:
+        return {"configured": config_path.is_file(), "issuer": None, "keys": False, "grantDirectory": False,
+                "degraded": ["meter:config-unreadable"], "next": f"fix config/meter.json ({type(exc).__name__})"}
+    return {"configured": config_path.is_file(), **meter.readiness()}
 
 
 def default_meter() -> Meter:
