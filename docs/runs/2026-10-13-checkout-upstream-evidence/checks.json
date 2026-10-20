@@ -1,0 +1,97 @@
+{
+  "status": "PASS_SCOPED_SOURCE",
+  "base": "284bc398a482c226ed9776eaee629221939e8928",
+  "source_hashes": {
+    "checkout_graph.py": "ddc107eadbc38a13dc3ac887d94fbdba4ece6d728887112c6dd049a33ee4bb03",
+    "checkout_inventory.py": "431809f29b45cf199104f0b472e3d88743f359fd92ce6da3c81cedbf4c8371f0",
+    "coverage_view.py": "1ce5a36c8a7db5b7ce17351759eafc73309bf5914156a57d931bdce075c80d13",
+    "tests/test_checkout_state.py": "280be5fd61fc68a203fac20e0367a62fa681811cd0278d13ded5956fd3663a43",
+    "tests/run_portable.py": "03b33d6914defd127a1a84709cdb6583d340280624aa35345dbdc255d14f316e"
+  },
+  "tests_first": {
+    "missing_module_errors": 6,
+    "exit_code": 1
+  },
+  "portable_suites": [
+    {
+      "file": "tests/test_checkout_state.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 26
+    },
+    {
+      "file": "tests/test_checkout_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 12
+    },
+    {
+      "file": "tests/test_coverage_view.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 8
+    },
+    {
+      "file": "tests/test_open_unlinked.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 12
+    }
+  ],
+  "final_additive_scan_reader_test": {
+    "checkout_state_cases": 27,
+    "exit_code": 0
+  },
+  "docs_check_exit": 0,
+  "not_run": [
+    "hosted-CI",
+    "installed-runtime",
+    "live-provider",
+    "remote-durability",
+    "lifecycle-authorization",
+    "native-Windows"
+  ],
+  "initial_source_hashes": {
+    "checkout_graph.py": "ddc107eadbc38a13dc3ac887d94fbdba4ece6d728887112c6dd049a33ee4bb03",
+    "checkout_inventory.py": "a68439786b2ac9ad97d0bf22cba886875b3c925cbcd00415a2a8b8be13290336",
+    "coverage_view.py": "bf002de661ddd746566f187f4f69a668feed12dc29df3c11f8c6c494ec071de6",
+    "tests/test_checkout_state.py": "db5cdd812f30d21801e8a2570b2900443c2c5373023b00d1e4f4e5de9d845090",
+    "tests/run_portable.py": "03b33d6914defd127a1a84709cdb6583d340280624aa35345dbdc255d14f316e"
+  },
+  "corrected_suites": [
+    {
+      "file": "tests/test_checkout_state.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 28
+    },
+    {
+      "file": "tests/test_checkout_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 12
+    },
+    {
+      "file": "tests/test_coverage_view.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 8
+    }
+  ],
+  "initial_review": {
+    "source": "885d1f6445b87120302b4d9500be18bf625e9f12",
+    "verdict": "CHANGES_REQUIRED",
+    "findings": [
+      "graph phase could borrow unused discovery time beyond declared cap",
+      "malformed saved bindings could project counts"
+    ],
+    "reproduced_failing_outcomes": 6
+  },
+  "independent_review": {
+    "source": "52c40faa2f4e286e2935439b0174d934ae9299d0",
+    "verdict": "PASS_SCOPED_SOURCE",
+    "original_counterexamples_and_controls": 6,
+    "additional_controls": 21,
+    "limits": "No remote durability, lifecycle authority, installed or whole-system acceptance."
+  }
+}

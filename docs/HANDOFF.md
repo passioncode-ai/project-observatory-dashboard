@@ -17,6 +17,26 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+2026-10-19, release 0.25.0 integration: the 2026-10-13 recovery work of #260, #278 and #280 merged onto current
+main in one pull request (#303), with main's M-8 (#289) merged in. Versions are 0.25.0, the `observatory-log` plugin
+included (M-8 changed its hooks and skill). Main's OpenRouter door is kept: the branch's rotation-exposure, policy-provenance, consumer-evidence revoke
+and spend code, its six OpenRouter suites and their text were left out (OBS-150); the wave-8 rotation-capacity stack
+is OBS-149. Fix cycle 1 (missing-worktree HEAD retention, coverage `degraded`, local upstreams, log links, absent log folders) landed; M-8's last LOWs are OBS-152 and OBS-153. Root tests and every complete-engine suite pass locally. Next: hosted checks on the pull request,
+review and merge, then the 0.25.0 tag and installed acceptance with automatic cleanup off.
+
+2026-10-18, automatic project registration follow-up: a remoteless worktree joins its main checkout's project
+instead of becoming a sibling (`collectors/scan_filesystem.py` `worktree_main`, `collectors/merge.py`;
+`tests/test_local_folders.py` fails without the fix). Root tests and `project-observatory full check` exit 0 locally.
+Next: release, so SessionStart registration reaches the operator's installed engine.
+
+[2026-10-17 — Automatic project registration](runs/2026-10-17-automatic-project-registration/README.md):
+SessionStart declares an eligible external Git checkout in `config/tracked.json`;
+the ordinary local/tick pipeline materializes it. Removal markers, exclusions,
+worktree dedupe, degraded inputs and identity ambiguity are preserved. Root tests
+(214, two clean runs) and all 249 complete-engine suites pass; the three external
+acceptance scopes remain explicitly unrun. Next: cross-repository integration.
+No credential/memory grant or organization change.
+
 [2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
 OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
 OBS-87 adds independent memory observations. Next: combined source acceptance,

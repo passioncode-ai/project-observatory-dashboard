@@ -1,0 +1,407 @@
+{
+  "$comment": "Shared vectors of the contract's two canonical JSON forms (DEC-0043, docs/specification/conformance.md#canonical-forms). A kit port runs its own functions over them. `inputJson` is JSON text to parse where the text matters (RFC samples, -0, a lone surrogate); otherwise `input` is the value. `ieee754` is the big-endian hex of a double. Settings-form outputs were written by Python's json.dumps(value, sort_keys=True, ensure_ascii=False); RFC 8785 outputs are the RFC's own (text pinned in docs/evidence/sources.md) or written by a UTF-16 code-unit sort over integers and strings.",
+  "settings": {
+    "function": "settingsCanonicalJson (src/canonical.ts)",
+    "vectors": [
+      {
+        "name": "separators, null, literals, escaping",
+        "input": {
+          "b": [
+            1,
+            "\u00e9\n\"x\"",
+            true
+          ],
+          "a": null,
+          "c": {}
+        },
+        "expected": "{\"a\": null, \"b\": [1, \"\u00e9\\n\\\"x\\\"\", true], \"c\": {}}"
+      },
+      {
+        "name": "code-point key order above U+FFFF",
+        "note": "U+FF61 < U+FFFF < U+1F600 by code point; UTF-16 order would put U+1F600 (D83D DE00) before U+FFFF",
+        "input": {
+          "\ud83d\ude00": 1,
+          "\uffff": 2,
+          "\uff61": 3
+        },
+        "expected": "{\"\uff61\": 3, \"\uffff\": 2, \"\ud83d\ude00\": 1}"
+      },
+      {
+        "name": "RFC 8785 \u00a73.2.3 sorting sample, in code-point order",
+        "note": "the emoji sorts last here and before U+FB33 in RFC 8785",
+        "inputJson": "{\n  \"\\u20ac\": \"Euro Sign\",\n  \"\\r\": \"Carriage Return\",\n  \"\\ufb33\": \"Hebrew Letter Dalet With Dagesh\",\n  \"1\": \"One\",\n  \"\\ud83d\\ude00\": \"Emoji: Grinning Face\",\n  \"\\u0080\": \"Control\",\n  \"\\u00f6\": \"Latin Small Letter O With Diaeresis\"\n}",
+        "expected": "{\"\\r\": \"Carriage Return\", \"1\": \"One\", \"\u0080\": \"Control\", \"\u00f6\": \"Latin Small Letter O With Diaeresis\", \"\u20ac\": \"Euro Sign\", \"\ufb33\": \"Hebrew Letter Dalet With Dagesh\", \"\ud83d\ude00\": \"Emoji: Grinning Face\"}"
+      },
+      {
+        "name": "nesting, control characters, empty key",
+        "input": {
+          "z": {
+            "y": [
+              {
+                "b": 0,
+                "a": -1
+              }
+            ]
+          },
+          "ctl": "\u0000\u001f\u007f\t\u2028",
+          "": []
+        },
+        "expected": "{\"\": [], \"ctl\": \"\\u0000\\u001f\u007f\\t\u2028\", \"z\": {\"y\": [{\"a\": -1, \"b\": 0}]}}"
+      },
+      {
+        "name": "integer bounds and minus zero",
+        "inputJson": "[9007199254740991, -9007199254740991, 0, -0]",
+        "expected": "[9007199254740991, -9007199254740991, 0, 0]"
+      }
+    ],
+    "refuses": [
+      {
+        "name": "a fraction",
+        "inputJson": "{\"price\": 0.5}"
+      },
+      {
+        "name": "an integer above 2^53 - 1",
+        "inputJson": "[9007199254740992]"
+      },
+      {
+        "name": "an integer below -(2^53 - 1)",
+        "inputJson": "[-9007199254740992]"
+      },
+      {
+        "name": "an exponent form that is not an integer",
+        "inputJson": "1e-7"
+      },
+      {
+        "name": "a lone surrogate (CT-25, DEC-0052)",
+        "inputJson": "\"\\ud800\""
+      },
+      {
+        "name": "a lone surrogate in a key (CT-25, DEC-0052)",
+        "inputJson": "{\"\\udc00\": 1}"
+      },
+      {
+        "name": "a lone low surrogate after a pair",
+        "inputJson": "[\"\\ud83d\\ude00\\ude00\"]"
+      }
+    ]
+  },
+  "rfc8785": {
+    "function": "rfc8785 (src/canonical.ts)",
+    "vectors": [
+      {
+        "name": "RFC 8785 \u00a73.2.2 sample, canonicalised as \u00a73.2.3 prints it",
+        "note": "utf8Hex is \u00a73.2.4",
+        "inputJson": "{\n  \"numbers\": [333333333.33333329, 1E30, 4.50,\n              2e-3, 0.000000000000000000000000001],\n  \"string\": \"\\u20ac$\\u000F\\u000aA'\\u0042\\u0022\\u005c\\\\\\\"\\/\",\n  \"literals\": [null, true, false]\n}",
+        "expected": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"\u20ac$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+        "utf8Hex": "7b226c69746572616c73223a5b6e756c6c2c747275652c66616c73655d2c226e756d62657273223a5b3333333333333333332e333333333333332c31652b33302c342e352c302e3030322c31652d32375d2c22737472696e67223a22e282ac245c75303030665c6e4127425c225c5c5c5c5c222f227d"
+      },
+      {
+        "name": "RFC 8785 \u00a73.2.3 sorting sample: UTF-16 code-unit order",
+        "note": "argument order: Carriage Return, One, Control, Latin Small Letter O With Diaeresis, Euro Sign, Emoji: Grinning Face, Hebrew Letter Dalet With Dagesh",
+        "inputJson": "{\n  \"\\u20ac\": \"Euro Sign\",\n  \"\\r\": \"Carriage Return\",\n  \"\\ufb33\": \"Hebrew Letter Dalet With Dagesh\",\n  \"1\": \"One\",\n  \"\\ud83d\\ude00\": \"Emoji: Grinning Face\",\n  \"\\u0080\": \"Control\",\n  \"\\u00f6\": \"Latin Small Letter O With Diaeresis\"\n}",
+        "expected": "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\u0080\":\"Control\",\"\u00f6\":\"Latin Small Letter O With Diaeresis\",\"\u20ac\":\"Euro Sign\",\"\ud83d\ude00\":\"Emoji: Grinning Face\",\"\ufb33\":\"Hebrew Letter Dalet With Dagesh\"}"
+      },
+      {
+        "name": "UTF-16 key order above U+FFFF",
+        "note": "U+FF61 < U+1F600 (D83D DE00) < U+FFFF by UTF-16 code unit",
+        "input": {
+          "\ud83d\ude00": 1,
+          "\uffff": 2,
+          "\uff61": 3
+        },
+        "expected": "{\"\ud83d\ude00\":1,\"\uff61\":3,\"\uffff\":2}"
+      },
+      {
+        "name": "nesting, control characters, empty key",
+        "input": {
+          "z": {
+            "y": [
+              {
+                "b": 0,
+                "a": -1
+              }
+            ]
+          },
+          "ctl": "\u0000\u001f\u007f\t\u2028",
+          "": []
+        },
+        "expected": "{\"\":[],\"ctl\":\"\\u0000\\u001f\u007f\\t\u2028\",\"z\":{\"y\":[{\"a\":-1,\"b\":0}]}}"
+      },
+      {
+        "name": "minus zero",
+        "inputJson": "[-0]",
+        "expected": "[0]"
+      }
+    ],
+    "numbers": [
+      {
+        "ieee754": "0000000000000000",
+        "expected": "0",
+        "note": "Zero"
+      },
+      {
+        "ieee754": "8000000000000000",
+        "expected": "0",
+        "note": "Minus zero"
+      },
+      {
+        "ieee754": "0000000000000001",
+        "expected": "5e-324",
+        "note": "Min pos number"
+      },
+      {
+        "ieee754": "8000000000000001",
+        "expected": "-5e-324",
+        "note": "Min neg number"
+      },
+      {
+        "ieee754": "7fefffffffffffff",
+        "expected": "1.7976931348623157e+308",
+        "note": "Max pos number"
+      },
+      {
+        "ieee754": "ffefffffffffffff",
+        "expected": "-1.7976931348623157e+308",
+        "note": "Max neg number"
+      },
+      {
+        "ieee754": "4340000000000000",
+        "expected": "9007199254740992",
+        "note": "Max pos int (1)"
+      },
+      {
+        "ieee754": "c340000000000000",
+        "expected": "-9007199254740992",
+        "note": "Max neg int (1)"
+      },
+      {
+        "ieee754": "4430000000000000",
+        "expected": "295147905179352830000",
+        "note": "~2**68 (2)"
+      },
+      {
+        "ieee754": "44b52d02c7e14af5",
+        "expected": "9.999999999999997e+22"
+      },
+      {
+        "ieee754": "44b52d02c7e14af6",
+        "expected": "1e+23"
+      },
+      {
+        "ieee754": "44b52d02c7e14af7",
+        "expected": "1.0000000000000001e+23"
+      },
+      {
+        "ieee754": "444b1ae4d6e2ef4e",
+        "expected": "999999999999999700000"
+      },
+      {
+        "ieee754": "444b1ae4d6e2ef4f",
+        "expected": "999999999999999900000"
+      },
+      {
+        "ieee754": "444b1ae4d6e2ef50",
+        "expected": "1e+21"
+      },
+      {
+        "ieee754": "3eb0c6f7a0b5ed8c",
+        "expected": "9.999999999999997e-7"
+      },
+      {
+        "ieee754": "3eb0c6f7a0b5ed8d",
+        "expected": "0.000001"
+      },
+      {
+        "ieee754": "41b3de4355555553",
+        "expected": "333333333.3333332"
+      },
+      {
+        "ieee754": "41b3de4355555554",
+        "expected": "333333333.33333325"
+      },
+      {
+        "ieee754": "41b3de4355555555",
+        "expected": "333333333.3333333"
+      },
+      {
+        "ieee754": "41b3de4355555556",
+        "expected": "333333333.3333334"
+      },
+      {
+        "ieee754": "41b3de4355555557",
+        "expected": "333333333.33333343"
+      },
+      {
+        "ieee754": "becbf647612f3696",
+        "expected": "-0.0000033333333333333333"
+      },
+      {
+        "ieee754": "43143ff3c1cb0959",
+        "expected": "1424953923781206.2",
+        "note": "Round to even (4)"
+      }
+    ],
+    "refuses": [
+      {
+        "name": "a lone surrogate",
+        "inputJson": "\"\\ud800\""
+      },
+      {
+        "name": "a lone surrogate in a key",
+        "inputJson": "{\"\\udc00\": 1}"
+      },
+      {
+        "name": "NaN (3)",
+        "ieee754": "7fffffffffffffff"
+      },
+      {
+        "name": "Infinity (3)",
+        "ieee754": "7ff0000000000000"
+      }
+    ]
+  },
+  "differ": [
+    {
+      "name": "the audit probe (F-B-315): separators and key order",
+      "input": {
+        "b": 1,
+        "a": [
+          "x",
+          true
+        ],
+        "\ud83d\ude00": 1,
+        "\uff61": 2
+      },
+      "settings": "{\"a\": [\"x\", true], \"b\": 1, \"\uff61\": 2, \"\ud83d\ude00\": 1}",
+      "rfc8785": "{\"a\":[\"x\",true],\"b\":1,\"\ud83d\ude00\":1,\"\uff61\":2}"
+    },
+    {
+      "name": "a fraction: RFC 8785 writes it, the settings form refuses it",
+      "inputJson": "{\"price\": 0.5}",
+      "settings": null,
+      "rfc8785": "{\"price\":0.5}"
+    }
+  ],
+  "commsDigest": {
+    "function": "commsDigest (src/comms-digest.ts); Fabric's commsDigest (apps/desktop/src/main/boardService.ts) gives the same digests",
+    "form": "rfc8785, integers within +-(2^53 - 1) only",
+    "vectors": [
+      {
+        "name": "com.submit of fixtures/positive/comms-submit-request.json",
+        "operation": "com.submit",
+        "args": {
+          "idempotency": {
+            "epoch": 3,
+            "key": "req-2026-10-04-0001"
+          },
+          "thread": {
+            "new": {
+              "participants": [
+                "proj-analytics",
+                "proj-growth"
+              ],
+              "subject": "Weekly retention numbers"
+            }
+          },
+          "kind": "request",
+          "body": {
+            "text": "Please compute 7-day retention for the iOS app and attach the query.",
+            "format": "text/plain"
+          },
+          "request": {
+            "target": "proj-analytics",
+            "capability": "analytics.retention",
+            "deadline": "2026-10-05T12:00:00Z"
+          }
+        },
+        "canonical": "{\"body\":{\"format\":\"text/plain\",\"text\":\"Please compute 7-day retention for the iOS app and attach the query.\"},\"idempotency\":{\"epoch\":3,\"key\":\"req-2026-10-04-0001\"},\"kind\":\"request\",\"request\":{\"capability\":\"analytics.retention\",\"deadline\":\"2026-10-05T12:00:00Z\",\"target\":\"proj-analytics\"},\"thread\":{\"new\":{\"participants\":[\"proj-analytics\",\"proj-growth\"],\"subject\":\"Weekly retention numbers\"}}}",
+        "digest": "sha256:cf57a8690f85fc937374907953d49e670246d771dded6c31a54972eb64a05561"
+      },
+      {
+        "name": "com.submit of fixtures/positive/comms-submit-reply.json",
+        "operation": "com.submit",
+        "args": {
+          "idempotency": {
+            "epoch": 3,
+            "key": "reply-2026-10-04-0002"
+          },
+          "thread": {
+            "id": "thr_8Hc2kQ9xA1"
+          },
+          "kind": "reply",
+          "replyTo": "msg_Q2w3e4r5t6",
+          "body": {
+            "text": "Done: 41.2 % on 2026-09-27 cohort, query attached."
+          },
+          "artifacts": [
+            {
+              "id": "https://example.com/artifacts/retention.sql",
+              "contentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "label": "retention.sql"
+            }
+          ]
+        },
+        "canonical": "{\"artifacts\":[{\"contentHash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"id\":\"https://example.com/artifacts/retention.sql\",\"label\":\"retention.sql\"}],\"body\":{\"text\":\"Done: 41.2 % on 2026-09-27 cohort, query attached.\"},\"idempotency\":{\"epoch\":3,\"key\":\"reply-2026-10-04-0002\"},\"kind\":\"reply\",\"replyTo\":\"msg_Q2w3e4r5t6\",\"thread\":{\"id\":\"thr_8Hc2kQ9xA1\"}}",
+        "digest": "sha256:e8d75f6bd5ce2fee88ce3be510dc636552ba4d4983d1f454e64a5c623981b42d"
+      },
+      {
+        "name": "key order above U+FFFF (not a schema-valid submit)",
+        "operation": "com.submit",
+        "args": {
+          "idempotency": {
+            "epoch": 1,
+            "key": "order-0001"
+          },
+          "body": {
+            "text": "\ud83d\ude00 \u00e9"
+          },
+          "\ud83d\ude00": 1,
+          "\uff61": 2,
+          "n": -9007199254740991
+        },
+        "canonical": "{\"body\":{\"text\":\"\ud83d\ude00 \u00e9\"},\"idempotency\":{\"epoch\":1,\"key\":\"order-0001\"},\"n\":-9007199254740991,\"\ud83d\ude00\":1,\"\uff61\":2}",
+        "digest": "sha256:b1ba23ae241f9dd5c4888eaf35799b985af3153ec5e140d44acb2cca7b3cbcd9"
+      },
+      {
+        "name": "same arguments, another operation",
+        "operation": "com.reply",
+        "args": {
+          "idempotency": {
+            "epoch": 1,
+            "key": "order-0001"
+          },
+          "body": {
+            "text": "\ud83d\ude00 \u00e9"
+          },
+          "\ud83d\ude00": 1,
+          "\uff61": 2,
+          "n": -9007199254740991
+        },
+        "canonical": "{\"body\":{\"text\":\"\ud83d\ude00 \u00e9\"},\"idempotency\":{\"epoch\":1,\"key\":\"order-0001\"},\"n\":-9007199254740991,\"\ud83d\ude00\":1,\"\uff61\":2}",
+        "digest": "sha256:7a152e536400b6880b4d92e2e8df0a4c931a8156e91b7cf0e733b908671bca86"
+      }
+    ],
+    "refuses": [
+      {
+        "name": "a fraction in the arguments",
+        "operation": "com.submit",
+        "argsJson": "{\"n\": 0.5}"
+      },
+      {
+        "name": "an integer above 2^53 - 1",
+        "operation": "com.submit",
+        "argsJson": "{\"n\": 9007199254740992}"
+      },
+      {
+        "name": "a lone surrogate",
+        "operation": "com.submit",
+        "argsJson": "{\"t\": \"\\ud800\"}"
+      },
+      {
+        "name": "a NUL in the operation",
+        "operation": "com.submit\u0000x",
+        "argsJson": "{}"
+      }
+    ]
+  }
+}

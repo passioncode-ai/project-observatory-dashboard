@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.24.5"
+  version: "0.25.0"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -30,7 +30,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.24.5`
+3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.25.0`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old).
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
@@ -175,8 +175,13 @@ confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbi
 provider text; malformed metadata remains unconfirmed and its body is not printed.
 
 
-Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
-`openrouter.py`. Check their installed `--help` and non-secret inventory first.
+Cloudflare, OpenRouter and Heroku have separate tools, `cloudflare.py`,
+`openrouter.py` and `heroku.py`. Check their installed `--help` and non-secret inventory first.
+A Heroku credential is `heroku.py issue --preset read|deploy|identity --vault
+<project>/<env>/<NAME> [--team <team>] [--app <app>]`: an OAuth authorization with that
+scope only, proved and delivered on stdin. Heroku cannot narrow one to a team or an app,
+so prefer `read` and name the app. Team and account membership (`heroku.py member`,
+`cloudflare.py member`) is a printed plan until `--apply`; apply only a change the task asked for.
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.

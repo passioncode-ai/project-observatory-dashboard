@@ -353,20 +353,28 @@ class Tick:
         self.outcomes: dict[str, str] = {}
         self.order: list[str] = []
         self.not_started: list[str] = []
+        from tick_progress import Progress
+        self.progress = Progress(scratch, log)
 
     def step(self, name: str, *argv) -> str:
         """Run a step under the watchdog; log every line it prints under its name; record a
         non-zero exit as a failed step and go on. Returns how it ended (`outcome_of`)."""
-        proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                errors="replace")
-        first = None
-        for line in proc.stdout:
-            first = line if first is None else first
-            log(f"{name}: {line.rstrip()}")
-        rc = proc.wait()
+        self.progress.start(name)
+        try:
+            proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                    errors="replace")
+            first = None
+            for line in proc.stdout:
+                first = line if first is None else first
+                log(f"{name}: {line.rstrip()}")
+            rc = proc.wait()
+        except BaseException:
+            self.progress.finish(None, "unknown")
+            raise
         outcome = outcome_of(rc, first)
+        self.progress.finish(rc, outcome)
         if rc != 0:
             log(f"{name}: EXIT {rc} — recorded as a failed step ({outcome.replace('_', ' ')})")
             self.failed.append((name, rc))
@@ -375,10 +383,18 @@ class Tick:
 
     def bounded(self, name: str, *argv) -> tuple[int, str]:
         """The same watchdog, ungated, for a command whose exit and output the tick reads itself."""
-        p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
-                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
-        return p.returncode, p.stdout + p.stderr
+        self.progress.start(name)
+        try:
+            p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+        except BaseException:
+            self.progress.finish(None, "unknown")
+            raise
+        output = p.stdout + p.stderr
+        first = output.splitlines()[0] if output else None
+        self.progress.finish(p.returncode, outcome_of(p.returncode, first))
+        return p.returncode, output
 
     def write_report(self) -> None:
         try:
@@ -391,6 +407,7 @@ class Tick:
                                  for s, rc in self.failed],
                 "collector_order": self.order,
                 "not_started": self.not_started,
+                "progress": self.progress.document(),
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
             log("tick: could not record the step report")
@@ -479,6 +496,7 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
 
     step("scan-cloudflare", PY, "collectors/scan_cloudflare.py", SCRATCH / "cloudflare_zones.json")
     step("scan-mcp", PY, "collectors/scan_mcp.py", SCRATCH / "mcp.json", "--declarations-only")
+    step("scan-agents", PY, "collectors/scan_agents.py", SCRATCH / "agents.json")
     # THE HARNESS: what every agent session loads, what it costs, which skills match a security rule
     # (docs/design/HARNESS.md). Files only; nothing runs.
     step("scan-harness", PY, "collectors/scan_harness.py", SCRATCH / "harness.json")
@@ -524,6 +542,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # take seconds — the index, the erasure, the review machinery — were `not started`
     # tick after tick. Now they run first and the heavy ones take what is left; what the
     # agent proposes this tick is indexed and exported on the next.
+    # Which Fabric project each project is (OBS-160): asked of Fabric's hub, recorded here.
+    # After `validate`, because it reads the registry this tick wrote; a hub that is down is
+    # named in its own output, never a failed step.
+    step("fabric-attribution", PY, "collectors/scan_fabric_attribution.py", SCRATCH / "fabric-attribution.json")
     step("index", PY, "store/indexer.py", "index")
     step("retention", PY, "store/retention.py", "apply")
     step("sweep", PY, "tools/sweep_fixtures.py")

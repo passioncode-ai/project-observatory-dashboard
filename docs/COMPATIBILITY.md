@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.24.5**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.25.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -60,7 +60,7 @@ Semantic versioning applies to the declared public API even before 1.0 as a proj
 
 External source directories and externally referenced credential stores are **references**, not bundled backup contents. Their independent backup/recovery policy remains the user's responsibility. Internal credential files, when included in a private snapshot, retain private modes and must never be attached to an issue or public release.
 
-**Encrypted artifacts (0.4.1).** Backups written to the backups root use the `OBSENC1` format, version 1: magic `OBSENC1\n`, a length-prefixed JSON header (`format`, `cipher` AES-256-GCM, `kdf` scrypt with `n`/`r`/`p`/`salt`, `nonce_prefix`, `chunk`, `kind`, `content`, `application_version`, `created_at`), then length-prefixed sealed chunks whose nonce is prefix ‖ counter ‖ final-flag, with magic and header as associated data. A reader refuses any other `format`, `cipher` or `kdf`. `.obsnap` holds a gzip tar of a snapshot directory (manifest verified again after decryption); `.obsdb` holds one SQLite file. Three artifacts per kind are kept. The passphrase cannot be recovered; a lost passphrase means a lost backup.
+**Encrypted artifacts (0.4.1).** Backups written to the backups root use the `OBSENC1` format, version 1: magic `OBSENC1\n`, a length-prefixed JSON header (`format`, `cipher` AES-256-GCM, `kdf` scrypt with `n`/`r`/`p`/`salt`, `nonce_prefix`, `chunk`, `kind`, `content`, `application_version`, `created_at`), then length-prefixed sealed chunks whose nonce is prefix ‖ counter ‖ final-flag, with magic and header as associated data. A reader refuses any other `format`, `cipher` or `kdf`. `.obsnap` holds a gzip tar of a snapshot directory (manifest verified again after decryption); `.obsdb` holds one SQLite file. `.obmachine` (kind `machine`, OBS-157) holds a gzip tar of a machine bundle: `files/`, `abs/`, `inventories/`, `checkouts/` and `MANIFEST.json` (`format` `observatory-machine/1`); a reader refuses another `format`. Three artifacts per kind are kept. The passphrase cannot be recovered; a lost passphrase means a lost backup.
 
 ## Original installation migration
 
@@ -212,3 +212,35 @@ used to be followed by SQLite's message, which is no longer copied anywhere.
 On a busy machine the first tick or two may stop at the step's deadline and raise
 `secret.leak_scan_partial` until the marks catch up. Nothing is removed; older readers ignore
 the new keys.
+
+## Registry: agents (OBS-83)
+
+New file `registry/agents.json` (schema_version 1, `observatory/engine/schemas/agents.schema.json`),
+written by the emit from `store/raw/agents.json` (new, collector `collectors/scan_agents.py`, tick step
+`scan-agents`, run with `features.machine_watch`) and `store/raw/mcp.json`, and validated by
+`validate`. It declares a new source, `SRC-0020`. Rows are `agent:<service-id>.<instance>`, one per
+fabric-service/0.1 descriptor (`agent:file:<name>` when a descriptor's own id is unusable), and carry no
+`auth` field, no absolute home path and no URL user-info or query (`key_in_url` says one was dropped). The
+document's `stale` is true when the collector's scan is older than one tick. `updated_on` is the day the emit
+wrote it; `scanned_on`, `first_seen_on` and `last_seen_running_on` are the scan's.
+Rows kept from an unreadable services directory carry `carried_since` and are left out of the supervisor
+totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents claim), `unattributed_http`, `stdio`
+(declarations whose transport is stdio) and `other` (neither stdio nor an HTTP(S) origin, such as `ws://` or a
+malformed target). URLs fail closed: `origin` and `source_repository` are
+kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with "origin unreadable" in
+`degraded`); in every other string a URL-shaped token that is not strict (`@`, `:/`, `:\`, or `?`/`#` after a
+`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment, including doubled separators, `./` and `../`
+segments before it and, on macOS, the `/System/Volumes/Data` firmlink (`_`, `-` and any punctuation before it
+are boundaries). `validate` refuses the home directory anywhere it ends a path, independently of that rewrite, so
+a form the rewrite misses makes the scan stale instead of reaching the registry. This
+covers scheme URLs with user-info, a query or a fragment; a schemeless `token=…`, a bare `?key=…` or a
+percent-encoded form is not recognised as a URL. A Windows drive path outside the home (`C:\work\x`) holds
+`:\` and is written `[url]` too. When the scan is missing or cannot be used (including a scan row without a valid agent id, and any
+scan that would produce a document `validate` refuses), the previous document is kept with `stale: true` and a
+degraded line naming the error and the day its rows are from; rows are rebuilt from the schema's keys only, so an
+undeclared key such as `auth` is never written; a descriptor file whose
+name is shaped like a URL is not read. A scan dated after the emit is stale
+(`clock-skew` in `degraded`). The wiki projection
+mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
+file on its first tick with the feature on. Until then it is absent, and no reader requires it.
+

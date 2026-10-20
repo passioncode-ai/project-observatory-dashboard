@@ -37,14 +37,15 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (24)
+    # observatory_* tools (25)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_lesson",
     "observatory_machine",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
-    "observatory_record", "observatory_resolve", "observatory_search", "observatory_status",
+    "observatory_record", "observatory_resolve", "observatory_search", "observatory_ssh_keys",
+    "observatory_status",
     "observatory_timeline", "observatory_workflow_list",
     # Fabric capabilities (fabric-interop/0.1) and their job tools (9)
     "estate.survey", "machine.mcp.inventory", "machine.mcp.refresh", "project.detail",
@@ -111,6 +112,16 @@ async def run() -> None:
                   f"{len(disc.instructions or '')} characters")
 
             listed = await session.list_tools()
+            machine_tool = next(t for t in listed.tools if t.name == "observatory_machine")
+            check("machine coverage is advertised in the actual input enum",
+                  "coverage" in machine_tool.input_schema["properties"]["section"]["enum"])
+            check("machine coverage has a published bounded output schema",
+                  machine_tool.output_schema["properties"]["coverage"]["properties"]["checkouts"]["properties"]["rows"]["maxItems"] == 10)
+            coverage_result = payload(await session.call_tool("observatory_machine", {"section": "coverage"}))
+            check("machine coverage reads absent saved receipts as unknown over stdio",
+                  not coverage_result["coverage"]["actionable"]
+                  and coverage_result["coverage"]["checkouts"]["snapshot_count"] is None
+                  and coverage_result["coverage"]["caches"]["reclaimable_bytes"] is None)
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")

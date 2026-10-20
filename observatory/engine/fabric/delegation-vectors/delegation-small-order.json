@@ -1,0 +1,42 @@
+{
+  "about": "A delegation token forged without any private key under a small-order public key published in the key set (an all-zero placeholder x): R = B, S = 1, the jti varied until H(R||A||M) mod L is 0 mod 4. Node 20/22 (OpenSSL 3.x) crypto.verify accepts it; Node 24 and 26 refuse it. Copied from passioncode-ai/fabric-agent-adapter test/fixtures/delegation/vectors.json at ea7efbea9a6eba6615881103035cf1a0bdec8db8, case 'forged under a small-order placeholder key'. DEC-0045, CT-29.",
+  "token": "eyJhbGciOiJFZERTQSIsInR5cCI6ImZhYnJpYy1kZWxlZ2F0aW9uK2p3dCIsImtpZCI6ImVzdGF0ZS16ZXJvIn0.eyJpc3MiOiJ1cm46ZmFicmljOmVzdGF0ZTpleGFtcGxlIiwic3ViIjoidXJuOnBlcnNvbjpvcGVyYXRvciIsImFjdCI6eyJzdWIiOiJleGFtcGxlLW1lZGlhIiwic2Vzc2lvbiI6InJ1bi0yMDI2LTEwLTExLTAwNDIiLCJhY3QiOnsic3ViIjoiZXhhbXBsZS1hZ2VudC5kZWZhdWx0In19LCJhdWQiOiJleGFtcGxlLXdyaXRlciIsInNjb3BlIjoid3JpdGVyLndyaXRlIHdyaXRlci5jaGVjayIsImVmZmVjdCI6WyJkcmFmdCJdLCJncmFudCI6WyJ1cm46Z3JhbnQ6cHJvamVjdC1hOmV4YW1wbGUtbWVkaWEtd3JpdGVyIzMiXSwic3BlbmQiOnsibW9kZSI6ImxpbWl0ZWQiLCJyZW1haW5pbmciOlt7IndpbmRvdyI6InRhc2siLCJyZW1haW5pbmdVc2QiOjEuNX0seyJ3aW5kb3ciOiJkYXkiLCJyZW1haW5pbmdVc2QiOjQuMn0seyJ3aW5kb3ciOiJtb250aCIsInJlbWFpbmluZ1VzZCI6Mzh9XSwicGVyQ2FsbE1heFVzZCI6MC41fSwicHJvamVjdCI6InVybjpwcm9qZWN0OmEiLCJpYXQiOjE3OTE3MjAwMDAsImV4cCI6MTc5MTcyMDYwMCwianRpIjoiZm9yZ2VkLTUifQ.WGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "7vnNBNaeu19galpnrteH6OnlZCfOv8apYQJ1QjcxTq8",
+        "kid": "estate-new",
+        "use": "sig",
+        "alg": "EdDSA"
+      },
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "66ueh2YLndQqBDpGKTMNc83J_MVfWPHqTtlLXArcewk",
+        "kid": "estate-old",
+        "use": "sig",
+        "alg": "EdDSA"
+      },
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "kid": "estate-zero",
+        "use": "sig",
+        "alg": "EdDSA"
+      }
+    ]
+  },
+  "now": 1791720030,
+  "audience": "example-writer",
+  "capability": "writer.write",
+  "effect": "draft",
+  "issuer": "urn:fabric:estate:example",
+  "expected": {
+    "ok": false,
+    "code": "issuer-unavailable",
+    "detail": "small-order-key"
+  }
+}

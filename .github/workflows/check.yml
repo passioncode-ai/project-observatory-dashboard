@@ -31,7 +31,7 @@ jobs:
           echo "$RUNNER_TEMP/observatory-python/bin" >> "$GITHUB_PATH"
       - name: Require SQLite extension support
         run: python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - name: The lock carries every pin (a Dependabot bump of pyproject.toml alone stops here)
@@ -70,7 +70,8 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
         run: |
           npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR
           claude --version
           for dir in . observatory/engine/skill observatory/engine/skill/plugins/observatory-log; do
             claude plugin validate --strict "$dir"
@@ -129,7 +130,7 @@ jobs:
 
       - name: Preserve synthetic compatibility logs on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: synthetic-check-${{ matrix.os }}-${{ matrix.python }}
           path: ${{ runner.temp }}/observatory-full-check
@@ -138,10 +139,9 @@ jobs:
 
   windows:
     # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
-    # change. Informative until W3 — each step runs whatever the one before it did, and the
-    # summary lists every outcome — so it is not one of the required checks yet.
+    # change. Historical informative steps remain explicitly allowed to fail.
+    # Holder safety is enforced at both step and job level; its failure fails this job.
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
@@ -231,10 +231,22 @@ jobs:
           python observatory/engine/tools/install_launchd.py status
           python observatory/engine/tools/install_launchd.py uninstall
           schtasks /Query /FO LIST | grep -c ProjectObservatory || true
+      - id: ledgerlock
+        name: The OpenRouter door's ledger lock across threads (J-11)
+        continue-on-error: true
+        run: |
+          cd observatory/engine
+          python tests/test_spend.py -v ProjectSpend.test_two_rotations_at_once_both_land ProjectSpend.test_the_rotate_command_reads_the_ledger_under_the_lock ProjectSpend.test_the_lock_refusal_names_every_locked_verb
       - id: tests
         name: Synthetic runtime and privacy tests
         continue-on-error: true
         run: python -m unittest discover -s tests
+      - id: holder_safety
+        name: Unknown Windows holders preserve paths; shared-delete rename is not evidence
+        if: always()
+        run: |
+          cd observatory/engine
+          python tests/test_disk_guard.py -v WindowsHolderUnknown
       - name: Outcomes
         if: always()
         run: |
@@ -253,5 +265,7 @@ jobs:
             echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
+            echo "| OpenRouter ledger lock | ${{ steps.ledgerlock.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
+            echo "| Holder safety (enforced) | ${{ steps.holder_safety.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

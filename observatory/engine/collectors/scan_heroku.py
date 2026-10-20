@@ -30,8 +30,10 @@ remedy.
     scan_heroku.py store/raw/heroku.json [--only <app> ...]
 """
 from __future__ import annotations
+import argparse
 import concurrent.futures as cf
 import json
+import math
 import re, pathlib, re, shutil, subprocess, sys, urllib.error, urllib.request
 from datetime import datetime, timezone
 
@@ -40,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 import atomic              
 import paths              
 import slow_command
+import oslocks
 
 API = "https://api.heroku.com"
 #: The Deploy tab's GitHub link is NOT in the Platform API. It lives on the
@@ -222,6 +225,18 @@ def owned_addons(addons: list, app_name: str) -> tuple[list, list]:
     return own, attached
 
 
+def _collection(value, required: dict[str, type]):
+    """An unknown response shape is a failed read, never an empty measurement."""
+    if (isinstance(value, list)
+            and all(isinstance(row, dict)
+                    and all(type(row.get(key)) is kind for key, kind in required.items())
+                    for row in value)):
+        return value
+    return {"__error__": (value.get("__error__") or "unexpected-response")
+            if isinstance(value, dict) else "unexpected-response",
+            "__reason__": value.get("__reason__") if isinstance(value, dict) else None}
+
+
 def scan_app(app: dict, tok: str) -> dict:
     aid, name = app["id"], app["name"]
     row = {
@@ -245,6 +260,23 @@ def scan_app(app: dict, tok: str) -> dict:
     rels = get(f"{API}/apps/{aid}/releases", tok,
                extra={"Range": f"version ..; max={RELEASE_WINDOW}, order=desc"})
     gh = get(f"{KOLKRABBI}/apps/{aid}/github", tok, accept="application/json")
+    form = _collection(form, {"type": str, "quantity": int, "size": str})
+    if isinstance(form, list) and any(f["quantity"] < 0 for f in form):
+        form = {"__error__": "unexpected-response"}
+    dynos = _collection(dynos, {"name": str, "state": str, "size": str})
+    addons = _collection(addons, {"name": str, "plan": dict, "app": dict,
+                                  "state": str, "billed_price": dict})
+    if isinstance(addons, list) and any(
+            not isinstance(a["plan"].get("name"), str)
+            or not isinstance(a["app"].get("name"), str)
+            or type(a["billed_price"].get("cents")) not in (int, float)
+            or not math.isfinite(a["billed_price"]["cents"])
+            or a["billed_price"]["cents"] < 0 for a in addons):
+        addons = {"__error__": "unexpected-response"}
+    rels = _collection(rels, {"version": int, "created_at": str, "description": str})
+    if not (isinstance(gh, dict) and "repo" in gh
+            and (gh["repo"] is None or isinstance(gh["repo"], str))):
+        gh = {"__error__": "unexpected-response"}
     # CUSTOM DOMAINS, because a zone's CNAME says `xyz.herokudns.com` and never
     # the app's name: the only way from a domain to the application serving it
     # is Heroku's own list of which hostnames it accepts for the app.
@@ -252,15 +284,20 @@ def scan_app(app: dict, tok: str) -> dict:
     # serves (docs/design/DEPLOYMENTS.md rule 1). 404 means the app is in no
     # pipeline, which is an answer; any other failure is kept as an error.
     pc = get(f"{API}/apps/{aid}/pipeline-couplings", tok)
-    if isinstance(pc, dict) and not pc.get("__error__"):
+    if (isinstance(pc, dict) and not pc.get("__error__")
+            and isinstance(pc.get("pipeline"), dict)
+            and isinstance(pc["pipeline"].get("id"), str)
+            and isinstance(pc["pipeline"].get("name"), str)
+            and isinstance(pc.get("stage"), str)):
         row["pipeline"] = {"id": (pc.get("pipeline") or {}).get("id"),
                            "name": (pc.get("pipeline") or {}).get("name"), "stage": pc.get("stage")}
         row["pipeline_error"] = None
     else:
         row["pipeline"] = None
         row["pipeline_error"] = (None if isinstance(pc, dict) and pc.get("__error__") == "404"
-                                 else (pc.get("__error__") if isinstance(pc, dict) else "unexpected"))
+                                 else ((pc.get("__error__") or "unexpected") if isinstance(pc, dict) else "unexpected"))
     doms = get(f"{API}/apps/{aid}/domains", tok)
+    doms = _collection(doms, {"hostname": str, "kind": str})
     row["domains"] = (sorted(d["hostname"] for d in doms
                              if isinstance(d, dict) and d.get("kind") == "custom" and d.get("hostname"))
                       if isinstance(doms, list) else [])
@@ -289,6 +326,9 @@ def scan_app(app: dict, tok: str) -> dict:
     row["addons_attached"] = attached
     row["addons_error"] = addons.get("__error__") if isinstance(addons, dict) else None
 
+    row["releases_error"] = None if isinstance(rels, list) else "unreadable"
+    row["github_error"] = (None if isinstance(gh, dict) and not gh.get("__error__")
+                           else "unreadable")
     rels = rels if isinstance(rels, list) else []
     row["releases_seen"] = len(rels)
     row["release_version"] = rels[0]["version"] if rels else None
@@ -364,7 +404,137 @@ def local_checkouts() -> tuple[dict[str, list[str]], list[str]]:
     return found, seen
 
 
+def _scoped(out_path: pathlib.Path, only: set[str]) -> int:
+    """Patch only positively refreshed apps, never turn a failed read into deletion.
+
+    Global metadata keeps its original timestamp; scoped_refresh measures only this
+    attempt. Unknown extension fields and untouched app rows survive unchanged.
+    A malformed prior survey is not a baseline we can safely replace.
+    """
+    try:
+        old = json.loads(out_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        old = {"schema_version": 1, "scanned_at": None, "apps": [],
+               "degraded": [{"source": "heroku:scope",
+                             "reason": "no complete survey exists; only requested apps measured"}]}
+    except (OSError, ValueError):
+        print("heroku: scoped refresh refused: previous survey unreadable", file=sys.stderr)
+        return 1
+    if (not isinstance(old, dict) or old.get("schema_version") != 1
+            or not isinstance(old.get("apps"), list)
+            or not isinstance(old.get("degraded", []), list)
+            or any(not isinstance(r, dict) or not isinstance(r.get("name"), str)
+                   or not r["name"] for r in old["apps"])
+            or len({r["name"] for r in old["apps"]}) != len(old["apps"])
+            or any(not isinstance(r, dict) for r in old.get("degraded", []))):
+        print("heroku: scoped refresh refused: previous survey invalid", file=sys.stderr)
+        return 1
+    prior = {r["name"]: r for r in old["apps"]}
+    now = datetime.now(timezone.utc).isoformat()
+    refreshed, failures, warnings = {}, {}, []
+    tok, why = token()
+    apps = paged("/apps", tok) if tok else None
+    if not isinstance(apps, list):
+        failures = {name: "authentication unavailable" if not tok else "app inventory unreadable"
+                    for name in only}
+    elif (any(not isinstance(a, dict) or not isinstance(a.get("name"), str)
+              or not a.get("id") for a in apps)
+          or len({a["name"] for a in apps}) != len(apps)):
+        failures = {name: "app inventory invalid" for name in only}
+    else:
+        targets = {a["name"]: a for a in apps if a["name"] in only}
+        failures.update({name: "not visible in this account; previous data retained"
+                         for name in only - targets.keys()})
+        def read(a):
+            try:
+                return scan_app(a, tok), None
+            except Exception as exc:
+                return None, type(exc).__name__
+        with cf.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            for a, (row, error) in zip(targets.values(), ex.map(read, targets.values())):
+                name = a["name"]
+                if error:
+                    failures[name] = "app read failed: " + error
+                    continue
+                if (not isinstance(row, dict) or row.get("name") != name
+                        or row.get("id") != a["id"]):
+                    failures[name] = "app result identity invalid"
+                    continue
+                if prior.get(name, {}).get("id") not in (None, a["id"]):
+                    failures[name] = "app identity changed; complete survey required"
+                    continue
+                unreadable = sorted(k for k, v in row.items() if k.endswith("_error") and v)
+                if unreadable:
+                    failures[name] = "unreadable app fields: " + ", ".join(unreadable)
+                    continue
+                # A remote-only refresh makes no claim about local filesystem
+                # coverage. Keep that separate measurement until a full scan.
+                row["local_folders"] = prior.get(name, {}).get("local_folders", [])
+                row["local_folders_status"] = prior.get(name, {}).get(
+                    "local_folders_status", "carried" if name in prior else "not_measured")
+                if row["local_folders_status"] == "not_measured":
+                    warnings.append({"source": "heroku:" + name,
+                                     "reason": "local checkout inventory not measured for new app"})
+                row["provider_scanned_at"] = now
+                refreshed[name] = {**prior.get(name, {}), **row}
+                if row.get("unpriced") or row.get("deploy_beyond_window"):
+                    warnings.append({"source": "heroku:" + name,
+                                     "reason": "cost or deployment window remains incomplete"})
+    # Preserve order and content outside the requested subset, including old errors.
+    rows = [refreshed.get(r["name"], r) for r in old["apps"]]
+    rows.extend(refreshed[n] for n in sorted(refreshed.keys() - prior.keys()))
+    successful_sources = {"heroku:" + n for n in refreshed}
+    degraded = [d for d in old.get("degraded", []) if d.get("source") not in successful_sources]
+    for name, reason in sorted(failures.items()):
+        entry = {"source": "heroku:" + name, "reason": "scoped refresh: " + reason}
+        if entry not in degraded:
+            degraded.append(entry)
+    doc = {**old, "apps": rows, "degraded": degraded + warnings,
+           "scoped_refresh": {"attempted_at": now, "requested": sorted(only),
+                              "refreshed": sorted(refreshed), "failed": sorted(failures),
+                              "coverage": "provider_only", "local_checkouts": "not_refreshed",
+                              "status": "partial" if failures else "complete_for_scope"}}
+    atomic.write_json(out_path, doc, indent=1)
+    print(f"heroku: scoped refresh: {len(refreshed)} refreshed, {len(failures)} unavailable; "
+          "global survey timestamp unchanged")
+    return 1 if failures else 0
+
+
 def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", nargs="?", type=pathlib.Path,
+                        default=paths.STORE / "raw/heroku.json")
+    parser.add_argument("--only", nargs="+", metavar="APP")
+    try:
+        args = parser.parse_args(argv[1:])
+    except SystemExit as exc:
+        return int(exc.code)
+    import configuration
+    if not configuration.enabled("heroku"):
+        print("heroku: not configured (integration disabled)")
+        return 0
+    # Every collector invocation, full or scoped, shares one nonblocking lock.
+    # Lock before reading the baseline or contacting the provider; rename alone
+    # cannot serialize two read/modify/write attempts. External writers must adopt
+    # this lock too; advisory locking cannot fence arbitrary file replacement.
+    out = args.output
+    lock_path = out.with_name(out.name + ".lock")
+    try:
+        if any(p.is_symlink() for p in (out, lock_path, *out.parents)):
+            raise ValueError("symbolic output path")
+        out.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with lock_path.open("a+b") as lock:
+            oslocks.flock(lock.fileno(), oslocks.LOCK_EX | oslocks.LOCK_NB)
+            if args.only is not None:
+                return _scoped(out, set(args.only))
+            return _full([argv[0], str(out)])
+    except (OSError, ValueError) as exc:
+        print(f"heroku: survey not saved ({type(exc).__name__}); previous output retained",
+              file=sys.stderr)
+        return 1
+
+
+def _full(argv: list[str]) -> int:
     import configuration
     if not configuration.enabled("heroku"):
         print("heroku: not configured (integration disabled)")

@@ -2,10 +2,11 @@
 
 ## State now
 
-I-2, bounded K-2 and K-7 implemented locally; independent validation remains open.
-Base: cleanup candidate `72e2e72` plus leak coverage candidate `d02a44b`, combined
-at `811ed20`. No deployment, provider mutation or operational scan is in scope.
-Next task: independently review the exact combined head and rerun focused gates after integration.
+I-2, bounded K-2 and K-7 passed independent source review at `6021715` and
+combined review with memory at `08ca960`. Hosted/release/installed acceptance
+are separate gates. The sequence below retains original failures and correction
+evidence. Current integration state: [wave-three record](../2026-10-13-recovery-wave-3/README.md).
+No provider mutation or deployment was used for component acceptance.
 
 ## Owned sequence and acceptance
 
@@ -94,7 +95,8 @@ retains interrupted outcomes and preserves severe tail findings. Merge provenanc
 names each inspected input timestamp; legacy no-timestamp files use mtime, an
 explicit limitation rather than a newly asserted measurement time.
 
-K-7 is still packet-only. Scheduling age alone does not prove a live collector
+At the initial K-2 checkpoint K-7 was packet-only; its implementation and review
+corrections are recorded below. Scheduling age alone does not prove a live collector
 is enabled now; findings describe the last completed tick's plan. The initial bounded slice left integrity outside rotation history;
 the follow-up below closes that producer gap while keeping its first-step order. Rollback to legacy engines can reset streaks (documented).
 

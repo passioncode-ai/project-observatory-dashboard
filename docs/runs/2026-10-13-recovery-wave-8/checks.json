@@ -1,0 +1,273 @@
+{
+  "schema": "recovery-wave8-checks/1",
+  "source_parent": "9e25fa7321f37ed83dcc4e26c6d214cd41699e03",
+  "focused": {
+    "schema_version": 1,
+    "coverage": "synthetic-offline",
+    "status": "PASS",
+    "suites": [
+      {
+        "file": "tests/test_rotation_capacity.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.13,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 16,
+        "unittest_skipped": 0,
+        "log": "rotation_capacity/run.log"
+      },
+      {
+        "file": "tests/test_policy_rotation_admission.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.36,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 13,
+        "unittest_skipped": 0,
+        "log": "policy_rotation_admission/run.log"
+      },
+      {
+        "file": "tests/test_rotation_accounting.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.2,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 19,
+        "unittest_skipped": 0,
+        "log": "rotation_accounting/run.log"
+      },
+      {
+        "file": "tests/test_j3_adversary.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 2.68,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 8,
+        "unittest_skipped": 0,
+        "log": "j3_adversary/run.log"
+      },
+      {
+        "file": "tests/test_revoke_consumers.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.26,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 12,
+        "unittest_skipped": 0,
+        "log": "revoke_consumers/run.log"
+      },
+      {
+        "file": "tests/test_issued_spend.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.27,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 10,
+        "unittest_skipped": 0,
+        "log": "issued_spend/run.log"
+      },
+      {
+        "file": "tests/test_credential_doors.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 132.53,
+        "pass_assertions": 486,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 0,
+        "unittest_skipped": 0,
+        "log": "credential_doors/run.log"
+      },
+      {
+        "file": "tests/test_backup_vault.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 23.13,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 36,
+        "unittest_skipped": 0,
+        "log": "backup_vault/run.log"
+      },
+      {
+        "file": "tests/test_provider_secret_boundaries.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 0.85,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 12,
+        "unittest_skipped": 0,
+        "log": "provider_secret_boundaries/run.log"
+      }
+    ],
+    "not_run": [
+      {
+        "scope": "live-provider-acceptance",
+        "status": "NOT_RUN",
+        "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+      },
+      {
+        "scope": "external-mcp-host-admission",
+        "status": "NOT_RUN",
+        "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+      },
+      {
+        "scope": "live-secret-rotation-and-delivery",
+        "status": "NOT_RUN",
+        "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+      }
+    ],
+    "suite_count": 9,
+    "python": "3.14.7"
+  },
+  "static": [
+    {
+      "name": "versions",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_version_consistency.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "manifests",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_plugin_manifests.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "doc_copies",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_engine_doc_copies.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "python3",
+        "tools/update_inventory.py",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_root",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "."
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_market",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_leaf",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill/plugins/observatory-log"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "observatory/engine/tools/openrouter.py": "8e3d7ef9f1278240ee1521a364360125638c220a76cab9917a061baf7504f0f6",
+    "observatory/engine/backup_vault.py": "64c738bd9655896a693b2eb574ccb2c8198ec49ea24fef682bff831dd4d6dc10",
+    "observatory/engine/tests/run_portable.py": "8ff21eb7249f0f45c2f3ddb2293350cc51d95528dbfcdaaeb714ab32a2424b29",
+    "observatory/engine/skill/plugins/observatory-log/skills/handling-secrets/SKILL.md": "b61d7438d3ed9697f3b8e07de5970df69bf9e3cc7bda5b50e1fdf916fd7e371d"
+  },
+  "baseline_128": {
+    "source": "1536adddaadb427a6830fa2343774801f87a60c8",
+    "pass": 58,
+    "fail": 70,
+    "error": 0,
+    "failures": "convergence",
+    "full5200": "NOT_RUN",
+    "rerun_on_combined_tree": false
+  },
+  "initial_ci_failure": {
+    "source": "8aff34f801a4154882d536bba0472b6549b041e7",
+    "run": "https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/38349250996",
+    "status": "FAILURE",
+    "corrections": [
+      "f06c6a26435b68b04c436877866e5abc938a5e8a",
+      "98922124f56a7f6fcbeafb157f1617690cc136af"
+    ]
+  },
+  "scope": "Synthetic only; no live provider, key reads, backup migration or installed acceptance",
+  "ci_correction_checks": {
+    "source_parent": "4249e6a1c2ed1838d9e807656c10a0bf343b086a",
+    "log_policy_cases": 12,
+    "privacy_boundary_cases": 3,
+    "claimed_key_assertions": 51,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "isolation": "Resolved temporary HOME/TMPDIR and OBSERVATORY_HOME, no engine archive/copy",
+    "first_direct_attempt": {
+      "status": "FAIL",
+      "reason": "Inherited macOS /tmp symbolic ancestor refused by atomic output; no source change before resolved-TMPDIR retry"
+    },
+    "accepted_source_blob_match": {
+      "log_policy.py": "67c9c7049eae74a10ef8398d2a00f5487aefba72",
+      "tests/test_openrouter_keys.py": "2081e860fcd584ef45c019d296d53a69927973c5"
+    },
+    "inventory_exit_code": 0
+  }
+}

@@ -109,8 +109,13 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
+    # Reads the Fabric services directory and launchd, neither written by a step here.
+    "scan-agents": {"writes": ["store/raw/agents.json"], "reads": []},
     "scan-harness": {"writes": ["store/raw/harness.json"], "reads": ["registry/projects.json"]},
     "scan-spend": {"writes": ["store/raw/spend.json"], "reads": []},
+    # Reads the registry `emit` wrote this tick, and Fabric's hub (outside the step graph).
+    "fabric-attribution": {"writes": ["store/raw/fabric-attribution.json"],
+                           "reads": ["registry/projects.json", "registry/repositories.json", "registry/relations.json"]},
     # READS the registry it will later help write, and that is a fixpoint over
     # ticks rather than a cycle: attribution needs the project list, so a
     # project's first sessions attach on the NEXT tick after the project itself
@@ -179,6 +184,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              "registry/duplicate-repo-names.json",
                              "registry/cloudflare-zones.json", "registry/products.json",
                              "registry/mcp-servers.json",
+                             # The agents document: the MCP join needs `scan-mcp`'s
+                             # output, and only the emit is sure to run after it.
+                             "registry/agents.json",
                              "registry/domain-liveness.json",
                              # UNDECLARED until it was traced. `validate` reads
                              # this file, so without the write here the graph
@@ -205,7 +213,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              # same reason as the rest: the project join needs
                              # the project list and only `emit` holds it.
                              "registry/google-properties.json"],
-                  "reads": ["store/raw/google.json", "store/raw/remote-env.json",
+                  "reads": ["store/raw/google.json", "store/raw/remote-env.json", "store/raw/agents.json", "registry/agents.json",
                             "store/raw/cloudflare_zones.json", "store/raw/mcp.json", "collectors/products.json",
                             "collectors/host_boundary.json", "store/raw/model.json", "registry/domains.json", "store/raw/domains_live.json",
                             "store/raw/heroku.json", "collectors/heroku_links.json",
@@ -220,6 +228,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                                           "registry/domains.json", "registry/domain-liveness.json",
                                           "registry/domain-exclusions.json",
                                           "registry/stale-remotes.json",
+                                          "registry/agents.json",
                                           # The engine reads the Cloudflare
                                           # snapshot from a workspace source
                                           # (`cloudflare_snapshot`), not from a
@@ -267,6 +276,11 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the lifecycle watch (collectors/scan_lifecycle.py),
                             # written by the tick's `lifecycle` step before this one
                             "store/raw/lifecycle.json", "store/raw/harness.json", "store/raw/spend.json",
+                            # Fabric attribution conflicts (OBS-160)
+                            "store/raw/fabric-attribution.json",
+                            # the SSH-key inventory, written by `full ssh-keys list`
+                            # outside the step graph (PB-163): declared so the read is known
+                            "store/raw/ssh-keys.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

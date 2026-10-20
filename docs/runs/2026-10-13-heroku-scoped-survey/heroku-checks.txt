@@ -1,0 +1,65 @@
+heroku — six ways an inventory lies
+
+  PASS  a suspended application is `suspended`, not `down`
+  PASS  scaled with nothing up is `down`
+  PASS  no dyno but a billed add-on is `resources-only`
+  PASS  no dyno and no add-on is `idle`
+  PASS  suspension outranks the formation it left behind
+  PASS  an add-on owned by another application is separated out
+  PASS  the separated one is still REPORTED, not dropped
+  PASS  an application named exactly like a project is still unlinked
+  PASS  and it says why rather than shrugging
+  PASS  the reason carries a KIND as well as a sentence
+  PASS  Heroku's own Deploy tab links an application
+  PASS  a checkout carrying the app's git remote links it
+  PASS  a checkout INSIDE a project's folder links it too
+  PASS  a hand link carrying evidence is accepted
+  PASS  a hand link with no evidence is refused
+  PASS  one edge per linked application, none for the rest
+  PASS  the edge points at the application's own id
+  PASS  a link and its rule are one fact
+  PASS  an absent document yields nothing
+  PASS  an empty app list yields nothing
+  PASS  a scaled application with nothing up raises app_down
+  PASS  a suspension is critical, a crash is not
+  PASS  and the action names support rather than a restart that cannot work
+  PASS  resources with no dyno raise paying_for_nothing
+  PASS  an application with no checkout raises heroku.no_local_clone
+  PASS  an unlinked running application raises exactly ONE aggregate row
+  PASS  no finding carries an instant
+  PASS  inside the window the estate rows are built
+  PASS  past it every estate row is withheld
+  PASS  and the withholding is SAID, not silent
+  PASS  the fresh rows name the day they were measured
+  PASS  a live link raises nothing
+  PASS  a dead project id is named
+  PASS  a row with no evidence is named
+  PASS  an application the scan no longer sees is named
+  PASS  a clean document raises nothing
+  PASS  the collector has a step
+  PASS  and a group reaches it
+  PASS  the Heroku tab offers the «noproject» filter
+  PASS  the Heroku tab offers the «nofolder» filter
+  PASS  the Heroku tab offers the «norepo» filter
+  PASS  the Heroku tab offers the «down» filter
+  PASS  the Heroku tab offers the «waste» filter
+  PASS  the Heroku tab offers the «stale» filter
+  PASS  the Heroku tab offers the «oldstack» filter
+  PASS  the projects tab can ask the reverse question
+  PASS  state is a word, never a colour alone
+  PASS  the token never reaches the written document
+  PASS  the registry emits over a planted Heroku scan
+  PASS  totals.apps counts the rows it summarises
+  PASS  totals.monthly_cost sums the rows it summarises
+  PASS  every state is one of the five
+  PASS  every linked application names a rule
+  PASS  the GitHub-linked application reaches a project
+  PASS  every unlinked application says why
+  PASS  `deployed_to` is a declared relation type
+  PASS  no edge points at an application the document does not hold
+  PASS  one edge per linked application
+  PASS  only config-changing releases are kept, deploys are not
+  PASS  a Set release carries every variable NAME it lists
+  PASS  an addon rotation carries the variable and the addon that did it
+
+[32ma name is still not evidence, and a suspended app is not a crashed one[0m

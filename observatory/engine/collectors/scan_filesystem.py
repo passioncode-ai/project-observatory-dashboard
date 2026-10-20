@@ -22,6 +22,12 @@ then discarded, and that one folder dominated the scan's run time. The
 exclusions are now read here, from the same file, and a skipped folder is
 REPORTED as skipped with its reason rather than silently absent.
 
+**Declarations stay narrow.** `config/tracked.json` may name an exact Git
+checkout outside the root (SessionStart or `full track local-folder`). Each is
+measured by this same `scan_folder` and written beside the root children in
+`local.json`; no parent is walked and `sources.projects` is not changed. A
+missing, malformed or excluded declaration is reported, never silently dropped.
+
     scan_filesystem.py store/raw/local.json
 """
 import sys, pathlib
@@ -31,6 +37,7 @@ import paths
 import safe_git
 import slow_command
 import step_budget
+import tracked
 import json, os, re, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -264,6 +271,12 @@ rows=[]
 degraded=[]
 skipped=[]
 EXCLUDED_PREFIXES, EXCLUDED_NAMES = exclusions()
+try:
+    DECLARED, _DISMISSED, declaration_gaps = tracked.rows()
+    degraded.extend(declaration_gaps)
+except tracked.TrackError as exc:
+    DECLARED = []
+    degraded.append({"source": "tracked", "reason": str(exc)})
 
 # A PREFLIGHT, and the reason for it. With `git` off PATH every git folder
 # answers nothing, so `merge.nwo("")` is None for all of them and each becomes a
@@ -306,9 +319,12 @@ except step_budget.OutOfTime:
 if _why:
     _git_folders = [e for e in os.listdir(DATA)
                     if not e.startswith(".") and (DATA/e/".git").exists()]
+    _git_folders += [row["path"] for row in DECLARED
+                     if (Path(row["path"]) / ".git").exists()
+                     and not tracked.is_excluded(Path(row["path"]), EXCLUDED_PREFIXES, EXCLUDED_NAMES)]
     if _git_folders:
         sys.exit(f"scan_filesystem: {_why}\n"
-                 f"  {len(_git_folders)} folder(s) under {DATA} are git checkouts and "
+                 f"  {len(_git_folders)} folder(s) in the projects source or declarations are git checkouts and "
                  f"none of them can be read.\n"
                  f"  Writing this scan would turn every one into a folder-anchored "
                  f"project — measured: 156 projects become 206 and 172 repositories "
@@ -332,7 +348,7 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
     # already in the registry. Agents create worktrees under the estate root, and
     # without this the estate would grow by however many an agent happens to
     # have open, each one an invented project with its parent's whole history.
-    worktree_of = ""
+    worktree_of = worktree_main = ""
     if git and dotgit.is_file():
         try:
             head = dotgit.read_text(encoding="utf-8", errors="replace").strip()
@@ -340,9 +356,14 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
             head = ""
         if head.startswith("gitdir:") and "/worktrees/" in head.replace("\\", "/"):
             target = head.split("gitdir:", 1)[1].strip().replace("\\", "/")
-            worktree_of = target.split("/.git/")[0].rstrip("/").split("/")[-1]
+            worktree_main = target.split("/.git/")[0].rstrip("/")
+            worktree_of = worktree_main.split("/")[-1]
+            try:
+                worktree_main = str(pathlib.Path(worktree_main).resolve())
+            except OSError:
+                pass
     rec = {"folder": entry, "path": str(p), "real_path": real, "symlink": is_link, "is_git": git,
-           "worktree_of": worktree_of,
+           "worktree_of": worktree_of, "worktree_main": worktree_main,
            "kinds": detect(p), "readme": first_para(p), "homepage_hits": homepage(p)}
     # THE PROJECT'S OWN DECLARATION OF ITS PARTS. `.gitmodules` names, per
     # module, the path inside this tree and the repository it comes from: a
@@ -466,20 +487,39 @@ PREV_AT, PREV_ROWS = _previous_scan(sys.argv[1]) if len(sys.argv) > 1 else ("", 
 out_of_time = ""
 carried: list[str] = []
 unmeasured: list[str] = []
+targets: list[tuple[str, Path, bool]] = []
 for entry in sorted(os.listdir(DATA)):
     p = DATA/entry
     if entry.startswith(".") or not p.is_dir(): continue
+    targets.append((entry, p, False))
+seen_paths = {p.resolve() for _entry, p, _declared in targets}
+for row in sorted(DECLARED, key=lambda r: r["path"]):
+    p = Path(row["path"])
+    if p in seen_paths:
+        continue
+    seen_paths.add(p)
+    targets.append((str(p), p, True))
+
+for entry, p, declared in targets:
+    if declared and (not p.is_dir() or not (p / ".git").exists()):
+        degraded.append({"source": f"tracked:{p}",
+                         "reason": "declared Git folder does not exist or is not a Git checkout"})
+        continue
     # EXCLUDED HERE, not two modules later. Reported rather than dropped: a
     # folder absent from the output with no reason is indistinguishable from one
     # the scan failed to see.
-    if entry.startswith(EXCLUDED_PREFIXES) or entry in EXCLUDED_NAMES:
+    excluded = (tracked.is_excluded(p, EXCLUDED_PREFIXES, EXCLUDED_NAMES) if declared
+                else entry.startswith(EXCLUDED_PREFIXES) or entry in EXCLUDED_NAMES)
+    if excluded:
         skipped.append({"folder": entry,
-                        "why": EXCLUDED_NAMES.get(entry)
-                        or f"excluded by prefix {[x for x in EXCLUDED_PREFIXES if entry.startswith(x)]}"})
+                        "why": EXCLUDED_NAMES.get(entry) or EXCLUDED_NAMES.get(p.name)
+                        or f"excluded by prefix {[x for x in EXCLUDED_PREFIXES if entry.startswith(x) or p.name.startswith(x)]}"})
         continue
     if not out_of_time:
         try:
             rec, found = scan_folder(entry, p)
+            if declared:
+                rec["display_name"] = p.name
             rows.append(rec)
             degraded.extend(found)
             continue

@@ -13,6 +13,18 @@ release. A checkout has the lock at its root; a wheel carries it at
 extra against that file). Without `-c`, pip resolves newer transitive releases
 this release was not tested with.
 
+## Read verification results
+
+`project-observatory full check` keeps a process's `exit_code` separate from the
+checks it observed. A selected suite that exits zero without reporting executed
+tests is `ERROR`, not PASS. The JSON gives its `test_protocol`,
+`minimum_executed`, `executed_checks`, `skipped_checks` and reason code. Repair a
+missing test entry point or reporting contract and rerun the affected suite.
+An explicit full skip remains `SKIP`; reported failures remain `FAIL` even when
+the script exits zero. A trusted script can forge well-formed output, so this
+contract does not authenticate tests or establish complete coverage.
+The repository-root test module `test_runner_evidence.py` exercises these boundaries.
+
 ## SQLite runtime prerequisite
 
 The full engine requires Python 3.11+ with SQLite 3.37+ **and loadable SQLite
@@ -99,6 +111,23 @@ for one name, or a name that contradicts a measured repository, deployment or do
 a conflict in `registry/identifiers.json` and withheld. `project.resolve` answers any of these
 names with the one canonical id ([design](design/IDENTITY.md)).
 
+**Which Fabric project each project is** is Fabric's to say: Fabric owns the canonical project id
+(fabric-agent-contract DEC-0089). Each tick, and `project-observatory full fabric-attribution`,
+asks Fabric's hub for every folder the registry holds and records the answer as a `fabric:<uuid>`
+alias (owner `fabric`) in `store/raw/fabric-attribution.json`, with when and from which Fabric
+process it came. Fabric writes nothing into the workspace. The first pass asks Fabric once for
+access to `project.resolve`; on your own machine Fabric allows it at once and journals it. The
+credential it hands over stays in an owner-only file under the workspace state and goes only to
+the hub `hub.json` names, only while that process is alive and owns the hub's listening port as
+you, and never through a proxy. A folder Fabric later detaches
+withdraws the alias, a different answer replaces it, and both stay in the file's `history`. A
+project whose folders sit in two Fabric projects is a `fabric.attribution_conflict` finding until
+you settle it in Fabric. When Fabric is not running nothing recorded changes, and `degraded` says
+why (`hub-absent`, `hub-dead`, `hub-origin-refused`, `hub-unverified`, `access-pending`, `access-refused`,
+`tool-absent`, `hub-error`, `budget`). `project.resolve` answers `fabric:<uuid>` and an absolute
+folder too: a folder by the contract's own rules over the registry's folders, with the `_*`
+folders under the projects root and `config/folder_exclusions.json` as declared containers.
+
 **Which environment an app serves** comes from the provider (a Heroku pipeline stage) or from you:
 `config/environments.json` holds `{"deployments": {"heroku:<app>": "production"}}`. The names
 `production`, `staging`, `review`, `development`, `test` and `local` are recognised (`prod` and
@@ -170,7 +199,7 @@ there are no findings.
 
 ## Sources
 
-Nothing outside the workspace is read until you name it. Each source is a path set with
+Apart from an exact SessionStart declaration described below, nothing outside the workspace is read until you name it. Each source is a path set with
 `project-observatory full configure sources NAME PATH`; `full doctor` lists every enabled
 integration or feature whose source is unset, missing (a path deleted after it was configured)
 or of the wrong kind under `coverage_warnings`, because a collector without its source reports
@@ -193,6 +222,27 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `cloudflare_snapshot` | a JSON snapshot of your Cloudflare zones, kept as evidence | `validate` (snapshot parity; reported as degraded when unset) |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
+
+### Exact Git checkouts declared by SessionStart
+
+When a coding session opens an eligible Git repository or linked worktree outside
+the `projects` root, SessionStart resolves any existing registry identity first
+and writes only that checkout's absolute path to `config/tracked.json`. It does
+not widen `sources.projects` to the parent and never writes
+`registry/projects.json`. The next `full local` or scheduled tick reads the
+declaration and runs the ordinary `scan_folder` → `local.json` → merge → emit
+pipeline. Same-remote clones and worktrees keep the existing primary-checkout
+and `extra_checkouts` dedupe.
+
+Declarations are locked, atomic and idempotent. Folder exclusions still win;
+non-Git folders, a home or other broad parent, and an ambiguous existing
+identity are refused with a reason. `full untrack local-folder PATH` removes a
+declaration and leaves a removal marker that later SessionStart calls do not
+undo. An explicit `full track local-folder PATH` opts back in; `full tracked`
+lists active and removed declarations and degraded rows, and `full doctor`
+summarizes them under `tracked`. Missing or malformed declarations appear in
+`local.json` `degraded` without hiding the ordinary root scan. This observation
+grants no credential or memory binding and changes no organization ownership.
 
 The `mcp` integration reads the declarations from the agent configs under
 `mcp_config_root` — `~/.claude.json` (user and project scopes), `~/.cursor/mcp.json`,
@@ -326,6 +376,27 @@ Slots are private files under the workspace by default. A separate
 limit local access; this is not a claim that the default files are encrypted at
 rest. Protect private backups just as carefully. A configured external store
 is not included in workspace backup snapshots.
+
+**A Heroku credential for one purpose, and the teams behind it.** `tools/heroku.py` is
+the Cloudflare door's twin on the Heroku Platform API. `heroku auth:token | python
+"$(project-observatory full-path)/tools/heroku.py" stash` (or `stash --from-cli`) keeps the
+CLI session's token as the admin, read by the door alone. `issue --preset read|deploy|identity
+--vault PROJECT/ENV/NAME [--team TEAM] [--app APP]` mints a direct OAuth authorization with that
+scope only (`config-read` and `config-write` reach config vars and need `--app`), proves it with
+its own value, and delivers it on stdin; `rotate` regenerates it in place, `revoke` deletes it
+first at Heroku, `list` and `ping` name what exists. Heroku narrows an authorization by scope
+only, never to a team or an app: `--team` and `--app` are its stated purpose and what the proof
+reads. `teams`, `members --team` and `apps --team` read the teams with the slots issued for each;
+`member add|role|remove --team TEAM --email ADDRESS [--role admin|member|collaborator]` prints
+its plan and changes nothing until `--apply`, then reads the team again to verify. It refuses
+`owner`, the last admin and the admin's own membership. On a team whose `team-invite-acceptance`
+feature is on, as the Heroku CLI does, `member add` sends an invitation, `members` shows pending
+invitations, and `member remove` of a pending invitee cancels the invitation. The Cloudflare door
+reads the same way: `cloudflare.py accounts` lists every stashed account with its tokens and the
+vault slot each managed one names, `members --account` reads its members, and `member
+add|role|remove --account` is a plan until `--apply`. It counts Super Administrators from both
+roles and permission policies, refuses to leave the account without one on the whole account, and
+refuses any write while it cannot read who holds that role.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
@@ -529,6 +600,43 @@ redirect, a key left at the old `store/` location is still read, with a note say
 belongs, and is never moved for you. If a key exists in both places, reading refuses and names both
 files, rather than guessing which one is current. Remove the one you no longer use.
 
+## SSH keys on this machine
+
+`project-observatory full ssh-keys` lists the machine's SSH keys, makes a new one, copies the part you
+paste and sends it to GitHub or a server. **The private key is never shown or moved**: Observatory
+reads only a private file's clear header (the cipher name, and the public key the OpenSSH format
+stores in clear), never its private section, and everything it shows, copies or sends is the public
+line of `NAME.pub`, checked to be that key's own. The design is
+[docs/design/SSH-KEYS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/SSH-KEYS.md);
+the scenarios are OSS-62–67.
+
+```sh
+project-observatory full ssh-keys list                    # every key: type, fingerprint, passphrase, where it is used and registered
+project-observatory full ssh-keys create deploy-alpha     # ed25519; ssh-keygen asks for the passphrase; on macOS it goes to the Keychain and the agent
+project-observatory full ssh-keys copy deploy-alpha       # the public line on the clipboard, and printed with its fingerprint
+project-observatory full ssh-keys send deploy-alpha --to github                 # gh ssh-key add, once; --as signing|both
+project-observatory full ssh-keys send deploy-alpha --to server:alpha --verify  # append to authorized_keys once, then prove the server accepts this key and no other
+project-observatory full ssh-keys findings                # no passphrase, weak, readable by others, unused, registered nowhere
+```
+
+- `create` never overwrites: a name already taken is refused before anything runs. `--no-passphrase`
+  makes an unattended key (the findings list it); `--host ALIAS --hostname HOST [--user U] [--port N]`
+  also appends a Host block to `~/.ssh/config`. On macOS the passphrase goes into the login Keychain
+  and the key into the running agent; `--no-keychain` skips that. A passphrase is typed into ssh-keygen's own prompt, so
+  `create` without `--no-passphrase` needs a terminal.
+- `list` asks GitHub through `gh` (scopes `read:public_key` and `read:ssh_signing_key`); `send --to
+  github` needs `admin:public_key` (`admin:ssh_signing_key` for signing). A source it cannot read is
+  named with the command that fixes it, never shown as "not registered". `--no-github` skips it.
+- `send --to server:ALIAS` uses the access that already works; `--interactive` lets you answer a
+  password prompt. It only ever appends one line. `--verify` logs in with no config (`-F none`) and
+  the new key alone, and passes only when ssh's log names the new key's fingerprint, so a Host block
+  that still names the old key cannot make it pass. Clouds have no door yet (OBS-112): the refusal says
+  so and the copied line goes in the provider's console.
+- Every create and send writes a receipt to the key movements journal (`tools/vault.py movements`).
+- `list` saves the inventory to `store/raw/ssh-keys.json`; the findings board reads it. Exit codes:
+  0 done, 1 refused by the provider or the server, 2 refused before anything changed, 3 done without
+  the clipboard, 4 done but the receipt was not written.
+
 ## Connect an agent
 
 The complete MCP server uses stdio. Configure a Python executable from the
@@ -575,7 +683,131 @@ as `lesson:` notes are converted once with
 (without `--apply` it lists what it would change and writes nothing).
 
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
-use the CLI and MCP without those hooks.
+use the CLI and MCP without those hooks. It declares three, and none of them can
+block a turn or a prompt:
+
+- **SessionStart** prints at most two lines about the project, only when one is
+  actionable.
+- **Stop** records the facts of a turn that changed a watched repository as a
+  `proposed` ledger record, one per session, revised per turn. It writes the
+  record first, then asks for the `why` of that record **once**. It does not ask
+  when this session's own tools already wrote the rationale. That is checked
+  after the record exists, within 2 seconds, from one pass over the last 4 MB of
+  the session's transcript (the Stop payload names it). The pass collects the
+  session's writing calls:
+  - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+  - Bash commands that write a file through `>`, `>>` (also `cat > file <<EOF`),
+    `tee` or `sed -i`, with the files they write.
+
+  The rationale counts in two cases:
+  - **A decision register.** A file named `decisions.md` in any folder and any
+    letter case, or a `.md`, `.markdown` or `.txt` file under an `adr/` directory.
+    It must be outside vendored trees (`vendor/`, `node_modules/`, `third_party/`,
+    `.venv/` and similar) and submodules, and not deleted, and the work must have
+    added at least one non-blank line to it, ignoring whitespace. One of those
+    calls must target that exact file, and its text must carry the addition: the
+    entry's own heading (the shallowest heading the work added, so a Context /
+    Decision / Consequences entry anchors on its title, not on a subheading), or,
+    when the addition has no heading, more than half of the added lines. One
+    common line is not enough. That heading must also appear in the register
+    exactly once as a heading a Markdown reader would see (see below).
+  - **The run ledger.** A `decision:` or `stage:` line in `.task-pipeline/run.md`,
+    consulted only when one of those calls wrote the ledger, or ran task-pipeline's
+    `stage_checkpoint.py`. The ledger's newest 64 KB and newest 200 such lines are
+    read, including when git ignores the file, and the line's text must be in what
+    those calls wrote.
+
+  The pass skips calls whose result was an error, and subagent (`isSidechain`)
+  lines. It does not scan a Bash command longer than 65,536 characters. The `git
+  diff` it reads gets only the time left in the 2 seconds; a diff that needs longer
+  (a register of megabytes) is asked about.
+
+  The turn is asked about in every other case:
+  - another session's edit in the same checkout;
+  - a file the session only read or grepped;
+  - a pull-request body that shares a heading;
+  - a write by a tool the pass does not know (a copy, a script, `perl -i`);
+  - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script
+    containing `|` or `;` (the command is split there);
+  - a relative path written after a `cd` in the same command;
+  - a path whose letter case differs from the file's on a case-insensitive volume;
+  - a subagent's edit;
+  - a failed call;
+  - a command longer than 65,536 characters;
+  - no transcript;
+  - a pass that runs out of its 2 seconds.
+
+  When the rationale counts, a second revision of the same record links that file.
+  The link is fixed in the evidence by four facts, not by the display anchor:
+  - the repository's id;
+  - the register's path in the repository;
+  - the exact raw heading line, at full length;
+  - the length and SHA-256 of the whole register file. No entry boundary is
+    guessed.
+
+  A heading longer than 120 characters is never linked, and the turn is asked
+  about.
+
+  Later revisions carry the link only while it holds **by bytes**, with no
+  Markdown parsing:
+  - this hook wrote it;
+  - it names the current repository;
+  - the stored line occurs exactly once as a whole line of the file;
+  - the file is byte-identical to the linked one, or its first bytes are (same
+    length and SHA-256) and what follows starts, at its first non-blank line, with
+    a column-0 heading no deeper than the entry's own. That append is accepted
+    only when the linked file ended in a newline outside any code fence and HTML
+    comment.
+
+  So appending a later entry keeps the link, and the record stays explained after
+  the register is committed and pushed and after the write scrolls out of the
+  transcript. Any other change to the file drops it, wherever it is: an edit to
+  this entry or to any other, a paragraph or a deeper heading appended, a change
+  of line endings, a `# comment` line inside a code block or HTML comment followed
+  by an edit below it. So does a session that moves
+  to another repository. A dropped link is attributed afresh only from the
+  session's writes after that link was made (a mark of that point is carried in
+  every later revision, so it holds for every later turn), and the turn is asked about when
+  there are none. A wrong ask is accepted; a wrong silence is not.
+
+  Every read of a register or the run ledger, fresh or carried, passes one gate.
+  The path must be inside the checkout, not a symbolic link and not under one.
+  The file is then opened once, without following a link and without blocking. The
+  opened file must be a regular file with a single hard link, and at most its limit
+  plus one byte is read (8 MB for a register).
+
+  A fresh link still uses a Markdown heading scanner, only to choose the anchor.
+  It is a linear pass over the file split on newlines only. A heading has at most
+  three spaces of indent, one to six `#`, then a space or tab, and `## Use C#`
+  keeps its `#`. Lines in fenced code are not headings: a fence closes only on
+  the same character, at least as long, with no info string, and an unclosed
+  fence runs to the end. Lines in a multi-line HTML comment are not headings
+  either. The heading must be the shallowest one the work added and must appear
+  exactly once. An added block whose heading syntax the scanner rejects is asked
+  about, never matched line by line.
+- **UserPromptSubmit** hands that request to the model with the session's next
+  prompt, as context, once. It records the delivery and prints nothing when no
+  request is pending. The context is capped at 4,000 characters. A request that
+  does not fit is not marked delivered: it goes back to wait for the next prompt. The request waits in a private per-session file under
+  `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
+  mode 0600). The file is removed when delivered. An undelivered one older than
+  seven days is removed the next time either hook writes or delivers a request. If
+  the file cannot be written, the request falls back to a Stop notice. An engine
+  older than this plugin, whose recorder does not decide whether to ask, also gets
+  the Stop notice, never an injected prompt.
+
+Every request is journalled in `store/raw/why-asks.jsonl` (it rotates to
+`why-asks.jsonl.1` past 1 MB; both are read, so a record is not asked again when it
+scrolls), and so is every delivery. A delivered request counts as answered when its
+record later carries a `why`. A request that never reached the model, such as a
+headless session with a single prompt, is pending and is never counted as
+unanswered. The rate over seven days, answered ÷ delivered, is in
+`store/raw/record-turn.json` (`whyAsks`: `asked`, `delivered`, `pending`,
+`answered`, `rate`, `window`) and from
+`python "$(project-observatory full-path)/why_asks.py"`. Below 10 % with at least
+20 delivered requests, the board raises `observatory.why_unanswered`.
+`why_asks.py reached <transcript.jsonl> <memory id>` says whether a request
+reached the model in a given session transcript.
 
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
@@ -696,8 +928,22 @@ ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
 run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
 stopped step is a failed step in the log and on the board, never a hung tick.
 
-The ceiling is shared out so the tick always ends with fresh findings and a fresh
-dashboard: the collectors stop 5 minutes before it (at most a fifth of the
+For stage diagnosis, `store/raw/tick.json` adds `progress`: a run ID and bounded
+stage rows with start, end, wall duration, exit and outcome. It includes silent
+tail commands such as merge and emit. During a run the top-level `finished_at`
+and failed-step report still describe the previous completed report. After the
+child stops, the supervisor copies only matching, validated stage metadata into
+`tick-run.json` and its history as `stage_progress`. Read `coverage` first:
+`unknown` means missing, stale or invalid evidence; `partial` includes a start
+without a terminal receipt or a failed receipt write. Such a stage has unknown
+outcome and no inferred exit or duration, even when the whole run timed out.
+`not_started` requires the watchdog's explicit budget refusal. A row's start and
+duration cover the watchdog call, including overhead; an absent row proves
+nothing about whether a stage ran. These fields contain no child output or
+command arguments. Receipt failures preserve the command's original exit.
+
+The ceiling reserves time for fresh findings and a fresh dashboard, without
+guaranteeing that those stages complete: the collectors stop 5 minutes before it (at most a fifth of the
 ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
@@ -805,6 +1051,20 @@ same summary.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
+- **Agents**: `registry/agents.json`, one row per Fabric service installed here
+  (each `<id>.<instance>.json` descriptor in the services directory): where it answers,
+  the contract its manifest pins, who supervises it and whether launchd has it loaded or
+  running, and which MCP declarations reach it by its origin. The wiki projection mirrors it
+  to `inventory/agents.json`. Nothing of a descriptor's `auth` is copied, and no row is guessed
+  from a name. A descriptor, manifest or launchd answer that could not be read is listed under
+  `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
+  `mcp_declarations` is `null`, not empty. URLs fail closed: an origin or repository that is
+  not a strict `scheme://host[:port][/path]` is written as null, and in any other text a scheme URL with
+  user-info, a query or a fragment is replaced whole by `[url]`, never partly cleaned (a schemeless
+  `token=…` is not recognised; a Windows drive path such as `C:\work\x` becomes `[url]`). If the scan is
+  missing or broken, the last rows are kept, marked `stale`, with the reason in `degraded`. With `features.machine_watch` off the document is marked
+  `stale`. Its top-level `updated_on` is the day the emit last wrote it; `scanned_on`, `first_seen_on` and
+  `last_seen_running_on` come from the scan, never from that day. A scan dated in the future is stale too.
 
 With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean
@@ -935,9 +1195,26 @@ without that identity is skipped and must be planned again. Build cleanup rechec
 activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
-last probe requires `lsof`; without it the plan is available but path removal
-waits. Windows retains the rename probe. See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+last probe uses `lsof` for positive holds. An empty listing plus unmatched
+rendered `ps` arguments cannot prove a closed script is inactive: spaces, relative
+paths and symlink aliases can hide its checkout. Current POSIX production holder
+snapshots therefore remain incomplete, and path removal is refused. Windows reports unknown holder coverage and preserves path targets.
+See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
+On POSIX, clean and archived dirty worktrees repeat this target check immediately
+before removal, after Git/archive verification. The preliminary admission snapshot never grants final removal. Planning now
+requests an explicit unknown snapshot without collecting a full process listing;
+per-phase `observation=not-attempted` and `measured_at=null` disclose that choice. Nonzero, diagnostic or undecodable `lsof`/`ps`
+output and unparseable global `lsof` names mean
+unknown, so cleanup can conservatively skip
+work even if a partial survey showed no holder. Cache-tool commands likewise
+skip when their process survey is unknown. In particular, a nonempty `busy_if`
+request cannot be cleared by an unmatched `ps` display. Commands without holder
+preconditions retain their separate configured policy. Worktree idle age is still a planning
+condition, not a fresh action-time measurement. A process starting after the
+final check remains a race; these checks are not an exclusive filesystem lock.
+Windows worktree removal also refuses unknown holder coverage. A successful
+rename can coexist with an open FILE_SHARE_DELETE handle; it never proves non-use.
 
 Build planning first refreshes explicit Git worktree registrations within a
 reserved budget. Root attempts rotate across passes with a persisted cursor and
@@ -945,19 +1222,25 @@ a five-second default quantum. Registration lists membership, not abandoned or
 safe-to-delete status. Failed path-holder readings remain visible per phase.
 See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
-**On every system.** What a process holds is read with `lsof` on macOS and Linux, from
-`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
-removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
-and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+**On every system.** Cleanup admission currently skips process-table collection
+because its negative result cannot authorize a path action. Explicit positive-hint
+readers use bounded `lsof`/`ps` capture: 2 MiB combined pipe output, bounded
+parsing and one shared deadline. The unbounded Linux `/proc` fallback is retired.
+Limit or capture failures remain unknown; this is not a measurement of RAM saved.
+[Capture limits and regression cases](design/DISK-GUARD.md#bounded-explicit-holder-observations)
+explain the owned-child cleanup and timing limits. Windows has no supported holder inventory
+here, so path actions skip instead of treating rename as proof. The
+schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
 
-What it never does: remove anything a process holds open or works inside (one
-`lsof` listing per run, re-checked at each removal; without it no path goes),
-follow a symlink, open a privacy-guarded folder, touch another user's file, stop a
-process, start an app (Docker commands run only while the daemon already runs),
-or run a cache command while that tool is running. Memory is reported, not
+Observed holds and incomplete holder coverage refuse path removal. These
+observations do not establish lifecycle ownership or exclude future writers.
+Cleanup also refuses symlinks, privacy-guarded folders and another user's files.
+It does not stop a process or start an app; daemon-dependent commands require a
+positive observation. A configured busy-tool precondition requires proven absence,
+which the current rendered process display does not provide. Memory is reported, not
 freed: the Machine page names who holds the memory that swap writes to this disk,
 and each running simulator with the command that stops it.
 
@@ -1084,8 +1367,12 @@ elsewhere.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
-`before-upgrade-*.obsnap`); a new one is decrypted in full before anything
-older is pruned.
+`before-upgrade-*.obsnap`, `before-update-*.obsnap` and `daily-*.obsnap`); a new
+one is decrypted in full before anything older is pruned. Local status and migration
+use the same snapshot kinds, including snapshots left by engine updates. Migration
+exports verified copies under the existing three-per-kind policy; an unverifiable
+copy is reported and retained. Unrecognized kinds are outside this inventory and
+remain untouched by migration; the count is not a survey of every backup-like directory.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
@@ -1141,6 +1428,104 @@ confirmed.
 
 `workspace-backup --output DIR` still writes a plaintext snapshot directory
 where you name it; that is an explicit choice and it is not encrypted.
+
+### This machine's agent setup, and moving to a new machine
+
+The workspace snapshot carries the engine's own data. Everything around it that makes a
+machine an agent machine is backed up separately, in the **same backups root**, encrypted
+with the **same passphrase**, as one file per run: `machine-<UTC stamp>-<id>.obmachine`
+(`machine_backup.py`, OBS-157). It is taken once a day by the maintenance job, before every
+engine update (unless one younger than an hour exists), and when you ask:
+
+```sh
+project-observatory full machine-backup            # take one now; prints size, items and what was not carried
+project-observatory full machine-backup status     # the newest, its age and size, what it did not carry
+```
+
+What one bundle holds, by category:
+
+| Category | What |
+|---|---|
+| Claude Code | `~/.claude/settings.json`, `settings.local.json`, `CLAUDE.md`, `keybindings.json`, `agents/`, `commands/`, `hooks/`, `skills/`, the plugin registry (`~/.claude/plugins/installed_plugins.json`, `~/.claude/plugins/known_marketplaces.json`) and `~/.claude.json`; `~/.agents/skills` |
+| Codex | `~/.codex/config.toml`, `~/.codex/AGENTS.md` |
+| Git, SSH, shell | `~/.gitconfig`, `~/.gitignore_global`, `~/.config/git/`, `~/.ssh/`, `~/.zshrc`, `~/.zprofile`, `~/.zshenv`, `~/.bashrc`, `~/.bash_profile`, `~/.profile` |
+| CLI logins | `~/.config/gh/`, doctl's configuration, `~/.config/heroku/`, `~/.netrc` |
+| Jobs and services | `~/Library/LaunchAgents/*.plist` (macOS) or `~/.config/systemd/user/` (Linux); the Fabric service descriptors directory |
+| Inventories | Homebrew (`brew bundle dump`), global npm, pipx and uv tools; this engine's workspace path, version and newest snapshot |
+| Checkouts | every Git checkout under the `projects` source and the declared local folders (or `roots`, below): remote URLs without user information, branch, HEAD, dirty and ahead/behind; one `git bundle` per repository of every commit no remote has (on branches, local tags, a detached HEAD of any of its worktrees, and every stash entry) plus its tag names, a patch of uncommitted changes (for a repository with no commit yet, its staged changes) and the untracked files with their modes, each under a cap; a shallow clone keeps its boundary |
+
+A symbolic link is recorded as a link with its target, never followed. Left out on purpose
+and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
+(`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
+Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
+belong in the vault, which the workspace snapshot carries. Anything over a cap (16 MB per
+file, 128 MB per entry, 320 MB of file copies, 16 MB per checkout bundle (estimated before it is written), 8 MB per patch or
+set of untracked files, 64 MB for all checkouts) is **not carried** and named, per folder, in
+`MANIFEST.json`, in the command's answer, in `doctor` (`machine_backup.not_carried`) and on the
+Health page. Measured on a working agent machine (2026-10-19): 69 MB, 14,221 items, 517
+checkouts, under two minutes. Three bundles are kept.
+
+Every decrypted or temporary copy, during a backup or a restore, lives in one private folder,
+`<home>/store/.machine-stage/` (mode 700; before a workspace exists,
+`${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-stage/`). A restore decrypts only
+what its current step needs and removes it before the next step; SIGTERM and SIGHUP remove it
+too, and whatever a killed run left is swept when the next backup or restore starts. A second
+backup or restore while one runs is refused before it touches anything.
+
+Nothing is written without a passphrase: a bundle holds `~/.ssh` and CLI logins, so it is
+never written unencrypted, not even inside the workspace. A write is also refused when the
+root's disk would keep less than 2 GB free; the refusal is recorded and shown by `doctor`,
+`maintain status` and Health (`machine-backup-refused-disk`), and the next attempt is an hour
+later. `doctor` warns when the newest bundle is older than 36 hours.
+
+**Your own paths** (a private agent's configuration, a tool this list does not know) go in
+`<home>/config/machine-backup.json`, which stays on this machine:
+
+```json
+{"include": ["~/.config/my-agent", "/opt/my-agent/etc/agent.toml"],
+ "exclude": ["~/.ssh/*.old", "*.log"],
+ "roots": ["~/src", "~/work"],
+ "transcripts": false,
+ "enabled": true,
+ "limits": {"total_mb": 160, "entry_mb": 32, "min_free_gb": 2}}
+```
+
+Every key is optional; an unknown key or a wrong value is refused by name (`doctor` shows it
+as `machine-backup-settings`). `exclude` patterns match a path written `~/…`, or a bare name.
+`limits` takes `file_mb`, `entry_mb`, `total_mb`, `bundle_mb`, `patch_mb`, `untracked_mb`,
+`checkouts_mb`, `min_free_gb`, `depth` (how deep `roots` are searched, default 4) and
+`checkout_seconds` (the checkout inventory's time budget, default 900). `"enabled": false`
+stops the daily and pre-update bundles.
+
+**Moving to a new machine, step by step:**
+
+1. On the old machine, keep the passphrase somewhere off the machine:
+   `project-observatory full backup-passphrase show` (it prints only to a terminal).
+2. Copy the backups root (`full backups status` names it) to the new machine, into the same
+   place: `~/Documents/Project Observatory/Backups/` on macOS. With iCloud Desktop & Documents
+   on, it is already there.
+3. On the new machine install the engine (README, Install), then look before writing:
+   `project-observatory full machine-restore --latest` prints every item, where it goes and
+   whether it is `missing`, the `same` or a `conflict`. Without a workspace it asks for the
+   passphrase at the terminal, or reads `OBSERVATORY_BACKUP_PASSPHRASE`. A bundle copied
+   elsewhere is named instead: `full machine-restore /path/to/machine-….obmachine`.
+4. `full machine-restore --latest --apply` writes only what is missing, with each file's mode
+   (so `~/.ssh` is 700 and a key 600). `--overwrite` replaces a conflict, moving the existing
+   file aside as `<name>.before-machine-restore-<stamp>`.
+5. `full machine-restore --latest --packages` installs Homebrew's Brewfile (`brew bundle
+   install --no-upgrade`) and the npm, pipx and uv tools. Install Homebrew first.
+6. `full machine-restore --latest --clone` clones every recorded checkout that is not there
+   yet (with your own Git configuration and the SSH keys step 4 put back), adds its other
+   remotes, fetches its carried commits and tags, puts back its stash entries in order, checks
+   out its branch (or detaches HEAD where it was detached), applies its patch and writes its
+   untracked files with their modes. A repository that had no commit yet is initialised and
+   its staged changes are staged again. A checkout that exists is never touched; a worktree is
+   added to its restored main checkout, detached where it was. A checkout that could not be
+   restored, or whose carried files are missing, is named in `failed` and the command exits 1.
+7. `project-observatory full init` (or `full restore --latest`) brings back the workspace
+   itself from its own snapshot, then `full maintain ensure` schedules the job.
+
+The plan and every answer carry paths, counts and reasons, never a file's contents.
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
@@ -1231,6 +1616,26 @@ Nothing needs to be run after a release. One job per workspace runs every 15 min
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
+After a maintenance pass, `project-observatory full maintain status` and
+`full doctor` include `log_retention`: separate engine, updater and hook-log
+scope receipts. Each scope has its attempt time, directory-entry count and
+counts of completed rotations, refusals and failures. Missing/unreadable scopes
+have unknown coverage and `observed_count: null`; an observed empty directory
+has zero entries. Action counts describe only attempted work, not remaining
+logs or reclaimed bytes. A lost whole-scope receipt also keeps action counts null,
+since effects may have occurred before the error. A failed scope does not suppress peer results.
+
+The receipt is saved in the workspace store as `maintenance.json`; its readers retain the original
+measurement time and mark evidence older than one hour stale. The Health page
+shows the same incomplete/stale warning, and its payload contains the typed
+scope result. Reasons are fixed codes, without paths, log contents or exception
+text. This adds evidence to the existing five-generation size policy; it does
+not enable automatic cleanup or change retention limits. A failed operation may
+already have moved older generations; no rollback is claimed. Copy/truncate
+still has its concurrent-append race, and external directory writers are not
+excluded. Synthetic evidence: `test_lifecycle.LogRetentionEvidence` and the
+`test_maintenance.Pass.test_log_retention_*` cases.
+
 **The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
 home. Without it, updates are on; only the word `off` in it turns them off. The commands
 below write it, and you can write it yourself. An update, a reinstall or an uninstall never
@@ -1295,9 +1700,22 @@ A running Claude Code session is never stopped by an update. Its MCP server
 (`mcp/server.py`) is a Python process that imported the engine when the session started.
 `pip` replaces the files on disk in place; the process keeps the code it already loaded, but
 a module it imports for the first time afterwards comes from the new release. The server
-therefore checks the installed version on each call and answers `stale-server` once the code
-under it changed, and the session gets the new release when it restarts or reconnects the
-server. `full update` lists those servers in its report and never signals them.
+therefore checks the installed version at each request, and once the code under it changed
+it moves itself onto the installed release (OBS-159): it holds that request, lets the
+requests already running answer, starts the installed release once to check it
+(`--reload-check`), then replaces itself in place with `os.execv`. The process id, the pipes
+and the session stay; the new release takes over the handshake the client already made, so
+the client sends no second `initialize`, and it answers the held request exactly once. When
+the tool list changed, the client receives `notifications/tools/list_changed`.
+
+Where it cannot move, it answers `stale-server` and names why, and the session gets the new
+release when it restarts or reconnects the server: on Windows (`os.execv` starts a new
+process there), while a `full update --apply` holds the workspace or the requests already
+running take longer than a minute to answer (it tries again at a later request), when the installed release fails its check, speaks another MCP revision or no
+longer exists, or when the replacement itself fails. Each move and each refusal is one line
+in `store/logs/mcp-reload.jsonl` (from, to, pid, and the reason for a refusal) and on the
+server's stderr; `full doctor` lists them under `session_servers`. `full update` lists the
+servers in its report and never signals them.
 
 #### A release that needs a person
 
@@ -1513,3 +1931,173 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+### Inspect checkout candidates beneath explicit roots
+
+```sh
+project-observatory full machine --checkouts --root /path/to/checkouts --root /path/to/other-checkouts
+```
+
+This read-only command writes `store/raw/checkout-candidates.json` with a persisted
+cursor. The default pass allows 20 seconds overall, 2 seconds and 250 entries per
+root, depth 8, and at most 10,000 retained candidates. Repeating the command resumes
+unfinished roots and rotates the root last attempted before expensive work. Symlinks
+are not traversed; Git metadata for a linked checkout may reference its common Git
+directory outside these roots. Repository contents are not recursively surveyed.
+
+The receipt distinguishes clones, linked worktrees, bare repositories and unknown
+Git results. A fresh registration receipt may establish listed path membership;
+missing, partial or old registration evidence leaves absence unknown. Allocated and
+reclaimable bytes, local changes, ownership, upstream containment and active use are
+not measured here. No candidate is actionable and none enters cleanup planning.
+Depth/time/entry limits and source failures keep a pass incomplete. Directory offsets
+are resumable hints; a changed directory identity resets its position, and huge
+or continually changing directories can need additional passes. Filesystem calls
+are checked between operations; a kernel-blocked filesystem read is not a hard
+real-time deadline. Git probes run in owned bounded child groups.
+
+A competing inventory writer refuses while the receipt lock is held; it never resets
+another scan's cursor. The command is not scheduled automatically.
+
+### Read cache and runtime coverage without cleaning
+
+```sh
+project-observatory full machine --cache-coverage
+```
+
+The receipt is `store/raw/cache-coverage.json`. It reads machine/cleanup declarations,
+checks non-protected root metadata, and locates executable tools without running them.
+It does not enumerate directory contents or start application-managed cleanup commands.
+Protected app containers and uncovered OS cache areas have unknown presence and size.
+A configured `regenerable` label remains an unverified declaration; tool availability
+means only that an executable was found, not that its daemon runs or the cache is idle.
+
+Old `du` figures retain their own dates as rounded reported sizes with unknown
+completeness. Exact allocated bytes, reclaimable bytes, owner, current use, restoration
+cost and regeneration proof remain unknown. Neither command estimates of zero nor
+APFS clone/private-size hints are promoted into reclamation promises by this adapter.
+The receipt always says coverage is partial. `measurement_complete` describes only
+completion of this narrow metadata pass, and never lifecycle safety.
+
+The default pass allows three seconds, capped at ten, and 128 attempted rows. Its
+persisted cursor advances before each probe so repeated bounded passes rotate through
+locations and tools. Input documents are capped at 1 MiB and source collections at 128
+rows; omissions are explicit. A kernel-blocked metadata read is not preempted. A failed
+source preserves old observations and dates; a missing current policy leaves those rows
+stale and does not authorize probing them again. A single-writer lock protects cursor
+progress. Nothing schedules this command or adds its rows to a cleanup planner.
+
+
+### Read saved checkout, cache and open-deleted-file coverage
+
+On macOS/Linux, the explicit checkout scan also records bounded local Git state.
+Its counters are status/index records, not recursive file totals. Hidden index
+flags, changed metadata and incomplete reads remain unknown. The saved coverage
+view shows current versus recorded state and age; a clean observation does not
+authorize removal. Windows currently reports this additional probe as unavailable.
+
+`project-observatory full machine --coverage` summarizes saved inventory
+receipts without running their collectors. The agent tool is
+`observatory_machine(section="coverage")`; its default overview includes the same
+summary. Each source retains its own attempt age and partial state. Snapshot counts
+count validated saved rows within the declared scope, never every checkout or cache
+on the machine. Current snapshot counts remain null for stale, partial or invalid
+sources. Cache lifecycle coverage remains partial even after all metadata probes finish.
+
+The reader caps each source at 4 MiB, each collection at 10,000 inspected rows, and
+returns ten rows per source. Its stale threshold is 30 minutes. Oversized or malformed
+receipts show an explicit unknown state; malformed rows do not erase valid peers.
+Read time is separate from measurement time. Reclaimable/allocated totals remain null,
+command arguments are omitted and all rows remain non-actionable. Refresh evidence
+with the separate `--checkouts --root ...` or `--cache-coverage` command when needed.
+
+### Missing worktree registration receipts
+
+For a missing worktree, cleanup first proves the directory absent: its parent folder
+is listed and lacks the entry. An unplugged drive, a renamed parent folder or a
+permission error is `unknown` instead; the survey marks that worktree `unreadable`
+and nothing is pruned. When the directory is absent, the worktree's HEAD is kept
+reachable first: by its branch, or for a detached HEAD by an
+`archive/wt-<sha8>` branch (a symbolic ref there does not count). Then only that
+registration's entry, `.git/worktrees/<name>`, found by the path its own `gitdir`
+records, is moved to `.git/worktrees-retired/` with its index and reflog: never a
+working directory, never a repository-wide `git worktree prune`. A directory that
+comes back loses nothing; move the entry back and run `git worktree repair` to
+register it again. An unknown, changed or unreadable HEAD, or a locked or ambiguous
+entry, moves nothing. A `pruned` journal row names the kept ref (`retained_ref`) and
+the moved entry (`retired_entry`); `registration_changes` stays null. A failed or
+interrupted move is `failed` with an unknown effect. Reasons omit Git output and exception bodies.
+Inspect `git worktree list --porcelain` in the owning repository before retrying.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
+
+### Open files absent from directory scans
+
+`project-observatory full machine --open-unlinked` records files that have been
+unlinked but remain open on macOS or Linux when `lsof` is available. It never
+stops a process, removes data or changes cleanup settings. Windows and a missing
+source return unknown, not zero. There is no scheduled observation.
+
+The bounded receipt `store/raw/open-unlinked.json` stores numeric process IDs and
+snapshot-local device/inode identities, logical sizes, source start/end times and
+the parser source hash. It collects no paths, process commands or environment.
+The command has a five-second deadline, a combined two-MiB output ceiling,
+100,000 fields and 10,000 distinct file records. Missing sizes, conflicting sizes
+for a shared identity, diagnostics, malformed output and partial execution remain
+degraded. Known-size peers survive as a separately labelled subtotal.
+
+`full machine --coverage`, `full doctor` and
+`observatory_machine(section="coverage")` read the saved observation only. The
+reader exposes up to ten size/PID-count samples and marks snapshots older than
+30 minutes stale. Shared files count once, so process totals must not be added.
+A successful command does not establish visibility of every process or namespace.
+Logical bytes are neither allocated blocks nor reclaimable memory or disk space:
+allocated/reclaimable values stay null and every observation remains non-actionable.
+Ownership and any supported supervisor action require separate evidence.
+
+Contract tests: `observatory/engine/tests/test_open_unlinked.py`, including a
+disposable open-then-unlinked file owned by the test; no host process is stopped.
+
+
+### Checkout observation does not fetch missing objects
+
+Checkout inventory and local-state Git queries explicitly use the offline
+observation profile. Partial clones can omit objects that an ordinary Git read
+would download on demand; this observation refuses that download and keeps an
+unreadable state unknown. It does not fetch upstream refs or establish remote
+backup durability. Explicit fetch and remote-query operations outside this
+profile retain their existing behavior. This is not a new cleanup permission.
+
+Proof: `tests/test_checkout_state.py::OfflineGitObservation` in the engine uses
+only disposable local file remotes, checks object-store contents before/after,
+and includes a positive complete local observation and explicit remote controls.
+
+
+### Read local upstream graph evidence
+
+An explicit checkout scan saves local-state results before a separately budgeted
+upstream graph phase. That phase reserves up to a quarter of the scan's time
+budget, at most five seconds, with its own persistent round-robin cursor and
+bounded child per checkout. Failures preserve the saved local-state observation.
+
+For a supported complete local graph, the receipt records ahead/behind commit
+counts and whether the upstream is another local branch or a remote-tracking
+ref. These are local resolved commits only: a remote-tracking ref can be stale,
+so `remote_durability` remains `unknown`, and `actionable` remains false. No
+fetch, deletion, pruning or owner inference follows. Detached/unborn/missing
+upstream, shallow or promisor history, replacement refs, grafts and alternate
+object stores produce unknown counts. Those exclusions preserve uncertainty
+rather than silently interpreting a different graph.
+
+The saved coverage view uses the graph's own measurement time and source binding;
+it never refreshes graph evidence from another phase's success. After 30 minutes,
+a malformed receipt or a source/binding mismatch, counts are unknown. Git output,
+remote URLs, commit subjects and ref names are absent from this aggregate view.
+Proof: `tests/test_checkout_state.py::UpstreamGraph` and `GraphPhase` in the engine.
+
+### Memory pressure observation
+
+The saved memory summary includes an independently dated macOS pressure level.
+It reads the platform's read-only sysctl; unknown codes, failed commands and
+unsupported platforms stay unknown. Swap usage remains a separate measurement.
+Saved pressure observations expire after30minutes and never authorize a lifecycle
+action. RAM/swap timestamps are not refreshed by a successful pressure-only read.

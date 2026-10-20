@@ -452,9 +452,15 @@ def test_the_page_is_allowed_and_says_why() -> None:
     # as long as it runs — "concurrently with the gate" by construction. No step
     # of any group starts or stops the daemon, so exempting its receipt removes
     # no coverage.
+    #
+    # The journal of requests for a why (M-8) is appended by the same Stop hook,
+    # in the same sessions, the first time a record is asked about — foreign for
+    # the receipt's reason.
     expected = {"store/raw/record-turn.json", "store/raw/integrity.json",
                 "store/raw/tick-lease.json", "store/raw/store-faults.jsonl",
-                "store/raw/companion-faults.jsonl", "store/raw/serverd.json"}
+                "store/raw/companion-faults.jsonl", "store/raw/serverd.json",
+                "store/raw/why-asks.jsonl", "store/raw/why-asks.jsonl.1",
+                "store/raw/why-asks.jsonl.lock"}
     check(f"exactly the {len(expected)} known foreign writers are exempted",
           set(foreign) == expected,
           f"unexpected: {sorted(set(foreign) - expected)}, "

@@ -1,5 +1,5 @@
 {
-  "description": "Optional Claude Code hooks: record changes in watched Git projects and request missing reasoning. SessionStart reports brief actionable context. Missing workspace, interpreter or watched project degrades quietly; hooks do not block a turn. Project names and paths stay in the private workspace.",
+  "description": "Optional Claude Code hooks: record changes in watched Git projects and request missing reasoning. SessionStart reports brief actionable context. Stop records the facts of a changed turn first; then, within 2 seconds, it reads the last 4 MB of the session transcript once for this session's writing calls (Edit, Write, MultiEdit, NotebookEdit, and Bash writes through >, >>, tee or sed -i; failed calls, subagent calls and commands over 65,536 characters are skipped). It leaves a request for the why at most once per record, none while a revision's rationale link is still true (same repository, a regular file in the checkout with one hard link and no symbolic link, the exact heading line present once and the file unchanged or with only a new entry appended after it; any other edit asks again), and none when such a call targeted a decisions.md or an adr/ .md, .markdown or .txt file (outside vendored trees) with text carrying the entry's own heading (unique in the register) or, with no heading, most of its added lines, or wrote a decision: or stage: line into .task-pipeline/run.md. UserPromptSubmit hands that pending request to the model with the next prompt, once, within 4,000 characters, records the delivery, and prints nothing when none is pending. Missing workspace, interpreter or watched project degrades quietly; hooks do not block a turn or a prompt. Project names and paths stay in the private workspace.",
   "hooks": {
     "SessionStart": [
       {
@@ -23,6 +23,18 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/record-turn.sh\"",
             "timeout": 20,
             "statusMessage": "Recording what changed"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "py=\"${OBSERVATORY_PYTHON:-}\"; [ -x \"$py\" ] || py=python3; \"$py\" \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-why.py\" 2>/dev/null; exit 0",
+            "timeout": 5
           }
         ]
       }

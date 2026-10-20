@@ -453,7 +453,11 @@ def from_store() -> dict:
                 "snapshot": (ms.get("snapshot") or {}).get("at"),
                 "snapshot_kind": (ms.get("snapshot") or {}).get("result"),
                 "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or [],
-                "warning_items": ms.get("warning_items") or []}
+                "warning_items": ms.get("warning_items") or [],
+                "log_retention": ms.get("log_retention"),
+                # The machine bundle (OBS-157): when, how large, how many items. No path.
+                "machine": {k: (ms.get("machine_backup") or {}).get(k)
+                            for k in ("enabled", "newest_at", "size", "items", "not_carried_count")}}
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["maintenance"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
@@ -2255,7 +2259,8 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     hb.push([T("installed"), T("engine {v}", {v: V.engine}) + (V.app ? ", " + T("app {v}", {v: V.app}) : ""), status]);
   // Every warning the job raised, in the reader's language, each its own row (A14) —
   // except what a row above or below already says (A14 review: every problem twice).
-  const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "no-backup", "not-encrypted", "passphrase"]);
+  const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "no-backup", "not-encrypted", "passphrase",
+                        "machine-backup-missing"]);
   const WARN = {
     "services-not-restarted": () => [T("a background job did not start again after the last backup or update"),
                                      toolCommand("serverd.py", ["--install"])],
@@ -2273,6 +2278,17 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
           {result: RESULT_WORD(w.result), detail: w.detail || ""}), status],
     "snapshot-failed": w => [T("the last daily backup failed: {detail}; tried again within the hour", {detail: w.detail || ""}),
                              fullCommand("backups status")],
+    // The machine bundle (OBS-157).
+    "machine-backup-failed": w => [T("the last machine backup failed: {detail}; tried again within the hour",
+                                     {detail: w.detail || ""}), fullCommand("machine-backup status")],
+    "machine-backup-refused-disk": w => [T("the last machine backup was not written: {detail}", {detail: w.detail || ""}),
+                                         fullCommand("machine-backup status")],
+    "machine-backup-stale": w => [T("the newest machine backup is {hours} hours old", {hours: Math.round(w.hours || 0)}),
+                                  fullCommand("machine-backup")],
+    "machine-backup-not-carried": w => [T("items the newest machine backup did not carry: {count}", {count: w.count || 0}),
+                                        fullCommand("machine-backup status")],
+    "machine-backup-settings": w => [T("the machine backup settings are refused: {detail}", {detail: w.detail || ""}),
+                                     fullCommand("machine-backup status")],
   };
   const items = (MT.warning_items || []).length ? MT.warning_items : (MT.warnings || []).map(text => ({text}));
   items.filter(w => !SAID.has(w.code)).forEach(w => {
@@ -2284,6 +2300,13 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     : MT.snapshot_kind === "before-upgrade" ? T("newest {date}, taken before the last update", {date: day})
     : MT.encrypted === false ? T("newest {date}, NOT encrypted, inside the workspace — set a passphrase", {date: day})
     : T("newest {date}, encrypted outside the workspace", {date: day}), fullCommand("backups status")]);
+  // The machine's agent setup in one encrypted bundle (OBS-157).
+  const MB = MT.machine || {};
+  if (MB.enabled !== false)
+    hb.push([T("machine backup"), !MB.newest_at ? T("none yet: the maintenance job takes one a day")
+      : T("newest {date}, {size} MB, {items} items", {date: MB.newest_at.slice(0, 10),
+          size: ((MB.size || 0) / 1048576).toFixed(1), items: MB.items == null ? "?" : MB.items}),
+      fullCommand("machine-backup status")]);
   // Where the passphrase that opens those backups is kept besides the workspace (A14).
   if (MT.passphrase_state && MT.passphrase_state !== "environment")
     hb.push([T("backup passphrase"), MT.passphrase_state === "missing"
@@ -3321,13 +3344,13 @@ function anchorSlug(s) { return String(s).replace(/[^A-Za-z0-9_.:/-]+/g, "-"); }
 // Credentials read by a provider tool have a "door": the tool that can
 // issue, list and revoke them.
 const doorOf = c => {
-  const m = /^tools\/(openrouter|cloudflare)\.py$/.exec(c.read_by || "");
+  const m = /^tools\/(openrouter|cloudflare|heroku)\.py$/.exec(c.read_by || "");
   return m ? m[1] : null;
 };
 // The door's LEDGER of minted keys sits in the same store and names the same
 // reader, but it is not a door — nothing is minted from a ledger (audit A41).
 const ledgerOf = c => {
-  const m = /^(openrouter|cloudflare)-issued\.json$/.exec(String(c.name || ""));
+  const m = /^(openrouter|cloudflare|heroku)-issued\.json$/.exec(String(c.name || ""));
   return m && doorOf(c) === m[1] ? m[1] : null;
 };
 
@@ -3338,6 +3361,7 @@ const ledgerOf = c => {
 const ISSUE_CMD = {
   openrouter: toolCommand("openrouter.py", ["issue", "--name", "KEY_NAME", "--limit", "AMOUNT", "--to", "vault:PROJECT/prod/NAME"]),
   cloudflare: toolCommand("cloudflare.py", ["issue", "--account", "ACCOUNT_ID", "--preset", "analytics"]),
+  heroku: toolCommand("heroku.py", ["issue", "--preset", "read", "--vault", "PROJECT/prod/NAME"]),
 };
 function credVerbs(c) {
   const door = doorOf(c);

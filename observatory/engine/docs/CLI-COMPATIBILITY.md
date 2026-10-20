@@ -97,7 +97,7 @@ Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
 passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning.
 `backups` and `backup-passphrase` are new workspace commands; nothing existing
 was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
-`--apply` only writes the plan. [`backup_vault.py`](../backup_vault.py) implements the root and format.
+`--apply` only writes the plan. `machine-backup` and `machine-restore` (OBS-157) are new workspace commands as well; `machine-restore` without `--apply`, `--packages` or `--clone` only prints the plan. [`backup_vault.py`](../backup_vault.py) implements the root and format.
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 
@@ -156,6 +156,19 @@ the engine migration path accepts the original full-engine layout explicitly.
 
 Two local servers require different ports when used concurrently. Workspace
 labels prevent scheduler-job collisions; they do not allocate TCP ports.
+
+## Declared local folders
+
+`full track local-folder PATH` declares one exact Git checkout in
+`config/tracked.json`; `full untrack local-folder PATH` removes it and leaves a
+removal marker that SessionStart will not override, and `full tracked` lists
+both states and any degradation. These are workspace commands added without
+renaming an existing command or changing `sources.projects`. A declaration is
+not a registry edit: the next `full local` or tick measures it through the same
+filesystem scan, merge and emit pipeline as a root child. The portable 0.1
+`core.discover` remains a preview with no registration side effect, and proposal
+review authority is unchanged.
+
 ## Step arguments and help
 
 Individual engine step commands have fixed arguments; undeclared arguments are

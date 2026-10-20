@@ -255,7 +255,7 @@ class WorkspaceUpgrade(unittest.TestCase):
         import re
         engine = Path(upgrade.__file__).resolve().parent
         written = set()
-        for source in ('tools/record_turn.py', 'tools/session_start.py', 'companion_faults.py'):
+        for source in ('tools/record_turn.py', 'tools/session_start.py', 'companion_faults.py', 'why_asks.py'):
             text = (engine / source).read_text(encoding='utf-8')
             written |= {'store/raw/' + n for n in re.findall(r'paths\.SCRATCH / "([^"]+)"', text)}
         # record_turn READS vault.json (the tick writes it); everything else named is written.

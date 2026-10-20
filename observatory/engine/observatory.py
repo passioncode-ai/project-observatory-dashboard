@@ -107,10 +107,15 @@ STEPS = {
     "heroku":    [PY, "collectors/scan_heroku.py", "store/raw/heroku.json"],
     "scan-cloudflare": [PY, "collectors/scan_cloudflare.py", "store/raw/cloudflare_zones.json"],
     "scan-mcp":  [PY, "collectors/scan_mcp.py", "store/raw/mcp.json"],
+    # The agents installed here: Fabric service descriptors and launchd (OBS-83).
+    "scan-agents": [PY, "collectors/scan_agents.py", "store/raw/agents.json"],
     "scan-harness": [PY, "collectors/scan_harness.py", "store/raw/harness.json"],
     "scan-spend": [PY, "collectors/scan_spend.py", "store/raw/spend.json"],
+    # Which Fabric project each project is, asked of Fabric's hub (OBS-160).
+    "fabric-attribution": [PY, "collectors/scan_fabric_attribution.py", "store/raw/fabric-attribution.json"],
     "harness":   [PY, "tools/harness.py"],
     "grant":     [PY, "tools/grant.py"],
+    "node":      [PY, "tools/node.py"],
     "openrouter": [PY, "collectors/scan_openrouter.py", "store/raw/openrouter.json"],
     "env":       [PY, "collectors/scan_env.py", "store/raw/env.json"],
     # Gated to once a day inside the scan itself: every run pulls every
@@ -198,6 +203,7 @@ STEPS = {
     "test-heroku": [PY, "tests/test_heroku.py"],
     "test-openrouter": [PY, "tests/test_openrouter_keys.py"],
     "test-digitalocean": [PY, "tests/test_digitalocean_door.py"],
+    "test-heroku-door": [PY, "tests/test_heroku_door.py"],
     "test-credentials": [PY, "tests/test_credentials.py"],
     "test-remote-env": [PY, "tests/test_remote_env.py"],
     "test-google": [PY, "tests/test_google.py"],
@@ -361,9 +367,9 @@ GROUPS = {
     # somebody else can fix.
     "check": ["validate", "fabric", "ledger-current", "dashboard", "design", "smoke", "smoke-pages", "test-pages",
               "test", "test-ledger", "test-skill", "test-agent", "test-key", "test-install-key", "test-vault", "test-analytics", "test-doors", "test-surfaces", "test-mcp-inventory", "test-ack", "test-serverd", "test-skill-check", "test-index",
-              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
+              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-heroku-door", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
               "probes-check", "contract"],
-    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
+    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "scan-agents", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
               "scan-events", "plugins", "rollup", "corroborate", "export-ledger", "lost",
               # `index` BEFORE the page, and the position is a measurement: it
               # charges the wallet through the provider boundary, and the page
@@ -452,7 +458,8 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
-                      "update", "profile", "maintain", "auto-update"}
+                      "machine-backup", "machine-restore",
+                      "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -462,6 +469,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
   configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
   local                        filesystem → registry → events → findings → dashboard
+  track local-folder PATH      declare one exact Git checkout for the next local pass
+  untrack local-folder PATH    remove that declaration and keep SessionStart from restoring it
+  tracked                      list declared and removed local folders with any degradations
   dashboard                    rebuild the dashboard pages only
   open [--serve|--stop]        open the dashboard in a browser (builds it if needed); stop the server
   agent install|status|uninstall  Claude Code plugin; install turns auto-update on
@@ -472,6 +482,13 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                encrypted into the backups root once a passphrase is set
   backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
+  machine-backup [now|status]  this machine's agent setup (Claude Code, Codex, SSH, Git, shell, CLI
+                               logins, launchd, Fabric descriptors, package inventories, unpushed and
+                               uncommitted work) into one encrypted .obmachine in the backups root;
+                               daily from `maintain` and before each update
+  machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
+                               put a machine bundle back: the plan by default; --apply writes only
+                               what is missing; --overwrite moves a conflict aside first
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
@@ -500,9 +517,16 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
+  ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
+                               ed25519 key, copy its public line, send it to GitHub or a server;
+                               the private key is never shown or moved
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
   scan-spend                   this month's provider spend across every account the doors hold, for the
-                               L0 limit and its 80 % warning (integration openrouter)
+                               L0 limit and its 80 % warning, and each project's month and last 30 days
+                               by key hash (tools/spend.py project; integration openrouter)
+  fabric-attribution           which Fabric project each project is: asks Fabric's hub (hub.json, a live pid,
+                               loopback only) and records fabric:<uuid> aliases in store/raw/fabric-attribution.json;
+                               a hub that is down or refuses is named in degraded, nothing recorded is lost
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
@@ -588,6 +612,8 @@ STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = 
                 "--force": (None, None, "ignore each plugin's age gate")},
     "harness": {"--accept": ("KEY", HARNESS_KEY, "record a changed skill's current digest as reviewed"),
                 "--accept-all": (None, None, "the same for every changed skill")},
+    "node": {"--init": (None, None, "create this machine's device keys if absent, then show them"),
+             "--show": (None, None, "show the device id and public keys")},
     "grant": {"--status": (None, None, "the month, the keys and open reservations"),
               "--check": (None, None, "one grant check; the token on stdin"),
               "--amount": ("USD", USD, "--check: the amount to reserve"),
@@ -754,6 +780,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import forget_cli
         return argparse_refusal(lambda: forget_cli.parser().parse_args(rest))
+    if name == "ssh-keys":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import ssh_keys
+        return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -903,6 +933,18 @@ FOREIGN_WRITES_IGNORED = {
         "with the gate, for the same reason its receipt is exempted below. "
         "Append-only by design, so a neighbouring session losing a "
         "turn mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl":
+        "appended by the companion's Stop hook the first time it asks about a record's "
+        "`why` — in every session of every watched project, concurrently with the gate, "
+        "like the receipt below. Append-only by design, so a neighbouring session's "
+        "ask mid-gate adds a line this tree did not write",
+    "store/raw/why-asks.jsonl.1":
+        "the previous generation of the journal above, renamed into place by whichever "
+        "session's hook first finds the journal past its size — concurrently with the "
+        "gate, for the same reason",
+    "store/raw/why-asks.jsonl.lock":
+        "the lock that journal rotation takes so two sessions do not rotate at once; "
+        "created by the first session's hook to rotate, concurrently with the gate",
     "store/raw/record-turn.json":
         "written by the companion's Stop hook — in EVERY session of EVERY watched "
         "project on this machine, concurrently with the gate. Forty-nine Claude "
@@ -1126,6 +1168,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import forget_cli
         return forget_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "ssh-keys":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import ssh_keys
+        return ssh_keys.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])
