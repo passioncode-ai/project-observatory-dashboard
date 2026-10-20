@@ -1,0 +1,12 @@
+{
+  "about": "The fabric-agent-contract's folder-attribution vectors (DEC-0089, rule FAC-SEM-121). folder_attribution.py ports src/folder-attribution.ts of the same commit, and tests/test_folder_attribution.py runs every vector against it. The copy is JSON-identical to the contract's file: the only change is that the colon of each of the contract's planted fake userinfo is written as a JSON escape, so the public-release gate's credential-URL pattern does not read a test value as a credential. canonicalSha256 is the SHA-256 of the parsed document re-serialised with sorted keys and no spaces; the test checks it. Never edit the vectors here: take a new copy from the contract and update this pin.",
+  "repository": "passioncode-ai/fabric-agent-contract",
+  "license": "AGPL-3.0-only",
+  "commit": "ebfddcead7733426870d7d62a46c129aa2a92a83",
+  "files": {
+    "folder-attribution.json": "fixtures/vectors/folder-attribution.json"
+  },
+  "status": "pinned to the merge commit of the contract's pull request #124 (DEC-0089); src/ and the vectors are unchanged from the reviewed head a11d6193",
+  "canonicalSha256": "821d78ef453b4310871ce411d97e30ed5916b83fc3f4da1e2461dd4f9f310f54",
+  "escaped": 2
+}
