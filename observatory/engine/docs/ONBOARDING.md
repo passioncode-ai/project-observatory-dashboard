@@ -687,10 +687,23 @@ use the CLI and MCP without those hooks. It declares three, and none of them can
 block a turn or a prompt:
 
 - **SessionStart** prints at most two lines about the project, only when one is
-  actionable.
+  actionable. It also keeps a snapshot of the checkout (each `git status` entry's
+  status, size and modification time, and HEAD) as the session's baseline.
 - **Stop** records the facts of a turn that changed a watched repository as a
-  `proposed` ledger record, one per session, revised per turn. It writes the
-  record first, then asks for the `why` of that record **once**. It does not ask
+  `proposed` ledger record, one per session, revised per turn. Only this session's
+  changes count: the record's files are those that differ from the baseline, so a
+  file that was already untracked or dirty when the session opened is never
+  reported as its work, and a turn that changed nothing since the previous turn's
+  snapshot writes nothing. A session with no baseline (it started before this
+  engine was installed) takes the untracked files it first sees as already there.
+  It writes the record first, then asks for the `why` of that record **once**, and
+  only when the turn changed tracked content (an edit, a staged or intent-to-add
+  file, a deletion, a commit): a new untracked file is recorded but not asked
+  about until it is added. The snapshots live in
+  `$XDG_STATE_HOME/project-observatory/turns/` (mode 0600, keyed by digests, no
+  path inside, pruned after seven days). The recorder's git calls share an
+  8-second budget and skip dirty submodule trees; a turn that runs out is left
+  unrecorded, silently, and counted at the next turn. It does not ask
   when this session's own tools already wrote the rationale. That is checked
   after the record exists, within 2 seconds, from one pass over the last 4 MB of
   the session's transcript (the Stop payload names it). The pass collects the
