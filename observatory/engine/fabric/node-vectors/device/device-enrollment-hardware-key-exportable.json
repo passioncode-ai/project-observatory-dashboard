@@ -1,0 +1,22 @@
+{
+  "protocol": "fabric-device/0.1",
+  "kind": "enrollment-request",
+  "org": {
+    "id": "org-7f3a"
+  },
+  "device": {
+    "id": "dev-01j9a",
+    "platform": "macos"
+  },
+  "key": {
+    "algorithm": "ecdsa-p256",
+    "storage": "tpm",
+    "exportable": true,
+    "publicKeySha256": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+  },
+  "csr": "MIIBDzCBtgIBADBUMQ8wDQYDVQQKDAZvcmctN2YzYTESMBAGA1UEAwwJZGV2LTAxajlh",
+  "auth": {
+    "method": "sso"
+  },
+  "requestedAt": "2026-10-07T08:30:00Z"
+}

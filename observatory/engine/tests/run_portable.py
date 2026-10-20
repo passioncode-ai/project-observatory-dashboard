@@ -301,6 +301,7 @@ def copy_source(target: Path) -> None:
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
     selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
+    selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
     for source in sorted(selected):
         if not source.is_file():
             # Optional root modules/skill docs are not needed by every release.

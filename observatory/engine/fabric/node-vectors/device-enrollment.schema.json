@@ -73,11 +73,14 @@
               "enum": [
                 "secure-enclave",
                 "tpm",
-                "platform-keystore"
-              ]
+                "platform-keystore",
+                "file"
+              ],
+              "description": "Where the private key lives. file (DEC-0094): an owner-only PKCS#8 file, which can be copied, so exportable is true; a server MAY refuse it by policy."
             },
             "exportable": {
-              "const": false
+              "type": "boolean",
+              "description": "False for the hardware and platform stores, true exactly for file (DEC-0094)."
             },
             "publicKeySha256": {
               "type": "string",
@@ -90,7 +93,17 @@
               "maxLength": 16384
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "if": {
+            "properties": { "storage": { "const": "file" } },
+            "required": ["storage"]
+          },
+          "then": {
+            "properties": { "exportable": { "const": true }, "attestation": false }
+          },
+          "else": {
+            "properties": { "exportable": { "const": false } }
+          }
         },
         "deviceKeys": {
           "type": "array",

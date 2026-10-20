@@ -5,8 +5,9 @@
 
 Copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch do not
 matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
-`schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, then rewrites the commit and
-the three digest rows of that folder's README. `tests/test_node_foundation.py` checks the digests and
+`schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
+check-in fixtures CT-65 added into its `device/` folder, then rewrites the commit and those files' digest rows in that
+folder's README. `tests/test_node_foundation.py` checks the digests and
 `tests/test_node_org.py` runs the files, so a re-vendored commit is checked by the next test run. Prints what changed;
 exits 1 when the commit or a file cannot be read, and changes nothing then.
 """
@@ -24,7 +25,15 @@ ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
 FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "share-registration.json": "fixtures/vectors/share-registration.json",
-         "device-enrollment.schema.json": "schemas/device-enrollment.schema.json"}
+         "device-enrollment.schema.json": "schemas/device-enrollment.schema.json",
+         # The device fixtures the node's requests and answers are held to (CT-65, DEC-0094).
+         "device/device-enrollment-request-file-key.json": "fixtures/positive/device-enrollment-request-file-key.json",
+         "device/device-enrollment-file-key-not-exportable.json":
+             "fixtures/negative/device-enrollment-file-key-not-exportable.json",
+         "device/device-enrollment-file-key-attested.json": "fixtures/negative/device-enrollment-file-key-attested.json",
+         "device/device-enrollment-hardware-key-exportable.json":
+             "fixtures/negative/device-enrollment-hardware-key-exportable.json",
+         "device/device-check-in-response-protocols.json": "fixtures/positive/device-check-in-response-protocols.json"}
 #: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
 PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
 
@@ -61,6 +70,7 @@ def vendor(contract: Path, commit: str) -> dict:
         pattern = re.compile(r"^\| `%s` \| `[0-9a-f]{64}` \|$" % re.escape(name), re.M)
         readme = pattern.sub(row, readme) if pattern.search(readme) else readme.rstrip("\n") + "\n" + row + "\n"
         target = VECTORS / name
+        target.parent.mkdir(exist_ok=True)
         if not target.exists() or target.read_bytes() != data:
             changed.append(name)
         target.write_bytes(data)

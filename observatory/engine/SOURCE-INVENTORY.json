@@ -1141,8 +1141,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "87a9c59a72d9868d346ef69277f0f577146bd619fdb71705284db2c1e8cdfed7",
-      "bytes": 3535
+      "export_sha256": "c97f584008b773ed5904088d1d189ba218fa0be338bdef862f21fcf12b07ac4f",
+      "bytes": 4258
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1155,8 +1155,8 @@
       "path": "fabric/node-vectors/device-enrollment.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "964b809237b6b6fa376f5e848c4bfc4821365bb0ec3f31f974783681b6a44687",
-      "bytes": 11338
+      "export_sha256": "0de4ddfa8af037d702fe2dec0e480a214e891bec140bf8d31479434e2a40682e",
+      "bytes": 12000
     },
     {
       "path": "fabric/node-vectors/enroll-token.json",
@@ -2077,8 +2077,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3639ece8fb4ebd3b0be7dfb1db2a721235476e18eb9e37870dc2906b54098946",
-      "bytes": 67259
+      "export_sha256": "81ab12b1b0a6396179274cea2e964bee0a67fb11fd64e727eb9de4997a7279c7",
+      "bytes": 67276
     },
     {
       "path": "node/p256.py",
@@ -2882,8 +2882,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "88e7b7a2ceb013d1abdb5e631f6970ec2113b971f34df609f6901eb21584b950",
-      "bytes": 35343,
+      "export_sha256": "da8b2f0f9fd0343b3d2e0665abb1e8c0c08a54c2df27fdddb50f605fcf3acccb",
+      "bytes": 35458,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4020,8 +4020,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f76680de59c06254bb2075f554b5b268ba75e00427d5dbeb1cdb55a1096b9214",
-      "bytes": 49856
+      "export_sha256": "38f3a38c7a29adcaec175eadf8b47cc1bf5bd6faaab15ab0a5ab211dc55a7e24",
+      "bytes": 53407
     },
     {
       "path": "tests/test_node_pairing.py",

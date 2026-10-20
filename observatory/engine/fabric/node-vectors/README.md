@@ -17,8 +17,9 @@ The same commit (the merge of contract pull request #113, DEC-0084) carries the 
 case; the first checks the digests below.
 
 `http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
-`device-enrollment.schema.json` (DEC-0031) are copied byte for byte (OBS-161 pin) from the contract at commit
-`07042181bfae2a481aa0da1a5651f24c76669c48` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+`device-enrollment.schema.json` (DEC-0031, DEC-0094), with the device fixtures in `device/` (`fixtures/positive/` and
+`fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
+`de9eae4d7f3c9fad89560d15ba0509092483749e` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
 `gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors all three at another
 commit and rewrites the commit and digests here: `python3 tools/vendor_org_vectors.py --contract <checkout> --commit
@@ -40,4 +41,9 @@ the digests below.
 | `revocation-delta.json` | `cdb1fb989808bf0bc7843ef39571c1aa2a27d2f2dd2281572e921fc77bfb7217` |
 | `share-registration.json` | `43678e29f6246a8b66d7d88befb60118e25540e676c315f19e1c1c39d7e78f5f` |
 | `secret-envelope.json` | `3ed14f7f95857b10a8d7ec97ded697ea65ea564c9f4c731e11c221e9ef03a3b3` |
-| `device-enrollment.schema.json` | `964b809237b6b6fa376f5e848c4bfc4821365bb0ec3f31f974783681b6a44687` |
+| `device-enrollment.schema.json` | `0de4ddfa8af037d702fe2dec0e480a214e891bec140bf8d31479434e2a40682e` |
+| `device/device-enrollment-request-file-key.json` | `5ff4d130ad4ad406d730eb7b353581f9ab0058e4a5ecb2a674bda8a9c64a9091` |
+| `device/device-enrollment-file-key-not-exportable.json` | `fd07f7ec3be7be88cfe175524a8d08afea88bf31f1136ff25fa492a94e69dbdc` |
+| `device/device-enrollment-file-key-attested.json` | `27fec7d9be6b86f8e99b152c7025f6b9046006e77d949ae401ddf2df537e7a27` |
+| `device/device-enrollment-hardware-key-exportable.json` | `b3641681253c75eb971e23b245187f3b16c8dad674d69834d8e9b13134e5ad64` |
+| `device/device-check-in-response-protocols.json` | `f7d9a64a109c118d86b15d7b309fc880d595d4e2ea4d897add884d94b7ce6d41` |

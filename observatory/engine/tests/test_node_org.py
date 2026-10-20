@@ -14,6 +14,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import unittest
@@ -43,9 +44,10 @@ AGENT = 'urn:fabric:agent:example:inbox-digest'
 T0 = 1792396800                                        # 2026-10-19T08:00:00Z (its UTC day began at T0 - 28800)
 
 
-def pinned_key_admits(storage: str, exportable: bool) -> bool:
-    """Whether the vendored device-enrollment schema (the contract commit this engine is pinned to) admits the key
-    declaration: `storage` in its enum and `exportable` as its const, or its if/then/else for `file` (CT-65)."""
+def pinned_key_admits(key: dict) -> bool:
+    """Whether the vendored device-enrollment schema (the contract commit this engine is pinned to) admits a request's
+    `key`: `storage` in its enum, and every const or forbidden property of the schema's top level and of its
+    if/then/else branch (CT-65: `file` with `exportable: true` and no attestation; any other store `exportable: false`)."""
     doc = json.loads((VECTORS / 'device-enrollment.schema.json').read_text(encoding='utf-8'))
     found = []
 
@@ -60,14 +62,20 @@ def pinned_key_admits(storage: str, exportable: bool) -> bool:
             for item in node:
                 walk(item)
     walk(doc)
-    (key,) = found
-    if storage not in key['properties']['storage']['enum']:
+    (rules,) = found
+    if key.get('storage') not in rules['properties']['storage']['enum'] or set(key) - set(rules['properties']):
         return False
-    rule = key['properties']['exportable']
-    if 'if' in key:
-        is_file = storage == key['if']['properties']['storage']['const']
-        rule = key['then' if is_file else 'else']['properties']['exportable']
-    return 'const' not in rule or rule['const'] is exportable
+    branches = [rules['properties']]
+    if 'if' in rules:
+        matched = key.get('storage') == rules['if']['properties']['storage']['const']
+        branches.append(rules['then' if matched else 'else'].get('properties', {}))
+    for properties in branches:
+        for name, rule in properties.items():
+            if rule is False and name in key:
+                return False
+            if isinstance(rule, dict) and 'const' in rule and name in key and key[name] != rule['const']:
+                return False
+    return True
 
 
 def vectors(name: str) -> dict:
@@ -260,7 +268,7 @@ class FakeServer:
             return 422, {'error': {'code': 'key-mismatch'}}
         assert [k['kid'].split('#')[1] for k in doc['deviceKeys']] == ['sig', 'kem']
         assert (doc['key']['storage'], doc['key']['exportable']) in (('file', True), ('platform-keystore', False))
-        if self.strict_schema and not pinned_key_admits(doc['key']['storage'], doc['key']['exportable']):
+        if self.strict_schema and not pinned_key_admits(doc['key']):
             return 422, {'error': {'code': 'schema-invalid', 'pointer': '/key/storage', 'message': 'not in enum'}}
         if doc['key']['storage'] in self.refuse_storage:
             return 403, {'error': {'code': 'key-storage-refused', 'message': 'policy'}}
@@ -829,7 +837,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         strict = FakeServer(self.clock)
         strict.strict_schema = True
         enrollment = Enrollment(self.node, 'org_strict', transport=strict, clock=self.clock)
-        if pinned_key_admits('file', True):            # pinned at CT-65 (DEC-0094) or later
+        if pinned_key_admits({'storage': 'file', 'exportable': True}):   # pinned at CT-65 (DEC-0094) or later
             self.assertTrue(enrollment.enroll('https://org.example', 'et_1.' + 'S' * 32)['enrolled'])
             return
         with self.assertRaises(OrgError) as raised:   # pinned before it: what a current server answers
@@ -859,6 +867,53 @@ class EnrollmentEndToEnd(unittest.TestCase):
         first.join(10)
         second.join(10)
         self.assertEqual(self.server.sequences, [1, 2])
+
+
+    # -- the contract pin (CT-65, DEC-0094, at de9eae4d) --------------------------------------------------------
+    def device_fixture(self, name):
+        return json.loads((VECTORS / 'device' / name).read_text(encoding='utf-8'))
+
+    def test_the_device_fixtures_are_the_pinned_ones(self):
+        readme = (VECTORS / 'README.md').read_text(encoding='utf-8')
+        listed = dict(re.findall(r'\| `device/([a-z0-9][a-z0-9.-]*\.json)` \| `([0-9a-f]{64})` \|', readme))
+        self.assertEqual(set(listed), {p.name for p in (VECTORS / 'device').glob('*.json')})
+        for name, digest in listed.items():
+            self.assertEqual(hashlib.sha256((VECTORS / 'device' / name).read_bytes()).hexdigest(), digest, name)
+
+    def test_the_nodes_key_declaration_is_what_the_pinned_schema_admits(self):
+        from node.org import Enrollment
+        key = Enrollment(self.node, ORG, transport=self.server, clock=self.clock).enrollment_request('et_1')['key']
+        self.assertEqual((key['storage'], key['exportable']), ('file', True))
+        self.assertTrue(pinned_key_admits(key))
+        self.assertTrue(pinned_key_admits(self.device_fixture('device-enrollment-request-file-key.json')['key']))
+        for name in ('device-enrollment-file-key-not-exportable.json', 'device-enrollment-file-key-attested.json',
+                     'device-enrollment-hardware-key-exportable.json'):
+            self.assertFalse(pinned_key_admits(self.device_fixture(name)['key']), name)
+
+    def test_the_contracts_check_in_answer_with_protocols_replaces_the_list(self):
+        from node import org
+        answer = self.device_fixture('device-check-in-response-protocols.json')
+        self.assertEqual(org._protocols(answer), answer['protocols'])
+        self.enroll()
+        self.server.checkin_protocols = answer['protocols']
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['protocols'], answer['protocols'])
+
+    def test_only_a_schema_refusal_of_the_key_storage_is_named(self):
+        from node.org import _key_schema_refusal
+        refusal = lambda pointer: {'error': {'code': 'schema-invalid', 'pointer': pointer}}
+        self.assertTrue(_key_schema_refusal(422, 'schema-invalid', refusal('/key/storage')))
+        self.assertTrue(_key_schema_refusal(422, 'schema-invalid', refusal('/key/exportable')))
+        for pointer in ('/key/publicKeySha256', '/device/platform', '/csr', '/storage'):
+            self.assertFalse(_key_schema_refusal(422, 'schema-invalid', refusal(pointer)), pointer)
+        self.assertFalse(_key_schema_refusal(400, 'schema-invalid', refusal('/key/storage')))
+        from node.org import Enrollment, OrgError
+        for pointer, code in (('/key/storage', 'key-storage-refused'), ('/csr', 'enroll-refused')):
+            answer = json.dumps(refusal(pointer)).encode()
+            with self.assertRaises(OrgError) as raised:
+                Enrollment(self.node, 'org_older', transport=lambda *a: (422, answer), clock=self.clock).enroll(
+                    'https://org.example', 'et_1.' + 'S' * 32)
+            self.assertEqual(raised.exception.code, code, pointer)
 
 
 class MaintenanceStep(unittest.TestCase):

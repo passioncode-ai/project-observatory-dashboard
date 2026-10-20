@@ -379,13 +379,14 @@ included (`"ok": true`).
 
 ## Organization enrollment (OBS-161)
 
-**Merge order: this lands only after the contract's CT-65 (DEC-0094).** The merged contract (`0704218`) admits a device
-key only in `secure-enclave`, `tpm` or `platform-keystore` with `exportable: false`; this node declares its owner-only
-key file truthfully as `storage: file`, `exportable: true`, which only CT-65 admits. A server on the older contract
-answers a 422 schema refusal naming the key fields, which the node reports as `key-storage-refused`. When CT-65 is
-merged, `python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>` re-vendors the transport vectors,
-the share-registration vectors and `device-enrollment.schema.json` at that commit in one step, and
-`test_node_org.py`'s schema test then expects the enrollment to succeed.
+**Contract pin: CT-65 (DEC-0094), merged at `de9eae4d`.** The contract admits the node's owner-only key file as
+`storage: file` with `exportable: true` (and no attestation); every other store stays `exportable: false`. The schema
+and the CT-65 device fixtures (`fabric/node-vectors/device/`: the file-key request, its three negatives, the check-in
+answer with `protocols`) are vendored at that commit and run by `test_node_org.py`. A server still on an older
+contract answers a 422 schema refusal pointing at `/key/storage` or `/key/exportable`, which the node reports as
+`key-storage-refused`. `python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>` re-pins every
+OBS-161 file at another commit in one step. The rotation-replay fixtures are the receiver's rule (FAC-SEM-125); the
+node's half, the same request sent again after a lost answer, is `test_a_rotation_lost_on_the_way_back_is_sent_again_unchanged`.
 
 `node/org.py`, `node/http_signature.py`, `node/share_registration.py`, `tools/org.py` (`full org`). One enrollment per
 organization (DEC-0082) in `node/orgs/<org.id>/`, with device keys of its own in `node/orgs/<org.id>/keys/` (devices.md:

@@ -140,14 +140,14 @@ def _protocols(doc: Any) -> Optional[List[str]]:
 
 
 def _key_schema_refusal(status: int, code: str, answer: Any) -> bool:
-    """A 422 schema refusal that names the request's `key` fields: what a server on a contract before CT-65
-    (DEC-0094, which admits `storage: file`) answers a file-held key. Named `key-storage-refused`, not a generic
+    """A 422 schema refusal whose detail points at `/key/storage` or `/key/exportable`: what a server on a contract
+    before CT-65 (DEC-0094, which admits `storage: file`) answers a file-held key. Named `key-storage-refused`, not a generic
     enrollment refusal, because a new token would not help: the server or its contract has to change."""
     if status != 422 or ('schema' not in code and code not in ('invalid-request', 'request-invalid', 'validation')):
         return False
     error = answer.get('error') if isinstance(answer, dict) else None
     detail = json.dumps({k: v for k, v in error.items() if k != 'code'}) if isinstance(error, dict) else ''
-    return bool(re.search(r'/key\b|\b(storage|exportable)\b', detail))
+    return bool(re.search(r'/key/(storage|exportable)\b', detail))
 
 
 def _error_code(doc: Any) -> Optional[str]:
