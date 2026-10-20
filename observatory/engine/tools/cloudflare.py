@@ -247,6 +247,7 @@ PRESETS: dict[str, dict] = {
         "why": "onboards one zone's domain to Email Sending and reads its records, for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/sending/subdomains",
+    },
     # CACHE PURGE, ONE ZONE, INTO THE VAULT. A site that deploys from CI (a
     # Heroku app behind a proxied zone) purges the zone's edge cache after each
     # release, so the next visitor reads the new build rather than a cached page.
