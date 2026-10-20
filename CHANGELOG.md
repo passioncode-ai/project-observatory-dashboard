@@ -5,6 +5,36 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Organization enrollment: `full org`** (OBS-161; contract DEC-0031, DEC-0056, DEC-0082, DEC-0086). A machine
+  enrolls in an organization server with a single-use enrollment token read from a vault slot (never from the command
+  line, never stored or logged), with device keys of its own for each organization (declared as an owner-only key
+  file, `storage: file`) and a certificate request signed by that `#sig` key; it keeps the certificate,
+  stream epoch and accepted protocols under `node/orgs/<org id>/`, holds one lock per organization so no two commands
+  (or a command and the maintenance tick) interleave, rotates the certificate at two thirds of its life (a lost answer
+  resends the same request),
+  checks in, and sends activity batches from a durable outbox (persisted events, contiguous slices of at most 1000,
+  one `batchId` across retries, backoff, acks consumed, overflow bounded). Every request after enrollment carries the
+  `fabric-device` HTTP signature. Share registrations are derived from the estate revision and delta this machine
+  verified and applied (`org records apply`) and sent only to a server that lists `share-registration/1`;
+  `grant.usage` for a share grant goes only to its own organization, only while the registration answer allows it
+  (checked again at send), and only once none of the day's calls can still settle. The maintenance job runs `org tick` on an enrolled machine. `org status` names expiry, the last check-in, the
+  outbox depth and anything degraded; `org leave` removes the local enrollment only. The contract's
+  `http-signature.json` (54 cases) and `share-registration.json` (derive, grant id and gate cases) are vendored and
+  run.
+
+
+## 0.26.0 (2026-10-20)
+
+The companion's Stop hook records and asks about what a turn changed, not what the working tree already held: a
+session's baseline is taken at SessionStart, standing untracked files never count, and the `why` is asked only for
+tracked content. A session's MCP server moves itself onto the installed release instead of answering `stale-server`.
+New on this line: a daily encrypted backup of the machine's agent setup with a restore onto a new machine, a Heroku
+door with team management and the team side of the Cloudflare door, Fabric's project id on every project, and the
+delegation verifier and meter brought to the contract's DEC-0045. The companion plugin `observatory-log` moves to
+0.26.0.
+
 ### Security
 
 - **The delegation verifier follows the contract's DEC-0045 ("Delegation sealed")** (OBS-162). `delegation.py` was
@@ -55,22 +85,6 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
 
 ### Added
 
-- **Organization enrollment: `full org`** (OBS-161; contract DEC-0031, DEC-0056, DEC-0082, DEC-0086). A machine
-  enrolls in an organization server with a single-use enrollment token read from a vault slot (never from the command
-  line, never stored or logged), with device keys of its own for each organization (declared as an owner-only key
-  file, `storage: file`) and a certificate request signed by that `#sig` key; it keeps the certificate,
-  stream epoch and accepted protocols under `node/orgs/<org id>/`, holds one lock per organization so no two commands
-  (or a command and the maintenance tick) interleave, rotates the certificate at two thirds of its life (a lost answer
-  resends the same request),
-  checks in, and sends activity batches from a durable outbox (persisted events, contiguous slices of at most 1000,
-  one `batchId` across retries, backoff, acks consumed, overflow bounded). Every request after enrollment carries the
-  `fabric-device` HTTP signature. Share registrations are derived from the estate revision and delta this machine
-  verified and applied (`org records apply`) and sent only to a server that lists `share-registration/1`;
-  `grant.usage` for a share grant goes only to its own organization, only while the registration answer allows it
-  (checked again at send), and only once none of the day's calls can still settle. The maintenance job runs `org tick` on an enrolled machine. `org status` names expiry, the last check-in, the
-  outbox depth and anything degraded; `org leave` removes the local enrollment only. The contract's
-  `http-signature.json` (54 cases) and `share-registration.json` (derive, grant id and gate cases) are vendored and
-  run.
 - **A daily encrypted backup of this machine's agent setup, and a restore onto a new machine** (OBS-157).
   One `machine-<stamp>-<id>.obmachine` per run goes to the same backups root as the workspace snapshots, in the same
   `OBSENC1` format and under the same passphrase: the Claude Code and Codex configuration, Git, SSH and shell
@@ -153,8 +167,6 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
   project on its own rules first.
 
-### Changed
-
 - **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
   session's Observatory server answered `stale-server` until a person restarted that session, and the
   maintenance job installs releases by itself. Now the server notices at its next request that its code was
@@ -172,6 +184,22 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
     reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
     servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
+- **The Stop hook records and asks about what the turn changed, not what the tree holds.** The recorder took every
+  `git status` entry as the turn's work, so standing untracked files (a pasted log, a `.worktrees/` folder) made
+  every turn "changed": measured 2026-10-20 on one machine, every recorded turn of 21 sessions was asked about, and
+  one session was asked 35 times about the same "4 files changed, +0/-0" it had not touched.
+  - SessionStart keeps a snapshot of the checkout as the session's baseline (`tools/turn_state.py`); the record's
+    files are those that differ from it, and a turn that changed nothing since the previous turn's snapshot writes
+    nothing. A session without a baseline takes the untracked files it first sees as already there.
+  - The `why` is asked only when the turn changed tracked content (an edit, a staged or intent-to-add file, a
+    deletion, a commit). A new untracked file is recorded but not asked about until it is added.
+  - The corroborator leaves a session record whose newest revision is under six hours old to settle
+    (`settling` in `store/raw/corroboration.json`): promoting a live record made the session's next changed turn
+    start another record and ask again, one record per tick.
+  - The recorder's git calls share an 8-second budget and skip dirty submodule trees
+    (`--ignore-submodules=dirty`; `git status` went from 0.45-1.9 s to 0.01-0.3 s in a checkout with eleven
+    submodules); a turn that runs out is unrecorded, silently, and counted at the next turn. The hook parses its
+    payload once instead of starting the interpreter once per field.
 
 ## 0.25.0 (2026-10-19)
 

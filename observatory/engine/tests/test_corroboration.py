@@ -566,6 +566,41 @@ def test_observation_is_revalidated_when_unchanged_commit_disappears() -> None:
         conn.close()
 
 
+def test_a_session_still_being_written_is_left_to_settle() -> None:
+    """One record per session: a promoted record is finished for its writer, so the
+    session's next changed turn starts another. Promoting a record its session is
+    still revising split one session into a record per tick (measured 2026-10-20:
+    one session's turns spread over 29 records). A session record whose newest
+    revision is younger than `SESSION_SETTLE_SECONDS` waits; an older one is checked."""
+    repo, _first, second = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"repo": repo})
+    conn = sdb.connect()
+    ev = [{"uri": "repo:repository:fixture/repo", "head": second, "branch": "master"}]
+    live = L.append(conn, owner="agent:claude-code", statement="a live session's turn",
+                    kind="session", state="proposed", evidence=ev, session_id="sess-live")
+    done = L.append(conn, owner="agent:claude-code", statement="a finished session's turn",
+                    kind="session", state="proposed", evidence=ev, session_id="sess-done")
+    conn.execute("UPDATE ledger SET created_at = '2026-01-01T00:00:00Z' WHERE memory_id = ?",
+                 (done["memoryId"],))
+    conn.commit()
+    conn.close()
+    m = load_corroborator()
+    check("the settle window is hours, not one tick", m.SESSION_SETTLE_SECONDS >= 3600,
+          str(m.SESSION_SETTLE_SECONDS))
+    m.main(["corroborate.py"])
+    conn = sdb.connect()
+    check("the live session's record is not promoted", _state(conn, live["memoryId"]) == "proposed",
+          _state(conn, live["memoryId"]))
+    check("the settled one is", _state(conn, done["memoryId"]) == "observed",
+          _state(conn, done["memoryId"]))
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("the receipt counts and lists what waits, apart from refusals",
+          receipt["counts"].get("settling") == 1
+          and [r["memory_id"] for r in receipt.get("settling", [])] == [live["memoryId"]]
+          and receipt["refused"] == [], json.dumps(receipt)[:400])
+
+
 if __name__ == "__main__":
     print("the second witness — what it refuses, and who hears about it\n")
     for fn in (test_a_row_with_no_recorded_head_is_refused,
@@ -585,7 +620,8 @@ if __name__ == "__main__":
                test_the_project_threshold_is_the_one_constant,
                test_the_proposed_count_is_the_rows_the_session_rule_looked_at,
                test_a_promoted_lesson_whose_commit_changes_is_proposed_again,
-               test_observation_is_revalidated_when_unchanged_commit_disappears):
+               test_observation_is_revalidated_when_unchanged_commit_disappears,
+               test_a_session_still_being_written_is_left_to_settle):
         fn()
     print()
     if FAILURES:
