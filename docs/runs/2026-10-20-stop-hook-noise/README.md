@@ -66,11 +66,8 @@ implementation; resolve the final object id with `git log -1 --format=%H` on tha
 - `python3.11 -m compileall` on the changed engine files; `claude plugin validate --strict` on
   the root, `observatory/engine/skill` and the plugin: passed.
 
-## Open work and next task
+## Outcome
 
-1. Merge through the three required checks; release (engine and plugin version bump, tag).
-2. Re-pin Observatory Log in `passioncode-ai/passioncode` `family.json` (it is at `v0.18.0`,
-   which ignores the recorder's `ask`), release the set, and update the installed set.
-3. The installed engine takes the release through its maintenance job or
-   `project-observatory full update --apply --unattended`; verify the installed
-   `tools/turn_state.py` and the plugin cache's `record-turn.sh`.
+Merged as `b8181ead` (#315), released in 0.26.0 and installed with the PassionCode set 0.2.16 (Observatory Log
+`v0.26.0`): see the [release record](../2026-10-20-release-0.26.0/README.md) for the receipts. Nothing of this
+unit is left open; OBS-170 (a macOS timing bound in another suite) was found on the way.

@@ -17,16 +17,17 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
-[2026-10-20: release 0.26.0](runs/2026-10-20-release-0.26.0/README.md): engine and `observatory-log` 0.26.0,
-carrying OBS-169 (#315) and everything merged since 0.25.0. Next: merge, tag `v0.26.0`, verify the release, re-pin
-Observatory Log in `passioncode-ai/passioncode`, update the installed set and engine.
+[2026-10-20: release 0.26.0](runs/2026-10-20-release-0.26.0/README.md): engine and `observatory-log` 0.26.0
+published and verified (tag `v0.26.0` on `83ae5682`, release run 39385168595), carrying OBS-169 (#315) and everything
+merged since 0.25.0. The PassionCode set 0.2.16 pins Observatory Log `v0.26.0`; both are installed on the operator's
+machine and match the tag byte for byte. Next: OBS-170 (a macOS timing bound in `test_session_reload.py`), and the
+owners of OBS-156/157/159/160/162 close their rows.
 
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
 counts only what differs from the previous turn's snapshot, only tracked content asks for a `why`, a live session's
-record settles six hours before it is corroborated, and the recorder's git calls are bounded. Next: merge, release
-with an `observatory-log` bump, re-pin Observatory Log in `passioncode-ai/passioncode` (it is at `v0.18.0`, which
-ignores the recorder's `ask`), and update the installed set and engine.
+record settles six hours before it is corroborated, and the recorder's git calls are bounded. Shipped in 0.26.0
+(see the release record below).
 
 2026-10-19, release 0.25.0 integration: the 2026-10-13 recovery work of #260, #278 and #280 merged onto current
 main in one pull request (#303), with main's M-8 (#289) merged in. Versions are 0.25.0, the `observatory-log` plugin

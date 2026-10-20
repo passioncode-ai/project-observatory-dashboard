@@ -23,5 +23,34 @@ OBS-157, OBS-159, OBS-160 and OBS-162 stay with their owners to close with their
 
 ## Steps and evidence
 
-Filled in as each step completes: the pull request and its checks, the merge commit, the annotated tag, the
-release run, the verified assets, the PassionCode set re-pin and the installed versions.
+- **Fix**: #315 squash-merged as `b8181ead` after its required checks passed on the exact head `0d7f7955`
+  (main had moved twice; merged into the branch, no force-push).
+- **Release PR**: #317 squash-merged as `83ae5682` (exact head `65a71f56`). Its first run failed
+  `tests/test_skill_check.py`: the `handling-secrets` handshake command still cited 0.25.0, fixed in the same
+  pull request. A macOS job of the push run failed once on a timing assertion in `tests/test_session_reload.py`
+  (12.2 s against a 9 s limit) and passed on a rerun: OBS-170.
+- **Main CI** on `83ae5682`: run 39382778561 success. Annotated tag `v0.26.0` on `83ae5682`.
+- **Release run** [39385168595](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/39385168595):
+  guard, wheel, manifest, five desktop builds, feed and publish all success; no reviewer was waited for. Published
+  2026-10-20T07:46:28Z, not a prerelease, 19 assets.
+- **Verified after publishing**: `shasum -a 256 -c SHA256SUMS` OK on the wheel; `gh attestation verify
+  ... --signer-repo passioncode-ai/.github` exit 0; `gpg --verify SHA256SUMS.asc SHA256SUMS` good signature
+  (PassionCode.ai releases). The wheel carries `tools/turn_state.py`.
+- **PassionCode set**: passioncode #123 (merge `ecebd5e`) pins Observatory Log at `v0.26.0` (it was `v0.18.0`);
+  tag `v0.2.16`, release run 39385375052 success, npm `@passioncode-ai/passioncode@0.2.16`; PC-53 closed in #124.
+- **Installed on the operator's machine**: `npx --yes @passioncode-ai/passioncode@0.2.16 update` installed
+  `observatory-log@passioncode` 0.26.0, whose 9 files are byte-identical to the tag's plugin tree.
+  `project-observatory full update --apply --unattended` was refused while a tick held the workspace and
+  succeeded on the fourth attempt two minutes apart: `project-observatory --version` 0.26.0, and
+  `tools/turn_state.py`, `tools/record_turn.py`, `tools/session_start.py` and `tools/corroborate.py` in the
+  installed package match the tag by SHA-256.
+- **Live check**: the installed recorder, driven at a checkout holding one untracked folder and four untracked
+  files with a fresh session id, answers `recorded: false, reason: nothing changed` (0.16-0.18 s), where 0.25.0
+  had recorded "4 files changed, +0/-0" and asked.
+- **Knowledge**: fabric-workspace #312 (`4b9ec00`) moves the Observatory and launcher rows.
+
+## Left
+
+- Sessions already running keep the hooks they loaded until they restart; their next turns have no SessionStart
+  baseline and take their untracked files as already there.
+- The rows of OBS-156, OBS-157, OBS-159, OBS-160 and OBS-162 shipped in 0.26.0 and stay with their owners to close.
