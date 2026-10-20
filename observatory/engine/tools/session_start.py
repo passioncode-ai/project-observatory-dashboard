@@ -46,6 +46,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))   # turn_state
 import paths              
 import safe_git           
 
@@ -74,6 +75,30 @@ def git_top(cwd: pathlib.Path) -> pathlib.Path | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return pathlib.Path(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
+
+
+def baseline(top: pathlib.Path, session_id: str) -> None:
+    """Take the session's baseline of this checkout for the Stop hook's recorder.
+
+    `tools/record_turn.py` counts as a session's work only what differs from this
+    snapshot (`turn_state`), so files that were already untracked or dirty when the
+    session opened are never reported, and never asked about, as its turn's change.
+    A session that already has one (a resume, a `/clear`, a compaction) keeps it:
+    its comparison point is its own last turn, not this moment. Bounded and silent:
+    a checkout git cannot read in time simply has no baseline, and the recorder
+    then takes its untracked files as already there."""
+    if not session_id:
+        return
+    import turn_state
+    if turn_state.load(session_id, top) is not None:
+        return
+    st = safe_git.run(list(turn_state.STATUS_ARGS), repo=top, timeout=5, git=GIT)
+    if st.returncode != 0:
+        return
+    head = safe_git.run(["rev-parse", "HEAD"], repo=top, timeout=5, git=GIT)
+    current = turn_state.snapshot(top, turn_state.parse_status(st.stdout),
+                                  head.stdout.strip() if head.returncode == 0 else "")
+    turn_state.save(session_id, top, current["entries"], current)
 
 
 def remote_of(top: pathlib.Path) -> str:
@@ -308,6 +333,10 @@ def main(argv: list[str]) -> int:
         top = git_top(cwd)
         if top is None:
             return 0
+        try:
+            baseline(top, session_id)
+        except Exception as exc:                                                   # noqa: BLE001
+            log({"cwd": str(cwd), "error": f"baseline: {type(exc).__name__}: {str(exc)[:200]}"})
         if top.resolve() in {ROOT.resolve(), ROOT.parent.resolve(), ROOT.parent.parent.resolve()}:
             return 0
         remote = remote_of(top)

@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/device-enrollment.schema.json",
+  "title": "Device enrollment request and response (fabric-device/0.1, DEC-0031)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    }
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "kind",
+        "org",
+        "device",
+        "key",
+        "csr",
+        "auth",
+        "requestedAt"
+      ],
+      "properties": {
+        "protocol": {
+          "$ref": "device-common.schema.json#/$defs/protocol"
+        },
+        "kind": {
+          "const": "enrollment-request"
+        },
+        "org": {
+          "$ref": "device-common.schema.json#/$defs/org"
+        },
+        "device": {
+          "type": "object",
+          "required": [
+            "id",
+            "platform"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "activity-common.schema.json#/$defs/opaqueId"
+            },
+            "platform": {
+              "enum": [
+                "macos",
+                "windows",
+                "linux",
+                "other"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "key": {
+          "type": "object",
+          "required": [
+            "algorithm",
+            "storage",
+            "exportable",
+            "publicKeySha256"
+          ],
+          "properties": {
+            "algorithm": {
+              "enum": [
+                "ecdsa-p256",
+                "ed25519"
+              ]
+            },
+            "storage": {
+              "enum": [
+                "secure-enclave",
+                "tpm",
+                "platform-keystore",
+                "file"
+              ],
+              "description": "Where the private key lives. file (DEC-0094): an owner-only PKCS#8 file, which can be copied, so exportable is true; a server MAY refuse it by policy."
+            },
+            "exportable": {
+              "type": "boolean",
+              "description": "False for the hardware and platform stores, true exactly for file (DEC-0094)."
+            },
+            "publicKeySha256": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "description": "SHA-256 of the DER SubjectPublicKeyInfo in the CSR; the server checks it against the CSR, and it is the key on record for re-enrollment (FAC-SEM-044)."
+            },
+            "attestation": {
+              "$ref": "device-common.schema.json#/$defs/base64",
+              "type": "string",
+              "maxLength": 16384
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": { "storage": { "const": "file" } },
+            "required": ["storage"]
+          },
+          "then": {
+            "properties": { "exportable": { "const": true }, "attestation": false }
+          },
+          "else": {
+            "properties": { "exportable": { "const": false } }
+          }
+        },
+        "deviceKeys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/deviceKey"
+          },
+          "description": "The device's public keys by role (DEC-0053): exactly one signing key, listed as `<device.id>#sig`, and at most one key-agreement key, `<device.id>#kem`, never one key in both roles (FAC-SEM-044, DEC-0056). The #sig key signs the device's requests (devices.md, transport). The relay protocol (DEC-0047) seals to the kem key."
+        },
+        "csr": {
+          "$ref": "device-common.schema.json#/$defs/base64",
+          "type": "string",
+          "maxLength": 8192,
+          "description": "A PKCS#10 request (RFC 2986), DER, base64, signed by the device key."
+        },
+        "auth": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "method"
+              ],
+              "properties": {
+                "method": {
+                  "const": "sso"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "method",
+                "tokenId"
+              ],
+              "properties": {
+                "method": {
+                  "const": "enrollment-token"
+                },
+                "tokenId": {
+                  "$ref": "activity-common.schema.json#/$defs/opaqueId"
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "description": "How the request is authenticated. The proof itself (the SSO session or the enrollment token's secret) travels in the Authorization header, never in the body."
+        },
+        "requestedAt": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "kind",
+        "certificate",
+        "streamEpoch",
+        "policyRootKey",
+        "checkIn"
+      ],
+      "properties": {
+        "protocol": {
+          "$ref": "device-common.schema.json#/$defs/protocol"
+        },
+        "protocols": {
+          "$ref": "common.schema.json#/$defs/protocols",
+          "description": "DEC-0067: the protocol revisions this receiver accepts from the device, N and N−1 per protocol."
+        },
+        "kind": {
+          "const": "enrollment-response"
+        },
+        "certificate": {
+          "type": "object",
+          "required": [
+            "der",
+            "serial",
+            "notBefore",
+            "notAfter",
+            "binding",
+            "issuer"
+          ],
+          "properties": {
+            "der": {
+              "$ref": "device-common.schema.json#/$defs/base64",
+              "type": "string",
+              "maxLength": 16384
+            },
+            "serial": {
+              "$ref": "device-common.schema.json#/$defs/serial"
+            },
+            "notBefore": {
+              "$ref": "common.schema.json#/$defs/timestamp"
+            },
+            "notAfter": {
+              "$ref": "common.schema.json#/$defs/timestamp"
+            },
+            "binding": {
+              "type": "object",
+              "required": [
+                "org",
+                "device"
+              ],
+              "properties": {
+                "org": {
+                  "$ref": "device-common.schema.json#/$defs/org"
+                },
+                "user": {
+                  "$ref": "activity-common.schema.json#/$defs/user"
+                },
+                "device": {
+                  "$ref": "activity-common.schema.json#/$defs/device"
+                }
+              },
+              "additionalProperties": false
+            },
+            "issuer": {
+              "$ref": "activity-common.schema.json#/$defs/opaqueId"
+            }
+          },
+          "additionalProperties": false
+        },
+        "streamEpoch": {
+          "$ref": "activity-common.schema.json#/$defs/epoch",
+          "description": "The epoch every collector on the device uses from now on; greater than every epoch issued to this device before."
+        },
+        "policyRootKey": {
+          "$ref": "device-common.schema.json#/$defs/signingKey",
+          "description": "The organization's root key. It signs policy key sets only, never a policy (FAC-SEM-046). It names its algorithm: ed25519 (the default) or es256 (DEC-0053)."
+        },
+        "rootCertification": {
+          "$ref": "device-root-certification.schema.json#/$defs/certification",
+          "description": "The root key's certification by an offline root the installer pinned, when it pinned one (FAC-SEM-069, DEC-0053)."
+        },
+        "delegationRevocations": {
+          "$ref": "device-root-certification.schema.json#/$defs/revocations",
+          "description": "The pinned offline root's current list of revoked delegation keys (FAC-SEM-069)."
+        },
+        "checkIn": {
+          "type": "object",
+          "required": [
+            "intervalSeconds"
+          ],
+          "properties": {
+            "intervalSeconds": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400
+            }
+          },
+          "additionalProperties": false
+        },
+        "collectionStart": {
+          "$ref": "common.schema.json#/$defs/timestamp",
+          "description": "As in the check-in response: when this device's collection for the organization started (DEC-0053)."
+        },
+        "keySet": {
+          "$ref": "device-key-set.schema.json"
+        },
+        "policy": {
+          "allOf": [
+            {
+              "$ref": "device-policy.schema.json"
+            },
+            {
+              "not": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "const": "user"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "deviceKey": {
+      "type": "object",
+      "required": [
+        "kid",
+        "use",
+        "alg",
+        "publicKey"
+      ],
+      "properties": {
+        "kid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}#(sig|kem)$",
+          "description": "<device.id>#sig or <device.id>#kem (FAC-SEM-044 checks the device id and the role)."
+        },
+        "use": {
+          "enum": [
+            "sig",
+            "kem"
+          ],
+          "description": "sig: signs (ES256 or Ed25519); kem: key agreement (ECDH over P-256) only."
+        },
+        "alg": {
+          "enum": [
+            "es256",
+            "ed25519",
+            "ecdh-p256"
+          ]
+        },
+        "publicKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "use": {
+                "const": "kem"
+              }
+            },
+            "required": [
+              "use"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "alg": {
+                "const": "ecdh-p256"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "use": {
+                "const": "sig"
+              }
+            },
+            "required": [
+              "use"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "alg": {
+                "enum": [
+                  "es256",
+                  "ed25519"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "alg": {
+                "const": "ed25519"
+              }
+            },
+            "required": [
+              "alg"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "publicKey": {
+                "$ref": "device-key-set.schema.json#/$defs/rawKey"
+              }
+            }
+          },
+          "else": {
+            "type": "object",
+            "properties": {
+              "publicKey": {
+                "$ref": "device-common.schema.json#/$defs/p256Key"
+              }
+            }
+          }
+        }
+      ],
+      "description": "One device public key and its role (DEC-0053). A P-256 key is valid by SEC 1 §3.2.2 and an Ed25519 key is never of small order (FAC-SEM-044)."
+    }
+  }
+}

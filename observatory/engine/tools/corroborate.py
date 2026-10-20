@@ -55,6 +55,27 @@ from store import ledger as L
 import atomic                                                                      
 
 BY = "agent:corroborator"
+
+#: A `session` record whose newest revision is younger than this is still being
+#: written, and is left to settle. The companion's recorder keeps ONE record per
+#: session and revises it turn after turn, but a promoted record is finished for
+#: its writer (`tools/record_turn.py`), so promoting a live session's record made
+#: its next changed turn start another one and ask for its `why` again: measured
+#: 2026-10-20, one session's turns spread over 29 records, one per tick. Six hours
+#: covers a working day's pauses; a session idle that long is corroborated, and
+#: one resumed after it continues in a fresh record, as before.
+SESSION_SETTLE_SECONDS = 6 * 3600
+
+
+def _settling(row, now: float) -> bool:
+    """True when this session row's newest revision is inside the settle window. An
+    unreadable time is not a reason to wait."""
+    try:
+        at = datetime.strptime(row["created_at"] or "", "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError, IndexError, KeyError):
+        return False
+    return now - at < SESSION_SETTLE_SECONDS
 #: The witness for lessons: a second identity, so a lesson an `agent:corroborator` wrote
 #: (none does today) could still be corroborated, and the provenance says which rule ran.
 LESSON_BY = "agent:lesson-corroborator"
@@ -391,7 +412,8 @@ def main(argv: list[str]) -> int:
     # FOUR BUCKETS, because `check_session` now has three answers and one of
     # them is "nobody could look". Folding that into `refused` is what put four
     # records of pushed work on the board as unplaceable.
-    promoted, refused, unaskable, needs_person = [], [], [], []
+    promoted, refused, unaskable, needs_person, settling = [], [], [], [], []
+    now = time.time()
     # LESSONS HAVE THEIR OWN RULE, across projects, and their own bucket in the receipt:
     # a lesson waiting for a second project is not a refusal, and the findings builder
     # reads `refused` as work git can no longer place.
@@ -410,6 +432,9 @@ def main(argv: list[str]) -> int:
             continue
         if row["owner"] == BY:
             continue                                                           
+        if _settling(row, now):
+            settling.append((row["memory_id"], row["created_at"]))
+            continue
         ok, why = check_session(row)
         if ok is None:
             unaskable.append((row["memory_id"], why, row["created_at"],
@@ -443,6 +468,7 @@ def main(argv: list[str]) -> int:
             "counts": {"proposed": len(rows), "promoted": len(promoted),
                        "refused": len(refused), "unaskable": len(unaskable),
                        "needs_person": len(needs_person),
+                       "settling": len(settling),
                        "lessons_promoted": len(lessons["promoted"]),
                        "lessons_waiting": len(lessons["waiting"]),
                        "lessons_unresolvable": len(lessons["unresolvable"]),
@@ -462,6 +488,8 @@ def main(argv: list[str]) -> int:
             # store for the one number the decision turns on.
             # AND WHICH REPOSITORY: five rows shared one title on the board, told
             # apart only by opening each (audit A30).
+            # WAITING, not refused: a session still revising its record.
+            "settling": [{"memory_id": mid, "created_at": at} for mid, at in settling],
             "unaskable": [{"memory_id": mid, "why": why, "created_at": at,
                            "owner": owner, "state": state, "repository": repo}
                           for mid, why, at, owner, state, repo in unaskable],
@@ -470,7 +498,8 @@ def main(argv: list[str]) -> int:
     tag = "[dry-run] " if dry else ""
     print(f"{tag}corroborate: {len(rows)} proposed — "
           f"{len(promoted)} promoted, {len(refused)} refused, "
-          f"{len(unaskable)} unaskable, {len(needs_person)} need a person")
+          f"{len(unaskable)} unaskable, {len(needs_person)} need a person, "
+          f"{len(settling)} session(s) still being written")
     for mid, why, *_ in unaskable[:6]:
         print(f"  unaskable {mid}: {why}")
     for mid, why in promoted[:6]:

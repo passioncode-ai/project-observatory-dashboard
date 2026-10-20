@@ -1,0 +1,80 @@
+{
+  "protocol": "fabric-device/0.1",
+  "kind": "check-in-response",
+  "device": {
+    "id": "dev-01j9a"
+  },
+  "at": "2026-10-07T09:32:05Z",
+  "nextCheckInSeconds": 300,
+  "flags": [],
+  "keySet": {
+    "protocol": "fabric-device/0.1",
+    "kind": "policy-key-set",
+    "org": {
+      "id": "org-7f3a"
+    },
+    "revision": 2,
+    "issuedAt": "2026-10-07T00:00:00Z",
+    "keys": [
+      {
+        "keyId": "org-7f3a.policy-2026",
+        "publicKey": "qVPRq70e5BWlbMOlUJu/xprQqt+Rb0Vy9ahteJ4PoqQ=",
+        "notBefore": "2026-01-01T00:00:00Z",
+        "notAfter": "2026-12-31T23:59:59Z"
+      },
+      {
+        "keyId": "org-7f3a.policy-2027",
+        "publicKey": "x6LottHlLXvMNePzR0VULfgmR0mWUC9CiF0abgRUaPA=",
+        "notBefore": "2026-12-01T00:00:00Z",
+        "notAfter": "2027-12-31T23:59:59Z"
+      }
+    ],
+    "signature": {
+      "alg": "ed25519",
+      "keyId": "org-7f3a.root",
+      "value": "dA/TpLE0x4fWxcimbcd87ulHxDSTCPHakf9bEp8/WC9XmYy1AkPqgqh7HqqYZhKnJWJnE1ac8/U9eaSawYbTAg=="
+    }
+  },
+  "policy": {
+    "protocol": "fabric-device/0.1",
+    "kind": "policy",
+    "org": {
+      "id": "org-7f3a"
+    },
+    "source": "server",
+    "revision": 12,
+    "issuedAt": "2026-10-07T08:00:00Z",
+    "keys": {
+      "logging.required": {
+        "value": true,
+        "locked": true
+      },
+      "build_channel.allowed": {
+        "value": "official",
+        "locked": true
+      },
+      "telemetry.endpoint": {
+        "value": "https://telemetry.example.org/v1/activity"
+      },
+      "telemetry.git_branch": {
+        "value": "plain"
+      },
+      "retention.raw_days": {
+        "value": 30
+      },
+      "x-example.banner": {
+        "value": "pilot"
+      }
+    },
+    "signature": {
+      "alg": "ed25519",
+      "keyId": "org-7f3a.policy-2026",
+      "value": "GJo5WdOsi8UwG0vysB+GiGNvIXHNr8LwAQvRzFj6zaEcqRi4I2vlSXfxyV0/wN8f3EZUdJRXe4Z1bFa4xajAAw=="
+    }
+  },
+  "protocols": [
+    "fabric-device/0.1",
+    "fabric-activity/0.1",
+    "share-registration/1"
+  ]
+}

@@ -98,6 +98,12 @@ def _load(text: str):
 class DeviceKeys:
     """The `#sig` and `#kem` keys of one device."""
 
+    #: What an enrollment request declares about the key (device-enrollment `key`): an owner-only PKCS#8 file, which
+    #: the contract admits as `file` with `exportable: true` (CT-65, DEC-0094). A hardware store (the Keychain helper,
+    #: DEC-0053) is another class with the same interface and its own `storage`, `exportable: false`.
+    storage = 'file'
+    exportable = True
+
     def __init__(self, device_id: str, sig_key, kem_key, created: str):
         if not isinstance(device_id, str) or not DEVICE_ID.fullmatch(device_id):
             raise ValueError('a device id is opaque: [A-Za-z0-9][A-Za-z0-9._:~-]{0,127}')
@@ -137,6 +143,25 @@ class DeviceKeys:
             {'kid': self.sig_kid, 'use': 'sig', 'alg': 'es256', 'publicKey': encode(self.sig_public)},
             {'kid': self.kem_kid, 'use': 'kem', 'alg': 'ecdh-p256', 'publicKey': encode(self.kem_public)},
         ]
+
+    def sig_spki(self) -> bytes:
+        """The DER SubjectPublicKeyInfo of the `#sig` key: what an organization enrollment certifies (DEC-0031)."""
+        serialization, _ = _crypto()
+        return self._sig.public_key().public_bytes(serialization.Encoding.DER,
+                                                   serialization.PublicFormat.SubjectPublicKeyInfo)
+
+    def csr(self) -> bytes:
+        """A PKCS#10 request (RFC 2986), DER, for the `#sig` key and signed by it (ECDSA with SHA-256). Its subject is
+        the opaque device id alone, so the request names no person or machine."""
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.x509.oid import NameOID
+        except ImportError as error:                       # the engine's `full` extra
+            raise RuntimeError('a certificate request needs the engine full extra (cryptography)') from error
+        request = x509.CertificateSigningRequestBuilder().subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, self.device_id)])).sign(self._sig, hashes.SHA256())
+        return request.public_bytes(serialization.Encoding.DER)
 
     @classmethod
     def generate(cls, device_id: Optional[str] = None) -> 'DeviceKeys':

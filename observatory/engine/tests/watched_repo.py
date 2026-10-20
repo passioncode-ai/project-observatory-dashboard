@@ -72,6 +72,9 @@ def build(dirty: bool = True) -> tuple[pathlib.Path, pathlib.Path, dict]:
         # would need an upstream to be "unpushed" against, and inventing a
         # remote would make the fixture about `@{u}` rather than about the hook.
         (repo / "worked-on.txt").write_text("the turn's work\n", encoding="utf-8")
+        # TRACKED (intent-to-add): the recorder asks only about tracked content a turn
+        # changed, and takes a session's untracked files at its first turn as already there.
+        _git(repo, "add", "-N", "worked-on.txt")
 
     top = _git(repo, "rev-parse", "--show-toplevel").strip()
     repo_id = "repository:fixture/watched"
