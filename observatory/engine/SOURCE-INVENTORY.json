@@ -937,8 +937,8 @@
       "path": "fabric/attribution-vectors/SOURCE.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9842e89ad50bc25edac840ccc5eb4a269585244160ca34cabb0ab174cb1dbea6",
-      "bytes": 1184
+      "export_sha256": "ad22996a86e70bf9e738db72044d8758f06d30dcf14bfdaeedabcd9ac5af9c33",
+      "bytes": 1201
     },
     {
       "path": "fabric/attribution-vectors/folder-attribution.json",
