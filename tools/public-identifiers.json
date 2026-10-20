@@ -220,6 +220,10 @@
   {
    "token": "_worktrees",
    "reason": "a generic folder-name convention for worktree checkouts, and in the engine a Python loop variable of the merge collector (collectors/merge.py, a remoteless worktree joins its main checkout's project, #301); a private list reaches it only because a machine keeps its own worktrees in a folder of that name"
+  },
+  {
+   "token": "sshlg",
+   "reason": "the author's public brand: the npm package sshlg-skills writes its managed block markers (SSHLG:PROJECT:BEGIN, OPTOUT, END) into AGENTS.md and CLAUDE.md (#312); a home-folder path stays refused by the path patterns, and every longer private name keeps its own entry"
   }
  ]
 }
