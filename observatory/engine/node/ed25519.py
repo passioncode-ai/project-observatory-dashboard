@@ -8,25 +8,9 @@ from __future__ import annotations
 
 from typing import Union
 
-SMALL_ORDER_ENCODINGS = (
-    '0000000000000000000000000000000000000000000000000000000000000000',  # y = 0: order 4
-    '0100000000000000000000000000000000000000000000000000000000000000',  # y = 1: the identity
-    '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05',  # order 8
-    'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a',  # order 8
-    'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',  # y = p − 1: order 2
-    'edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',  # y = p, non-canonical 0
-    'eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',  # y = p + 1, non-canonical 1
-)
-_SMALL_ORDER = frozenset(SMALL_ORDER_ENCODINGS)
-
-
-def is_small_order_key(raw: bytes) -> bool:
-    """True when the key must be refused: not 32 bytes, or its encoding with the sign bit cleared is a small-order one."""
-    if len(raw) != 32:
-        return True
-    cleared = bytearray(raw)
-    cleared[31] &= 0x7F
-    return bytes(cleared).hex() in _SMALL_ORDER
+# The list and the predicate live in the engine's top-level `ed25519_order.py`, so the delegation verifier and the
+# release-signature check share them (OBS-162); they are re-exported here for the node's modules.
+from ed25519_order import SMALL_ORDER_ENCODINGS, is_small_order_key  # noqa: E402,F401
 
 
 def verify(raw_key: bytes, message: Union[bytes, str], signature: bytes) -> bool:

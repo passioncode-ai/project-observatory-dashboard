@@ -169,13 +169,13 @@ def envelope_shape(value: Any) -> bool:
     return (sorted(h) == _HEADER_MEMBERS and h['type'] == ENVELOPE_TYPE and isinstance(h['alg'], str)
             and isinstance(h['suite'], list) and _numbers(h['suite']) == list(ENVELOPE_SUITE)
             and _kid(h['recipient']) and _kid(h['sender'])
-            and isinstance(h['agentRef'], str) and len(h['agentRef']) <= 146 and bool(_AGENT_REF.match(h['agentRef']))
-            and isinstance(h['slot'], str) and bool(_SLOT.match(h['slot']))
+            and isinstance(h['agentRef'], str) and len(h['agentRef']) <= 146 and bool(_AGENT_REF.fullmatch(h['agentRef']))
+            and isinstance(h['slot'], str) and bool(_SLOT.fullmatch(h['slot']))
             and _counter(h['placement']) and _counter(h['envelopeSequence'])
             and relay.instant(h['iat']) is not None and relay.instant(h['exp']) is not None
-            and isinstance(h['enc'], str) and bool(_B64URL.match(h['enc']))
-            and isinstance(value['ct'], str) and bool(_B64URL.match(value['ct']))
-            and isinstance(value['sig'], str) and bool(_SIG.match(value['sig'])))
+            and isinstance(h['enc'], str) and bool(_B64URL.fullmatch(h['enc']))
+            and isinstance(value['ct'], str) and bool(_B64URL.fullmatch(value['ct']))
+            and isinstance(value['sig'], str) and bool(_SIG.fullmatch(value['sig'])))
 
 
 def _instant_text(ms: int) -> str:
