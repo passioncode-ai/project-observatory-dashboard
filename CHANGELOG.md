@@ -78,7 +78,7 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
     state file or an answer.
   - `doctor` warns when the newest bundle is older than 36 hours; an update never fails on its machine backup.
     Guide: [ONBOARDING, This machine's agent setup](docs/ONBOARDING.md#this-machines-agent-setup-and-moving-to-a-new-machine).
-    Scenario OSS-68.
+    Scenario OSS-70.
 
 - **A Heroku door, and the team side of the Cloudflare door** (OBS-156). `tools/heroku.py` does for Heroku what
   `tools/cloudflare.py` does for Cloudflare, on the Platform API:
@@ -116,6 +116,26 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
     their last write, and each write replaces only its own row, so concurrent runs keep every row.
   - `issue` proves every target it names (the app and the team's apps when both are given) and prints exactly
     what the new value read; a team or app the scope cannot read (an `identity` value) is said to be unproved.
+- **Fabric's project id on every project** (OBS-160; Fabric CO-331, fabric-agent-contract DEC-0089). Fabric owns
+  the canonical project id. A new tick step, `fabric-attribution` (and `full fabric-attribution`), asks Fabric's
+  hub `fabric.project.resolve` for every folder the registry holds and records `fabric:<uuid>` on the project in
+  `store/raw/fabric-attribution.json`, with its provenance (Fabric, the hub's pid, the time) and a history of
+  every addition, replacement and withdrawal. The hub is reached only at the origin `hub.json` names, only on
+  `127.0.0.1`, never through a proxy, and only while its pid is alive and is the process listening on the
+  hub's port as this user since before the hub started; access is asked once with `fabric.access.request`, and the binding
+  credential stays in an owner-only file and goes nowhere else. A project whose folders resolve to two Fabric
+  projects is the finding `fabric.attribution_conflict`, never a merge. An unreachable hub is named in
+  `degraded` and changes nothing recorded.
+- **`project.resolve` answers `fabric:<uuid>` and absolute folders.** A folder is attributed by the contract's
+  folder rules (`folder_attribution.py`, a port checked against all of the contract's vectors), with the `_*`
+  folders under the projects root and `config/folder_exclusions.json` as declared containers. Both answer
+  with `matched.via` `alias`, so the published output schema is unchanged.
+
+### Changed
+
+- **The SessionStart hook asks Fabric which project a session's folder is**, then the contract's folder rules
+  while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
+  project on its own rules first.
 
 ### Changed
 

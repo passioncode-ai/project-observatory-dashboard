@@ -218,6 +218,10 @@
    "reason": "OpenSSH's key-derivation function name (bcrypt_pbkdf), written in an encrypted private key's header; the SSH-key tests build such headers (PB-163). A public algorithm, not a private project"
   },
   {
+   "token": "project:fabric",
+   "reason": "a synthetic project id in fabric-agent-contract's public folder-attribution vectors (DEC-0089), vendored unchanged in observatory/engine/fabric/attribution-vectors/ so the engine runs the contract's own cases; Fabric is the organization's public product"
+  },
+  {
    "token": "_worktrees",
    "reason": "a generic folder-name convention for worktree checkouts, and in the engine a Python loop variable of the merge collector (collectors/merge.py, a remoteless worktree joins its main checkout's project, #301); a private list reaches it only because a machine keeps its own worktrees in a folder of that name"
   },

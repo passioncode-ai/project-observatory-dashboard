@@ -201,6 +201,8 @@ BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the
 # canary that it reaches the model, read from a synthetic transcript.
 BOUNDARY += ('ask_why', 'ask_why_reach')
+# OBS-160: the Fabric contract's folder-attribution vectors (DEC-0089) and the pull from Fabric's hub.
+BOUNDARY += ('folder_attribution', 'fabric_attribution')
 # The machine bundle and its restore onto an empty home (OBS-157).
 BOUNDARY += ('machine_backup',)
 # A session MCP server moving itself onto the installed release over real pipes (OBS-159).
@@ -235,7 +237,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 's
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
@@ -308,6 +310,7 @@ def copy_source(target: Path) -> None:
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'schemas', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
                    'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/delegation-vectors', 'fabric/node-vectors',
+                   'fabric/attribution-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).

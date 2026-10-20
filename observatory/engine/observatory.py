@@ -111,6 +111,8 @@ STEPS = {
     "scan-agents": [PY, "collectors/scan_agents.py", "store/raw/agents.json"],
     "scan-harness": [PY, "collectors/scan_harness.py", "store/raw/harness.json"],
     "scan-spend": [PY, "collectors/scan_spend.py", "store/raw/spend.json"],
+    # Which Fabric project each project is, asked of Fabric's hub (OBS-160).
+    "fabric-attribution": [PY, "collectors/scan_fabric_attribution.py", "store/raw/fabric-attribution.json"],
     "harness":   [PY, "tools/harness.py"],
     "grant":     [PY, "tools/grant.py"],
     "node":      [PY, "tools/node.py"],
@@ -522,6 +524,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   scan-spend                   this month's provider spend across every account the doors hold, for the
                                L0 limit and its 80 % warning, and each project's month and last 30 days
                                by key hash (tools/spend.py project; integration openrouter)
+  fabric-attribution           which Fabric project each project is: asks Fabric's hub (hub.json, a live pid,
+                               loopback only) and records fabric:<uuid> aliases in store/raw/fabric-attribution.json;
+                               a hub that is down or refuses is named in degraded, nothing recorded is lost
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
