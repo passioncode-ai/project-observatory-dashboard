@@ -119,6 +119,11 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
 
 ### Changed
 
+- **Dependencies:** `google-auth` 2.61.0 (from 2.59.1) in the `[full]` extra, with `requirements-full.lock` and its
+  engine copy `observatory/engine/requirements-full.lock` moved to the same pin, so `pip install -c
+  requirements-full.lock '.[full]'` resolves (supersedes Dependabot #283, which bumped `pyproject.toml` alone). No other
+  pin moves.
+
 - **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
   session's Observatory server answered `stale-server` until a person restarted that session, and the
   maintenance job installs releases by itself. Now the server notices at its next request that its code was
