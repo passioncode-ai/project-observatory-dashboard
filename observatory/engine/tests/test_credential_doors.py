@@ -1634,6 +1634,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint", "rd-value-"),
         ("workers-routes", "zone", ("Zone Read", "Workers Routes Write"),
          "/zones/z1/workers/routes", "wr-value-"),
+        ("cache-purge", "zone", ("Zone Read", "Cache Purge"),
+         "/zones/z1/purge_cache", "cp-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1673,9 +1675,10 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
               "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
-              "workers-routes": ("Zone Read", "Workers Routes Write")}
+              "workers-routes": ("Zone Read", "Workers Routes Write"),
+              "cache-purge": ("Zone Read", "Cache Purge")}
     level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
-             "redirect-rules": "zone", "workers-routes": "zone"}
+             "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
@@ -1715,6 +1718,30 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
         m.deliver_to_vault = lambda value, p, e, n, d=delivered2: d.append(value)
         check(f"{preset}: a token that cannot do its read is not delivered",
               issue("proj/prod/CF_X") == 1 and not delivered2 and not delivered, str(delivered2))
+
+
+def test_cf_cache_purge_preset_proves_its_grant_by_purging_one_unserved_url() -> None:
+    """Purge has no read, so the new token proves itself with a purge of one
+    `.well-known` URL in its own zone, sent as a POST body, never a GET."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _preset_fake(m, log, [("Zone Read", "zone"), ("Cache Purge", "zone")], "/zones/z1/purge_cache", "cp-value-")
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append((p, e, n))
+    m._journal = lambda *a, **k: None
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_issue_zone("cache-purge", "example.com", "proj/prod/CF_CACHE_PURGE_TOKEN", None, wait=0)
+    check("cache-purge issues", rc == 0, str(rc))
+    probes = [(meth, pl) for meth, path, tok, pl in log
+              if path == "/zones/z1/purge_cache" and tok.startswith("cp-value-")]
+    check("the probe is one POST purging an unserved URL of its own zone",
+          probes == [("POST", {"files": ["https://example.com/.well-known/observatory-cache-purge-probe"]})],
+          str(probes))
+    create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+    check("the token is named after its zone and its slot",
+          bool(create) and create[0]["name"]
+          == "observatory-cache-purge example.com proj/prod/CF_CACHE_PURGE_TOKEN (managed)", str(create))
+    check("and lands in that slot", delivered == [("proj", "prod", "CF_CACHE_PURGE_TOKEN")], str(delivered))
 
 
 def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> None:

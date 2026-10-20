@@ -15,6 +15,7 @@
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
@@ -193,6 +194,20 @@ PRESETS: dict[str, dict] = {
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/routing/rules?per_page=1",
     },
+    # CACHE PURGE, ONE ZONE, INTO THE VAULT. A site whose CDN keeps a file after a
+    # deploy (a prerendered route the origin once sent with a year's s-maxage)
+    # needs to evict that URL, and nothing else: not DNS, not rules, not another
+    # zone. Purge has no read to prove it with, so the probe IS a purge, of one
+    # URL under `.well-known` that no site serves: it evicts nothing anyone
+    # fetches. Named after the zone AND the slot, like email-routing.
+    "cache-purge": {
+        "name": "observatory-cache-purge {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Cache Purge"),
+        "why": "purges cached URLs in one zone for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/purge_cache",
+        "probe_body": {"files": ["https://{zone}/.well-known/observatory-cache-purge-probe"]},
+    },
     # SINGLE REDIRECTS, ONE ZONE, INTO THE VAULT. Sending one hostname to
     # another at the edge (`www.example.com` → `example.com`, 301, query kept) is
     # a rule in the zone's `http_request_dynamic_redirect` phase — Single
@@ -364,6 +379,13 @@ def _request(path: str, token: str, payload: dict | None = None,
         raise RuntimeError(f"cloudflare answered HTTP {e.code}; provider response withheld") from None
     except OSError as e:
         raise RuntimeError(f"cloudflare unreachable: {type(e).__name__}") from None
+
+
+def _zone_body(body, zone: str):
+    """A zone probe's POST body with `{zone}` filled in; None (a GET) when the preset has none."""
+    if body is None:
+        return None
+    return json.loads(json.dumps(body).replace("{zone}", zone))
 
 
 def slug(text: str) -> str:
@@ -899,7 +921,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
             try:
                 if analytics:
                     return can_read_analytics(value, [zid]) or None
-                _request(probe, value)
+                _request(probe, value, _zone_body(preset.get("probe_body"), zone))
                 return None
             except RuntimeError as exc:
                 # Only a preset that declared it: its probe reads a thing the zone may
