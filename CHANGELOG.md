@@ -112,6 +112,26 @@ meter sets none: trusting whichever key signed would be the forgery this fix clo
   while Fabric is not running, and only then the older registry match. Observatory no longer decides a session's
   project on its own rules first.
 
+### Changed
+
+- **A session's MCP server moves itself onto the installed release** (OBS-159). After an update, every open
+  session's Observatory server answered `stale-server` until a person restarted that session, and the
+  maintenance job installs releases by itself. Now the server notices at its next request that its code was
+  replaced, holds that request, lets the running ones answer, starts the installed release once to check it
+  (`mcp/server.py --reload-check`) and replaces itself in place with `os.execv`: same process id, same pipes,
+  same session. The new release takes over the client's handshake without a second `initialize` and answers
+  the held request exactly once; a changed tool set is announced with `notifications/tools/list_changed`
+  (the server now declares `tools.listChanged`). The session's stdio is served by `mcp/stdio_relay.py`
+  instead of the SDK's own transport on POSIX.
+  - Where the move is impossible the server keeps answering `stale-server`, now with the reason: Windows,
+    an update holding the workspace or requests still running after a minute (both retried at a later
+    request), an installed release that fails its check
+    or speaks another MCP revision, code that is gone, or a failed `execv`. The pipe stays open and no
+    request is answered twice.
+  - Each move and refusal is one line in `store/logs/mcp-reload.jsonl` and on stderr (from, to, pid,
+    reason); `full doctor` lists them under `session_servers`, `full update` says what now happens to the
+    servers it lists, and the lifecycle scan no longer reports a server that moved as running replaced code.
+
 ## 0.25.0 (2026-10-19)
 
 The recovery work of 2026-10-13 lands on this line. Cleanup keeps local work it cannot verify, rechecks every target
