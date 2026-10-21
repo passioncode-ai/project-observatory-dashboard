@@ -19,15 +19,20 @@ from pathlib import Path
 from observatory import core, credentials, dashboard
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every test's git environment comes from the engine tests' helper: configuration shut out, no
+# background gc or maintenance left writing into a temporary repository.
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env", ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
 
 
 class ObservatoryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
-        self.environment = patch.dict(os.environ, {"HOME": str(self.base / "empty-home"),
+        self.environment = patch.dict(os.environ, git_env.git_env({"HOME": str(self.base / "empty-home"),
             "XDG_CONFIG_HOME": str(self.base / "empty-xdg"), "PATH": os.environ.get("PATH", ""),
-            "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_ATTR_NOSYSTEM": "1"}, clear=True)
+            "GIT_ATTR_NOSYSTEM": "1"}), clear=True)
         self.environment.start()
         self.state = self.base / "state"
         self.project = self.base / "project"

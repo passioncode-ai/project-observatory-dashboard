@@ -79,8 +79,8 @@ def estate() -> pathlib.Path:
     os.chmod(proj / "loose.pem", 0o644)
     repo = d / "demo-project"
     (repo / ".gitignore").write_text("secrets/ignored.key\nsecrets/sa.json\n", encoding="utf-8")
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    from git_env import git_env
+    env = git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
     for cmd in (["init", "-q"], ["add", ".gitignore", "secrets/tracked.token", "secrets/.gitkeep"],
                 ["commit", "-qm", "seed"]):
         subprocess.run(["git", "-C", str(repo), *cmd], capture_output=True, env=env, timeout=60)

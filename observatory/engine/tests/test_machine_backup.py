@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import tmp  # noqa: F401: the sandbox defaults for a suite run by hand
+from git_env import git_env  # noqa: E402
 import configuration as config
 import workspace
 import backup_vault as vault
@@ -53,11 +54,12 @@ class Base(unittest.TestCase):
         self.ws = self.base / 'workspace'
         self.root = self.base / 'backups'
         self.bin = self.base / 'fake-bin'
-        self.env = patch.dict(os.environ, {
+        # The global git file is the temporary HOME's (global_config=None), as a person's would be.
+        self.env = patch.dict(os.environ, git_env({
             'HOME': str(self.user), 'OBSERVATORY_HOME': str(self.ws), 'OBSERVATORY_BACKUPS': str(self.root),
             'FABRIC_SERVICES_DIR': str(self.user / 'fabric-services'), 'PATH': os.environ.get('PATH', ''),
-            'OBSERVATORY_SYSTEM_SETUP': '0', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir()),
-            'GIT_CONFIG_NOSYSTEM': '1'}, clear=True)
+            'OBSERVATORY_SYSTEM_SETUP': '0', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir())},
+            global_config=None), clear=True)
         self.env.start()
         workspace.initialize(self.ws)
         import paths

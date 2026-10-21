@@ -270,7 +270,8 @@ def git(root: Path, *args: str) -> str | None:
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_GLOBAL": os.devnull, "GIT_ATTR_NOSYSTEM": "1"})
-        base = ["git", "--no-optional-locks", "-C", str(root)]
+        # No background `gc --auto` or maintenance started by an observer, as safe_git.OPTIONS.
+        base = ["git", "--no-optional-locks", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(root)]
         keys = subprocess.run([*base, "config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|smudge|process|required)$"],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                               timeout=10, env=env)

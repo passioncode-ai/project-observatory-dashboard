@@ -39,6 +39,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 for sub in ("", "collectors", "tools", "plugins", "tests"):
     sys.path.insert(0, str(ROOT / sub) if sub else str(ROOT))
 import tmp as tmpdir  # noqa: E402
+from git_env import git_env  # noqa: E402
 
 HOOKS = ("pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "post-checkout",
          "post-merge", "post-rewrite", "pre-push", "pre-auto-gc", "reference-transaction",
@@ -49,10 +50,9 @@ FAKE_SIG = ("gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEFAKEFAKEF
 
 def bare(cwd, *args, env=None, check=True, text=True, input=None):
     """Fixture construction only: git with NO user configuration at all."""
-    base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    base.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
-                GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
-                GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+    base = git_env(drop_git=True,
+                   GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                   GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
     return subprocess.run(["git", "-c", "core.hooksPath=" + os.devnull, *args], cwd=cwd,
                           env={**base, **(env or {})}, capture_output=True, text=text,
                           input=input, check=check, timeout=120)
@@ -204,10 +204,9 @@ class Fixture:
             m.unlink()
 
     def environ(self) -> dict[str, str]:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env.update(HOME=str(self.home), XDG_CONFIG_HOME=str(self.d / "xdg"), GIT_CONFIG_NOSYSTEM="1",
-                   PATH=f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}")
-        return env
+        # The hostile global file stays: it is read from this HOME (global_config=None).
+        return git_env(drop_git=True, global_config=None, HOME=str(self.home), XDG_CONFIG_HOME=str(self.d / "xdg"),
+                       PATH=f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}")
 
 
 FIX: Fixture | None = None
@@ -241,7 +240,8 @@ class HostileBase(unittest.TestCase):
 
 class Control(HostileBase):
     def test_the_fixture_is_live_bare_git_runs_the_planted_programs(self) -> None:
-        env = dict(os.environ)
+        # Bare git under the hostile HOME: its global file stays (global_config=None).
+        env = git_env(global_config=None)
         subprocess.run(["git", "-C", str(self.f.alpha), "log", "-1", "--format=%cI"],
                        env=env, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
         subprocess.run(["git", "-C", str(self.f.beta), "status", "--porcelain"],
