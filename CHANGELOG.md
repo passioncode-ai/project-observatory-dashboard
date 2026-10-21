@@ -14,13 +14,18 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **No test, and no git the launcher runs in its own sample repository, leaves background maintenance behind**
   (OBS-157 follow-up, the class behind the refused v0.27.0 tag). Every test's git environment now comes from one helper,
   `observatory/engine/tests/git_env.py`, which shuts out the system and global configuration and appends `gc.auto=0`
-  and `maintenance.auto=false` through `GIT_CONFIG_COUNT` after any entries a caller set; the portable runner's
-  `clean_env` and the eleven test files that built their own git environment use it. `observatory demo` commits into
-  its sample repository and `observatory scan` reads repositories with `-c gc.auto=0 -c maintenance.auto=false`, as
-  the engine's `safe_git` already did. `tests/test_git_background_maintenance.py` fails on a test that sets a
-  `GIT_CONFIG_*` variable itself, and on any git command the engine, the launcher or `tools/` spell that is not a
-  pure read and lacks both settings; `test_git_env` proves with git itself that the runner's environment turns them
-  off.
+  and `maintenance.auto=false` through `GIT_CONFIG_COUNT` after any entries a caller set (an inherited
+  `GIT_CONFIG_PARAMETERS`, which git ranks above them, is dropped); the portable runner's `clean_env` and the
+  twenty-two test files that built their own git environment use it, and check.yml's workflow-level `env:` carries the
+  same entries for every CI step, so the root tests (run by `unittest discover`, outside the runner) are covered at
+  run time too. `observatory demo` commits into its sample repository and `observatory scan` reads repositories with
+  `-c gc.auto=0 -c maintenance.auto=false`, as the engine's `safe_git` already did.
+  `tests/test_git_background_maintenance.py` fails on a test that sets or removes a `GIT_CONFIG_*` variable itself,
+  strips every `GIT_*` variable by hand or hands git an environment built as a literal dict; on a workflow `env:`
+  that differs from what the helper composes; and on any git command the engine, the launcher or `tools/` spell
+  (a list, a concatenation, `args=`, `create_subprocess_exec`, a shell string, or a binary bound to another name)
+  that is not a pure read and lacks both settings among git's own `-c` options. On GitHub Actions it also asks git
+  what it reads in the root tests' own process; `test_git_env` does the same for the runner's environment.
 
 ## 0.27.0 (2026-10-20)
 

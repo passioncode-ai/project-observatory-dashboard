@@ -12,7 +12,8 @@ caller; this suite pins the class.
 Every git a test runs takes its environment from `git_env.py`, which shuts out the operator's
 system and global configuration and turns background maintenance off through
 `GIT_CONFIG_COUNT`, appended after any entries a caller already set. The portable runner's
-`clean_env` uses it, so a suite that inherits the runner's environment is covered too.
+`clean_env` uses it, so a suite that inherits the runner's environment is covered too, and
+check.yml's workflow-level `env:` carries the same entries for the root tests.
 `tests/test_git_background_maintenance.py` (the repository's root tests) refuses a test that
 builds a git environment by hand.
 """
@@ -81,6 +82,11 @@ class Composition(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 git_env.quiet_maintenance({"GIT_CONFIG_COUNT": bad})
 
+    def test_an_outer_gits_options_cannot_turn_gc_back_on(self):
+        # A git started by another git inherits its `-c` options here, ranked above GIT_CONFIG_COUNT.
+        env = git_env.quiet_maintenance({"GIT_CONFIG_PARAMETERS": "'gc.auto'='50'"})
+        self.assertNotIn("GIT_CONFIG_PARAMETERS", env)
+
     def test_the_input_is_not_changed(self):
         base = {"GIT_CONFIG_COUNT": "0"}
         git_env.quiet_maintenance(base)
@@ -129,6 +135,11 @@ class WhatGitReads(unittest.TestCase):
         env = run_portable.clean_env(self.base / "suite")
         self.assertEqual(effective(env, "gc.auto", self.tmp.name), "0")
         self.assertEqual(effective(env, "maintenance.auto", self.tmp.name), "false")
+
+    def test_an_inherited_outer_option_does_not_win(self):
+        env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name,
+                               "GIT_CONFIG_PARAMETERS": "'gc.auto'='50'"})
+        self.assertEqual(effective(env, "gc.auto", self.tmp.name), "0")
 
     def test_the_helpers_environment_turns_maintenance_off(self):
         env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name})

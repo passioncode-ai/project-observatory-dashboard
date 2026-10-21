@@ -30,8 +30,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def git(repo: pathlib.Path, *cmd: str) -> None:
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}
+    from git_env import git_env
+    env = git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.test",
+                  GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.test")
     subprocess.run([GIT, "-C", str(repo), *cmd], capture_output=True, env=env, timeout=60, check=True)
 
 

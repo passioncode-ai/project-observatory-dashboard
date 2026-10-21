@@ -240,7 +240,8 @@ class HostileBase(unittest.TestCase):
 
 class Control(HostileBase):
     def test_the_fixture_is_live_bare_git_runs_the_planted_programs(self) -> None:
-        env = dict(os.environ)
+        # Bare git under the hostile HOME: its global file stays (global_config=None).
+        env = git_env(global_config=None)
         subprocess.run(["git", "-C", str(self.f.alpha), "log", "-1", "--format=%cI"],
                        env=env, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
         subprocess.run(["git", "-C", str(self.f.beta), "status", "--porcelain"],

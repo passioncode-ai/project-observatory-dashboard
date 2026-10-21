@@ -12,13 +12,19 @@ Two things, together:
    detached gc was still writing, and the release guard refused v0.27.0. `gc.auto=0` and
    `maintenance.auto=false` are set through `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` /
    `GIT_CONFIG_VALUE_n` (git 2.31 and later; an older git ignores them), appended after any
-   entries the caller already set, so a caller's own `-c`-like settings are kept and these two
-   are the last word on their keys.
+   entries the caller already set, so a caller's own entries are kept and these two are the
+   last of them on their keys. Git ranks `-c` above `GIT_CONFIG_COUNT`, and a git started by
+   another git (a hook, say) inherits that one's `-c` options as `GIT_CONFIG_PARAMETERS`: it is
+   dropped here, so only a `-c` written on the test's own command line can still override these
+   two, and that is the test's own choice.
 
 The portable runner's `clean_env` uses it, so a suite inheriting the runner's environment is
-covered; a test that builds its own environment calls `git_env(...)`. The repository's root
-test `tests/test_git_background_maintenance.py` refuses a test that sets a `GIT_CONFIG_*`
-variable itself. Standard library only: `run_portable.py` loads this file by its path.
+covered, and check.yml's workflow-level `env:` carries the same two entries for every CI step,
+the root tests included (`unittest discover -s tests` runs outside the runner). A test that
+builds its own environment calls `git_env(...)`. The repository's root test
+`tests/test_git_background_maintenance.py` refuses a test that sets or removes a `GIT_CONFIG_*`
+variable itself, strips every `GIT_*` variable by hand, or hands git an environment built as a
+literal dict. Standard library only: `run_portable.py` loads this file by its path.
 """
 from __future__ import annotations
 
@@ -36,9 +42,12 @@ def quiet_maintenance(env: Mapping[str, str]) -> dict[str, str]:
 
     Entries already there are kept. A key whose last entry already holds our value is not
     repeated, so composing twice adds nothing. A count git itself would refuse (not a
-    non-negative integer) raises ValueError rather than being overwritten.
+    non-negative integer) raises ValueError rather than being overwritten. An inherited
+    `GIT_CONFIG_PARAMETERS` (an outer git's `-c` options, which git ranks above these entries)
+    is dropped.
     """
     out = dict(env)
+    out.pop("GIT_CONFIG_PARAMETERS", None)
     raw = out.get("GIT_CONFIG_COUNT", "").strip()
     try:
         count = int(raw) if raw else 0
