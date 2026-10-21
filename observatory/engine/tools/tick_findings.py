@@ -5,7 +5,9 @@ import pathlib
 import sys
 import time
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / 'dashboard'))
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from finding_types import titled
+import tick_budget
 
 CORE_TAIL = {'merge', 'emit', 'validate'}
 
@@ -15,7 +17,65 @@ def number(value):
     return float(value)
 
 
-def findings(tick, rotation, *, now=None, config=None, severe=None):
+def _over(progress, ceiling):
+    """{step: (seconds, outcome)} of one run's stages past their alert line; {} for anything unreadable."""
+    stages = progress.get('stages') if isinstance(progress, dict) and isinstance(progress.get('stages'), list) else []
+    longest = {}
+    for row in stages:
+        if not isinstance(row, dict) or not isinstance(row.get('step'), str) or row['step'] in tick_budget.RESUMABLE:
+            continue
+        seconds = number(row.get('duration_seconds'))
+        line = tick_budget.ALERT_FRACTION * tick_budget.share(row['step']) * ceiling
+        if seconds is not None and seconds > line and seconds > longest.get(row['step'], (0, ''))[0]:
+            longest[row['step']] = (seconds, str(row.get('outcome') or 'unknown'))
+    return longest
+
+
+def over_share(tick, runs=()):
+    """`tick.step_over_share`: a step that used ALERT_FRACTION of its share of the ceiling in ALERT_MIN
+    of the last ALERT_WINDOW ticks, finished or not (OBS-52; review of #328, L2). Read from the stage
+    receipts: this tick's `progress` (which a tick stopped at its ceiling also leaves) and the earlier
+    runs' `stage_progress` in `runs`, oldest first, each run counted once by its id. The ceiling is the
+    one the receipt names, else this run's. Rows that are not numbers raise nothing."""
+    progress = tick.get('progress') if isinstance(tick.get('progress'), dict) else {}
+    ceiling = number(progress.get('ceiling_seconds'))
+    if ceiling is None or ceiling <= 0:
+        ceiling = tick_budget.ceiling_seconds()
+    window, ids = [], set()
+    for run in [*(r for r in runs if isinstance(r, dict)), progress]:
+        rid = run.get('run_id')
+        if isinstance(rid, str) and rid in ids:
+            continue
+        ids.add(rid)
+        window.append(_over(run, ceiling))
+    window = window[-tick_budget.ALERT_WINDOW:]
+    latest = window[-1] if window else {}
+    out = []
+    for name in sorted({n for w in window for n in w}):
+        ticks = sum(1 for w in window if name in w)
+        if ticks < tick_budget.ALERT_MIN:
+            continue
+        seconds, outcome = max(w[name] for w in window if name in w)
+        cap = (f' A collector is held to {tick_budget.share(name):.0%} of the ceiling '
+               f'({tick_budget.share_limit(name, ceiling):.0f} s) and resumes on a later tick if it can.'
+               if name not in CORE_TAIL else '')
+        out.append({'type': 'tick.step_over_share', 'subject': 'step:' + name, 'severity': 'warning',
+                    **titled("the scheduled tick's `{step}` step took {share} of its time", step=name,
+                             share=f'{seconds / ceiling:.0%}'),
+                    'detail': (f'In {ticks} of the last {len(window)} ticks it used {tick_budget.ALERT_FRACTION:.0%} '
+                               f'or more of its {tick_budget.share(name):.0%} share of the {ceiling:.0f} s ceiling; '
+                               f'the longest ran {seconds:.0f} s (outcome: {outcome.replace("_", " ")})'
+                               + ('' if name in latest else ', not in the last tick')
+                               + '. A step that keeps using its whole share takes the time other steps were due,'
+                               ' and those are the ones reported as not started.' + cap),
+                    'action': ('read the step\'s lines in store/logs/tick.log for what it spent the time on; '
+                               'a collector that resumes needs nothing more, any other step needs its slow part '
+                               'found and bounded'),
+                    'evidence': ['store:raw/tick.json#progress', 'store:raw/tick-runs.jsonl', 'store:logs/tick.log']})
+    return out
+
+
+def findings(tick, rotation, *, now=None, config=None, severe=None, runs=None):
     now = time.time() if now is None else now
     config = config if isinstance(config, dict) else {}
     severe = severe if isinstance(severe, dict) else {}
@@ -37,6 +97,7 @@ def findings(tick, rotation, *, now=None, config=None, severe=None):
                               + ' Last tick finished ' + str(tick.get('finished_at', 'unknown')) + '.',
                     'action': 'read store/logs/tick.log; resolve the reported limit or step failure before rerunning the affected step',
                     'evidence': ['store:raw/tick.json', 'store:logs/tick.log']})
+    out.extend(over_share(tick, runs or ()))
     if rotation is None and not tick.get("collector_order"):
         return out
 
@@ -79,7 +140,7 @@ def findings(tick, rotation, *, now=None, config=None, severe=None):
             continue
         last, streak = number(row.get('last_ran_at')), number(row.get('not_started_streak'))
         hours = max(0, now - last) / 3600 if last is not None else None
-        if (streak or 0) < 3 and (hours is None or hours <= threshold):
+        if (streak or 0) < tick_budget.STARVED_TICKS and (hours is None or hours <= threshold):
             continue
         status = 'interrupted or completion unknown' if outcome is None else outcome
         out.append({'type': 'tick.collector_starved', 'subject': 'collector:' + name,

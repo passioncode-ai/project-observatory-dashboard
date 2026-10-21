@@ -160,6 +160,29 @@ def _report(when: str, delivered: bool, detail: str, undelivered: list[dict]) ->
         "undelivered": undelivered})
 
 
+def delivery_ref(con: sqlite3.Connection, f: dict) -> str:
+    """What a delivery is recorded under: the finding, its severity and its episode."""
+    return f"{f['id']}@{f['severity']}#{episode(con, f['id'])}"
+
+
+def record(con: sqlite3.Connection, fresh: list[dict], when: str, via: str | None = None) -> None:
+    """Mark each finding of `fresh` as delivered, by finding, severity and episode (`ref`). Only a
+    delivery is recorded: a banner that was shown, or a finding handed to the host (`via`)."""
+    for f in fresh:
+        ref = delivery_ref(con, f)
+        con.execute(
+            "insert or ignore into events (id, kind, ref, actor, occurred_at, "
+            "payload_json) values (?,?,?,?,?,?)",
+            # A STABLE id. `abs(hash(ref))` is randomised per process by
+            # PYTHONHASHSEED, so the same fact got a different id on every
+            # run; the UNIQUE(kind, ref) index hid that, and a re-run after
+            # a delete would have written the same fact under a new name.
+            (f"ev:notify:{hashlib.sha256(ref.encode()).hexdigest()[:16]}",
+             KIND, ref, "tool:notify_findings", when,
+             json.dumps({"title": f["title"], "severity": f["severity"], "delivered": True,
+                         **({"via": via} if via else {})}, ensure_ascii=False)))
+
+
 def main(argv: list[str]) -> int:
     dry = "--dry-run" in argv
     levels = {"critical", "warning"} | ({"info"} if "--include-info" in argv else set())
@@ -206,7 +229,7 @@ def main(argv: list[str]) -> int:
         "select ref from events where kind = ?", (KIND,))}
 
     def ref_of(f: dict) -> str:
-        return f"{f['id']}@{f['severity']}#{episode(con, f['id'])}"
+        return delivery_ref(con, f)
 
     # LEGACY REFS. The fifteen rows written before 2026-09-07 carry
     # `<id>@<severity>` with no episode, which IS episode 0 — read any other way
@@ -239,9 +262,16 @@ def main(argv: list[str]) -> int:
 
     host = host_channel()
     if host:
-        con.close()
+        # HANDED TO THE HOST IS DELIVERED, and recorded as such. This branch returned before the
+        # record below, so `seen` never grew and every tick handed the same ninety findings over as
+        # new (2026-10-21). The record is what makes the next run quiet; `via` says no banner of
+        # ours was shown.
         if not dry:
-            _report(now_z(), True, host, [])
+            when = now_z()
+            record(con, fresh, when, via="host")
+            con.commit()
+            _report(when, True, host, [])
+        con.close()
         print(f"notify_findings: {len(fresh)} new/escalated, {host}; no banner of our own")
         return 0
 
@@ -267,19 +297,7 @@ def main(argv: list[str]) -> int:
     # from launchd, where a job not attached to an Aqua session cannot reach the
     # window server at all.
     if sent:
-        for f in fresh:
-            ref = ref_of(f)
-            con.execute(
-                "insert or ignore into events (id, kind, ref, actor, occurred_at, "
-                "payload_json) values (?,?,?,?,?,?)",
-                # A STABLE id. `abs(hash(ref))` is randomised per process by
-                # PYTHONHASHSEED, so the same fact got a different id on every
-                # run; the UNIQUE(kind, ref) index hid that, and a re-run after
-                # a delete would have written the same fact under a new name.
-                (f"ev:notify:{hashlib.sha256(ref.encode()).hexdigest()[:16]}",
-                 KIND, ref, "tool:notify_findings", now,
-                 json.dumps({"title": f["title"], "severity": f["severity"],
-                             "delivered": True}, ensure_ascii=False)))
+        record(con, fresh, now)
         con.commit()
     con.close()
 

@@ -2237,7 +2237,8 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     "updated-services-not-restarted": T("updated, a background job did not start"),
     "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
     "needs-person": T("needs a person"), "another-update-running": T("another update was running"),
-    "held": T("waits for a step by a person"), "deferred": T("ready, waits for a moment with no client")};
+    "held": T("waits for a step by a person"), "deferred": T("ready, waits for a moment with no client"),
+    "refused-disk": T("refused: too little free disk space")};
   const RESULT_WORD = r => RESULT[r] || r || "?";
   if (!MT.wanted || MT.scheduled === false)
     hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),

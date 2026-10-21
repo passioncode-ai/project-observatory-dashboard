@@ -138,5 +138,20 @@ class TickHealth(unittest.TestCase):
         self.assertEqual(len(lines), T.KEEP_RUNS)
 
 
+    def test_a_history_that_is_not_utf8_is_empty_not_a_crash(self):
+        """Confirming review of #328: the readers caught OSError only, and a damaged byte in
+        `tick-runs.jsonl` raised UnicodeDecodeError out of `/health` and the findings build."""
+        (self.raw / T.RUNS_FILE).write_bytes(b'{"outcome": "finished"}\n\xff\xfe broken\n')
+        self.assertEqual(T.recent(self.raw)["runs"], 0)
+        self.assertEqual(T.stage_history(self.raw, 5), [])
+
+    def test_the_stage_history_is_the_newest_runs_oldest_first(self):
+        rows = [{"outcome": "finished", "stage_progress": {"run_id": c * 32, "stages": []}} for c in "abcdef"]
+        (self.raw / T.RUNS_FILE).write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n[]\n")
+        self.assertEqual([r["run_id"][0] for r in T.stage_history(self.raw, 8)], list("abcdef"))
+        self.assertEqual([r["run_id"][0] for r in T.stage_history(self.raw, 4)], list("ef"))
+        self.assertEqual(T.stage_history(self.raw / "absent", 5), [])
+
+
 if __name__ == "__main__":
     unittest.main()

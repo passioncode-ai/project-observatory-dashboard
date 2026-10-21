@@ -187,10 +187,32 @@ def test_the_tick_takes_one_a_day() -> None:
                                  capture_output=True, text=True, timeout=120).returncode
     check("--due says due (exit 0) when no copy exists", ask() == 0)
     copy = load().take(db, "2026-09-14T1400Z")
-    check("--due says not due (exit 1) once a copy younger than a day exists", ask() == 1)
+    check("--due says not due (exit 3, its own code) once a copy younger than a day exists", ask() == 3)
     old = copy.stat().st_mtime - 25 * 3600
     os.utime(copy, (old, old))
     check("--due says due again when the newest copy is older than a day", ask() == 0)
+
+
+
+def test_a_crashing_due_question_is_a_failure_not_a_no() -> None:
+    """Review of #328, M3: an uncaught exception exits 1, which was the "not due" answer, so a broken
+    `--due` read as "a copy exists" for ever. "Not due" is exit 3 (NOT_DUE), and anything that goes
+    wrong while answering is exit 2 with the exception's type on stderr."""
+    import contextlib, io
+    mod = load()
+    check("not due has an exit of its own, not the one a crash gives", mod.NOT_DUE not in (0, 1))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("synthetic")
+    mod.due = broken
+    db = planted()
+    os.environ["OBSERVATORY_DB"] = str(db)
+    importlib.reload(mod.paths)
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = mod.main(["backup_store.py", "--due"])
+    check("a crash while answering exits 2", code == 2, str(code))
+    check("and says what raised", "RuntimeError" in err.getvalue(), err.getvalue())
 
 
 if __name__ == "__main__":
@@ -201,7 +223,8 @@ if __name__ == "__main__":
                test_a_stamp_that_is_not_a_past_minute_is_refused,
                test_a_stamp_older_than_the_kept_window_is_refused,
                test_a_missing_store_is_not_a_failure_and_list_names_what_exists,
-               test_the_tick_takes_one_a_day):
+               test_the_tick_takes_one_a_day,
+               test_a_crashing_due_question_is_a_failure_not_a_no):
         fn()
     print()
     if FAILURES:

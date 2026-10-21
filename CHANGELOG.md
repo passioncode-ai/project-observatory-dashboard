@@ -33,6 +33,38 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Every collector gets a turn, and none takes the tick** (OBS-52; OBS-40 superseded). One installed 0.27.0 timed
+  out on 28 of its last 50 ticks: the leak scan took a median 1125 s of the 1500 s ceiling and eight collectors were not
+  started 28 times. A disabled step keeps its old start, so it sorted as the most starved collector and the rotation
+  moved the step it reads from to the front: the disabled companion scrub dragged the leak scan, and the disabled
+  Bitbucket listing the folder scan, to the head of every tick. A disabled collector now runs last, one not started for
+  3 ticks runs first, and each collector's watchdog limit is at most its share of the ceiling (40 %, the leak scan 30 %;
+  `tick_budget.py`). The leak scan also stops between the chunks of a file and the pages of a store and resumes there
+  next tick, instead of being killed with nothing written, and a complete pass over its databases (forced whenever the
+  set of known values changes, which is most days) now resumes across ticks from how far it read each table, the
+  databases it has not finished first; before, each tick began every database at rowid 0 in the same order, and one
+  large store kept the ones behind it unread. A database finished earlier in such a pass is read incrementally, with
+  its signature, so a row updated in place meanwhile is still read; an unfinished one resumes only if it is the same
+  file; a pass pending more than 2 days starts over; and a database that will not open is named as a hole without
+  holding the pass open. A new finding, `tick.step_over_share`, names a step that used 95 % of its share of the
+  ceiling in 3 of the last 5 ticks (a step that resumes by design, the leak scan, is not judged).
+- **A probe's "no" is not a failed step, and a crash is not a "no".** `backup-due` answered "not due" with exit 1, and
+  17 tick receipts in a row recorded it as `failed`. "Not due" is now exit 3 (`backup_store.NOT_DUE`, recorded as
+  `not_due`), anything that goes wrong while answering exits 2, and any other exit (an uncaught exception gives 1) is a
+  failed step whose output goes to the tick log. A test refuses a `bounded(...)[0] == 0` in `tools/tick.py`.
+- **Findings handed to Fabric Dashboards are not new again on the next tick.** With the host present the notifier
+  returned before recording what it handed over, so every tick reported about ninety findings as new or escalated.
+  They are now recorded as delivered `via: host`.
+- **A degradation that lasts a day is a warning** (`collector.degraded_persistent`). A collector whose same reason
+  (its `code`, else its text) stays in its receipt for more than 24 hours is reported on its own, for every collector
+  but the structural reasons `degradations.STRUCTURAL` names, by source and reason together (the leak scan's coverage,
+  kept off the push channel; the disk guard's holder policy; retired keys; one checkout's or folder's own state;
+  listing budgets), or a row marks `structural: true`; a real failure from the same source still fires:
+  the Fabric attribution collector had written `degraded: access-refused` on every run for over a day and produced
+  nothing, while the board showed it as one more info row. First sightings are kept in the store, `degraded-since.json`.
+- **`tick.err` lines carry their time.** The supervisor's lines (`tick stopped: ...`) and the tick script's stderr now
+  start with their UTC time, through `log_policy.StampedLines` (moved from `serverd.py`, which still uses it).
+
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
@@ -61,6 +93,37 @@ while the major version is 0, a minor release may change behaviour and says so h
   any other answer stays unknown with its reason. A complete listing that lacks a key still wins. Every request
   refuses a redirect (urllib would carry the key's `Authorization` header to the new location), and a `.env` is
   read only for the exact `OPENROUTER_API_KEY=` variable.
+- **`full update --apply` checks free disk before it changes anything.** On 2026-10-20 an automatic update rolled
+  back with "database or disk is full" half-way through the new release's workspace migration. Before downloading,
+  and again after the machine backup and just before any job is stopped, every volume the update writes to is
+  measured against what it writes there (the release wheels, the installed package beside the one it replaces, the
+  workspace snapshot and its encrypted copy, the cached rollback wheels, the store's databases once more for the
+  migration, and in the first check the machine backup about to be taken) plus 1 GB left free; volumes reporting the
+  same free space (APFS volumes of one container) are summed as one. A short volume refuses with the new exit code 7 and a `space` report naming the
+  bytes needed and free on each volume; nothing is downloaded, stopped, installed or rolled back. The preview lists it
+  under `apply_blockers`; the maintenance job records `refused-disk` and tries again the next hour.
+- **The portable test run keeps its disk footprint bounded** (OBS-167). Each suite's sandbox (a copy of the source
+  and the suite's own files) is removed when that suite ends, its `run.log` kept (`--keep` keeps them all); a full
+  run used to keep 273 copies, about 3.5 GB, to the end. The run refuses to start (exit 7, `insufficient_disk`)
+  when the temporary folder would keep less than one source copy per running suite plus 2 GB free;
+  `--min-free-gb N` sets the floor and `0` starts anyway.
+- **One rule's duplicate finding id no longer stops the whole board.** `build_findings` exited on a duplicate id
+  and published nothing. It now keeps the first finding of each id and adds a `board.duplicate_id` warning naming the
+  ids and their rule, so acknowledgement keys stay unique and the defect stays visible.
+- **What the machine backup leaves behind is a finding with its fix.** Each item not carried is now a
+  `machine.backup_not_carried` row on the board (a warning for the only copy of commits or uncommitted changes) and
+  carries a `fix` in the manifest, the answer and `full machine-backup status`: push the branch, or the exact
+  `limits` value in `config/machine-backup.json` that would carry it. The only copies of work are listed first. One
+  row per checkout and part (commits, changes, untracked files), so two parts of one checkout never share an id.
+
+### Changed
+
+- **The machine backup carries larger checkouts by default.** Measured on a working agent machine on 2026-10-20,
+  ten repositories' unpushed commits (bundles of 16.7 to 130 MB, one of 404 MB) and two patches (23 and 59 MB) were
+  left out under the old caps. The defaults are now 160 MB per bundle (was 16; caps count MiB, and the largest of those bundles is 130.0 MiB), 64 MB per patch (was 8), 32 MB per
+  untracked set (was 8) and 768 MB for all checkouts (was 64), which carries all of them but the 404 MB bundle and a
+  161 MB untracked set, for about 560 MB more per bundle. Carried parts are spooled to the private stage and
+  streamed into the bundle, so a larger cap costs disk, checked against `min_free_gb`, never memory.
 
 ## 0.27.0 (2026-10-20)
 

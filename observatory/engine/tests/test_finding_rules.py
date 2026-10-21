@@ -145,6 +145,34 @@ def builder():
 
 # ───────────────────────── the pure functions ────────────────────────────────
 
+def test_a_duplicate_id_drops_the_later_row_and_says_so() -> None:
+    """Review of #325: one rule's duplicate id used to stop the whole board."""
+    bf = builder()
+    rows_in = [{"id": "x.y:a", "type": "x.y", "subject": "a", "severity": "info", "n": 1},
+               {"id": "x.y:a", "type": "x.y", "subject": "a", "severity": "info", "n": 2},
+               {"id": "x.z:b", "type": "x.z", "subject": "b", "severity": "info", "n": 3}]
+    out = bf.keep_unique_ids(rows_in)
+    ids = [f["id"] for f in out]
+    check("every published id is unique", len(ids) == len(set(ids)), str(ids))
+    check("the first of a pair is kept", [f.get("n") for f in out if f["id"] == "x.y:a"] == [1], str(out))
+    warn = [f for f in out if f["type"] == "board.duplicate_id"]
+    check("the drop is a warning naming the id and its rule",
+          len(warn) == 1 and warn[0]["severity"] == "warning" and "x.y:a" in warn[0]["detail"]
+          and "x.y" in warn[0]["detail"], str(warn))
+    check("a board without duplicates is unchanged", bf.keep_unique_ids(rows_in[1:]) == rows_in[1:])
+
+
+def test_the_machine_backup_pair_of_one_checkout_reaches_the_board() -> None:
+    """The operator's receipt held a patch and an untracked set of one checkout: two rows."""
+    nc = [{"source": "~/src/alpha-web", "reason": "uncommitted changes: over the cap of 8 MB (limits.patch_mb)", "size": 9},
+          {"source": "~/src/alpha-web", "reason": "1577 untracked file(s): over the cap of 8 MB (limits.untracked_mb)", "size": 9}]
+    success = {"result": "taken", "file": "machine-x.obmachine", "not_carried_count": 2, "not_carried": nc}
+    board = sandbox(state={"machine-backup": {"last": success, "success": success}})
+    got = rows(board, "machine.backup_not_carried")
+    check("both parts are on the board", len(got) == 2, str([f["id"] for f in got]))
+    check("and no id was produced twice", not rows(board, "board.duplicate_id"))
+
+
 def test_a_sighting_reads_as_a_date_and_a_sentence() -> None:
     """Audit A28: "Recorded 2026-09-14T14:18:55Z: the value was seen at echoed by…"."""
     sys.path.insert(0, str(ROOT / "tools"))
@@ -887,7 +915,9 @@ def test_no_message_names_a_command_a_user_cannot_run() -> None:
 
 if __name__ == "__main__":
     print("the board's rules — eleven that had never been seen firing\n")
-    for fn in (test_a_sighting_reads_as_a_date_and_a_sentence,
+    for fn in (test_a_duplicate_id_drops_the_later_row_and_says_so,
+               test_the_machine_backup_pair_of_one_checkout_reaches_the_board,
+               test_a_sighting_reads_as_a_date_and_a_sentence,
                test_a_blank_page_is_reported,
                test_an_unreadable_health_file_is_not_read_as_healthy,
                test_a_quarantined_model_is_named,

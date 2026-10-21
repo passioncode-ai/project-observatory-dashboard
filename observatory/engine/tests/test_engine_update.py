@@ -698,6 +698,118 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(doc["machine_backup"]["result"], "failed")
         self.assertTrue(any("machine backup" in d for d in doc["degraded"]))
 
+    # --- free space (2026-10-20: an automatic update rolled back on "database or disk is full") ---
+
+    def assert_refused_for_space(self, code, doc, before):
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        self.assertEqual(doc["status"], "refused", doc)
+        self.assertIn("free", doc["error"])
+        self.assertTrue(doc["space"]["short"], doc)
+        for volume in doc["space"]["short"]:
+            self.assertGreater(volume["needed_bytes"], volume["free_bytes"])
+            # The message names both numbers, in bytes, for every short volume.
+            self.assertIn(str(volume["needed_bytes"]), doc["error"])
+            self.assertIn(str(volume["free_bytes"]), doc["error"])
+        self.assertEqual(self.installer.calls, [], "nothing installed")
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start", "restart")],
+                         "no job stopped or started")
+        self.assertFalse(doc.get("rolled_back"), "nothing to roll back")
+        self.assertEqual(self.tree(), before)
+        self.assertFalse(list((self.home / "backups").glob("before-update-*")), "no snapshot taken")
+
+    def test_too_little_free_space_refuses_before_anything_changes(self):
+        self.gh.publish(NEWER)
+        before = self.tree()
+        backups = []
+        for flags in (("--apply",), ("--apply", "--unattended")):
+            code, doc = self.run_cli(*flags, free_space=lambda path: 64 * 1024 * 1024,
+                                     machine_backup=lambda base: backups.append(base) or {"result": "taken"})
+            self.assert_refused_for_space(code, doc, before)
+        self.assertEqual(backups, [], "refused before the machine backup and the download")
+        self.assertFalse((self.home / "backups/engine-releases").exists())
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[-1]["event"], "refused")
+
+    def test_the_space_needed_is_what_the_update_writes(self):
+        # A store of 3 MB: the snapshot copies it and a migration may rewrite it once more.
+        (self.home / "store" / "planted.db").write_bytes(b"\0" * (3 * 1024 * 1024))
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply", free_space=lambda path: 0)
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        rows = {row["what"]: row["bytes"] for v in doc["space"]["volumes"] for row in v["writes"]}
+        self.assertGreaterEqual(rows["workspace snapshot"], 3 * 1024 * 1024)
+        self.assertGreaterEqual(rows["store growth during the migration"], 3 * 1024 * 1024)
+        self.assertGreater(rows["release wheels"], 0)
+        self.assertGreater(rows["installed package, new beside old"], 0)
+        for v in doc["space"]["volumes"]:
+            self.assertEqual(v["needed_bytes"], sum(r["bytes"] for r in v["writes"]) + self.mod.SPACE_FLOOR)
+        # What was asked for is enough (plus the few hundred bytes the update's own journal
+        # adds to the workspace between the first check and the second).
+        enough = max(v["needed_bytes"] for v in doc["space"]["volumes"]) + 64 * 1024
+        code, doc = self.run_cli("--apply", free_space=lambda path: enough)
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+
+    def test_space_taken_by_the_machine_backup_is_checked_again_before_the_jobs_stop(self):
+        self.gh.publish(NEWER)
+        before = self.tree()
+        free = [10 * 1024 ** 4]
+
+        def backup(base):
+            free[0] = 1024           # the bundle filled the disk
+            return {"result": "taken"}
+        code, doc = self.run_cli("--apply", free_space=lambda path: free[0], machine_backup=backup)
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        self.assertEqual(self.installer.calls, [])
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start", "restart")])
+        self.assertEqual(self.tree(), before)
+        # The second refusal says what already happened (review of #325): the release was
+        # downloaded and the machine backup taken; and it does not count the wheels it already wrote.
+        self.assertNotIn("nothing was downloaded", doc["error"])
+        self.assertIn("nothing was stopped or installed", doc["error"])
+        writes = {w["what"] for v in doc["space"]["volumes"] for w in v["writes"]}
+        self.assertNotIn("release wheels", writes)
+        self.assertNotIn("machine backup before the update", writes)
+
+    def test_the_first_check_counts_the_machine_backup_it_is_about_to_take(self):
+        # Review of #325: with a marginal disk the hourly retry took a fresh machine backup
+        # (about a gigabyte) every time before refusing. The first check now counts it.
+        import machine_backup
+        self.gh.publish(NEWER)
+        with patch.object(machine_backup, "expected_before_update", lambda base: 5 * 1024 ** 3):
+            code, doc = self.run_cli("--apply", free_space=lambda path: 0)
+        rows = {w["what"]: w["bytes"] for v in doc["space"]["volumes"] for w in v["writes"]}
+        self.assertEqual(rows["machine backup before the update"], 5 * 1024 ** 3)
+        taken = []
+        with patch.object(machine_backup, "expected_before_update", lambda base: 5 * 1024 ** 3):
+            code, doc = self.run_cli("--apply", free_space=lambda path: 2 * 1024 ** 3,
+                                     machine_backup=lambda base: taken.append(base) or {"result": "taken"})
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        self.assertEqual(taken, [], "refused before the backup was taken")
+
+    def test_volumes_that_share_their_free_space_are_one_volume(self):
+        # Review of #325: APFS volumes of one container have their own st_dev but one pool of
+        # free space; checked apart, each fit while together they did not.
+        rows = [{"what": "a", "path": self.base / "one", "bytes": 600},
+                {"what": "b", "path": self.base / "two", "bytes": 600}]
+        devices = {str(self.base / "one"): 1, str(self.base / "two"): 2}
+        with patch.object(self.mod, "_volume", lambda path: devices[str(path)]):
+            space = self.mod.space_check(rows, lambda path: self.mod.SPACE_FLOOR + 1000)
+        self.assertEqual(len(space["volumes"]), 1, space)
+        self.assertEqual(space["volumes"][0]["needed_bytes"], self.mod.SPACE_FLOOR + 1200)
+        self.assertTrue(space["short"])
+        with patch.object(self.mod, "_volume", lambda path: devices[str(path)]):
+            free = {str(self.base / "one"): 10 ** 12, str(self.base / "two"): 2 * 10 ** 12}
+            apart = self.mod.space_check(rows, lambda path: free[str(path)])
+        self.assertEqual(len(apart["volumes"]), 2, "different free space: two volumes")
+
+    def test_the_preview_names_the_space_and_blocks_on_it(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli(free_space=lambda path: 0)
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(any("free" in b for b in doc["apply_blockers"]), doc)
+        self.assertTrue(doc["space"]["short"])
+        self.assertIsNone(doc["next"])
+
     def test_a_person_may_still_install_a_held_release_after_seeing_the_step(self):
         step = "back up the store by hand first"
         self.gh.publish(NEWER, wheel=self.held_wheel({"version": NEWER, "needs_person": step}))

@@ -1651,6 +1651,34 @@ def provider_findings(health: dict | None, agent: dict | None, agent_enabled: bo
     return out
 
 
+def persistent_degradation_findings(persistent: dict[str, list[tuple[str, float]]],
+                                    now: float | None = None) -> list[dict]:
+    """`collector.degraded_persistent`: one warning per receipt whose same degradation has lasted
+    more than `degradations.PERSIST_HOURS`, with each reason and since when."""
+    import time
+    now = time.time() if now is None else now
+    out = []
+    for receipt, pairs in sorted(persistent.items()):
+        oldest = min(since for _, since in pairs)
+        shown = [f"{pair} (since {datetime.fromtimestamp(since, timezone.utc):%Y-%m-%d %H:%MZ})"
+                 for pair, since in sorted(pairs, key=lambda ps: ps[1])[:DEGRADED_LISTED]]
+        rest = len(pairs) - len(shown)
+        out.append({
+            "type": "collector.degraded_persistent", "subject": f"collector:{receipt}",
+            "severity": "warning",
+            **titled("{receipt} has reported the same degradation for {hours} hours",
+                     receipt=receipt, hours=f"{(now - oldest) / 3600:.0f}"),
+            "detail": ("The collector's receipt has carried the same degradation, unchanged, for over "
+                       f"{degradations.PERSIST_HOURS} hours (measured each time the findings are built), so "
+                       "whatever it is meant to produce may not have been produced since. " + clipped("; ".join(shown), 900)
+                       + (f" … and {rest} more" if rest > 0 else "") + "."),
+            "action": (f"read `store/raw/{receipt}` for the reason, then fix the source or switch the "
+                       "collector off; a reason another system owns is that system's to change, and this "
+                       "row stays until it does"),
+            "evidence": [f"store/raw/{receipt}#degraded", f"store/{degradations.PERSISTENCE_FILE}"]})
+    return out
+
+
 def collect() -> list[dict]:
     out: list[dict] = []
     # WHERE THE ESTATE RUNS, on the same board as what it is made of. Absent is
@@ -1715,6 +1743,8 @@ def collect() -> list[dict]:
         except (OSError, ValueError):
             continue
     out.extend(machine_findings.findings(paths.SCRATCH, paths.STATE / "logs", _mc))
+    # WHAT THE MACHINE BACKUP LEFT BEHIND, one row per item with its fix (machine_backup.py).
+    out.extend(machine_findings.backup_findings(paths.STATE / "machine-backup.json"))
     # THE LIFECYCLE WATCH: orphaned product processes, session servers on replaced
     # code, jobs past their interval, logs past their cap — per owning product
     # (collectors/scan_lifecycle.py). Silent when the collector has never run.
@@ -3718,6 +3748,12 @@ def collect() -> list[dict]:
                       f"the source or accept the gap — the reason names which",
             "evidence": [f"store/raw/{receipt}#degraded"]})
 
+    # THE SAME DEGRADATION FOR A DAY (degradations.persistence). The row above is info on purpose,
+    # and a collector that has done nothing for a day hid among the structural ones: the Fabric
+    # attribution collector wrote `degraded: access-refused` on every run from 2026-10-20 and the
+    # board never said it was a silent no-op.
+    out += persistent_degradation_findings(degradations.persistent())
+
     # WHAT DOES NOT APPLY HERE, kept visible. A collector moves a source to its
     # `not_applicable` list when it measured that the source does not apply to
     # this machine — a tool not installed, a registry with no RDAP service for a
@@ -4385,6 +4421,12 @@ def collect() -> list[dict]:
     # complete — the contract's "completion blocks until every configured
     # backend attests" was true of the function and false of the system.
     import tick_findings
+    def _tick_history():
+        # The earlier runs' stage receipts, `store/raw/tick-runs.jsonl`, read through tick_health.
+        import tick_budget
+        import tick_health
+        return tick_health.stage_history(paths.SCRATCH, tick_budget.ALERT_WINDOW)
+
     def _tick_receipt(path):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
@@ -4395,7 +4437,8 @@ def collect() -> list[dict]:
     out.extend(tick_findings.findings(
         _tick_receipt(paths.SCRATCH / "tick.json"),
         _tick_receipt(paths.STATE / "tick-rotation.json"),
-        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS))
+        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS,
+        runs=_tick_history()))
 
     # WORK GIT CAN NO LONGER PLACE. `tools/corroborate.py` refuses to promote
     # a `session` row whose recorded sha is gone or has fallen off its
@@ -4648,6 +4691,38 @@ def collect() -> list[dict]:
     return out
 
 
+def keep_unique_ids(findings: list[dict]) -> list[dict]:
+    """One finding per id, and a warning that names every id a rule produced twice.
+
+    An id is the dedupe key and the acknowledgement key: two findings sharing one would let an
+    operator dismiss neither without the other, so the board never publishes two. It used to
+    stop instead, and one rule's slip then published NOTHING: on 2026-10-21 (review of #325)
+    two parts of one checkout left out of the machine backup shared an id and the whole board
+    would have gone dark. The first of each id is kept, the rest are dropped, and the drop is
+    itself a warning (`board.duplicate_id`) naming the ids and their rule, so the defect is
+    seen and fixed rather than hidden. Its own id is unique by construction."""
+    seen: dict[str, dict] = {}
+    dropped: dict[str, int] = {}
+    for f in findings:
+        if f["id"] in seen:
+            dropped[f["id"]] = dropped.get(f["id"], 0) + 1
+        else:
+            seen[f["id"]] = f
+    kept = list(seen.values())
+    if dropped:
+        ids = sorted(dropped)
+        kept.append({
+            "type": "board.duplicate_id", "subject": "board", "id": "board.duplicate_id:board",
+            "severity": "warning", "first_seen": TODAY,
+            **titled("{count} finding ids were produced twice; the later rows were dropped", count=len(ids)),
+            "detail": ("A rule produced two findings with one id, so only the first of each is on the board "
+                       "(an id is also the acknowledgement key): " + listed(ids, 10) + ". Rules: "
+                       + ", ".join(sorted({i.split(":", 1)[0] for i in ids})) + "."),
+            "action": "a defect in the named rule: report it with the ids above; give each finding a subject of its own",
+            "evidence": ["registry:findings.json"]})
+    return kept
+
+
 def main(argv: list[str]) -> int:
     previous = {f["id"]: f for f in (json.loads(OUT.read_text(encoding="utf-8"))["findings"]
                                      if OUT.is_file() else [])}
@@ -4681,12 +4756,7 @@ def main(argv: list[str]) -> int:
             f["acked"] = {"until": a.get("until"), "why": a.get("why"), "by": a.get("by")}
         findings.append(f)
 
-    dupes = sorted({f["id"] for f in findings
-                    if sum(1 for g in findings if g["id"] == f["id"]) > 1})
-    if dupes:
-        sys.exit(f"build_findings: duplicate finding id(s) {dupes}. An id is the "
-                 f"dedupe key and the acknowledgement key; two findings sharing one "
-                 f"means an operator cannot dismiss either without the other.")
+    findings = keep_unique_ids(findings)
 
     rank = {"critical": 0, "warning": 1, "info": 2}
     findings.sort(key=lambda f: (rank.get(f["severity"], 3), f.get("deadline") or "9999",

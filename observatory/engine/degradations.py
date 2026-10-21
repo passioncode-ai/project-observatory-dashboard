@@ -206,3 +206,119 @@ def every_not_applicable() -> dict[str, list[dict]]:
         if isinstance(rows, list) and rows:
             out[f.name] = [r for r in rows if isinstance(r, dict)]
     return out
+
+
+#: Hours a collector's same degradation may last before it is a finding of its own
+#: (`collector.degraded_persistent`, tools/build_findings.py). 2026-10-21: the Fabric attribution
+#: collector wrote `degraded: access-refused` on every run for over a day and produced nothing, and
+#: the board carried it as one more info row. A day is past any outage a retry rides out.
+PERSIST_HOURS = 24
+#: Where each current degradation's first sighting is kept, under the store (not the scratch, so a
+#: receipt reader never mistakes it for a collector). Reasons only, never a detail.
+PERSISTENCE_FILE = "degraded-since.json"
+
+
+#: DEGRADATIONS THAT ARE THE STATE OF THINGS, not a collector doing nothing (review of #328, M2).
+#: `collector.degraded` is info on purpose: most of its rows are structural, explained and not the
+#: operator's to fix, and a day of them is no news. Per receipt: (source prefix, a pattern its reason
+#: or code must match, why). Both must match, so a real failure from the same source still fires: an
+#: OpenRouter listing with no provisioning key, or a spend key whose `GET /activity` failed, is no
+#: listing budget and no retired key (confirming review of #328). A collector can also mark one row
+#: `"structural": true` where it writes it. Anything else, a new collector's included, is reported once
+#: it lasts a day: that is how the Fabric attribution collector's `access-refused` reaches a person.
+#: What one checkout's own state reads like in the git hygiene receipts (collectors/scan_git_hygiene.py).
+CHECKOUT_STATE = (r"^(registered checkout could not be read|no default branch could be resolved|"
+                  r"worktree registration unavailable|(worktree|branch) classification unavailable|"
+                  r"current branch unavailable)")
+STRUCTURAL: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "leak-scan.json": (("", "", "the leak scan's coverage; reported as `secret.leak_scan_partial`, which is "
+                                "kept off the push channel (ENG-001)"),),
+    "disk-guard.json": (("holders", r"^what processes hold could not be read",
+                         "no removal is admitted until non-use can be proven: a policy (OBS-173)"),),
+    "spend.json": (("spend:openrouter:key:", r"^(a retired key|retired with|rotated on or before|"
+                                             r"a provider hash held by two|no provider hash to read by)",
+                    "a retired or rotated key's history: nothing left to measure"),),
+    "git-hygiene.json": tuple((prefix, CHECKOUT_STATE, "one checkout's own state") for prefix in ("local:", "repository:"))
+    + (("worktree-registration", r"^registration budget exhausted", "the registration budget; the rest is read next pass"),
+       ("git-hygiene", r"^the step's time ran out after \d+ of \d+ checkouts",
+        "the step's share of the tick; the checkouts not reached carry their last measurement and go first next pass")),
+    "worktree-registration.json": tuple((prefix, CHECKOUT_STATE, "one checkout's own state") for prefix in ("local:", "repository:"))
+    + (("worktree-registration", r"^registration budget exhausted", "the registration budget; the rest is read next pass"),),
+    "local.json": (("folder:", r"^(remote|remotes_all|dirty): |^mtime unreadable",
+                    "one folder's own state (no remote, unreadable)"),),
+    "openrouter.json": (("openrouter:listing", r"^stopped after \d+ pages",
+                         "the account's key listing past its page budget"),
+                        ("openrouter:", r"^its key is not among the newest \d+ keys",
+                         "a key past the listing's page budget, asked about itself")),
+}
+#: Finding types kept off the push channel (tools/notify_findings.NOT_PUSHED), and the receipt each is
+#: built from: such a receipt must be STRUCTURAL whole, or a day of it would be pushed after all.
+NOT_PUSHED_RECEIPTS = {"secret.leak_scan_partial": "leak-scan.json"}
+
+
+def structural(receipt: str, row: dict) -> bool:
+    """True when `row` of `receipt` is a structural degradation: its source starts with a STRUCTURAL
+    prefix and its reason (or code) matches that entry's pattern, or it is marked at its source."""
+    import re
+    if row.get("structural") is True:
+        return True
+    source = str(row.get("source", ""))
+    text = str(row.get("reason") or row.get("code") or "")
+    return any(source.startswith(prefix) and re.search(pattern, text)
+               for prefix, pattern, _ in STRUCTURAL.get(receipt, ()))
+
+
+def _persist_key(receipt: str, row: dict) -> tuple[str, str]:
+    """(record key, the pair a person reads). The `code` when the row has one, else its reason:
+    a reason that carries a count changes with the count and starts its clock again, which errs
+    towards saying nothing rather than towards a false 'for a day'."""
+    source = str(row.get("source", "?"))
+    reason = str(row.get("code") or row.get("reason") or "").strip()
+    return f"{receipt}\t{source}\t{reason}", f"{source} — {reason}"
+
+
+def persistence(current: dict[str, list[dict]], record, now: float
+                ) -> tuple[dict, dict[str, list[tuple[str, float]]]]:
+    """(the new record, per receipt the degradations seen for more than PERSIST_HOURS with their
+    first sighting). Structural rows (`structural`) are neither kept nor reported. `record` is the previous one, `{"first_seen": {key: epoch}}`; anything else is
+    read as empty. A degradation absent from `current` is forgotten, so one that comes back starts
+    again."""
+    import math
+    old = record.get("first_seen") if isinstance(record, dict) else None
+    old = old if isinstance(old, dict) else {}
+    first_seen: dict[str, float] = {}
+    persistent: dict[str, list[tuple[str, float]]] = {}
+    for receipt, rows in sorted(current.items()):
+        for row in rows:
+            if not isinstance(row, dict) or structural(receipt, row):
+                continue
+            key, pair = _persist_key(receipt, row)
+            seen = old.get(key)
+            seen = float(seen) if (isinstance(seen, (int, float)) and not isinstance(seen, bool)
+                                   and math.isfinite(seen) and seen <= now) else now
+            first_seen[key] = seen
+            if now - seen > PERSIST_HOURS * 3600 and pair not in [p for p, _ in persistent.get(receipt, [])]:
+                persistent.setdefault(receipt, []).append((pair, seen))
+    return {"schema": 1, "first_seen": first_seen}, persistent
+
+
+def persistent(now: float | None = None) -> dict[str, list[tuple[str, float]]]:
+    """`persistence` over every collector's receipt now, the record kept in the store between runs.
+    An unreadable record starts every clock again; a record that cannot be written is said on
+    stderr and costs only the next run's memory."""
+    import sys
+    import time
+    now = time.time() if now is None else now
+    path = paths.STATE / PERSISTENCE_FILE
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = {}
+    record, out = persistence(every_collector(), record, now)
+    try:
+        import atomic
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic.write_json(path, record)
+    except Exception as exc:  # noqa: BLE001 — the findings still build
+        print(f"  {PERSISTENCE_FILE} not written: {type(exc).__name__}", file=sys.stderr)
+    return out

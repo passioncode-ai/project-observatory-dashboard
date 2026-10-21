@@ -61,6 +61,9 @@ sys.path.insert(0, str(ROOT))
 PY = sys.executable
 #: The watchdog's exit for a step it stopped or did not start (tick_lease.TIMED_OUT).
 TIMED_OUT = 124
+#: A probe's "no" (`Tick.probe`): an exit of its own, never 1, which is what any uncaught exception
+#: gives (review of #328, M3). `tools/backup_store.py` NOT_DUE is the same number.
+PROBE_NO = 3
 LEASE = "tools/tick_lease.py"
 #: Hours before the remotes and Bitbucket listings are read again.
 STALE_HOURS = 6
@@ -156,11 +159,17 @@ def reads_cycle(reads: dict[str, tuple[str, ...]], names) -> list[str]:
 
 
 def rotation_order(planned: list[str], started: dict[str, float],
-                   reads: dict[str, tuple[str, ...]] = READS_FROM) -> list[str]:
-    """`planned` least recently started first; a step never started goes first, and ties keep the
+                   reads: dict[str, tuple[str, ...]] = READS_FROM, *,
+                   priority: dict[str, int] | None = None) -> list[str]:
+    """`planned` by `priority` (`tick_budget.priority`: 0 starved, 1 in turn, 2 disabled; absent
+    is 1), then least recently started first; a step never started goes first, and ties keep the
     planned order. Then a writer that would run after a step reading its output is moved to just
     before that reader, so the starved reader stays early and still reads this tick's output. A
     start of None (never started) sorts as the oldest; only this ordering reads it as 0.
+
+    A DISABLED step sorts last, so it never pulls a writer forward: it keeps its old start, and
+    sorted by that alone it read as the most starved collector of all, dragging the leak scan and
+    the folder scan to the head of every tick (OBS-52, 2026-10-21).
 
     Bounded: a cycle in `reads` among the planned steps has no such order, and the loop that moved
     writers forward used to spin on it for ever (ENG-007). A cycle is named in the log and the
@@ -171,7 +180,8 @@ def rotation_order(planned: list[str], started: dict[str, float],
     if cycle:
         log(f"rotation: READS_FROM has a cycle through {', '.join(cycle)} — the planned order this tick")
         return list(planned)
-    order = sorted(planned, key=lambda name: started.get(name) or 0.0)
+    priority = priority or {}
+    order = sorted(planned, key=lambda name: (priority.get(name, 1), started.get(name) or 0.0))
     for _ in range(max(len(order), 1) ** 2):
         moved = False
         for reader, writers in reads.items():
@@ -308,7 +318,9 @@ class Rotation:
             streak = (rows.get(name) or {}).get("not_started_streak") or 0
             if streak:
                 log(f"rotation: {name} not started for {streak} tick{'s' if streak != 1 else ''}")
-        order = rotation_order(planned, started)
+        import tick_budget
+        order = rotation_order(planned, started,
+                               priority={name: tick_budget.priority(rows.get(name)) for name in planned})
         ahead = [name for name in order if order.index(name) < planned.index(name)]
         if ahead:
             now = time.time()
@@ -396,6 +408,33 @@ class Tick:
         self.progress.finish(p.returncode, outcome_of(p.returncode, first))
         return p.returncode, output
 
+    def probe(self, name: str, *argv) -> bool | None:
+        """A yes/no question under the same watchdog: exit 0 is yes, PROBE_NO is no (`not_due` in the
+        stage receipt, never a failed step), anything else a failed step, its output in the log, and
+        None. `backup_store.py --due` answered "not due" with exit 1 and 17 tick receipts in a row
+        recorded it as `failed` (2026-10-21); exit 1 is also an uncaught exception, so it is not a no."""
+        self.progress.start(name)
+        try:
+            p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+        except BaseException:
+            self.progress.finish(None, "unknown")
+            raise
+        output = p.stdout + p.stderr
+        if p.returncode in (0, PROBE_NO):
+            self.progress.finish(p.returncode, "ran" if p.returncode == 0 else "not_due")
+            return p.returncode == 0
+        first = output.splitlines()[0] if output else None
+        outcome = outcome_of(p.returncode, first)
+        self.progress.finish(p.returncode, outcome)
+        for line in output.splitlines():
+            log(f"{name}: {line.rstrip()}")
+        log(f"{name}: EXIT {p.returncode} — recorded as a failed step ({outcome.replace('_', ' ')})")
+        self.failed.append((name, p.returncode))
+        self.outcomes[name] = outcome
+        return None
+
     def write_report(self) -> None:
         try:
             import atomic
@@ -481,7 +520,7 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # The daily copy may live in the backups root (encrypted, outside this disk) or beside the
     # database (no passphrase yet); only the script knows where the root is, so the due check
     # is the script's own.
-    if bounded("backup-due", PY, "tools/backup_store.py", "--due")[0] == 0:
+    if t.probe("backup-due", PY, "tools/backup_store.py", "--due"):
         log("backup: taking a daily copy of the store")
         step("backup", PY, "tools/backup_store.py")
     if stale(SCRATCH / "heroku.json", 24):
@@ -600,6 +639,10 @@ def main() -> int:
     if os.environ.get("OBSERVATORY_TICK_SUPERVISOR_PID") != str(os.getppid()):
         return supervise()
     os.umask(0o077)
+    # Its stderr (a traceback, a warning) lands in `tick.err` beside the supervisor's lines: stamped
+    # like them, so a fault there says when it happened. Its stdout lines carry `log`'s own stamp.
+    from log_policy import StampedLines
+    sys.stderr = StampedLines(sys.stderr)
     import paths
     paths.SCRATCH.mkdir(parents=True, exist_ok=True)
     (paths.STATE / "logs").mkdir(parents=True, exist_ok=True)
