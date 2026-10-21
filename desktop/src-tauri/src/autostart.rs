@@ -281,9 +281,9 @@ mod tests {
 
     #[test]
     fn the_autostart_folder_honours_an_absolute_xdg_config_home_only() {
-        let home = Path::new("/home/u");
+        let home = Path::new("/srv/example-home");
         assert_eq!(autostart_dir(Some("/x/cfg"), home), Path::new("/x/cfg/autostart"));
-        assert_eq!(autostart_dir(Some("rel"), home), Path::new("/home/u/.config/autostart"));
-        assert_eq!(autostart_dir(None, home), Path::new("/home/u/.config/autostart"));
+        assert_eq!(autostart_dir(Some("rel"), home), Path::new("/srv/example-home/.config/autostart"));
+        assert_eq!(autostart_dir(None, home), Path::new("/srv/example-home/.config/autostart"));
     }
 }

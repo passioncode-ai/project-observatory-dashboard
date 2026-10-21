@@ -163,10 +163,13 @@ NATIVE_SOURCES = {
     "macos/Tests/ObservatoryCoreTests/DashboardWindowTests.swift", "macos/Tests/ObservatoryCoreTests/AccessibilityTests.swift",
     "macos/Tests/ObservatoryCoreTests/ScratchDefaults.swift", "macos/Tests/ObservatoryCoreTests/LocalizationTests.swift",
     "macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift",
+    "macos/Sources/ObservatoryCore/AppLifecycle.swift", "macos/Sources/ObservatoryApp/Lifecycle.swift",
+    "macos/Tests/ObservatoryCoreTests/AppLifecycleTests.swift",
 }
 # The Windows and Linux app (docs/desktop/, W8), file by file like the macOS sources above.
 DESKTOP_SOURCES = {
     "desktop/src-tauri/src/updates.rs",
+    "desktop/src-tauri/src/autostart.rs",
     "desktop/ui/assistant.js",
     "desktop/ui/assistant.css",
     "desktop/ui/assistant.html",
