@@ -12,7 +12,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   `org.project-observatory.<id>.check`, systemd `-check.timer`, the Task Scheduler task `check`), installed by
   `full maintain ensure` beside the 15-minute maintenance job, reads the newest release's static `SHA256SUMS` on
   github.com every five minutes, the retry after a failed check included, and starts the maintenance job at once when
-  it finds a newer release. `full update --check` reads the same file; the REST API (60 anonymous requests an hour) is
+  it finds a newer release. It has its own lock and record and starts offset from the maintenance job, so a
+  maintenance run is never skipped for a running check. `full update --check` reads the same file; the REST API (60 anonymous requests an hour) is
   read only by `--apply`'s signed verification, `--version` and a person's `--api-url` mirror. A check that finds what
   the last one found prints nothing and adds no line to the shared update log. The heavy pass keeps its 15 minutes, so
   no job runs past its own interval (LC-03); an update that failed for a lasting reason waits six hours before the same
@@ -24,7 +25,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   how to grant it, and asks «Restart to finish updating» (Restart now / Later) once per staged version while a window is
   on screen. The Windows and Linux app writes its own login entry (the `Run` value, an XDG autostart file) unless turned
   off in Settings, starts in the tray when launched at login, names a login entry it could not write or that went
-  missing, and downloads an update in the background before asking the same question. Closing a window still hides it;
+  missing (or switched off by the desktop or Windows' Startup apps), and downloads an update in the background before
+  asking the same question; a failing download backs off up to six hours, and a failed install is said with its reason. Closing a window still hides it;
   each app quits only through its own Quit.
 - **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
   alone and could not resolve against the lock).

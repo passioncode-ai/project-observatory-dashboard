@@ -1651,7 +1651,7 @@ Nothing needs to be run after a release. One job per workspace runs every 15 min
 small job of the same workspace (`.check`, `-check.timer`, the task `check`) asks every five
 minutes whether a newer release exists: one read of the newest release's `SHA256SUMS` on
 github.com (`releases/latest/download/SHA256SUMS`), never the GitHub REST API and its limit of 60
-requests an hour, and nothing else. When it finds one it starts the maintenance job at once. A
+requests an hour, and nothing else. When it finds one it starts the maintenance job at once. It keeps its own lock and its own record, `update-check.json` in the workspace's store folder, so a maintenance run is never skipped or overwritten because a check is running. A
 check that finds what the last one found writes nothing to `store/logs/check.log` and no new line
 to the shared update log. Each maintenance run does only what is due:
 

@@ -58,6 +58,7 @@ import email.parser
 import oslocks
 import osprivacy
 import hashlib
+import http.client
 import importlib.metadata
 import importlib.util
 import json
@@ -345,8 +346,13 @@ class Fetcher:
 
     def get_text(self, url: str, limit: int) -> str:
         """A small text file (the static release feed); anonymous unless the host is the API."""
-        with self._open(url, "application/octet-stream") as response:
-            body = response.read(limit + 1)
+        try:
+            with self._open(url, "application/octet-stream") as response:
+                body = response.read(limit + 1)
+        except (http.client.HTTPException, OSError) as exc:
+            # A connection dropped mid-body (IncompleteRead, a reset) is a check that could not
+            # look, never a traceback (review L7).
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} could not be read ({type(exc).__name__})") from None
         if len(body) > limit:
             raise Undetermined(f"{urllib.parse.urlsplit(url).path} is larger than expected")
         try:

@@ -282,7 +282,10 @@ class Wiring(Workspace):
         # The five-minute update check is a task of its own (operator rule, 2026-10-17).
         self.assertTrue(got["check_path"].endswith("-check"))
         self.assertIn("<Interval>PT5M</Interval>", got["check_xml"])
-        self.assertIn("<Delay>PT1M30S</Delay>", got["check_xml"])
+        # Offset from the pass (review H1): never the same logon second or repetition anchor.
+        self.assertIn("<Delay>PT2M30S</Delay>", got["check_xml"])
+        self.assertIn("<StartBoundary>2026-01-01T00:02:30</StartBoundary>", got["check_xml"])
+        self.assertIn("<StartBoundary>2026-01-01T00:00:00</StartBoundary>", got["xml"])
         self.assertIn("maintain.py check", got["check_xml"].replace('"', ""))
 
 

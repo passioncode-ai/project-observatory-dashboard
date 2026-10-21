@@ -84,5 +84,6 @@
   "Restart to finish updating": "Перезапустите, чтобы завершить обновление",
   "Version {version} is downloaded and verified. Restart now to finish updating, or later from the File menu or the tray.": "Версия {version} загружена и проверена. Перезапустите сейчас, чтобы завершить обновление, или позже из меню «Файл» или из трея.",
   "Restart now": "Перезапустить сейчас",
-  "Later": "Позже"
+  "Later": "Позже",
+  "The update could not be installed: {why}. «Restart to update» in the File menu or the tray tries again.": "Обновление не установлено: {why}. Пункт «Перезапустить для обновления» в меню «Файл» или в трее попробует снова."
 }

@@ -393,6 +393,24 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual((code, doc["status"]), (self.mod.EXIT_UNDETERMINED, "degraded"), body)
             self.assertNotIn("up-to-date", json.dumps(doc))
 
+    def test_a_feed_cut_off_mid_body_is_undetermined_not_a_traceback(self):
+        # Review L7: the body was read outside the fetcher's error handling.
+        import http.client
+
+        class Cut:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n):
+                raise http.client.IncompleteRead(b"partial", 10)
+        fetcher = self.mod.Fetcher(attempts=1, sleep=lambda s: None)
+        with patch.object(fetcher, "_open", return_value=Cut()):
+            with self.assertRaises(self.mod.Undetermined):
+                fetcher.get_text("https://github.com/x/y/releases/latest/download/SHA256SUMS", 1024)
+
     def test_explicit_version_uses_the_tag_endpoint(self):
         self.gh.publish(NEWER, latest=False)
         self.gh.latest = CURRENT

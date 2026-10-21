@@ -1002,9 +1002,11 @@ class Pass(Base):
         self.assertEqual(M.CHECK_INTERVAL_SECONDS, 300)
         commands = FakeCommands(check=0)
         self.run_pass(commands)
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4, seconds=59))["update"]["result"],
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4, seconds=29))["update"]["result"],
                          "not-due")
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=5))["update"]["result"], "up-to-date")
+        # 30 s of scheduler jitter count as on time (review M1).
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4, seconds=31))["update"]["result"],
+                         "up-to-date")
         self.assertEqual(len(commands.calls), 2)
 
     def test_a_failed_check_is_retried_after_five_minutes_too(self):
@@ -1405,15 +1407,16 @@ class CheckJob(Base):
     def check(self, latest="9.9.9", at=AT, kicks=None, feed=None):
         kicks = kicks if kicks is not None else []
         return M.check_pass(self.home, at=at, feed=feed or (lambda base: latest),
-                            kick=lambda: kicks.append(at) or {"result": "started"}, sleep=lambda s: None)
+                            kick=lambda: kicks.append(at) or {"result": "started"})
 
     def test_the_check_job_is_its_own_five_minute_job_on_every_scheduler(self):
         launchd = M.LaunchdSchedule(self.home, job="check")
         doc = launchd.document()
         self.assertTrue(doc["Label"].endswith(".check"))
-        self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "check",
-                                                       "--first-check-delay", "90"])
-        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (300, True))
+        self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "check"],
+                         "no first-check delay: it slept 90 s of every run (review H1)")
+        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (300, False),
+                         "the pass runs at load; the check one interval later, never together")
         self.assertTrue(doc["StandardOutPath"].endswith("check.log"))
         self.assertEqual(launchd.launch.lint_plist(doc), [])
         self.assertNotIn(doc["Label"], {j["label"] for j in launchd.launch.managed_jobs()})
@@ -1426,7 +1429,10 @@ class CheckJob(Base):
         self.assertIn('maintain.py" check', systemd.service_text())
         self.assertIn(f"TimeoutStartSec={M.CHECK_TIME_LIMIT}", systemd.service_text().splitlines())
         self.assertIn("OnUnitActiveSec=5min", systemd.timer_text().splitlines())
-        self.assertIn("OnStartupSec=90s", systemd.timer_text().splitlines())
+        self.assertIn(f"OnStartupSec={M.CHECK_FIRST_DELAY}s", systemd.timer_text().splitlines())
+        self.assertNotEqual(M.CHECK_FIRST_DELAY, M.FIRST_CHECK_DELAY, "the two jobs never start on one second")
+        self.assertNotEqual(M.CHECK_FIRST_DELAY % M.CHECK_INTERVAL_SECONDS,
+                            M.FIRST_CHECK_DELAY % M.CHECK_INTERVAL_SECONDS)
         # LC-03: the job ends well inside its own interval.
         self.assertLess(M.CHECK_TIME_LIMIT, M.CHECK_INTERVAL_SECONDS)
 
@@ -1469,9 +1475,9 @@ class CheckJob(Base):
                 patch.object(M, "system_setup_allowed", return_value=True):
             code, doc, _ = self.cli("maintain", "check")
             self.assertEqual((code, doc["check"]["result"]), (0, "up-to-date"))
-            state = M.read_state(self.home)
-            state["check"]["at"] = M.iso(M.now() - datetime.timedelta(minutes=6))
-            M.write_state(self.home, state)
+            record = M.read_check(self.home)
+            record["check"]["at"] = M.iso(M.now() - datetime.timedelta(minutes=6))
+            M.write_check(self.home, record)
             code, doc, _ = self.cli("maintain", "check")
         self.assertEqual((code, doc), (0, {}), "nothing new: no line in maintain's log")
 
@@ -1515,14 +1521,49 @@ class CheckJob(Base):
         self.assertEqual(self.check(feed=offline, at=AT + datetime.timedelta(minutes=5))["check"]["failures"], 2)
         self.assertEqual(events(), [("update_check", "check_failed")])
 
-    def test_off_means_no_read_and_a_running_pass_means_no_second_check(self):
+    def test_off_means_no_read_and_a_running_check_means_no_second_one(self):
         (self.home / "auto-update").write_text("off\n")
         reads = []
         self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "off")
         (self.home / "auto-update").unlink()
-        with M.pass_lock(self.home):
+        with M.check_lock(self.home):
             self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "busy")
         self.assertEqual(reads, [])
+
+    def test_a_check_and_a_pass_at_the_same_moment_both_run(self):
+        # Review H1: the check held the pass lock (and slept 90 s in it), so the 15-minute pass found
+        # it busy and skipped the guard, the backup and the app on every OS.
+        seen = {}
+
+        def feed(base):
+            # The check is reading the feed; a pass starts now.
+            seen["pass"] = M.run_pass(self.home, at=AT, commands=FakeCommands(check=0), services=None,
+                                      store=self.store, app=NoApp(), sleep=lambda s: None)
+            return config.VERSION
+        report = self.check(feed=feed)
+        self.assertEqual(report["status"], "checked")
+        self.assertEqual(seen["pass"]["status"], "ran", "the pass is never skipped for a running check")
+        self.assertEqual(seen["pass"]["snapshot"]["result"], "taken")
+        # And the other way round: a check beside a running pass reads the feed.
+        with M.pass_lock(self.home):
+            later = self.check(latest=config.VERSION, at=AT + datetime.timedelta(minutes=10))
+        self.assertEqual(later["status"], "checked")
+        self.assertFalse(M.pass_running(self.home), "`maintain uninstall` is not refused for a check")
+        # The check writes only its own record: the pass's (snapshot, update) is never rewritten.
+        self.assertEqual(M.read_state(self.home)["snapshot"]["result"], "taken")
+        self.assertIn("check", M.read_check(self.home))
+
+    def test_a_run_a_moment_early_is_still_due(self):
+        # Review M1: launchd started a run 0.2 s early, it was not due, and the cadence became ten minutes.
+        self.check(latest=config.VERSION)
+        early = self.check(latest="9.9.9", at=AT + datetime.timedelta(seconds=299.8))
+        self.assertEqual(early["status"], "checked")
+        self.assertEqual(self.check(latest="9.9.9", at=AT + datetime.timedelta(seconds=310))["status"], "not-due")
+        self.assertEqual(M.CHECK_SLACK, datetime.timedelta(seconds=30))
+        self.assertTrue(M.due({"check": {"at": M.iso(AT)}}, "check", M.CHECK_EVERY,
+                              AT + datetime.timedelta(seconds=275), M.CHECK_SLACK))
+        self.assertFalse(M.due({"check": {"at": M.iso(AT)}}, "check", M.CHECK_EVERY,
+                               AT + datetime.timedelta(seconds=269), M.CHECK_SLACK))
 
 
 class Schedule(Base):

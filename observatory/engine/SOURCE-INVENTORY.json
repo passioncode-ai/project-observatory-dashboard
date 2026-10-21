@@ -884,15 +884,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "26304c786c4b85ad973ef3d8bad64ff276fd93e6bfb2cef444072e20e46b0a55",
-      "bytes": 148000,
+      "export_sha256": "83920448efcdfa7c424b04b19551368a99b4f751fb8e2aaa828eaf111cb1b87f",
+      "bytes": 148176,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "b0ffe5c084f4746eafa5235c44d8f9d4eae096b07520c1267d352381e09a4cdb",
-      "bytes": 128236,
+      "export_sha256": "d873860a18c3443213026ce3ed098d68fb530627d206241a8d76ecd6aa864104",
+      "bytes": 128742,
       "upstream_modified": true
     },
     {
@@ -913,8 +913,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60245d4741f7430f9d9e5b416fea14485d132a6477c050899b9e67ae1c3aeceb",
-      "bytes": 81592
+      "export_sha256": "6d4fd7866b3e3c31a9bf008a4ee6936ba35452beacc46c59776110cd8654a503",
+      "bytes": 81959
     },
     {
       "path": "estate.py",
@@ -2081,8 +2081,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "01c44e59ac50123e4e9229ab95bfa9248c1ede063374ac76cf9ba7d1b28c667c",
-      "bytes": 96258
+      "export_sha256": "40e3134a5fddb3feec69da81ccacc174848a614189b89d98140a0826308ebe21",
+      "bytes": 99250
     },
     {
       "path": "mcp/capability_tools.py",
@@ -2339,8 +2339,8 @@
       "path": "osschedule.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8d4037a045fd6b9c72dc78676641bd6e8fca252b5d2705e025aff549178743a3",
-      "bytes": 18640
+      "export_sha256": "c72c94e0fdd714a793bc186b3d5c7b6385dfd15eb4d944cefc4478117d6f41ba",
+      "bytes": 18939
     },
     {
       "path": "paths.py",
@@ -3575,8 +3575,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56ebb2843dc0ba54c9e697e30b0a8211124667fa02373ee5843bc78f6491e8fd",
-      "bytes": 65869
+      "export_sha256": "96e675e3e774bcc9d2ce145c7032f9d050ead0f8c535cff5b3aa6fa0ed3a4fa8",
+      "bytes": 66588
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -4070,8 +4070,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f4c9656099a4b303fd71d3c12f89908c3147d32c76467c4aac7a15caf1d45a92",
-      "bytes": 137628
+      "export_sha256": "89fad4b00f0a0e40cc1d8694aae21ce41741ee4203cbd802fca9f38468f63372",
+      "bytes": 140419
     },
     {
       "path": "tests/test_manifest_urls.py",
@@ -4307,8 +4307,8 @@
       "path": "tests/test_osschedule.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9935dc764542ba2bacdb78b0d623df61fe160707d3c067840aa4e3c1032c05d7",
-      "bytes": 15491
+      "export_sha256": "c0b09917812ce069f7b2928f0db6105a2a26325a49bd4483fe659296660ae883",
+      "bytes": 15767
     },
     {
       "path": "tests/test_page_omission.py",

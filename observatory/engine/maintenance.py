@@ -94,6 +94,9 @@ RETRY_UNDETERMINED = CHECK_EVERY
 #: The check job's own interval, in seconds (CHECK_EVERY), and the most it may run (LC-03).
 CHECK_INTERVAL_SECONDS = 300
 CHECK_TIME_LIMIT = 240
+#: The check job's first run after a login, offset from the pass's FIRST_CHECK_DELAY so the two
+#: jobs never start together (review H1); the pass's own check covers the first 90 seconds.
+CHECK_FIRST_DELAY = 150
 #: An update that failed for a lasting reason (rolled back, a refused verification) is not tried
 #: again for the same release before this: the check every five minutes keeps finding it, and each
 #: attempt stops the tick and server, snapshots and installs. A momentary refusal or a deferral
@@ -315,8 +318,25 @@ def state_path(base: Path) -> Path:
     return base / "store" / STATE_FILE
 
 
-def read_state(base: Path) -> dict:
-    file = state_path(base)
+#: The check job's own record (`check_pass`). Never maintenance.json: the job holds no pass lock, so
+#: a read-modify-write of the pass's record from beside a running pass would undo what the pass wrote.
+CHECK_FILE = "update-check.json"
+
+
+def check_path(base: Path) -> Path:
+    return base / "store" / CHECK_FILE
+
+
+def read_check(base: Path) -> dict:
+    return read_state(base, check_path(base))
+
+
+def write_check(base: Path, doc: dict) -> None:
+    write_state(base, doc, check_path(base))
+
+
+def read_state(base: Path, file: Path | None = None) -> dict:
+    file = file or state_path(base)
     if not file.is_file() or file.is_symlink():
         return {}
     try:
@@ -326,8 +346,8 @@ def read_state(base: Path) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
-def write_state(base: Path, doc: dict) -> None:
-    file = state_path(base)
+def write_state(base: Path, doc: dict, file: Path | None = None) -> None:
+    file = file or state_path(base)
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".maintenance-")
     try:
@@ -341,9 +361,26 @@ def write_state(base: Path, doc: dict) -> None:
         raise
 
 
-def due(state: dict, key: str, every: datetime.timedelta, at: datetime.datetime) -> bool:
+def due(state: dict, key: str, every: datetime.timedelta, at: datetime.datetime,
+        slack: datetime.timedelta = datetime.timedelta(0)) -> bool:
+    """Whether `every` has passed since `state[key].at`. `slack` absorbs a scheduler's start jitter
+    when `every` equals its interval: without it a run 0.2 s early is not due, and a five-minute
+    cadence becomes ten (review M1)."""
     last = parse_iso((state.get(key) or {}).get("at"))
-    return last is None or at - last >= every
+    return last is None or at - last >= every - slack
+
+
+#: A scheduler starts a job a little early or late; a check this close to its five minutes is due.
+CHECK_SLACK = datetime.timedelta(seconds=30)
+
+
+def last_check(state: dict, record: dict) -> dict:
+    """The newer of the pass's own check and the check job's (`update-check.json`)."""
+    mine, job = state.get("check") or {}, record.get("check") or {}
+    a, b = parse_iso(mine.get("at")), parse_iso(job.get("at"))
+    if b is not None and (a is None or b > a):
+        return {**job, "source": "check-job"}
+    return mine
 
 
 # --- system effects, guarded -------------------------------------------------------
@@ -623,20 +660,23 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         return {"result": "waiting-for-person",
                 "detail": "the last automatic update could not roll back by itself; "
                           "`project-observatory full update` says what to do"}
-    last_check = state.get("check") or {}
     # Every five minutes, the retry after a check that could not look included (operator rule,
-    # 2026-10-17). A newer release the check job found a moment ago is not asked for again: the
-    # job started this pass to apply it.
-    pending = last_check.get("result") == "update-available" and _newer(last_check.get("latest"))
-    if not due(state, "check", CHECK_EVERY, at) and not pending:
+    # 2026-10-17), counting the check job's own reads (`update-check.json`). A newer release the
+    # job found a moment ago is not asked for again: the job started this pass to apply it.
+    recent = last_check(state, read_check(base))
+    is_due = due({"check": recent}, "check", CHECK_EVERY, at, CHECK_SLACK)
+    pending = recent.get("result") == "update-available" and _newer(recent.get("latest"))
+    if not is_due and not pending:
         return {"result": "not-due"}
-    if pending and not due(state, "check", CHECK_EVERY, at):
-        code, report, err = UPDATE_AVAILABLE, {"target": last_check.get("latest")}, ""
+    if pending and not is_due:
+        # The job's own read stands, with its own time: nothing was read now (review L8).
+        code, report, err = UPDATE_AVAILABLE, {"target": recent.get("latest")}, ""
+        check = {"at": recent.get("at"), "exit": code, "source": "check-job"}
     else:
         if before_check is not None:
             before_check()
         code, report, err = commands.full("update", "--check", timeout=600)
-    check = {"at": iso(at), "exit": code}
+        check = {"at": iso(at), "exit": code}
     if code == UPDATE_OK:
         check["result"] = "up-to-date"
     elif code == UPDATE_AVAILABLE:
@@ -646,7 +686,7 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     else:
         check["result"] = "undetermined"
         check["detail"] = err or f"exit {code}"
-        check["failures"] = int(last_check.get("failures") or 0) + 1 if last_check.get("result") == "undetermined" else 1
+        check["failures"] = int(recent.get("failures") or 0) + 1 if recent.get("result") == "undetermined" else 1
     state["check"] = check
     if code != UPDATE_AVAILABLE:
         return {"result": check["result"]}
@@ -1035,7 +1075,8 @@ def feed_latest(base: Path) -> str:
     """The newest release's version from the static feed (engine_update.latest_version)."""
     import engine_update as eu
     api, repo = eu.release_source()
-    return eu.latest_version(eu.Fetcher(timeout=20, attempts=2), api, repo)[0]
+    # One attempt: the fetcher sleeps between attempts, and the next check is five minutes away.
+    return eu.latest_version(eu.Fetcher(timeout=20, attempts=1), api, repo)[0]
 
 
 def _kick_wanted(state: dict, latest: str, at: datetime.datetime) -> bool:
@@ -1055,32 +1096,47 @@ def _kick_wanted(state: dict, latest: str, at: datetime.datetime) -> bool:
     return not (kicked.get("to") == latest and last is not None and at - last < KICK_AGAIN)
 
 
-def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, kick=None,
-               sleep=time.sleep, first_check_delay: float = 0, clock=time.monotonic) -> dict:
+@contextlib.contextmanager
+def check_lock(base: Path):
+    """One check job at a time per workspace. Its own lock, never the pass's: holding the pass lock
+    made the 15-minute pass find it busy and skip the guard, the backup and the app (review H1)."""
+    file = base / "store" / "update-check.lock"
+    file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
+    try:
+        try:
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(fd)
+
+
+def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, kick=None) -> dict:
     """The five-minute check job (`maintain.py check`): one read of the static feed, nothing else.
 
     Never the pass: no guard, backup, app or update runs here, so the job ends well inside its
-    five-minute interval (LC-03). A newer release starts the pass at once through `kick` (the
-    scheduler's own "run now"), which applies it at a safe point. `quiet` in the answer means
-    the check found what the last one found: `main` prints nothing then."""
+    five-minute interval (LC-03). It takes its own lock, never the pass's, and writes its own
+    record (`update-check.json`), never maintenance.json, so a pass running beside it is neither
+    skipped nor overwritten; it never sleeps. A newer release starts the pass at once through
+    `kick` (the scheduler's own "run now"), which applies it at a safe point. `quiet` in the
+    answer means the check found what the last one found: `main` prints nothing then."""
     at = at or now()
     config.validate_workspace(base, required=True)
     if not auto_enabled(base):
         return {"status": "off", "quiet": True}
     kick_to = None
-    with pass_lock(base) as held:
+    with check_lock(base) as held:
         if not held:
-            # The pass is running and checks for itself.
             return {"status": "busy", "quiet": True}
         if update_running(base):
             return {"status": "update-running", "quiet": True}
-        state = read_state(base)
-        previous = state.get("check") or {}
-        if not due(state, "check", CHECK_EVERY, at):
+        state, record = read_state(base), read_check(base)    # the pass's record is only read
+        previous = record.get("check") or {}
+        if not due({"check": last_check(state, record)}, "check", CHECK_EVERY, at, CHECK_SLACK):
             return {"status": "not-due", "quiet": True}
-        wait = first_check_delay - (clock() - PROCESS_STARTED)
-        if first_check_delay > 0 and wait > 0:
-            sleep(wait)
         import engine_update as eu
         check: dict = {"at": iso(at), "source": "feed"}
         try:
@@ -1093,14 +1149,13 @@ def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, ki
             newer = _newer(latest)
             check.update(result="update-available" if newer else "up-to-date", latest=latest)
             update_events.emit("update_check", "ready" if newer else "current", base=base)
-            if newer and _kick_wanted(state, latest, at):
+            if newer and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
                 kick_to = latest
-                state["kick"] = {"at": iso(at), "to": latest}
-        state["check"] = check
-        write_state(base, state)
+                record["kick"] = {"at": iso(at), "to": latest}
+        record["check"] = check
+        write_check(base, record)
     report: dict = {"status": "checked", "at": iso(at), "check": check}
     if kick_to:
-        # Outside the lock: the pass it starts takes the same lock.
         try:
             report["kick"] = (kick or (lambda: schedule_for(base).kick()))()
         except Exception as exc:  # noqa: BLE001: the scheduled pass still comes within 15 minutes
@@ -1279,9 +1334,11 @@ class LaunchdSchedule:
             # FIRST_CHECK_DELAY seconds after the start (LC-16).
             "ProgramArguments": [self.launch.stable_interpreter(engine_python()),
                                  str(config.SOURCE / "tools" / "maintain.py"), JOBS[self.job]["action"],
-                                 "--first-check-delay", str(FIRST_CHECK_DELAY)],
+                                 *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])],
             "StartInterval": JOBS[self.job]["interval"],
-            "RunAtLoad": True,
+            # The check job does not run at load: the pass does (its check 90 s after the login),
+            # and the check's first run is one interval later, never the pass's moment (review H1).
+            "RunAtLoad": self.job == "maintain",
             "WorkingDirectory": str(config.SOURCE),
             "StandardOutPath": str(logs / f"{self.job}.log"),
             "StandardErrorPath": str(logs / f"{self.job}.err"),
@@ -1400,7 +1457,7 @@ class SystemdSchedule:
             "[Timer]",
             # The user manager starts at login: the first pass, and so the first check,
             # comes 90 seconds after it (LC-16), then every 15 (the check: 5) minutes.
-            f"OnStartupSec={FIRST_CHECK_DELAY}s",
+            f"OnStartupSec={FIRST_CHECK_DELAY if self.job == 'maintain' else CHECK_FIRST_DELAY}s",
             f"OnUnitActiveSec={JOBS[self.job]['interval'] // 60}min",
             "Persistent=true",
             "",
@@ -1476,7 +1533,9 @@ class TaskSchedulerSchedule:
             argv=(python, str(config.SOURCE / "tools" / "maintain.py"), JOBS[job]["action"]),
             env=(("OBSERVATORY_HOME", str(base)), ("OBSERVATORY_PYTHON", python), ("OBSERVATORY_SYSTEM_SETUP", "1")),
             cwd=config.SOURCE, stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
-            interval_seconds=JOBS[job]["interval"], at_login=True, first_delay_seconds=FIRST_CHECK_DELAY,
+            interval_seconds=JOBS[job]["interval"], at_login=True,
+            first_delay_seconds=FIRST_CHECK_DELAY if job == "maintain" else CHECK_FIRST_DELAY,
+            phase_seconds=0 if job == "maintain" else CHECK_FIRST_DELAY,
             # The pass is short; an update it starts runs in a process of its own, which ending
             # the task does not stop.
             time_limit_seconds=JOBS[job]["limit"] or PASS_TIME_LIMIT)
@@ -1686,7 +1745,7 @@ def status(base: Path, *, schedule=None) -> dict:
     return {"auto_update": auto_enabled(base), "switch": switch_status(base),
             "schedule_wanted": schedule_wanted(base), "schedule": sched,
             "scheduled": scheduled, "versions": versions, "passphrase": state.get("passphrase"),
-            "last_pass": (state.get("pass") or {}).get("at"), "check": state.get("check"),
+            "last_pass": (state.get("pass") or {}).get("at"), "check": last_check(state, read_check(base)) or None,
             "update": state.get("update"), "update_in_flight": state.get("update_in_flight"),
             "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
             "machine_backup": machine,
@@ -1814,7 +1873,7 @@ def main(argv: list[str]) -> int:
             result = run_pass(base, first_check_delay=max(0.0, min(a.first_check_delay, 600.0)))
         elif a.action == "check":
             signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
-            result = check_pass(base, first_check_delay=max(0.0, min(a.first_check_delay, 120.0)))
+            result = check_pass(base)
             if result.pop("quiet", False):
                 # Nothing new: the log keeps a change, not every five minutes (operator rule).
                 return 0

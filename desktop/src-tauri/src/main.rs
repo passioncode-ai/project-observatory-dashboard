@@ -352,7 +352,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "start" => run_action(app, "serve", "Starting the server…", "Could not start the server"),
         "build" => run_action(app, "build", "Building the dashboard…", "Could not build the dashboard"),
         "guide" => { let _ = app.opener().open_url(GUIDE, None::<&str>); }
-        "update" => updates::install_and_restart(app.clone()),
+        "update" => updates::install_and_restart(app.clone(), install_failed),
         "open" => show_main(app),
         _ => {}
     }
@@ -464,12 +464,26 @@ fn check_login_item(app: &AppHandle) {
 
 /// An update is downloaded and verified (SCN-010): the menu and the tray offer «Restart to update»,
 /// and the person is asked once per version.
+/// A failed install, said to the person (review M3); «Restart to update» stays in the menu.
+fn install_failed(app: &AppHandle, why: String) {
+    let l = lang(app);
+    app.dialog()
+        .message(l10n::t(l, "The update could not be installed: {why}. «Restart to update» in the File menu or the tray tries again.", &[("why", &why)]))
+        .title(l10n::t(l, "Restart to finish updating", &[]))
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCustom(l10n::t(l, "OK", &[])))
+        .show(|_| {});
+}
+
 fn update_ready(app: &AppHandle, version: String) {
     *app.state::<State>().update.lock().unwrap() = Some(version.clone());
     refresh_menus(app);
     if !app.state::<State>().prompts.lock().unwrap().should_ask(&version) {
         return;
     }
+    // Remembered across restarts: Later is not asked again for this version.
+    let dir = app.state::<State>().config_dir.clone();
+    let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(updates::PROMPTED_FILE), &version));
     let l = lang(app);
     let handle = app.clone();
     app.dialog()
@@ -478,7 +492,7 @@ fn update_ready(app: &AppHandle, version: String) {
         .buttons(MessageDialogButtons::OkCancelCustom(l10n::t(l, "Restart now", &[]), l10n::t(l, "Later", &[])))
         .show(move |now| {
             if now {
-                updates::install_and_restart(handle);
+                updates::install_and_restart(handle, install_failed);
             }
         });
 }
@@ -543,13 +557,16 @@ fn main() {
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let loaded = settings::load(&config_dir);
+            let prompted = updates::PromptOnce::from_stored(
+                std::fs::read_to_string(config_dir.join(updates::PROMPTED_FILE)).ok().as_deref(),
+            );
             app.manage(State {
                 settings: Mutex::new(loaded),
                 shown: Mutex::new(Shown::default()),
                 config_dir,
                 generation: Mutex::new(0),
                 update: Mutex::new(None),
-                prompts: Mutex::new(updates::PromptOnce::default()),
+                prompts: Mutex::new(prompted),
             });
             // The login entry's own launch (SCN-012) starts in the tray, with no window.
             let background = std::env::args().any(|a| a == autostart::BACKGROUND_ARG);

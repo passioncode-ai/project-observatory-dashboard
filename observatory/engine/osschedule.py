@@ -19,6 +19,7 @@ environment a job gets names folders and the interpreter only, as the launchd pl
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import hashlib
 import os
 import shutil
@@ -59,6 +60,9 @@ class Job:
     first_delay_seconds: int = 0
     time_limit_seconds: int | None = None  # None: no limit (a service)
     background: bool = True
+    #: Seconds after the anchor the repetition starts: two jobs of a workspace (the pass and the
+    #: five-minute check) never start on the same second.
+    phase_seconds: int = 0
 
     def __post_init__(self):
         if self.name not in ("tick", "server", "maintain", "check"):
@@ -126,7 +130,8 @@ class TaskSchedulerJob:
         if j.interval_seconds:
             # A fixed start in the past: the repetition is anchored there and never drifts with
             # each reinstall. No Duration: it repeats indefinitely.
-            triggers.append("<TimeTrigger><StartBoundary>2026-01-01T00:00:00</StartBoundary><Enabled>true</Enabled>"
+            anchor = (datetime.datetime(2026, 1, 1) + datetime.timedelta(seconds=j.phase_seconds)).isoformat()
+            triggers.append(f"<TimeTrigger><StartBoundary>{anchor}</StartBoundary><Enabled>true</Enabled>"
                             f"<Repetition><Interval>{_iso_duration(max(60, j.interval_seconds))}</Interval>"
                             "<StopAtDurationEnd>false</StopAtDurationEnd></Repetition></TimeTrigger>")
         restart = ("<RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>"

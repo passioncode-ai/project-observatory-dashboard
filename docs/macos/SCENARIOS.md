@@ -250,7 +250,9 @@ registration the system lost, off removes a leftover one and never registers →
 login switches it, with the line that the app keeps working with its window closed and quits from
 its menu (⌘Q).
 Expected result: the app runs from login without being asked; an update keeps the person's choice,
-because the choice is stored, never re-defaulted.
+because the choice is stored, never re-defaulted. At login it opens as a launch from the Dock does,
+with the dashboard window on screen: macOS starts a `SMAppService` main-app login item with no
+argument the app could tell apart from a person's launch, so it is not started hidden.
 Errors & recovery: a registration that fails, or one waiting for the person's approval, is SCN-013;
 each act is logged by code in `~/Library/Logs/Project Observatory/app.log` (`login_item`
 `registered`/`unregistered`/`requires_approval`/`failed`).
