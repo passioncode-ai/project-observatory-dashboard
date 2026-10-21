@@ -279,6 +279,8 @@ mod tests {
         assert_eq!(reg_query_args(), ["query", RUN_KEY, "/v", "Project Observatory"]);
     }
 
+    // XDG paths are POSIX paths: `/x/cfg` is not absolute on Windows, where no autostart file exists.
+    #[cfg(unix)]
     #[test]
     fn the_autostart_folder_honours_an_absolute_xdg_config_home_only() {
         let home = Path::new("/srv/example-home");
