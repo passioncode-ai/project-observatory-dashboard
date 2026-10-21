@@ -5,6 +5,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
+  alone and could not resolve against the lock).
+
 ### Fixed
 
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
