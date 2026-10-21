@@ -891,7 +891,7 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "0c21328a31aab8ce96b8540cbd32bc78fe8c9bf96f4c6ae50e11d161d3fab6cf",
+      "export_sha256": "b0ffe5c084f4746eafa5235c44d8f9d4eae096b07520c1267d352381e09a4cdb",
       "bytes": 128236,
       "upstream_modified": true
     },
