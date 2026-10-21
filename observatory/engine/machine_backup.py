@@ -853,7 +853,8 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
             col.miss(shown, "uncommitted changes: git diff failed")
         elif p.stdout and room(len(p.stdout), "patch_mb", "uncommitted changes"):
             spool = work / f"{cid}-{name}"
-            fd = os.open(spool, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            import osprivacy
+            fd = osprivacy.open(spool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as out:
                 out.write(p.stdout)
             members.append({"arcname": f"checkouts/{cid}/{name}", "file": spool})
