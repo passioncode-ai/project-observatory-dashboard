@@ -28,7 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The whole history and the release tags: tests/test_changelog_releases.py compares each
+          # released CHANGELOG section with its tag, and tools/check_backlog.py reads merged commits.
           fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: runner.os != 'macOS'
         with:
@@ -51,6 +54,14 @@ jobs:
       - name: Compile every distributed Python module on the matrix interpreter
         run: python -m compileall -q observatory
       - name: Synthetic runtime and privacy tests
+        env:
+          # The squash subject this pull request will leave on main, `TITLE (#N)`: tools/check_backlog.py
+          # reads it so a title that delivers a row still open fails here, not on main after the merge.
+          # Passed as an environment value, never interpolated into the script.
+          CHECK_BACKLOG_PR_SUBJECT: ${{ github.event_name == 'pull_request' && format('{0} (#{1})', github.event.pull_request.title, github.event.pull_request.number) || '' }}
+          # The repository squashes with COMMIT_OR_PR_TITLE: one commit lands under its own headline.
+          CHECK_BACKLOG_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHECK_BACKLOG_PR_COMMITS: ${{ github.event.pull_request.commits }}
         run: python -m unittest discover -s tests -v
       - name: Native macOS bridge and state tests
         if: runner.os == 'macOS'

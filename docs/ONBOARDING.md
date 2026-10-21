@@ -408,6 +408,36 @@ add|role|remove --account` is a plan until `--apply`. It counts Super Administra
 roles and permission policies, refuses to leave the account without one on the whole account, and
 refuses any write while it cannot read who holds that role.
 
+**Cloudflare presets.** `tools/cloudflare.py issue --preset P` mints one narrow token from the
+stashed admin token: `analytics` for the observatory's own traffic reader (filed where the plugin
+reads it), and into a vault slot (`--vault PROJECT/ENV/NAME`) `zone-analytics-read` (one zone's
+counters), `dns-edit`, `email-routing`, `email-sending-domain`, `redirect-rules`, `workers-routes`,
+`cache-purge` (one zone each, `--zone`), and `d1-edit`, `email-send`, `workers-edit`,
+`workers-observability-read`, `fabric-inbox-server`, `fabric-inbox-account` (one account each,
+`--account`). `r2-bucket` is one bucket (`--account --bucket NAME`) and delivers an S3 pair to three
+slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
+`PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
+what each grants.
+
+**A DigitalOcean team's tokens, one place per team.** `tools/digitalocean.py stash` keeps a team's
+own token, read on stdin (or `stash --from-doctl CONTEXT|all`, which reads doctl's config and prints
+nothing), owner-only in `secrets/digitalocean-admin/`; it is never handed out. `teams [--probe]`
+lists each team with your role and the vault slots holding its tokens, `members --team T` gives the
+role and member count (the public API lists no members), and `team create NAME --org T [--invite
+EMAIL:ROLE]` is a plan until `--apply`. DigitalOcean's public API cannot mint a token: `issue
+--preset P --team T --vault PROJECT/ENV/NAME` refuses and prints the control-panel recipe (the
+preset's custom scopes; `presets` lists them all), and `pbpaste | digitalocean.py install --preset P
+--team T --vault PROJECT/ENV/NAME` takes the minted token on stdin, refuses one of another team or
+one that cannot do its preset's reads, delivers it and records team, preset and dates in
+`secrets/digitalocean-issued/` (never the value). The presets are `observatory-read` (what
+`full scan-digitalocean` reads; kept in `secrets/digitalocean-read.d/` for the collector),
+`read-only`, `app-deploy`, `droplet-deploy`, `dns-edit` (DigitalOcean scopes are per team, so it
+reaches every domain of the team), `registry`, `spaces-keys` and `billing-read`. `rotate LABEL`
+(new value on stdin) and `revoke LABEL` count the old value as revoked only when `/v2/account` then
+answers 401 to it. With `integrations.digitalocean` on, `full scan-digitalocean` (daily in the tick)
+records per team the balance, Droplets with their monthly price, apps, databases without
+credentials, volumes and domains in `store/raw/digitalocean.json`, naming each 401, 403 and 429.
+
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
 `db consumers CLUSTER` show metadata; the latter lists only apps whose spec binds the

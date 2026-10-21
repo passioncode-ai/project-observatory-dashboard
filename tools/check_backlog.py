@@ -45,7 +45,24 @@ On top of the format it refuses:
   agent-sync's `reserve OBS`; `.claude/agent-sync.json` declares the register), or a board
   with no such line;
 - stale-at-merge wording in a status: "in this PR", "to follow", "merging",
-  "once … restart(s)";
+  "once … restart(s)", "awaiting review", "ready", "closes when … merges", "lands with";
+- an id below the next free one with no row and no declaration on the board's
+  `**Vacant ids:**` line, written `OBS-n` (reason); a declaration whose row exists;
+- an open or blocked row whose id a merged commit on the checked branch delivers: a subject ending
+  in `(#n)` that names the id in a parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)` (a commit
+  that only files a row writes it bare or with a word, `(OBS-n filed)`). The one exception is a row
+  whose status says `partly done` (`open — partly done: …`). The history is read only for this
+  repository's own board, and a shallow clone or a missing Git is named on stderr and in the JSON
+  (`history`), never read as clean; `--require-history` makes it a failure. In a pull_request run
+  check.yml passes the pull request's own title as `TITLE (#N)` in CHECK_BACKLOG_PR_SUBJECT (and, for a
+  pull request of one commit, which the repository squashes under that commit's headline, its number and
+  commit count, so the headline is checked too), so a
+  title that would deliver a row still open fails the pull request, not main after it. A revert
+  (`Revert "…"`) delivers nothing, and a row whose status says `reopened` is exempt like `partly done`;
+- (vacancies) a gap whose reservation is younger than GAP_GRACE_DAYS (14) is a pull request in flight
+  and needs no declaration; older, it is an abandoned reservation and must be declared. The ages come
+  from the history of the `Next free ID` line; without the history the gaps are not checked, and
+  the note says so;
 - `done` together with "remain" (write `open — partly done: …` instead);
 - `done in X.Y.Z` naming a release CHANGELOG.md has no heading for;
 - in the board and CHANGELOG.md: token shapes, private-key blocks, personal machine paths
@@ -64,6 +81,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import unicodedata
 
@@ -80,7 +98,43 @@ STALE = (
     (re.compile(r"\bto follow\b", re.I), "to follow"),
     (re.compile(r"\bmerging\b", re.I), "merging"),
     (re.compile(r"\bonce\b[^.;]{0,120}?\brestart", re.I), "once … restarts"),
+    # A pull request's state on the day it was written (OBS-110 "awaiting review", OBS-133 "PR #297
+    # ready", OBS-118 "closes when PR #297 merges"): all three stayed on the board after the merge.
+    (re.compile(r"\bawaiting (?:review|merge|a review)\b", re.I), "awaiting review"),
+    (re.compile(r"(?<!\bnot )\bready\b(?!-)", re.I), "ready"),
+    (re.compile(r"\bcloses? when\b[^.;]{0,120}?\bmerge", re.I), "closes when … merges"),
+    # OBS-80, OBS-84…87, OBS-89: "lands with the 0.25.0 integration pull request (#303)", a week after it did.
+    (re.compile(r"\b(?:lands?|landing) with\b", re.I), "lands with"),
 )
+#: The one phrase that keeps an open row open after a merged commit names it: the row says what
+#: shipped and what remains (`open — partly done: …`, the form AGENTS.md prescribes for a
+#: remainder). Any other open or blocked row whose id a merged commit carries is stale.
+PARTLY_DONE = re.compile(r"\bpartly done\b", re.I)
+#: A row a merged commit delivered and that is open again on purpose (its change reverted, or a defect found
+#: after the merge) says `reopened` in its status: `open — reopened: …`.
+REOPENED = re.compile(r"\breopened\b", re.I)
+#: In a pull_request run, check.yml hands the pull request's title and number here as one subject,
+#: `TITLE (#N)`: the squash commit main will carry. Without it a title naming `(OBS-n)` for a row still
+#: open passes its own pull request and turns main red after the merge (OBS-63 was named by eight).
+PENDING_SUBJECT_ENV = "CHECK_BACKLOG_PR_SUBJECT"
+#: The repository squashes with COMMIT_OR_PR_TITLE: a pull request of ONE commit lands under that commit's
+#: headline, not its title. check.yml passes the number and the commit count; with one commit the
+#: headline of the pull request's head (`HEAD^2` of the merge checkout) is checked as `HEADLINE (#N)` too.
+PR_NUMBER_ENV = "CHECK_BACKLOG_PR_NUMBER"
+PR_COMMITS_ENV = "CHECK_BACKLOG_PR_COMMITS"
+#: A gap below the next free id whose reservation is younger than this is taken as a pull request still
+#: in flight; older than this, it must be a row or a declared vacancy (an abandoned reservation).
+GAP_GRACE_DAYS = 14
+#: A merged commit on the checked branch, as squash merges write it: the subject ends with the
+#: pull request, `(#n)`, and names the row it delivers in a parenthesised list, `(OBS-n)` or
+#: `(OBS-n, DEC-m)`. A row FILED by a commit is written bare (`docs(backlog): OBS-96..99`) or with
+#: a word (`(OBS-118 filed)`), and is not a delivery.
+MERGED_PR = re.compile(r"\(#(\d+)\)\s*$")
+PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+DELIVERED_ID = re.compile(r"OBS-0*([1-9][0-9]*)")
+#: Ids the board accounts for without a row: `**Vacant ids:** `OBS-n` (why); `OBS-m` (why)`.
+VACANT_LINE = re.compile(r"^\*\*Vacant ids:\*\*(.*)$", re.M)
+VACANT_ENTRY = re.compile(r"`(OBS-(?:0[1-9]|[1-9][0-9]*))` \(([^()]*)\)")
 
 # -- the canonical format (org-index check_observatory_registers.py, #67) -------------------------
 BOARD_HEADING = "## Board"
@@ -276,7 +330,14 @@ def _hidden_at(lines: list[str], start: int) -> str | None:
     return f"{names[state]} opened on line {opened + 1}" if state else None
 
 
-def check_board(text: str, changelog: str, deny: list[str] | None = None) -> list[str]:
+def check_board(text: str, changelog: str, deny: list[str] | None = None, *,
+                merged: dict[int, list[str]] | None = None, gaps: bool = True,
+                in_flight: set[int] | None = None) -> list[str]:
+    """Every refusal for one board, one per line. `merged` maps an OBS number to the pull requests
+    (`#n`) whose merged commit delivered it (`merged_ids`); None when the history was not read.
+    `gaps` turns on the vacancy rule (fixtures that hold a few rows under a high next-free id
+    turn it off); `in_flight` names gaps whose reservation is younger than GAP_GRACE_DAYS
+    (`gap_ages`), which need no declaration yet. Without it every gap needs one."""
     deny = deny or []
     problems: list[str] = []
     headings = set(re.findall(r"^##\s+(\d+\.\d+\.\d+)\b", changelog, re.M))
@@ -386,6 +447,12 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
             problems.append(f"{rid}: {parsed}")
             continue
         kind, detail = parsed
+        if (kind == "open" and merged and number in merged and not PARTLY_DONE.search(status)
+                and not REOPENED.search(status)):
+            problems.append(f"{rid}: open, but merged commit(s) {', '.join(merged[number])} name it as delivered "
+                            "(`(OBS-n)` in a subject ending in `(#n)`); close it (`done in X.Y.Z (#n)` or `done — "
+                            "merged (#n), unreleased`), write `open — partly done: …` when something remains, or, for "
+                            "a step toward the row, name it without parentheses in the title (`OBS-n: step 2`)")
         if kind == "released" and detail not in headings:
             problems.append(f"{rid}: `done in {detail}` but CHANGELOG.md has no `## {detail}` heading")
         if kind == "superseded":
@@ -398,6 +465,8 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
         if successor not in spelled:
             problems.append(f"{rid}: `superseded by {successor}` names no row on the board spelled that way; "
                             "write the successor's id exactly as its row does")
+    if gaps and next_free is not None:
+        problems += _vacancy_problems(text, set(seen), next_free, in_flight or set())
     if found_table and phase in ("before", "separator"):
         problems.append(f"docs/backlog.md: the board section (line {start + 1}) has no header and separator")
     elif found_table and not rows and not any(p.startswith(("OBS-", "docs/backlog.md line")) for p in problems):
@@ -414,6 +483,140 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
     prose = "\n".join(l for l in lines if not ROW_ID.match(l))
     problems += privacy_problems("docs/backlog.md (outside the rows)", prose, deny)
     return problems
+
+
+def _vacancy_problems(text: str, present: set[int], next_free: int, in_flight: set[int] = frozenset()) -> list[str]:
+    """Every id below the next free one is a row or a declared vacancy with its reason.
+
+    An id the register handed out and nobody wrote (OBS-146, reserved in #300's window and never
+    written) reads, without a declaration, exactly like a row that was deleted. An id reserved within
+    GAP_GRACE_DAYS (`in_flight`) is a pull request still open and needs nothing; past that, a
+    reservation nobody wrote is abandoned and must be declared. A declaration whose row exists fails."""
+    problems: list[str] = []
+    lines = VACANT_LINE.findall(text)
+    if len(lines) > 1:
+        problems.append("docs/backlog.md: more than one `**Vacant ids:**` line; keep one")
+    declared: dict[int, str] = {}
+    for entry in VACANT_ENTRY.finditer(" ".join(lines)):
+        number = int(entry.group(1).split("-")[1])
+        if number in declared:
+            problems.append(f"{entry.group(1)}: declared vacant twice")
+        declared[number] = entry.group(2).strip()
+        if not declared[number]:
+            problems.append(f"{entry.group(1)}: declared vacant without a reason; write why, in the parentheses")
+    if lines and len(re.findall(r"`OBS-[^`]*`", " ".join(lines))) != len(VACANT_ENTRY.findall(" ".join(lines))):
+        problems.append("docs/backlog.md: the `**Vacant ids:**` line holds an id not written as `OBS-n` (reason)")
+    for number in range(1, next_free):
+        if number not in present and number not in declared and number not in in_flight:
+            problems.append(f"OBS-{number}: no row and not declared vacant; a reader cannot tell a lost row from "
+                            f"an id never written (reserved more than {GAP_GRACE_DAYS} days ago, or the history is "
+                            "unread). Add it to the `**Vacant ids:**` line: `OBS-n` (why)")
+    for number in sorted(declared):
+        if number in present:
+            problems.append(f"OBS-{number}: declared vacant but its row exists; remove its entry from the "
+                            "`**Vacant ids:**` line")
+        elif number >= next_free:
+            problems.append(f"OBS-{number}: declared vacant at or above the next free id OBS-{next_free}")
+    return problems
+
+
+def delivered(subjects: list[str]) -> tuple[dict[int, list[str]], int]:
+    """{OBS number: ["#n", …]} from squash subjects, and how many carried a pull request number.
+
+    A revert (`Revert "…"`) delivers nothing: it takes a delivery back."""
+    found: dict[int, list[str]] = {}
+    commits = 0
+    for subject in subjects:
+        pr = MERGED_PR.search(subject)
+        if not pr or subject.startswith('Revert "'):
+            continue
+        commits += 1
+        for group in PAREN_GROUP.findall(subject[:pr.start()]):
+            for token in group.split(","):
+                m = DELIVERED_ID.fullmatch(token.strip())
+                if m:
+                    found.setdefault(int(m.group(1)), []).append(f"#{pr.group(1)}")
+    return found, commits
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    # Reads only, but the subcommand is spliced in: say so to git as the engine's other readers do.
+    return subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(repo), *args],
+                          capture_output=True, text=True, timeout=120)
+
+
+def _history_unreadable(repo: Path) -> str | None:
+    """Why the history of `repo` cannot be read whole, or None when it can."""
+    try:
+        shallow = _git(repo, "rev-parse", "--is-shallow-repository")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"git unavailable ({type(exc).__name__})"
+    if shallow.returncode != 0:
+        return "not a Git checkout"
+    if shallow.stdout.strip() == "true":
+        return "a shallow clone (fetch the whole history, `git fetch --unshallow`)"
+    return None
+
+
+def merged_ids(repo: Path = ROOT, ref: str = "HEAD",
+               pending: list[str] | None = None) -> tuple[dict[int, list[str]] | None, str]:
+    """{OBS number: ["#n", …]} from the merged commits of `ref`, plus `pending` subjects (the pull request
+    under test, `TITLE (#N)`), and a note saying what was read.
+
+    None when the history cannot be read, with the reason: not a Git checkout, the ref unknown, or a
+    shallow clone, whose history stops early and would pass a stale row silently. The caller says so;
+    it never reads as clean."""
+    why = _history_unreadable(repo)
+    if why:
+        return None, f"merged commits NOT checked: {why}"
+    log = _git(repo, "log", "--format=%s", ref)
+    if log.returncode != 0:
+        return None, f"merged commits NOT checked: `git log {ref}` failed"
+    subjects = log.stdout.splitlines() + [p for p in (pending or []) if p.strip()]
+    found, commits = delivered(subjects)
+    extra = f", plus this pull request's title" if pending and any(p.strip() for p in pending) else ""
+    return found, f"merged commits: {commits} read on {ref}{extra}, {len(found)} OBS ids delivered"
+
+
+def pending_subjects(repo: Path = ROOT, env: dict | None = None) -> list[str]:
+    """The squash subjects the pull request under test may leave on main: its title, and, when it has one
+    commit, that commit's headline (both as `… (#N)`). Empty outside a pull_request run."""
+    env = os.environ if env is None else env
+    out = [env.get(PENDING_SUBJECT_ENV, "").strip()]
+    number, commits = env.get(PR_NUMBER_ENV, "").strip(), env.get(PR_COMMITS_ENV, "").strip()
+    if number.isdigit() and commits == "1":
+        parents = _git(repo, "rev-list", "--parents", "-n", "1", "HEAD")
+        if parents.returncode == 0 and len(parents.stdout.split()) == 3:   # the merge checkout: HEAD^2 is the head
+            headline = _git(repo, "log", "-1", "--format=%s", "HEAD^2")
+            if headline.returncode == 0 and headline.stdout.strip():
+                out.append(f"{headline.stdout.strip()} (#{number})")
+    return [s for s in out if s]
+
+
+def gap_ages(repo: Path = ROOT, ref: str = "HEAD", path: str = "docs/backlog.md",
+             grace_days: int = GAP_GRACE_DAYS) -> tuple[set[int] | None, str]:
+    """The ids whose reservation is younger than `grace_days`: those the board's `**Next free ID:**` line
+    passed on `ref`'s first-parent history less than that before `ref`'s own commit time, or not at all
+    yet (a working-tree change). None, with the reason, when the history cannot be read."""
+    why = _history_unreadable(repo)
+    if why:
+        return None, f"reservation ages NOT read: {why}"
+    head = _git(repo, "log", "-1", "--format=%ct", ref)
+    log = _git(repo, "log", "--first-parent", "--reverse", "--format=%x00%ct", "-p", "-U0", ref, "--", path)
+    if head.returncode != 0 or log.returncode != 0:
+        return None, f"reservation ages NOT read: `git log {ref}` failed"
+    now = int(head.stdout.strip())
+    passed: dict[int, int] = {}            # id -> when the next free id first moved past it
+    highest = 0
+    for chunk in log.stdout.split("\x00")[1:]:
+        when = int(chunk.split("\n", 1)[0])
+        for value in re.findall(r"^\+\*\*Next free ID:\*\* `OBS-(\d+)`", chunk, re.M):
+            for number in range(highest, int(value)):
+                passed.setdefault(number, when)
+            highest = max(highest, int(value))
+    young = {n for n, when in passed.items() if now - when < grace_days * 86400}
+    young |= set(range(highest, 100000))  # past the last committed line: this change itself
+    return young, f"reservation ages read from {len(passed)} ids' history (grace {grace_days} days)"
 
 
 def load_denylist(path: Path | None) -> tuple[list[str], str]:
@@ -435,6 +638,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--board", type=Path, default=BOARD)
     parser.add_argument("--changelog", type=Path, default=CHANGELOG)
     parser.add_argument("--private-denylist", type=Path)
+    parser.add_argument("--history-ref", default="HEAD",
+                        help="the branch whose merged commits are read (this repository's own board only)")
+    parser.add_argument("--require-history", action="store_true",
+                        help="exit 1 when the merged commits cannot be read (a shallow clone)")
     args = parser.parse_args(argv)
     try:
         # Raw bytes: read_text turns CR and CRLF into LF and would hide a CR the organization refuses.
@@ -444,10 +651,24 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"check_backlog: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-    problems = check_board(text, changelog, deny)
+    if args.board.resolve() == BOARD.resolve():
+        merged, history = merged_ids(ROOT, args.history_ref, pending_subjects(ROOT))
+        in_flight, ages = gap_ages(ROOT, args.history_ref)
+        history += "; " + ages
+    else:
+        merged, history = None, "merged commits NOT checked: --board is not this repository's board"
+        in_flight = None
+    # Without the history a reservation in flight cannot be told from an abandoned one: the gaps are then
+    # not checked, and the note below says so (as for the merged commits).
+    problems = check_board(text, changelog, deny, merged=merged, in_flight=in_flight, gaps=in_flight is not None)
+    if (merged is None or in_flight is None) and args.require_history:
+        problems.append(f"check_backlog: {history}")
     for problem in problems:
         print(problem, file=sys.stderr)
-    print(json.dumps({"board": args.board.name, "problems": len(problems), "privacy": note}))
+    if merged is None or in_flight is None:
+        # Said where a reader looks, not only in the JSON: an unread history is not a clean one.
+        print(f"check_backlog: {history}", file=sys.stderr)
+    print(json.dumps({"board": args.board.name, "problems": len(problems), "privacy": note, "history": history}))
     return 1 if problems else 0
 
 

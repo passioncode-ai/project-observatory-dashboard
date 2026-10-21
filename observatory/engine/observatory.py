@@ -462,6 +462,12 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
                       "machine-backup", "machine-restore",
                       "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
+#: Commands `main` hands to a parser of their own before the step table is read. The dispatcher's
+#: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
+#: holds `main` to this list and the public help to describing each one (`full node` and
+#: `scan-digitalocean` existed for a release with no line in the help).
+OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "memory-http", "forget",
+                       "ssh-keys", "org")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -525,7 +531,19 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
                                enrollments (fabric-device/0.1): enroll with a token from a vault slot,
                                signed check-ins, rotation, the activity outbox, share registrations
+  scan                         the filesystem, GitHub, vault and session scans in one run (scan-fs,
+                               scan-gh, scan-vault, scan-sessions)
+  remotes                      one `git ls-remote` per checkout: what each remote holds (`local` asks no remote)
   scan-mcp                    the MCP servers your agent configs declare (integration mcp)
+  scan-digitalocean            what each DigitalOcean team runs and costs (balance, Droplets, apps,
+                               databases without credentials, volumes, domains) through the door's
+                               tokens (tools/digitalocean.py; integration digitalocean; daily in the tick)
+  google [--force]             GA4 and Search Console analytics, cached twelve hours; --force re-fetches
+  plugins [--only ID] [--force]  run the metric plugins (each past its age gate with --force)
+  plugins-check                validate the installed metric plugins' manifests; runs none
+  review                       the queue of proposed ledger records (tools/review.py decides them)
+  node --init | --show         this machine's agent-network device keys: --init creates them if absent,
+                               --show prints the device id and the two public keys; no private key is printed
   scan-spend                   this month's provider spend across every account the doors hold, for the
                                L0 limit and its 80 % warning, and each project's month and last 30 days
                                by key hash (tools/spend.py project; integration openrouter)

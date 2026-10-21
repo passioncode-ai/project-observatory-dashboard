@@ -5,6 +5,24 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Checks that keep the documentation true after a merge** (an audit of main at 23a52296 found nine drifts).
+  `tools/check_backlog.py` refuses an open row a merged commit delivers (`(OBS-n)` in a squash subject ending in
+  `(#n)`) unless it says `partly done` or `reopened`; in a pull_request run it also reads the pull request's own
+  title (and, for one commit, its headline), so a subject that would deliver a row still open fails there and not
+  on main, and a revert delivers nothing.
+  It adds "awaiting review", "ready", "closes when … merges" and "lands with" to the stale wording, and requires
+  every id below the next free one to be a row or a declared vacancy once its reservation is 14 days old (younger,
+  it is a pull request in flight). In a shallow clone it says the history was not read instead of passing.
+  `tests/test_changelog_releases.py` compares every released CHANGELOG section with its tag (a clone without tags
+  reports a skip), and check.yml now fetches the tags. `tests/test_docs_drift.py` holds the scenario ids to one
+  definition each and a `Next free OSS id` line, the `full --help` text to every command the docs name, every
+  credential door's `--preset` choices to ONBOARDING or the handling-secrets skill, every state family the engine
+  writes from 0.26.0 on to a COMPATIBILITY.md row, and a next step written after a release (by `git blame`, a line the
+  change under test writes counting as written now) to not name that release as still to come. `tests/test_cli_compatibility.py` holds `full --help` to every command and
+  group the dispatcher accepts; CHANGELOG headings are pinned to `## X.Y.Z (YYYY-MM-DD)` from 0.25.0 on.
+
 ### Changed
 
 - **A new release is found within five minutes, without the GitHub API** (operator rule of 2026-10-17 for every
@@ -33,6 +51,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Documentation drift found by the same audit.** Nine backlog rows that shipped in 0.25.0 (OBS-107, OBS-108,
+  OBS-109, OBS-110, OBS-113, OBS-114, OBS-118, OBS-133, OBS-145) and OBS-80 are closed, the partly shipped OBS-83..87
+  and OBS-89 say so, and OBS-91 and OBS-146 are declared vacant. The agents scenario is renumbered OSS-62 to OSS-72
+  (OSS-62 is the SSH-key listing) and OSS-59 is declared vacant. `full --help` describes `node`, `scan-digitalocean`,
+  `scan`, `remotes`, `google`, `plugins`, `plugins-check` and `review`. ONBOARDING and the handling-secrets skill
+  describe the DigitalOcean door's team half and every DigitalOcean and Cloudflare preset. COMPATIBILITY.md lists
+  the state added in 0.25.0 to 0.27.0 (`node/`, `store/raw/digitalocean.json`, `store/raw/fabric-attribution.json`,
+  the DigitalOcean and Heroku secret folders). The 0.27.0 release record carries its receipts.
 - **Every collector gets a turn, and none takes the tick** (OBS-52; OBS-40 superseded). One installed 0.27.0 timed
   out on 28 of its last 50 ticks: the leak scan took a median 1125 s of the 1500 s ceiling and eight collectors were not
   started 28 times. A disabled step keeps its old start, so it sorted as the most starved collector and the rotation

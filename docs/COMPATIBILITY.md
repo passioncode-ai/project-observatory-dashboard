@@ -244,3 +244,29 @@ name is shaped like a URL is not read. A scan dated after the emit is stale
 mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.
 
+
+## Workspace state added in 0.25.0 to 0.27.0
+
+Each family below is new; no earlier file changes shape. An upgrade creates none of them: each
+appears the first time its command or collector runs. A downgrade leaves them in place, unread by
+the older engine. `secrets/` here means the configured `sources.secret_store`, `secrets/` in the
+workspace by default; `node/` is `OBSERVATORY_NODE`, the workspace's `node/` by default. A workspace
+snapshot carries a family only while it lives inside the workspace (the defaults): a secret store or
+node folder configured elsewhere is a reference, as the rollback rules above say for external
+stores, and needs its own backup. Restoring a snapshot taken before the upgrade drops these files, as
+for every later observation. The repository's `StateFamilies` test refuses a family the code writes
+that is not classified, and one from 0.26.0 on that has no row here; it finds the families from the
+code's path constants, so a path built another way is not seen (OBS-182).
+
+| Path | Since | What it holds | Upgrade and downgrade |
+|---|---|---|---|
+| `store/raw/fabric-attribution.json` | 0.26.0 | Fabric's id for each project (`schema_version` 1): `aliases` (`fabric:<uuid>` per `project:` id with its provenance), `conflicts`, `unattributed`, per-folder answers and a `history` of at most 500 changes, written by `full fabric-attribution` and the tick | `project.resolve` and the findings read it; without it they answer from the registry alone, as before 0.26.0. Deleting it loses only the history: the next pass asks Fabric again |
+| `secrets/heroku-admin/` | 0.26.0 | the Heroku CLI session token the door stashes as the admin, one owner-only file per account | read by `tools/heroku.py` alone; an older engine has no Heroku door and never opens it |
+| `secrets/heroku-issued.json` | 0.26.0 | the ledger of authorizations the Heroku door issued: ids, scopes, slot, team, app, dates; never a value | as above; removing it makes the door forget what it issued, not revoke anything at Heroku |
+| `store/raw/digitalocean.json` | 0.27.0 | per DigitalOcean team: balance, Droplets with their monthly price, apps, databases without credentials, volumes, domains and named `degraded` (401, 403, 429), written by `full scan-digitalocean` | the findings read it; absent, they skip DigitalOcean |
+| `secrets/digitalocean-admin/` | 0.27.0 | each team's own token stashed by `digitalocean.py stash`, owner-only, never handed out | read by `tools/digitalocean.py` alone |
+| `secrets/digitalocean-read.d/` | 0.27.0 | each team's installed `observatory-read` token, which the collector prefers over the stashed one | the collector falls back to the stashed token when a team has none |
+| `secrets/digitalocean-issued/` | 0.27.0 | one `<label>.meta.json` per installed narrow token (team, preset, declared scopes, slot, dates; never a value) and its lock | removing a record makes the door forget the token, not revoke it |
+| `node/device/` | 0.25.0 | this machine's agent-network device keys from `full node --init`: `device.json`, `sig.pem`, `kem.pem`, owner-only; never replaced | an older engine ignores it; deleting it gives the machine a new device id at the next `--init` |
+| `node/records/` | 0.27.0 | the estate revision and revocation-delta state this machine verified and applied (`estate-record.json`, `delta-state.json`) | share registrations derive from it; absent, none is derived |
+| `node/orgs/<org>/` | 0.27.0 | one organization enrollment (`full org enroll`): `enrollment.json` (server, certificate serial and window, epoch, check-in state; no token), its own device keys in `keys/`, the signed activity outbox `outbox.sqlite`, a bounded `journal.jsonl`; locks in `node/orgs/.locks/` | `full org leave` removes the folder; an older engine neither checks in nor sends the outbox, which keeps its pending batches until a 0.27.0 or later engine runs again |

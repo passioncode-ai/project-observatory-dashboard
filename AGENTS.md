@@ -274,8 +274,10 @@ tasks are the operator's and which a contributor can take.
    (`tests/test_version_consistency.py` fails until they agree), and the desktop app's in
    `desktop/package.json`, `desktop/package-lock.json` (its root entries),
    `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml` and its own entry in
-   `desktop/src-tauri/Cargo.lock` (`tests/test_desktop_app.py`), and add the `## X.Y.Z — date`
-   section to `CHANGELOG.md`. A plugin change bumps `observatory-log` separately, in its three
+   `desktop/src-tauri/Cargo.lock` (`tests/test_desktop_app.py`), and add the `## X.Y.Z (YYYY-MM-DD)`
+   section to `CHANGELOG.md` (headings up to 0.24.5 keep their older form; `tests/test_version_consistency.py`
+   refuses any other), turning `## Unreleased` into it. A released section never changes after its tag:
+   `tests/test_changelog_releases.py` compares each with `git show vX.Y.Z:CHANGELOG.md`. A plugin change bumps `observatory-log` separately, in its three
    manifests and every `SKILL.md` (`tests/test_plugin_manifests.py`).
 2. Merge that pull request through the required checks, then push the annotated tag `vX.Y.Z` on
    the merge commit.
@@ -315,7 +317,13 @@ tasks are the operator's and which a contributor can take.
      `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
    - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
 4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
-5. Record the release in `docs/runs/<date>-<slug>/`.
+5. Record the release in `docs/runs/<date>-<slug>/`. The release pull request's record says what comes
+   next before the tag ("Next: merge, tag vX.Y.Z, verify"); once the release is published, a follow-up
+   commit adds its receipts (run, sums, attestation, signature) and rewrites that Next, and the next step
+   in `docs/HANDOFF.md` with it. `tests/test_docs_drift.py` refuses a next step that names an existing
+   tag on a line written after that tag (`git blame`; a line the change under test writes counts as
+   written now, since its squash will descend from the tag), so the rewrite cannot keep the old step; a line
+   nobody edited since the tag is not checked, which is why this step is the release's.
 
 ## Shared backlog
 
@@ -359,13 +367,25 @@ allowlisted format, not as Markdown. Two things keep it true:
   `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled`, `superseded by OBS-n`, or
   `open`/`blocked` with an optional note (a closed status takes no note: write what was delivered
   in the Item column, after "Outcome:"); at most one `parent:` token in Source, followed by a PB id.
-  On top of the format it refuses a duplicate id, an id at or above the next free one, wording
-  that is false once merged ("in this PR", "to follow", "merging", "once … restarts"), `done` with
+  On top of the format it refuses a duplicate id, an id at or above the next free one, an id below
+  it with no row and no entry on the `**Vacant ids:**` line (`` `OBS-n` (reason)``) once its
+  reservation is older than 14 days (younger, it is a pull request in flight; the age comes from the
+  history of the `Next free ID` line), wording
+  that is false once merged ("in this PR", "to follow", "merging", "once … restarts", "awaiting
+  review", "ready", "closes when … merges", "lands with"), an open or blocked row that a merged
+  commit on the checked branch delivers (a subject ending in `(#n)` that names the id in a
+  parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)`; a `Revert "…"` delivers nothing; in a pull_request
+  run check.yml adds the pull request's own title as `TITLE (#N)`, and for a pull request of one commit
+  that commit's headline (the repository squashes with COMMIT_OR_PR_TITLE), so a title for a step
+  toward a row names it bare, `OBS-n: step 2`) unless its status says `partly done` or `reopened`, `done` with
   something that remains (write `open — partly done: …`), `done in X.Y.Z` without a `## X.Y.Z`
   heading in CHANGELOG.md, and private names in the board and CHANGELOG.md. Private names need the
   maintainer's local denylist (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the
   file `tools/check_public_release.py` reads); without it the lint says so and checks shapes only,
-  so run it with the denylist before a release.
+  so run it with the denylist before a release. The merged-commit rule needs the whole history:
+  in a shallow clone it says `merged commits NOT checked` on stderr and in its JSON (`history`),
+  never passes silently, and `--require-history` makes that a failure. check.yml checks out with
+  `fetch-depth: 0` and `fetch-tags: true`.
 
 ## After work
 

@@ -19,8 +19,10 @@ expectation. It changes test evidence and documentation, not the published engin
 
 [2026-10-20: release 0.27.0](runs/2026-10-20-release-0.27.0/README.md): engine and `observatory-log` 0.27.0,
 carrying OBS-155 (#306, DigitalOcean teams and costs), OBS-161 (#308, organization enrollment), the Cloudflare
-presets `cache-purge` (#292) and `email-sending-domain` (#302), and `google-auth` 2.61.0 (#316). Next: merge, tag
-`v0.27.0`, verify the release, re-pin Observatory Log in the PassionCode set, update the installed set and engine.
+presets `cache-purge` (#292) and `email-sending-domain` (#302), and `google-auth` 2.61.0 (#316). Published
+2026-10-20T16:47:49Z (release run 39454033288, attempt 2 after a guard refusal; sums, attestations and the GPG
+signature verified, receipts in the record). Next: re-pin Observatory Log in the PassionCode set, update the installed
+engines, then the first production enrollment.
 
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
@@ -32,8 +34,8 @@ record settles six hours before it is corroborated, and the recorder's git calls
 main in one pull request (#303), with main's M-8 (#289) merged in. Versions are 0.25.0, the `observatory-log` plugin
 included (M-8 changed its hooks and skill). Main's OpenRouter door is kept: the branch's rotation-exposure, policy-provenance, consumer-evidence revoke
 and spend code, its six OpenRouter suites and their text were left out (OBS-150); the wave-8 rotation-capacity stack
-is OBS-149. Fix cycle 1 (missing-worktree HEAD retention, coverage `degraded`, local upstreams, log links, absent log folders) landed; M-8's last LOWs are OBS-152 and OBS-153. Root tests and every complete-engine suite pass locally. Next: hosted checks on the pull request,
-review and merge, then the 0.25.0 tag and installed acceptance with automatic cleanup off.
+is OBS-149. Fix cycle 1 (missing-worktree HEAD retention, coverage `degraded`, local upstreams, log links, absent log folders) landed; M-8's last LOWs are OBS-152 and OBS-153. Root tests and every complete-engine suite pass locally. Merged and released as 0.25.0
+([record](runs/2026-10-19-release-0.25.0/README.md)); installed acceptance with automatic cleanup off is still owed.
 
 2026-10-18, automatic project registration follow-up: a remoteless worktree joins its main checkout's project
 instead of becoming a sibling (`collectors/scan_filesystem.py` `worktree_main`, `collectors/merge.py`;

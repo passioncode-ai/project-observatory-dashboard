@@ -27,6 +27,14 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every test's git environment comes from the engine tests' helper: configuration shut out, no
+# background gc or maintenance left writing into a temporary repository.
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env",
+                                                       ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
+IDENTITY = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
 HEAD = """# Local backlog
 
@@ -84,6 +92,7 @@ class BoardLint(unittest.TestCase):
         self.lint = load()
 
     def problems(self, text: str, **kw) -> list[str]:
+        kw.setdefault("gaps", False)
         return self.lint.check_board(text, CHANGELOG, **kw)
 
     def test_the_9a3778f_statuses_fail_on_what_goes_stale_at_merge(self):
@@ -219,7 +228,7 @@ class BoardLint(unittest.TestCase):
             self.assertFalse(any(planted in p for p in found), "the lint printed the private value")
 
     def test_the_changelog_is_scanned_too(self):
-        found = self.lint.check_board(board(CORRECTED), CHANGELOG + "\nmoved from /" + "Users/someone/x\n")
+        found = self.lint.check_board(board(CORRECTED), CHANGELOG + "\nmoved from /" + "Users/someone/x\n", gaps=False)
         self.assertTrue(any(p.startswith("CHANGELOG.md") and "personal-machine-path" in p for p in found), found)
 
     def test_the_privacy_scan_sees_a_name_that_ends_a_sentence(self):
@@ -233,7 +242,8 @@ class BoardLint(unittest.TestCase):
     def test_a_denylisted_name_in_the_changelog_alone_fails(self):
         # No shape pattern can see a name: only the denylist scan over CHANGELOG.md does.
         planted = "quiet-heron-agent"
-        found = self.lint.check_board(board(CORRECTED), CHANGELOG + f"\nFirst use: {planted}.\n", deny=[planted])
+        found = self.lint.check_board(board(CORRECTED), CHANGELOG + f"\nFirst use: {planted}.\n", deny=[planted],
+                                      gaps=False)
         self.assertEqual([p.split(":")[0] for p in found], ["CHANGELOG.md"], found)
         self.assertIn("private-identifier", found[0])
         self.assertFalse(any(planted in p for p in found), "the lint printed the private value")
@@ -250,7 +260,7 @@ class BoardLint(unittest.TestCase):
     def test_the_command_reads_a_denylist_file_and_exits_1(self):
         with tempfile.TemporaryDirectory() as tmp:
             b, c, d = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md"), Path(tmp, "deny.json")
-            b.write_text(board({"OBS-01": "done in 0.24.0 (#1)"},
+            b.write_text(board({"OBS-01": "done in 0.24.0 (#1)"}, next_free=3,
                                extra="| OBS-02 | quiet-heron-agent | open | parent: PB-140 |\n"), encoding="utf-8")
             c.write_text(CHANGELOG, encoding="utf-8")
             d.write_text(json.dumps(["quiet-heron-agent"]), encoding="utf-8")
@@ -277,7 +287,39 @@ class BoardLint(unittest.TestCase):
         # Raw bytes: read_text would turn a CR or CRLF into LF and hide what the organization refuses.
         text = (ROOT / "docs/backlog.md").read_bytes().decode("utf-8")
         changelog = (ROOT / "CHANGELOG.md").read_bytes().decode("utf-8")
-        self.assertEqual(self.lint.check_board(text, changelog), [])
+        # Gaps need the reservation ages: test_the_live_board_accounts_for_every_id.
+        self.assertEqual(self.lint.check_board(text, changelog, gaps=False), [])
+
+    def test_the_live_board_has_no_open_row_whose_work_merged(self):
+        """OBS-107…OBS-145: nine rows read open for days after their pull requests merged. In a
+        pull_request run the pull request's own title counts too (check.yml, CHECK_BACKLOG_PR_SUBJECT)."""
+        merged, note = self.lint.merged_ids(ROOT, pending=self.lint.pending_subjects(ROOT))
+        if merged is None:
+            self.skipTest(note)
+        text = (ROOT / "docs/backlog.md").read_bytes().decode("utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_bytes().decode("utf-8")
+        self.assertEqual(self.lint.check_board(text, changelog, merged=merged, gaps=False), [])
+
+    def test_the_live_board_accounts_for_every_id(self):
+        in_flight, note = self.lint.gap_ages(ROOT)
+        if in_flight is None:
+            self.skipTest(note)
+        text = (ROOT / "docs/backlog.md").read_bytes().decode("utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_bytes().decode("utf-8")
+        self.assertEqual(self.lint.check_board(text, changelog, in_flight=in_flight), [])
+
+    def test_the_command_reads_the_history_for_the_live_board(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("OBSERVATORY_PRIVATE_DENYLIST",
+                                                                  self.lint.PENDING_SUBJECT_ENV,
+                                                                  self.lint.PR_NUMBER_ENV, self.lint.PR_COMMITS_ENV)}
+        run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py")], capture_output=True, text=True,
+                             timeout=120, env=env)
+        history = json.loads(run.stdout.splitlines()[-1])["history"]
+        if "NOT" in history:
+            self.skipTest(history)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("merged commits:", history)
+        self.assertIn("reservation ages read", history)
 
     def test_the_live_board_says_it_is_canonical_for_obs_rows(self):
         text = (ROOT / "docs/backlog.md").read_text(encoding="utf-8")
@@ -291,7 +333,7 @@ class BoardSection(unittest.TestCase):
         self.lint = load()
 
     def problems(self, text: str) -> list[str]:
-        return self.lint.check_board(text, CHANGELOG)
+        return self.lint.check_board(text, CHANGELOG, gaps=False)
 
     def test_the_canonical_board_passes(self):
         self.assertEqual(self.problems(board(CORRECTED, after="\n## Notes\n\nProse after the board.\n")), [])
@@ -350,7 +392,7 @@ class Parents(unittest.TestCase):
 
     def row(self, source: str) -> list[str]:
         text = HEAD.format(next=84) + f"| OBS-01 | an engine task | open | {source} |\n"
-        return self.lint.check_board(text, CHANGELOG)
+        return self.lint.check_board(text, CHANGELOG, gaps=False)
 
     def test_one_parent_or_none_passes(self):
         for source in ("parent: PB-140", "parent: PB-140; also PB-138", "[run record](runs/x/README.md)",
@@ -373,7 +415,7 @@ class Hardening(unittest.TestCase):
         self.lint = load()
 
     def problems(self, text: str) -> list[str]:
-        return self.lint.check_board(text, CHANGELOG)
+        return self.lint.check_board(text, CHANGELOG, gaps=False)
 
     def with_row(self, item: str = "an engine task", status: str = "open", source: str = "x") -> list[str]:
         return self.problems(board({"OBS-01": "open"}, extra=f"| OBS-02 | {item} | {status} | {source} |\n"))
@@ -477,6 +519,253 @@ class Hardening(unittest.TestCase):
         found = self.problems(board(CORRECTED, after="\n## Archive\n\n| a | b |\nOBS-02 continues the row\n"))
         self.assertTrue(any("outside the board" in p for p in found), found)
 
+
+
+class StaleAtMerge(unittest.TestCase):
+    """2026-10-21 audit: rows whose pull request had merged still said so in its open tense."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def problems(self, text: str, **kw) -> list[str]:
+        kw.setdefault("gaps", False)
+        return self.lint.check_board(text, CHANGELOG, **kw)
+
+    def test_a_pull_request_state_is_stale_wording(self):
+        # The status cells of OBS-110, OBS-133 and OBS-118 on 23a52296.
+        for status, said in (("open — implemented in #294, awaiting review", "awaiting review"),
+                             ("open: PR #297 ready, vectors from the contract merge", "ready"),
+                             ("open: fixed in OBS-133, closes when PR #297 merges", "closes when")):
+            found = self.problems(board({"OBS-01": status}))
+            self.assertTrue(any(p.startswith("OBS-01") and said in p for p in found), (status, found))
+
+    def test_lands_with_a_pull_request_is_stale_wording(self):
+        # OBS-89 on 23a52296, a week after #303 had merged.
+        found = self.problems(board({"OBS-01": "open: tick stage receipts land with the 0.25.0 integration "
+                                               "pull request (#303, from #278); installed acceptance remains"}))
+        self.assertTrue(any(p.startswith("OBS-01") and "lands with" in p for p in found), found)
+
+    def test_already_is_not_ready(self):
+        self.assertEqual(self.problems(board({"OBS-01": "open — the door already reads it"})), [])
+
+    def test_an_open_row_a_merged_commit_delivered_fails(self):
+        found = self.problems(board({"OBS-07": "open"}), merged={7: ["#291"]})
+        self.assertTrue(any(p.startswith("OBS-07") and "#291" in p for p in found), found)
+        blocked = self.problems(board({"OBS-07": "blocked: waits on the contract"}), merged={7: ["#291"]})
+        self.assertTrue(any(p.startswith("OBS-07") for p in blocked), blocked)
+
+    def test_partly_done_keeps_a_delivered_row_open(self):
+        self.assertEqual(self.problems(board({"OBS-07": "open — partly done: the door; the page remains"}),
+                                       merged={7: ["#291"]}), [])
+
+    def test_a_closed_row_or_an_undelivered_one_passes(self):
+        self.assertEqual(self.problems(board({"OBS-07": "done in 0.24.0 (#291)", "OBS-08": "open"}),
+                                       merged={7: ["#291"]}), [])
+
+    def test_merged_ids_reads_delivery_not_filing(self):
+        """A synthetic history: squash subjects that deliver, file, or name a range."""
+        with tempfile.TemporaryDirectory() as tmp:
+            def git(*args):
+                subprocess.run(["git", "-C", tmp, *args], check=True, capture_output=True,
+                               env=git_env.git_env(**IDENTITY))
+            git("init", "-q")
+            for subject in ("feat(node): the relay session (OBS-108) (#293)",
+                            "Node: estate record, envelope (OBS-109, OBS-113, DEC-0084) (#295)",
+                            "Node: the round's LOWs (OBS-118 filed) (#296)",
+                            "docs(backlog): OBS-96..99, LOW findings (#282)",
+                            "docs(runs): release receipts; OBS-170 (#318)",
+                            "wip: (OBS-120) not merged yet"):
+                git("commit", "-q", "--allow-empty", "-m", subject)
+            merged, note = self.lint.merged_ids(Path(tmp))
+            self.assertEqual(merged, {108: ["#293"], 109: ["#295"], 113: ["#295"]}, note)
+            self.assertIn("5 read", note)
+
+    def test_a_shallow_clone_is_named_never_read_as_clean(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, clone = Path(tmp, "source"), Path(tmp, "clone")
+            env = git_env.git_env(**IDENTITY)
+            subprocess.run(["git", "init", "-q", str(source)], check=True, env=env)
+            for n in (1, 2):
+                subprocess.run(["git", "-C", str(source), "commit", "-q", "--allow-empty", "-m",
+                                f"step (OBS-{n}) (#{n})"], check=True, env=env)
+            subprocess.run(["git", "clone", "-q", "--depth", "1", f"file://{source}", str(clone)], check=True, env=env)
+            merged, note = self.lint.merged_ids(clone)
+            self.assertIsNone(merged)
+            self.assertIn("shallow", note)
+            merged, note = self.lint.merged_ids(Path(tmp))
+            self.assertIsNone(merged)
+            self.assertIn("NOT checked", note)
+
+    def test_the_command_says_when_the_history_was_not_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, c = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md")
+            b.write_text(board({"OBS-01": "open"}, next_free=2), encoding="utf-8")
+            c.write_text(CHANGELOG, encoding="utf-8")
+            env = {**os.environ}
+            env.pop("OBSERVATORY_PRIVATE_DENYLIST", None)
+            run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
+                                  "--changelog", str(c)], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertIn("merged commits NOT checked", run.stderr)
+            self.assertIn("NOT checked", json.loads(run.stdout)["history"])
+            strict = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
+                                     "--changelog", str(c), "--require-history"], capture_output=True, text=True,
+                                    timeout=60, env=env)
+            self.assertEqual(strict.returncode, 1, strict.stderr)
+
+
+class Vacancies(unittest.TestCase):
+    """OBS-91 and OBS-146 were handed out and never written; nothing said so."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def problems(self, text: str) -> list[str]:
+        return self.lint.check_board(text, CHANGELOG)
+
+    def test_a_gap_without_a_declaration_fails(self):
+        found = self.problems(board({"OBS-01": "open", "OBS-03": "open"}, next_free=4))
+        self.assertTrue(any(p.startswith("OBS-2:") and "Vacant ids" in p for p in found), found)
+
+    def test_a_gap_declared_with_its_reason_passes(self):
+        text = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace(
+            "## Board", "**Vacant ids:** `OBS-2` (reserved and never written)\n\n## Board")
+        self.assertEqual(self.problems(text), [])
+
+    def test_a_declaration_without_a_reason_or_for_a_present_row_fails(self):
+        text = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace(
+            "## Board", "**Vacant ids:** `OBS-2` (), `OBS-3` (a row exists)\n\n## Board")
+        found = self.problems(text)
+        self.assertTrue(any(p.startswith("OBS-2") and "reason" in p for p in found), found)
+        self.assertTrue(any(p.startswith("OBS-3") and "row exists" in p for p in found), found)
+
+    def test_an_id_reserved_by_an_open_pull_request_passes_until_its_row_lands(self):
+        # OBS-173 and OBS-174, reserved through the register by #328 while it was open.
+        line = "**Vacant ids:** `OBS-2` (reserved by open pull request #328, which writes the row)\n\n## Board"
+        waiting = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace("## Board", line)
+        self.assertEqual(self.problems(waiting), [])
+        landed = board({"OBS-01": "open", "OBS-02": "open", "OBS-03": "open"}, next_free=4).replace("## Board", line)
+        found = self.problems(landed)
+        self.assertTrue(any(p.startswith("OBS-2:") and "remove its entry" in p for p in found), found)
+
+    def test_an_id_on_the_line_without_its_reason_form_fails(self):
+        text = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace(
+            "## Board", "**Vacant ids:** `OBS-2`, reserved and never written\n\n## Board")
+        found = self.problems(text)
+        self.assertTrue(any("not written as" in p for p in found), found)
+        self.assertTrue(any(p.startswith("OBS-2:") for p in found), found)
+
+
+def git_repo(tmp: str):
+    """A synthetic repository and a commit helper taking a subject and an optional age in days."""
+    env = git_env.git_env(**IDENTITY)
+    subprocess.run(["git", "init", "-q", tmp], check=True, env=env)
+
+    def commit(subject: str, days_ago: int = 0, board: str | None = None):
+        import time
+        stamp = f"@{int(time.time()) - days_ago * 86400} +0000"
+        if board is not None:
+            Path(tmp, "docs").mkdir(exist_ok=True)
+            Path(tmp, "docs/backlog.md").write_text(board, encoding="utf-8")
+            subprocess.run(["git", "-C", tmp, "add", "-A"], check=True, env=env)
+        subprocess.run(["git", "-C", tmp, "commit", "-q", "--allow-empty", "-m", subject], check=True,
+                       env=git_env.git_env(**IDENTITY, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp))
+    return commit
+
+
+class FixCycleOne(unittest.TestCase):
+    """#326 review: guards that would turn main red after a legitimate merge, and the surviving mutants."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def problems(self, text: str, **kw) -> list[str]:
+        return self.lint.check_board(text, CHANGELOG, **kw)
+
+    def test_the_pull_requests_own_title_counts_before_the_merge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git_repo(tmp)("base (#1)")
+            merged, note = self.lint.merged_ids(Path(tmp), pending=["fix(disk): step two (OBS-07) (#9)"])
+            self.assertEqual(merged, {7: ["#9"]}, note)
+            self.assertIn("this pull request's title", note)
+            bare, _ = self.lint.merged_ids(Path(tmp), pending=["fix(disk): OBS-07, step two (#9)"])
+            self.assertEqual(bare, {})
+        found = self.problems(board({"OBS-07": "open"}), merged={7: ["#9"]}, gaps=False)
+        self.assertTrue(any("without parentheses" in p for p in found), found)
+
+    def test_a_revert_delivers_nothing_and_reopened_reads_open(self):
+        merged, _ = self.lint.delivered(['Revert "feat: the door (OBS-07) (#9)" (#10)', "feat: other (OBS-08) (#11)"])
+        self.assertEqual(merged, {8: ["#11"]})
+        self.assertEqual(self.problems(board({"OBS-08": "open — reopened: the door broke a consumer"}),
+                                       merged={8: ["#11"]}, gaps=False), [])
+
+    def test_not_ready_is_not_stale(self):
+        self.assertEqual(self.problems(board({"OBS-01": "open — the contract is not ready"}), gaps=False), [])
+        found = self.problems(board({"OBS-01": "open — PR #5 ready"}), gaps=False)
+        self.assertTrue(any("ready" in p for p in found), found)
+
+    def test_a_young_reservation_is_in_flight_and_an_old_one_must_be_declared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            commit = git_repo(tmp)
+            commit("board (#1)", days_ago=40, board="**Next free ID:** `OBS-3`\n")
+            commit("reserve (#2)", days_ago=20, board="**Next free ID:** `OBS-5`\n")
+            commit("reserve (#3)", days_ago=2, board="**Next free ID:** `OBS-7`\n")
+            young, note = self.lint.gap_ages(Path(tmp))
+        self.assertTrue({5, 6} <= young, (young, note))
+        self.assertFalse({1, 2, 3, 4} & young, young)
+        text = board({"OBS-01": "open", "OBS-02": "open", "OBS-03": "open"}, next_free=7)
+        found = self.problems(text, in_flight=young)
+        self.assertEqual(sorted(p.split(":")[0] for p in found), ["OBS-4"], found)
+
+    def test_a_shallow_clone_reads_no_ages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(self.lint.gap_ages(Path(tmp))[0])
+
+    def test_the_vacancy_line_edges(self):
+        base = board({"OBS-02": "open"}, next_free=3)
+        # OBS-1 is a gap too: the range starts at 1.
+        self.assertTrue(any(p.startswith("OBS-1:") for p in self.problems(base)), self.problems(base))
+        twice = base.replace("## Board", "**Vacant ids:** `OBS-1` (a) `OBS-1` (b)\n\n## Board")
+        self.assertTrue(any("declared vacant twice" in p for p in self.problems(twice)), self.problems(twice))
+        two_lines = base.replace("## Board", "**Vacant ids:** `OBS-1` (a)\n\n**Vacant ids:** `OBS-1` (b)\n\n## Board")
+        self.assertTrue(any("more than one" in p for p in self.problems(two_lines)), self.problems(two_lines))
+        above = base.replace("## Board", "**Vacant ids:** `OBS-1` (a) `OBS-3` (not yet)\n\n## Board")
+        self.assertTrue(any(p.startswith("OBS-3") and "at or above" in p for p in self.problems(above)),
+                        self.problems(above))
+
+
+
+class FixCycleTwo(unittest.TestCase):
+    """#326 confirming round at 8efc149a."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def test_a_one_commit_pull_request_is_judged_by_its_headline_too(self):
+        """COMMIT_OR_PR_TITLE: one commit lands under its own headline, whatever the title says."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commit = git_repo(tmp)
+            commit("base (#1)")
+            env = git_env.git_env(**IDENTITY)
+            run = lambda *a: subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", tmp, *a],
+                                            check=True, capture_output=True, env=env)
+            run("checkout", "-q", "-b", "topic")
+            commit("feat(door): the door (OBS-07)")
+            run("checkout", "-q", "-")
+            run("merge", "-q", "--no-ff", "-m", "Merge topic", "topic")
+            pr = {self.lint.PENDING_SUBJECT_ENV: "A neutral title (#9)", self.lint.PR_NUMBER_ENV: "9",
+                  self.lint.PR_COMMITS_ENV: "1"}
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), pr),
+                             ["A neutral title (#9)", "feat(door): the door (OBS-07) (#9)"])
+            merged, _ = self.lint.merged_ids(Path(tmp), pending=self.lint.pending_subjects(Path(tmp), pr))
+            self.assertEqual(merged, {7: ["#9"]})
+            several = dict(pr, **{self.lint.PR_COMMITS_ENV: "2"})
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), several), ["A neutral title (#9)"])
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), {}), [])
+
+    def test_a_hyphenated_ready_word_is_not_stale(self):
+        text = board({"OBS-01": "open — a ready-made fixture exists"})
+        self.assertEqual(self.lint.check_board(text, CHANGELOG, gaps=False), [])
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,8 +24,25 @@ Cloudflare presets `cache-purge` (#292) and `email-sending-domain` (#302), and `
 - **No `RELEASE.json` marker**: nothing needs a person before installation. Enrollment against a production
   organization server is an operator-run step after installation (`full org enroll`), not an upgrade step.
 
+## Published
+
+Recorded 2026-10-21 from the release itself (`gh release view v0.27.0 -R passioncode-ai/project-observatory-dashboard`):
+`v0.27.0` on `e6e8673c` (#320), published 2026-10-20T16:47:49Z, not a draft or prerelease, 19 assets (the wheel,
+the macOS zip, Linux AppImage and deb and Windows installers for x64 and arm64 with their signatures and receipts,
+`latest.json`, `SHA256SUMS`, `SHA256SUMS.asc`).
+
+- Release workflow run 39454033288: attempt 1 failed in `guard`, because `check.yml` run 39454032758 on the tagged
+  commit had failed (`test (ubuntu-latest, 3.14)`, the complete-engine step: `tests/test_machine_backup.py` errored in
+  a restore case; the detached `git gc --auto` a restore's fetch could leave in a test's temporary folder is what
+  #321 removed after the release). Both runs were re-run; attempt 2 of
+  each succeeded, and attempt 2 of the release run published.
+- Re-downloaded `project_observatory-0.27.0-py3-none-any.whl` and `ProjectObservatory-0.27.0-macos.zip`:
+  `shasum -a 256 --ignore-missing -c SHA256SUMS` reads OK for both; `gh attestation verify <file> -R
+  passioncode-ai/project-observatory-dashboard --signer-repo passioncode-ai/.github` exits 0 for both; `gpg --verify
+  SHA256SUMS.asc SHA256SUMS` reads a good signature by the organization's release key.
+
 ## Next
 
-Merge, tag `v0.27.0`, verify the release (sums, attestation, GPG), re-pin Observatory Log in the PassionCode set,
-update the installed engine, then run the first production enrollment when the organization server's single-use
+Re-pin Observatory Log 0.27.0 in the PassionCode set and update the installed engines (`full update --apply`; this
+record does not observe either), then run the first production enrollment when the organization server's single-use
 token is in the vault slot its owner names.
