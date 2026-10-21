@@ -89,16 +89,22 @@ def label_of(value: str) -> str:
     return "sk-or-v1-" + value[9:12] + "..." + value[-TAIL:]
 
 
-def _label(text: str) -> str:
-    """The label of a key found in a file. Never the key."""
+def _key_in(text: str) -> str:
+    """The key a file holds: the whole file, or a .env's OPENROUTER_API_KEY line."""
     text = (text or "").strip()
-    if not text:
-        return ""
     if "OPENROUTER_API_KEY" in text:                      # a .env, not a bare key
         for line in text.splitlines():
             if line.strip().startswith("OPENROUTER_API_KEY"):
                 text = line.split("=", 1)[-1].strip().strip('"').strip("'")
                 break
+    return text
+
+
+def _label(text: str) -> str:
+    """The label of a key found in a file. Never the key."""
+    text = _key_in(text)
+    if not text:
+        return ""
     return label_of(text)
 
 
@@ -185,6 +191,25 @@ def whoami(prov: str) -> tuple[dict | None, str | None]:
     """
     data, _code, why = _get("/key", prov)
     return data, why
+
+
+def self_described(path: pathlib.Path) -> tuple[dict | None, int | None, str | None]:
+    """What the provider says about a consumer's key when that key asks about itself.
+
+    The listing is newest first, and on an account where another product mints a
+    key per user (measured 2026-10-21: about 300 a day, past 21,200 keys), a
+    consumer's key a few weeks old sits beyond every page the deep walk reads,
+    and its existence stayed "unknown" on every run. `GET /key` carries only the
+    consumer's own key, to the provider that issued it, and answers for that key
+    alone: one request instead of a walk that cannot reach it.
+    """
+    try:
+        value = _key_in(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError as exc:
+        return None, None, f"unreadable: {type(exc).__name__}"
+    if not label_of(value):
+        return None, None, "the file holds no OpenRouter-shaped key"
+    return _get("/key", value)
 
 
 def key_by_hash(prov: str, h: str) -> tuple[dict | None, int | None, str | None]:
@@ -274,6 +299,26 @@ def main(argv: list[str]) -> int:
         else:
             unknown[n] = f"its recorded hash could not be asked about ({err})"
 
+    # A KEY NEVER FOUND IS ASKED TO DESCRIBE ITSELF before the account is walked:
+    # one request with that key alone. A 401 is the provider refusing the key the
+    # consumer holds; a matching label proves it exists, wherever it sits in the
+    # listing.
+    for n in list(missing):
+        me, code, err = self_described(DESTINATIONS[n])
+        if me is not None and me.get("label") == dests[n]:
+            verified[n] = "the key describes itself (GET /key with that key alone)"
+            missing.remove(n)
+            unknown.pop(n, None)
+        elif code == 401:
+            gone[n] = ("refused: the provider answers 401 when this key asks about itself, "
+                       "so the consumer holds a deleted or disabled key")
+            missing.remove(n)
+            unknown.pop(n, None)
+        elif me is not None:
+            unknown[n] = "GET /key answered for a key whose label differs from the one in this slot"
+        else:
+            unknown.setdefault(n, f"it could not describe itself ({err})")
+
     # A BOUNDED LISTING IS NOT PROOF OF ABSENCE. Look further, once, for what is
     # still missing, and stop as soon as all of it is found.
     searched, complete = len(rows), why is None
@@ -295,6 +340,7 @@ def main(argv: list[str]) -> int:
             if dests[n] in found:
                 verified[n] = f"found past the bounded listing, among the newest {searched} keys"
                 missing.remove(n)
+                unknown.pop(n, None)
     seen_hashes = {r.get("hash") for r in rows}
     rows = rows + [r for r in extra if r.get("hash") not in seen_hashes]
 

@@ -11,6 +11,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
   restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+- **An OpenRouter consumer's key past every listed page is asked about itself.** On an account where another product
+  mints a key per user (about 300 a day, measured 2026-10-21), the gateway's key sat beyond the newest 21,200 keys
+  the deep walk reads, and every run reported its existence as unknown. A consumer's key the listing and its
+  remembered hash did not settle now asks `GET /key` with that key alone, before the account is walked: a matching
+  label verifies it, a 401 reports a deleted or disabled key, any other answer stays unknown with its reason.
 
 ## 0.27.0 (2026-10-20)
 

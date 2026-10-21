@@ -95,13 +95,15 @@ def test_a_shared_label_is_reported_rather_than_resolved():
           "share the label" in src)
 
 
-def planted_scan(provisioning: bool = True, collide: bool = False) -> dict:
+def planted_scan(provisioning: bool = True, collide: bool = False, answer=None) -> dict:
     """Run the collector in process against planted destinations and a stubbed
     listing, and return the document it wrote.
 
     Nothing reaches the provider: `listing` is replaced, and every destination
     file lives in a scratch directory. The rows carry a `hash` the way the
     provider's listing does, so the test can watch where the hash lands.
+    `answer(path, key)` stands in for every direct request (`GET /key`,
+    `GET /keys/{hash}`); by default each one fails as if offline.
     """
     import configuration
     sys.path.insert(0, str(ROOT / "tests"))
@@ -120,16 +122,17 @@ def planted_scan(provisioning: bool = True, collide: bool = False) -> dict:
             {"label": "sk-or-v1-999...zzz", "name": "unused", "hash": "h-unused"}]
     if collide:
         rows.append({"label": "sk-or-v1-abc...def", "name": "a stranger", "hash": "h-stranger"})
-    saved = (S.DESTINATIONS, S.listing, configuration.enabled)
+    saved = (S.DESTINATIONS, S.listing, configuration.enabled, S._get)
     S.DESTINATIONS = {"observatory": observatory_key, "claude-mem": companion_env,
                       "gateway": d / "absent", "provisioning": prov}
-    S.listing = lambda _prov: (rows, None)
+    S.listing = lambda _prov, **_kw: (rows, None)
+    S._get = answer or (lambda path, key: (None, None, "offline"))
     configuration.enabled = lambda name: True
     out = d / "openrouter.json"
     try:
         S.main(["scan_openrouter.py", str(out)])
     finally:
-        S.DESTINATIONS, S.listing, configuration.enabled = saved
+        S.DESTINATIONS, S.listing, configuration.enabled, S._get = saved
     return json.loads(out.read_text(encoding="utf-8"))
 
 
@@ -188,6 +191,45 @@ def test_absent_provisioning_is_a_degradation_not_an_empty_estate():
           and all(any(d["source"].endswith(n) for d in doc["degraded"])
                   for n in doc["unlisted_destinations"]),
           str(doc["unlisted_destinations"]))
+
+
+COMPANION = "sk-or-v1-" + "fed" + "0" * 55 + "cba"
+
+
+def test_a_key_past_every_page_is_settled_by_asking_it_about_itself():
+    """2026-10-21: on an account where another product mints a key per user, the
+    gateway's key sat past the newest 21,200 keys, and every run reported its
+    existence as unknown. Asking the key about itself settles it in one request."""
+    asked = []
+
+    def alive(path, key):
+        asked.append((path, key))
+        if path == "/key" and key == COMPANION:
+            return {"label": "sk-or-v1-fed...cba"}, None, None
+        return None, None, "offline"
+    doc = planted_scan(answer=alive)
+    check("the unlisted key that describes itself is verified",
+          "claude-mem" in doc["verified"] and doc["unlisted_destinations"] == [],
+          f"{doc['verified']} {doc['unlisted_destinations']}")
+    check("only that key was sent, and only to ask about itself",
+          ("/key", COMPANION) in asked and all(k != COMPANION or p == "/key" for p, k in asked),
+          str([p for p, _ in asked]))
+    check("and no destination is left degraded for it",
+          not any(d["source"] == "openrouter:claude-mem" for d in doc["degraded"]), str(doc["degraded"]))
+
+    def refused(path, key):
+        if path == "/key" and key == COMPANION:
+            return None, 401, "HTTP 401"
+        return None, None, "offline"
+    doc = planted_scan(answer=refused)
+    check("a key the provider refuses is reported as dead, not as unknown",
+          any(d["source"] == "openrouter:claude-mem" and "deleted or disabled" in d["reason"]
+              for d in doc["degraded"]), str(doc["degraded"]))
+
+    doc = planted_scan()
+    check("a key that cannot be asked stays unknown and says why",
+          any(d["source"] == "openrouter:claude-mem" and "could not describe itself" in d["reason"]
+              for d in doc["degraded"]), str(doc["degraded"]))
 
 
 def test_the_step_is_reachable():
@@ -456,6 +498,7 @@ if __name__ == "__main__":
                test_no_value_and_no_hash_reach_the_registry_half,
                test_a_collision_is_reported_on_a_real_run,
                test_absent_provisioning_is_a_degradation_not_an_empty_estate,
+               test_a_key_past_every_page_is_settled_by_asking_it_about_itself,
                test_the_step_is_reachable,
                test_the_door_reads_every_page_of_keys,
                test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,

@@ -435,8 +435,8 @@
     {
       "path": "collectors/scan_openrouter.py",
       "source_sha256": "255a843fbca4a16a7cc9548346ac38c039f0399cf2d485591ddcb222984e3ee2",
-      "export_sha256": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae",
-      "bytes": 18589,
+      "export_sha256": "5ca5a293fbd276692896a92085b85e77b7b81216fa3cc991e676f055ec4b2105",
+      "bytes": 20759,
       "python_comments_removed": 33,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -3812,8 +3812,8 @@
       "path": "tests/test_honest_absence.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e3de91fe784b654646b42df0330200896d076c25b21195963db2c84040c3330",
-      "bytes": 27509
+      "export_sha256": "2c478b83c03bc9969672b932dd2708ae41dea1f64481c22a1e4525ac22b0b2c8",
+      "bytes": 27665
     },
     {
       "path": "tests/test_horizon.py",
@@ -4258,8 +4258,8 @@
       "path": "tests/test_openrouter_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "50444668ab4cff4febdc0b95ffeb58682fc82d2e3b634d6155faf8d5821a45ea",
-      "bytes": 25116
+      "export_sha256": "e44d5400f3a614825d73f61b66bbc00dbb255380728590840d84a08168767a1d",
+      "bytes": 27322
     },
     {
       "path": "tests/test_organizations.py",

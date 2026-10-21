@@ -228,6 +228,10 @@
   {
    "token": "sshlg",
    "reason": "the author's public brand: the npm package sshlg-skills writes its managed block markers (SSHLG:PROJECT:BEGIN, OPTOUT, END) into AGENTS.md and CLAUDE.md (#312); a home-folder path stays refused by the path patterns, and every longer private name keeps its own entry"
+  },
+  {
+   "token": ".worktrees",
+   "reason": "a generic folder name for git worktrees (git's own convention and many tools'); it names no project or person, though a private registry path contains it"
   }
  ]
 }
