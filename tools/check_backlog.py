@@ -484,7 +484,8 @@ def _vacancy_problems(text: str, present: set[int], next_free: int) -> list[str]
                             "an id never written. Add it to the `**Vacant ids:**` line: `OBS-n` (why)")
     for number in sorted(declared):
         if number in present:
-            problems.append(f"OBS-{number}: declared vacant but its row exists; remove the declaration")
+            problems.append(f"OBS-{number}: declared vacant but its row exists (a reservation whose pull request "
+                            "has landed); remove its entry from the `**Vacant ids:**` line")
         elif number >= next_free:
             problems.append(f"OBS-{number}: declared vacant at or above the next free id OBS-{next_free}")
     return problems

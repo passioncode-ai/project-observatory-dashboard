@@ -370,6 +370,8 @@ def openrouter_run(*, deep_rows: list[dict], remembered: dict | None = None,
                                   "gateway": d / "secrets/openrouter",
                                   "provisioning": d / "secrets/provisioning"},
                  listing=listing, key_by_hash=key_by_hash,
+                 # Offline, as every request here: these cases test the listing walk.
+                 self_described=lambda path: (None, None, "offline"),
                  whoami=lambda prov: ({"label": S.label_of(KEY_P), "is_provisioning_key": True}, None)), \
             Patched(configuration, enabled=lambda *a, **k: True):
         S.main(["scan_openrouter.py", str(out)])

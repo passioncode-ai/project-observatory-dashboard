@@ -613,6 +613,15 @@ class Vacancies(unittest.TestCase):
         self.assertTrue(any(p.startswith("OBS-2") and "reason" in p for p in found), found)
         self.assertTrue(any(p.startswith("OBS-3") and "row exists" in p for p in found), found)
 
+    def test_an_id_reserved_by_an_open_pull_request_passes_until_its_row_lands(self):
+        # OBS-173 and OBS-174, reserved through the register by #328 while it was open.
+        line = "**Vacant ids:** `OBS-2` (reserved by open pull request #328, which writes the row)\n\n## Board"
+        waiting = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace("## Board", line)
+        self.assertEqual(self.problems(waiting), [])
+        landed = board({"OBS-01": "open", "OBS-02": "open", "OBS-03": "open"}, next_free=4).replace("## Board", line)
+        found = self.problems(landed)
+        self.assertTrue(any(p.startswith("OBS-2:") and "remove its entry" in p for p in found), found)
+
     def test_an_id_on_the_line_without_its_reason_form_fails(self):
         text = board({"OBS-01": "open", "OBS-03": "open"}, next_free=4).replace(
             "## Board", "**Vacant ids:** `OBS-2`, reserved and never written\n\n## Board")

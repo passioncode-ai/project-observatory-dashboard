@@ -22,15 +22,17 @@ sees it, and `tools/keyserver.py` resolves a key by its tail against the raw
 file at the moment it acts.
 
 WHICH DESTINATION EACH KEY SERVES is answered by reading the four files and
-comparing the PROVIDER'S OWN LABEL with the listing — never by transmitting or
-storing what they hold. A destination whose key the account does not list is
-reported: that is either a key from another workspace or a dead one, and both
-are worth saying out loud.
+comparing the PROVIDER'S OWN LABEL with the listing, never by storing what they
+hold. A key is transmitted only to the provider that issued it, and only to ask
+about itself (`GET /key`): the provisioning key always, a consumer's key when the
+bounded listing could not reach it. A destination whose key the account does not
+list is reported: that is either a key from another workspace or a dead one, and
+both are worth saying out loud.
 
     scan_openrouter.py store/raw/openrouter.json
 """
 from __future__ import annotations
-import json, pathlib, sys, time, urllib.error, urllib.request
+import json, pathlib, re, sys, time, urllib.error, urllib.request
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -52,6 +54,8 @@ MAX_PAGES = 12
 #: past key 7,400 — and was reported as "no longer exists" by a listing that had
 #: stopped at 1,200. A key found this way is remembered by its hash and asked
 #: about directly afterwards, so the deep walk is paid once per key, not per run.
+#: Since 2026-10-21 a key the listing missed first asks the provider about itself
+#: (`self_described`, one request); the walk runs only for what that left open.
 DEEP_PAGES = 200
 
 #: Where a key is read from, and by whom. The paths are facts about this
@@ -89,16 +93,35 @@ def label_of(value: str) -> str:
     return "sk-or-v1-" + value[9:12] + "..." + value[-TAIL:]
 
 
+_ENV_LINE = re.compile(r"^\s*(?:export\s+)?OPENROUTER_API_KEY\s*=\s*(.*)$")
+
+
+def _key_in(text: str) -> str:
+    """The key a file holds: the whole file, or a .env's `OPENROUTER_API_KEY=` line.
+
+    Only that exact name counts (`OPENROUTER_API_KEY_OLD=` is another variable),
+    an `export ` prefix is allowed, and an unquoted value loses a trailing
+    ` # comment`.
+    """
+    text = (text or "").strip()
+    if "OPENROUTER_API_KEY" not in text:
+        return text
+    for line in text.splitlines():
+        m = _ENV_LINE.match(line)
+        if not m:
+            continue
+        value = m.group(1).strip()
+        if value[:1] in "\"'" and value[:1] and value.count(value[0]) >= 2:
+            return value[1:value.index(value[0], 1)]
+        return value.split(" #", 1)[0].strip()
+    return ""
+
+
 def _label(text: str) -> str:
     """The label of a key found in a file. Never the key."""
-    text = (text or "").strip()
+    text = _key_in(text)
     if not text:
         return ""
-    if "OPENROUTER_API_KEY" in text:                      # a .env, not a bare key
-        for line in text.splitlines():
-            if line.strip().startswith("OPENROUTER_API_KEY"):
-                text = line.split("=", 1)[-1].strip().strip('"').strip("'")
-                break
     return label_of(text)
 
 
@@ -148,7 +171,7 @@ def listing(prov: str, offset: int = 0, pages: int = MAX_PAGES,
         req = urllib.request.Request(f"{API}/keys?offset={offset}",
                                      headers={"Authorization": f"Bearer {prov}"})
         try:
-            with urllib.request.urlopen(req, timeout=45) as r:
+            with _OPENER.open(req, timeout=45) as r:
                 page = json.loads(r.read().decode())["data"]
         except urllib.error.HTTPError as e:
             return rows, f"GET /keys failed: HTTP {e.code}"
@@ -165,10 +188,21 @@ def listing(prov: str, offset: int = 0, pages: int = MAX_PAGES,
                   f"holds more and this list is partial")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an error here: urllib would carry `Authorization` to the new
+    location, and a key is sent to the provider's API and nowhere else."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):   # noqa: D401
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _get(path: str, prov: str) -> tuple[dict | None, int | None, str | None]:
     req = urllib.request.Request(f"{API}{path}", headers={"Authorization": f"Bearer {prov}"})
     try:
-        with urllib.request.urlopen(req, timeout=45) as r:
+        with _OPENER.open(req, timeout=45) as r:
             return (json.loads(r.read().decode()).get("data") or {}), None, None
     except urllib.error.HTTPError as e:
         return None, e.code, f"HTTP {e.code}"
@@ -185,6 +219,27 @@ def whoami(prov: str) -> tuple[dict | None, str | None]:
     """
     data, _code, why = _get("/key", prov)
     return data, why
+
+
+def self_described(path: pathlib.Path) -> tuple[dict | None, int | None, str | None]:
+    """What the provider says about a consumer's key when that key asks about itself.
+
+    The listing is newest first, and on an account where another product mints a
+    key per user (measured 2026-10-21: about 300 a day, past 21,200 keys), a
+    consumer's key a few weeks old sits beyond every page the deep walk reads,
+    and its existence stayed "unknown" on every run. `GET /key` carries only the
+    consumer's own key, to the provider that issued it, and answers for that key
+    alone: one request instead of a walk that cannot reach it. It answers no
+    hash, so a key confirmed this way is asked again on the next run (one
+    request), never remembered for `GET /keys/{hash}`.
+    """
+    try:
+        value = _key_in(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError as exc:
+        return None, None, f"unreadable: {type(exc).__name__}"
+    if not label_of(value):
+        return None, None, "the file holds no OpenRouter-shaped key"
+    return _get("/key", value)
 
 
 def key_by_hash(prov: str, h: str) -> tuple[dict | None, int | None, str | None]:
@@ -238,8 +293,10 @@ def main(argv: list[str]) -> int:
     # THE PROVISIONING KEY is never in a listing, so it is confirmed by asking
     # about itself. Its label must be the one in the file; anything else is a
     # different key in that slot, which is worth saying.
+    prov_me = None
     if "provisioning" in dests:
         me, err = whoami(prov)
+        prov_me = me
         if me is not None and me.get("label") == dests["provisioning"]:
             verified["provisioning"] = "the provider describes this key as itself (GET /key)"
         elif me is not None:
@@ -274,6 +331,42 @@ def main(argv: list[str]) -> int:
         else:
             unknown[n] = f"its recorded hash could not be asked about ({err})"
 
+    # A KEY THE BOUNDED LISTING COULD NOT REACH IS ASKED TO DESCRIBE ITSELF, before
+    # the account is walked: one request with that key alone. Only when the listing
+    # is partial: a COMPLETE listing that lacks a key is the stronger evidence (the
+    # key is in another workspace or gone), and a live key from anywhere answers
+    # `GET /key`. A matching label from the provisioning key's own workspace
+    # verifies it, and its answer (limit, usage, disabled) becomes its row; another
+    # workspace is said so; a 401 is a key the provider refuses.
+    self_rows: list[dict] = []
+    elsewhere: dict[str, str] = {}
+    home = (prov_me or {}).get("workspace_id")
+    for n in list(missing) if why else []:
+        me, code, err = self_described(DESTINATIONS[n])
+        if me is not None and me.get("label") == dests[n]:
+            theirs = me.get("workspace_id")
+            if home and theirs and theirs != home:
+                elsewhere[n] = ("it answers GET /key, but from another workspace than the "
+                                "provisioning key's, so this account's listing does not govern it")
+            else:
+                verified[n] = ("the key describes itself (GET /key with that key alone)"
+                               + ("" if home and theirs else
+                                  "; the workspace was not compared: the provider named none"))
+                self_rows.append({k: me.get(k) for k in ("label", "name", "limit", "limit_reset",
+                                                         "usage", "limit_remaining", "disabled",
+                                                         "created_at")})
+            missing.remove(n)
+            unknown.pop(n, None)
+        elif code == 401:
+            gone[n] = ("refused: the provider answers 401 when this key asks about itself, "
+                       "so the consumer holds an invalid, disabled or deleted key")
+            missing.remove(n)
+            unknown.pop(n, None)
+        elif me is not None:
+            unknown[n] = "GET /key answered for a key whose label differs from the one in this slot"
+        else:
+            unknown.setdefault(n, f"it could not describe itself ({err})")
+
     # A BOUNDED LISTING IS NOT PROOF OF ABSENCE. Look further, once, for what is
     # still missing, and stop as soon as all of it is found.
     searched, complete = len(rows), why is None
@@ -295,18 +388,21 @@ def main(argv: list[str]) -> int:
             if dests[n] in found:
                 verified[n] = f"found past the bounded listing, among the newest {searched} keys"
                 missing.remove(n)
+                unknown.pop(n, None)
     seen_hashes = {r.get("hash") for r in rows}
-    rows = rows + [r for r in extra if r.get("hash") not in seen_hashes]
+    rows = rows + [r for r in extra if r.get("hash") not in seen_hashes] + self_rows
 
     if why:
-        if missing or unknown:
+        if missing or unknown or elsewhere:
             degraded.append({"source": "openrouter:listing", "reason": why})
         else:
             not_applicable.append({
                 "source": "openrouter:listing",
                 "reason": (f"{why.split(';')[0]}, by design: only the newest {MAX_PAGES} pages "
                            f"are read each run, and every key a consumer on this machine holds "
-                           f"was matched, so the unread older keys hold none of them")})
+                           f"was settled (found in the listing, by its remembered hash, or "
+                           f"confirmed by the provider when it asked about itself), so nothing "
+                           f"this machine uses is left in doubt by the unread pages")})
 
     # A LABEL SHARED BY TWO KEYS IS NAMED, never resolved by preference: the
     # destination is then unattributable, and saying so is the only honest
@@ -351,9 +447,9 @@ def main(argv: list[str]) -> int:
         if n in unknown:
             reason += f"; {unknown[n]}"
         degraded.append({"source": f"openrouter:{n}", "reason": reason})
-    for n, reason in sorted(gone.items()):
+    for n, reason in sorted({**gone, **elsewhere}.items()):
         degraded.append({"source": f"openrouter:{n}", "reason": reason})
-    orphan_dests = sorted(set(missing) | set(gone))
+    orphan_dests = sorted(set(missing) | set(gone) | set(elsewhere))
     hash_of = {(r.get("label") or ""): r.get("hash") for r in rows}
     destination_hashes = {n: {"label": lab, "hash": hash_of[lab]} for n, lab in dests.items()
                           if lab in by_label and hash_of.get(lab)}

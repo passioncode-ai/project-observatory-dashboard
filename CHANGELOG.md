@@ -10,7 +10,8 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **Checks that keep the documentation true after a merge** (an audit of main at 23a52296 found nine drifts).
   `tools/check_backlog.py` refuses an open row a merged commit delivers (`(OBS-n)` in a squash subject ending in
   `(#n)`) unless it says `partly done`, adds "awaiting review", "ready", "closes when … merges" and "lands with" to
-  the stale wording, and requires every id below the next free one to be a row or a declared vacancy; in a shallow
+  the stale wording, and requires every id below the next free one to be a row or a declared vacancy (an id an open pull request
+  reserved is declared with that pull request, and refused once its row lands); in a shallow
   clone it says the history was not read instead of passing. `tests/test_changelog_releases.py` compares every
   released CHANGELOG section with its tag (a clone without tags reports a skip), and check.yml now fetches the tags.
   `tests/test_docs_drift.py` holds the scenario ids to one definition each and a `Next free OSS id` line, the
@@ -34,6 +35,15 @@ while the major version is 0, a minor release may change behaviour and says so h
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
   restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+- **An OpenRouter consumer's key past every listed page is asked about itself.** On an account where another product
+  mints a key per user (about 300 a day, measured 2026-10-21), the gateway's key sat beyond the newest 21,200 keys
+  the deep walk reads, and every run reported its existence as unknown. A consumer's key the listing and its
+  remembered hash did not settle, while the listing is partial, now asks `GET /key` with that key alone before the
+  account is walked: a matching label from the provisioning key's workspace verifies it and its answer (label, limit,
+  usage) becomes its row; another workspace is reported as such; a 401 is an invalid, disabled or deleted key;
+  any other answer stays unknown with its reason. A complete listing that lacks a key still wins. Every request
+  refuses a redirect (urllib would carry the key's `Authorization` header to the new location), and a `.env` is
+  read only for the exact `OPENROUTER_API_KEY=` variable.
 
 ## 0.27.0 (2026-10-20)
 
