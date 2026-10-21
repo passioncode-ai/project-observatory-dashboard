@@ -1,8 +1,8 @@
 # Local backlog
 
-**Next free ID:** `OBS-176`
+**Next free ID:** `OBS-183`
 
-**Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-146` (reserved through the OBS register on 2026-10-18 after #300 wrote OBS-145, and never written; #289 wrote OBS-147 and OBS-148 next); `OBS-173` (reserved by open pull request #328, which writes the row; remove this entry when it merges); `OBS-174` (reserved by open pull request #328, as OBS-173)
+**Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-146` (reserved through the OBS register on 2026-10-18 after #300 wrote OBS-145, and never written; #289 wrote OBS-147 and OBS-148 next)
 
 This board is canonical for OBS rows: engine execution, closed by a pull request and a release.
 Product packages, priorities and operator gates are on the organization's board, cited here as
@@ -19,8 +19,8 @@ organization's register check. A Status cell is exactly one of `done`, `done in 
 what was delivered is written in the Item column, after "Outcome:". An open row whose pull request has merged either closes or says
 `open — partly done: …` (what shipped, what remains): `tools/check_backlog.py` refuses any other open row that a
 merged commit's subject names as `(OBS-n)` with its `(#n)`. Every id below the next free one is a row or an entry of
-the `**Vacant ids:**` line with its reason, an id reserved by a pull request still open included (the entry
-names the pull request, and the check fails once the row lands until the entry is removed). A row holds no backslash and no
+the `**Vacant ids:**` line with its reason; an id reserved less than 14 days ago is taken as a pull request
+still open and needs nothing, and a reservation older than that with no row must be declared. A row holds no backslash and no
 `<`, and the table is the last thing in its section.
 
 ## Board
@@ -198,3 +198,4 @@ names the pull request, and the check fails once the row lands until the entry i
 | OBS-171 | Partner channel on the node (fabric-agent-contract DEC-0090, PA-06, contract `3d8cb17`): verify a partner's publisher key only under `publisherScopes[]` in `estate-record/1` (`placementTrust` hands it only to the scoped organization contexts; a revision breaking FAC-SEM-122 is refused whole; a scoped key is taken only from the record), and re-vendor the node vectors at that pin together with the meter and the adapter's kits | open: planned for 0.29.0, by 2026-10-31 | contract announcement on the Fabric board 2026-10-20 (thread 6e66a023), answered 2026-10-21 |
 | OBS-172 | The desktop app's Linux build pulls `glib` 0.18 through `gtk` 0.18 (Tauri 2), which carries GHSA-wrw7-89jp-8q8g (unsound `VariantStrIter` iterators; fixed in 0.20, which needs gtk4). The app never calls it (no glib use in `desktop/src-tauri/src`). Re-check when Tauri moves to gtk4 and lift `glib` then | open: waits on Tauri | Dependabot alert 1, dismissed as tolerable risk on 2026-10-21 with this reason |
 | OBS-175 | OpenRouter collector, LOW findings of the #322 rounds: (A) two destinations holding the same key past the listing make two self rows with one label, read as a collision (de-duplicate self rows by label and `extra` by hash); (B) the workspace compared is the provisioning key's, while `GET /keys` lists the default workspace, so take it from the listed rows; (C) when the provisioning key's `GET /key` failed, the note says the provider named no workspace; (D) a `.env` with two `OPENROUTER_API_KEY=` lines is read first-wins, dotenv loaders use the last; (E) the redirect test calls the handler directly and would pass if `_get` went back to `urlopen` | open | review rounds of #322, 2026-10-21 |
+| OBS-182 | The state-family check (`tests/test_docs_drift.py` `StateFamilies`) derives what the engine persists from regular expressions over path constants (`observatory.py` step outputs, `secrets/` constants in `tools/` and `collectors/`, `node/` folder names), so a path built another way is not seen. Declare the families in one engine registry the writers import, and check COMPATIBILITY.md against it | open | #326 review, fix cycle 1 (LOW) |

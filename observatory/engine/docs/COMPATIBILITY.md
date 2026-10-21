@@ -249,12 +249,14 @@ file on its first tick with the feature on. Until then it is absent, and no read
 
 Each family below is new; no earlier file changes shape. An upgrade creates none of them: each
 appears the first time its command or collector runs. A downgrade leaves them in place, unread by
-the older engine, and a workspace snapshot carries them like any other file (`outbox.sqlite`
-through SQLite's backup API). Restoring a snapshot taken before the upgrade drops them, as the
-rollback rules above say for every later observation. `secrets/` here means the configured
-`sources.secret_store`, `secrets/` in the workspace by default; `node/` is `OBSERVATORY_NODE`, the
-workspace's `node/` by default. The repository's `StateFamilies` test refuses a family the
-code writes that is not classified, and one from 0.26.0 on that has no row here.
+the older engine. `secrets/` here means the configured `sources.secret_store`, `secrets/` in the
+workspace by default; `node/` is `OBSERVATORY_NODE`, the workspace's `node/` by default. A workspace
+snapshot carries a family only while it lives inside the workspace (the defaults): a secret store or
+node folder configured elsewhere is a reference, as the rollback rules above say for external
+stores, and needs its own backup. Restoring a snapshot taken before the upgrade drops these files, as
+for every later observation. The repository's `StateFamilies` test refuses a family the code writes
+that is not classified, and one from 0.26.0 on that has no row here; it finds the families from the
+code's path constants, so a path built another way is not seen (OBS-182).
 
 | Path | Since | What it holds | Upgrade and downgrade |
 |---|---|---|---|

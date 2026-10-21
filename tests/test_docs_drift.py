@@ -239,13 +239,48 @@ class StateFamilies(unittest.TestCase):
 
 # ---- a run record's next step is not already done ------------------------------------------------
 
-TAG_NAMED = re.compile(r"\btag(?:ging)? `?v(\d+\.\d+\.\d+)`?|`?v?(\d+\.\d+\.\d+)`? tag\b")
+#: A release named as a step still to take: `tag v0.28.0`, `tag 0.28.0`, `the 0.28.0 tag`, `release v0.28.0`.
+TAG_NAMED = re.compile(r"\b(?:tag(?:ging)?|release) `?v?(\d+\.\d+\.\d+)`?|`?v?(\d+\.\d+\.\d+)`? tag\b", re.I)
+#: Headings whose whole body is a next step, and headings under which only the text after a `Next:`
+#: marker is one. Measured on 99 run records (2026-10-21): `## Next`, `## Next task`, `## Exact next task`,
+#: `## Open work and exact next task`, … carry the step whole; `## State now`, `## Left`, `## Open`
+#: carry it after `Next task:` or `Next:`.
+NEXT_HEADING = re.compile(r"^#{2,3} .*\bnext\b", re.I)
+NEXT_MARKER = re.compile(r"\bnext(?: task| step)?:", re.I)
 
 
-def tags() -> dict[str, str] | None:
-    """{tag: commit} for the release tags in this checkout; None without Git or tags."""
-    run = subprocess.run(["git", "-C", str(ROOT), "tag", "--list", "v*", "--format=%(refname:short) %(objectname)"
-                          " %(*objectname)"], capture_output=True, text=True, timeout=60)
+def next_lines(path: Path, only_section: str | None = None) -> list[tuple[int, str]]:
+    """(line number, the text that is a next step on that line) in one document."""
+    out: list[tuple[int, str]] = []
+    whole, inside, marked = False, only_section is None, False
+    for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+        if line.startswith("## "):
+            inside = only_section is None or line.startswith(only_section)
+            whole = bool(NEXT_HEADING.match(line))
+            marked = False
+            continue
+        if not inside:
+            continue
+        if not line.strip():
+            marked = False
+            continue
+        if whole:
+            out.append((n, line))
+            continue
+        m = NEXT_MARKER.search(line)
+        if m:
+            marked = True
+            out.append((n, line[m.end():]))
+        elif marked:
+            out.append((n, line))
+    return out
+
+
+def release_tags() -> dict[str, str] | None:
+    """{tag: the commit it names} for the release tags in this checkout; None without Git or tags."""
+    run = subprocess.run(["git", "-C", str(ROOT), "for-each-ref", "refs/tags/v*",
+                          "--format=%(refname:short) %(objectname) %(*objectname)"],
+                         capture_output=True, text=True, timeout=60)
     if run.returncode != 0:
         return None
     out = {}
@@ -256,49 +291,79 @@ def tags() -> dict[str, str] | None:
     return out or None
 
 
-def head_is(commit: str) -> bool:
-    run = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=60)
-    return run.returncode == 0 and run.stdout.strip() == commit
+def written_after(path: Path, line: int, commit: str) -> bool:
+    """Whether `line` of `path` was last written after `commit`: by a strict descendant of it, or not yet
+    committed. A line the tagged commit itself wrote (the release's own record) is not."""
+    blame = subprocess.run(["git", "-C", str(ROOT), "blame", "--porcelain", "-L", f"{line},{line}", "--",
+                            str(path.relative_to(ROOT))], capture_output=True, text=True, timeout=60)
+    if blame.returncode != 0:
+        return False
+    author = blame.stdout.split(" ", 1)[0]
+    if set(author) == {"0"}:
+        return True
+    if author == commit:
+        return False
+    ancestor = subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", commit, author],
+                              capture_output=True, timeout=60)
+    return ancestor.returncode == 0
 
 
-def next_steps() -> list[tuple[str, str]]:
-    """(where, text) for every run record's `## Next` section and the handoff's `Next:` sentences under
-    `## Latest run`."""
-    out = []
-    for record in sorted((ROOT / "docs/runs").glob("*/README.md")):
-        text = record.read_text(encoding="utf-8")
-        m = re.search(r"^## Next\b.*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
-        if m:
-            out.append((str(record.relative_to(ROOT)), m.group(1)))
-    handoff = (ROOT / "docs/HANDOFF.md").read_text(encoding="utf-8")
-    latest = re.search(r"^## Latest run\b(.*?)(?=^## |\Z)", handoff, re.M | re.S)
-    if latest:
-        for paragraph in re.split(r"\n\s*\n", latest.group(1)):
-            if "Next:" in paragraph:
-                out.append(("docs/HANDOFF.md (Latest run)", paragraph.split("Next:", 1)[1]))
-    return out
+def stale_next_steps(known: dict[str, str]) -> list[str]:
+    docs = [(p, None) for p in sorted((ROOT / "docs/runs").glob("*/README.md"))]
+    docs.append((ROOT / "docs/HANDOFF.md", "## Latest run"))
+    stale = []
+    for path, section in docs:
+        for n, text in next_lines(path, section):
+            for m in TAG_NAMED.finditer(text):
+                tag = "v" + (m.group(1) or m.group(2))
+                if tag in known and written_after(path, n, known[tag]):
+                    stale.append(f"{path.relative_to(ROOT)}:{n}: a next step names {tag}, which was tagged before "
+                                 "this line was written; record the release and the real next step")
+    return stale
 
 
 class NextIsNotAlreadyDone(unittest.TestCase):
-    def test_no_next_step_names_a_tag_that_exists(self):
-        """A tag that exists on an earlier commit is a release that happened: the record says so instead.
+    """A next step written after a release that still names the release as to come.
 
-        The tagged commit itself is exempt: check.yml runs on the tag before the release workflow
-        publishes it, and the record in that commit is the one being released."""
-        known = tags()
+    Judged per line by `git blame`, so a record the release itself wrote ("Next: merge, tag vX.Y.Z") does
+    not turn every later pull request red: AGENTS.md's release steps rewrite it once the release is out.
+    Not checked: a stale line nobody edited since the tag; the release step owns that."""
+
+    def test_no_next_step_written_after_a_tag_names_it(self):
+        known = release_tags()
         if known is None:
             self.skipTest("no release tags in this checkout: next steps NOT compared with releases")
-        stale = []
-        for where, text in next_steps():
-            for m in TAG_NAMED.finditer(text):
-                tag = "v" + (m.group(1) or m.group(2))
-                if tag in known and not head_is(known[tag]):
-                    stale.append(f"{where}: Next names {tag}, which is tagged; record the release and the real next step")
-        self.assertEqual(stale, [])
+        self.assertEqual(stale_next_steps(known), [])
 
-    def test_the_pattern_reads_both_wordings(self):
-        self.assertEqual(TAG_NAMED.search("Merge, tag `v0.27.0`, verify").group(1), "0.27.0")
-        self.assertEqual(TAG_NAMED.search("then the 0.25.0 tag and installed acceptance").group(2), "0.25.0")
+    def test_the_pattern_reads_every_wording(self):
+        for text, version in (("Merge, tag `v0.27.0`, verify", "0.27.0"), ("then tag 0.28.0", "0.28.0"),
+                              ("then the 0.25.0 tag and installed acceptance", "0.25.0"),
+                              ("Release v0.28.0 once CI is green", "0.28.0")):
+            m = TAG_NAMED.search(text)
+            self.assertEqual(m and (m.group(1) or m.group(2)), version, text)
+        self.assertIsNone(TAG_NAMED.search("0.28.0 tagged and published"))
+
+    def test_sections_and_markers_are_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp, "README.md")
+            doc.write_text("# Run\n\n## What shipped\n\nrelease v0.1.0 was cut\n\n## State now\n\nDone. Next task: "
+                           "tag v0.2.0\nand verify.\n\nOther text, tag v0.3.0.\n\n## Exact next task\n\ntag v0.4.0\n",
+                           encoding="utf-8")
+            found = [m.group(1) for _, t in next_lines(doc) for m in TAG_NAMED.finditer(t)]
+        self.assertEqual(found, ["0.2.0", "0.4.0"])
+
+    def test_blame_separates_the_release_commit_from_a_later_edit(self):
+        """The reviewer's reproduction: the tagged commit passes, a later edit of the line fails."""
+        known = release_tags()
+        if known is None or "v0.27.0" not in known:
+            self.skipTest("v0.27.0 is not in this checkout")
+        record = ROOT / "docs/runs/2026-10-20-release-0.27.0/README.md"
+        line = next(n for n, t in enumerate(record.read_text(encoding="utf-8").split("\n"), 1)
+                    if t.startswith("# Run"))
+        self.assertFalse(written_after(record, line, known["v0.27.0"]), "the tagged commit wrote this line")
+        older = known.get("v0.26.0")
+        if older:
+            self.assertTrue(written_after(record, line, older), "written after v0.26.0")
 
 
 if __name__ == "__main__":

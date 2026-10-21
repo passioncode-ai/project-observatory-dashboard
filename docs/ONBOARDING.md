@@ -402,9 +402,11 @@ refuses any write while it cannot read who holds that role.
 stashed admin token: `analytics` for the observatory's own traffic reader (filed where the plugin
 reads it), and into a vault slot (`--vault PROJECT/ENV/NAME`) `zone-analytics-read` (one zone's
 counters), `dns-edit`, `email-routing`, `email-sending-domain`, `redirect-rules`, `workers-routes`,
-`cache-purge` (one zone each, `--zone`), and `d1-edit`, `email-send`, `workers-edit`, `r2-bucket`,
+`cache-purge` (one zone each, `--zone`), and `d1-edit`, `email-send`, `workers-edit`,
 `workers-observability-read`, `fabric-inbox-server`, `fabric-inbox-account` (one account each,
-`--account`). Each is verified with its own value before delivery; the handling-secrets skill says
+`--account`). `r2-bucket` is one bucket (`--account --bucket NAME`) and delivers an S3 pair to three
+slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
+`PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
 what each grants.
 
 **A DigitalOcean team's tokens, one place per team.** `tools/digitalocean.py stash` keeps a team's

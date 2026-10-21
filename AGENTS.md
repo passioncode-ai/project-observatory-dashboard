@@ -306,7 +306,12 @@ tasks are the operator's and which a contributor can take.
      `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
    - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
 4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
-5. Record the release in `docs/runs/<date>-<slug>/`.
+5. Record the release in `docs/runs/<date>-<slug>/`. The release pull request's record says what comes
+   next before the tag ("Next: merge, tag vX.Y.Z, verify"); once the release is published, a follow-up
+   commit adds its receipts (run, sums, attestation, signature) and rewrites that Next, and the next step
+   in `docs/HANDOFF.md` with it. `tests/test_docs_drift.py` refuses a next step that names an existing
+   tag on a line written after that tag (`git blame`), so the rewrite cannot keep the old step; a line
+   nobody edited since the tag is not checked, which is why this step is the release's.
 
 ## Shared backlog
 
@@ -351,11 +356,15 @@ allowlisted format, not as Markdown. Two things keep it true:
   `open`/`blocked` with an optional note (a closed status takes no note: write what was delivered
   in the Item column, after "Outcome:"); at most one `parent:` token in Source, followed by a PB id.
   On top of the format it refuses a duplicate id, an id at or above the next free one, an id below
-  it with no row and no entry on the `**Vacant ids:**` line (`` `OBS-n` (reason)``), wording
+  it with no row and no entry on the `**Vacant ids:**` line (`` `OBS-n` (reason)``) once its
+  reservation is older than 14 days (younger, it is a pull request in flight; the age comes from the
+  history of the `Next free ID` line), wording
   that is false once merged ("in this PR", "to follow", "merging", "once … restarts", "awaiting
   review", "ready", "closes when … merges", "lands with"), an open or blocked row that a merged
   commit on the checked branch delivers (a subject ending in `(#n)` that names the id in a
-  parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)`) unless its status says `partly done`, `done` with
+  parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)`; a `Revert "…"` delivers nothing; in a pull_request
+  run check.yml adds the pull request's own title as `TITLE (#N)`, so a title for a step toward a row
+  names it bare, `OBS-n: step 2`) unless its status says `partly done` or `reopened`, `done` with
   something that remains (write `open — partly done: …`), `done in X.Y.Z` without a `## X.Y.Z`
   heading in CHANGELOG.md, and private names in the board and CHANGELOG.md. Private names need the
   maintainer's local denylist (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the
