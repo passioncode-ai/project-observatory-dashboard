@@ -14,8 +14,12 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **An OpenRouter consumer's key past every listed page is asked about itself.** On an account where another product
   mints a key per user (about 300 a day, measured 2026-10-21), the gateway's key sat beyond the newest 21,200 keys
   the deep walk reads, and every run reported its existence as unknown. A consumer's key the listing and its
-  remembered hash did not settle now asks `GET /key` with that key alone, before the account is walked: a matching
-  label verifies it, a 401 reports a deleted or disabled key, any other answer stays unknown with its reason.
+  remembered hash did not settle, while the listing is partial, now asks `GET /key` with that key alone before the
+  account is walked: a matching label from the provisioning key's workspace verifies it and its answer (limit, usage,
+  disabled) becomes its row; another workspace is reported as such; a 401 is an invalid, disabled or deleted key;
+  any other answer stays unknown with its reason. A complete listing that lacks a key still wins. Every request
+  refuses a redirect (urllib would carry the key's `Authorization` header to the new location), and a `.env` is
+  read only for the exact `OPENROUTER_API_KEY=` variable.
 
 ## 0.27.0 (2026-10-20)
 

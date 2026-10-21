@@ -435,8 +435,8 @@
     {
       "path": "collectors/scan_openrouter.py",
       "source_sha256": "255a843fbca4a16a7cc9548346ac38c039f0399cf2d485591ddcb222984e3ee2",
-      "export_sha256": "5ca5a293fbd276692896a92085b85e77b7b81216fa3cc991e676f055ec4b2105",
-      "bytes": 20759,
+      "export_sha256": "edad024cea969b43e40e82bbb8f66c63562746ed06290684dbbaea5c3e8bab02",
+      "bytes": 23480,
       "python_comments_removed": 33,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -4258,8 +4258,8 @@
       "path": "tests/test_openrouter_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e44d5400f3a614825d73f61b66bbc00dbb255380728590840d84a08168767a1d",
-      "bytes": 27322
+      "export_sha256": "68852cae94c2baf8cd7d44fabd4063ea877a0932d553d6364c8b61ab9be211c4",
+      "bytes": 30925
     },
     {
       "path": "tests/test_organizations.py",
