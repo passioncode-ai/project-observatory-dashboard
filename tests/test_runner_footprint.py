@@ -110,6 +110,15 @@ class FreeSpaceFloor(unittest.TestCase):
         self.assertIn('--min-free-gb 0', doc['reason'], 'the refusal names the flag that overrides it')
         self.assertIn(doc['reason'], err)
 
+    def test_a_source_that_cannot_be_sized_is_a_fail_receipt_not_a_traceback(self):
+        stream = io.StringIO()
+        with mock.patch.object(sys, 'argv', ['runner', '--suite', 'time']), \
+             mock.patch.object(runner, 'source_files', side_effect=FileNotFoundError('tests/test_gone.py')), \
+             contextlib.redirect_stdout(stream):
+            code = runner.main()
+        doc = json.loads(stream.getvalue())
+        self.assertEqual((1, 'FAIL', 'FileNotFoundError'), (code, doc['status'], doc['error_type']))
+
     def test_the_floor_scales_with_jobs(self):
         one = runner.space_needed(jobs=1, floor_gb=0)
         eight = runner.space_needed(jobs=8, floor_gb=0)

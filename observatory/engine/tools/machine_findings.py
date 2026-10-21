@@ -277,25 +277,33 @@ def backup_findings(state_file: pathlib.Path) -> list[dict]:
         count = len(items)
     import machine_backup
     status = "`project-observatory full machine-backup status` lists every item with its fix"
-    out = []
+    # ONE ROW PER SOURCE AND PART. A checkout can leave its commits, its uncommitted changes and
+    # its untracked files behind at once, and a home folder can break two caps: keyed on the
+    # source alone they shared one id, and the board's duplicate-id guard then published
+    # nothing at all (review of #325; the operator's receipt held such a pair).
+    parts = {0: "commits", 1: "changes", 2: "untracked", 3: "checkout"}
+    groups: dict[tuple[str, str], list[dict]] = {}
     for record in items:
-        rank = machine_backup.loss_rank(record)
-        size = record.get("size")
-        detail = str(record.get("reason") or "not carried")
-        if isinstance(size, int) and size:
-            detail += f" ({size / 1048576:.1f} MB)"
+        part = parts.get(machine_backup.loss_rank(record), "files")
+        groups.setdefault((str(record["source"]), part), []).append(record)
+    out = []
+    for (source, part), records in groups.items():
+        rank = min(machine_backup.loss_rank(r) for r in records)
+        reasons = []
+        for record in records:
+            size = record.get("size")
+            reason = str(record.get("reason") or "not carried")
+            reasons.append(reason + (f" ({size / 1048576:.1f} MB)" if isinstance(size, int) and size else ""))
+        detail = "; ".join(reasons)
         detail += (". It is the only copy of this work: were this machine lost, it would be lost with it"
                    if rank <= 1 else ". A new machine restored from the bundle would not have it")
-        if success.get("file"):
-            detail += f" (bundle {success['file']})."
-        else:
-            detail += "."
-        fix = str(record.get("fix") or "").strip()
-        out.append({"type": "machine.backup_not_carried", "subject": f"machine-backup:{record['source']}",
+        detail += f" (bundle {success['file']})." if success.get("file") else "."
+        fixes = list(dict.fromkeys(str(r.get("fix") or "").strip() for r in records if str(r.get("fix") or "").strip()))
+        out.append({"type": "machine.backup_not_carried", "subject": f"machine-backup:{source}:{part}",
                     "severity": "warning" if rank <= 1 else "info",
-                    **titled("the machine backup did not carry {source}", source=record["source"]),
+                    **titled("the machine backup did not carry {source}", source=source),
                     "detail": detail,
-                    "action": (fix + "; " + status) if fix else status,
+                    "action": "; ".join([*fixes, status]),
                     "evidence": ["store:machine-backup.json"]})
     if count > len(items):
         out.append({"type": "machine.backup_not_carried", "subject": "machine-backup:more", "severity": "info",

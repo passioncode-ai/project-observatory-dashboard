@@ -365,6 +365,40 @@ class Taking(Machine):
             data = (stage / item['arcname']).read_bytes()
             self.assertEqual((len(data), MB._sha256(data)), (item['size'], item['sha256']))
 
+    def test_untracked_files_are_spooled_by_number_never_by_name(self):
+        # Two untracked names differing only in case are two files on a case-sensitive checkout
+        # and one on a case-insensitive stage: spooled by name, the second replaced the first.
+        copy = shutil.copyfile
+        spooled = []
+
+        def watch(src, dst, *a, **kw):
+            if 'untracked' in Path(dst).parts:
+                spooled.append(Path(dst).name)
+            return copy(src, dst, *a, **kw)
+        with patch.object(MB.shutil, 'copyfile', watch):
+            self.take(at=AT)
+        self.assertTrue(spooled)
+        self.assertTrue(all(name.isdigit() for name in spooled), spooled)
+
+    def test_the_default_caps_carry_what_the_measured_machine_left_behind(self):
+        # The receipt of 2026-10-20 on a working agent machine, in its own order and exact bytes
+        # (cap, size). Review of #325: a 128 MB cap still refused the 130.0 MiB bundle that held
+        # 32 unpushed commits while the docs said it was carried. The claim is computed here.
+        measured = [('bundle_mb', 136315663), ('bundle_mb', 423910252), ('bundle_mb', 20078651),
+                    ('untracked_mb', 16661073), ('bundle_mb', 31750920), ('bundle_mb', 25166940),
+                    ('patch_mb', 61986064), ('bundle_mb', 17470199), ('bundle_mb', 80559231),
+                    ('bundle_mb', 27675287), ('bundle_mb', 31057757), ('bundle_mb', 115944523),
+                    ('patch_mb', 24526032), ('untracked_mb', 169381330)]
+        used, left = [0], []
+        for key, size in measured:
+            refused = MB.over_cap(size, key, used[0], MB.LIMITS)
+            if refused:
+                left.append((key, size, refused))
+            else:
+                used[0] += size
+        self.assertEqual([(k, s) for k, s, _ in left], [('bundle_mb', 423910252), ('untracked_mb', 169381330)],
+                         'every one but the 404 MiB single-commit bundle and the 161.5 MiB untracked set')
+
     def test_the_default_caps_are_the_documented_ones(self):
         # The caps are a promise in the onboarding page; a change to one changes both.
         text = (ROOT / 'docs' / 'ONBOARDING.md').read_text(encoding='utf-8')
@@ -722,6 +756,14 @@ class Schedule(Base):
         name = f"machine-{at.strftime('%Y%m%dT%H%M%SZ')}-0000000{len(self.calls)}.obmachine"
         (root / name).write_bytes(b'x')
         return {'result': 'taken', 'file': name, 'size': 1, 'items': 1, 'not_carried_count': 0}
+
+    def test_the_update_counts_the_bundle_it_is_about_to_take(self):
+        self.assertEqual(MB.expected_before_update(self.ws, AT), 0, 'a test home is never backed up')
+        with patch.object(MB, 'automatic_allowed', lambda: True):
+            self.assertEqual(MB.expected_before_update(self.ws, AT), 0, 'no bundle yet: nothing to size it by')
+            self.fake(self.ws, trigger='daily', at=AT)
+            self.assertEqual(MB.expected_before_update(self.ws, AT + datetime.timedelta(minutes=30)), 0, 'fresh')
+            self.assertEqual(MB.expected_before_update(self.ws, AT + datetime.timedelta(hours=2)), 1, 'due')
 
     def test_daily_then_not_due_then_due_again(self):
         self.assertEqual(MB.step(self.ws, AT, take_fn=self.fake)['result'], 'taken')

@@ -1524,7 +1524,7 @@ belong in the vault, which the workspace snapshot carries.
 
 The caps, each a key of `limits` (below): `file_mb` 16 MB (one file), `entry_mb` 128 MB (one
 entry, such as `~/.claude/skills`), `total_mb` 320 MB (every file copy together), `bundle_mb`
-128 MB (one repository's bundle of unpushed commits, estimated before it is written),
+160 MB (one repository's bundle of unpushed commits, estimated before it is written),
 `patch_mb` 64 MB (one checkout's uncommitted changes), `untracked_mb` 32 MB (one checkout's
 untracked files together), `checkouts_mb` 768 MB (everything carried for checkouts), and
 `min_free_gb` 2 GB left free on the disk that holds the backups root. Anything over a cap is
@@ -1540,7 +1540,9 @@ Why these caps: on 2026-10-20 a working agent machine (476 checkouts, a bundle o
 or untracked set and 64 MB for all checkouts. Ten were repositories whose unpushed commits
 made bundles of 16.7 to 130 MB (and one of 404 MB, a single commit of a large file); two were
 patches of 23 and 59 MB. At the caps above all of them but the 404 MB bundle and a 161 MB set
-of untracked files are carried, for about 560 MB more per bundle. A carried part is spooled to
+of untracked files are carried, for about 560 MB more per bundle. (Caps count MiB: the bundle
+cap is 160, not 128, because the largest of those bundles, 32 commits that were the only copy
+of their work, is 130.0 MiB.) A carried part is spooled to
 the private stage and streamed into the bundle, so a larger cap costs disk (checked against
 `min_free_gb`), never memory. Three bundles are kept.
 
@@ -1863,9 +1865,12 @@ job, it measures every volume it writes to against what it writes there: the rel
 (the published size), the installed package beside the one it replaces (twice the installed
 size, since pip keeps the old files until it commits), the workspace snapshot (the workspace
 as the snapshot copies it), its encrypted copy in the backups root when a passphrase is set,
-the cached rollback wheels, and room for the store's databases to be written once more while
-the new release migrates them; plus 1 GB left free. A volume short of that refuses with exit
-7: nothing downloaded, stopped or installed, the report's `space` lists each volume's writes,
+the cached rollback wheels, room for the store's databases to be written once more while the
+new release migrates them, and, in the first check, the machine backup it is about to take
+(sized by the newest bundle); plus 1 GB left free. Volumes that report the same free space
+(APFS volumes of one container share it) are counted as one. The second check leaves out what
+is already on disk. A volume short of that refuses with exit 7: nothing stopped or installed
+(and, at the first check, nothing downloaded and no backup taken), the report's `space` lists each volume's writes,
 `needed_bytes` and `free_bytes`, and the error names both numbers and how to free space. On
 2026-10-20 an automatic update without this check rolled back on "database or disk is full"
 half-way through the migration. The preview shows the same measurement and lists a short

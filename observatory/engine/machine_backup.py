@@ -108,15 +108,18 @@ STATE_NAME = "machine-backup.json"
 #: commits made bundles of 16.7, 19.1, 24.0, 26.4, 29.6, 30.3, 76.8, 110.6, 130.0 and 404.3 MB
 #: against a 16 MB cap (one held 32 unpushed commits), two patches of 23.4 and 59.1 MB against
 #: 8 MB, and untracked sets of 15.9 and 161.5 MB against 8 MB. Those commits are the only copy
-#: of the work, and the bundle exists so the machine can move. At 128/64/32 MB and 768 MB for
+#: of the work, and the bundle exists so the machine can move. At 160/64/32 MB and 768 MB for
 #: all checkouts, every one of them but the 404 MB bundle (one commit of a large file) and the
-#: 161.5 MB untracked set is carried: about 560 MB more per bundle, three bundles kept. What
-#: still does not fit is a finding with its fix (`remedy`), never only a count.
+#: 161.5 MB untracked set is carried: about 560 MB more per bundle, three bundles kept. 160, not
+#: 128: caps are MiB and the largest of them, the 32 commits, is 130.0 MiB (a 128 cap refused
+#: it, review of #325). `test_the_default_caps_carry_what_the_measured_machine_left_behind`
+#: computes this claim from the receipt's exact sizes through `over_cap`. What still does not
+#: fit is a finding with its fix (`remedy`), never only a count.
 LIMITS = {
     "file_mb": 16,          # one file
     "entry_mb": 128,        # one manifest entry (a directory such as ~/.claude/skills)
     "total_mb": 320,        # every file copy together; measured: 69 MB compressed with every skill carried
-    "bundle_mb": 128,       # one checkout's git bundle of unpushed commits
+    "bundle_mb": 160,       # one checkout's git bundle of unpushed commits
     "patch_mb": 64,         # one checkout's patch of uncommitted changes
     "untracked_mb": 32,     # one checkout's untracked files together
     "checkouts_mb": 768,    # everything carried for checkouts together
@@ -792,6 +795,17 @@ def _bundle_repository(path: Path, rec: dict, heads: dict, work: Path, cid: str)
     return tmp, revs, estimate
 
 
+def over_cap(size: int, cap_key: str, used: int, limits: dict) -> str | None:
+    """The cap a checkout part of `size` bytes breaks, or None: its own (`cap_key`) or, with
+    `used` bytes already carried for checkouts, `checkouts_mb`. Caps are MiB. The one rule both
+    the backup and the test of the documented defaults apply."""
+    if size > int(limits[cap_key] * 1024 * 1024):
+        return cap_key
+    if used + size > int(limits["checkouts_mb"] * 1024 * 1024):
+        return "checkouts_mb"
+    return None
+
+
 def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Path, cid: str,
                    bundled_dirs: set, budget: list, heads: dict | None = None) -> list[dict]:
     """The members this checkout adds: one bundle per repository of every commit no remote has
@@ -803,10 +817,11 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
     floor = int(limits["min_free_gb"] * 1024 ** 3)
 
     def room(size: int, cap_key: str, what: str, charge: bool = True) -> bool:
-        if size > col.mb(cap_key):
+        broken = over_cap(size, cap_key, budget[0], limits)
+        if broken == cap_key:
             col.miss(shown, f"{what}: over the cap of {limits[cap_key]} MB (limits.{cap_key})", size)
             return False
-        if budget[0] + size > col.mb("checkouts_mb"):
+        if broken:
             col.miss(shown, f"{what}: over the checkouts' cap of {limits['checkouts_mb']} MB (limits.checkouts_mb)", size)
             return False
         if free_bytes(work) - size < floor:
@@ -869,8 +884,10 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
             size += f.stat().st_size
         if files and room(size, "untracked_mb", f"{len(files)} untracked file(s)"):
             carried["untracked"], carried["untracked_modes"] = [], {}
-            for rel, f in files:
-                spool = work / cid / "untracked" / rel
+            for n, (rel, f) in enumerate(files):
+                # By number, never by name: two names that differ only in case would be one file
+                # on a case-insensitive stage, and the second copy would replace the first.
+                spool = work / cid / "untracked" / str(n)
                 try:
                     spool.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                     shutil.copyfile(f, spool, follow_symlinks=False)
@@ -1288,6 +1305,25 @@ def step(base: Path, at: datetime.datetime, *, take_fn=None) -> dict:
         return {"result": "refused-disk", "detail": str(exc)[:300]}
     except MachineBackupError as exc:
         return {"result": "busy" if "is running" in str(exc) else "failed", "detail": str(exc)[:300]}
+
+
+def expected_before_update(base: Path, at: datetime.datetime | None = None) -> int:
+    """Bytes `before_update` is about to write: the newest bundle's size when one is due (the
+    best estimate of the next), 0 when none will be taken. `full update` counts it in its first
+    space check, so a marginal disk is refused before a fresh bundle fills it (review of #325)."""
+    at = at or datetime.datetime.now(datetime.timezone.utc)
+    try:
+        if not enabled(base) or not automatic_allowed():
+            return 0
+        last = newest(base)
+        if last is None:
+            return 0
+        when = _stamp_time(last)
+        if when and at - when < FRESH:
+            return 0
+        return last.stat().st_size
+    except OSError:
+        return 0
 
 
 def before_update(base: Path, *, take_fn=None, at: datetime.datetime | None = None) -> dict:

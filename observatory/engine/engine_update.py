@@ -998,7 +998,8 @@ def installed_bytes() -> int | None:
     return total or None
 
 
-def space_writes(base: Path, release: Release, *, has_ws: bool, rollback_cached: bool) -> list[dict]:
+def space_writes(base: Path, release: Release, *, has_ws: bool, rollback_cached: bool,
+                 downloaded: bool = False) -> list[dict]:
     """What `--apply` writes, where, in bytes: each row {what, path, bytes}.
 
     Sized from the things themselves: the release's published wheel size (MAX_WHEEL when the
@@ -1007,10 +1008,18 @@ def space_writes(base: Path, release: Release, *, has_ws: bool, rollback_cached:
     copies it (workspace_upgrade's own exclusions), the encrypted copy of that snapshot in
     the backups root when a passphrase is set, and the store's databases once more: a
     migration that rebuilds a table writes it again before the old pages are freed. That last
-    row is what ran out on 2026-10-20."""
+    row is what ran out on 2026-10-20.
+
+    Before the download (`downloaded` false) the rows also hold the wheels about to be fetched
+    and the machine backup about to be taken (machine_backup.expected_before_update, the size of
+    the newest bundle when one is due): with a marginal disk the hourly retry used to write a
+    fresh bundle of about a gigabyte before refusing. After them (the second check) both are
+    on disk already and are not counted again."""
     wheel = release.wheel.size if release.wheel is not None and release.wheel.size else MAX_WHEEL
-    rows = [{"what": "release wheels", "path": Path(tempfile.gettempdir()),
-             "bytes": wheel * (1 if rollback_cached else 2)}]
+    rows = []
+    if not downloaded:
+        rows.append({"what": "release wheels", "path": Path(tempfile.gettempdir()),
+                     "bytes": wheel * (1 if rollback_cached else 2)})
     installed = installed_bytes()
     rows.append({"what": "installed package, new beside old", "path": Path(sysconfig.get_paths()["purelib"]),
                  "bytes": 2 * (installed if installed else 4 * wheel)})
@@ -1022,29 +1031,56 @@ def space_writes(base: Path, release: Release, *, has_ws: bool, rollback_cached:
     databases = sum(f.stat().st_size for f in store.glob("*.db*")
                     if f.is_file() and not f.is_symlink() and not f.name.endswith("-shm")) if store.is_dir() else 0
     rows.append({"what": "store growth during the migration", "path": store, "bytes": databases})
-    rows.append({"what": "release wheels cached for the next rollback", "path": base / CACHE, "bytes": 2 * wheel})
+    # The target wheel, and the rollback wheel unless an earlier update already cached it.
+    rows.append({"what": "release wheels cached for the next rollback", "path": base / CACHE,
+                 "bytes": wheel * (1 if rollback_cached else 2)})
     try:
+        root = Path(backup_vault.root_info(base)["path"])
         if backup_vault.passphrase(base) is not None:
-            rows.append({"what": "encrypted copy of the snapshot", "path": Path(backup_vault.root_info(base)["path"]),
-                         "bytes": snapshot})
+            rows.append({"what": "encrypted copy of the snapshot", "path": root, "bytes": snapshot})
     except (config.ConfigurationError, OSError):
-        pass
+        root = None
+    if not downloaded and root is not None:
+        try:
+            import machine_backup
+            bundle = machine_backup.expected_before_update(base)
+        except Exception:  # noqa: BLE001: an estimate never fails the update; the backup's own floor still holds
+            bundle = 0
+        if bundle:
+            rows.append({"what": "machine backup before the update", "path": root, "bytes": bundle})
     return rows
+
+
+#: Volumes whose free space differs by less than this are taken to share it.
+SHARED_FREE_SLACK = 16 * 1024 * 1024
 
 
 def space_check(rows: list[dict], free: Callable[[Path], int]) -> dict:
     """Group the writes by volume and compare each volume's total plus SPACE_FLOOR with its free
-    space. Returns {volumes, short}; every number is in bytes."""
+    space. Returns {volumes, short}; every number is in bytes.
+
+    APFS volumes of one container (macOS's Data volume and another on the same disk) have
+    their own `st_dev` but draw on one pool of free space, so two of them checked apart can
+    each fit while together they do not. Volumes reporting the same free space (within
+    SHARED_FREE_SLACK, measured a moment apart) are therefore summed as one. Two separate disks
+    that happen to agree that closely are summed too, which only ever refuses more, never less."""
     volumes: dict = {}
     for row in rows:
         key = _volume(row["path"])
         entry = volumes.setdefault(key, {"path": str(row["path"]), "writes": []})
         entry["writes"].append({"what": row["what"], "bytes": int(row["bytes"])})
-    out = []
+    out: list[dict] = []
     for entry in volumes.values():
-        entry["needed_bytes"] = sum(w["bytes"] for w in entry["writes"]) + SPACE_FLOOR
         entry["free_bytes"] = int(free(Path(entry["path"])))
-        out.append(entry)
+        shared = next((o for o in out if abs(o["free_bytes"] - entry["free_bytes"]) < SHARED_FREE_SLACK), None)
+        if shared is not None:
+            shared["writes"].extend(entry["writes"])
+            shared.setdefault("also", []).append(entry["path"])
+            shared["free_bytes"] = min(shared["free_bytes"], entry["free_bytes"])
+        else:
+            out.append(entry)
+    for entry in out:
+        entry["needed_bytes"] = sum(w["bytes"] for w in entry["writes"]) + SPACE_FLOOR
     return {"volumes": out, "short": [v for v in out if v["free_bytes"] < v["needed_bytes"]],
             "floor_bytes": SPACE_FLOOR}
 
@@ -1053,14 +1089,16 @@ def _gb(n: int) -> str:
     return f"{n / 1024 ** 3:.2f} GB"
 
 
-def space_refusal(space: dict) -> str:
+def space_refusal(space: dict, *, downloaded: bool = False) -> str:
     parts = []
     for v in space["short"]:
         biggest = ", ".join(f"{w['what']} {_gb(w['bytes'])}" for w in sorted(v["writes"], key=lambda w: -w["bytes"]))
         parts.append(f"the volume holding {v['path']} needs {v['needed_bytes']} bytes ({_gb(v['needed_bytes'])}: "
                      f"{biggest}, and {_gb(SPACE_FLOOR)} left free) and has {v['free_bytes']} bytes free "
                      f"({_gb(v['free_bytes'])})")
-    return ("Not updated, nothing was downloaded, stopped or installed: too little free space; "
+    done = ("the release was downloaded and verified and the machine backup taken, but nothing was stopped or "
+            "installed" if downloaded else "nothing was downloaded, stopped or installed")
+    return (f"Not updated, {done}: too little free space; "
             + "; ".join(parts) + ". Free space on that volume (`project-observatory full machine --disk` names "
             "the largest places, `full disk-guard --apply` removes what loses nothing), then run "
             "`project-observatory full update --apply` again")
@@ -1245,13 +1283,14 @@ class Transaction:
             workspace_upgrade.preflight(self.base)
         self.check_space(rollback_cached=self.has_ws and cached_wheel(self.base, self.current) is not None)
 
-    def check_space(self, *, rollback_cached: bool) -> None:
+    def check_space(self, *, rollback_cached: bool, downloaded: bool = False) -> None:
         """Refuses with EXIT_NO_SPACE when a volume would keep less than SPACE_FLOOR free."""
         space = space_check(space_writes(self.base, self.release, has_ws=self.has_ws,
-                                         rollback_cached=rollback_cached), self.deps.free_space)
+                                         rollback_cached=rollback_cached, downloaded=downloaded),
+                            self.deps.free_space)
         self.report["space"] = space
         if space["short"]:
-            raise UpdateError(space_refusal(space), EXIT_NO_SPACE, {"space": space})
+            raise UpdateError(space_refusal(space, downloaded=downloaded), EXIT_NO_SPACE, {"space": space})
 
     def rollback_wheel(self, work: Path) -> Path | None:
         if self.has_ws:
@@ -1469,7 +1508,8 @@ class Transaction:
                                                    + str(self.report["machine_backup"].get("detail", ""))[:200])
             # Again, with the machine bundle written and the wheels downloaded: the last
             # moment at which a refusal changes nothing.
-            self.check_space(rollback_cached=rollback is not None and rollback.parent == self.base / CACHE)
+            self.check_space(rollback_cached=rollback is not None and rollback.parent == self.base / CACHE,
+                             downloaded=True)
             self.stop_writers()
             snapshot = before = None
             try:

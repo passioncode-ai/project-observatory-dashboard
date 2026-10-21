@@ -75,17 +75,38 @@ class BackupLeftBehind(unittest.TestCase):
             {'source': '~/.agents/skills/bulky', 'reason': 'over the per-entry cap of 128 MB (limits.entry_mb)',
              'size': 5, 'files': 2, 'fix': 'raise limits.entry_mb'}]})
         found = {f['subject']: f for f in F.backup_findings(self.state)}
-        alpha = found['machine-backup:~/src/alpha-web']
+        alpha = found['machine-backup:~/src/alpha-web:commits']
         self.assertEqual((alpha['type'], alpha['severity']), ('machine.backup_not_carried', 'warning'))
         self.assertIn('32 commit(s)', alpha['detail'])
         self.assertIn('only copy', alpha['detail'])
         self.assertIn('git -C ~/src/alpha-web push', alpha['action'])
-        self.assertEqual(found['machine-backup:~/src/beta-api']['severity'], 'warning')
-        self.assertEqual(found['machine-backup:~/.agents/skills/bulky']['severity'], 'info')
+        self.assertEqual(found['machine-backup:~/src/beta-api:changes']['severity'], 'warning')
+        self.assertEqual(found['machine-backup:~/.agents/skills/bulky:files']['severity'], 'info')
         # One more than the receipt lists: named as a count, with where to read them all.
         rest = found['machine-backup:more']
         self.assertIn('1', rest['title'])
         self.assertIn('machine-backup status', rest['action'])
+
+    def test_two_parts_of_one_checkout_are_two_findings_with_two_ids(self):
+        # Review of #325: a patch over patch_mb and untracked files over untracked_mb of ONE
+        # checkout shared one subject, and the board's duplicate-id guard then published nothing.
+        # The operator's real receipt held such a pair. Two caps of one home folder too.
+        self.write({'result': 'taken', 'not_carried_count': 5, 'not_carried': [
+            {'source': '~/src/alpha-web', 'reason': '3 commit(s) no remote has: over the cap of 16 MB (limits.bundle_mb)', 'size': 9},
+            {'source': '~/src/alpha-web', 'reason': 'uncommitted changes: over the cap of 8 MB (limits.patch_mb)', 'size': 9},
+            {'source': '~/src/alpha-web', 'reason': '1577 untracked file(s): over the cap of 8 MB (limits.untracked_mb)', 'size': 9},
+            {'source': '~/.agents/skills/bulky', 'reason': 'over the per-file cap of 16 MB (limits.file_mb)', 'size': 9, 'fix': 'a'},
+            {'source': '~/.agents/skills/bulky', 'reason': 'over the per-entry cap of 128 MB (limits.entry_mb)', 'size': 9, 'fix': 'b'}]})
+        found = F.backup_findings(self.state)
+        ids = [f"{f['type']}:{f['subject']}" for f in found]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+        alpha = {f['subject'] for f in found if '~/src/alpha-web' in f['subject']}
+        self.assertEqual(len(alpha), 3, 'commits, uncommitted changes and untracked files are each a row')
+        bulky = [f for f in found if '~/.agents/skills/bulky' in f['subject']]
+        self.assertEqual(len(bulky), 1, 'two caps of one folder are one row naming both')
+        self.assertIn('limits.file_mb', bulky[0]['detail'])
+        self.assertIn('limits.entry_mb', bulky[0]['detail'])
+        self.assertIn('a', bulky[0]['action']); self.assertIn('b', bulky[0]['action'])
 
     def test_a_record_without_a_fix_still_says_where_to_look(self):
         self.write({'result': 'taken', 'not_carried_count': 1,

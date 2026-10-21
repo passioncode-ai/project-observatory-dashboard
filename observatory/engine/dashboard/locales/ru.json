@@ -185,6 +185,8 @@
  "Machine": "Машина",
  "Machine disk low": "Мало места на диске машины",
  "Not carried by the machine backup": "Не вошло в резервную копию машины",
+ "One finding id produced twice": "Один идентификатор находки выдан дважды",
+ "{count} finding ids were produced twice; the later rows were dropped": "идентификаторов находок, выданных дважды: {count}; более поздние строки отброшены",
  "the machine backup did not carry {source}": "в резервную копию машины не вошло: {source}",
  "items the machine backup did not carry beyond those listed: {count}": "ещё не вошло в резервную копию машины, сверх перечисленного: {count}",
  "Machine secrets": "Секреты машины",

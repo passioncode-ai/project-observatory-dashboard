@@ -693,7 +693,14 @@ def main() -> int:
     if args.jobs < 1 or args.timeout < 1: ap.error('jobs and timeout must be positive')
     if args.min_free_gb < 0: ap.error('--min-free-gb must be 0 or more')
     names=tuple(dict.fromkeys(args.suite or SUITES))
-    refusal = space_refusal(min(args.jobs, len(names)), args.min_free_gb)
+    try:
+        refusal = space_refusal(min(args.jobs, len(names)), args.min_free_gb)
+    except Exception as exc:
+        # Sizing reads the source list, which raises for a missing suite file: a receipt, not a
+        # traceback (review of #325).
+        print(json.dumps({'schema_version':1,'status':'FAIL','error_type':type(exc).__name__,
+                          'reason':'the free-space check could not size the run','not_run':list(NOT_RUN)}))
+        return 1
     if refusal:
         print(refusal['reason'], file=sys.stderr, flush=True)
         print(json.dumps({'schema_version':1,'status':'FAIL','reason_code':'insufficient_disk',**refusal,
