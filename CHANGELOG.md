@@ -11,6 +11,32 @@ while the major version is 0, a minor release may change behaviour and says so h
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
   restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+- **`full update --apply` checks free disk before it changes anything.** On 2026-10-20 an automatic update rolled
+  back with "database or disk is full" half-way through the new release's workspace migration. Before downloading,
+  and again after the machine backup and just before any job is stopped, every volume the update writes to is
+  measured against what it writes there (the release wheels, the installed package beside the one it replaces, the
+  workspace snapshot and its encrypted copy, the cached rollback wheels, the store's databases once more for the
+  migration) plus 1 GB left free. A short volume refuses with the new exit code 7 and a `space` report naming the
+  bytes needed and free on each volume; nothing is downloaded, stopped, installed or rolled back. The preview lists it
+  under `apply_blockers`; the maintenance job records `refused-disk` and tries again the next hour.
+- **The portable test run keeps its disk footprint bounded** (OBS-167). Each suite's sandbox (a copy of the source
+  and the suite's own files) is removed when that suite ends, its `run.log` kept (`--keep` keeps them all); a full
+  run used to keep 273 copies, about 3.5 GB, to the end. The run refuses to start (exit 7, `insufficient_disk`)
+  when the temporary folder would keep less than one source copy per running suite plus 2 GB free;
+  `--min-free-gb N` sets the floor and `0` starts anyway.
+- **What the machine backup leaves behind is a finding with its fix.** Each item not carried is now a
+  `machine.backup_not_carried` row on the board (a warning for the only copy of commits or uncommitted changes) and
+  carries a `fix` in the manifest, the answer and `full machine-backup status`: push the branch, or the exact
+  `limits` value in `config/machine-backup.json` that would carry it. The only copies of work are listed first.
+
+### Changed
+
+- **The machine backup carries larger checkouts by default.** Measured on a working agent machine on 2026-10-20,
+  ten repositories' unpushed commits (bundles of 16.7 to 130 MB, one of 404 MB) and two patches (23 and 59 MB) were
+  left out under the old caps. The defaults are now 128 MB per bundle (was 16), 64 MB per patch (was 8), 32 MB per
+  untracked set (was 8) and 768 MB for all checkouts (was 64), which carries all of them but the 404 MB bundle and a
+  161 MB untracked set, for about 560 MB more per bundle. Carried parts are spooled to the private stage and
+  streamed into the bundle, so a larger cap costs disk, checked against `min_free_gb`, never memory.
 
 ## 0.27.0 (2026-10-20)
 

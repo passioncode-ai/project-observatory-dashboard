@@ -99,6 +99,10 @@ def _transient(record: dict) -> bool:
     detail = str(record.get("detail") or "")
     if record.get("result") == "another-update-running":
         return True
+    if record.get("result") == "refused-disk":
+        # Refused before it began for too little free space (exit 7): the disk guard runs on
+        # every pass and a person may free space, so the next hour may fit.
+        return True
     return record.get("result") in ("refused", "failed-rolled-back", "undetermined") and any(
         marker in detail for marker in TRANSIENT)
 
@@ -162,7 +166,7 @@ INTERVAL_SECONDS = 900
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
 #: caught by tests/test_maintenance.py rather than by a user's stalled install.
 UPDATE_OK, UPDATE_FAILED, UPDATE_REFUSED, UPDATE_UNDETERMINED = 0, 1, 2, 3
-UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_HELD, UPDATE_AVAILABLE = 4, 5, 6, 10
+UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_HELD, UPDATE_NO_SPACE, UPDATE_AVAILABLE = 4, 5, 6, 7, 10
 SNAPSHOT_ATTEMPTS = 3
 #: Set in every process a maintenance pass starts. A schedule installed from inside a pass
 #: never boots the job out: that would kill the pass and whatever it runs (review F1).
@@ -649,7 +653,7 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     outcome = {UPDATE_OK: "updated", UPDATE_SERVICES: "updated-services-not-restarted",
                UPDATE_FAILED: "failed-rolled-back", UPDATE_REFUSED: "refused",
                UPDATE_UNDETERMINED: "undetermined", UPDATE_NEEDS_PERSON: "needs-person",
-               UPDATE_HELD: "held"}.get(code, "failed")
+               UPDATE_HELD: "held", UPDATE_NO_SPACE: "refused-disk"}.get(code, "failed")
     update = {"at": iso(at), "exit": code, "result": outcome, "from": config.VERSION,
               "to": report.get("version") or check.get("latest")}
     if code == UPDATE_HELD:

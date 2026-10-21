@@ -616,9 +616,16 @@ class Pass(Base):
     def test_codes_match_the_updater(self):
         import engine_update as eu
         self.assertEqual((M.UPDATE_OK, M.UPDATE_FAILED, M.UPDATE_REFUSED, M.UPDATE_UNDETERMINED,
-                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_HELD, M.UPDATE_AVAILABLE),
+                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_HELD, M.UPDATE_NO_SPACE,
+                          M.UPDATE_AVAILABLE),
                          (eu.EXIT_OK, eu.EXIT_FAILED, eu.EXIT_REFUSED, eu.EXIT_UNDETERMINED,
-                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_HELD, eu.EXIT_UPDATE_AVAILABLE))
+                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_HELD, eu.EXIT_NO_SPACE,
+                          eu.EXIT_UPDATE_AVAILABLE))
+        # Every exit code the updater defines is named here: a new one cannot reach the job as
+        # an unexplained "failed".
+        updater = {v for k, v in vars(eu).items() if k.startswith("EXIT_")}
+        named = {v for k, v in vars(M).items() if k.startswith("UPDATE_") and isinstance(v, int)}
+        self.assertEqual(updater - named, set())
 
     def test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup(self):
         commands = FakeCommands(check=0)
@@ -929,6 +936,25 @@ class Pass(Base):
         commands.apply_code = 0
         later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
         self.assertEqual(later["update"]["result"], "updated", "a transient refusal is tried again the next hour")
+
+    def test_an_update_refused_for_disk_space_is_named_and_retried_the_next_hour(self):
+        # 2026-10-20: an update ran out of disk half-way and rolled back. Now it is refused
+        # before it starts (exit 7); the disk guard runs every pass, so the next hour may fit.
+        commands = FakeCommands(check=10, apply=7)
+        commands.apply_orig = commands.apply
+
+        def apply(*args, env=None):
+            code, doc, err = commands.apply_orig(*args, env=env)
+            return code, {"status": "refused", "error": "Not updated: too little free space; needs 5 bytes"}, ""
+        commands.apply = apply
+        self.assertEqual(self.run_pass(commands)["update"]["result"], "refused-disk")
+        self.assertIn("too little free space", M.read_state(self.home)["update"]["detail"])
+        status = M.status(self.home, schedule=FakeSchedule())
+        item = next(w for w in status["warning_items"] if w["code"] == "update-incomplete")
+        self.assertEqual((item["result"], item["soon"]), ("refused-disk", True))
+        commands.apply_code = 0
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated")
 
     def test_a_refusal_for_good_waits_a_day(self):
         commands = FakeCommands(check=10, apply=2)

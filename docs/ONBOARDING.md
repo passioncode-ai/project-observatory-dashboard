@@ -25,6 +25,16 @@ the script exits zero. A trusted script can forge well-formed output, so this
 contract does not authenticate tests or establish complete coverage.
 The repository-root test module `test_runner_evidence.py` exercises these boundaries.
 
+Each suite runs in its own sandbox under the temporary folder (a copy of the engine's source,
+about 14 MB, and the suite's own files). The sandbox is removed as soon as its suite ends;
+only its `run.log` stays until the run ends (`--keep` keeps the sandboxes for inspection), and
+its row's `sandbox_bytes` says how much the sandbox held, so a run names the suites that write most.
+Before copying anything the run checks the temporary folder's free space: below one source copy
+per running suite (`--jobs`) plus the template and a 2 GB floor it refuses, exit 7, with
+`reason_code: insufficient_disk`, the bytes it needs and has, and the way out: free space,
+lower `--jobs`, or pass `--min-free-gb 0` to start anyway (`--min-free-gb N` sets the floor).
+Before this a full run kept all 273 copies to the end, about 3.5 GB (OBS-167).
+
 ## SQLite runtime prerequisite
 
 The full engine requires Python 3.11+ with SQLite 3.37+ **and loadable SQLite
@@ -1510,12 +1520,29 @@ A symbolic link is recorded as a link with its target, never followed. Left out 
 and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
 (`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
 Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
-belong in the vault, which the workspace snapshot carries. Anything over a cap (16 MB per
-file, 128 MB per entry, 320 MB of file copies, 16 MB per checkout bundle (estimated before it is written), 8 MB per patch or
-set of untracked files, 64 MB for all checkouts) is **not carried** and named, per folder, in
-`MANIFEST.json`, in the command's answer, in `doctor` (`machine_backup.not_carried`) and on the
-Health page. Measured on a working agent machine (2026-10-19): 69 MB, 14,221 items, 517
-checkouts, under two minutes. Three bundles are kept.
+belong in the vault, which the workspace snapshot carries.
+
+The caps, each a key of `limits` (below): `file_mb` 16 MB (one file), `entry_mb` 128 MB (one
+entry, such as `~/.claude/skills`), `total_mb` 320 MB (every file copy together), `bundle_mb`
+128 MB (one repository's bundle of unpushed commits, estimated before it is written),
+`patch_mb` 64 MB (one checkout's uncommitted changes), `untracked_mb` 32 MB (one checkout's
+untracked files together), `checkouts_mb` 768 MB (everything carried for checkouts), and
+`min_free_gb` 2 GB left free on the disk that holds the backups root. Anything over a cap is
+**not carried** and named, per folder, in `MANIFEST.json`, in the command's answer, in `doctor`
+(`machine_backup.not_carried`), on the Health page and as a finding on the board
+(`machine.backup_not_carried`, a warning when what is left behind is the only copy of commits
+or uncommitted changes). Each such item carries its `fix`: push the branch so a remote holds
+the commits, or the exact `limits` value that would carry it, written as the JSON to put in
+`machine-backup.json`. The only copies of work are listed first.
+
+Why these caps: on 2026-10-20 a working agent machine (476 checkouts, a bundle of 87 MB in
+104 seconds) left 19 items behind under the earlier caps of 16 MB per bundle, 8 MB per patch
+or untracked set and 64 MB for all checkouts. Ten were repositories whose unpushed commits
+made bundles of 16.7 to 130 MB (and one of 404 MB, a single commit of a large file); two were
+patches of 23 and 59 MB. At the caps above all of them but the 404 MB bundle and a 161 MB set
+of untracked files are carried, for about 560 MB more per bundle. A carried part is spooled to
+the private stage and streamed into the bundle, so a larger cap costs disk (checked against
+`min_free_gb`), never memory. Three bundles are kept.
 
 Every decrypted or temporary copy, during a backup or a restore, lives in one private folder,
 `<home>/store/.machine-stage/` (mode 700; before a workspace exists,
@@ -1831,6 +1858,20 @@ already been upgraded, the pre-update snapshot is restored at the same path and 
 copy is kept beside it as `<home>.failed-update-…`. Every step is a line in
 `store/logs/update.jsonl`.
 
+Before it downloads anything, and again after the machine backup and just before it stops a
+job, it measures every volume it writes to against what it writes there: the release wheels
+(the published size), the installed package beside the one it replaces (twice the installed
+size, since pip keeps the old files until it commits), the workspace snapshot (the workspace
+as the snapshot copies it), its encrypted copy in the backups root when a passphrase is set,
+the cached rollback wheels, and room for the store's databases to be written once more while
+the new release migrates them; plus 1 GB left free. A volume short of that refuses with exit
+7: nothing downloaded, stopped or installed, the report's `space` lists each volume's writes,
+`needed_bytes` and `free_bytes`, and the error names both numbers and how to free space. On
+2026-10-20 an automatic update without this check rolled back on "database or disk is full"
+half-way through the migration. The preview shows the same measurement and lists a short
+volume under `apply_blockers`. The automatic job records it as `refused-disk` and tries again
+the next hour, since the disk guard may have freed space by then.
+
 It refuses a downgrade, the same version without `--reinstall`, and a source checkout or
 editable install (update those with Git). `--version X.Y.Z` pins the target; `--repository
 OWNER/NAME` and `--api-url URL` select a fork or a mirror; the signature is still checked
@@ -1849,6 +1890,7 @@ HTTPS is accepted, except to this machine.
 | 4 | — | rollback incomplete; `human_steps` says what to run |
 | 5 | — | updated, but a stopped job did not start; `services_not_restarted` has the command |
 | 6 | — | `--unattended` only: the release declares a step that needs a person; downloaded and verified, not installed (`status: held`, `needs_person` names the step; do it, then `full update --apply`) |
+| 7 | not used | refused before any change: a volume the update writes to has too little free space (`space` names each volume's `needed_bytes` and `free_bytes`); free space and run it again |
 | 10 | a newer installable release exists | — |
 
 Anonymous GitHub API requests are limited to 60 an hour per address; a `--check` from a

@@ -115,6 +115,7 @@ LABELS: dict[str, str] = {
     "lifecycle.orphans": "Orphaned product processes",
     "lifecycle.overrun": "Job running past its interval",
     "lifecycle.stale_servers": "Session servers on replaced code",
+    "machine.backup_not_carried": "Not carried by the machine backup",
     "machine.detached_servers": "Detached server processes",
     "machine.disk_low": "Machine disk low",
     "machine.guard_stopping": "Disk guard Git cleanup keeps stopping",

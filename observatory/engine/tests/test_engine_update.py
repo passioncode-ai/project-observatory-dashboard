@@ -636,6 +636,79 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(doc["machine_backup"]["result"], "failed")
         self.assertTrue(any("machine backup" in d for d in doc["degraded"]))
 
+    # --- free space (2026-10-20: an automatic update rolled back on "database or disk is full") ---
+
+    def assert_refused_for_space(self, code, doc, before):
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        self.assertEqual(doc["status"], "refused", doc)
+        self.assertIn("free", doc["error"])
+        self.assertTrue(doc["space"]["short"], doc)
+        for volume in doc["space"]["short"]:
+            self.assertGreater(volume["needed_bytes"], volume["free_bytes"])
+            # The message names both numbers, in bytes, for every short volume.
+            self.assertIn(str(volume["needed_bytes"]), doc["error"])
+            self.assertIn(str(volume["free_bytes"]), doc["error"])
+        self.assertEqual(self.installer.calls, [], "nothing installed")
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start", "restart")],
+                         "no job stopped or started")
+        self.assertFalse(doc.get("rolled_back"), "nothing to roll back")
+        self.assertEqual(self.tree(), before)
+        self.assertFalse(list((self.home / "backups").glob("before-update-*")), "no snapshot taken")
+
+    def test_too_little_free_space_refuses_before_anything_changes(self):
+        self.gh.publish(NEWER)
+        before = self.tree()
+        backups = []
+        for flags in (("--apply",), ("--apply", "--unattended")):
+            code, doc = self.run_cli(*flags, free_space=lambda path: 64 * 1024 * 1024,
+                                     machine_backup=lambda base: backups.append(base) or {"result": "taken"})
+            self.assert_refused_for_space(code, doc, before)
+        self.assertEqual(backups, [], "refused before the machine backup and the download")
+        self.assertFalse((self.home / "backups/engine-releases").exists())
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[-1]["event"], "refused")
+
+    def test_the_space_needed_is_what_the_update_writes(self):
+        # A store of 3 MB: the snapshot copies it and a migration may rewrite it once more.
+        (self.home / "store" / "planted.db").write_bytes(b"\0" * (3 * 1024 * 1024))
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply", free_space=lambda path: 0)
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        rows = {row["what"]: row["bytes"] for v in doc["space"]["volumes"] for row in v["writes"]}
+        self.assertGreaterEqual(rows["workspace snapshot"], 3 * 1024 * 1024)
+        self.assertGreaterEqual(rows["store growth during the migration"], 3 * 1024 * 1024)
+        self.assertGreater(rows["release wheels"], 0)
+        self.assertGreater(rows["installed package, new beside old"], 0)
+        for v in doc["space"]["volumes"]:
+            self.assertEqual(v["needed_bytes"], sum(r["bytes"] for r in v["writes"]) + self.mod.SPACE_FLOOR)
+        # What was asked for is enough (plus the few hundred bytes the update's own journal
+        # adds to the workspace between the first check and the second).
+        enough = max(v["needed_bytes"] for v in doc["space"]["volumes"]) + 64 * 1024
+        code, doc = self.run_cli("--apply", free_space=lambda path: enough)
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+
+    def test_space_taken_by_the_machine_backup_is_checked_again_before_the_jobs_stop(self):
+        self.gh.publish(NEWER)
+        before = self.tree()
+        free = [10 * 1024 ** 4]
+
+        def backup(base):
+            free[0] = 1024           # the bundle filled the disk
+            return {"result": "taken"}
+        code, doc = self.run_cli("--apply", free_space=lambda path: free[0], machine_backup=backup)
+        self.assertEqual(code, self.mod.EXIT_NO_SPACE, doc)
+        self.assertEqual(self.installer.calls, [])
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start", "restart")])
+        self.assertEqual(self.tree(), before)
+
+    def test_the_preview_names_the_space_and_blocks_on_it(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli(free_space=lambda path: 0)
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(any("free" in b for b in doc["apply_blockers"]), doc)
+        self.assertTrue(doc["space"]["short"])
+        self.assertIsNone(doc["next"])
+
     def test_a_person_may_still_install_a_held_release_after_seeing_the_step(self):
         step = "back up the store by hand first"
         self.gh.publish(NEWER, wheel=self.held_wheel({"version": NEWER, "needs_person": step}))

@@ -1715,6 +1715,8 @@ def collect() -> list[dict]:
         except (OSError, ValueError):
             continue
     out.extend(machine_findings.findings(paths.SCRATCH, paths.STATE / "logs", _mc))
+    # WHAT THE MACHINE BACKUP LEFT BEHIND, one row per item with its fix (machine_backup.py).
+    out.extend(machine_findings.backup_findings(paths.STATE / "machine-backup.json"))
     # THE LIFECYCLE WATCH: orphaned product processes, session servers on replaced
     # code, jobs past their interval, logs past their cap — per owning product
     # (collectors/scan_lifecycle.py). Silent when the collector has never run.

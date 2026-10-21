@@ -309,6 +309,71 @@ class Taking(Machine):
         self.assertEqual({m['source'] for m in missed}, {'~/src/alpha-web', '~/src/beta-api'})
         self.assertFalse(any('bundle' in (r.get('carried') or {}) for r in manifest['checkouts']))
 
+    def test_everything_not_carried_says_how_to_carry_it_and_commits_come_first(self):
+        # 2026-10-20 on a real machine: 19 items not carried, ten of them unpushed commits over
+        # the 16 MB bundle cap, named only as a count in a receipt. The bundle exists so the
+        # machine can move; an item left behind must say what to do about it.
+        (self.user / 'src' / 'alpha-web' / 'notes' / 'bulky.bin').write_bytes(b'u' * 40_000)
+        self.settings({'roots': ['~/src'], 'limits': {'bundle_mb': 0.0001, 'patch_mb': 0.0000001,
+                                                       'untracked_mb': 0.01, 'file_mb': 0.02},
+                       'include': ['~/.config/example-agent']})
+        result = self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        for record in manifest['not_carried']:
+            self.assertTrue(record.get('fix'), record)
+        by_cap = {}
+        for record in manifest['not_carried']:
+            for key in MB.LIMITS:
+                if f'limits.{key}' in record['reason']:
+                    by_cap.setdefault(key, []).append(record)
+        for key in ('bundle_mb', 'patch_mb', 'untracked_mb', 'file_mb'):
+            self.assertIn(key, by_cap, key)
+            for record in by_cap[key]:
+                self.assertIn(f'limits.{key}', record['fix'])
+                self.assertIn(MB.CONFIG_NAME, record['fix'])
+                # The value it names carries this item.
+                needed = float(record['fix'].split(f'"{key}": ', 1)[1].split('}', 1)[0])
+                self.assertGreaterEqual(needed * 1024 * 1024, record['size'])
+        for record in by_cap['bundle_mb']:
+            self.assertIn('push', record['fix'])
+        # The receipt lists the only copies of work first: commits, then uncommitted changes.
+        kinds = [MB.loss_rank(r) for r in result['not_carried']]
+        self.assertEqual(kinds, sorted(kinds))
+        self.assertIn('commit', result['not_carried'][0]['reason'])
+        status = MB.status(self.ws, AT)
+        item = next(w for w in status['warning_items'] if w['code'] == 'machine-backup-not-carried')
+        self.assertGreaterEqual(item['commits'], 2)
+        self.assertIn('commit', item['text'])
+
+    def test_a_carried_bundle_is_streamed_from_its_file_never_read_whole(self):
+        read = Path.read_bytes
+        whole = []
+
+        def watch(path):
+            if path.suffix in ('.bundle', '.patch') or 'untracked' in path.parts:
+                whole.append(path.name)
+            return read(path)
+        with patch.object(Path, 'read_bytes', watch):
+            self.take(at=AT)
+        self.assertEqual(whole, [])
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        checkouts = [i for i in manifest['items'] if i['kind'] == 'checkout']
+        self.assertTrue(checkouts)
+        for item in checkouts:
+            data = (stage / item['arcname']).read_bytes()
+            self.assertEqual((len(data), MB._sha256(data)), (item['size'], item['sha256']))
+
+    def test_the_default_caps_are_the_documented_ones(self):
+        # The caps are a promise in the onboarding page; a change to one changes both.
+        text = (ROOT / 'docs' / 'ONBOARDING.md').read_text(encoding='utf-8')
+        start = text.index('### This machine\'s agent setup')
+        section = ' '.join(text[start:text.index('\n## ', start)].split())   # line breaks are layout
+        for key in ('file_mb', 'entry_mb', 'total_mb', 'bundle_mb', 'patch_mb', 'untracked_mb', 'checkouts_mb'):
+            self.assertIn(f'`{key}` {MB.LIMITS[key]} MB', section, key)
+        self.assertIn(f'`min_free_gb` {MB.LIMITS["min_free_gb"]} GB', section)
+
     def test_a_submodule_is_not_a_worktree(self):
         sub_dir = self.base / 'kinds' / 'lib'
         sub_dir.mkdir(parents=True)
