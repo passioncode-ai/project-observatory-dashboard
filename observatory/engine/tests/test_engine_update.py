@@ -87,6 +87,7 @@ class FakeGitHub:
         self.rate_limited = False
         self.reject_token = False
         self.tokens_seen = 0
+        self.feed_override: bytes | None = None
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -112,6 +113,13 @@ class FakeGitHub:
                     if spec is None:
                         return self._send(404, b'{"message":"Not Found"}')
                     return self._send(200, json.dumps(outer.document(version)).encode())
+                feed = f"/{REPO}/releases/latest/download/"
+                if self.path.startswith(feed):
+                    # github.com's static asset route: the latest release's file, no API.
+                    data = outer.releases.get(outer.latest or "", {}).get("files", {}).get(self.path[len(feed):])
+                    if outer.feed_override is not None:
+                        data = outer.feed_override
+                    return self._send(200, data) if data is not None else self._send(404, b"missing")
                 if self.path.startswith("/assets/"):
                     version, name = self.path[len("/assets/"):].split("/", 1)
                     data = outer.releases.get(version, {}).get("files", {}).get(name)
@@ -348,6 +356,42 @@ class UpdateTest(unittest.TestCase):
         backup_vault.passphrase_file(self.home).unlink()
         self.assertEqual(self.tree(), before, "a preview writes nothing")
         self.assertEqual(self.services.calls, [], "a preview does not even ask launchd")
+
+    # --- the static feed (operator rule, 2026-10-17) ----------------------------------
+
+    def api_requests(self):
+        return [r for r in self.gh.requests if r.startswith("/repos/")]
+
+    def test_check_reads_the_static_feed_and_never_the_rate_limited_api(self):
+        self.gh.latest = CURRENT
+        code, doc = self.run_cli("--check", feed=self.gh.api)
+        self.assertEqual((code, doc["status"], doc["source"]), (0, "up-to-date", "feed"))
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--check", feed=self.gh.api)
+        self.assertEqual((code, doc["status"], doc["target"]), (self.mod.EXIT_UPDATE_AVAILABLE, "update-available", NEWER))
+        self.assertEqual(self.api_requests(), [], "a check is one static file, never the REST API")
+        self.assertIn(f"/{REPO}/releases/latest/download/SHA256SUMS", self.gh.requests)
+        code, doc = self.run_cli("--check", "--version", NEWER, feed=self.gh.api)
+        self.assertEqual(code, self.mod.EXIT_UPDATE_AVAILABLE, "an explicit version still reads its tag")
+
+    def test_the_feed_is_githubs_static_asset_for_the_organizations_api_only(self):
+        self.assertEqual(self.mod.feed_host_for(self.mod.DEFAULT_API), "https://github.com")
+        self.assertEqual(self.mod.feed_url(REPO),
+                         f"https://github.com/{REPO}/releases/latest/download/SHA256SUMS")
+        self.assertIsNone(self.mod.feed_host_for("https://mirror.example.invalid"),
+                          "a person's mirror keeps the API layout it promises")
+        self.assertEqual(self.mod.feed_host_for("https://mirror.example.invalid", "https://feed.example.invalid"),
+                         "https://feed.example.invalid")
+
+    def test_a_feed_that_names_no_single_wheel_is_undetermined_never_current(self):
+        self.gh.latest = CURRENT
+        for body in (b"not a sums file\n", ("0" * 64 + "  SHA256SUMS.asc\n").encode(),
+                     ("1" * 64 + f"  project_observatory-{CURRENT}-py3-none-any.whl\n"
+                      + "2" * 64 + f"  project_observatory-{NEWER}-py3-none-any.whl\n").encode()):
+            self.gh.feed_override = body
+            code, doc = self.run_cli("--check", feed=self.gh.api)
+            self.assertEqual((code, doc["status"]), (self.mod.EXIT_UNDETERMINED, "degraded"), body)
+            self.assertNotIn("up-to-date", json.dumps(doc))
 
     def test_explicit_version_uses_the_tag_endpoint(self):
         self.gh.publish(NEWER, latest=False)
@@ -715,10 +759,13 @@ class UpdateTest(unittest.TestCase):
         out = io.StringIO()
         with patch.dict(os.environ, {self.mod.REPOSITORY_ENV: REPO, self.mod.API_ENV: self.gh.api}), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
-                patch.object(self.mod.Fetcher, "get_json", side_effect=self.mod.Undetermined("offline")):
+                patch.object(self.mod.Fetcher, "get_json", side_effect=self.mod.Undetermined("offline")), \
+                patch.object(self.mod.Fetcher, "get_text", side_effect=self.mod.Undetermined("offline")) as feed:
             code = self.mod.main(["--check"], self.deps())
         self.assertEqual(code, self.mod.EXIT_UNDETERMINED)
         self.assertEqual(self.gh.requests, [], "the redirected feed was not read")
+        self.assertEqual(feed.call_args.args[0], self.mod.feed_url(agent_plugin.REPOSITORY),
+                         "the organization's static feed on github.com, not the variable's server")
 
     def test_a_tampered_package_and_a_failed_install_are_logged_by_code(self):
         self.gh.publish(NEWER, digest="0" * 64)

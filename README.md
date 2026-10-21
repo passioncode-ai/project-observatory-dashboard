@@ -56,7 +56,7 @@ The wheel carries `requirements-full.lock`, the dependency set this release was 
 `pip` line installs the `full` extra against it. Without `-c`, pip resolves the newest releases of the
 transitive dependencies instead, which this release was not tested with.
 
-Later releases install themselves: `full init` schedules a maintenance job that checks for a newer stable release every six hours and installs it with `full update --apply --unattended`, verified and reversible. `project-observatory full auto-update off` turns that off (the daily backup keeps running); `project-observatory full update --apply` installs a release by hand ([staying in step](docs/ONBOARDING.md#staying-in-step)).
+Later releases install themselves: `full init` schedules a maintenance job that checks for a newer stable release every five minutes (a static file on github.com, not the rate-limited API) and installs it with `full update --apply --unattended`, verified and reversible. `project-observatory full auto-update off` turns that off (the daily backup keeps running); `project-observatory full update --apply` installs a release by hand ([staying in step](docs/ONBOARDING.md#staying-in-step)).
 
 ### Configure
 

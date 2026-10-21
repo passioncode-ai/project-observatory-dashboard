@@ -47,7 +47,7 @@ def instance(workspace: Path) -> str:
 class Job:
     """What runs, how often, and where it writes. `argv[0]` is the engine's interpreter."""
 
-    name: str                      # tick | server | maintain
+    name: str                      # tick | server | maintain | check
     workspace: Path
     argv: tuple[str, ...]
     env: tuple[tuple[str, str], ...]
@@ -61,7 +61,7 @@ class Job:
     background: bool = True
 
     def __post_init__(self):
-        if self.name not in ("tick", "server", "maintain"):
+        if self.name not in ("tick", "server", "maintain", "check"):
             raise ValueError(f"unknown job {self.name!r}")
         if self.interval_seconds is not None and self.interval_seconds < 60:
             raise ValueError("a periodic job runs at most once a minute")

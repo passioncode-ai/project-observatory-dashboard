@@ -271,13 +271,19 @@ class Wiring(Workspace):
             import os
             with mock.patch.object(sys, "platform", "win32"):
                 s = maintenance.schedule_for(Path(os.environ["OBSERVATORY_HOME"]))
-            print(json.dumps({"kind": s.kind, "xml": s.job.xml(), "path": s.job.path}))
+            print(json.dumps({"kind": s.kind, "xml": s.main.job.xml(), "path": s.main.job.path,
+                              "check_xml": s.check.job.xml(), "check_path": s.check.job.path}))
             """))
         self.assertEqual(got["kind"], "task-scheduler")
         self.assertTrue(got["path"].endswith("-maintain"))
         self.assertIn("<Delay>PT1M30S</Delay>", got["xml"])
         self.assertIn("<Interval>PT15M</Interval>", got["xml"])
         self.assertIn("OBSERVATORY_SYSTEM_SETUP=1", got["xml"])
+        # The five-minute update check is a task of its own (operator rule, 2026-10-17).
+        self.assertTrue(got["check_path"].endswith("-check"))
+        self.assertIn("<Interval>PT5M</Interval>", got["check_xml"])
+        self.assertIn("<Delay>PT1M30S</Delay>", got["check_xml"])
+        self.assertIn("maintain.py check", got["check_xml"].replace('"', ""))
 
 
 @unittest.skipUnless(os.name == "nt", "needs Windows Task Scheduler")

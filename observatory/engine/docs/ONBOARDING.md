@@ -1647,13 +1647,19 @@ estate. On the new machine:
 
 Nothing needs to be run after a release. One job per workspace runs every 15 minutes: launchd
 `org.project-observatory.<id>.maintain` on macOS, a systemd user timer
-`project-observatory-<id>-maintain.timer` on Linux, a Task Scheduler task on Windows. Each run does only what is due:
+`project-observatory-<id>-maintain.timer` on Linux, a Task Scheduler task on Windows. A second,
+small job of the same workspace (`.check`, `-check.timer`, the task `check`) asks every five
+minutes whether a newer release exists: one read of the newest release's `SHA256SUMS` on
+github.com (`releases/latest/download/SHA256SUMS`), never the GitHub REST API and its limit of 60
+requests an hour, and nothing else. When it finds one it starts the maintenance job at once. A
+check that finds what the last one found writes nothing to `store/logs/check.log` and no new line
+to the shared update log. Each maintenance run does only what is due:
 
 - With `features.auto_cleanup` on, first the disk guard (see [The disk guard](#the-disk-guard)): hourly while space
   is normal, on every pass below the `low` line.
 
-- Every six hours it runs `full update --check`; at login the first check waits 90 seconds
-  after the job starts. When a newer **stable** release exists, it runs `full update --apply
+- Every five minutes it runs `full update --check` (the same static read); at login the first
+  check waits 90 seconds after the job starts. When a newer **stable** release exists, it runs `full update --apply
   --unattended`, the verified, reversible transaction described below, at a safe point (see
   [When a new release starts running](#when-a-new-release-starts-running)).
 - On macOS, when the installed app is older than the engine, it replaces the app with that
@@ -1728,9 +1734,9 @@ reboot or a power loss is different: it ends the update too, and the next pass r
 `failed` ("the update ended without a final journal entry"). Health and `doctor` then show
 the failure; `doctor` also says whether the engine and its jobs run. Where there are no launchd
 jobs (Linux), the job and the plugin pass `--writers-stopped`, because there is nothing for the
-update to stop. A check that could not look is retried once within the hour, then every six
-hours. A failed update is rolled back and retried at the next check, or the next hour when
-the reason was momentary (a copy changed while it was taken, a busy lock). An update whose
+update to stop. A check that could not look is retried five minutes later, like every check. A
+failed update is rolled back and the same release is tried again six hours later, or at the
+next pass when the reason was momentary (a copy changed while it was taken, a busy lock). An update whose
 rollback needs a person stops the automatic attempts. Once you have run `full update`
 successfully, they resume. Until then, `doctor`, the Health page and `auto-update status` say
 so. `doctor` and the Health page also show when automatic updates are off, when the job is

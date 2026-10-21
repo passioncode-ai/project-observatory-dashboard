@@ -78,6 +78,10 @@ def emit(event: str, code: str, *, subject: str = "engine", base: Path | None = 
         file = folder / FILE
         if file.is_symlink():
             return
+        if event == "update_check" and _repeats(file, row):
+            # A check every five minutes (operator rule, 2026-10-17) that finds what the last
+            # one found is logged once, not every time: the line marks a change.
+            return
         import log_policy
         log_policy.rotate(file)
         fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
@@ -85,6 +89,30 @@ def emit(event: str, code: str, *, subject: str = "engine", base: Path | None = 
             out.write(json.dumps(row, sort_keys=True) + "\n")
     except (OSError, ImportError):
         pass
+
+
+#: How much of the log's end is read to find the previous check (a few hundred lines).
+TAIL_BYTES = 32 * 1024
+
+
+def _repeats(file: Path, row: dict) -> bool:
+    """Whether the previous `update_check` of the same subject and instance carried the same code."""
+    try:
+        with open(file, "rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - TAIL_BYTES))
+            lines = stream.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    for line in reversed(lines):
+        try:
+            prev = json.loads(line)
+        except ValueError:
+            continue
+        if (isinstance(prev, dict) and prev.get("event") == "update_check"
+                and prev.get("subject") == row["subject"] and prev.get("instance") == row.get("instance")):
+            return prev.get("code") == row["code"]
+    return False
 
 
 def read(limit: int = 200) -> list[dict]:
