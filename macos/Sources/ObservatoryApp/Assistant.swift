@@ -249,6 +249,7 @@ struct AssistantView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var m: Model
+    @EnvironmentObject var loginItem: LoginItem
     @FocusState private var field: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -267,6 +268,14 @@ struct SettingsView: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(m.t("Language"))
                 Text(m.t("System follows the first language in System Settings. The menus macOS draws itself follow at the next launch."))
+                    .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(m.t("Open at login"), isOn: Binding(get: { loginItem.enabled }, set: { loginItem.enabled = $0 }))
+                    .toggleStyle(.switch).tint(Theme.accent)
+                    // A switch style draws its label beside it, unread by VoiceOver without this.
+                    .accessibilityLabel(m.t("Open at login"))
+                Text(m.t("Project Observatory opens when you log in and keeps working with its window closed. Quit it from its menu (⌘Q)."))
                     .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 10) {

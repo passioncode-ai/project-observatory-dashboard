@@ -37,6 +37,14 @@ the Python environment, the background jobs and the workspace:
    answers `stale-server` with the reason (mcp/capability_tools.py). The report lists
    their pids as the processes this update did not touch.
 
+Before step 1, and again just before step 2 (after the machine backup, which writes too),
+every volume the update writes to is measured against what it writes there (`space_check`):
+the two wheels, the installed package beside the one it replaces, the workspace snapshot,
+its encrypted copy, and room for the store to grow while the new release migrates it, plus
+SPACE_FLOOR left over. A volume short of that refuses with EXIT_NO_SPACE, naming the bytes
+needed and free, before anything is downloaded, stopped or installed (2026-10-20: an
+automatic update rolled back on "database or disk is full" half-way through the migration).
+
 A release whose wheel declares a step that needs a person (RELEASE_MEMBER, below) is
 fetched and verified like any other; `--unattended` (the maintenance job) then stops there
 and exits EXIT_HELD, while a person's `--apply` shows the step and proceeds.
@@ -58,6 +66,7 @@ import email.parser
 import oslocks
 import osprivacy
 import hashlib
+import http.client
 import importlib.metadata
 import importlib.util
 import json
@@ -65,8 +74,10 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from typing import Callable
@@ -87,6 +98,14 @@ import update_events
 from store import compatibility, migrate  # noqa: F401
 
 DEFAULT_API = "https://api.github.com"
+#: Where "is there something newer" is read (operator rule, 2026-10-17): the newest release's
+#: own SHA256SUMS, served by github.com as a static release asset
+#: (`<host>/<repo>/releases/latest/download/SHA256SUMS`), never the REST API, whose anonymous
+#: limit is 60 requests an hour per address and which a check every five minutes from several
+#: workspaces and apps would exhaust. The wheel it names carries the version in its file name.
+#: The full signed verification of `--apply` still reads the API, once, when there is a release
+#: to install.
+FEED_HOST = "https://github.com"
 REPOSITORY_ENV, API_ENV = "OBSERVATORY_RELEASE_REPOSITORY", "OBSERVATORY_RELEASE_API"
 DISTRIBUTION = "project-observatory"
 WHEEL = "project_observatory-{version}-py3-none-any.whl"
@@ -109,6 +128,7 @@ EXIT_UNDETERMINED = 3      # the release could not be looked up (network, rate l
 EXIT_NEEDS_PERSON = 4      # rollback incomplete; `human_steps` says exactly what to do
 EXIT_SERVICES = 5          # updated, but a stopped job did not start again
 EXIT_HELD = 6              # --unattended only: the release declares a step that needs a person
+EXIT_NO_SPACE = 7          # refused before any change: a volume it writes to has too little free space
 EXIT_UPDATE_AVAILABLE = 10  # --check only
 
 #: A release that cannot be installed without a person (a data or schema migration that must
@@ -127,11 +147,14 @@ MAX_STEP_TEXT = 1000
 
 
 class UpdateError(RuntimeError):
-    """A refusal or failure with the exit code it maps to. Never carries a credential."""
+    """A refusal or failure with the exit code it maps to. Never carries a credential.
 
-    def __init__(self, message: str, code: int = EXIT_REFUSED):
+    `details` is merged into the printed report (the space check's measurements)."""
+
+    def __init__(self, message: str, code: int = EXIT_REFUSED, details: dict | None = None):
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 class Undetermined(UpdateError):
@@ -335,6 +358,22 @@ class Fetcher:
             raise Undetermined("Release document is not an object")
         return doc
 
+    def get_text(self, url: str, limit: int) -> str:
+        """A small text file (the static release feed); anonymous unless the host is the API."""
+        try:
+            with self._open(url, "application/octet-stream") as response:
+                body = response.read(limit + 1)
+        except (http.client.HTTPException, OSError) as exc:
+            # A connection dropped mid-body (IncompleteRead, a reset) is a check that could not
+            # look, never a traceback (review L7).
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} could not be read ({type(exc).__name__})") from None
+        if len(body) > limit:
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} is larger than expected")
+        try:
+            return body.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} is not text") from None
+
     def fetch_file(self, url: str, dest: Path, limit: int) -> tuple[str, int]:
         """Stream into a new private file; returns (sha256, size)."""
         digest, size = hashlib.sha256(), 0
@@ -411,6 +450,43 @@ def parse_release(doc: dict, expected: str | None = None) -> Release:
     return Release(version, tag, doc.get("html_url") if isinstance(doc.get("html_url"), str) else None,
                    _asset(wheel) if wheel else None, _asset(sums) if sums else None,
                    _asset(signature) if signature else None)
+
+
+def feed_url(repo: str, host: str = FEED_HOST) -> str:
+    return f"{host.rstrip('/')}/{repo}/releases/latest/download/{SUMS}"
+
+
+def latest_from_feed(fetcher: "Fetcher", url: str) -> str:
+    """The version of the newest release, read from its static SHA256SUMS.
+
+    Exactly one release wheel must be named; anything else is undetermined, never "current"."""
+    text = fetcher.get_text(url, MAX_SUMS)
+    try:
+        names = parse_sums(text)
+    except UpdateError as exc:
+        raise Undetermined(f"the release feed is not a SHA256SUMS file ({exc})") from None
+    versions = {m.group(1) for m in (re.fullmatch(r"project_observatory-(\d+\.\d+\.\d+)-py3-none-any\.whl", n)
+                                     for n in names) if m}
+    if len(versions) != 1:
+        raise Undetermined(f"the release feed names {len(versions)} engine wheels, not one")
+    return versions.pop()
+
+
+def feed_host_for(api: str, override: str | None = None) -> str | None:
+    """The static feed's host: the explicit one (a test, a development mirror), else github.com
+    when the release source is the organization's API; a person's own `--api-url` mirror keeps
+    the API route, which is the only layout it promises."""
+    if override:
+        return override
+    return FEED_HOST if api.rstrip("/") == DEFAULT_API else None
+
+
+def latest_version(fetcher: "Fetcher", api: str, repo: str, feed_host: str | None = None) -> tuple[str, str]:
+    """(version, source): the static feed when there is one, else the API's latest release."""
+    host = feed_host_for(api, feed_host)
+    if host:
+        return latest_from_feed(fetcher, feed_url(repo, host)), "feed"
+    return resolve_release(fetcher, api, repo, None).version, "api"
 
 
 def resolve_release(fetcher: Fetcher, api: str, repo: str, version: str | None) -> Release:
@@ -930,6 +1006,166 @@ def machine_backup_before_update(base: Path) -> dict:
     return machine_backup.before_update(base)
 
 
+# --- free space -------------------------------------------------------------------------
+
+#: What every volume the update writes to keeps free AFTER the update's own writes: the
+#: store and the logs go on growing while the jobs run on the new release, and a volume at
+#: zero fails them too.
+SPACE_FLOOR = 1024 ** 3
+
+
+def free_space(path: Path) -> int:
+    """Free bytes where a write to `path` lands (machine_backup.free_bytes, the one helper)."""
+    import machine_backup
+    return machine_backup.free_bytes(path)
+
+
+def _volume(path: Path):
+    import machine_backup
+    return os.stat(machine_backup.existing_ancestor(path)).st_dev
+
+
+def _tree_bytes(root: Path, skip=lambda rel: False) -> int:
+    """Bytes of the regular files under `root`, without following a link; `skip` takes the
+    path relative to `root` (the snapshot's own exclusions)."""
+    total = 0
+    for directory, children, files in os.walk(root, followlinks=False):
+        here = Path(directory)
+        children[:] = [c for c in children if not skip((here / c).relative_to(root))]
+        for name in files:
+            f = here / name
+            if skip(f.relative_to(root)):
+                continue
+            try:
+                info = f.lstat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                total += info.st_size
+    return total
+
+
+def installed_bytes() -> int | None:
+    """The installed distribution's files, from its RECORD; None when it is not installed."""
+    try:
+        dist = importlib.metadata.distribution(DISTRIBUTION)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    total = 0
+    for f in dist.files or []:
+        try:
+            total += Path(dist.locate_file(f)).stat().st_size
+        except (OSError, TypeError):
+            continue
+    return total or None
+
+
+def space_writes(base: Path, release: Release, *, has_ws: bool, rollback_cached: bool,
+                 downloaded: bool = False) -> list[dict]:
+    """What `--apply` writes, where, in bytes: each row {what, path, bytes}.
+
+    Sized from the things themselves: the release's published wheel size (MAX_WHEEL when the
+    release does not say), the installed package's RECORD (pip writes the new files while it
+    keeps the replaced ones aside until it commits, so twice), the workspace as the snapshot
+    copies it (workspace_upgrade's own exclusions), the encrypted copy of that snapshot in
+    the backups root when a passphrase is set, and the store's databases once more: a
+    migration that rebuilds a table writes it again before the old pages are freed. That last
+    row is what ran out on 2026-10-20.
+
+    Before the download (`downloaded` false) the rows also hold the wheels about to be fetched
+    and the machine backup about to be taken (machine_backup.expected_before_update, the size of
+    the newest bundle when one is due): with a marginal disk the hourly retry used to write a
+    fresh bundle of about a gigabyte before refusing. After them (the second check) both are
+    on disk already and are not counted again."""
+    wheel = release.wheel.size if release.wheel is not None and release.wheel.size else MAX_WHEEL
+    rows = []
+    if not downloaded:
+        rows.append({"what": "release wheels", "path": Path(tempfile.gettempdir()),
+                     "bytes": wheel * (1 if rollback_cached else 2)})
+    installed = installed_bytes()
+    rows.append({"what": "installed package, new beside old", "path": Path(sysconfig.get_paths()["purelib"]),
+                 "bytes": 2 * (installed if installed else 4 * wheel)})
+    if not has_ws:
+        return rows
+    snapshot = _tree_bytes(base, workspace_upgrade.excluded)
+    rows.append({"what": "workspace snapshot", "path": base / "backups", "bytes": snapshot})
+    store = base / "store"
+    databases = sum(f.stat().st_size for f in store.glob("*.db*")
+                    if f.is_file() and not f.is_symlink() and not f.name.endswith("-shm")) if store.is_dir() else 0
+    rows.append({"what": "store growth during the migration", "path": store, "bytes": databases})
+    # The target wheel, and the rollback wheel unless an earlier update already cached it.
+    rows.append({"what": "release wheels cached for the next rollback", "path": base / CACHE,
+                 "bytes": wheel * (1 if rollback_cached else 2)})
+    try:
+        root = Path(backup_vault.root_info(base)["path"])
+        if backup_vault.passphrase(base) is not None:
+            rows.append({"what": "encrypted copy of the snapshot", "path": root, "bytes": snapshot})
+    except (config.ConfigurationError, OSError):
+        root = None
+    if not downloaded and root is not None:
+        try:
+            import machine_backup
+            bundle = machine_backup.expected_before_update(base)
+        except Exception:  # noqa: BLE001: an estimate never fails the update; the backup's own floor still holds
+            bundle = 0
+        if bundle:
+            rows.append({"what": "machine backup before the update", "path": root, "bytes": bundle})
+    return rows
+
+
+#: Volumes whose free space differs by less than this are taken to share it.
+SHARED_FREE_SLACK = 16 * 1024 * 1024
+
+
+def space_check(rows: list[dict], free: Callable[[Path], int]) -> dict:
+    """Group the writes by volume and compare each volume's total plus SPACE_FLOOR with its free
+    space. Returns {volumes, short}; every number is in bytes.
+
+    APFS volumes of one container (macOS's Data volume and another on the same disk) have
+    their own `st_dev` but draw on one pool of free space, so two of them checked apart can
+    each fit while together they do not. Volumes reporting the same free space (within
+    SHARED_FREE_SLACK, measured a moment apart) are therefore summed as one. Two separate disks
+    that happen to agree that closely are summed too, which only ever refuses more, never less."""
+    volumes: dict = {}
+    for row in rows:
+        key = _volume(row["path"])
+        entry = volumes.setdefault(key, {"path": str(row["path"]), "writes": []})
+        entry["writes"].append({"what": row["what"], "bytes": int(row["bytes"])})
+    out: list[dict] = []
+    for entry in volumes.values():
+        entry["free_bytes"] = int(free(Path(entry["path"])))
+        shared = next((o for o in out if abs(o["free_bytes"] - entry["free_bytes"]) < SHARED_FREE_SLACK), None)
+        if shared is not None:
+            shared["writes"].extend(entry["writes"])
+            shared.setdefault("also", []).append(entry["path"])
+            shared["free_bytes"] = min(shared["free_bytes"], entry["free_bytes"])
+        else:
+            out.append(entry)
+    for entry in out:
+        entry["needed_bytes"] = sum(w["bytes"] for w in entry["writes"]) + SPACE_FLOOR
+    return {"volumes": out, "short": [v for v in out if v["free_bytes"] < v["needed_bytes"]],
+            "floor_bytes": SPACE_FLOOR}
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1024 ** 3:.2f} GB"
+
+
+def space_refusal(space: dict, *, downloaded: bool = False) -> str:
+    parts = []
+    for v in space["short"]:
+        biggest = ", ".join(f"{w['what']} {_gb(w['bytes'])}" for w in sorted(v["writes"], key=lambda w: -w["bytes"]))
+        parts.append(f"the volume holding {v['path']} needs {v['needed_bytes']} bytes ({_gb(v['needed_bytes'])}: "
+                     f"{biggest}, and {_gb(SPACE_FLOOR)} left free) and has {v['free_bytes']} bytes free "
+                     f"({_gb(v['free_bytes'])})")
+    done = ("the release was downloaded and verified and the machine backup taken, but nothing was stopped or "
+            "installed" if downloaded else "nothing was downloaded, stopped or installed")
+    return (f"Not updated, {done}: too little free space; "
+            + "; ".join(parts) + ". Free space on that volume (`project-observatory full machine --disk` names "
+            "the largest places, `full disk-guard --apply` removes what loses nothing), then run "
+            "`project-observatory full update --apply` again")
+
+
 @dataclasses.dataclass
 class Dependencies:
     fetcher: Fetcher = dataclasses.field(default_factory=Fetcher)
@@ -940,6 +1176,9 @@ class Dependencies:
     idle_timeout: float = 60.0
     sessions: Callable[[], list[dict]] = session_servers
     machine_backup: Callable[[Path], dict] = machine_backup_before_update
+    free_space: Callable[[Path], int] = free_space
+    #: The static feed's host for `--check`; None derives it (github.com for the organization's API).
+    feed: str | None = None
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -1012,6 +1251,20 @@ def relation(current: str, target: str) -> int:
     return (b > a) - (b < a)
 
 
+def feed_check_result(current: str, latest: str, repo: str, host: str) -> tuple[int, dict]:
+    """`--check` from the static feed: versions only, like the API check; `--apply` verifies."""
+    rel = relation(current, latest)
+    page = f"{FEED_HOST}/{repo}/releases/tag/v{latest}" if host == FEED_HOST else None
+    out = {"current": current, "target": latest, "release": page, "source": "feed", "degraded": []}
+    if rel == 0:
+        return EXIT_OK, {**out, "status": "up-to-date"}
+    if rel < 0:
+        return EXIT_OK, {**out, "status": "newer-installed",
+                         "note": "this machine runs a newer release than the target; update the other machine"}
+    return EXIT_UPDATE_AVAILABLE, {**out, "status": "update-available",
+                                   "next": f"project-observatory full update --version {latest} --apply"}
+
+
 def check_result(current: str, release: Release) -> tuple[int, dict]:
     rel = relation(current, release.version)
     out = {"current": current, "target": release.version, "release": release.page, "degraded": []}
@@ -1049,6 +1302,9 @@ def preview(base: Path, current: str, release: Release, deps: Dependencies, args
         except (config.ConfigurationError, RuntimeError, OSError) as exc:
             blockers.append(f"workspace: {exc}")
     cached = has_ws and cached_wheel(base, current) is not None
+    space = space_check(space_writes(base, release, has_ws=has_ws, rollback_cached=cached), deps.free_space)
+    if space["short"]:
+        blockers.append(space_refusal(space))
     would = [f"fetch {WHEEL.format(version=release.version)} and {SUMS}; verify both against GitHub's digests",
              f"rollback wheel {current}: " + ("cached from an earlier update" if cached else
                                                "downloaded from its own release and verified the same way")]
@@ -1065,7 +1321,7 @@ def preview(base: Path, current: str, release: Release, deps: Dependencies, args
                                                            "restart the jobs that were stopped" if has_ws else "")]
     return {"status": "preview", "current": current, "target": release.version, "release": release.page,
             "update_available": rel > 0, "workspace": "present" if has_ws else "none (install only)",
-            "would": would, "apply_blockers": blockers, "degraded": [],
+            "would": would, "apply_blockers": blockers, "degraded": [], "space": space,
             "next": None if blockers else "project-observatory full update"
                     + (f" --version {release.version}" if args.version else "") + " --apply"}
 
@@ -1103,6 +1359,16 @@ class Transaction:
         if self.has_ws:
             workspace_upgrade.managed_layout(self.base)
             workspace_upgrade.preflight(self.base)
+        self.check_space(rollback_cached=self.has_ws and cached_wheel(self.base, self.current) is not None)
+
+    def check_space(self, *, rollback_cached: bool, downloaded: bool = False) -> None:
+        """Refuses with EXIT_NO_SPACE when a volume would keep less than SPACE_FLOOR free."""
+        space = space_check(space_writes(self.base, self.release, has_ws=self.has_ws,
+                                         rollback_cached=rollback_cached, downloaded=downloaded),
+                            self.deps.free_space)
+        self.report["space"] = space
+        if space["short"]:
+            raise UpdateError(space_refusal(space, downloaded=downloaded), EXIT_NO_SPACE, {"space": space})
 
     def rollback_wheel(self, work: Path) -> Path | None:
         if self.has_ws:
@@ -1318,6 +1584,10 @@ class Transaction:
                 if self.report["machine_backup"].get("result") in ("failed", "refused-disk"):
                     self.report["degraded"].append("the machine backup before this update was not taken: "
                                                    + str(self.report["machine_backup"].get("detail", ""))[:200])
+            # Again, with the machine bundle written and the wheels downloaded: the last
+            # moment at which a refusal changes nothing.
+            self.check_space(rollback_cached=rollback is not None and rollback.parent == self.base / CACHE,
+                             downloaded=True)
             self.stop_writers()
             snapshot = before = None
             try:
@@ -1492,6 +1762,14 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         if args.version:
             config.version_tuple(args.version)
         api, repo = release_source(args.repository, args.api_url, deps.origin)
+        host = None if args.version else feed_host_for(api, deps.feed)
+        if args.check and host:
+            # The cheap question first, off the rate-limited API (operator rule, 2026-10-17).
+            code, result = feed_check_result(current, latest_from_feed(deps.fetcher, feed_url(repo, host)), repo, host)
+            update_events.emit("update_check", {EXIT_OK: "current", EXIT_UPDATE_AVAILABLE: "ready"}.get(
+                code, "check_failed"), base=_workspace_or_none(base))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return code
         release = resolve_release(deps.fetcher, api, repo, args.version)
         if args.check:
             code, result = check_result(current, release)
@@ -1513,7 +1791,8 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         if args.check:
             update_events.emit("update_check", "check_failed", base=_workspace_or_none(base))
     except UpdateError as exc:
-        code, result = exc.code, {"status": "refused", "current": current, "error": str(exc), "degraded": []}
+        code, result = exc.code, {"status": "refused", "current": current, "error": str(exc), "degraded": [],
+                                  **(exc.details or {})}
         if args.check:
             update_events.emit("update_check", "check_failed", base=_workspace_or_none(base))
     except (config.ConfigurationError, RuntimeError, OSError) as exc:

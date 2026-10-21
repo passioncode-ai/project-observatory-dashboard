@@ -180,8 +180,12 @@ asset digest and that line, and `SHA256SUMS` carries the organization's signatur
 Since 0.19.0 the app updates itself: the maintenance job stages the verified app, and the
 running app offers **Restart to update** and swaps it at a safe point, never while it is in
 use ([SPEC, "Updates"](SPEC.md#native-screens-and-lifecycle)). Since 0.20.0 it notices a staged
-update within 15 minutes and marks the Dock icon with `↑` until it is installed; left alone for
-30 minutes with no window on screen, it restarts into the update by itself. An app older than
+update within 5 minutes (15 before the operator's 2026-10-17 rule) and marks the Dock icon with
+`↑` until it is installed, asking once per version «Restart to finish updating» (Restart now /
+Later) while a window is on screen; left alone for 30 minutes with no window on screen, it restarts
+into the update by itself. It opens at login unless turned off in Settings, keeps running with its
+window closed, and names a missing permission in a banner at launch
+([SCN-012, SCN-013](SCENARIOS.md)). An app older than
 0.19.0 cannot do any of this: it is replaced the first time it is quit.
 
 A downloaded app keeps the browser's quarantine flag; Gatekeeper opens a notarized,

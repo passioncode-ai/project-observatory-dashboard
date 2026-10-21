@@ -11,6 +11,11 @@ import ObservatoryCore
     static var openWindow: OpenWindowAction?
     /// The staged-update watch; one per app, started at launch.
     let updates = Updates()
+    /// Open at login (on by default) and the launch-time permission check.
+    let loginItem = LoginItem()
+    /// Closing the last window hides it: the app keeps running in the Dock and quits only
+    /// through its own Quit (⌘Q) or a shutdown or logout (operator rule, 2026-10-16).
+    static let terminatesAfterLastWindowClosed = WindowClosePolicy.terminateAfterLastWindowClosed
     /// `--background` (the organization's background launch, and the idle restart's
     /// reopen): start and do the startup work, but show no window and take no focus
     /// until the person opens the app.
@@ -24,6 +29,9 @@ import ObservatoryCore
         // One dark PassionCode product: menus, alerts, sheets and the Settings window
         // follow the dashboard's dark pages whatever the system appearance is.
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        // At every launch: open at login as the person chose (on by default), and whatever
+        // the app needs and lacks is named in the dashboard window, never left silent.
+        loginItem.apply()
         updates.start()
         if Self.launchedInBackground {
             // SwiftUI opens the first scene's window by itself; put it away unseen. A Dock
@@ -52,7 +60,7 @@ import ObservatoryCore
         Self.showDashboard()
         return false
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { Self.terminatesAfterLastWindowClosed }
     /// A quit is a safe point (LC-16): a staged update is swapped in once the app is gone.
     func applicationWillTerminate(_ notification: Notification) { updates.installOnQuit() }
 
@@ -122,6 +130,7 @@ extension DashboardReopen.Seen {
             // The pages are dark by design (PassionCode tokens, `color-scheme: dark`):
             // the window's chrome matches them instead of framing them in light grey.
             DashboardView().environmentObject(model).environmentObject(web).environmentObject(appDelegate.updates)
+                .environmentObject(appDelegate.loginItem)
         }
         .defaultSize(width: 1320, height: 860)
         .keyboardShortcut("1")
@@ -139,7 +148,7 @@ extension DashboardReopen.Seen {
         .defaultSize(width: 1080, height: 760)
         .keyboardShortcut("a", modifiers: [.command, .shift])
 
-        Settings { SettingsView().environmentObject(model) }
+        Settings { SettingsView().environmentObject(model).environmentObject(appDelegate.loginItem) }
     }
 }
 

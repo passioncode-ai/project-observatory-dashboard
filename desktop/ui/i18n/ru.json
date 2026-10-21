@@ -70,5 +70,20 @@
   "The spending ceiling is reached; the assistant waits until it resets.": "Лимит расходов исчерпан; ассистент продолжит после его сброса.",
   "The assistant is answering another question; try again when it finishes.": "Ассистент отвечает на другой вопрос; повторите, когда он закончит.",
   "The disk is full; free some space before asking.": "Диск заполнен: освободите место и задайте вопрос снова.",
-  "The question looks like it contains a key; remove it and send again.": "Похоже, в вопросе есть ключ; уберите его и отправьте снова."
+  "The question looks like it contains a key; remove it and send again.": "Похоже, в вопросе есть ключ; уберите его и отправьте снова.",
+  "Open at login": "Открывать при входе в систему",
+  "Starts Project Observatory in the tray when you sign in. On by default.": "Запускает Project Observatory в трее при входе в систему. Включено по умолчанию.",
+  "Project Observatory opens at login.": "Project Observatory открывается при входе в систему.",
+  "Project Observatory no longer opens at login.": "Project Observatory больше не открывается при входе в систему.",
+  "The startup entry could not be changed: {error}": "Не удалось изменить запись автозапуска: {error}",
+  "Project Observatory could not write its startup entry: {error}. Allow the write and restart the app, or turn “Open at login” off in Settings.": "Project Observatory не смог записать запись автозапуска: {error}. Разрешите запись и перезапустите приложение или выключите «Открывать при входе в систему» в настройках.",
+  "Project Observatory is set to open at login, but its startup entry is missing: {where}. Restore it, or turn “Open at login” off in Settings.": "Project Observatory должен открываться при входе в систему, но его запись автозапуска пропала: {where}. Восстановите её или выключите «Открывать при входе в систему» в настройках.",
+  "OK": "ОК",
+  "Restore": "Восстановить",
+  "Turn off": "Выключить",
+  "Restart to finish updating": "Перезапустите, чтобы завершить обновление",
+  "Version {version} is downloaded and verified. Restart now to finish updating, or later from the File menu or the tray.": "Версия {version} загружена и проверена. Перезапустите сейчас, чтобы завершить обновление, или позже из меню «Файл» или из трея.",
+  "Restart now": "Перезапустить сейчас",
+  "Later": "Позже",
+  "The update could not be installed: {why}. «Restart to update» in the File menu or the tray tries again.": "Обновление не установлено: {why}. Пункт «Перезапустить для обновления» в меню «Файл» или в трее попробует снова."
 }

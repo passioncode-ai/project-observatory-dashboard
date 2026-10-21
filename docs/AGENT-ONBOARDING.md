@@ -35,6 +35,11 @@ An `ERROR` row is also listed under `not_run` to prevent treating missing eviden
 as PASS. If saving `--report-dir` fails, the overall result is FAIL and stdout
 keeps the suite rows with `report_error_type`; the destination may be partial.
 Fix the named filesystem/runtime problem and rerun the affected verification.
+A run that would leave the temporary folder under its free-space floor refuses before it
+copies anything: exit 7, `reason_code: insufficient_disk`, `free_bytes` and `needed_bytes`.
+Free space or lower `--jobs`; `--min-free-gb 0` starts anyway. Each suite's sandbox is
+removed when the suite ends (`--keep` keeps them). `full update --apply` refuses the same way
+(exit 7, the report's `space`) before it downloads, stops or installs anything.
 
 An exit code of zero is separate from observed test evidence. Each suite declares
 `test_protocol`, `minimum_executed`, `executed_checks` and `skipped_checks`.

@@ -257,6 +257,63 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     return out
 
 
+def backup_findings(state_file: pathlib.Path) -> list[dict]:
+    """What the newest machine bundle left behind, one finding per item (machine_backup.py).
+
+    WHY. The bundle exists so the whole machine can move to another one. On 2026-10-20 it left
+    19 items behind, ten of them repositories whose unpushed commits were over the bundle cap,
+    and the only trace was a count in a receipt and a line in `doctor`. Each item is now a row
+    on the board with what is lost and the fix the backup recorded for it (`remedy`): push, or
+    the exact `limits` value. The only copies of work (commits, uncommitted changes) are
+    warnings; the rest is information. Silent when no bundle was taken or nothing was left."""
+    doc = _load(state_file)
+    success = doc.get("success") if isinstance(doc, dict) else None
+    if not isinstance(success, dict):
+        return []
+    items = [r for r in success.get("not_carried") or [] if isinstance(r, dict) and r.get("source")]
+    try:
+        count = int(success.get("not_carried_count") or 0)
+    except (TypeError, ValueError):
+        count = len(items)
+    import machine_backup
+    status = "`project-observatory full machine-backup status` lists every item with its fix"
+    # ONE ROW PER SOURCE AND PART. A checkout can leave its commits, its uncommitted changes and
+    # its untracked files behind at once, and a home folder can break two caps: keyed on the
+    # source alone they shared one id, and the board's duplicate-id guard then published
+    # nothing at all (review of #325; the operator's receipt held such a pair).
+    parts = {0: "commits", 1: "changes", 2: "untracked", 3: "checkout"}
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for record in items:
+        part = parts.get(machine_backup.loss_rank(record), "files")
+        groups.setdefault((str(record["source"]), part), []).append(record)
+    out = []
+    for (source, part), records in groups.items():
+        rank = min(machine_backup.loss_rank(r) for r in records)
+        reasons = []
+        for record in records:
+            size = record.get("size")
+            reason = str(record.get("reason") or "not carried")
+            reasons.append(reason + (f" ({size / 1048576:.1f} MB)" if isinstance(size, int) and size else ""))
+        detail = "; ".join(reasons)
+        detail += (". It is the only copy of this work: were this machine lost, it would be lost with it"
+                   if rank <= 1 else ". A new machine restored from the bundle would not have it")
+        detail += f" (bundle {success['file']})." if success.get("file") else "."
+        fixes = list(dict.fromkeys(str(r.get("fix") or "").strip() for r in records if str(r.get("fix") or "").strip()))
+        out.append({"type": "machine.backup_not_carried", "subject": f"machine-backup:{source}:{part}",
+                    "severity": "warning" if rank <= 1 else "info",
+                    **titled("the machine backup did not carry {source}", source=source),
+                    "detail": detail,
+                    "action": "; ".join([*fixes, status]),
+                    "evidence": ["store:machine-backup.json"]})
+    if count > len(items):
+        out.append({"type": "machine.backup_not_carried", "subject": "machine-backup:more", "severity": "info",
+                    **titled("items the machine backup did not carry beyond those listed: {count}", count=count - len(items)),
+                    "detail": "The receipt lists the first items, the only copies of work first; the bundle's "
+                              "MANIFEST.json names every one.",
+                    "action": status, "evidence": ["store:machine-backup.json"]})
+    return out
+
+
 def _guard_detail(guard: dict | None) -> str:
     """What the guard did last, who holds the memory that swap writes here, and the
     largest files — the three things a person needs when the disk is low."""

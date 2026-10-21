@@ -2237,7 +2237,8 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     "updated-services-not-restarted": T("updated, a background job did not start"),
     "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
     "needs-person": T("needs a person"), "another-update-running": T("another update was running"),
-    "held": T("waits for a step by a person"), "deferred": T("ready, waits for a moment with no client")};
+    "held": T("waits for a step by a person"), "deferred": T("ready, waits for a moment with no client"),
+    "refused-disk": T("refused: too little free disk space")};
   const RESULT_WORD = r => RESULT[r] || r || "?";
   if (!MT.wanted || MT.scheduled === false)
     hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),
@@ -2269,10 +2270,10 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     // A held release (LC-16): verified, not installed by the job; the step is the person's.
     "needs-migration": w => [T("release {version} needs a step by a person before it is installed: {step}",
                                {version: w.version || "?", step: w.step || ""}), fullCommand("update --apply")],
-    "deferred": w => [T("release {version} is ready and waits for a moment with no client; tried again within the hour",
+    "deferred": w => [T("release {version} is ready and waits for a moment with no client; tried again within 15 minutes",
                         {version: w.version || "?"}), status],
     "update-incomplete": w => [w.soon
-      ? T("the last automatic update did not complete ({result}: {detail}); tried again within the hour",
+      ? T("the last automatic update did not complete ({result}: {detail}); tried again within 15 minutes",
           {result: RESULT_WORD(w.result), detail: w.detail || ""})
       : T("the last automatic update did not complete ({result}: {detail}); tried again within six hours",
           {result: RESULT_WORD(w.result), detail: w.detail || ""}), status],

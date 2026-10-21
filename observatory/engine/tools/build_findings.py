@@ -1743,6 +1743,8 @@ def collect() -> list[dict]:
         except (OSError, ValueError):
             continue
     out.extend(machine_findings.findings(paths.SCRATCH, paths.STATE / "logs", _mc))
+    # WHAT THE MACHINE BACKUP LEFT BEHIND, one row per item with its fix (machine_backup.py).
+    out.extend(machine_findings.backup_findings(paths.STATE / "machine-backup.json"))
     # THE LIFECYCLE WATCH: orphaned product processes, session servers on replaced
     # code, jobs past their interval, logs past their cap — per owning product
     # (collectors/scan_lifecycle.py). Silent when the collector has never run.
@@ -4689,6 +4691,38 @@ def collect() -> list[dict]:
     return out
 
 
+def keep_unique_ids(findings: list[dict]) -> list[dict]:
+    """One finding per id, and a warning that names every id a rule produced twice.
+
+    An id is the dedupe key and the acknowledgement key: two findings sharing one would let an
+    operator dismiss neither without the other, so the board never publishes two. It used to
+    stop instead, and one rule's slip then published NOTHING: on 2026-10-21 (review of #325)
+    two parts of one checkout left out of the machine backup shared an id and the whole board
+    would have gone dark. The first of each id is kept, the rest are dropped, and the drop is
+    itself a warning (`board.duplicate_id`) naming the ids and their rule, so the defect is
+    seen and fixed rather than hidden. Its own id is unique by construction."""
+    seen: dict[str, dict] = {}
+    dropped: dict[str, int] = {}
+    for f in findings:
+        if f["id"] in seen:
+            dropped[f["id"]] = dropped.get(f["id"], 0) + 1
+        else:
+            seen[f["id"]] = f
+    kept = list(seen.values())
+    if dropped:
+        ids = sorted(dropped)
+        kept.append({
+            "type": "board.duplicate_id", "subject": "board", "id": "board.duplicate_id:board",
+            "severity": "warning", "first_seen": TODAY,
+            **titled("{count} finding ids were produced twice; the later rows were dropped", count=len(ids)),
+            "detail": ("A rule produced two findings with one id, so only the first of each is on the board "
+                       "(an id is also the acknowledgement key): " + listed(ids, 10) + ". Rules: "
+                       + ", ".join(sorted({i.split(":", 1)[0] for i in ids})) + "."),
+            "action": "a defect in the named rule: report it with the ids above; give each finding a subject of its own",
+            "evidence": ["registry:findings.json"]})
+    return kept
+
+
 def main(argv: list[str]) -> int:
     previous = {f["id"]: f for f in (json.loads(OUT.read_text(encoding="utf-8"))["findings"]
                                      if OUT.is_file() else [])}
@@ -4722,12 +4756,7 @@ def main(argv: list[str]) -> int:
             f["acked"] = {"until": a.get("until"), "why": a.get("why"), "by": a.get("by")}
         findings.append(f)
 
-    dupes = sorted({f["id"] for f in findings
-                    if sum(1 for g in findings if g["id"] == f["id"]) > 1})
-    if dupes:
-        sys.exit(f"build_findings: duplicate finding id(s) {dupes}. An id is the "
-                 f"dedupe key and the acknowledgement key; two findings sharing one "
-                 f"means an operator cannot dismiss either without the other.")
+    findings = keep_unique_ids(findings)
 
     rank = {"critical": 0, "warning": 1, "info": 2}
     findings.sort(key=lambda f: (rank.get(f["severity"], 3), f.get("deadline") or "9999",

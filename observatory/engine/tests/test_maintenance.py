@@ -283,6 +283,25 @@ class UpdateLog(Base):
         with self.assertRaises(ValueError):
             update_events.emit("update_check", "something-else")
 
+    def test_a_check_that_finds_nothing_new_is_logged_once(self):
+        # Operator rule, 2026-10-17: a check every five minutes logs a change, not every check.
+        for _ in range(3):
+            update_events.emit("update_check", "current", base=self.home)
+        update_events.emit("update_check", "current", subject="app", base=self.home)
+        update_events.emit("update_check", "current", subject="app", base=self.home)
+        update_events.emit("update_check", "current", base=self.base / "another workspace")
+        update_events.emit("update_download", "started", base=self.home)   # another event between
+        update_events.emit("update_check", "current", base=self.home)
+        update_events.emit("update_check", "ready", base=self.home)
+        update_events.emit("update_check", "ready", base=self.home)
+        update_events.emit("update_check", "current", base=self.home)
+        rows = update_events.read()
+        self.assertEqual([(r["event"], r["code"], r["subject"]) for r in rows],
+                         [("update_check", "current", "engine"), ("update_check", "current", "app"),
+                          ("update_check", "current", "engine"), ("update_download", "started", "engine"),
+                          ("update_check", "ready", "engine"), ("update_check", "current", "engine")])
+        self.assertNotEqual(rows[0]["instance"], rows[2]["instance"], "each workspace keeps its own line")
+
     def test_every_lc16_code_is_known(self):
         self.assertEqual({k: set(v) for k, v in update_events.EVENTS.items()}, {
             "update_check": {"current", "ready", "check_failed", "download_failed", "signature_failed",
@@ -616,9 +635,16 @@ class Pass(Base):
     def test_codes_match_the_updater(self):
         import engine_update as eu
         self.assertEqual((M.UPDATE_OK, M.UPDATE_FAILED, M.UPDATE_REFUSED, M.UPDATE_UNDETERMINED,
-                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_HELD, M.UPDATE_AVAILABLE),
+                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_HELD, M.UPDATE_NO_SPACE,
+                          M.UPDATE_AVAILABLE),
                          (eu.EXIT_OK, eu.EXIT_FAILED, eu.EXIT_REFUSED, eu.EXIT_UNDETERMINED,
-                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_HELD, eu.EXIT_UPDATE_AVAILABLE))
+                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_HELD, eu.EXIT_NO_SPACE,
+                          eu.EXIT_UPDATE_AVAILABLE))
+        # Every exit code the updater defines is named here: a new one cannot reach the job as
+        # an unexplained "failed".
+        updater = {v for k, v in vars(eu).items() if k.startswith("EXIT_")}
+        named = {v for k, v in vars(M).items() if k.startswith("UPDATE_") and isinstance(v, int)}
+        self.assertEqual(updater - named, set())
 
     def test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup(self):
         commands = FakeCommands(check=0)
@@ -628,7 +654,7 @@ class Pass(Base):
         self.assertTrue(report["snapshot"]["encrypted"], "a generated passphrase encrypts the copy")
         self.assertEqual(len(list(vault.root_info(self.home)["path"].glob("daily-*.obsnap"))), 1)
         self.assertEqual(report["passphrase"]["passphrase"], "generated")
-        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=2))
+        later = self.run_pass(commands, at=AT + datetime.timedelta(minutes=4))
         self.assertEqual((later["update"]["result"], later["snapshot"]["result"]), ("not-due", "not-due"))
         self.assertEqual(len(commands.calls), 1)
         next_day = self.run_pass(commands, at=AT + datetime.timedelta(hours=25), services=FakeServices())
@@ -907,7 +933,10 @@ class Pass(Base):
         commands = FakeCommands(check=10, apply=1)
         self.assertEqual(self.run_pass(commands)["update"]["result"], "failed-rolled-back")
         self.assertEqual(M.read_state(self.home)["update"]["failures"], 1)
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"], "not-due")
+        # The check every five minutes still finds the release; the failed one waits six hours.
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"],
+                         "waiting-to-retry")
+        self.assertEqual([c[0][1] for c in commands.calls].count("--apply"), 1, "not installed again")
         self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=24))["update"]["result"],
                          "failed-rolled-back")
         self.assertEqual(M.read_state(self.home)["update"]["failures"], 2)
@@ -930,10 +959,30 @@ class Pass(Base):
         later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
         self.assertEqual(later["update"]["result"], "updated", "a transient refusal is tried again the next hour")
 
+    def test_an_update_refused_for_disk_space_is_named_and_retried_the_next_hour(self):
+        # 2026-10-20: an update ran out of disk half-way and rolled back. Now it is refused
+        # before it starts (exit 7); the disk guard runs every pass, so the next hour may fit.
+        commands = FakeCommands(check=10, apply=7)
+        commands.apply_orig = commands.apply
+
+        def apply(*args, env=None):
+            code, doc, err = commands.apply_orig(*args, env=env)
+            return code, {"status": "refused", "error": "Not updated: too little free space; needs 5 bytes"}, ""
+        commands.apply = apply
+        self.assertEqual(self.run_pass(commands)["update"]["result"], "refused-disk")
+        self.assertIn("too little free space", M.read_state(self.home)["update"]["detail"])
+        status = M.status(self.home, schedule=FakeSchedule())
+        item = next(w for w in status["warning_items"] if w["code"] == "update-incomplete")
+        self.assertEqual((item["result"], item["soon"]), ("refused-disk", True))
+        commands.apply_code = 0
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated")
+
     def test_a_refusal_for_good_waits_a_day(self):
         commands = FakeCommands(check=10, apply=2)
         self.run_pass(commands)
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"], "not-due")
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"],
+                         "waiting-to-retry")
 
     def test_an_update_that_needs_a_person_stops_the_attempts(self):
         commands = FakeCommands(check=10, apply=4)
@@ -949,10 +998,10 @@ class Pass(Base):
         self.assertEqual(report["update"]["result"], "undetermined")
         self.assertEqual(M.read_state(self.home)["check"]["detail"], "network down")
         # Seen live: a check that timed out on a loaded machine waited a whole day. It is
-        # tried again the next hour.
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=30))["update"]["result"], "not-due")
+        # tried again five minutes later (operator rule, 2026-10-17).
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4))["update"]["result"], "not-due")
         commands.check = 10
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"], "updated")
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=5))["update"]["result"], "updated")
 
     def test_turned_off_means_no_check_and_the_backup_still_runs(self):
         M.set_setting(self.home, "auto", False)
@@ -973,28 +1022,32 @@ class Pass(Base):
         self.assertEqual((commands.calls, app.calls), ([], []), "no check, no download, no install")
         self.assertEqual(report["snapshot"]["result"], "taken", "the daily backup keeps running")
 
-    def test_a_check_every_six_hours(self):
-        self.assertEqual(M.CHECK_EVERY, datetime.timedelta(hours=6))
+    def test_a_check_every_five_minutes(self):
+        # Operator rule, 2026-10-17 (every PassionCode product): every five minutes.
+        self.assertEqual(M.CHECK_EVERY, datetime.timedelta(minutes=5))
+        self.assertEqual(M.CHECK_INTERVAL_SECONDS, 300)
         commands = FakeCommands(check=0)
         self.run_pass(commands)
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=5, minutes=59))["update"]["result"],
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4, seconds=29))["update"]["result"],
                          "not-due")
-        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=6))["update"]["result"], "up-to-date")
+        # 30 s of scheduler jitter count as on time (review M1).
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4, seconds=31))["update"]["result"],
+                         "up-to-date")
         self.assertEqual(len(commands.calls), 2)
 
-    def test_a_failed_check_is_retried_once_within_the_hour_then_every_six_hours(self):
+    def test_a_failed_check_is_retried_after_five_minutes_too(self):
+        self.assertEqual(M.RETRY_UNDETERMINED, datetime.timedelta(minutes=5))
         commands = FakeCommands(check=3)
         self.assertEqual(self.run_pass(commands)["update"]["result"], "undetermined")
-        hour = AT + datetime.timedelta(hours=1)
-        self.assertEqual(self.run_pass(commands, at=hour)["update"]["result"], "undetermined")
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=4))["update"]["result"], "not-due")
+        five = AT + datetime.timedelta(minutes=5)
+        self.assertEqual(self.run_pass(commands, at=five)["update"]["result"], "undetermined")
         self.assertEqual(M.read_state(self.home)["check"]["failures"], 2)
-        self.assertEqual(self.run_pass(commands, at=hour + datetime.timedelta(hours=1))["update"]["result"], "not-due",
-                         "one retry, then back to the six-hour cadence")
-        self.assertEqual(self.run_pass(commands, at=hour + datetime.timedelta(hours=6))["update"]["result"],
-                         "undetermined")
+        self.assertEqual(self.run_pass(commands, at=five + datetime.timedelta(minutes=5))["update"]["result"],
+                         "undetermined", "every retry, not one and then six hours")
         commands.check = 0
-        later = hour + datetime.timedelta(hours=12)
-        self.assertEqual(self.run_pass(commands, at=later)["update"]["result"], "up-to-date")
+        self.assertEqual(self.run_pass(commands, at=five + datetime.timedelta(minutes=10))["update"]["result"],
+                         "up-to-date")
         self.assertNotIn("failures", M.read_state(self.home)["check"])
 
     def test_the_schedulers_first_check_waits_90_seconds_after_the_start(self):
@@ -1017,7 +1070,7 @@ class Pass(Base):
                          "the check waits, then runs")
         self.assertAlmostEqual(order[0][1], 80, places=6)
         order.clear()
-        M.run_pass(self.home, at=AT + datetime.timedelta(hours=1), commands=commands, services=None,
+        M.run_pass(self.home, at=AT + datetime.timedelta(minutes=4), commands=commands, services=None,
                    store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", round(s, 6))),
                    first_check_delay=90, clock=lambda: M.PROCESS_STARTED + 10)
         self.assertNotIn("check", order)
@@ -1372,6 +1425,172 @@ class RecordingApp:
 
 
 # --- R3: the schedule -------------------------------------------------------------------
+
+class CheckJob(Base):
+    """The five-minute update check (operator rule, 2026-10-17): a job of its own, one static read,
+    never the pass; a newer release starts the pass, and nothing new is printed or logged once."""
+
+    def check(self, latest="9.9.9", at=AT, kicks=None, feed=None):
+        kicks = kicks if kicks is not None else []
+        return M.check_pass(self.home, at=at, feed=feed or (lambda base: latest),
+                            kick=lambda: kicks.append(at) or {"result": "started"})
+
+    def test_the_check_job_is_its_own_five_minute_job_on_every_scheduler(self):
+        launchd = M.LaunchdSchedule(self.home, job="check")
+        doc = launchd.document()
+        self.assertTrue(doc["Label"].endswith(".check"))
+        self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "check"],
+                         "no first-check delay: it slept 90 s of every run (review H1)")
+        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (300, False),
+                         "the pass runs at load; the check one interval later, never together")
+        self.assertTrue(doc["StandardOutPath"].endswith("check.log"))
+        self.assertEqual(launchd.launch.lint_plist(doc), [])
+        self.assertNotIn(doc["Label"], {j["label"] for j in launchd.launch.managed_jobs()})
+        self.assertEqual(M.LaunchdSchedule(self.home).document()["StartInterval"], 900, "the pass keeps its 15 minutes")
+
+        def run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        systemd = M.SystemdSchedule(self.home, runner=run, which=lambda name: "/usr/bin/systemctl", job="check")
+        self.assertTrue(systemd.name.endswith("-check"))
+        self.assertIn('maintain.py" check', systemd.service_text())
+        self.assertIn(f"TimeoutStartSec={M.CHECK_TIME_LIMIT}", systemd.service_text().splitlines())
+        self.assertIn("OnUnitActiveSec=5min", systemd.timer_text().splitlines())
+        self.assertIn(f"OnStartupSec={M.CHECK_FIRST_DELAY}s", systemd.timer_text().splitlines())
+        self.assertNotEqual(M.CHECK_FIRST_DELAY, M.FIRST_CHECK_DELAY, "the two jobs never start on one second")
+        self.assertNotEqual(M.CHECK_FIRST_DELAY % M.CHECK_INTERVAL_SECONDS,
+                            M.FIRST_CHECK_DELAY % M.CHECK_INTERVAL_SECONDS)
+        # LC-03: the job ends well inside its own interval.
+        self.assertLess(M.CHECK_TIME_LIMIT, M.CHECK_INTERVAL_SECONDS)
+
+    def test_schedule_for_installs_both_jobs_and_scheduled_means_both(self):
+        class Job(FakeSchedule):
+            def __init__(self, loaded=True):
+                super().__init__()
+                self.is_loaded = loaded
+
+            def status(self):
+                return {"kind": "fake", "installed": self.installs > 0, "loaded": self.installs > 0 and self.is_loaded}
+        main, check = Job(), Job(loaded=False)
+        both = M.Schedules(main, check)
+        out = both.install()
+        self.assertEqual((main.installs, check.installs), (1, 1))
+        self.assertIn("check", out)
+        self.assertFalse(both.status()["loaded"], "a pass without its check job is not scheduled")
+        check.is_loaded = True
+        self.assertTrue(both.status()["loaded"])
+        both.uninstall()
+        self.assertEqual((main.removed, check.removed), (1, 1))
+        with patch.object(sys, "platform", "darwin"):
+            sched = M.schedule_for(self.home)
+        self.assertEqual((sched.main.label.rsplit(".", 1)[1], sched.check.label.rsplit(".", 1)[1]), ("maintain", "check"))
+
+    def test_nothing_new_is_quiet_and_logged_once(self):
+        first = self.check(latest=config.VERSION)
+        self.assertEqual((first["check"]["result"], first["check"]["source"]), ("up-to-date", "feed"))
+        self.assertFalse(first["quiet"], "the first result is said once")
+        for minutes in (5, 10, 15):
+            again = self.check(latest=config.VERSION, at=AT + datetime.timedelta(minutes=minutes))
+            self.assertTrue(again["quiet"])
+        self.assertEqual(events(), [("update_check", "current")], "one line, not one every five minutes")
+        self.assertTrue(self.check(latest=config.VERSION, at=AT + datetime.timedelta(minutes=17))["quiet"],
+                        "not due yet: nothing read, nothing said")
+
+    def test_the_cli_prints_nothing_for_a_quiet_check(self):
+        with patch.object(M, "feed_latest", lambda base: config.VERSION), \
+                patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "1"}), \
+                patch.object(M, "system_setup_allowed", return_value=True):
+            code, doc, _ = self.cli("maintain", "check")
+            self.assertEqual((code, doc["check"]["result"]), (0, "up-to-date"))
+            record = M.read_check(self.home)
+            record["check"]["at"] = M.iso(M.now() - datetime.timedelta(minutes=6))
+            M.write_check(self.home, record)
+            code, doc, _ = self.cli("maintain", "check")
+        self.assertEqual((code, doc), (0, {}), "nothing new: no line in maintain's log")
+
+    def test_a_newer_release_starts_the_pass_once_and_the_pass_applies_it_without_asking_again(self):
+        kicks = []
+        report = self.check(kicks=kicks)
+        self.assertEqual((report["check"]["result"], report["check"]["latest"]), ("update-available", "9.9.9"))
+        self.assertEqual(report["kick"], {"result": "started"})
+        self.assertEqual(events(), [("update_check", "ready")])
+        # The next check five minutes later finds the same release: the pass was started for it.
+        self.assertNotIn("kick", self.check(kicks=kicks, at=AT + datetime.timedelta(minutes=5)))
+        self.assertEqual(len(kicks), 1)
+        # The started pass installs it with no second `update --check`.
+        commands = FakeCommands(check=0, apply=0, latest="9.9.9")
+        with patch.object(M, "_services", return_value=object()):
+            result = M.run_pass(self.home, at=AT + datetime.timedelta(minutes=5, seconds=30), commands=commands,
+                                services=None, store=self.store, app=NoApp(), sleep=lambda s: None)
+        self.assertEqual(result["update"]["result"], "updated")
+        self.assertEqual([c[0][:2] for c in commands.calls], [("update", "--apply")])
+
+    def test_a_held_release_or_a_recent_failure_never_starts_the_pass(self):
+        state = M.read_state(self.home)
+        state["update"] = {"at": M.iso(AT), "result": "held", "to": "9.9.9", "from": config.VERSION}
+        M.write_state(self.home, state)
+        self.assertNotIn("kick", self.check())
+        state = M.read_state(self.home)
+        state["update"] = {"at": M.iso(AT), "result": "failed-rolled-back", "to": "9.9.9", "from": config.VERSION,
+                           "failures": 1, "detail": "synthetic"}
+        M.write_state(self.home, state)
+        self.assertNotIn("kick", self.check(at=AT + datetime.timedelta(minutes=5)))
+        self.assertIn("kick", self.check(at=AT + datetime.timedelta(hours=6, minutes=5)),
+                      "a lasting failure is tried again after six hours")
+
+    def test_a_failed_check_is_logged_and_retried_five_minutes_later(self):
+        import engine_update as eu
+
+        def offline(base):
+            raise eu.Undetermined("release source unreachable (synthetic)")
+        first = self.check(feed=offline)
+        self.assertEqual(first["check"]["result"], "undetermined")
+        self.assertEqual(self.check(feed=offline, at=AT + datetime.timedelta(minutes=5))["check"]["failures"], 2)
+        self.assertEqual(events(), [("update_check", "check_failed")])
+
+    def test_off_means_no_read_and_a_running_check_means_no_second_one(self):
+        (self.home / "auto-update").write_text("off\n")
+        reads = []
+        self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "off")
+        (self.home / "auto-update").unlink()
+        with M.check_lock(self.home):
+            self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "busy")
+        self.assertEqual(reads, [])
+
+    def test_a_check_and_a_pass_at_the_same_moment_both_run(self):
+        # Review H1: the check held the pass lock (and slept 90 s in it), so the 15-minute pass found
+        # it busy and skipped the guard, the backup and the app on every OS.
+        seen = {}
+
+        def feed(base):
+            # The check is reading the feed; a pass starts now.
+            seen["pass"] = M.run_pass(self.home, at=AT, commands=FakeCommands(check=0), services=None,
+                                      store=self.store, app=NoApp(), sleep=lambda s: None)
+            return config.VERSION
+        report = self.check(feed=feed)
+        self.assertEqual(report["status"], "checked")
+        self.assertEqual(seen["pass"]["status"], "ran", "the pass is never skipped for a running check")
+        self.assertEqual(seen["pass"]["snapshot"]["result"], "taken")
+        # And the other way round: a check beside a running pass reads the feed.
+        with M.pass_lock(self.home):
+            later = self.check(latest=config.VERSION, at=AT + datetime.timedelta(minutes=10))
+        self.assertEqual(later["status"], "checked")
+        self.assertFalse(M.pass_running(self.home), "`maintain uninstall` is not refused for a check")
+        # The check writes only its own record: the pass's (snapshot, update) is never rewritten.
+        self.assertEqual(M.read_state(self.home)["snapshot"]["result"], "taken")
+        self.assertIn("check", M.read_check(self.home))
+
+    def test_a_run_a_moment_early_is_still_due(self):
+        # Review M1: launchd started a run 0.2 s early, it was not due, and the cadence became ten minutes.
+        self.check(latest=config.VERSION)
+        early = self.check(latest="9.9.9", at=AT + datetime.timedelta(seconds=299.8))
+        self.assertEqual(early["status"], "checked")
+        self.assertEqual(self.check(latest="9.9.9", at=AT + datetime.timedelta(seconds=310))["status"], "not-due")
+        self.assertEqual(M.CHECK_SLACK, datetime.timedelta(seconds=30))
+        self.assertTrue(M.due({"check": {"at": M.iso(AT)}}, "check", M.CHECK_EVERY,
+                              AT + datetime.timedelta(seconds=275), M.CHECK_SLACK))
+        self.assertFalse(M.due({"check": {"at": M.iso(AT)}}, "check", M.CHECK_EVERY,
+                               AT + datetime.timedelta(seconds=269), M.CHECK_SLACK))
+
 
 class Schedule(Base):
     def test_the_launchd_job_runs_every_quarter_hour_and_is_never_a_managed_job(self):

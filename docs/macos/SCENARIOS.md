@@ -21,6 +21,8 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-009 | Window closed, Dock click brings it back | draft |
 | SCN-010 | An update is waiting: restart, quit or idle installs it | draft |
 | SCN-011 | The app speaks the person's language | draft |
+| SCN-012 | The app opens at login unless the person turned it off | draft |
+| SCN-013 | A permission the app needs is missing at launch | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the three 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
@@ -163,6 +165,11 @@ Steps: reopen → the dashboard window is created (or un-minimised) and comes fo
 window that is open stays open. A dashboard already on screen is left as it is.
 Expected result: the app is never running without a way back to its window.
 Errors & recovery: none expected; ⌘1 (Window → Dashboard) does the same.
+Closing a window never quits the app (operator rule, 2026-10-16): with every window closed it keeps
+running in the Dock, keeps reading its update record and keeps its idle restart; it quits only
+through its own Quit (⌘Q) or a shutdown or logout. `AppLifecycleTests`
+`testClosingTheLastWindowNeverQuitsTheApp` pins `applicationShouldTerminateAfterLastWindowClosed` to
+`WindowClosePolicy` (false).
 Coverage: native walkthroughs 2026-10-02 and 2026-10-03 (launch 1 window → closed 0 → reopen 1). Run 2
 found that ⌘1, Window → Dashboard and Dashboard → Overview each ADDED a window (a WindowGroup); the
 dashboard is one `Window` now — Close All → 0, reopen → 1, again → 1 — and the Window menu lists
@@ -179,10 +186,12 @@ Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-02, JTBD-01, FLW-05
-Preconditions: the app is open; the engine's hourly pass verified a newer app and recorded
+Preconditions: the app is open; the engine's maintenance pass verified a newer app and recorded
 `waiting-for-quit` with its `pending` version in the workspace's `store/maintenance.json`.
-Trigger: the app's launch or its 6-hourly check reads the record.
-Steps: **Restart to update** appears in the app menu and in the dashboard's toolbar (its help
+Trigger: the app's launch or its check every 5 minutes (operator rule, 2026-10-17) reads the record.
+Steps: once per version, while a window of the app is on screen (or at the next minute one is), a
+prompt asks «Restart to finish updating» with **Restart now** and **Later**; Restart now is the same
+act as Restart to update below, Later is remembered for that version and asks no more. **Restart to update** appears in the app menu and in the dashboard's toolbar (its help
 names the version) → the person chooses it → the app quits, a detached helper waits for it,
 runs `full maintain app` and opens the new app in front. Or: the person quits → the same swap,
 nothing reopens. Or: no window on screen, the app in the background, no input and no work for
@@ -200,9 +209,11 @@ Coverage: `AppUpdateTests` (`testOnlyAStrictlyNewerReadableVersionIsOffered`,
 `testAFailedEngineInTheBackgroundReopensWithoutAWindow`, `testAQuitSwapsAndOpensNothing`,
 `testTheHelperRunsInASessionOfItsOwn`, `testTheLogHoldsCodesOnlyInUTC`), `UpdatesTests`
 (restart, refusal, quit, no bundle) in `macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift`;
+`AppLifecycleTests` (`testAReadyUpdateAsksOncePerVersionAndOnlyWhenSeen`,
+`testTheUpdatesWatchAsksThroughItsPresenterAndRemembersTheVersion`, `testTheUpdateRecordIsReadEveryFiveMinutes`);
 engine `observatory/engine/tests/test_maintain_app.py`. Not yet walked on a real Mac with a
-signed release: the menu item and toolbar button on screen, the real swap and relaunch, and
-`--background` keeping the reopened window hidden.
+signed release: the menu item and toolbar button on screen, the prompt's sheet on the dashboard
+window, the real swap and relaunch, and `--background` keeping the reopened window hidden.
 
 ## SCN-011 — The app speaks the person's language
 Status: draft
@@ -225,3 +236,51 @@ Coverage: `LocalizationTests` (`testTheSystemLanguageDecidesWhenNothingIsChosen`
 `testEveryPluralEntryHasEachFormOfItsLanguage`; `testACountReadsInTheRightFormInBothLanguages`;
 `testTheBuiltResourcesAreTheSourceDictionaries`); `ModelTests` for the page round-trip. Not yet walked
 on a real Mac: the AppKit menus in Russian after a relaunch with Русский chosen on an English system.
+
+## SCN-012: The app opens at login unless the person turned it off
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01
+Preconditions: none (operator rule, 2026-10-16, for every product that ships an app).
+Trigger: every launch; Settings → Open at login.
+Steps: the first launch registers the app as a login item (`SMAppService.mainApp`) and stores the
+choice (`openAtLogin`, on) → at every later launch the stored choice decides: on registers again a
+registration the system lost, off removes a leftover one and never registers → Settings → Open at
+login switches it, with the line that the app keeps working with its window closed and quits from
+its menu (⌘Q).
+Expected result: the app runs from login without being asked; an update keeps the person's choice,
+because the choice is stored, never re-defaulted. At login it opens as a launch from the Dock does,
+with the dashboard window on screen: macOS starts a `SMAppService` main-app login item with no
+argument the app could tell apart from a person's launch, so it is not started hidden.
+Errors & recovery: a registration that fails, or one waiting for the person's approval, is SCN-013;
+each act is logged by code in `~/Library/Logs/Project Observatory/app.log` (`login_item`
+`registered`/`unregistered`/`requires_approval`/`failed`).
+Coverage: `AppLifecycleTests` (`testTheFirstLaunchTurnsOpenAtLoginOnAndStoresTheChoice`,
+`testAPersonsOffIsNeverOverriddenAndALeftoverRegistrationIsRemoved`,
+`testAnUpdateKeepsTheChoiceAndALostRegistrationIsRestored`,
+`testTheLoginItemGlueAppliesTheDefaultOnceAndLogsIt`); `AccessibilityTests`
+`testSettingsReadsEveryControlByItsOwnName` (the switch is named in both languages). Not yet walked on
+a real Mac: the app in System Settings › General › Login Items after a first launch, and opening at the
+next login.
+
+## SCN-013: A permission the app needs is missing at launch
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01
+Preconditions: none. Today the app needs no privacy (TCC) permission; the one grant it depends on is
+the login item's approval (SCN-012). A new requirement joins `AppPermissions` with its test.
+Trigger: every launch, and every change of Settings → Open at login.
+Steps: the launch checks what the app needs → for each missing grant the dashboard window shows a
+banner naming it and how to grant it («Project Observatory cannot open at login»: allow it in System
+Settings › General › Login Items, or turn off Open at login in Settings) with **Open System
+Settings**, which opens Login Items.
+Expected result: nothing the app needs is missing silently: the banner, and an `app_permission
+missing` line with the permission's code in `app.log`.
+Errors & recovery: granting it in System Settings, or turning Open at login off, removes the banner at
+the next check (the next launch or the Settings switch).
+Coverage: `AppLifecycleTests` (`testAMissingLoginItemApprovalIsNamedWithHowToGrantIt`,
+`testNothingIsMissingWhenGrantedOrNotWanted`, `testARegistrationThatFailsIsShownAndLoggedNeverSilent`).
+Not yet walked on a real Mac: the banner on screen after switching the app off in Login Items, and the
+button opening System Settings there.

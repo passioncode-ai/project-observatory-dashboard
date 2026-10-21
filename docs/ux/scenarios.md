@@ -9,7 +9,7 @@ alongside existing safety contracts. The suppression contract (PB-032) is OSS-40
 agent plugin, MCP inventory, the agent's reads, credentials, embeddings, review, Health, models,
 the dashboard server, provider keys and the leak register. OSS-62–67 cover the machine's SSH keys (PB-163): list, create,
 copy the public part, send it to GitHub or a server, findings and rotation; the private key is
-never shown or moved ([design](../design/SSH-KEYS.md)).
+never shown or moved ([design](../design/SSH-KEYS.md)). OSS-73 covers the five-minute update check on the release's static feed (operator rule, 2026-10-17); the apps' lifecycle defaults of 2026-10-16 (open at login, a launch-time permission check, closing hides, «Restart to finish updating») are [macOS](../macos/SCENARIOS.md) SCN-009, SCN-010, SCN-012 and SCN-013 and [Windows and Linux](../desktop/SCENARIOS.md) SCN-009, SCN-010, SCN-012 and SCN-013.
 
 This file indexes the two distinct runtime paths. The table below describes the retained portable compatibility CLI only. Full-engine scenarios are in [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md); despite that historical filename, its OSS scenarios cover the full engine. The public site's scenarios live separately in [docs/site/](../site/). The implementation and tests are linked from [MIGRATION.md](../MIGRATION.md).
 

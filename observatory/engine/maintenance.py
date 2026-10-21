@@ -5,7 +5,8 @@ workspace runs `tools/maintain.py run` every 15 minutes — launchd on macOS, a 
 timer on Linux — and each pass does only what is due:
 
 1. a backup passphrase exists and is kept outside the workspace (backup_vault.SecretStore);
-2. every six hours, with automatic updates on (the default; the switch is below):
+2. every five minutes (operator rule, 2026-10-17), with automatic updates on (the default;
+   the switch is below):
    `full update --check`, and when a newer stable release exists, `full update --apply
    --unattended` — verified and reversible, the same transaction a person runs — but only
    at a safe point: while the local server has answered no client and no memory-http
@@ -24,6 +25,16 @@ timer on Linux — and each pass does only what is due:
 The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the
 systemd timer starts 90 seconds after the user manager does (lifecycle LC-16).
+
+THE CHECK JOB. "Is there something newer" is asked every five minutes, the retry after a check
+that could not look included (operator rule, 2026-10-17), by a SECOND job of the same workspace,
+`maintain.py check` (launchd `.check`, systemd `-check`, Task Scheduler `check`): one read of the
+newest release's static SHA256SUMS on github.com, in this process (`engine_update.latest_version`),
+never the REST API's 60 requests an hour and never the pass above, whose guard, backup and
+update may take longer than five minutes (LC-03: a job never runs past its own interval). When it
+finds a newer release it starts the pass at once (`kick`), unless that release is held for a
+person or was tried in the last 15 minutes; the pass applies it at a safe point as before. A check
+that finds what the last one found prints nothing and logs nothing new (`update_events`).
 
 THE SWITCH (LC-16) is the file `auto-update` in the workspace home: absent means on, and
 only the word `off` turns automatic updates off. `full auto-update on|off` writes it; an
@@ -74,11 +85,23 @@ import backup_vault
 import update_events
 
 STATE_FILE = "maintenance.json"
-#: How often a newer release is looked for (lifecycle LC-16: every six hours).
-CHECK_EVERY = datetime.timedelta(hours=6)
-#: A check that could not look (network, rate limit, a timeout on a loaded machine) is
-#: tried once more within the hour, then back to CHECK_EVERY (LC-16).
-RETRY_UNDETERMINED = datetime.timedelta(hours=1)
+#: How often a newer release is looked for: every five minutes (operator rule, 2026-10-17,
+#: relayed to every PassionCode product; it was six hours under LC-16).
+CHECK_EVERY = datetime.timedelta(minutes=5)
+#: A check that could not look (network, a timeout on a loaded machine) is tried again on the
+#: same five-minute cadence: the rule names the retry too.
+RETRY_UNDETERMINED = CHECK_EVERY
+#: The check job's own interval, in seconds (CHECK_EVERY), and the most it may run (LC-03).
+CHECK_INTERVAL_SECONDS = 300
+CHECK_TIME_LIMIT = 240
+#: The check job's first run after a login, offset from the pass's FIRST_CHECK_DELAY so the two
+#: jobs never start together (review H1); the pass's own check covers the first 90 seconds.
+CHECK_FIRST_DELAY = 150
+#: An update that failed for a lasting reason (rolled back, a refused verification) is not tried
+#: again for the same release before this: the check every five minutes keeps finding it, and each
+#: attempt stops the tick and server, snapshots and installs. A momentary refusal or a deferral
+#: is tried at the next pass (`_transient`).
+RETRY_FAILED_UPDATE = datetime.timedelta(hours=6)
 #: The scheduler's first check waits this long after the job started (LC-16: 90 s).
 FIRST_CHECK_DELAY = 90
 #: The switch: a file in the workspace home (LC-16). Absent = on; only `off` turns it off.
@@ -98,6 +121,10 @@ TRANSIENT = ("integrity verification failed", "disk image is malformed", "change
 def _transient(record: dict) -> bool:
     detail = str(record.get("detail") or "")
     if record.get("result") == "another-update-running":
+        return True
+    if record.get("result") == "refused-disk":
+        # Refused before it began for too little free space (exit 7): the disk guard runs on
+        # every pass and a person may free space, so the next hour may fit.
         return True
     return record.get("result") in ("refused", "failed-rolled-back", "undetermined") and any(
         marker in detail for marker in TRANSIENT)
@@ -155,14 +182,14 @@ SNAPSHOT_EVERY = datetime.timedelta(hours=24)
 #: How long a failed snapshot waits before it is tried again (it stops the tick and server).
 SNAPSHOT_RETRY = datetime.timedelta(hours=1)
 #: Every 15 minutes (2026-10-11; it was an hour). Everything else in a pass is gated by its own
-#: cadence (the update check every 6 hours, the backup daily), so a pass that is not due for
+#: cadence (the update check every 5 minutes, the backup daily), so a pass that is not due for
 #: them is quick; the disk guard is what needs the frequency — below the `low` line it runs
 #: on every pass, because a full disk had stopped the machine inside one hourly gap.
 INTERVAL_SECONDS = 900
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
 #: caught by tests/test_maintenance.py rather than by a user's stalled install.
 UPDATE_OK, UPDATE_FAILED, UPDATE_REFUSED, UPDATE_UNDETERMINED = 0, 1, 2, 3
-UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_HELD, UPDATE_AVAILABLE = 4, 5, 6, 10
+UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_HELD, UPDATE_NO_SPACE, UPDATE_AVAILABLE = 4, 5, 6, 7, 10
 SNAPSHOT_ATTEMPTS = 3
 #: Set in every process a maintenance pass starts. A schedule installed from inside a pass
 #: never boots the job out: that would kill the pass and whatever it runs (review F1).
@@ -295,8 +322,25 @@ def state_path(base: Path) -> Path:
     return base / "store" / STATE_FILE
 
 
-def read_state(base: Path) -> dict:
-    file = state_path(base)
+#: The check job's own record (`check_pass`). Never maintenance.json: the job holds no pass lock, so
+#: a read-modify-write of the pass's record from beside a running pass would undo what the pass wrote.
+CHECK_FILE = "update-check.json"
+
+
+def check_path(base: Path) -> Path:
+    return base / "store" / CHECK_FILE
+
+
+def read_check(base: Path) -> dict:
+    return read_state(base, check_path(base))
+
+
+def write_check(base: Path, doc: dict) -> None:
+    write_state(base, doc, check_path(base))
+
+
+def read_state(base: Path, file: Path | None = None) -> dict:
+    file = file or state_path(base)
     if not file.is_file() or file.is_symlink():
         return {}
     try:
@@ -306,8 +350,8 @@ def read_state(base: Path) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
-def write_state(base: Path, doc: dict) -> None:
-    file = state_path(base)
+def write_state(base: Path, doc: dict, file: Path | None = None) -> None:
+    file = file or state_path(base)
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".maintenance-")
     try:
@@ -321,9 +365,26 @@ def write_state(base: Path, doc: dict) -> None:
         raise
 
 
-def due(state: dict, key: str, every: datetime.timedelta, at: datetime.datetime) -> bool:
+def due(state: dict, key: str, every: datetime.timedelta, at: datetime.datetime,
+        slack: datetime.timedelta = datetime.timedelta(0)) -> bool:
+    """Whether `every` has passed since `state[key].at`. `slack` absorbs a scheduler's start jitter
+    when `every` equals its interval: without it a run 0.2 s early is not due, and a five-minute
+    cadence becomes ten (review M1)."""
     last = parse_iso((state.get(key) or {}).get("at"))
-    return last is None or at - last >= every
+    return last is None or at - last >= every - slack
+
+
+#: A scheduler starts a job a little early or late; a check this close to its five minutes is due.
+CHECK_SLACK = datetime.timedelta(seconds=30)
+
+
+def last_check(state: dict, record: dict) -> dict:
+    """The newer of the pass's own check and the check job's (`update-check.json`)."""
+    mine, job = state.get("check") or {}, record.get("check") or {}
+    a, b = parse_iso(mine.get("at")), parse_iso(job.get("at"))
+    if b is not None and (a is None or b > a):
+        return {**job, "source": "check-job"}
+    return mine
 
 
 # --- system effects, guarded -------------------------------------------------------
@@ -550,6 +611,22 @@ def live_clients(base: Path, at: datetime.datetime) -> list[str]:
     return reasons
 
 
+def _retry_after(last: dict, latest) -> datetime.datetime | None:
+    """When a release whose automatic update failed for a lasting reason may be tried again."""
+    if not last.get("failures") or last.get("to") != latest or _transient(last):
+        return None
+    failed = parse_iso(last.get("at"))
+    return failed + RETRY_FAILED_UPDATE if failed else None
+
+
+def _newer(target) -> bool:
+    """Whether `target` is a release newer than the running engine."""
+    try:
+        return config.version_tuple(str(target)) > config.version_tuple(config.VERSION)
+    except (ValueError, TypeError, config.ConfigurationError):
+        return False
+
+
 def _engine_moved_past(target) -> bool:
     try:
         return config.version_tuple(config.VERSION) >= config.version_tuple(str(target))
@@ -559,7 +636,7 @@ def _engine_moved_past(target) -> bool:
 
 def step_update(base: Path, state: dict, at: datetime.datetime, commands: Commands,
                 before_check=None) -> dict:
-    """Check every six hours; apply a newer stable release at a safe point. Returns what happened."""
+    """Check every five minutes; apply a newer stable release at a safe point. Returns what happened."""
     if not auto_enabled(base):
         return {"result": "off"}
     reconcile_in_flight(base, state)
@@ -587,20 +664,23 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         return {"result": "waiting-for-person",
                 "detail": "the last automatic update could not roll back by itself; "
                           "`project-observatory full update` says what to do"}
-    last_check, last_update = state.get("check") or {}, state.get("update") or {}
-    same_pass = last_update.get("at") == last_check.get("at")
-    # One retry within the hour after a check that could not look, then every six hours
-    # (LC-16); an update deferred for a live client or refused for a moment is tried at
-    # the next hourly pass.
-    hourly = (last_check.get("result") == "undetermined" and int(last_check.get("failures") or 1) <= 1) or (
-        same_pass and (last_update.get("result") == "deferred" or _transient(last_update)))
-    every = RETRY_UNDETERMINED if hourly else CHECK_EVERY
-    if not due(state, "check", every, at):
+    # Every five minutes, the retry after a check that could not look included (operator rule,
+    # 2026-10-17), counting the check job's own reads (`update-check.json`). A newer release the
+    # job found a moment ago is not asked for again: the job started this pass to apply it.
+    recent = last_check(state, read_check(base))
+    is_due = due({"check": recent}, "check", CHECK_EVERY, at, CHECK_SLACK)
+    pending = recent.get("result") == "update-available" and _newer(recent.get("latest"))
+    if not is_due and not pending:
         return {"result": "not-due"}
-    if before_check is not None:
-        before_check()
-    code, report, err = commands.full("update", "--check", timeout=600)
-    check = {"at": iso(at), "exit": code}
+    if pending and not is_due:
+        # The job's own read stands, with its own time: nothing was read now (review L8).
+        code, report, err = UPDATE_AVAILABLE, {"target": recent.get("latest")}, ""
+        check = {"at": recent.get("at"), "exit": code, "source": "check-job"}
+    else:
+        if before_check is not None:
+            before_check()
+        code, report, err = commands.full("update", "--check", timeout=600)
+        check = {"at": iso(at), "exit": code}
     if code == UPDATE_OK:
         check["result"] = "up-to-date"
     elif code == UPDATE_AVAILABLE:
@@ -610,7 +690,7 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     else:
         check["result"] = "undetermined"
         check["detail"] = err or f"exit {code}"
-        check["failures"] = int(last_check.get("failures") or 0) + 1 if last_check.get("result") == "undetermined" else 1
+        check["failures"] = int(recent.get("failures") or 0) + 1 if recent.get("result") == "undetermined" else 1
     state["check"] = check
     if code != UPDATE_AVAILABLE:
         return {"result": check["result"]}
@@ -618,6 +698,10 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         # Downloaded and verified once already; the step is still the person's.
         state["update"] = {**last, "checked_at": iso(at)}
         return {"result": "held", "detail": last.get("needs_person") or ""}
+    retry_at = _retry_after(last, check.get("latest"))
+    if retry_at is not None and at < retry_at:
+        return {"result": "waiting-to-retry",
+                "detail": f"the last attempt at {check.get('latest')} failed; tried again after {iso(retry_at)}"}
     if update_running(base):
         # A person (or the plugin's bridge) is updating right now; never a second
         # transaction. Recorded, so the next hour tries again (audit A13).
@@ -649,7 +733,7 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     outcome = {UPDATE_OK: "updated", UPDATE_SERVICES: "updated-services-not-restarted",
                UPDATE_FAILED: "failed-rolled-back", UPDATE_REFUSED: "refused",
                UPDATE_UNDETERMINED: "undetermined", UPDATE_NEEDS_PERSON: "needs-person",
-               UPDATE_HELD: "held"}.get(code, "failed")
+               UPDATE_HELD: "held", UPDATE_NO_SPACE: "refused-disk"}.get(code, "failed")
     update = {"at": iso(at), "exit": code, "result": outcome, "from": config.VERSION,
               "to": report.get("version") or check.get("latest")}
     if code == UPDATE_HELD:
@@ -986,6 +1070,105 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         return report
 
 
+#: How long a release the check job handed to the pass waits before the job starts the pass again
+#: for it (a deferred or refused attempt): the scheduled pass comes this often anyway.
+KICK_AGAIN = datetime.timedelta(seconds=900)
+
+
+def feed_latest(base: Path) -> str:
+    """The newest release's version from the static feed (engine_update.latest_version)."""
+    import engine_update as eu
+    api, repo = eu.release_source()
+    # One attempt: the fetcher sleeps between attempts, and the next check is five minutes away.
+    return eu.latest_version(eu.Fetcher(timeout=20, attempts=1), api, repo)[0]
+
+
+def _kick_wanted(state: dict, latest: str, at: datetime.datetime) -> bool:
+    """Whether the check job should start the pass now for `latest`."""
+    update = state.get("update") or {}
+    if update.get("result") == "needs-person":
+        return False
+    if update.get("result") == "held" and update.get("to") == latest:
+        return False                 # verified once; the step is a person's (LC-16)
+    if state.get("update_in_flight"):
+        return False
+    retry_at = _retry_after(update, latest)
+    if retry_at is not None and at < retry_at:
+        return False
+    kicked = state.get("kick") or {}
+    last = parse_iso(kicked.get("at"))
+    return not (kicked.get("to") == latest and last is not None and at - last < KICK_AGAIN)
+
+
+@contextlib.contextmanager
+def check_lock(base: Path):
+    """One check job at a time per workspace. Its own lock, never the pass's: holding the pass lock
+    made the 15-minute pass find it busy and skip the guard, the backup and the app (review H1)."""
+    file = base / "store" / "update-check.lock"
+    file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
+    try:
+        try:
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(fd)
+
+
+def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, kick=None) -> dict:
+    """The five-minute check job (`maintain.py check`): one read of the static feed, nothing else.
+
+    Never the pass: no guard, backup, app or update runs here, so the job ends well inside its
+    five-minute interval (LC-03). It takes its own lock, never the pass's, and writes its own
+    record (`update-check.json`), never maintenance.json, so a pass running beside it is neither
+    skipped nor overwritten; it never sleeps. A newer release starts the pass at once through
+    `kick` (the scheduler's own "run now"), which applies it at a safe point. `quiet` in the
+    answer means the check found what the last one found: `main` prints nothing then."""
+    at = at or now()
+    config.validate_workspace(base, required=True)
+    if not auto_enabled(base):
+        return {"status": "off", "quiet": True}
+    kick_to = None
+    with check_lock(base) as held:
+        if not held:
+            return {"status": "busy", "quiet": True}
+        if update_running(base):
+            return {"status": "update-running", "quiet": True}
+        state, record = read_state(base), read_check(base)    # the pass's record is only read
+        previous = record.get("check") or {}
+        if not due({"check": last_check(state, record)}, "check", CHECK_EVERY, at, CHECK_SLACK):
+            return {"status": "not-due", "quiet": True}
+        import engine_update as eu
+        check: dict = {"at": iso(at), "source": "feed"}
+        try:
+            latest = (feed or feed_latest)(base)
+        except (eu.UpdateError, OSError, ValueError) as exc:
+            check.update(result="undetermined", detail=str(exc)[:300],
+                         failures=int(previous.get("failures") or 0) + 1 if previous.get("result") == "undetermined" else 1)
+            update_events.emit("update_check", "check_failed", base=base)
+        else:
+            newer = _newer(latest)
+            check.update(result="update-available" if newer else "up-to-date", latest=latest)
+            update_events.emit("update_check", "ready" if newer else "current", base=base)
+            if newer and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
+                kick_to = latest
+                record["kick"] = {"at": iso(at), "to": latest}
+        record["check"] = check
+        write_check(base, record)
+    report: dict = {"status": "checked", "at": iso(at), "check": check}
+    if kick_to:
+        try:
+            report["kick"] = (kick or (lambda: schedule_for(base).kick()))()
+        except Exception as exc:  # noqa: BLE001: the scheduled pass still comes within 15 minutes
+            report["kick"] = {"result": "failed", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    report["quiet"] = not kick_to and previous.get("result") == check["result"] \
+        and previous.get("latest") == check.get("latest")
+    return report
+
+
 def _reload_after_pass(base: Path, spawn=None) -> str | None:
     """Load a schedule an update wrote but could not reload from inside the pass that ran it.
 
@@ -1114,15 +1297,22 @@ def _instance_digest(base: Path) -> str:
     return hashlib.sha256(str(base.resolve()).encode()).hexdigest()[:16]
 
 
+#: The two jobs of a workspace: the pass, and the five-minute check (operator rule, 2026-10-17).
+JOBS = {"maintain": {"action": "run", "interval": INTERVAL_SECONDS, "limit": None, "what": "maintenance"},
+        "check": {"action": "check", "interval": CHECK_INTERVAL_SECONDS, "limit": CHECK_TIME_LIMIT,
+                  "what": "update check"}}
+
+
 class LaunchdSchedule:
-    """org.project-observatory.<sha16>.maintain: every 15 minutes, at login too, never a managed job."""
+    """org.project-observatory.<sha16>.maintain: every 15 minutes, at login too, never a managed job;
+    `job="check"`: org.project-observatory.<sha16>.check, every five minutes."""
 
     kind = "launchd"
 
-    def __init__(self, base: Path, runner=None):
-        self.base = base
+    def __init__(self, base: Path, runner=None, job: str = "maintain"):
+        self.base, self.job = base, job
         self.launch = _install_launchd()
-        self.label = f"org.project-observatory.{_instance_digest(base)}.maintain"
+        self.label = f"org.project-observatory.{_instance_digest(base)}.{job}"
         self.plist = Path.home() / "Library" / "LaunchAgents" / f"{self.label}.plist"
         self.runner = runner
 
@@ -1147,13 +1337,15 @@ class LaunchdSchedule:
             # RunAtLoad starts the pass at login with everything else; its check waits
             # FIRST_CHECK_DELAY seconds after the start (LC-16).
             "ProgramArguments": [self.launch.stable_interpreter(engine_python()),
-                                 str(config.SOURCE / "tools" / "maintain.py"), "run",
-                                 "--first-check-delay", str(FIRST_CHECK_DELAY)],
-            "StartInterval": INTERVAL_SECONDS,
-            "RunAtLoad": True,
+                                 str(config.SOURCE / "tools" / "maintain.py"), JOBS[self.job]["action"],
+                                 *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])],
+            "StartInterval": JOBS[self.job]["interval"],
+            # The check job does not run at load: the pass does (its check 90 s after the login),
+            # and the check's first run is one interval later, never the pass's moment (review H1).
+            "RunAtLoad": self.job == "maintain",
             "WorkingDirectory": str(config.SOURCE),
-            "StandardOutPath": str(logs / "maintain.log"),
-            "StandardErrorPath": str(logs / "maintain.err"),
+            "StandardOutPath": str(logs / f"{self.job}.log"),
+            "StandardErrorPath": str(logs / f"{self.job}.err"),
             # Not "Background" with LowPriorityIO: on a loaded machine that throttling
             # stretched a 2-second `full update --check` past its 600-second limit (seen
             # live, 2026-10-05). A nice value is enough.
@@ -1174,10 +1366,10 @@ class LaunchdSchedule:
         problems = self.launch.lint_plist(doc)
         if problems:
             raise config.ConfigurationError("; ".join(problems))
-        self.launch.prepare_logs(("maintain.log", "maintain.err"), self.base / "store" / "logs")
+        self.launch.prepare_logs((f"{self.job}.log", f"{self.job}.err"), self.base / "store" / "logs")
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
         pending = self.base / "store" / "maintenance-reload-pending"
-        if current == doc and self.loaded() and not pending.exists():
+        if current == doc and self.loaded() and (self.job != "maintain" or not pending.exists()):
             return {"schedule": self.kind, "label": self.label, "changed": False}
         self.plist.parent.mkdir(parents=True, exist_ok=True)
         if self.plist.is_symlink():
@@ -1189,7 +1381,7 @@ class LaunchdSchedule:
             stream.write(plistlib.dumps(doc))
         os.replace(tmp, self.plist)
         if self.loaded():
-            if pass_running(self.base):
+            if self.job == "maintain" and pass_running(self.base):
                 # Booting the job out now would kill the pass that is running — perhaps the
                 # very `full update` asking for this schedule. The new definition is on disk;
                 # the next ensure outside a pass (the plugin hook, a person) loads it.
@@ -1199,8 +1391,14 @@ class LaunchdSchedule:
         ok, detail = self.launch.start_job(str(self.plist))
         if not ok:
             raise config.ConfigurationError(f"launchd did not load {self.label}: {detail[:200]}")
-        pending.unlink(missing_ok=True)
+        if self.job == "maintain":
+            pending.unlink(missing_ok=True)
         return {"schedule": self.kind, "label": self.label, "changed": True}
+
+    def kick(self) -> dict:
+        """Run the job now (`launchctl kickstart`, no `-k`: a running pass is left alone)."""
+        ok, detail = self.launch.kick_job(self.label)
+        return {"result": "started" if ok else "failed", **({} if ok else {"detail": detail[:200]})}
 
     def uninstall(self) -> dict:
         if self.loaded():
@@ -1217,9 +1415,9 @@ class SystemdSchedule:
 
     kind = "systemd"
 
-    def __init__(self, base: Path, runner=subprocess.run, which=shutil.which):
-        self.base, self.runner, self.which = base, runner, which
-        self.name = f"project-observatory-{_instance_digest(base)}-maintain"
+    def __init__(self, base: Path, runner=subprocess.run, which=shutil.which, job: str = "maintain"):
+        self.base, self.runner, self.which, self.job = base, runner, which, job
+        self.name = f"project-observatory-{_instance_digest(base)}-{job}"
         root = os.environ.get("XDG_CONFIG_HOME")
         self.units = (Path(root) if root and Path(root).is_absolute() else Path.home() / ".config") / "systemd" / "user"
 
@@ -1235,15 +1433,18 @@ class SystemdSchedule:
         python = _install_launchd().stable_interpreter(engine_python())
         return "\n".join([
             "[Unit]",
-            f"Description=Project Observatory maintenance (updates and backups) for {self.base}",
+            (f"Description=Project Observatory maintenance (updates and backups) for {self.base}"
+             if self.job == "maintain" else f"Description=Project Observatory update check for {self.base}"),
             "",
             "[Service]",
             "Type=oneshot",
-            f"ExecStart={self.quote(python)} {self.quote(str(config.SOURCE / 'tools' / 'maintain.py'))} run",
+            f"ExecStart={self.quote(python)} {self.quote(str(config.SOURCE / 'tools' / 'maintain.py'))} "
+            f"{JOBS[self.job]['action']}",
             f"Environment={self.quote('OBSERVATORY_HOME=' + str(self.base))}",
             'Environment="OBSERVATORY_SYSTEM_SETUP=1"',
             "Nice=10",
             "UMask=0077",
+            *([f"TimeoutStartSec={CHECK_TIME_LIMIT}"] if self.job == "check" else []),
             # The pass starts an update in a session of its own and never waits to kill
             # it (audit A03); systemd's default control-group kill would take it down with
             # the pass on a stop or a logout, leaving the jobs it stopped down (A03 review).
@@ -1254,13 +1455,14 @@ class SystemdSchedule:
     def timer_text(self) -> str:
         return "\n".join([
             "[Unit]",
-            f"Description=Run Project Observatory maintenance every 15 minutes for {self.base}",
+            f"Description=Run Project Observatory {JOBS[self.job]['what']} every "
+            f"{JOBS[self.job]['interval'] // 60} minutes for {self.base}",
             "",
             "[Timer]",
             # The user manager starts at login: the first pass, and so the first check,
-            # comes 90 seconds after it (LC-16), then every 15 minutes.
-            f"OnStartupSec={FIRST_CHECK_DELAY}s",
-            f"OnUnitActiveSec={INTERVAL_SECONDS // 60}min",
+            # comes 90 seconds after it (LC-16), then every 15 (the check: 5) minutes.
+            f"OnStartupSec={FIRST_CHECK_DELAY if self.job == 'maintain' else CHECK_FIRST_DELAY}s",
+            f"OnUnitActiveSec={JOBS[self.job]['interval'] // 60}min",
             "Persistent=true",
             "",
             "[Install]",
@@ -1314,6 +1516,11 @@ class SystemdSchedule:
             active = self._systemctl("is-active", f"{self.name}.timer")[0] == 0
         return {"kind": self.kind, "unit": f"{self.name}.timer", "installed": self.installed(), "active": active}
 
+    def kick(self) -> dict:
+        """Run the pass now; `--no-block` returns at once, the timer keeps its cadence."""
+        code, out = self._systemctl("start", "--no-block", f"{self.name}.service")
+        return {"result": "started" if code == 0 else "failed", **({} if code == 0 else {"detail": out[:200]})}
+
 
 class TaskSchedulerSchedule:
     """A per-user Windows task: every 15 minutes, and 90 seconds after logon (LC-16), never a managed job;
@@ -1321,19 +1528,21 @@ class TaskSchedulerSchedule:
 
     kind = "task-scheduler"
 
-    def __init__(self, base: Path, runner=None):
+    def __init__(self, base: Path, runner=None, job: str = "maintain"):
         import osschedule
         self.base = base
         python = _install_launchd().stable_interpreter(engine_python())
         job = osschedule.Job(
-            name="maintain", workspace=base,
-            argv=(python, str(config.SOURCE / "tools" / "maintain.py"), "run"),
+            name=job, workspace=base,
+            argv=(python, str(config.SOURCE / "tools" / "maintain.py"), JOBS[job]["action"]),
             env=(("OBSERVATORY_HOME", str(base)), ("OBSERVATORY_PYTHON", python), ("OBSERVATORY_SYSTEM_SETUP", "1")),
-            cwd=config.SOURCE, stdout=base / "store" / "logs" / "maintain.log", stderr=base / "store" / "logs" / "maintain.err",
-            interval_seconds=INTERVAL_SECONDS, at_login=True, first_delay_seconds=FIRST_CHECK_DELAY,
+            cwd=config.SOURCE, stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
+            interval_seconds=JOBS[job]["interval"], at_login=True,
+            first_delay_seconds=FIRST_CHECK_DELAY if job == "maintain" else CHECK_FIRST_DELAY,
+            phase_seconds=0 if job == "maintain" else CHECK_FIRST_DELAY,
             # The pass is short; an update it starts runs in a process of its own, which ending
             # the task does not stop.
-            time_limit_seconds=PASS_TIME_LIMIT)
+            time_limit_seconds=JOBS[job]["limit"] or PASS_TIME_LIMIT)
         self.job = osschedule.TaskSchedulerJob(job, **({"runner": runner} if runner else {}))
 
     def installed(self) -> bool:
@@ -1352,13 +1561,49 @@ class TaskSchedulerSchedule:
     def status(self) -> dict:
         return self.job.status()
 
+    def kick(self) -> dict:
+        ok, detail = self.job.start()
+        return {"result": "started" if ok else "failed", **({} if ok else {"detail": str(detail)[:200]})}
+
+
+class Schedules:
+    """The workspace's two jobs as one schedule: the pass and the five-minute check.
+
+    Scheduled means both are; an install from before the check job reads as not scheduled
+    until `maintain ensure` (which every `full update` runs) adds it."""
+
+    def __init__(self, main, check):
+        self.main, self.check = main, check
+        self.kind = main.kind
+
+    def install(self) -> dict:
+        out = self.main.install()
+        return {**out, "check": self.check.install()}
+
+    def uninstall(self) -> dict:
+        out = self.main.uninstall()
+        return {**out, "check": self.check.uninstall()}
+
+    def status(self) -> dict:
+        main, check = self.main.status(), self.check.status()
+        out = {**main, "check": check}
+        for key in ("installed", "loaded", "active"):
+            if key in main and main[key] is not None:
+                out[key] = bool(main[key]) and bool(check.get(key))
+        return out
+
+    def kick(self) -> dict:
+        return self.main.kick()
+
 
 def schedule_for(base: Path):
     if sys.platform == "darwin":
-        return LaunchdSchedule(base)
-    if sys.platform == "win32":
-        return TaskSchedulerSchedule(base)
-    return SystemdSchedule(base)
+        kind = LaunchdSchedule
+    elif sys.platform == "win32":
+        kind = TaskSchedulerSchedule
+    else:
+        kind = SystemdSchedule
+    return Schedules(kind(base), kind(base, job="check"))
 
 
 def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> dict:
@@ -1461,7 +1706,7 @@ def status(base: Path, *, schedule=None) -> dict:
         hour = _transient(update)
         detail = str(update.get("detail", ""))[:120]
         warn("update-incomplete", f"the last automatic update did not complete ({update.get('result')}: "
-                                  f"{detail}); it is tried again {'the next hour' if hour else 'within six hours'}",
+                                  f"{detail}); it is tried again {'at the next pass' if hour else 'six hours after it failed'}",
              result=update.get("result"), detail=detail, soon=hour)
     failure = state.get("snapshot_failure") or {}
     if failure and (parse_iso(failure.get("at")) or now()) >= (parse_iso((state.get("snapshot") or {}).get("at"))
@@ -1504,7 +1749,7 @@ def status(base: Path, *, schedule=None) -> dict:
     return {"auto_update": auto_enabled(base), "switch": switch_status(base),
             "schedule_wanted": schedule_wanted(base), "schedule": sched,
             "scheduled": scheduled, "versions": versions, "passphrase": state.get("passphrase"),
-            "last_pass": (state.get("pass") or {}).get("at"), "check": state.get("check"),
+            "last_pass": (state.get("pass") or {}).get("at"), "check": last_check(state, read_check(base)) or None,
             "update": state.get("update"), "update_in_flight": state.get("update_in_flight"),
             "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
             "machine_backup": machine,
@@ -1584,11 +1829,11 @@ def restore_latest(base: Path, *, store=None, label: str | None = None) -> dict:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="project-observatory full maintain",
                                  description="updates that arrive by themselves and a daily backup")
-    ap.add_argument("action", choices=["run", "ensure", "uninstall", "status", "hook", "app"])
+    ap.add_argument("action", choices=["run", "check", "ensure", "uninstall", "status", "hook", "app"])
     ap.add_argument("--if-wanted", action="store_true",
                     help="with ensure: keep a schedule a person removed with `maintain uninstall` removed")
     ap.add_argument("--first-check-delay", type=float, default=0, metavar="SECONDS",
-                    help="with run: a check waits until SECONDS after this process started (the scheduler's)")
+                    help="with run or check: a check waits until SECONDS after this process started (the scheduler's)")
     return ap
 
 
@@ -1620,7 +1865,7 @@ def main(argv: list[str]) -> int:
         # `run` and `hook` write the Keychain and may bootstrap launchd: the same consent
         # `ensure` asks for (audit A07 review). The jobs and the plugin hook set
         # OBSERVATORY_SYSTEM_SETUP=1; a person's terminal passes on its own.
-        if a.action in ("run", "hook") and not system_setup_allowed(base):
+        if a.action in ("run", "check", "hook") and not system_setup_allowed(base):
             raise config.ConfigurationError(
                 f"`maintain {a.action}` touches launchd/systemd and the credential store; this process "
                 "may not (OBSERVATORY_SYSTEM_SETUP=0, a temporary workspace, or not this account's home). "
@@ -1630,6 +1875,12 @@ def main(argv: list[str]) -> int:
             # the `finally` that starts the tick and server again (review F2).
             signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
             result = run_pass(base, first_check_delay=max(0.0, min(a.first_check_delay, 600.0)))
+        elif a.action == "check":
+            signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
+            result = check_pass(base)
+            if result.pop("quiet", False):
+                # Nothing new: the log keeps a change, not every five minutes (operator rule).
+                return 0
         elif a.action == "ensure":
             if not system_setup_allowed(base):
                 raise config.ConfigurationError(

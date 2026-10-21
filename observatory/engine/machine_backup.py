@@ -24,7 +24,15 @@ nothing is written at all. Inside:
 
 A symbolic link is recorded as a link with its target and never followed into another tree.
 Anything over a cap (a file, an entry, the bundle, a checkout's bundle or patch) is NOT
-CARRIED and named: in MANIFEST.json, in the command's answer, in `doctor` and on Health.
+CARRIED and named: in MANIFEST.json, in the command's answer, in `doctor`, on Health and as a
+finding (`machine.backup_not_carried`). Every such record carries a `fix`: the push that puts the
+commits on a remote, or the exact `limits` value in machine-backup.json that would carry it
+(`remedy`). The only copies of work (commits no remote has, then uncommitted changes) are
+listed first, so the receipt's first twenty are the ones that matter most.
+
+A checkout's carried parts (bundle, patch, untracked files) are spooled to files in the private
+stage and streamed into the tar from there, so a large cap costs disk, checked against
+`min_free_gb`, and never memory.
 
 WHAT IT NEVER HOLDS. Transcripts (`~/.claude/projects`, opt-in with `transcripts: true`),
 plugin and package caches, the engine's own workspace (the daily snapshot carries it),
@@ -60,6 +68,7 @@ import fnmatch
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -93,14 +102,27 @@ FRESH = datetime.timedelta(hours=1)
 CONFIG_NAME = "machine-backup.json"
 STATE_NAME = "machine-backup.json"
 #: Every limit, and the key that changes it in machine-backup.json → `limits`.
+#:
+#: The checkout caps were raised on 2026-10-21 from what one working agent machine measured the
+#: day before: 476 checkouts, 19 items not carried, ten of them repositories whose unpushed
+#: commits made bundles of 16.7, 19.1, 24.0, 26.4, 29.6, 30.3, 76.8, 110.6, 130.0 and 404.3 MB
+#: against a 16 MB cap (one held 32 unpushed commits), two patches of 23.4 and 59.1 MB against
+#: 8 MB, and untracked sets of 15.9 and 161.5 MB against 8 MB. Those commits are the only copy
+#: of the work, and the bundle exists so the machine can move. At 160/64/32 MB and 768 MB for
+#: all checkouts, every one of them but the 404 MB bundle (one commit of a large file) and the
+#: 161.5 MB untracked set is carried: about 560 MB more per bundle, three bundles kept. 160, not
+#: 128: caps are MiB and the largest of them, the 32 commits, is 130.0 MiB (a 128 cap refused
+#: it, review of #325). `test_the_default_caps_carry_what_the_measured_machine_left_behind`
+#: computes this claim from the receipt's exact sizes through `over_cap`. What still does not
+#: fit is a finding with its fix (`remedy`), never only a count.
 LIMITS = {
     "file_mb": 16,          # one file
     "entry_mb": 128,        # one manifest entry (a directory such as ~/.claude/skills)
     "total_mb": 320,        # every file copy together; measured: 69 MB compressed with every skill carried
-    "bundle_mb": 16,        # one checkout's git bundle of unpushed commits
-    "patch_mb": 8,          # one checkout's patch of uncommitted changes
-    "untracked_mb": 8,      # one checkout's untracked files together
-    "checkouts_mb": 64,     # everything carried for checkouts together
+    "bundle_mb": 160,       # one checkout's git bundle of unpushed commits
+    "patch_mb": 64,         # one checkout's patch of uncommitted changes
+    "untracked_mb": 32,     # one checkout's untracked files together
+    "checkouts_mb": 768,    # everything carried for checkouts together
     "min_free_gb": 2,       # free space the root's disk keeps after the write
     "depth": 4,             # how deep a root is searched for checkouts
     "checkout_seconds": 900,  # the whole checkout inventory; past it the rest is named, not read
@@ -425,6 +447,82 @@ class Collection:
             self.miss(display(root, self.home), f"unreadable: {type(exc).__name__}")
 
 
+# --- what was left behind, and how to carry it ------------------------------------------------
+
+CAP = re.compile(r"\(limits\.([a-z_]+)\)")
+
+
+def loss_rank(record: dict) -> int:
+    """0: commits no remote has; 1: uncommitted changes; 2: untracked files; 3: a checkout
+    git could not read (its work unknown); 4: a file or folder of the home."""
+    reason = str(record.get("reason") or "")
+    if "commit(s) no remote has" in reason:
+        return 0
+    if reason.startswith("uncommitted changes"):
+        return 1
+    if "untracked file" in reason:
+        return 2
+    if reason.startswith("checkout not read"):
+        return 3
+    return 4
+
+
+def remedy(record: dict, limits: dict) -> str:
+    """How to carry what was left behind: in the person's words, with the exact value."""
+    reason, source = str(record.get("reason") or ""), str(record.get("source") or "")
+    size = int(record.get("size") or 0)
+    rank = loss_rank(record)
+    where = f"config/{CONFIG_NAME}"
+    cap = CAP.search(reason)
+    if cap and cap.group(1) in LIMITS and cap.group(1) != "min_free_gb":
+        key = cap.group(1)
+        # A per-item cap needs the item's size; a cap shared by many (entry, total, checkouts)
+        # needs what is already under it as well.
+        shared = key in ("entry_mb", "total_mb", "checkouts_mb")
+        need = max(1, math.ceil(((limits.get(key) or 0) * 1024 * 1024 * shared + size) / 1024 ** 2))
+        raise_it = f'raise limits.{key} in {where} to at least {need} MB ({{"limits": {{"{key}": {need}}}}})'
+        first = {0: f"push the branch so a remote holds the commits (`git -C {source} push`), or ",
+                 1: f"commit and push the changes in {source}, or ",
+                 2: f"commit, ignore or remove the untracked files in {source}, or "}.get(rank, "")
+        last = "" if rank < 4 else f", or add it to `exclude` in {where} if it need not move"
+        return first + raise_it + last
+    if "would leave under" in reason:
+        return ("free space on the disk that holds the backups root (`project-observatory full disk-guard --apply` "
+                f"removes what loses nothing), or lower limits.min_free_gb in {where}")
+    if "git bundle failed" in reason:
+        return (f"`git -C {source} fsck` names what the repository lacks; repair it, then push the branch so a "
+                "remote holds the commits")
+    if rank == 3:
+        return f"git cannot read the checkout at {source}: repair or remove its `.git`, or keep it out of `roots` in {where}"
+    if reason.startswith("grew past"):
+        return f"take the backup again once the file stops growing, or raise limits.file_mb in {where}"
+    if "unreadable" in reason:
+        return f"make {source} readable by this account, or add it to `exclude` in {where}"
+    if "time budget" in reason:
+        return f"raise limits.checkout_seconds in {where}, or narrow `roots`"
+    return f"see the reason; every setting is in {where}"
+
+
+def settle_not_carried(col: "Collection") -> None:
+    """Every record gets its `fix`, and the only copies of work come first (in place: the
+    manifest holds the same list)."""
+    for record in col.not_carried:
+        record["fix"] = remedy(record, col.limits)
+    col.not_carried.sort(key=lambda r: (loss_rank(r), -int(r.get("size") or 0)))
+
+
+class _Hashing:
+    """A file read by tarfile, hashed on the way through: a carried part is never whole in memory."""
+
+    def __init__(self, stream, digest):
+        self.stream, self.digest = stream, digest
+
+    def read(self, size=-1):
+        block = self.stream.read(size)
+        self.digest.update(block)
+        return block
+
+
 # --- inventories --------------------------------------------------------------------------
 
 def tool_path(home: Path) -> str:
@@ -697,6 +795,17 @@ def _bundle_repository(path: Path, rec: dict, heads: dict, work: Path, cid: str)
     return tmp, revs, estimate
 
 
+def over_cap(size: int, cap_key: str, used: int, limits: dict) -> str | None:
+    """The cap a checkout part of `size` bytes breaks, or None: its own (`cap_key`) or, with
+    `used` bytes already carried for checkouts, `checkouts_mb`. Caps are MiB. The one rule both
+    the backup and the test of the documented defaults apply."""
+    if size > int(limits[cap_key] * 1024 * 1024):
+        return cap_key
+    if used + size > int(limits["checkouts_mb"] * 1024 * 1024):
+        return "checkouts_mb"
+    return None
+
+
 def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Path, cid: str,
                    bundled_dirs: set, budget: list, heads: dict | None = None) -> list[dict]:
     """The members this checkout adds: one bundle per repository of every commit no remote has
@@ -708,10 +817,11 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
     floor = int(limits["min_free_gb"] * 1024 ** 3)
 
     def room(size: int, cap_key: str, what: str, charge: bool = True) -> bool:
-        if size > col.mb(cap_key):
+        broken = over_cap(size, cap_key, budget[0], limits)
+        if broken == cap_key:
             col.miss(shown, f"{what}: over the cap of {limits[cap_key]} MB (limits.{cap_key})", size)
             return False
-        if budget[0] + size > col.mb("checkouts_mb"):
+        if broken:
             col.miss(shown, f"{what}: over the checkouts' cap of {limits['checkouts_mb']} MB (limits.checkouts_mb)", size)
             return False
         if free_bytes(work) - size < floor:
@@ -740,9 +850,11 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
             if p.returncode != 0 or not target.is_file():
                 col.miss(shown, f"{what}: git bundle failed ({(p.stderr or '').strip()[:120]})")
             elif room(target.stat().st_size, "bundle_mb", what):
-                members.append({"arcname": f"checkouts/{cid}/unpushed.bundle", "data": target.read_bytes()})
+                # Kept in the private stage and streamed into the tar (`_take` removes `work`).
+                members.append({"arcname": f"checkouts/{cid}/unpushed.bundle", "file": target})
                 carried["bundle"] = f"checkouts/{cid}/unpushed.bundle"
-            target.unlink(missing_ok=True)
+            else:
+                target.unlink(missing_ok=True)
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)
     if rec.get("changed"):
@@ -755,7 +867,12 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
         if p.returncode != 0:
             col.miss(shown, "uncommitted changes: git diff failed")
         elif p.stdout and room(len(p.stdout), "patch_mb", "uncommitted changes"):
-            members.append({"arcname": f"checkouts/{cid}/{name}", "data": p.stdout})
+            spool = work / f"{cid}-{name}"
+            import osprivacy
+            fd = osprivacy.open(spool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as out:
+                out.write(p.stdout)
+            members.append({"arcname": f"checkouts/{cid}/{name}", "file": spool})
             carried["patch"] = f"checkouts/{cid}/{name}"
     if rec.get("untracked"):
         files, size = [], 0
@@ -767,14 +884,19 @@ def carry_checkout(rec: dict, path: Path, home: Path, col: Collection, work: Pat
             size += f.stat().st_size
         if files and room(size, "untracked_mb", f"{len(files)} untracked file(s)"):
             carried["untracked"], carried["untracked_modes"] = [], {}
-            for rel, f in files:
+            for n, (rel, f) in enumerate(files):
+                # By number, never by name: two names that differ only in case would be one file
+                # on a case-insensitive stage, and the second copy would replace the first.
+                spool = work / cid / "untracked" / str(n)
                 try:
-                    data = f.read_bytes()
+                    spool.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    shutil.copyfile(f, spool, follow_symlinks=False)
+                    os.chmod(spool, 0o600)
                     mode = stat.S_IMODE(f.stat().st_mode)
                 except OSError as exc:
                     col.miss(f"{shown}/{rel}", f"unreadable: {type(exc).__name__}")
                     continue
-                members.append({"arcname": f"checkouts/{cid}/untracked/{rel}", "data": data, "mode": mode})
+                members.append({"arcname": f"checkouts/{cid}/untracked/{rel}", "file": spool, "mode": mode})
                 carried["untracked"].append(rel)
                 carried["untracked_modes"][rel] = mode
     return members
@@ -943,11 +1065,18 @@ def _parse(value) -> datetime.datetime | None:
 
 # --- taking one ---------------------------------------------------------------------------------
 
-def free_bytes(path: Path) -> int:
+def existing_ancestor(path: Path) -> Path:
+    """`path`, or its nearest parent that exists: where a write to `path` would land."""
     probe = path
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
-    return shutil.disk_usage(probe).free
+    return probe
+
+
+def free_bytes(path: Path) -> int:
+    """Free bytes on the volume a write to `path` would land on. Shared: `full update`
+    sizes its preflight with it too (engine_update.space_check)."""
+    return shutil.disk_usage(existing_ancestor(path)).free
 
 
 def workspace_pointer(base: Path, home: Path) -> dict:
@@ -1094,10 +1223,15 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                     manifest["items"].append({"kind": "inventory", "source": name.split("/")[-1].split(".")[0],
                                               "arcname": name, "size": len(data), "sha256": _sha256(data)})
                 for m in members:
-                    add(m["arcname"], m["data"])
+                    info = tarfile.TarInfo(m["arcname"])
+                    info.size, info.mode, info.mtime = m["file"].stat().st_size, 0o600, int(at.timestamp())
+                    digest = hashlib.sha256()
+                    with m["file"].open("rb") as stream:
+                        tar.addfile(info, _Hashing(stream, digest))
                     manifest["items"].append({"kind": "checkout", "source": m["arcname"], "arcname": m["arcname"],
-                                              "size": len(m["data"]), "sha256": _sha256(m["data"]),
+                                              "size": info.size, "sha256": digest.hexdigest(),
                                               **({"mode": m["mode"]} if "mode" in m else {})})
+                settle_not_carried(col)
                 manifest["totals"] = {"items": len(manifest["items"]), "skipped": len(col.skipped),
                                       "not_carried": len(col.not_carried), "checkouts": len(records)}
                 add("MANIFEST.json", json.dumps(manifest, indent=1, ensure_ascii=False).encode())
@@ -1108,10 +1242,12 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
         dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    settle_not_carried(col)
     return {"at": iso(at), "result": "taken", "trigger": trigger, "file": dest.name, "root": str(root),
             "size": dest.stat().st_size, "items": manifest["totals"]["items"],
             "checkouts": len(records), "skipped": len(col.skipped),
             "not_carried_count": len(col.not_carried), "not_carried": col.not_carried[:NOT_CARRIED_SHOWN],
+            "not_carried_commits": sum(1 for r in col.not_carried if loss_rank(r) == 0),
             "inventories": {i["name"]: i["status"] for i in invs}, "rotated": dropped,
             "seconds": round(time.monotonic() - started, 1)}
 
@@ -1171,6 +1307,25 @@ def step(base: Path, at: datetime.datetime, *, take_fn=None) -> dict:
         return {"result": "busy" if "is running" in str(exc) else "failed", "detail": str(exc)[:300]}
 
 
+def expected_before_update(base: Path, at: datetime.datetime | None = None) -> int:
+    """Bytes `before_update` is about to write: the newest bundle's size when one is due (the
+    best estimate of the next), 0 when none will be taken. `full update` counts it in its first
+    space check, so a marginal disk is refused before a fresh bundle fills it (review of #325)."""
+    at = at or datetime.datetime.now(datetime.timezone.utc)
+    try:
+        if not enabled(base) or not automatic_allowed():
+            return 0
+        last = newest(base)
+        if last is None:
+            return 0
+        when = _stamp_time(last)
+        if when and at - when < FRESH:
+            return 0
+        return last.stat().st_size
+    except OSError:
+        return 0
+
+
 def before_update(base: Path, *, take_fn=None, at: datetime.datetime | None = None) -> dict:
     """Before an engine update: a bundle unless one younger than FRESH exists. Never raises:
     an update is not held back by the machine backup, it only says what happened."""
@@ -1209,6 +1364,7 @@ def status(base: Path, at: datetime.datetime | None = None) -> dict:
            "size": size, "keep": KEEP,
            "last_attempt": {k: last.get(k) for k in ("at", "result", "trigger", "detail") if k in last} or None,
            "items": success.get("items"), "not_carried_count": success.get("not_carried_count"),
+           "not_carried_commits": success.get("not_carried_commits"),
            "not_carried": success.get("not_carried") or [], "settings": str(settings_path(base))}
     items = []
 
@@ -1235,9 +1391,12 @@ def status(base: Path, at: datetime.datetime | None = None) -> dict:
              hours=out["age_hours"])
     if file and out["not_carried_count"]:
         names = ", ".join(i["source"] for i in out["not_carried"][:5])
+        commits = out.get("not_carried_commits") or sum(1 for i in out["not_carried"] if loss_rank(i) == 0)
+        lost = (f", {commits} of them the only copy of commits no remote has" if commits else "")
         warn("machine-backup-not-carried", f"{out['not_carried_count']} item(s) were not carried in the newest "
-                                           f"machine backup ({names}…); see `full machine-backup status`",
-             count=out["not_carried_count"])
+                                           f"machine backup{lost} ({names}…); `full machine-backup status` names "
+                                           "each with how to carry it",
+             count=out["not_carried_count"], commits=commits)
     out["warnings"] = [i["text"] for i in items]
     out["warning_items"] = items
     return out

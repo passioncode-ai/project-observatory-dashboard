@@ -9,6 +9,7 @@ external host acceptance tests are explicitly outside this offline set.
 from __future__ import annotations
 import argparse
 import concurrent.futures
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -308,7 +309,7 @@ NOT_RUN = (
 )
 
 
-def copy_source(target: Path) -> None:
+def source_files() -> list[Path]:
     """Only code, reviewed defaults and exact fixture dependencies are copied."""
     selected = {ROOT / name for name in ROOT_FILES + SKILL_FILES}
     selected |= {ROOT / 'tests' / ('test_' + name + '.py') for name in SUITES}
@@ -339,12 +340,19 @@ def copy_source(target: Path) -> None:
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
     selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
     selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
+    out = []
     for source in sorted(selected):
         if not source.is_file():
             # Optional root modules/skill docs are not needed by every release.
             if source.parent == ROOT / 'tests' or source == ROOT / 'plugins/README.md':
                 raise FileNotFoundError(str(source.relative_to(ROOT)))
             continue
+        out.append(source)
+    return out
+
+
+def copy_source(target: Path) -> None:
+    for source in source_files():
         if source.is_symlink():
             raise ValueError('Refusing source symlink: ' + str(source.relative_to(ROOT)))
         destination = target / source.relative_to(ROOT)
@@ -458,9 +466,75 @@ ASSERTION_LINE_SUITES = frozenset((
 SUITE_MINIMUMS: dict[str, int] = {}
 
 
-def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
+#: What a run keeps free under the temporary folder (OBS-167): on 2026-10-19 four parallel
+#: runs wrote about 3.5 GB each and left a machine under 1 GB free, failing other suites with
+#: ENOSPC. `--min-free-gb` changes it; 0 starts whatever the disk holds.
+MIN_FREE_GB = 2
+#: The refusal's exit code, the one `full update` uses for the same reason.
+EXIT_NO_SPACE = 7
+
+
+def space_needed(jobs: int, floor_gb: float) -> int:
+    """Bytes a run needs free before it starts: the template plus one source copy per suite
+    running at once (each sandbox goes when its suite ends, so at most `jobs` exist), and
+    the floor left over for the suites' own files and everything else on the machine."""
+    source = sum(f.stat().st_size for f in source_files())
+    return source * (jobs + 1) + int(floor_gb * 1024 ** 3)
+
+
+def discard(path: Path) -> None:
+    """Remove a sandbox completely, even what a suite made read-only."""
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    for directory, children, _files in os.walk(path):
+        for child in children:
+            inner = os.path.join(directory, child)
+            if not os.path.islink(inner):
+                with contextlib.suppress(OSError):
+                    os.chmod(inner, 0o700)
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o700)
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def discard_sandbox(work: Path) -> None:
+    """Everything a suite was given and wrote, except its log (OBS-167). A run copied the
+    source for every suite and removed none until the run ended: 273 copies, ~3.5 GB."""
+    if not work.is_dir():
+        return
+    for child in work.iterdir():
+        if child.name != 'run.log':
+            discard(child)
+
+
+def tree_bytes(root: Path) -> int:
+    total = 0
+    for directory, _children, files in os.walk(root):
+        for name in files:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(directory, name)).st_size
+    return total
+
+
+def run_suite(name: str, base: Path, template: Path, timeout: int, keep: bool = False) -> dict:
+    """One suite in its sandbox. The receipt's `sandbox_bytes` is what the sandbox held when
+    the suite ended (source copy included), so every run says which suites write the most."""
+    work = base / name; work.mkdir()
+    try:
+        result = _run_suite(name, work, template, timeout)
+        result['sandbox_bytes'] = tree_bytes(work)
+        return result
+    finally:
+        if not keep:
+            discard_sandbox(work)
+
+
+def _run_suite(name: str, work: Path, template: Path, timeout: int) -> dict:
     timeout = suite_timeout(name, timeout)
-    started = time.monotonic(); work = base / name; work.mkdir()
+    started = time.monotonic()
     checkout = work / 'source'; shutil.copytree(template, checkout)
     env = clean_env(work)
     command = ([sys.executable, '-c', LEGACY_BOOTSTRAP, name] if name in LEGACY else
@@ -557,7 +631,7 @@ def nothing_ran(result: dict) -> bool:
     return result['executed_checks'] == 0 and result['skipped_checks'] > 0
 
 
-def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> dict:
+def run_suite_recorded(name: str, base: Path, template: Path, timeout: int, keep: bool = False) -> dict:
     """Keep one receipt per selection even when sandbox setup or log I/O fails.
 
     Pool.map otherwise raises on the first exception and discards the other suites'
@@ -566,7 +640,7 @@ def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> d
     """
     started = time.monotonic()
     try:
-        return run_suite(name, base, template, timeout)
+        return run_suite(name, base, template, timeout, keep=keep)
     except Exception as exc:
         result = {'file': 'tests/test_' + name + '.py', 'status': 'ERROR',
                   'exit_code': None, 'seconds': round(time.monotonic() - started, 2),
@@ -612,19 +686,52 @@ def parser(prog: str | None = None) -> argparse.ArgumentParser:
     ap.add_argument('--timeout',type=int,default=120,help='Seconds per suite.')
     ap.add_argument('--report-dir', type=Path, help='Write only synthetic suite logs and the summary to a new directory.')
     ap.add_argument('--keep',action='store_true',help='Keep private synthetic logs and source sandboxes.')
+    ap.add_argument('--min-free-gb', type=float, default=MIN_FREE_GB, metavar='GB',
+                    help=f'Refuse to start when the temporary folder would keep less than this free '
+                         f'(default {MIN_FREE_GB}); 0 starts regardless.')
     return ap
+
+
+def space_refusal(jobs: int, floor_gb: float) -> dict | None:
+    """None when the run fits; otherwise the receipt's fields, every number in bytes."""
+    if floor_gb == 0:
+        return None
+    where = tempfile.gettempdir()
+    free, needed = shutil.disk_usage(where).free, space_needed(jobs, floor_gb)
+    if free >= needed:
+        return None
+    gb = lambda n: f'{n / 1024 ** 3:.2f} GB'  # noqa: E731
+    return {'free_bytes': free, 'needed_bytes': needed, 'where': where,
+            'reason': (f'Not started: {free} bytes ({gb(free)}) free under the temporary folder {where}, '
+                       f'under the {needed} bytes ({gb(needed)}) this run needs: one source copy for each '
+                       f'of {jobs} suite(s) at a time plus the template, and {floor_gb:g} GB left free. '
+                       f'Free space, lower --jobs, or pass --min-free-gb 0 to start anyway.')}
 
 
 def main() -> int:
     ap=parser(os.environ.get('OBSERVATORY_PROG') or None)
     args=ap.parse_args()
     if args.jobs < 1 or args.timeout < 1: ap.error('jobs and timeout must be positive')
+    if args.min_free_gb < 0: ap.error('--min-free-gb must be 0 or more')
     names=tuple(dict.fromkeys(args.suite or SUITES))
+    try:
+        refusal = space_refusal(min(args.jobs, len(names)), args.min_free_gb)
+    except Exception as exc:
+        # Sizing reads the source list, which raises for a missing suite file: a receipt, not a
+        # traceback (review of #325).
+        print(json.dumps({'schema_version':1,'status':'FAIL','error_type':type(exc).__name__,
+                          'reason':'the free-space check could not size the run','not_run':list(NOT_RUN)}))
+        return 1
+    if refusal:
+        print(refusal['reason'], file=sys.stderr, flush=True)
+        print(json.dumps({'schema_version':1,'status':'FAIL','reason_code':'insufficient_disk',**refusal,
+                          'suites':[],'suite_count':0,'not_run':list(NOT_RUN)},indent=2))
+        return EXIT_NO_SPACE
     base=Path(tempfile.mkdtemp(prefix='observatory-portable-')).resolve();base.chmod(0o700)  # paths-check: allow — removed by the finally below unless --keep asks to keep it
     try:
         template=base/'template';template.mkdir();copy_source(template)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            results=list(pool.map(lambda name:run_suite_recorded(name,base,template,args.timeout),names))
+            results=list(pool.map(lambda name:run_suite_recorded(name,base,template,args.timeout,args.keep),names))
         report={'schema_version':1,'coverage':'synthetic-offline',
                 'status':overall(results),
                 'suites':results,'not_run':not_run(results, shutil.which('node')),

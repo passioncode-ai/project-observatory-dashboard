@@ -81,7 +81,7 @@ class SuiteFailureReceipts(unittest.TestCase):
             self.assertEqual('FileExistsError', result['report_error_type'])
 
     def test_setup_failure_preserves_every_selected_suite_and_report(self):
-        def execute(name, base, template, timeout):
+        def execute(name, base, template, timeout, keep=False):
             if name == 'time':
                 raise OSError('synthetic setup failure; body must not reach receipt')
             work = base / name

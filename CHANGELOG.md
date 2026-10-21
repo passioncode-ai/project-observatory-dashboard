@@ -25,6 +25,27 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **A new release is found within five minutes, without the GitHub API** (operator rule of 2026-10-17 for every
+  PassionCode product; OBS-176). A second small job per workspace, `maintain.py check` (launchd
+  `org.project-observatory.<id>.check`, systemd `-check.timer`, the Task Scheduler task `check`), installed by
+  `full maintain ensure` beside the 15-minute maintenance job, reads the newest release's static `SHA256SUMS` on
+  github.com every five minutes, the retry after a failed check included, and starts the maintenance job at once when
+  it finds a newer release. It has its own lock and record and starts offset from the maintenance job, so a
+  maintenance run is never skipped for a running check. `full update --check` reads the same file; the REST API (60 anonymous requests an hour) is
+  read only by `--apply`'s signed verification, `--version` and a person's `--api-url` mirror. A check that finds what
+  the last one found prints nothing and adds no line to the shared update log. The heavy pass keeps its 15 minutes, so
+  no job runs past its own interval (LC-03); an update that failed for a lasting reason waits six hours before the same
+  release is tried again. The Mac app reads the update record every five minutes, and the Windows and Linux app checks
+  its `latest.json` feed every five minutes and logs a check only when its result changes.
+- **The apps open at login, check what they need at every launch and ask to restart for a ready update** (operator
+  rule of 2026-10-16; OBS-177). The Mac app registers as a login item on its first launch (`SMAppService`; Settings →
+  Open at login turns it off, and an update keeps the choice), shows a banner naming a missing login-item approval and
+  how to grant it, and asks «Restart to finish updating» (Restart now / Later) once per staged version while a window is
+  on screen. The Windows and Linux app writes its own login entry (the `Run` value, an XDG autostart file) unless turned
+  off in Settings, starts in the tray when launched at login, names a login entry it could not write or that went
+  missing (or switched off by the desktop or Windows' Startup apps), and downloads an update in the background before
+  asking the same question; a failing download backs off up to six hours, and a failed install is said with its reason. Closing a window still hides it;
+  each app quits only through its own Quit.
 - **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
   alone and could not resolve against the lock).
 
@@ -98,6 +119,37 @@ while the major version is 0, a minor release may change behaviour and says so h
   any other answer stays unknown with its reason. A complete listing that lacks a key still wins. Every request
   refuses a redirect (urllib would carry the key's `Authorization` header to the new location), and a `.env` is
   read only for the exact `OPENROUTER_API_KEY=` variable.
+- **`full update --apply` checks free disk before it changes anything.** On 2026-10-20 an automatic update rolled
+  back with "database or disk is full" half-way through the new release's workspace migration. Before downloading,
+  and again after the machine backup and just before any job is stopped, every volume the update writes to is
+  measured against what it writes there (the release wheels, the installed package beside the one it replaces, the
+  workspace snapshot and its encrypted copy, the cached rollback wheels, the store's databases once more for the
+  migration, and in the first check the machine backup about to be taken) plus 1 GB left free; volumes reporting the
+  same free space (APFS volumes of one container) are summed as one. A short volume refuses with the new exit code 7 and a `space` report naming the
+  bytes needed and free on each volume; nothing is downloaded, stopped, installed or rolled back. The preview lists it
+  under `apply_blockers`; the maintenance job records `refused-disk` and tries again the next hour.
+- **The portable test run keeps its disk footprint bounded** (OBS-167). Each suite's sandbox (a copy of the source
+  and the suite's own files) is removed when that suite ends, its `run.log` kept (`--keep` keeps them all); a full
+  run used to keep 273 copies, about 3.5 GB, to the end. The run refuses to start (exit 7, `insufficient_disk`)
+  when the temporary folder would keep less than one source copy per running suite plus 2 GB free;
+  `--min-free-gb N` sets the floor and `0` starts anyway.
+- **One rule's duplicate finding id no longer stops the whole board.** `build_findings` exited on a duplicate id
+  and published nothing. It now keeps the first finding of each id and adds a `board.duplicate_id` warning naming the
+  ids and their rule, so acknowledgement keys stay unique and the defect stays visible.
+- **What the machine backup leaves behind is a finding with its fix.** Each item not carried is now a
+  `machine.backup_not_carried` row on the board (a warning for the only copy of commits or uncommitted changes) and
+  carries a `fix` in the manifest, the answer and `full machine-backup status`: push the branch, or the exact
+  `limits` value in `config/machine-backup.json` that would carry it. The only copies of work are listed first. One
+  row per checkout and part (commits, changes, untracked files), so two parts of one checkout never share an id.
+
+### Changed
+
+- **The machine backup carries larger checkouts by default.** Measured on a working agent machine on 2026-10-20,
+  ten repositories' unpushed commits (bundles of 16.7 to 130 MB, one of 404 MB) and two patches (23 and 59 MB) were
+  left out under the old caps. The defaults are now 160 MB per bundle (was 16; caps count MiB, and the largest of those bundles is 130.0 MiB), 64 MB per patch (was 8), 32 MB per
+  untracked set (was 8) and 768 MB for all checkouts (was 64), which carries all of them but the 404 MB bundle and a
+  161 MB untracked set, for about 560 MB more per bundle. Carried parts are spooled to the private stage and
+  streamed into the bundle, so a larger cap costs disk, checked against `min_free_gb`, never memory.
 
 ## 0.27.0 (2026-10-20)
 

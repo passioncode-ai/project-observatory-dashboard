@@ -10,6 +10,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod bridge;
 mod l10n;
 mod pages;
@@ -24,6 +25,7 @@ use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilde
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 const GUIDE: &str = "https://github.com/passioncode-ai/project-observatory-dashboard#install";
@@ -48,6 +50,8 @@ struct State {
     generation: Mutex<u64>,
     /// A verified update waiting for the person's «Restart to update» (SCN-010).
     update: Mutex<Option<String>>,
+    /// «Restart to finish updating» is asked once per version (SCN-010).
+    prompts: Mutex<updates::PromptOnce>,
 }
 
 fn lang(app: &AppHandle) -> &'static str {
@@ -348,7 +352,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "start" => run_action(app, "serve", "Starting the server…", "Could not start the server"),
         "build" => run_action(app, "build", "Building the dashboard…", "Could not build the dashboard"),
         "guide" => { let _ = app.opener().open_url(GUIDE, None::<&str>); }
-        "update" => updates::install_and_restart(app.clone()),
+        "update" => updates::install_and_restart(app.clone(), install_failed),
         "open" => show_main(app),
         _ => {}
     }
@@ -367,7 +371,9 @@ fn get_settings(state: tauri::State<'_, State>) -> settings::Settings {
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<Value, bridge::BridgeError> {
-    let settings = settings::Settings { language: settings::normalized(&settings.language), ..settings };
+    // The login choice is changed only by `set_launch_at_login`, which writes the entry too.
+    let kept = app.state::<State>().settings.lock().unwrap().launch_at_login;
+    let settings = settings::Settings { language: settings::normalized(&settings.language), launch_at_login: kept, ..settings };
     if let Some(code) = settings::problems(&settings).first() {
         let detail = (*code == "backend-missing").then(|| settings.program.clone());
         return Err(bridge::BridgeError { code: code.to_string(), detail });
@@ -385,6 +391,110 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<V
     let _ = app.emit("workspace-changed", ()); // the assistant drops what it showed (SCN-005)
     show_dashboard(&app);
     Ok(status)
+}
+
+/// Settings → «Open at login» (SCN-012): the entry is written or removed first, and the choice is
+/// kept only when that worked; a failure is the person's to read, with what failed.
+#[tauri::command]
+fn set_launch_at_login(app: AppHandle, on: bool) -> Result<(), bridge::BridgeError> {
+    autostart::apply(on).map_err(|e| bridge::BridgeError { code: "autostart-failed".into(), detail: Some(e) })?;
+    save_login_choice(&app, on)
+}
+
+fn save_login_choice(app: &AppHandle, on: bool) -> Result<(), bridge::BridgeError> {
+    let state = app.state::<State>();
+    let next = settings::Settings { launch_at_login: Some(on), ..state.settings.lock().unwrap().clone() };
+    settings::save(&state.config_dir, &next)
+        .map_err(|e| bridge::BridgeError { code: "settings-unwritable".into(), detail: Some(e.to_string()) })?;
+    *state.settings.lock().unwrap() = next;
+    Ok(())
+}
+
+/// Checked at every launch (SCN-013): the login entry against the person's choice. A first launch
+/// turns it on; an entry that could not be written, or that is gone while the choice is on, is shown
+/// in a message naming it and how to fix it, never left silent.
+fn check_login_item(app: &AppHandle) {
+    let stored = app.state::<State>().settings.lock().unwrap().launch_at_login;
+    let l = lang(app);
+    let write_failed = move |app: &AppHandle, error: String| {
+        app.dialog()
+            .message(l10n::t(l, "Project Observatory could not write its startup entry: {error}. Allow the write and restart the app, or turn “Open at login” off in Settings.", &[("error", &error)]))
+            .title(l10n::t(l, "Open at login", &[]))
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCustom(l10n::t(l, "OK", &[])))
+            .show(|_| {});
+    };
+    match autostart::decide(stored, autostart::present()) {
+        autostart::Launch::EnableFirstRun => {
+            // The choice is on from now, whether or not the write worked: a failure is shown, and the
+            // next launch checks again.
+            let _ = save_login_choice(app, true);
+            if let Err(e) = autostart::apply(true) {
+                write_failed(app, e);
+            }
+        }
+        autostart::Launch::Refresh => {
+            if let Err(e) = autostart::apply(true) {
+                write_failed(app, e);
+            }
+        }
+        autostart::Launch::Remove => {
+            let _ = autostart::apply(false);
+        }
+        autostart::Launch::AskMissing => {
+            let handle = app.clone();
+            app.dialog()
+                .message(l10n::t(l, "Project Observatory is set to open at login, but its startup entry is missing: {where}. Restore it, or turn “Open at login” off in Settings.", &[("where", &autostart::location())]))
+                .title(l10n::t(l, "Open at login", &[]))
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom(l10n::t(l, "Restore", &[]), l10n::t(l, "Turn off", &[])))
+                .show(move |restore| {
+                    if restore {
+                        if let Err(e) = autostart::apply(true) {
+                            write_failed(&handle, e);
+                        }
+                    } else {
+                        let _ = save_login_choice(&handle, false);
+                    }
+                });
+        }
+        autostart::Launch::Nothing => {}
+    }
+}
+
+/// An update is downloaded and verified (SCN-010): the menu and the tray offer «Restart to update»,
+/// and the person is asked once per version.
+/// A failed install, said to the person (review M3); «Restart to update» stays in the menu.
+fn install_failed(app: &AppHandle, why: String) {
+    let l = lang(app);
+    app.dialog()
+        .message(l10n::t(l, "The update could not be installed: {why}. «Restart to update» in the File menu or the tray tries again.", &[("why", &why)]))
+        .title(l10n::t(l, "Restart to finish updating", &[]))
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCustom(l10n::t(l, "OK", &[])))
+        .show(|_| {});
+}
+
+fn update_ready(app: &AppHandle, version: String) {
+    *app.state::<State>().update.lock().unwrap() = Some(version.clone());
+    refresh_menus(app);
+    if !app.state::<State>().prompts.lock().unwrap().should_ask(&version) {
+        return;
+    }
+    // Remembered across restarts: Later is not asked again for this version.
+    let dir = app.state::<State>().config_dir.clone();
+    let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(updates::PROMPTED_FILE), &version));
+    let l = lang(app);
+    let handle = app.clone();
+    app.dialog()
+        .message(l10n::t(l, "Version {version} is downloaded and verified. Restart now to finish updating, or later from the File menu or the tray.", &[("version", &version)]))
+        .title(l10n::t(l, "Restart to finish updating", &[]))
+        .buttons(MessageDialogButtons::OkCancelCustom(l10n::t(l, "Restart now", &[]), l10n::t(l, "Later", &[])))
+        .show(move |now| {
+            if now {
+                updates::install_and_restart(handle, install_failed);
+            }
+        });
 }
 
 #[tauri::command]
@@ -441,18 +551,25 @@ fn main() {
             build_dashboard,
             assistant,
             open_settings,
-            open_guide
+            open_guide,
+            set_launch_at_login
         ])
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let loaded = settings::load(&config_dir);
+            let prompted = updates::PromptOnce::from_stored(
+                std::fs::read_to_string(config_dir.join(updates::PROMPTED_FILE)).ok().as_deref(),
+            );
             app.manage(State {
                 settings: Mutex::new(loaded),
                 shown: Mutex::new(Shown::default()),
                 config_dir,
                 generation: Mutex::new(0),
                 update: Mutex::new(None),
+                prompts: Mutex::new(prompted),
             });
+            // The login entry's own launch (SCN-012) starts in the tray, with no window.
+            let background = std::env::args().any(|a| a == autostart::BACKGROUND_ARG);
             let handle = app.handle().clone();
             let nav = handle.clone();
             let loaded_handle = handle.clone();
@@ -460,6 +577,7 @@ fn main() {
                 .title("Project Observatory")
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(900.0, 620.0)
+                .visible(!background)
                 .menu(build_menu(&handle)?)
                 .on_navigation(move |url| allow_navigation(&nav, url))
                 .on_page_load(move |webview, payload| {
@@ -488,10 +606,9 @@ fn main() {
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
                 .build(app)?;
-            updates::watch(handle.clone(), |app, version| {
-                *app.state::<State>().update.lock().unwrap() = Some(version);
-                refresh_menus(app);
-            });
+            updates::watch(handle.clone(), update_ready);
+            let login = handle.clone();
+            std::thread::spawn(move || check_login_item(&login));
             show_dashboard(&handle);
             Ok(())
         })
