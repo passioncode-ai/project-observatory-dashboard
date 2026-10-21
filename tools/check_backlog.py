@@ -45,7 +45,15 @@ On top of the format it refuses:
   agent-sync's `reserve OBS`; `.claude/agent-sync.json` declares the register), or a board
   with no such line;
 - stale-at-merge wording in a status: "in this PR", "to follow", "merging",
-  "once … restart(s)";
+  "once … restart(s)", "awaiting review", "ready", "closes when … merges", "lands with";
+- an id below the next free one with no row and no declaration on the board's
+  `**Vacant ids:**` line, written `OBS-n` (reason); a declaration whose row exists;
+- an open or blocked row whose id a merged commit on the checked branch delivers: a subject ending
+  in `(#n)` that names the id in a parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)` (a commit
+  that only files a row writes it bare or with a word, `(OBS-n filed)`). The one exception is a row
+  whose status says `partly done` (`open — partly done: …`). The history is read only for this
+  repository's own board, and a shallow clone or a missing Git is named on stderr and in the JSON
+  (`history`), never read as clean; `--require-history` makes it a failure;
 - `done` together with "remain" (write `open — partly done: …` instead);
 - `done in X.Y.Z` naming a release CHANGELOG.md has no heading for;
 - in the board and CHANGELOG.md: token shapes, private-key blocks, personal machine paths
@@ -64,6 +72,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import unicodedata
 
@@ -80,7 +89,28 @@ STALE = (
     (re.compile(r"\bto follow\b", re.I), "to follow"),
     (re.compile(r"\bmerging\b", re.I), "merging"),
     (re.compile(r"\bonce\b[^.;]{0,120}?\brestart", re.I), "once … restarts"),
+    # A pull request's state on the day it was written (OBS-110 "awaiting review", OBS-133 "PR #297
+    # ready", OBS-118 "closes when PR #297 merges"): all three stayed on the board after the merge.
+    (re.compile(r"\bawaiting (?:review|merge|a review)\b", re.I), "awaiting review"),
+    (re.compile(r"\bready\b", re.I), "ready"),
+    (re.compile(r"\bcloses? when\b[^.;]{0,120}?\bmerge", re.I), "closes when … merges"),
+    # OBS-80, OBS-84…87, OBS-89: "lands with the 0.25.0 integration pull request (#303)", a week after it did.
+    (re.compile(r"\b(?:lands?|landing) with\b", re.I), "lands with"),
 )
+#: The one phrase that keeps an open row open after a merged commit names it: the row says what
+#: shipped and what remains (`open — partly done: …`, the form AGENTS.md prescribes for a
+#: remainder). Any other open or blocked row whose id a merged commit carries is stale.
+PARTLY_DONE = re.compile(r"\bpartly done\b", re.I)
+#: A merged commit on the checked branch, as squash merges write it: the subject ends with the
+#: pull request, `(#n)`, and names the row it delivers in a parenthesised list, `(OBS-n)` or
+#: `(OBS-n, DEC-m)`. A row FILED by a commit is written bare (`docs(backlog): OBS-96..99`) or with
+#: a word (`(OBS-118 filed)`), and is not a delivery.
+MERGED_PR = re.compile(r"\(#(\d+)\)\s*$")
+PAREN_GROUP = re.compile(r"\(([^()]*)\)")
+DELIVERED_ID = re.compile(r"OBS-0*([1-9][0-9]*)")
+#: Ids the board accounts for without a row: `**Vacant ids:** `OBS-n` (why); `OBS-m` (why)`.
+VACANT_LINE = re.compile(r"^\*\*Vacant ids:\*\*(.*)$", re.M)
+VACANT_ENTRY = re.compile(r"`(OBS-(?:0[1-9]|[1-9][0-9]*))` \(([^()]*)\)")
 
 # -- the canonical format (org-index check_observatory_registers.py, #67) -------------------------
 BOARD_HEADING = "## Board"
@@ -276,7 +306,12 @@ def _hidden_at(lines: list[str], start: int) -> str | None:
     return f"{names[state]} opened on line {opened + 1}" if state else None
 
 
-def check_board(text: str, changelog: str, deny: list[str] | None = None) -> list[str]:
+def check_board(text: str, changelog: str, deny: list[str] | None = None, *,
+                merged: dict[int, list[str]] | None = None, gaps: bool = True) -> list[str]:
+    """Every refusal for one board, one per line. `merged` maps an OBS number to the pull requests
+    (`#n`) whose merged commit delivered it (`merged_ids`); None when the history was not read.
+    `gaps` turns on the vacancy rule (fixtures that hold a few rows under a high next-free id
+    turn it off)."""
     deny = deny or []
     problems: list[str] = []
     headings = set(re.findall(r"^##\s+(\d+\.\d+\.\d+)\b", changelog, re.M))
@@ -386,6 +421,10 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
             problems.append(f"{rid}: {parsed}")
             continue
         kind, detail = parsed
+        if kind == "open" and merged and number in merged and not PARTLY_DONE.search(status):
+            problems.append(f"{rid}: open, but merged commit(s) {', '.join(merged[number])} name it as delivered; "
+                            "close it (`done in X.Y.Z (#n)` or `done — merged (#n), unreleased`) or, when "
+                            "something remains, write `open — partly done: …`")
         if kind == "released" and detail not in headings:
             problems.append(f"{rid}: `done in {detail}` but CHANGELOG.md has no `## {detail}` heading")
         if kind == "superseded":
@@ -398,6 +437,8 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
         if successor not in spelled:
             problems.append(f"{rid}: `superseded by {successor}` names no row on the board spelled that way; "
                             "write the successor's id exactly as its row does")
+    if gaps and next_free is not None:
+        problems += _vacancy_problems(text, set(seen), next_free)
     if found_table and phase in ("before", "separator"):
         problems.append(f"docs/backlog.md: the board section (line {start + 1}) has no header and separator")
     elif found_table and not rows and not any(p.startswith(("OBS-", "docs/backlog.md line")) for p in problems):
@@ -414,6 +455,74 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
     prose = "\n".join(l for l in lines if not ROW_ID.match(l))
     problems += privacy_problems("docs/backlog.md (outside the rows)", prose, deny)
     return problems
+
+
+def _vacancy_problems(text: str, present: set[int], next_free: int) -> list[str]:
+    """Every id below the next free one is a row or a declared vacancy with its reason.
+
+    An id the register handed out and nobody wrote (OBS-146, reserved in #300's window and never
+    written) reads, without a declaration, exactly like a row that was deleted. A branch still open
+    that holds a lower reservation is declared too (`reserved by an open pull request`), and the
+    declaration is removed when its row lands: the check then names the stale declaration."""
+    problems: list[str] = []
+    lines = VACANT_LINE.findall(text)
+    if len(lines) > 1:
+        problems.append("docs/backlog.md: more than one `**Vacant ids:**` line; keep one")
+    declared: dict[int, str] = {}
+    for entry in VACANT_ENTRY.finditer(" ".join(lines)):
+        number = int(entry.group(1).split("-")[1])
+        if number in declared:
+            problems.append(f"{entry.group(1)}: declared vacant twice")
+        declared[number] = entry.group(2).strip()
+        if not declared[number]:
+            problems.append(f"{entry.group(1)}: declared vacant without a reason; write why, in the parentheses")
+    if lines and len(re.findall(r"`OBS-[^`]*`", " ".join(lines))) != len(VACANT_ENTRY.findall(" ".join(lines))):
+        problems.append("docs/backlog.md: the `**Vacant ids:**` line holds an id not written as `OBS-n` (reason)")
+    for number in range(1, next_free):
+        if number not in present and number not in declared:
+            problems.append(f"OBS-{number}: no row and not declared vacant; a reader cannot tell a lost row from "
+                            "an id never written. Add it to the `**Vacant ids:**` line: `OBS-n` (why)")
+    for number in sorted(declared):
+        if number in present:
+            problems.append(f"OBS-{number}: declared vacant but its row exists; remove the declaration")
+        elif number >= next_free:
+            problems.append(f"OBS-{number}: declared vacant at or above the next free id OBS-{next_free}")
+    return problems
+
+
+def merged_ids(repo: Path = ROOT, ref: str = "HEAD") -> tuple[dict[int, list[str]] | None, str]:
+    """{OBS number: ["#n", …]} from the merged commits of `ref`, and a note saying what was read.
+
+    None when the history cannot be read, with the reason: not a Git checkout, the ref unknown, or a
+    shallow clone (`git rev-parse --is-shallow-repository`), whose history stops early and would
+    pass a stale row silently. The caller says so; it never reads as clean."""
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120)
+    try:
+        shallow = git("rev-parse", "--is-shallow-repository")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"merged commits NOT checked: git unavailable ({type(exc).__name__})"
+    if shallow.returncode != 0:
+        return None, "merged commits NOT checked: not a Git checkout"
+    if shallow.stdout.strip() == "true":
+        return None, ("merged commits NOT checked: a shallow clone (fetch the whole history, "
+                      "`git fetch --unshallow`, to check open rows against merged work)")
+    log = git("log", "--format=%s", ref)
+    if log.returncode != 0:
+        return None, f"merged commits NOT checked: `git log {ref}` failed"
+    found: dict[int, list[str]] = {}
+    commits = 0
+    for subject in log.stdout.splitlines():
+        pr = MERGED_PR.search(subject)
+        if not pr:
+            continue
+        commits += 1
+        for group in PAREN_GROUP.findall(subject[:pr.start()]):
+            for token in group.split(","):
+                m = DELIVERED_ID.fullmatch(token.strip())
+                if m:
+                    found.setdefault(int(m.group(1)), []).append(f"#{pr.group(1)}")
+    return found, f"merged commits: {commits} read on {ref}, {len(found)} OBS ids delivered"
 
 
 def load_denylist(path: Path | None) -> tuple[list[str], str]:
@@ -435,6 +544,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--board", type=Path, default=BOARD)
     parser.add_argument("--changelog", type=Path, default=CHANGELOG)
     parser.add_argument("--private-denylist", type=Path)
+    parser.add_argument("--history-ref", default="HEAD",
+                        help="the branch whose merged commits are read (this repository's own board only)")
+    parser.add_argument("--require-history", action="store_true",
+                        help="exit 1 when the merged commits cannot be read (a shallow clone)")
     args = parser.parse_args(argv)
     try:
         # Raw bytes: read_text turns CR and CRLF into LF and would hide a CR the organization refuses.
@@ -444,10 +557,19 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"check_backlog: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
-    problems = check_board(text, changelog, deny)
+    if args.board.resolve() == BOARD.resolve():
+        merged, history = merged_ids(ROOT, args.history_ref)
+    else:
+        merged, history = None, "merged commits NOT checked: --board is not this repository's board"
+    problems = check_board(text, changelog, deny, merged=merged)
+    if merged is None and args.require_history:
+        problems.append(f"check_backlog: {history}")
     for problem in problems:
         print(problem, file=sys.stderr)
-    print(json.dumps({"board": args.board.name, "problems": len(problems), "privacy": note}))
+    if merged is None:
+        # Said where a reader looks, not only in the JSON: an unread history is not a clean one.
+        print(f"check_backlog: {history}", file=sys.stderr)
+    print(json.dumps({"board": args.board.name, "problems": len(problems), "privacy": note, "history": history}))
     return 1 if problems else 0
 
 

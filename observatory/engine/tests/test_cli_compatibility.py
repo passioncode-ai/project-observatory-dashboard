@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -239,6 +240,44 @@ class PortableRunnerTests(unittest.TestCase):
         self.assertEqual(scopes['suite:tests/test_printed.py'], 'node is not installed here')
         self.assertIn('node is not on PATH', scopes['dashboard-execution'])
         self.assertNotIn('dashboard-execution', {row['scope'] for row in runner.not_run([partly], '/usr/bin/node')})
+
+
+class HelpCoversTheDispatcher(unittest.TestCase):
+    """Every command the dispatcher accepts is in `full --help`, and every command a person types is described.
+
+    0.25.0 shipped `full node` and 0.27.0 `full scan-digitalocean` with no line in the help: both were
+    only in the `steps:` list, where nothing says what they do."""
+
+    def described(self, name: str) -> bool:
+        # `  name …` or `  a / b / name …` at the start of a help line.
+        return bool(re.search(rf"(?m)^ {{2,4}}(?:[a-z-]+ / )*{re.escape(name)}(?=[\s\[]|$)", cli.PUBLIC_HELP))
+
+    def test_main_hands_exactly_the_declared_commands_to_their_own_parsers(self):
+        import inspect
+        source = inspect.getsource(cli.main)
+        handed = re.findall(r'argv\[1\] == "([a-z-]+)"', source)
+        self.assertEqual(sorted(handed), sorted(cli.OWN_PARSER_COMMANDS))
+
+    def test_every_command_and_group_is_described_in_the_help(self):
+        public = cli.public_profile()
+        names = (set(cli.WORKSPACE_COMMANDS) | set(cli.OWN_PARSER_COMMANDS) | set(cli.GROUPS)
+                 | {"check", "check-portable"})
+        missing = sorted(n for n in names if not cli.unavailable_step(n, public) and not self.described(n))
+        self.assertEqual(missing, [], "give each a line in PUBLIC_HELP (observatory.py)")
+
+    def test_every_step_is_listed_and_the_person_facing_ones_are_described(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["observatory.py", "--help"]), 0)
+        text = output.getvalue()
+        listed = set(next(line for line in text.splitlines() if line.startswith("steps:"))[7:].split(", "))
+        public = cli.public_profile()
+        self.assertEqual(sorted(n for n in cli.STEPS if not cli.unavailable_step(n, public) and n not in listed), [])
+        for name in ("node", "scan-digitalocean", "scan-mcp", "scan-spend", "fabric-attribution", "remotes",
+                     "google", "plugins", "plugins-check", "review"):
+            with self.subTest(name):
+                self.assertTrue(self.described(name), f"`full {name}` has no line in the help")
+
 
 if __name__ == "__main__":
     unittest.main()

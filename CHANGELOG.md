@@ -5,7 +5,30 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Checks that keep the documentation true after a merge** (an audit of main at 23a52296 found nine drifts).
+  `tools/check_backlog.py` refuses an open row a merged commit delivers (`(OBS-n)` in a squash subject ending in
+  `(#n)`) unless it says `partly done`, adds "awaiting review", "ready", "closes when … merges" and "lands with" to
+  the stale wording, and requires every id below the next free one to be a row or a declared vacancy; in a shallow
+  clone it says the history was not read instead of passing. `tests/test_changelog_releases.py` compares every
+  released CHANGELOG section with its tag (a clone without tags reports a skip), and check.yml now fetches the tags.
+  `tests/test_docs_drift.py` holds the scenario ids to one definition each and a `Next free OSS id` line, the
+  `full --help` text to every command the docs name, every credential door's `--preset` choices to ONBOARDING or the
+  handling-secrets skill, every state family the engine writes from 0.26.0 on to a COMPATIBILITY.md row, and run
+  records to a next step that is not an existing tag. `tests/test_cli_compatibility.py` holds `full --help` to every
+  command and group the dispatcher accepts; CHANGELOG headings are pinned to `## X.Y.Z (YYYY-MM-DD)` from 0.25.0 on.
+
 ### Fixed
+
+- **Documentation drift found by the same audit.** Nine backlog rows that shipped in 0.25.0 (OBS-107, OBS-108,
+  OBS-109, OBS-110, OBS-113, OBS-114, OBS-118, OBS-133, OBS-145) and OBS-80 are closed, the partly shipped OBS-83..87
+  and OBS-89 say so, and OBS-91 and OBS-146 are declared vacant. The agents scenario is renumbered OSS-62 to OSS-72
+  (OSS-62 is the SSH-key listing) and OSS-59 is declared vacant. `full --help` describes `node`, `scan-digitalocean`,
+  `scan`, `remotes`, `google`, `plugins`, `plugins-check` and `review`. ONBOARDING and the handling-secrets skill
+  describe the DigitalOcean door's team half and every DigitalOcean and Cloudflare preset. COMPATIBILITY.md lists
+  the state added in 0.25.0 to 0.27.0 (`node/`, `store/raw/digitalocean.json`, `store/raw/fabric-attribution.json`,
+  the DigitalOcean and Heroku secret folders). The 0.27.0 release record carries its receipts.
 
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of

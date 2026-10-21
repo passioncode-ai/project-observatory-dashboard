@@ -142,6 +142,20 @@ context. `db list` and `db consumers CLUSTER` print metadata only; consumer disc
 App Platform bindings, not every possible consumer. `db credential CLUSTER USER --db NAME
 --to vault:PROJECT/ENV/NAME` puts the connection URL in the vault on stdin.
 
+The DigitalOcean door's account half keeps one token per team. `digitalocean.py stash` takes a
+team's own token on stdin (or `stash --from-doctl CONTEXT|all` reads doctl's config, printing
+nothing); it stays owner-only under `secrets/digitalocean-admin/` and is never handed out.
+`teams [--probe]` lists each team with your role and the vault slots holding its tokens; `members
+--team T` gives the role and member count (the public API lists no members); `team create NAME
+--org T` is a plan until `--apply`. DigitalOcean's API cannot mint a token, so `issue --preset P
+--team T --vault <project>/<env>/<NAME>` refuses and prints the control-panel recipe, and
+`digitalocean.py install --preset P --team T --vault …` takes the minted value on stdin, checks its
+team and its preset's reads, delivers it and records it without the value. `presets` prints each
+preset's custom scopes: `observatory-read` (what `full scan-digitalocean` reads, kept for the
+collector), `read-only`, `app-deploy`, `droplet-deploy`, `dns-edit` (every domain of the team:
+scopes are per team), `registry`, `spaces-keys` and `billing-read`. `rotate LABEL` and
+`revoke LABEL` count a revocation only when the provider then answers 401 to the old value.
+
 DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
 Its name is not evidence: a plain value must equal the selected database user's current
 provider password, or be a database URL with that password, user, engine and the provider's
@@ -199,6 +213,12 @@ record the reason as a pre-action attestation before clearing the row; an
 unwritable journal refuses the change. This is an operator assertion, not
 provider verification. A separate completion event follows the ledger write.
 
+The observatory's own Cloudflare traffic reader is `cloudflare.py issue --preset analytics
+[--project project:<slug>]`: Zone Read, Analytics Read and DNS Read across the account, filed
+where the analytics plugin reads it, never in a vault slot. An agent that measures one site gets
+`cloudflare.py issue --preset zone-analytics-read --zone <zone> --vault <project>/<env>/<NAME>`:
+Zone Read and Analytics Read on that zone only, verified by the plugin's own counter read.
+
 A project that must edit DNS in one zone (a custom domain, a CNAME to its host)
 gets `cloudflare.py issue --preset dns-edit --zone <zone> --vault <project>/<env>/<NAME>`:
 Zone Read and DNS Write on that zone only, verified against its records and
@@ -251,7 +271,7 @@ Each is its own token in its own slot. When a preset's groups are unknown, `clou
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.
 
-A Fabric Inbox server's own token is `--preset fabric-inbox-server --account
+A Fabric Inbox server's own token is `cloudflare.py issue --preset fabric-inbox-server --account
 <slug> --vault <project>/<env>/<NAME>`; a token for one more account whose
 domains that server reads is `--preset fabric-inbox-account` issued from THAT
 account. Each carries the product's own permission list as two policies —
@@ -260,7 +280,7 @@ Routing Rules, Zone Settings, DNS Write) on every zone of that account only —
 is verified by listing the account's Workers, and is named after its slot.
 The other-account token makes no storage and no sign-in there.
 
-Reading one account's Worker logs is `--preset workers-observability-read
+Reading one account's Worker logs is `cloudflare.py issue --preset workers-observability-read
 --account <slug> --vault <project>/<env>/<NAME>`: Workers Observability Read
 only, verified by the telemetry-keys query with the new value.
 
