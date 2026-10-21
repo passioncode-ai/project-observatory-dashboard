@@ -59,6 +59,9 @@ jobs:
           # reads it so a title that delivers a row still open fails here, not on main after the merge.
           # Passed as an environment value, never interpolated into the script.
           CHECK_BACKLOG_PR_SUBJECT: ${{ github.event_name == 'pull_request' && format('{0} (#{1})', github.event.pull_request.title, github.event.pull_request.number) || '' }}
+          # The repository squashes with COMMIT_OR_PR_TITLE: one commit lands under its own headline.
+          CHECK_BACKLOG_PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHECK_BACKLOG_PR_COMMITS: ${{ github.event.pull_request.commits }}
         run: python -m unittest discover -s tests -v
       - name: Native macOS bridge and state tests
         if: runner.os == 'macOS'

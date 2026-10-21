@@ -293,7 +293,7 @@ class BoardLint(unittest.TestCase):
     def test_the_live_board_has_no_open_row_whose_work_merged(self):
         """OBS-107…OBS-145: nine rows read open for days after their pull requests merged. In a
         pull_request run the pull request's own title counts too (check.yml, CHECK_BACKLOG_PR_SUBJECT)."""
-        merged, note = self.lint.merged_ids(ROOT, pending=[os.environ.get(self.lint.PENDING_SUBJECT_ENV, "")])
+        merged, note = self.lint.merged_ids(ROOT, pending=self.lint.pending_subjects(ROOT))
         if merged is None:
             self.skipTest(note)
         text = (ROOT / "docs/backlog.md").read_bytes().decode("utf-8")
@@ -310,7 +310,8 @@ class BoardLint(unittest.TestCase):
 
     def test_the_command_reads_the_history_for_the_live_board(self):
         env = {k: v for k, v in os.environ.items() if k not in ("OBSERVATORY_PRIVATE_DENYLIST",
-                                                                  self.lint.PENDING_SUBJECT_ENV)}
+                                                                  self.lint.PENDING_SUBJECT_ENV,
+                                                                  self.lint.PR_NUMBER_ENV, self.lint.PR_COMMITS_ENV)}
         run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py")], capture_output=True, text=True,
                              timeout=120, env=env)
         history = json.loads(run.stdout.splitlines()[-1])["history"]
@@ -732,6 +733,39 @@ class FixCycleOne(unittest.TestCase):
         self.assertTrue(any(p.startswith("OBS-3") and "at or above" in p for p in self.problems(above)),
                         self.problems(above))
 
+
+
+class FixCycleTwo(unittest.TestCase):
+    """#326 confirming round at 8efc149a."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def test_a_one_commit_pull_request_is_judged_by_its_headline_too(self):
+        """COMMIT_OR_PR_TITLE: one commit lands under its own headline, whatever the title says."""
+        with tempfile.TemporaryDirectory() as tmp:
+            commit = git_repo(tmp)
+            commit("base (#1)")
+            env = git_env.git_env(**IDENTITY)
+            run = lambda *a: subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", tmp, *a],
+                                            check=True, capture_output=True, env=env)
+            run("checkout", "-q", "-b", "topic")
+            commit("feat(door): the door (OBS-07)")
+            run("checkout", "-q", "-")
+            run("merge", "-q", "--no-ff", "-m", "Merge topic", "topic")
+            pr = {self.lint.PENDING_SUBJECT_ENV: "A neutral title (#9)", self.lint.PR_NUMBER_ENV: "9",
+                  self.lint.PR_COMMITS_ENV: "1"}
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), pr),
+                             ["A neutral title (#9)", "feat(door): the door (OBS-07) (#9)"])
+            merged, _ = self.lint.merged_ids(Path(tmp), pending=self.lint.pending_subjects(Path(tmp), pr))
+            self.assertEqual(merged, {7: ["#9"]})
+            several = dict(pr, **{self.lint.PR_COMMITS_ENV: "2"})
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), several), ["A neutral title (#9)"])
+            self.assertEqual(self.lint.pending_subjects(Path(tmp), {}), [])
+
+    def test_a_hyphenated_ready_word_is_not_stale(self):
+        text = board({"OBS-01": "open — a ready-made fixture exists"})
+        self.assertEqual(self.lint.check_board(text, CHANGELOG, gaps=False), [])
 
 if __name__ == "__main__":
     unittest.main()

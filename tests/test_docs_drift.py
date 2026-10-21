@@ -14,6 +14,7 @@ once or a surface nobody was told to update:
 from __future__ import annotations
 
 import ast
+import importlib.util
 import os
 import re
 import subprocess
@@ -23,6 +24,11 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every test's git environment comes from the engine tests' helper (no background gc or maintenance).
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env",
+                                                       ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
 ENGINE = ROOT / "observatory/engine"
 SCENARIOS = ENGINE / "docs/ux/portable-scenarios.md"
 SKILL = ENGINE / "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md"
@@ -291,11 +297,32 @@ def release_tags() -> dict[str, str] | None:
     return out or None
 
 
-def written_after(path: Path, line: int, commit: str) -> bool:
-    """Whether `line` of `path` was last written after `commit`: by a strict descendant of it, or not yet
-    committed. A line the tagged commit itself wrote (the release's own record) is not."""
-    blame = subprocess.run(["git", "-C", str(ROOT), "blame", "--porcelain", "-L", f"{line},{line}", "--",
-                            str(path.relative_to(ROOT))], capture_output=True, text=True, timeout=60)
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60)
+
+
+def base_ref(repo: Path = ROOT, env: dict | None = None) -> str | None:
+    """The branch a change lands on, as a ref `repo` resolves: the merge checkout's first parent in a
+    pull_request run, else `origin/<GITHUB_BASE_REF>`, else `origin/main`; None when none resolves."""
+    env = os.environ if env is None else env
+    candidates = []
+    if env.get("GITHUB_EVENT_NAME") == "pull_request":
+        candidates.append("HEAD^1")
+    if env.get("GITHUB_BASE_REF"):
+        candidates.append(f"origin/{env['GITHUB_BASE_REF']}")
+    candidates.append("origin/main")
+    for ref in candidates:
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0:
+            return ref
+    return None
+
+
+def written_after(path: Path, line: int, commit: str, repo: Path = ROOT, base: str | None = None) -> bool:
+    """Whether `line` of `path` was last written after `commit`: by a strict descendant of it, not yet
+    committed, or by a commit the base branch does not hold yet (this change's own, which the squash
+    merge will rewrite as a descendant of every tag on the base). A line the tagged commit itself wrote
+    (the release's own record) is not."""
+    blame = _git(repo, "blame", "--porcelain", "-L", f"{line},{line}", "--", str(path.relative_to(repo)))
     if blame.returncode != 0:
         return False
     author = blame.stdout.split(" ", 1)[0]
@@ -303,21 +330,23 @@ def written_after(path: Path, line: int, commit: str) -> bool:
         return True
     if author == commit:
         return False
-    ancestor = subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", commit, author],
-                              capture_output=True, timeout=60)
-    return ancestor.returncode == 0
+    if base and _git(repo, "merge-base", "--is-ancestor", author, base).returncode != 0:
+        return True
+    return _git(repo, "merge-base", "--is-ancestor", commit, author).returncode == 0
 
 
-def stale_next_steps(known: dict[str, str]) -> list[str]:
-    docs = [(p, None) for p in sorted((ROOT / "docs/runs").glob("*/README.md"))]
-    docs.append((ROOT / "docs/HANDOFF.md", "## Latest run"))
+def stale_next_steps(known: dict[str, str], repo: Path = ROOT, base: str | None = None,
+                     docs: list[tuple[Path, str | None]] | None = None) -> list[str]:
+    if docs is None:
+        docs = [(p, None) for p in sorted((repo / "docs/runs").glob("*/README.md"))]
+        docs.append((repo / "docs/HANDOFF.md", "## Latest run"))
     stale = []
     for path, section in docs:
         for n, text in next_lines(path, section):
             for m in TAG_NAMED.finditer(text):
                 tag = "v" + (m.group(1) or m.group(2))
-                if tag in known and written_after(path, n, known[tag]):
-                    stale.append(f"{path.relative_to(ROOT)}:{n}: a next step names {tag}, which was tagged before "
+                if tag in known and written_after(path, n, known[tag], repo, base):
+                    stale.append(f"{path.relative_to(repo)}:{n}: a next step names {tag}, which was tagged before "
                                  "this line was written; record the release and the real next step")
     return stale
 
@@ -333,7 +362,49 @@ class NextIsNotAlreadyDone(unittest.TestCase):
         known = release_tags()
         if known is None:
             self.skipTest("no release tags in this checkout: next steps NOT compared with releases")
-        self.assertEqual(stale_next_steps(known), [])
+        self.assertEqual(stale_next_steps(known, ROOT, base_ref()), [])
+
+    def test_a_line_this_change_writes_is_judged_as_the_squash_will_be(self):
+        """Confirming round at 8efc149a: A on main; a branch from A writes "Next task: tag v0.2.0"; B on main,
+        tagged v0.2.0. Blamed in the pull request's merge checkout the line belongs to the branch's commit,
+        not a descendant of the tag, and passed; after the squash it belongs to the squash commit, a
+        descendant, and main went red. The branch's own commits count as written now."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            env = git_env.git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                                  GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+
+            def git(*args):
+                return subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", tmp, *args],
+                                      check=True, capture_output=True, text=True, env=env).stdout.strip()
+
+            record = repo / "docs/runs/2026-01-01-x/README.md"
+            record.parent.mkdir(parents=True)
+            git("init", "-q", "-b", "main")
+            record.write_text("# Run\n\n## State now\n\nNothing yet.\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-q", "-m", "A")
+            git("checkout", "-q", "-b", "topic")
+            record.write_text("# Run\n\n## State now\n\nDone. Next task: tag v0.2.0\n", encoding="utf-8")
+            git("commit", "-q", "-am", "P1")
+            git("checkout", "-q", "main")
+            (repo / "other.txt").write_text("b\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-q", "-m", "B")
+            git("tag", "v0.2.0")
+            known = {"v0.2.0": git("rev-parse", "v0.2.0")}
+            docs = [(record, None)]
+            # The pull request's merge checkout, base = its first parent.
+            git("merge", "-q", "--no-ff", "-m", "Merge topic", "topic")
+            pr_env = {"GITHUB_EVENT_NAME": "pull_request"}
+            self.assertEqual(base_ref(repo, pr_env), "HEAD^1")
+            self.assertEqual(len(stale_next_steps(known, repo, base_ref(repo, pr_env), docs)), 1,
+                             "the pull request's own line passed, so the squash would turn main red")
+            # The squash on main: the same line, now a descendant of the tag.
+            git("reset", "-q", "--hard", "HEAD^1")
+            git("merge", "-q", "--squash", "topic")
+            git("commit", "-q", "-m", "P1 (#1)")
+            self.assertEqual(len(stale_next_steps(known, repo, None, docs)), 1)
 
     def test_the_pattern_reads_every_wording(self):
         for text, version in (("Merge, tag `v0.27.0`, verify", "0.27.0"), ("then tag 0.28.0", "0.28.0"),

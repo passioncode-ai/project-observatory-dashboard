@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-183`
+**Next free ID:** `OBS-186`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-146` (reserved through the OBS register on 2026-10-18 after #300 wrote OBS-145, and never written; #289 wrote OBS-147 and OBS-148 next)
 
@@ -199,3 +199,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-172 | The desktop app's Linux build pulls `glib` 0.18 through `gtk` 0.18 (Tauri 2), which carries GHSA-wrw7-89jp-8q8g (unsound `VariantStrIter` iterators; fixed in 0.20, which needs gtk4). The app never calls it (no glib use in `desktop/src-tauri/src`). Re-check when Tauri moves to gtk4 and lift `glib` then | open: waits on Tauri | Dependabot alert 1, dismissed as tolerable risk on 2026-10-21 with this reason |
 | OBS-175 | OpenRouter collector, LOW findings of the #322 rounds: (A) two destinations holding the same key past the listing make two self rows with one label, read as a collision (de-duplicate self rows by label and `extra` by hash); (B) the workspace compared is the provisioning key's, while `GET /keys` lists the default workspace, so take it from the listed rows; (C) when the provisioning key's `GET /key` failed, the note says the provider named no workspace; (D) a `.env` with two `OPENROUTER_API_KEY=` lines is read first-wins, dotenv loaders use the last; (E) the redirect test calls the handler directly and would pass if `_get` went back to `urlopen` | open | review rounds of #322, 2026-10-21 |
 | OBS-182 | The state-family check (`tests/test_docs_drift.py` `StateFamilies`) derives what the engine persists from regular expressions over path constants (`observatory.py` step outputs, `secrets/` constants in `tools/` and `collectors/`, `node/` folder names), so a path built another way is not seen. Declare the families in one engine registry the writers import, and check COMPATIBILITY.md against it | open | #326 review, fix cycle 1 (LOW) |
+| OBS-185 | The backlog vacancy grace (`tools/check_backlog.py` `gap_ages`, 14 days) fails the wrong pull request: when a pull request holding an OBS reservation stays open past 14 days, the gap it leaves turns the next unrelated pull request red (and main, once one merges), not the one holding the id. Make the reservation's holder visible to the check (the register's ref names its key) or move the failure to the holder, and test both | open | #326 confirming round at 8efc149a (LOW 2) |

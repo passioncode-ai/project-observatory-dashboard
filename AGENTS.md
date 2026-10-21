@@ -320,7 +320,8 @@ tasks are the operator's and which a contributor can take.
    next before the tag ("Next: merge, tag vX.Y.Z, verify"); once the release is published, a follow-up
    commit adds its receipts (run, sums, attestation, signature) and rewrites that Next, and the next step
    in `docs/HANDOFF.md` with it. `tests/test_docs_drift.py` refuses a next step that names an existing
-   tag on a line written after that tag (`git blame`), so the rewrite cannot keep the old step; a line
+   tag on a line written after that tag (`git blame`; a line the change under test writes counts as
+   written now, since its squash will descend from the tag), so the rewrite cannot keep the old step; a line
    nobody edited since the tag is not checked, which is why this step is the release's.
 
 ## Shared backlog
@@ -373,8 +374,9 @@ allowlisted format, not as Markdown. Two things keep it true:
   review", "ready", "closes when … merges", "lands with"), an open or blocked row that a merged
   commit on the checked branch delivers (a subject ending in `(#n)` that names the id in a
   parenthesised list, `(OBS-n)` or `(OBS-n, DEC-m)`; a `Revert "…"` delivers nothing; in a pull_request
-  run check.yml adds the pull request's own title as `TITLE (#N)`, so a title for a step toward a row
-  names it bare, `OBS-n: step 2`) unless its status says `partly done` or `reopened`, `done` with
+  run check.yml adds the pull request's own title as `TITLE (#N)`, and for a pull request of one commit
+  that commit's headline (the repository squashes with COMMIT_OR_PR_TITLE), so a title for a step
+  toward a row names it bare, `OBS-n: step 2`) unless its status says `partly done` or `reopened`, `done` with
   something that remains (write `open — partly done: …`), `done in X.Y.Z` without a `## X.Y.Z`
   heading in CHANGELOG.md, and private names in the board and CHANGELOG.md. Private names need the
   maintainer's local denylist (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the

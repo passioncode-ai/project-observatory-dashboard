@@ -10,7 +10,8 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **Checks that keep the documentation true after a merge** (an audit of main at 23a52296 found nine drifts).
   `tools/check_backlog.py` refuses an open row a merged commit delivers (`(OBS-n)` in a squash subject ending in
   `(#n)`) unless it says `partly done` or `reopened`; in a pull_request run it also reads the pull request's own
-  title, so a title that would deliver a row still open fails there and not on main, and a revert delivers nothing.
+  title (and, for one commit, its headline), so a subject that would deliver a row still open fails there and not
+  on main, and a revert delivers nothing.
   It adds "awaiting review", "ready", "closes when … merges" and "lands with" to the stale wording, and requires
   every id below the next free one to be a row or a declared vacancy once its reservation is 14 days old (younger,
   it is a pull request in flight). In a shallow clone it says the history was not read instead of passing.
@@ -18,8 +19,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   reports a skip), and check.yml now fetches the tags. `tests/test_docs_drift.py` holds the scenario ids to one
   definition each and a `Next free OSS id` line, the `full --help` text to every command the docs name, every
   credential door's `--preset` choices to ONBOARDING or the handling-secrets skill, every state family the engine
-  writes from 0.26.0 on to a COMPATIBILITY.md row, and a next step written after a release (by `git blame`) to not
-  name that release as still to come. `tests/test_cli_compatibility.py` holds `full --help` to every command and
+  writes from 0.26.0 on to a COMPATIBILITY.md row, and a next step written after a release (by `git blame`, a line the
+  change under test writes counting as written now) to not name that release as still to come. `tests/test_cli_compatibility.py` holds `full --help` to every command and
   group the dispatcher accepts; CHANGELOG headings are pinned to `## X.Y.Z (YYYY-MM-DD)` from 0.25.0 on.
 
 ### Changed

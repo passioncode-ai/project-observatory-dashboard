@@ -54,7 +54,9 @@ On top of the format it refuses:
   whose status says `partly done` (`open — partly done: …`). The history is read only for this
   repository's own board, and a shallow clone or a missing Git is named on stderr and in the JSON
   (`history`), never read as clean; `--require-history` makes it a failure. In a pull_request run
-  check.yml passes the pull request's own title as `TITLE (#N)` in CHECK_BACKLOG_PR_SUBJECT, so a
+  check.yml passes the pull request's own title as `TITLE (#N)` in CHECK_BACKLOG_PR_SUBJECT (and, for a
+  pull request of one commit, which the repository squashes under that commit's headline, its number and
+  commit count, so the headline is checked too), so a
   title that would deliver a row still open fails the pull request, not main after it. A revert
   (`Revert "…"`) delivers nothing, and a row whose status says `reopened` is exempt like `partly done`;
 - (vacancies) a gap whose reservation is younger than GAP_GRACE_DAYS (14) is a pull request in flight
@@ -99,7 +101,7 @@ STALE = (
     # A pull request's state on the day it was written (OBS-110 "awaiting review", OBS-133 "PR #297
     # ready", OBS-118 "closes when PR #297 merges"): all three stayed on the board after the merge.
     (re.compile(r"\bawaiting (?:review|merge|a review)\b", re.I), "awaiting review"),
-    (re.compile(r"(?<!\bnot )\bready\b", re.I), "ready"),
+    (re.compile(r"(?<!\bnot )\bready\b(?!-)", re.I), "ready"),
     (re.compile(r"\bcloses? when\b[^.;]{0,120}?\bmerge", re.I), "closes when … merges"),
     # OBS-80, OBS-84…87, OBS-89: "lands with the 0.25.0 integration pull request (#303)", a week after it did.
     (re.compile(r"\b(?:lands?|landing) with\b", re.I), "lands with"),
@@ -115,6 +117,11 @@ REOPENED = re.compile(r"\breopened\b", re.I)
 #: `TITLE (#N)`: the squash commit main will carry. Without it a title naming `(OBS-n)` for a row still
 #: open passes its own pull request and turns main red after the merge (OBS-63 was named by eight).
 PENDING_SUBJECT_ENV = "CHECK_BACKLOG_PR_SUBJECT"
+#: The repository squashes with COMMIT_OR_PR_TITLE: a pull request of ONE commit lands under that commit's
+#: headline, not its title. check.yml passes the number and the commit count; with one commit the
+#: headline of the pull request's head (`HEAD^2` of the merge checkout) is checked as `HEADLINE (#N)` too.
+PR_NUMBER_ENV = "CHECK_BACKLOG_PR_NUMBER"
+PR_COMMITS_ENV = "CHECK_BACKLOG_PR_COMMITS"
 #: A gap below the next free id whose reservation is younger than this is taken as a pull request still
 #: in flight; older than this, it must be a row or a declared vacancy (an abandoned reservation).
 GAP_GRACE_DAYS = 14
@@ -571,6 +578,21 @@ def merged_ids(repo: Path = ROOT, ref: str = "HEAD",
     return found, f"merged commits: {commits} read on {ref}{extra}, {len(found)} OBS ids delivered"
 
 
+def pending_subjects(repo: Path = ROOT, env: dict | None = None) -> list[str]:
+    """The squash subjects the pull request under test may leave on main: its title, and, when it has one
+    commit, that commit's headline (both as `… (#N)`). Empty outside a pull_request run."""
+    env = os.environ if env is None else env
+    out = [env.get(PENDING_SUBJECT_ENV, "").strip()]
+    number, commits = env.get(PR_NUMBER_ENV, "").strip(), env.get(PR_COMMITS_ENV, "").strip()
+    if number.isdigit() and commits == "1":
+        parents = _git(repo, "rev-list", "--parents", "-n", "1", "HEAD")
+        if parents.returncode == 0 and len(parents.stdout.split()) == 3:   # the merge checkout: HEAD^2 is the head
+            headline = _git(repo, "log", "-1", "--format=%s", "HEAD^2")
+            if headline.returncode == 0 and headline.stdout.strip():
+                out.append(f"{headline.stdout.strip()} (#{number})")
+    return [s for s in out if s]
+
+
 def gap_ages(repo: Path = ROOT, ref: str = "HEAD", path: str = "docs/backlog.md",
              grace_days: int = GAP_GRACE_DAYS) -> tuple[set[int] | None, str]:
     """The ids whose reservation is younger than `grace_days`: those the board's `**Next free ID:**` line
@@ -630,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"check_backlog: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     if args.board.resolve() == BOARD.resolve():
-        merged, history = merged_ids(ROOT, args.history_ref, [os.environ.get(PENDING_SUBJECT_ENV, "")])
+        merged, history = merged_ids(ROOT, args.history_ref, pending_subjects(ROOT))
         in_flight, ages = gap_ages(ROOT, args.history_ref)
         history += "; " + ages
     else:
