@@ -3763,8 +3763,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ff47200a759529eeb52449c638cbace07da2699f8bae75544b22bebdf212c72b",
-      "bytes": 22629
+      "export_sha256": "275668ecb51993647518460695ede04439abf04630840c087e3fa5c12cd0b0fa",
+      "bytes": 22651
     },
     {
       "path": "tests/test_handoff.py",

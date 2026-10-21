@@ -67,7 +67,7 @@ SAMPLES = {
     "ID": "alpha-plugin", "AMOUNT": "5", "VENDOR/MODEL": "example/model-a", "X.Y.Z": "0.12.0",
     "PORT": "8765", "NAME": "github", "SNAPSHOT": "/srv/example-ws/snapshot", "OUTPUT": "/srv/example-ws/out",
     "ID,ID": "example/model-a,example/model-b", "CEILING": "daily_ceiling", "ACTION": "status",
-    "{p['id']}": "alpha-plugin", "{release.version}": "0.12.0",
+    "{p['id']}": "alpha-plugin", "{release.version}": "0.12.0", "{latest}": "0.12.0",
     "{doc['engine_version']}": "0.12.0", "{source}": "projects", "{section}": "integrations",
     "{name}": "github", "{k}": "daily_ceiling",
     "WORKFLOW_ID": "wf_0123456789abcdef", "{kept}": "wf_0123456789abcdef",
