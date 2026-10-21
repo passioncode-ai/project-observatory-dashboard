@@ -136,7 +136,7 @@ def recent(scratch: Path, last: int = RECENT_RUNS) -> dict:
     outcomes: dict[str, int] = {}
     try:
         lines = (scratch / RUNS_FILE).read_text(encoding="utf-8").splitlines()[-last:]
-    except OSError:
+    except (OSError, UnicodeDecodeError):     # a damaged history is an empty one, never a crash
         lines = []
     for line in lines:
         try:
@@ -146,6 +146,24 @@ def recent(scratch: Path, last: int = RECENT_RUNS) -> dict:
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
     runs = sum(outcomes.values())
     return {"runs": runs, "incomplete": runs - outcomes.get("finished", 0), "outcomes": outcomes}
+
+
+def stage_history(scratch: Path, last: int) -> list[dict]:
+    """The newest `last` runs' stage receipts (`stage_progress`), oldest first; [] when the history is
+    absent, unreadable or not UTF-8, and a line that is not a run is skipped."""
+    try:
+        lines = (scratch / RUNS_FILE).read_text(encoding="utf-8").splitlines()[-last:]
+    except (OSError, UnicodeDecodeError):
+        return []
+    runs = []
+    for line in lines:
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("stage_progress"), dict):
+            runs.append(doc["stage_progress"])
+    return runs
 
 
 def history_sentence(r: dict) -> str:

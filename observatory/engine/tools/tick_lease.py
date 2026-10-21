@@ -389,11 +389,11 @@ DEFAULT_STEP_SECONDS = 900
 #: spent 785 s under a load near 400 and left `scan-fs` no time. It stops itself before
 #: its limit and records `unmeasured` (tools/check_store.py).
 STEP_SECONDS = {"leaks": 1200, "integrity": 240}
-#: The whole tick's ceiling, below the 30-minute interval (lifecycle LC-03: a
-#: watchdog shorter than the interval). `install_launchd.build` lowers it for a
-#: shorter interval and writes it into the plist.
-DEFAULT_CEILING_SECONDS = 1500
-CEILING_ENV = "OBSERVATORY_TICK_CEILING_SECONDS"
+#: The whole tick's ceiling and each collector's share of it live in tick_budget.py
+#: (OBS-52), read there by the watchdog, the stage receipt and the findings alike.
+import tick_budget  # noqa: E402
+DEFAULT_CEILING_SECONDS = tick_budget.DEFAULT_CEILING_SECONDS
+CEILING_ENV = tick_budget.CEILING_ENV
 DEADLINE_ENV = "OBSERVATORY_TICK_DEADLINE"
 #: The wall-clock moment (epoch seconds) a step's own watchdog fires, handed to
 #: the step so it can stop in time and write what it has instead of being killed
@@ -434,12 +434,7 @@ CORE_RESERVE_SECONDS = 120
 
 
 def ceiling_seconds() -> float:
-    raw = os.environ.get(CEILING_ENV, "").strip()
-    try:
-        value = float(raw)
-    except ValueError:
-        return float(DEFAULT_CEILING_SECONDS)
-    return value if 1 <= value <= 3600 else float(DEFAULT_CEILING_SECONDS)
+    return tick_budget.ceiling_seconds()
 
 
 def tail_reserve_seconds() -> float:
@@ -474,9 +469,13 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     left in `tick-step.pgid` while the step runs, so a supervisor that had to
     SIGKILL this runner can still reach the group (`supervised`).
 
-    A collector — any step not in TAIL_STEPS — also leaves the tail its reserve,
-    and every step is told the moment its watchdog fires (`STEP_DEADLINE_ENV`)."""
+    A collector — any step not in TAIL_STEPS — also leaves the tail its reserve and
+    takes at most its share of the ceiling (`tick_budget.share_limit`, OBS-52), so no
+    one collector can use the time every other collector was due; every step is told
+    the moment its watchdog fires (`STEP_DEADLINE_ENV`)."""
     limit = float(STEP_SECONDS.get(name, DEFAULT_STEP_SECONDS) if limit is None else limit)
+    if name not in TAIL_STEPS:
+        limit = min(limit, tick_budget.share_limit(name, ceiling_seconds()))
     reserve = (0.0 if name in CORE_TAIL_STEPS else core_reserve_seconds() if name in SOFT_TAIL_STEPS
                else tail_reserve_seconds())
     deadline = os.environ.get(DEADLINE_ENV, "").strip()
@@ -645,6 +644,10 @@ def main() -> int:
     ap.add_argument("arguments", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     if args.action == "run":
+        # The supervisor's own lines go to the job's log files as they are (`tick.log`, `tick.err`):
+        # each starts with its UTC time, like every line the tick script logs (LC-12).
+        from log_policy import StampedLines
+        sys.stdout, sys.stderr = StampedLines(sys.stdout), StampedLines(sys.stderr)
         command = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
         return supervised(command)
     if args.action == "step":

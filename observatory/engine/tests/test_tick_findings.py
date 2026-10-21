@@ -101,6 +101,7 @@ class TickFindings(unittest.TestCase):
                 return 'not_started' if name == 'integrity' else 'ran'
             runner.step = fake_step
             runner.bounded = lambda name, *args: (1, 'synthetic stop before merge')
+            runner.probe = lambda name, *args: False
             with patch.object(paths, 'STATE', state):
                 with self.assertRaises(SystemExit):
                     tick.steps(runner, scratch, state / 'dashboard.html')
@@ -110,6 +111,90 @@ class TickFindings(unittest.TestCase):
             self.assertIn('integrity', runner.order)
             self.assertEqual(receipt['collectors']['integrity']['not_started_streak'], 1)
             self.assertIsNone(receipt['collectors']['integrity']['last_ran_at'])
+
+class StepShare(unittest.TestCase):
+    """OBS-52: one step that takes most of the tick is reported, whether or not it finished. Measured
+    2026-10-21: the leak scan took a median 1125 s of a 1500 s ceiling and nothing on the board said
+    one step was eating the tick. A step is over when it used ALERT_FRACTION of its own share (the
+    collectors' share, so a collector inside it never fires: review of #328, L2), and the finding needs
+    ALERT_MIN of the last ALERT_WINDOW ticks, so one slow tick does not make it flap."""
+
+    def receipt(self, rid, stages):
+        return {'schema': 1, 'run_id': rid * 32, 'stages': stages}
+
+    def stage(self, step, seconds):
+        return {'step': step, 'duration_seconds': seconds, 'outcome': 'ran', 'exit': 0}
+
+    def tick_doc(self, stages, ceiling=1500, rid='a'):
+        progress = {**self.receipt(rid, stages), 'write_failures': 0}
+        if ceiling is not None:
+            progress['ceiling_seconds'] = ceiling
+        return {'progress': progress}
+
+    def found(self, tick, runs=()):
+        import tick_findings as F
+        return [f['subject'] for f in F.findings(tick, None, runs=list(runs)) if f['type'] == 'tick.step_over_share']
+
+    def over(self, step, ceiling=1500):
+        import tick_budget
+        return tick_budget.ALERT_FRACTION * tick_budget.share(step) * ceiling + 1
+
+    def test_a_step_over_its_share_in_enough_ticks_is_reported(self):
+        import tick_budget
+        runs = [self.receipt(c, [self.stage('git-hygiene', self.over('git-hygiene'))]) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))]), runs),
+                         ['step:git-hygiene'])
+        self.assertEqual(tick_budget.ALERT_MIN, 3)
+
+    def test_a_resumable_step_using_its_share_by_design_does_not_fire(self):
+        import tick_budget
+        self.assertIn('leaks', tick_budget.RESUMABLE)
+        runs = [self.receipt(c, [self.stage('leaks', 0.98 * tick_budget.share_limit('leaks', 1500))]) for c in 'bcde']
+        doc = self.tick_doc([self.stage('leaks', 0.98 * tick_budget.share_limit('leaks', 1500))])
+        self.assertEqual(self.found(doc, runs), [])
+
+    def test_one_slow_tick_does_not_fire(self):
+        runs = [self.receipt(c, [self.stage('git-hygiene', 10)]) for c in 'bcde']
+        self.assertEqual(self.found(self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))]), runs), [])
+
+    def test_a_collector_inside_its_share_never_fires(self):
+        import tick_budget
+        inside = tick_budget.ALERT_FRACTION * tick_budget.COLLECTOR_SHARE * 1500 - 1
+        runs = [self.receipt(c, [self.stage('scan-fs', inside)]) for c in 'bcde']
+        self.assertGreater(inside, 1500 / 3, 'a third of the ceiling is inside a collector share')
+        self.assertEqual(self.found(self.tick_doc([self.stage('scan-fs', inside)]), runs), [])
+
+    def test_the_same_run_is_counted_once(self):
+        doc = self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))], rid='a')
+        twice = [doc['progress'], doc['progress'], self.receipt('b', [self.stage('git-hygiene', self.over('git-hygiene'))])]
+        self.assertEqual(self.found(doc, twice), [])
+
+    def test_the_ceiling_comes_from_the_receipt(self):
+        runs = [self.receipt(c, [self.stage('scan-fs', self.over('scan-fs', 900))]) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc([self.stage('scan-fs', self.over('scan-fs', 900))], ceiling=900), runs),
+                         ['step:scan-fs'])
+
+    def test_unreadable_stages_raise_nothing_and_crash_nothing(self):
+        for stages in (None, 'x', [None, {'step': 'leaks'}, {'step': 'leaks', 'duration_seconds': 'x'},
+                                   {'step': 'leaks', 'duration_seconds': float('nan')}]):
+            with self.subTest(stages=stages):
+                doc = {'progress': {'stages': stages, 'ceiling_seconds': 'x'}}
+                self.assertEqual(self.found(doc, [None, 'x', {'stages': 'x'}]), [])
+
+    def test_one_row_per_step_even_when_it_ran_twice(self):
+        stages = [self.stage('findings', 900), self.stage('findings', 800)]
+        runs = [self.receipt(c, stages) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc(stages), runs), ['step:findings'])
+
+    def test_starvation_begins_at_the_shared_threshold(self):
+        import tick_budget
+        import tick_findings as F
+        for streak, expected in ((tick_budget.STARVED_TICKS, True), (tick_budget.STARVED_TICKS - 1, False)):
+            with self.subTest(streak=streak):
+                found = F.findings({'collector_order': ['google']}, {'schema': 2, 'collectors': {'google': {
+                    'outcome': 'not_started', 'not_started_streak': streak, 'last_ran_at': 9990}}}, now=10000)
+                self.assertEqual('tick.collector_starved' in {f['type'] for f in found}, expected)
+
 
 if __name__ == '__main__':
     unittest.main()

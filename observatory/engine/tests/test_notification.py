@@ -311,14 +311,55 @@ def test_a_fabric_host_is_the_one_channel() -> None:
     rc = m.main([])
     check("exits 0", rc == 0, str(rc))
     check("no banner of our own", calls["n"] == 0, str(calls["n"]))
-    check("nothing recorded as notified by this tool", not notified_refs(d), str(notified_refs(d)))
     report = json.loads((d / "scratch/notify.json").read_text(encoding="utf-8"))
     check("the channel report names the host, so no channel finding is raised",
           report["delivered"] is True and "Fabric Dashboards" in report["detail"], str(report))
     # Without the app the descriptor alone delivers nothing: the banner is ours again.
-    os.environ["FABRIC_DASHBOARDS_APP"] = str(d / "gone.app")
+    d2, _ = sandbox()
+    (d2 / "services/project-observatory.default.json").write_text("{}", encoding="utf-8")
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(d2 / "gone.app")
+    m = load_notifier()
+    m.notify = counting
     m.main([])
     check("no host app: the tool notifies itself", calls["n"] == 1, str(calls["n"]))
+
+
+def test_what_the_host_was_handed_is_not_new_on_the_next_run() -> None:
+    """2026-10-21: with Fabric Dashboards on the machine every tick logged about ninety findings as
+    `new/escalated`, because the host branch returned before the record that makes a finding seen.
+    What the host was handed is recorded the same way a banner is, so the next run hands over only
+    what is new."""
+    d, _ = sandbox()
+    (d / "services/project-observatory.default.json").write_text("{}", encoding="utf-8")
+    app = d / "Fabric Dashboards.app"
+    app.mkdir()
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(app)
+    m = load_notifier()
+    m.notify = lambda title, body: (True, "osascript accepted it")
+    import contextlib, io
+    first, second = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(first):
+        m.main([])
+    with contextlib.redirect_stdout(second):
+        m.main([])
+    check("the first run hands the finding to the host", "1 new/escalated" in first.getvalue(), first.getvalue())
+    check("the second run reports nothing new", "nothing new since the last run" in second.getvalue(),
+          second.getvalue())
+    refs = notified_refs(d)
+    check("recorded once, by finding, severity and episode", len(refs) == 1, str(refs))
+    con = sqlite3.connect(f"file:{d / 'observatory.db'}?mode=ro", uri=True)
+    payload = json.loads(con.execute("SELECT payload_json FROM events WHERE kind = 'finding.notified'").fetchone()[0])
+    con.close()
+    check("the record says the host delivered it, not a banner of ours",
+          payload.get("delivered") is True and payload.get("via") == "host", str(payload))
+    dry = io.StringIO()
+    d3, _ = sandbox()
+    (d3 / "services/project-observatory.default.json").write_text("{}", encoding="utf-8")
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(app)
+    m = load_notifier()
+    with contextlib.redirect_stdout(dry):
+        m.main(["--dry-run"])
+    check("a dry run records nothing", not notified_refs(d3), str(notified_refs(d3)))
 
 
 if __name__ == "__main__":
@@ -331,7 +372,8 @@ if __name__ == "__main__":
                test_the_reason_reaches_the_caller,
                test_info_findings_still_never_notify,
                test_a_partial_leak_scan_is_on_the_board_but_not_pushed,
-               test_a_fabric_host_is_the_one_channel):
+               test_a_fabric_host_is_the_one_channel,
+               test_what_the_host_was_handed_is_not_new_on_the_next_run):
         fn()
     print()
     if FAILURES:

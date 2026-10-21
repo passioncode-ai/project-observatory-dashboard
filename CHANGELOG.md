@@ -12,6 +12,38 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Every collector gets a turn, and none takes the tick** (OBS-52; OBS-40 superseded). One installed 0.27.0 timed
+  out on 28 of its last 50 ticks: the leak scan took a median 1125 s of the 1500 s ceiling and eight collectors were not
+  started 28 times. A disabled step keeps its old start, so it sorted as the most starved collector and the rotation
+  moved the step it reads from to the front: the disabled companion scrub dragged the leak scan, and the disabled
+  Bitbucket listing the folder scan, to the head of every tick. A disabled collector now runs last, one not started for
+  3 ticks runs first, and each collector's watchdog limit is at most its share of the ceiling (40 %, the leak scan 30 %;
+  `tick_budget.py`). The leak scan also stops between the chunks of a file and the pages of a store and resumes there
+  next tick, instead of being killed with nothing written, and a complete pass over its databases (forced whenever the
+  set of known values changes, which is most days) now resumes across ticks from how far it read each table, the
+  databases it has not finished first; before, each tick began every database at rowid 0 in the same order, and one
+  large store kept the ones behind it unread. A database finished earlier in such a pass is read incrementally, with
+  its signature, so a row updated in place meanwhile is still read; an unfinished one resumes only if it is the same
+  file; a pass pending more than 2 days starts over; and a database that will not open is named as a hole without
+  holding the pass open. A new finding, `tick.step_over_share`, names a step that used 95 % of its share of the
+  ceiling in 3 of the last 5 ticks (a step that resumes by design, the leak scan, is not judged).
+- **A probe's "no" is not a failed step, and a crash is not a "no".** `backup-due` answered "not due" with exit 1, and
+  17 tick receipts in a row recorded it as `failed`. "Not due" is now exit 3 (`backup_store.NOT_DUE`, recorded as
+  `not_due`), anything that goes wrong while answering exits 2, and any other exit (an uncaught exception gives 1) is a
+  failed step whose output goes to the tick log. A test refuses a `bounded(...)[0] == 0` in `tools/tick.py`.
+- **Findings handed to Fabric Dashboards are not new again on the next tick.** With the host present the notifier
+  returned before recording what it handed over, so every tick reported about ninety findings as new or escalated.
+  They are now recorded as delivered `via: host`.
+- **A degradation that lasts a day is a warning** (`collector.degraded_persistent`). A collector whose same reason
+  (its `code`, else its text) stays in its receipt for more than 24 hours is reported on its own, for every collector
+  but the structural reasons `degradations.STRUCTURAL` names, by source and reason together (the leak scan's coverage,
+  kept off the push channel; the disk guard's holder policy; retired keys; one checkout's or folder's own state;
+  listing budgets), or a row marks `structural: true`; a real failure from the same source still fires:
+  the Fabric attribution collector had written `degraded: access-refused` on every run for over a day and produced
+  nothing, while the board showed it as one more info row. First sightings are kept in the store, `degraded-since.json`.
+- **`tick.err` lines carry their time.** The supervisor's lines (`tick stopped: ...`) and the tick script's stderr now
+  start with their UTC time, through `log_policy.StampedLines` (moved from `serverd.py`, which still uses it).
+
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
