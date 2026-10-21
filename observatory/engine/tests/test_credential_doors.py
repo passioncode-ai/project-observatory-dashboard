@@ -1636,6 +1636,9 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/zones/z1/workers/routes", "wr-value-"),
         ("cache-purge", "zone", ("Zone Read", "Cache Purge"),
          "/zones/z1/purge_cache", "cp-value-"),
+        ("zone-edge-rules", "zone",
+         ("Zone Read", "Cache Settings Write", "Config Settings Write", "Bot Management Write"),
+         "/zones/z1/rulesets/phases/http_request_cache_settings/entrypoint", "er-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1676,9 +1679,12 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
               "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
               "workers-routes": ("Zone Read", "Workers Routes Write"),
-              "cache-purge": ("Zone Read", "Cache Purge")}
+              "cache-purge": ("Zone Read", "Cache Purge"),
+              "zone-edge-rules": ("Zone Read", "Cache Settings Write", "Config Settings Write",
+                                  "Bot Management Write")}
     level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
-             "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone"}
+             "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone",
+             "zone-edge-rules": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
@@ -1783,7 +1789,7 @@ def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> Non
     to a token that MAY read it; a token without the group gets 403 (measured
     2026-10-12 with a zone's DNS-only token). So 404 proves the grant and the
     token is delivered; 403 does not, and the token created for the call is
-    deleted again. The 404 allowance is the redirect preset's alone."""
+    deleted again. The 404 allowance belongs only to presets that declare it."""
     import contextlib, io
     entry = "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint"
     for status, delivers in ((404, True), (403, False)):
@@ -1835,6 +1841,58 @@ def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> Non
     with contextlib.redirect_stderr(io.StringIO()):
         rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
     check("a 404 proves nothing for a preset that did not declare it", rc == 1 and not delivered, str(rc))
+
+
+def test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules() -> None:
+    """One zone's Cache Rules (`http_request_cache_settings`), Configuration Rules
+    (`http_config_settings`) and AI-bot setting (`/bot_management`) are three zone
+    rights in one token: Cache Settings Write, Config Settings Write and Bot
+    Management Write, beside Zone Read, and nothing else. The proof reads the
+    cache-settings phase entrypoint with the NEW value; a zone that never had a
+    Cache Rule answers 404 there to a token that may read it, so 404 delivers,
+    while 403 (no grant) does not, and the token minted for the call is deleted."""
+    import contextlib, io
+    entry = "/zones/z1/rulesets/phases/http_request_cache_settings/entrypoint"
+    groups = ("Zone Read", "Cache Settings Write", "Config Settings Write", "Bot Management Write")
+    for status, delivers in ((404, True), (403, False)):
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        _preset_fake(m, log, [(g, "zone") for g in groups], "/never", "er-value-")
+        inner = m._request
+
+        def answer(path, token, payload=None, method=None, inner=inner, status=status):
+            if path.startswith(entry) and token.startswith("er-value-"):
+                log.append(("GET", path, token, None))
+                raise RuntimeError(f"cloudflare answered HTTP {status}; provider response withheld")
+            return inner(path, token, payload, method)
+        m._request = answer
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((p, e, n))
+        m._journal = lambda *a, **k: None
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = m.cmd_issue_zone("zone-edge-rules", "example.com", "proj/prod/CF_EDGE_RULES", None, wait=0)
+        create = [pl for _m, p, _t, pl in log if p == "/accounts/a1/tokens" and pl]
+        if delivers:
+            check("zone-edge-rules: a 404 cache-settings entrypoint (no cache rule yet) proves the read",
+                  rc == 0 and delivered == [("proj", "prod", "CF_EDGE_RULES")], f"{rc} {err.getvalue()}")
+            check("zone-edge-rules: the token is named after its zone and its slot",
+                  bool(create) and create[0]["name"]
+                  == "observatory-zone-edge-rules example.com proj/prod/CF_EDGE_RULES (managed)", str(create))
+            pols = create[0]["policies"] if create else []
+            check("zone-edge-rules: one policy, the zone's own resource, exactly its four groups",
+                  len(pols) == 1 and pols[0]["resources"] == {"com.cloudflare.api.account.zone.z1": "*"}
+                  and [g["id"] for g in pols[0]["permission_groups"]] == [f"id-zone-{g}" for g in groups],
+                  str(pols))
+            check("zone-edge-rules: the summary names the four groups on that zone only",
+                  ", ".join(groups) + " on example.com only" in out.getvalue(), out.getvalue())
+        else:
+            check("zone-edge-rules: a 403 on the entrypoint is not a proof",
+                  rc == 1 and not delivered, f"{rc} {err.getvalue()}")
+            check("zone-edge-rules: the token that never proved its read is deleted",
+                  any(_m == "DELETE" and p == "/accounts/a1/tokens/t-new" for _m, p, _t, _pl in log)
+                  and "deleted again" in err.getvalue(), err.getvalue())
+        check(f"zone-edge-rules: no value printed ({status})",
+              "er-value-" not in out.getvalue() + err.getvalue(), "")
 
 
 def test_cf_cache_purge_proves_itself_with_one_harmless_purge() -> None:
@@ -3503,6 +3561,7 @@ if __name__ == "__main__":
                test_cf_logs_preset_reads_telemetry_with_a_post_and_grants_nothing_more,
                test_cf_zone_analytics_preset_reads_one_zone_into_the_vault,
                test_cf_cache_purge_proves_itself_with_one_harmless_purge,
+               test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,

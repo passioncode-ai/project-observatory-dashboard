@@ -247,6 +247,9 @@ a hostname (`example.com/*`) is the zone right `--preset workers-routes --zone <
 sending one hostname to another at the edge (a Single Redirect, `www.` to the apex) is
 the zone right `--preset redirect-rules --zone <zone>`; purging a zone's edge cache after a
 deploy is `--preset cache-purge --zone <zone>`, proved by purging one URL the site does not serve.
+A zone's Cache Rules, Configuration Rules and AI-bot blocking are `--preset zone-edge-rules
+--zone <zone>`: Zone Read, Cache Settings Write, Config Settings Write and Bot Management Write
+on that zone, proved by reading its cache-settings phase (a 404 there means no Cache Rule yet).
 Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.

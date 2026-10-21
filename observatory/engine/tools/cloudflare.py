@@ -18,6 +18,7 @@
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset zone-edge-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
@@ -264,6 +265,28 @@ PRESETS: dict[str, dict] = {
         "scope": "zone",
         "probe": "/zones/{zone_id}/purge_cache",
         "probe_body": {"files": ["https://{zone}/.well-known/observatory-purge-probe"]},
+    },
+    # EDGE RULES AND THE AI-BOT SETTING, ONE ZONE, INTO THE VAULT. A site that
+    # tunes its own edge needs three zone rights and no others: a Cache Rule
+    # (the `http_request_cache_settings` phase, caching HTML for one host) is
+    # Cache Settings Write; a Configuration Rule (the `http_config_settings`
+    # phase, Email Obfuscation off for one host) is Config Settings Write; the
+    # zone's AI-bot blocking (`/zones/{z}/bot_management`, `ai_bots_protection`)
+    # is Bot Management Write (the catalogue's names, `groups` on 2026-10-21).
+    # Not DNS, not purging, not the zone's other settings or rulesets, not a
+    # second zone. Verified by reading the cache-settings phase's entrypoint
+    # with the NEW value: like redirect-rules, a zone that
+    # never had a Cache Rule has no entrypoint and answers 404 to a token that
+    # may read it, 403 to one without the group, so `probe_absent_ok` lets 404
+    # count as the proof. Named after the zone AND the slot, like email-routing.
+    "zone-edge-rules": {
+        "name": "observatory-zone-edge-rules {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Cache Settings Write", "Config Settings Write",
+                   "Bot Management Write"),
+        "why": "edits one zone's cache rules, configuration rules and AI-bot setting for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint",
+        "probe_absent_ok": True,
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
@@ -924,7 +947,8 @@ def _zone_body(body, zone: str):
 
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
-    """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects, cache purge) into a vault slot."""
+    """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects, cache purge,
+    edge rules) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "zone":
         print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
@@ -963,7 +987,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
             except RuntimeError as exc:
                 # Only a preset that declared it: its probe reads a thing the zone may
                 # not have yet, and the provider tells "absent" (404) from "not
-                # allowed" (403) — see redirect-rules.
+                # allowed" (403) — see redirect-rules and zone-edge-rules.
                 if preset.get("probe_absent_ok") and "HTTP 404" in str(exc):
                     return None
                 return str(exc)
