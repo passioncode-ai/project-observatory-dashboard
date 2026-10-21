@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from test_portable_mcp import setup as portable_setup  # noqa: E402
 portable_setup()
 import tmp as tmpdir  # noqa: E402
+from git_env import git_env  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -359,8 +360,7 @@ def test_the_git_state_tells_ignored_from_merely_untracked():
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-env-"))
     repo = d / "repo"
     repo.mkdir()
-    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(d / "gitconfig"),
-           "GIT_CONFIG_NOSYSTEM": "1"}
+    env = git_env(global_config=str(d / "gitconfig"))
     subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
     (repo / ".gitignore").write_text(".env.ignored\n", encoding="utf-8")
     (repo / ".env.ignored").write_text("A=1\n", encoding="utf-8")

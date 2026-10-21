@@ -33,6 +33,21 @@ while the major version is 0, a minor release may change behaviour and says so h
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
   restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+- **No test, and no git the launcher runs in its own sample repository, leaves background maintenance behind**
+  (OBS-157 follow-up, the class behind the refused v0.27.0 tag). Every test's git environment now comes from one helper,
+  `observatory/engine/tests/git_env.py`, which shuts out the system and global configuration and appends `gc.auto=0`
+  and `maintenance.auto=false` through `GIT_CONFIG_COUNT` after any entries a caller set (an inherited
+  `GIT_CONFIG_PARAMETERS`, which git ranks above them, is dropped); the portable runner's `clean_env` and the
+  twenty-two test files that built their own git environment use it, and check.yml's workflow-level `env:` carries the
+  same entries for every CI step, so the root tests (run by `unittest discover`, outside the runner) are covered at
+  run time too. `observatory demo` commits into its sample repository and `observatory scan` reads repositories with
+  `-c gc.auto=0 -c maintenance.auto=false`, as the engine's `safe_git` already did.
+  `tests/test_git_background_maintenance.py` fails on a test that sets or removes a `GIT_CONFIG_*` variable itself,
+  strips every `GIT_*` variable by hand or hands git an environment built as a literal dict; on a workflow `env:`
+  that differs from what the helper composes; and on any git command the engine, the launcher or `tools/` spell
+  (a list, a concatenation, `args=`, `create_subprocess_exec`, a shell string, or a binary bound to another name)
+  that is not a pure read and lacks both settings among git's own `-c` options. On GitHub Actions it also asks git
+  what it reads in the root tests' own process; `test_git_env` does the same for the runner's environment.
 - **An OpenRouter consumer's key past every listed page is asked about itself.** On an account where another product
   mints a key per user (about 300 a day, measured 2026-10-21), the gateway's key sat beyond the newest 21,200 keys
   the deep walk reads, and every run reported its existence as unknown. A consumer's key the listing and its

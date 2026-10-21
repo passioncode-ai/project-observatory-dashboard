@@ -35,8 +35,8 @@ def rows(p: subprocess.CompletedProcess) -> list[dict]:
 
 
 def git(repo: pathlib.Path, *cmd: str) -> None:
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    from git_env import git_env
+    env = git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
     subprocess.run(["git", "-C", str(repo), *cmd], capture_output=True, env=env, timeout=60, check=True)
 
 

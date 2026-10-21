@@ -38,6 +38,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 sys.path.insert(0, str(ROOT / "tests"))
 import tmp as tmpdir                                                  # noqa: E402
+from git_env import git_env                                           # noqa: E402
 
 FAILURES: list[str] = []
 RU = "ru_RU.UTF-8"
@@ -86,10 +87,10 @@ def test_git_translates_the_messages_the_code_matches() -> None:
     the pin is harmless and this case says so."""
     d = bare_repo()
     ru = subprocess.run(["git", "remote", "get-url", "origin"], cwd=d,
-                        env={**os.environ, "LC_ALL": RU, "LANGUAGE": "ru"},
+                        env=git_env(LC_ALL=RU, LANGUAGE="ru"),
                         capture_output=True, text=True, timeout=300).stderr
     en = subprocess.run(["git", "remote", "get-url", "origin"], cwd=d,
-                        env={**os.environ, "LC_ALL": "C", "LANGUAGE": ""},
+                        env=git_env(LC_ALL="C", LANGUAGE=""),
                         capture_output=True, text=True, timeout=300).stderr
     if ru.strip() == en.strip():
         print("  NOTE  this git does not translate its messages here "

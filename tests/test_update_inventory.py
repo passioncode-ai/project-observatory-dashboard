@@ -8,6 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("update_inventory", ROOT / "tools/update_inventory.py")
 inv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inv)
+# Every test's git environment comes from the engine tests' helper: configuration shut out, no
+# background gc or maintenance left writing into a temporary repository.
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env", ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
 
 
 def sha(data: bytes) -> str:
@@ -54,9 +59,10 @@ class RefreshTest(unittest.TestCase):
     def test_an_open_conflict_is_refused_not_inventoried(self):
         import subprocess
         with tempfile.TemporaryDirectory() as repo:
+            env = git_env.git_env()
             git = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.name=t",
                                              "-c", "user.email=t@example.invalid", *a],
-                                            check=True, capture_output=True)
+                                            check=True, capture_output=True, env=env)
             git("init", "-q", "-b", "main")
             f = Path(repo, "observatory/engine/x.py"); f.parent.mkdir(parents=True)
             f.write_text("x = 0\n"); git("add", "."); git("commit", "-qm", "base")
@@ -66,10 +72,10 @@ class RefreshTest(unittest.TestCase):
             # it ever reaches the conflict, and the test would be testing nothing.
             merged = subprocess.run(["git", "-C", repo, "-c", "user.name=t",
                                      "-c", "user.email=t@example.invalid", "merge", "-q", "side"],
-                                    capture_output=True, text=True)
+                                    capture_output=True, text=True, env=env)
             self.assertNotEqual(merged.returncode, 0, "the fixture must leave a conflict open")
             self.assertTrue(subprocess.run(["git", "-C", repo, "ls-files", "-u"], capture_output=True,
-                                           text=True).stdout.strip(), merged.stderr)
+                                           text=True, env=env).stdout.strip(), merged.stderr)
             with self.assertRaises(inv.Unmerged):
                 inv.tracked_engine_files(Path(repo))
             f.write_text("x = 3\n"); git("add", ".")

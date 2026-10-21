@@ -69,7 +69,10 @@ def demo(state: Path) -> dict:
     try:
         for args in (("init", "-q"), ("add", "README.md", "package.json", ".gitignore"),
                      ("-c", "user.name=Demo", "-c", "user.email=demo@example.invalid", "commit", "-q", "-m", "Synthetic demo")):
-            result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", str(project), *args],
+            # gc.auto=0 and maintenance.auto=false: a commit can detach a `gc --auto` that outlives
+            # the demo and keeps writing into the sample repository (tests/test_git_background_maintenance.py).
+            result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0",
+                                     "-c", "maintenance.auto=false", "-C", str(project), *args],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
                                     env={**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
                                          "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
