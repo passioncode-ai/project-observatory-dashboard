@@ -11,6 +11,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the
   restore ended, writing into a repository a person owns (and, on Linux CI, into a test's temporary folder).
+- **No test, and no git the launcher runs in its own sample repository, leaves background maintenance behind**
+  (OBS-157 follow-up, the class behind the refused v0.27.0 tag). Every test's git environment now comes from one helper,
+  `observatory/engine/tests/git_env.py`, which shuts out the system and global configuration and appends `gc.auto=0`
+  and `maintenance.auto=false` through `GIT_CONFIG_COUNT` after any entries a caller set; the portable runner's
+  `clean_env` and the eleven test files that built their own git environment use it. `observatory demo` commits into
+  its sample repository and `observatory scan` reads repositories with `-c gc.auto=0 -c maintenance.auto=false`, as
+  the engine's `safe_git` already did. `tests/test_git_background_maintenance.py` fails on a test that sets a
+  `GIT_CONFIG_*` variable itself, and on any git command the engine, the launcher or `tools/` spell that is not a
+  pure read and lacks both settings; `test_git_env` proves with git itself that the runner's environment turns them
+  off.
 
 ## 0.27.0 (2026-10-20)
 

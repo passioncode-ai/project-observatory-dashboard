@@ -23,9 +23,9 @@ def setup():
     atexit.register(temp.cleanup)
     base=Path(temp.name).resolve(); _BASE=base
     from run_portable import runtime_environment
-    env={**runtime_environment(),'PATH':os.environ['PATH'],'HOME':str(base/'user'),'LANG':'en_US.UTF-8',
-         'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime'),
-         'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_GLOBAL':os.devnull}
+    from git_env import git_env
+    env=git_env({**runtime_environment(),'PATH':os.environ['PATH'],'HOME':str(base/'user'),'LANG':'en_US.UTF-8',
+                 'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime')})
     os.environ.clear();os.environ.update(env)
     (base/'user').mkdir(); (base/'tmp').mkdir(); os.environ['TMPDIR']=str(base/'tmp'); tempfile.tempdir=str(base/'tmp')
     projects=base/'projects';projects.mkdir()

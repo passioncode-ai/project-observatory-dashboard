@@ -423,7 +423,8 @@ class Redaction(WorkflowCase):
 class GitAndRelated(WorkflowCase):
     def test_git_snapshot_reads_state_not_contents(self) -> None:
         with tempfile.TemporaryDirectory(prefix="observatory-wf-repo-") as d:
-            env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+            from git_env import git_env
+            env = git_env()
             run = lambda *a: subprocess.run(["git", *a], cwd=d, env=env, check=True,
                                             capture_output=True)
             run("init", "-q", "-b", "main")

@@ -101,6 +101,14 @@ git diff --exit-code                                   # the checks left no trac
 - After changing any engine file run `python tools/update_inventory.py` and commit the
   inventory with the change.
 - Behaviour changes are test-first: the failing test, then the change, then green.
+- A test's git takes its environment from `observatory/engine/tests/git_env.py`
+  (`git_env(...)`): the operator's system and global git configuration shut out, and
+  `gc.auto=0` / `maintenance.auto=false` appended through `GIT_CONFIG_COUNT`, so no detached
+  `gc --auto` keeps writing into a temporary repository while the test removes it (the cause of
+  the refused v0.27.0 tag). The runner's `clean_env` uses it; a test that sets a `GIT_CONFIG_*`
+  variable itself fails `tests/test_git_background_maintenance.py`, which also holds every git
+  command the engine, the launcher and `tools/` spell (not a pure read, not through `safe_git`)
+  to `-c gc.auto=0 -c maintenance.auto=false`.
 - CI runs on Python 3.11 as well as 3.14; run `compileall` on 3.11 before pushing when you can,
   since 3.14 accepts syntax 3.11 rejects.
 

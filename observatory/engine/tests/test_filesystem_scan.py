@@ -57,6 +57,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 import tmp as tmpdir  # noqa: E402
 import emitter_fixture
+from git_env import git_env  # noqa: E402
 
 PY = str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").exists() else sys.executable
 FAILURES: list[str] = []
@@ -98,7 +99,7 @@ def git_estate(root: pathlib.Path) -> pathlib.Path:
     checkout = data / "fixture-local"
     checkout.mkdir(exist_ok=True)
     if not (checkout / ".git").exists():
-        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        env = git_env()
         subprocess.run(["git", "init", "--template=", str(checkout)], env=env,
                        check=True, capture_output=True)
         subprocess.run(["git", "-C", str(checkout), "-c", "user.name=Fixture",
@@ -545,7 +546,7 @@ def test_a_folder_on_an_uninventoried_host_records_its_unpushed_work() -> None:
     (d / "raw").mkdir()
     data = d / "data"
     data.mkdir()
-    genv = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    genv = git_env()
     bare, work = d / "upstream.git", data / "fixture-elsewhere"
     def g(*args, cwd=None):
         subprocess.run(["git", *(["-C", str(cwd)] if cwd else []), "-c", "user.name=Fixture",
