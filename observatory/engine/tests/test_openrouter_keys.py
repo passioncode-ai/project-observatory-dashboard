@@ -95,13 +95,18 @@ def test_a_shared_label_is_reported_rather_than_resolved():
           "share the label" in src)
 
 
-def planted_scan(provisioning: bool = True, collide: bool = False) -> dict:
+def planted_scan(provisioning: bool = True, collide: bool = False, answer=None,
+                 partial: bool = False, prov_value: str = "fixture-provisioning-handle") -> dict:
     """Run the collector in process against planted destinations and a stubbed
     listing, and return the document it wrote.
 
     Nothing reaches the provider: `listing` is replaced, and every destination
     file lives in a scratch directory. The rows carry a `hash` the way the
     provider's listing does, so the test can watch where the hash lands.
+    `answer(path, key)` stands in for every direct request (`GET /key`,
+    `GET /keys/{hash}`); by default each one fails as if offline. `partial`
+    makes the listing stop early with nothing further to walk, and records each
+    walk in `planted_scan.walks`.
     """
     import configuration
     sys.path.insert(0, str(ROOT / "tests"))
@@ -115,21 +120,29 @@ def planted_scan(provisioning: bool = True, collide: bool = False) -> dict:
                              encoding="utf-8")
     prov = d / "provisioning"
     if provisioning:
-        prov.write_text("fixture-provisioning-handle\n", encoding="utf-8")
+        prov.write_text(prov_value + "\n", encoding="utf-8")
     rows = [{"label": "sk-or-v1-abc...def", "name": "tick", "hash": "h-observatory", "usage": 1.5},
             {"label": "sk-or-v1-999...zzz", "name": "unused", "hash": "h-unused"}]
     if collide:
         rows.append({"label": "sk-or-v1-abc...def", "name": "a stranger", "hash": "h-stranger"})
-    saved = (S.DESTINATIONS, S.listing, configuration.enabled)
+    saved = (S.DESTINATIONS, S.listing, configuration.enabled, S._get)
     S.DESTINATIONS = {"observatory": observatory_key, "claude-mem": companion_env,
                       "gateway": d / "absent", "provisioning": prov}
-    S.listing = lambda _prov: (rows, None)
+    walks = planted_scan.walks = []
+
+    def listing(_prov, offset=0, pages=S.MAX_PAGES, until=None):
+        walks.append(offset)
+        if not partial:
+            return rows, None
+        return (rows if offset == 0 else []), "stopped after 1 pages; the account holds more"
+    S.listing = listing
+    S._get = answer or (lambda path, key: (None, None, "offline"))
     configuration.enabled = lambda name: True
     out = d / "openrouter.json"
     try:
         S.main(["scan_openrouter.py", str(out)])
     finally:
-        S.DESTINATIONS, S.listing, configuration.enabled = saved
+        S.DESTINATIONS, S.listing, configuration.enabled, S._get = saved
     return json.loads(out.read_text(encoding="utf-8"))
 
 
@@ -188,6 +201,95 @@ def test_absent_provisioning_is_a_degradation_not_an_empty_estate():
           and all(any(d["source"].endswith(n) for d in doc["degraded"])
                   for n in doc["unlisted_destinations"]),
           str(doc["unlisted_destinations"]))
+
+
+COMPANION = "sk-or-v1-" + "fed" + "0" * 55 + "cba"
+
+
+PROV = "sk-or-v1-" + "ppp" + "0" * 55 + "p03"
+
+
+def test_a_key_past_every_page_is_settled_by_asking_it_about_itself():
+    """2026-10-21: on an account where another product mints a key per user, the
+    gateway's key sat past the newest 21,200 keys, and every run reported its
+    existence as unknown. Asking the key about itself settles it in one request,
+    keeps its row, and never overrides a complete listing or another workspace."""
+    asked = []
+
+    def provider(workspace="W1", companion=None):
+        def answer(path, key):
+            asked.append((path, key))
+            if path == "/key" and key == PROV:
+                return {"label": "sk-or-v1-ppp...p03", "workspace_id": "W1"}, None, None
+            if path == "/key" and key == COMPANION:
+                return companion if companion else (
+                    {"label": "sk-or-v1-fed...cba", "workspace_id": workspace, "usage": 2.5,
+                     "limit": 10, "disabled": False}, None, None)
+            return None, None, "offline"
+        return answer
+
+    doc = planted_scan(answer=provider(), partial=True, prov_value=PROV)
+    row = [k for k in doc["keys"] if k["label"] == "sk-or-v1-fed...cba"]
+    check("an unreached key that describes itself is verified",
+          "claude-mem" in doc["verified"] and doc["unlisted_destinations"] == [],
+          f"{doc['verified']} {doc['unlisted_destinations']}")
+    check("and keeps its row: serves, usage and limit from its own answer",
+          len(row) == 1 and row[0]["serves"] == "claude-mem" and row[0]["usage"] == 2.5
+          and row[0]["limit"] == 10, str(row))
+    check("so the 200-page walk did not run for it", planted_scan.walks == [0], str(planted_scan.walks))
+    check("the consumer's key went only to GET /key",
+          ("/key", COMPANION) in asked and all(k != COMPANION or p == "/key" for p, k in asked),
+          str([p for p, _ in asked]))
+    check("a settled partial listing is a note that says how it was settled",
+          any(n["source"] == "openrouter:listing" and "asked about itself" in n["reason"]
+              for n in doc.get("not_applicable") or []), str(doc.get("not_applicable")))
+
+    doc = planted_scan(answer=provider(workspace="W2"), partial=True, prov_value=PROV)
+    check("a key from another workspace is said so, never verified",
+          "claude-mem" not in doc["verified"]
+          and any(d["source"] == "openrouter:claude-mem" and "another workspace" in d["reason"]
+                  for d in doc["degraded"]), f"{doc['verified']} {doc['degraded']}")
+
+    asked.clear()
+    doc = planted_scan(answer=provider(), prov_value=PROV)
+    check("a COMPLETE listing that lacks the key is not overridden by its answer",
+          "claude-mem" not in doc["verified"] and ("/key", COMPANION) not in asked
+          and any(d["source"] == "openrouter:claude-mem" and "not in this account's listing" in d["reason"]
+                  for d in doc["degraded"]), f"{doc['verified']} {doc['degraded']}")
+
+    doc = planted_scan(answer=provider(companion=(None, 401, "HTTP 401")), partial=True, prov_value=PROV)
+    check("a key the provider refuses is reported as invalid, disabled or deleted",
+          any(d["source"] == "openrouter:claude-mem" and "invalid, disabled or deleted" in d["reason"]
+              for d in doc["degraded"]) and "claude-mem" in doc["unlisted_destinations"],
+          f"{doc['degraded']} {doc['unlisted_destinations']}")
+
+    doc = planted_scan(partial=True, prov_value=PROV)
+    check("a key that cannot be asked stays unknown and says why",
+          any(d["source"] == "openrouter:claude-mem" and "could not describe itself" in d["reason"]
+              for d in doc["degraded"]), str(doc["degraded"]))
+
+
+def test_a_key_is_never_carried_to_a_redirect():
+    """urllib copies `Authorization` to a redirect's new location; the opener
+    every request goes through refuses a redirect instead."""
+    import urllib.error
+    S = scanner()
+    try:
+        S._NoRedirect().redirect_request(None if False else type("R", (), {"full_url": "x"})(),
+                                         None, 302, "Found", {}, "http://elsewhere.invalid/")
+        check("a redirect is refused", False, "followed")
+    except urllib.error.HTTPError as e:
+        check("a redirect is refused", e.code == 302, str(e.code))
+
+
+def test_only_the_exact_variable_is_read_from_a_dotenv():
+    S = scanner()
+    key = "sk-or-v1-" + "abc" + "0" * 55 + "def"
+    for text in ("OPENROUTER_API_KEY_OLD=stale\nOPENROUTER_API_KEY=" + key,
+                 'export OPENROUTER_API_KEY="' + key + '" # the tick',
+                 "OPENROUTER_API_KEY=" + key + " # the tick"):
+        check(f"read {text[:24]!r}", S.label_of(S._key_in(text)) == "sk-or-v1-abc...def", S._key_in(text)[:12])
+    check("a .env without the variable holds no key", S._key_in("OPENROUTER_API_KEY_OLD=x") == "")
 
 
 def test_the_step_is_reachable():
@@ -456,6 +558,9 @@ if __name__ == "__main__":
                test_no_value_and_no_hash_reach_the_registry_half,
                test_a_collision_is_reported_on_a_real_run,
                test_absent_provisioning_is_a_degradation_not_an_empty_estate,
+               test_a_key_past_every_page_is_settled_by_asking_it_about_itself,
+               test_a_key_is_never_carried_to_a_redirect,
+               test_only_the_exact_variable_is_read_from_a_dotenv,
                test_the_step_is_reachable,
                test_the_door_reads_every_page_of_keys,
                test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,
