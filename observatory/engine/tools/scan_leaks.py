@@ -92,6 +92,18 @@ import step_budget  # noqa: E402  — the time this tick step has left (OBS-52)
 #: started only while more than FILE_RESERVE_S is left, a store only while more than STORE_RESERVE_S is.
 STORE_RESERVE_S = 60.0
 FILE_RESERVE_S = 2 * STORE_RESERVE_S
+#: Seconds a store being read stops before the deadline, to write the answer. A file being read
+#: stops at FILE_RESERVE_S, so a large transcript never takes the stores' time (OBS-52: a pass that
+#: overran inside one unit was killed by its watchdog and wrote nothing, ten ticks in a row).
+ANSWER_RESERVE_S = 15.0
+#: What `scan_file` and `scan_zst` give as their problem when they stopped for the deadline: not a
+#: hole (the file was readable), not clean either. The caller keeps what was read and stops.
+OUT_OF_TIME = "out of time"
+
+
+def out_of_time(reserve: float):
+    """A stop check for a unit of work: True once fewer than `reserve` seconds are left."""
+    return lambda: step_budget.remaining() < reserve
 
 # Direct scanner callers may use names; main uses a name and version pair.
 SecretRef = str | tuple[str, str | None]
@@ -921,7 +933,7 @@ def table_signature(conn: sqlite3.Connection, table: str, updated: str | None, s
 
 def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
                 since: dict[str, int] | None = None, signature: dict | None = None,
-                hits: dict | None = None, tally: dict | None = None
+                hits: dict | None = None, tally: dict | None = None, stop=None
                 ) -> tuple[dict[tuple[SecretRef, str], int], str | None, dict[str, int], int, dict | None]:
     """Occurrences by (secret name, `table.column`) across every text column
     of a SQLite store, read-only; the reason when it could not be read; the
@@ -950,6 +962,9 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
     a maximum already in the future; an update column holding mixed types (its
     maximum is compared within one type only); and a change of rowids whose
     count, sum and sum of squares all collide (impractical, not impossible).
+
+    `stop`, when given, is asked before every page; once it says so the read raises
+    `step_budget.OutOfTime` and the caller keeps the store's old mark (OBS-52).
 
     A table that cannot be read — a damaged page, a missing module — is a hole:
     the store comes back read in part (`PARTIAL`), its other tables still read,
@@ -988,6 +1003,10 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
     conn.text_factory = lambda b: b.decode("utf-8", "surrogateescape")
     damaged: list[str] = []
 
+    def in_time() -> None:
+        if stop is not None and stop():
+            raise step_budget.OutOfTime("the step's deadline is near")
+
     def scan_rows(table: str, cols: list[str], rows) -> None:
         nonlocal read
         read += len(rows)
@@ -1017,6 +1036,7 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
         sel = ", ".join(_q(c) for c in cols)
         n, total, squares, after = 0, 0, 0, low
         while True:
+            in_time()
             rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {rid} > ? AND {rid} <= ?{extra} '
                                 f'ORDER BY {rid} LIMIT {PAGE}', (after, top, *args)).fetchall()
             if not rows:
@@ -1040,6 +1060,7 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
         index = [i for i, c in enumerate(plain) if c in cols]
         after = 0
         while True:
+            in_time()
             rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? AND {rid} > ? '
                                 f'AND {rid} <= ? ORDER BY {rid} LIMIT {PAGE}',
                                 (before["upd"], after, mark)).fetchall()
@@ -1079,6 +1100,7 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
             sel = ", ".join(_q(c) for c in cols)
             offset = 0
             while True:
+                in_time()
                 rows = conn.execute(f'SELECT NULL, {sel} FROM {_q(table)} LIMIT {PAGE} OFFSET ?',
                                     (offset,)).fetchall()
                 if not rows:
@@ -1240,12 +1262,17 @@ def _label(path) -> str:
 
 
 def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
-              start: int, longest: int) -> tuple[dict[SecretRef, int], int, str | None]:
+              start: int, longest: int, stop=None) -> tuple[dict[SecretRef, int], int, str | None]:
     """Occurrences by secret name, the offset reached, and why it could not be read.
 
     PERMISSION DENIED IS NOT CLEAN (PB-032). A file this process may not open
     used to return no hits, and the report counted it among the targets it had
     read. The reason now comes back, and the caller lists the file as unread.
+
+    `stop`, when given, is asked before each chunk; once it says so the read ends there and the
+    problem is OUT_OF_TIME, with the offset reached moved back by the overlap kept for a value
+    split across two chunks, so the next pass starts where this one stopped (OBS-52). A value
+    inside that overlap can be counted by both passes; none is missed.
     """
     hits: dict[SecretRef, int] = {}
     try:
@@ -1259,21 +1286,28 @@ def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
     try:
         with path.open("rb") as fh:
             fh.seek(start)
-            _scan_stream(fh, pattern, by_value, longest, hits)
+            read, carried, stopped = _scan_stream(fh, pattern, by_value, longest, hits, stop)
     except OSError as exc:
         return hits, start, type(exc).__name__
+    if stopped:
+        return hits, start + read - carried, OUT_OF_TIME
     return hits, size, None
 
 
 def _scan_stream(fh, pattern: list[bytes], by_value: dict[bytes, SecretRef], longest: int,
-                 hits: dict[SecretRef, int]) -> None:
+                 hits: dict[SecretRef, int], stop=None) -> tuple[int, int, bool]:
     """Count every value in a binary stream, chunk by chunk, with an overlap so a value
-    split across two reads is still found."""
+    split across two reads is still found. (bytes read, bytes of overlap carried at the end,
+    whether `stop` ended it before the end of the stream)."""
     carry = b""
+    read = 0
     while True:
+        if stop is not None and stop():
+            return read, len(carry), True
         chunk = fh.read(CHUNK)
         if not chunk:
-            break
+            return read, len(carry), False
+        read += len(chunk)
         buf = carry + chunk
         for needle in pattern:
             at = buf.find(needle)
@@ -1291,10 +1325,11 @@ ZSTD_MISSING = "compressed with zstd, and this Python has no zstd decoder (3.14+
 
 
 def scan_zst(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
-             longest: int) -> tuple[dict[SecretRef, int], int, str | None]:
+             longest: int, stop=None) -> tuple[dict[SecretRef, int], int, str | None]:
     """`scan_file` for a zstd-compressed transcript, read whole: a frame has no offset to resume.
 
-    A file this Python cannot decode is a hole with that reason, never a clean file.
+    A file this Python cannot decode is a hole with that reason, never a clean file. One that
+    `stop` ended is OUT_OF_TIME, and is read whole again by the next pass.
     """
     hits: dict[SecretRef, int] = {}
     try:
@@ -1305,9 +1340,11 @@ def scan_zst(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Sec
     try:
         size = path.stat().st_size
         with zstd.open(path, "rb") as fh:
-            _scan_stream(fh, pattern, by_value, longest, hits)
+            stopped = _scan_stream(fh, pattern, by_value, longest, hits, stop)[2]
     except failures as exc:
         return {}, 0, type(exc).__name__
+    if stopped:
+        return hits, 0, OUT_OF_TIME
     return hits, size, None
 
 
@@ -1413,15 +1450,27 @@ def main(argv: list[str]) -> int:
         # message file, the built page or a tracked file is rewritten in place, so an
         # offset would skip a value written before the old end. Such a file is read
         # whole again whenever its size or modification time moves.
+        # A FILE STOPS BETWEEN ITS CHUNKS when the deadline nears (OBS-52), keeping the stores' time.
+        stop = out_of_time(FILE_RESERVE_S)
         if key.endswith(".jsonl"):
             start = int(state.get(key, 0))
-            found, reached, problem = scan_file(p, pattern, by_value, start, longest)
+            found, reached, problem = scan_file(p, pattern, by_value, start, longest, stop)
         else:
             start, sig = 0, _signature(p)
             if sig is not None and signatures.get(key) == sig:
                 continue
-            found, reached, problem = (scan_zst(p, pattern, by_value, longest) if key.endswith(".zst")
-                                       else scan_file(p, pattern, by_value, 0, longest))
+            found, reached, problem = (scan_zst(p, pattern, by_value, longest, stop) if key.endswith(".zst")
+                                       else scan_file(p, pattern, by_value, 0, longest, stop))
+        if problem == OUT_OF_TIME:
+            # What was read counts, and an append-only file resumes from where it stopped; a file
+            # read whole has no signature recorded, so the next pass reads it again from the start.
+            if key.endswith(".jsonl"):
+                read_bytes += max(0, reached - start)
+                state[key] = reached
+            for name, n in found.items():
+                hits[(name, key)] = hits.get((name, key), 0) + n
+            cut_at = i
+            break
         if problem:
             unreadable.append({"what": key, "why": f"could not be read ({problem}); not counted as clean",
                                "unreadable": True})
@@ -1467,7 +1516,13 @@ def main(argv: list[str]) -> int:
         found: dict = {}
         tally: dict = {}
         try:
-            results[store] = scan_sqlite(store, pattern, by_value, since, store_sigs.get(str(store)), found, tally)
+            results[store] = scan_sqlite(store, pattern, by_value, since, store_sigs.get(str(store)), found, tally,
+                                         stop=out_of_time(ANSWER_RESERVE_S))
+        except step_budget.OutOfTime:
+            # STOPPED BETWEEN PAGES (OBS-52): unread, not clean, its mark where it was; what it saw
+            # before stopping is still reported.
+            results[store] = (found, None, None, tally.get("rows", 0), None)
+            stores_cut.append(str(store))
         except Exception as exc:  # noqa: BLE001 — one store is a hole, never the end of the scan
             # WHATEVER ONE STORE RAISES (round 4): the other homes are still measured and the
             # report is still written; the sightings counted before it stopped stand (round 5).

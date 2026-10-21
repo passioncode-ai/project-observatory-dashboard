@@ -223,7 +223,7 @@ raise SystemExit(tl.supervised([sys.executable,'-c',sys.argv[2],sys.argv[1]]))
         import ast, tick_progress
         tree=ast.parse((ROOT/'tools/tick.py').read_text())
         names={n.args[0].value for n in ast.walk(tree) if isinstance(n,ast.Call)
-               and isinstance(n.func,ast.Name) and n.func.id in ('step','bounded')
+               and isinstance(n.func,ast.Name) and n.func.id in ('step','bounded','probe')
                and n.args and isinstance(n.args[0],ast.Constant) and isinstance(n.args[0].value,str)}
         self.assertTrue(names)
         self.assertFalse(names - tick_progress.STAGES)
@@ -237,5 +237,67 @@ raise SystemExit(tl.supervised([sys.executable,'-c',sys.argv[2],sys.argv[1]]))
             self.assertEqual(self.t.bounded('merge','synthetic')[0],17)
         self.assertIn('stage receipt unavailable',out.getvalue())
         self.assertNotIn('secret-disk-detail',out.getvalue())
+
+
+class ProbeSteps(unittest.TestCase):
+    """A yes/no question is not a failed step (2026-10-21: `backup-due` answers "not due" with exit 1,
+    and 17 consecutive tick receipts recorded it as `failed, exit 1`). `Tick.probe` records the no as
+    `not_due`; only an answer outside the protocol is a failure."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="observatory-probe-")
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name).resolve()
+        self.env = patch.dict(os.environ, {"HOME": str(base), "OBSERVATORY_HOME": str(base / "workspace"),
+                                           "OBSERVATORY_TICK_RUN_ID": "c" * 32})
+        self.env.start(); self.addCleanup(self.env.stop)
+        self.tick = load_tick()
+        self.scratch = base / "raw"; self.scratch.mkdir()
+        self.t = self.tick.Tick(self.scratch)
+
+    def answer(self, code):
+        with patch.object(self.tick.subprocess, "run", return_value=subprocess.CompletedProcess([], code, "", "")):
+            return self.t.probe("backup-due", "synthetic")
+
+    def test_no_is_not_due_and_not_a_failure(self):
+        import tick_progress
+        self.assertIs(self.answer(1), False)
+        self.assertEqual(self.t.failed, [])
+        row = json.loads((self.scratch / "tick.json").read_text())["progress"]["stages"][-1]
+        self.assertEqual((row["step"], row["outcome"], row["exit"]), ("backup-due", "not_due", 1))
+        snap = tick_progress.snapshot(self.scratch, "c" * 32)
+        self.assertEqual(snap["coverage"], "observed")
+        self.assertEqual(snap["stages"][-1]["outcome"], "not_due")
+
+    def test_yes_ran(self):
+        self.assertIs(self.answer(0), True)
+        self.assertEqual(self.t.failed, [])
+
+    def test_any_other_answer_is_a_failed_step(self):
+        self.assertIsNone(self.answer(2))
+        self.assertEqual(self.t.failed, [("backup-due", 2)])
+        self.t.write_report()
+        rows = json.loads((self.scratch / "tick.json").read_text())["failed_steps"]
+        self.assertEqual(rows, [{"step": "backup-due", "exit": 2, "outcome": "failed"}])
+
+    def test_not_due_needs_exit_one_in_the_projection(self):
+        import tick_progress
+        self.answer(1)
+        doc = json.loads((self.scratch / "tick.json").read_text())
+        doc["progress"]["stages"][-1]["exit"] = 0
+        (self.scratch / "tick.json").write_text(json.dumps(doc))
+        self.assertEqual(tick_progress.snapshot(self.scratch, "c" * 32)["coverage"], "unknown")
+
+    def test_the_tick_never_reads_a_bounded_exit_as_a_yes(self):
+        """The class, not the instance: a `bounded(...)[0] == 0` in tools/tick.py is a yes/no
+        question asked through a step that records its no as a failure. It must be a `probe`."""
+        import ast
+        tree = ast.parse((ROOT / "tools/tick.py").read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare) and any(isinstance(op, ast.Eq) for op in node.ops):
+                for side in (node.left, *node.comparators):
+                    call = side.value if isinstance(side, ast.Subscript) else side
+                    if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "bounded":
+                        self.fail(f"tools/tick.py:{node.lineno} reads a bounded step's exit as a yes; use probe()")
 
 if __name__ == "__main__": unittest.main()

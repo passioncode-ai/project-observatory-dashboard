@@ -267,3 +267,35 @@ def sweep_report(directory: Path, *, max_bytes: int | None = None, generations: 
     """
     return _sweep(directory, max_bytes=max_bytes, generations=generations,
                   files=files, detailed=True, root=root)[1]
+
+
+class StampedLines:
+    """A stream that starts every line with a UTC timestamp (LC-12): launchd hands a job's
+    stderr to a file (`serverd.err`, `tick.err`), and its lines (refusals, heartbeat failures,
+    tracebacks, `tick stopped: ...`) carried no time, so nobody could tell when a fault began.
+    The server's stderr, the tick supervisor's two streams and the tick script's stderr use it.
+    A child process writing to the same descriptor is not stamped by it: the tick's steps write
+    to its stdout, through `tools/tick.py log`, which stamps them."""
+
+    def __init__(self, stream, clock=None):
+        self.stream, self.at_line_start = stream, True
+        if clock is None:
+            from datetime import datetime, timezone
+            clock = lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+        self.clock = clock
+
+    def write(self, text: str) -> int:
+        out = []
+        for piece in text.splitlines(keepends=True):
+            if self.at_line_start and piece.strip():
+                out.append(self.clock() + " ")
+            out.append(piece)
+            self.at_line_start = piece.endswith("\n")
+        self.stream.write("".join(out))
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)

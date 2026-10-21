@@ -206,3 +206,69 @@ def every_not_applicable() -> dict[str, list[dict]]:
         if isinstance(rows, list) and rows:
             out[f.name] = [r for r in rows if isinstance(r, dict)]
     return out
+
+
+#: Hours a collector's same degradation may last before it is a finding of its own
+#: (`collector.degraded_persistent`, tools/build_findings.py). 2026-10-21: the Fabric attribution
+#: collector wrote `degraded: access-refused` on every run for over a day and produced nothing, and
+#: the board carried it as one more info row. A day is past any outage a retry rides out.
+PERSIST_HOURS = 24
+#: Where each current degradation's first sighting is kept, under the store (not the scratch, so a
+#: receipt reader never mistakes it for a collector). Reasons only, never a detail.
+PERSISTENCE_FILE = "degraded-since.json"
+
+
+def _persist_key(receipt: str, row: dict) -> tuple[str, str]:
+    """(record key, the pair a person reads). The `code` when the row has one, else its reason:
+    a reason that carries a count changes with the count and starts its clock again, which errs
+    towards saying nothing rather than towards a false 'for a day'."""
+    source = str(row.get("source", "?"))
+    reason = str(row.get("code") or row.get("reason") or "").strip()
+    return f"{receipt}\t{source}\t{reason}", f"{source} — {reason}"
+
+
+def persistence(current: dict[str, list[dict]], record, now: float
+                ) -> tuple[dict, dict[str, list[tuple[str, float]]]]:
+    """(the new record, per receipt the degradations seen for more than PERSIST_HOURS with their
+    first sighting). `record` is the previous one, `{"first_seen": {key: epoch}}`; anything else is
+    read as empty. A degradation absent from `current` is forgotten, so one that comes back starts
+    again."""
+    import math
+    old = record.get("first_seen") if isinstance(record, dict) else None
+    old = old if isinstance(old, dict) else {}
+    first_seen: dict[str, float] = {}
+    persistent: dict[str, list[tuple[str, float]]] = {}
+    for receipt, rows in sorted(current.items()):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key, pair = _persist_key(receipt, row)
+            seen = old.get(key)
+            seen = float(seen) if (isinstance(seen, (int, float)) and not isinstance(seen, bool)
+                                   and math.isfinite(seen) and seen <= now) else now
+            first_seen[key] = seen
+            if now - seen > PERSIST_HOURS * 3600 and pair not in [p for p, _ in persistent.get(receipt, [])]:
+                persistent.setdefault(receipt, []).append((pair, seen))
+    return {"schema": 1, "first_seen": first_seen}, persistent
+
+
+def persistent(now: float | None = None) -> dict[str, list[tuple[str, float]]]:
+    """`persistence` over every collector's receipt now, the record kept in the store between runs.
+    An unreadable record starts every clock again; a record that cannot be written is said on
+    stderr and costs only the next run's memory."""
+    import sys
+    import time
+    now = time.time() if now is None else now
+    path = paths.STATE / PERSISTENCE_FILE
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = {}
+    record, out = persistence(every_collector(), record, now)
+    try:
+        import atomic
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic.write_json(path, record)
+    except Exception as exc:  # noqa: BLE001 — the findings still build
+        print(f"  {PERSISTENCE_FILE} not written: {type(exc).__name__}", file=sys.stderr)
+    return out

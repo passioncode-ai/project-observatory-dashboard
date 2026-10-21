@@ -163,5 +163,60 @@ class LeakScan(unittest.TestCase):
         self.assertTrue(any(h["where"].startswith(str(self.db)) for h in later["hits"]), "the row is read by the next pass")
 
 
+class StopsInsideAUnit(LeakScan):
+    """OBS-52, 2026-10-21: the leak scan was killed by its watchdog on ten ticks in a row (`exceeded
+    its 1197 s limit`) and so wrote nothing, though it checks the deadline between files and between
+    stores: one large transcript, or one store, outran the reserve. It now also checks between the
+    chunks of a file and the pages of a store, and stops with what it read."""
+
+    def clock(self, *left):
+        """`step_budget.remaining` answering `left` in turn, then the last value for ever."""
+        answers = list(left)
+
+        def remaining():
+            return answers.pop(0) if len(answers) > 1 else answers[0]
+        patcher = patch.object(L.step_budget, "remaining", remaining)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_large_file_stops_between_chunks_and_the_next_pass_resumes_it(self):
+        base = Path(self.tmp.name).resolve()
+        big = base / "big.jsonl"
+        big.write_bytes(f"{SECRET_A}\n".encode() + b"x" * (L.CHUNK * 2) + f"\n{SECRET_A}\n".encode())
+        L.targets = lambda days: ([big], [])
+        # The loop's check, then the first chunk's, then out of time before the second chunk.
+        self.clock(1000, 1000, 0)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(L.main(["leaks"]), 0)
+        first = json.loads(L.OUT.read_text())
+        self.assertTrue(first["partial"])
+        self.assertIn("deadline-targets", {d["code"] for d in first["degraded"]})
+        self.assertEqual(sum(h["occurrences"] for h in first["hits"] if h["where"] == str(big)), 1)
+        offset = json.loads(L.STATE.read_text())["offsets"][str(big)]
+        self.assertGreater(offset, 0, "what was read is kept")
+        self.assertLess(offset, big.stat().st_size, "what was not read is not marked read")
+        patch.stopall()
+        second = self.scan()
+        self.assertFalse(second["partial"])
+        self.assertEqual(sum(h["occurrences"] for h in second["hits"] if h["where"] == str(big)), 1,
+                         "the rest is read by the next pass, and the start is not counted twice")
+        self.assertEqual(json.loads(L.STATE.read_text())["offsets"][str(big)], big.stat().st_size)
+
+    def test_a_store_stops_between_pages_and_keeps_its_mark(self):
+        self.scan()
+        before = json.loads(L.STATE.read_text())["sqlite"]["stores"]
+        self.insert(f"new row {SECRET_A}")
+        # The store's start check passes; the check before its first page does not.
+        self.clock(1000, 0)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(L.main(["leaks"]), 0)
+        out = json.loads(L.OUT.read_text())
+        self.assertFalse(out["companion_store"]["read"])
+        self.assertIn("deadline-store", {d.get("code") for d in out["degraded"]})
+        self.assertEqual(json.loads(L.STATE.read_text())["sqlite"]["stores"], before, "the mark did not move")
+        patch.stopall()
+        self.assertTrue(any(h["where"].startswith(str(self.db)) for h in self.scan()["hits"]))
+
+
 if __name__ == "__main__":
     unittest.main()

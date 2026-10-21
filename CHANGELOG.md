@@ -7,6 +7,28 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Every collector gets a turn, and none takes the tick** (OBS-52; OBS-40 superseded). One installed 0.27.0 timed
+  out on 28 of its last 50 ticks: the leak scan took a median 1125 s of the 1500 s ceiling and eight collectors were not
+  started 28 times. A disabled step keeps its old start, so it sorted as the most starved collector and the rotation
+  moved the step it reads from to the front: the disabled companion scrub dragged the leak scan, and the disabled
+  Bitbucket listing the folder scan, to the head of every tick. A disabled collector now runs last, one not started for
+  3 ticks runs first, and each collector's watchdog limit is at most its share of the ceiling (40 %, the leak scan 30 %;
+  `tick_budget.py`). The leak scan also stops between the chunks of a file and the pages of a store and resumes there
+  next tick, instead of being killed with nothing written. A new finding, `tick.step_over_share`, names a step that ran
+  past a third of the ceiling.
+- **A probe's "no" is not a failed step.** `backup-due` answers "not due" with exit 1, and 17 tick receipts in a row
+  recorded it as `failed`. `Tick.probe` records it as `not_due`; only an exit other than 0 or 1 is a failure, and a
+  test refuses a `bounded(...)[0] == 0` in `tools/tick.py`.
+- **Findings handed to Fabric Dashboards are not new again on the next tick.** With the host present the notifier
+  returned before recording what it handed over, so every tick reported about ninety findings as new or escalated.
+  They are now recorded as delivered `via: host`.
+- **A degradation that lasts a day is a warning** (`collector.degraded_persistent`). A collector whose same reason
+  (its `code`, else its text) stays in its receipt for more than 24 hours is reported on its own, for every collector:
+  the Fabric attribution collector had written `degraded: access-refused` on every run for over a day and produced
+  nothing, while the board showed it as one more info row. First sightings are kept in the store, `degraded-since.json`.
+- **`tick.err` lines carry their time.** The supervisor's lines (`tick stopped: ...`) and the tick script's stderr now
+  start with their UTC time, through `log_policy.StampedLines` (moved from `serverd.py`, which still uses it).
+
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
   --clone` runs now carries `-c gc.auto=0 -c maintenance.auto=false`, as the engine's other git readers do: a fetch of
   carried commits into a checkout that was already there could leave a detached `gc --auto` running after the

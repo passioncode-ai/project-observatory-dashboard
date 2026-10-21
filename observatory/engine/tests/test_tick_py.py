@@ -98,6 +98,43 @@ class WholeTick(unittest.TestCase):
                 self.assertLessEqual(row["started_at"], row["finished_at"], (name, row))
 
 
+class StampedStderr(unittest.TestCase):
+    """2026-10-21: `store/logs/tick.err` held 415 lines and not one said when it was written; 193 of
+    them were the supervisor's `tick stopped: ...`. The supervisor's own lines and the tick script's
+    stderr now start with their UTC time, as `serverd.err`'s do (log_policy.StampedLines)."""
+
+    def test_the_supervisors_own_lines_carry_a_utc_stamp(self):
+        with tempfile.TemporaryDirectory(prefix="observatory-stamp-") as tmp:
+            base = Path(tmp).resolve()
+            env = {**os.environ, "OBSERVATORY_HOME": str(base / "runtime"), "OBSERVATORY_SYSTEM_SETUP": "0",
+                   "HOME": str(base / "user"), "USERPROFILE": str(base / "user"),
+                   "OBSERVATORY_TICK_CEILING_SECONDS": "2"}
+            for key in ("OBSERVATORY_TICK_SUPERVISOR_PID", "OBSERVATORY_TICK_DEADLINE", "AGENT_SYNC_RUN_ID",
+                        "OBSERVATORY_SCRATCH", "OBSERVATORY_STATE", "OBSERVATORY_REGISTRY", "OBSERVATORY_DB"):
+                env.pop(key, None)
+            (base / "user").mkdir()
+            subprocess.run([sys.executable, "observatory.py", "init"], cwd=ROOT, env=env, capture_output=True,
+                           check=True, timeout=120)
+            settings = base / "runtime/config/settings.json"
+            doc = json.loads(settings.read_text(encoding="utf-8"))
+            doc.setdefault("features", {})["scheduler"] = True
+            settings.write_text(json.dumps(doc), encoding="utf-8")
+            p = subprocess.run([sys.executable, "tools/tick_lease.py", "run", "--", sys.executable, "-c",
+                                "import time; time.sleep(30)"], cwd=ROOT, env=env, capture_output=True,
+                               text=True, timeout=120)
+        self.assertEqual(p.returncode, 124, p.stdout + p.stderr)
+        lines = [line for line in p.stderr.splitlines() if line.strip()]
+        self.assertTrue(any("tick stopped:" in line for line in lines), p.stderr)
+        for line in lines:
+            self.assertRegex(line, r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ ", line)
+
+    def test_the_tick_script_stamps_its_own_stderr(self):
+        import ast
+        tree = ast.parse((ROOT / "tools/tick.py").read_text(encoding="utf-8"))
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        self.assertIn("StampedLines", ast.dump(main), "tools/tick.py main() wraps sys.stderr")
+
+
 def load_tick():
     import importlib.util
     spec = importlib.util.spec_from_file_location("tick_under_test", ROOT / "tools/tick.py")

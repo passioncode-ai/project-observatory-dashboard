@@ -27,7 +27,9 @@ STAGES = frozenset("""integrity scan-fs scan-gh scan-vault scan-sessions remotes
     merge emit validate events snapshot diff fabric-attribution index retention sweep corroborate ledger lost plugins
     rollup agent findings dashboard smoke findings-recheck notify registry project-into-vault
     projection links logs unknown""".split())
-OUTCOMES = frozenset(("running", "ran", "failed", "stopped", "not_started", "disabled", "unknown"))
+#: `not_due` is a probe's "no" (`Tick.probe`, exit 1): an answer, not a failure.
+OUTCOMES = frozenset(("running", "ran", "failed", "stopped", "not_started", "disabled", "not_due",
+                      "unknown"))
 
 
 def stamp() -> str:
@@ -68,8 +70,12 @@ class Progress:
         self.began = 0.0
 
     def document(self) -> dict:
+        # `ceiling_seconds`: what the watchdog stops the whole tick at, so a reader of the stage
+        # durations (`tick.step_over_share`, tools/tick_findings.py) judges them against the same
+        # number. The supervisor's projection (`snapshot`) does not copy it.
+        import tick_budget
         return {"schema": 1, "run_id": self.run_id, "stages": self.stages,
-                "write_failures": self.write_failures}
+                "write_failures": self.write_failures, "ceiling_seconds": tick_budget.ceiling_seconds()}
 
     def warn(self, message: str) -> None:
         try:
@@ -160,6 +166,7 @@ def snapshot(scratch: Path, run_id: str | None) -> dict:
                 elif type(code) is not int:
                     return unknown
                 elif ((outcome in ("ran", "disabled") and code != 0)
+                      or (outcome == "not_due" and code != 1)
                       or (outcome == "not_started" and code != 124)
                       or (outcome == "stopped" and not (code == 124 or code < 0 or code > 128))
                       or (outcome == "failed" and not (0 < code <= 128 and code != 124))):

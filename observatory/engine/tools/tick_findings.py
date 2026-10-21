@@ -5,7 +5,9 @@ import pathlib
 import sys
 import time
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1] / 'dashboard'))
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from finding_types import titled
+import tick_budget
 
 CORE_TAIL = {'merge', 'emit', 'validate'}
 
@@ -13,6 +15,42 @@ def number(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         return None
     return float(value)
+
+
+def over_share(tick):
+    """`tick.step_over_share`: a step of the last tick that ran longer than `tick_budget.ALERT_SHARE`
+    of the ceiling, finished or not (OBS-52). Read from the stage receipt (`progress`), which a tick
+    stopped at its ceiling also leaves; the ceiling is the one the receipt names, else this run's.
+    One row per step: its longest run in that tick. Rows that are not numbers raise nothing."""
+    progress = tick.get('progress') if isinstance(tick.get('progress'), dict) else {}
+    stages = progress.get('stages') if isinstance(progress.get('stages'), list) else []
+    ceiling = number(progress.get('ceiling_seconds'))
+    if ceiling is None or ceiling <= 0:
+        ceiling = tick_budget.ceiling_seconds()
+    longest = {}
+    for row in stages:
+        if not isinstance(row, dict) or not isinstance(row.get('step'), str):
+            continue
+        seconds = number(row.get('duration_seconds'))
+        if seconds is not None and seconds > tick_budget.ALERT_SHARE * ceiling and seconds > longest.get(row['step'], (0, ''))[0]:
+            longest[row['step']] = (seconds, str(row.get('outcome') or 'unknown'))
+    out = []
+    for name, (seconds, outcome) in longest.items():
+        cap = (f' A collector is held to {tick_budget.share(name):.0%} of the ceiling '
+               f'({tick_budget.share_limit(name, ceiling):.0f} s) and resumes on a later tick if it can.'
+               if name not in CORE_TAIL else '')
+        out.append({'type': 'tick.step_over_share', 'subject': 'step:' + name, 'severity': 'warning',
+                    **titled("the scheduled tick's `{step}` step took {share} of its time", step=name,
+                             share=f'{seconds / ceiling:.0%}'),
+                    'detail': (f'It ran {seconds:.0f} s of the tick\'s {ceiling:.0f} s ceiling (outcome: '
+                               f'{outcome.replace("_", " ")}); past {tick_budget.ALERT_SHARE:.0%} one step is '
+                               f'using time the other steps were due, and those are the ones reported as not '
+                               f'started.' + cap),
+                    'action': ('read the step\'s lines in store/logs/tick.log for what it spent the time on; '
+                               'a collector that resumes needs nothing more, any other step needs its slow part '
+                               'found and bounded'),
+                    'evidence': ['store:raw/tick.json#progress', 'store:logs/tick.log']})
+    return out
 
 
 def findings(tick, rotation, *, now=None, config=None, severe=None):
@@ -37,6 +75,7 @@ def findings(tick, rotation, *, now=None, config=None, severe=None):
                               + ' Last tick finished ' + str(tick.get('finished_at', 'unknown')) + '.',
                     'action': 'read store/logs/tick.log; resolve the reported limit or step failure before rerunning the affected step',
                     'evidence': ['store:raw/tick.json', 'store:logs/tick.log']})
+    out.extend(over_share(tick))
     if rotation is None and not tick.get("collector_order"):
         return out
 
@@ -79,7 +118,7 @@ def findings(tick, rotation, *, now=None, config=None, severe=None):
             continue
         last, streak = number(row.get('last_ran_at')), number(row.get('not_started_streak'))
         hours = max(0, now - last) / 3600 if last is not None else None
-        if (streak or 0) < 3 and (hours is None or hours <= threshold):
+        if (streak or 0) < tick_budget.STARVED_TICKS and (hours is None or hours <= threshold):
             continue
         status = 'interrupted or completion unknown' if outcome is None else outcome
         out.append({'type': 'tick.collector_starved', 'subject': 'collector:' + name,

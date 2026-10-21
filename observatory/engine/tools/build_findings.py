@@ -1651,6 +1651,34 @@ def provider_findings(health: dict | None, agent: dict | None, agent_enabled: bo
     return out
 
 
+def persistent_degradation_findings(persistent: dict[str, list[tuple[str, float]]],
+                                    now: float | None = None) -> list[dict]:
+    """`collector.degraded_persistent`: one warning per receipt whose same degradation has lasted
+    more than `degradations.PERSIST_HOURS`, with each reason and since when."""
+    import time
+    now = time.time() if now is None else now
+    out = []
+    for receipt, pairs in sorted(persistent.items()):
+        oldest = min(since for _, since in pairs)
+        shown = [f"{pair} (since {datetime.fromtimestamp(since, timezone.utc):%Y-%m-%d %H:%MZ})"
+                 for pair, since in sorted(pairs, key=lambda ps: ps[1])[:DEGRADED_LISTED]]
+        rest = len(pairs) - len(shown)
+        out.append({
+            "type": "collector.degraded_persistent", "subject": f"collector:{receipt}",
+            "severity": "warning",
+            **titled("{receipt} has reported the same degradation for {hours} hours",
+                     receipt=receipt, hours=f"{(now - oldest) / 3600:.0f}"),
+            "detail": ("The collector has said the same thing about its coverage on every run for over "
+                       f"{degradations.PERSIST_HOURS} hours, so whatever it is meant to produce may not have "
+                       "been produced since. " + clipped("; ".join(shown), 900)
+                       + (f" … and {rest} more" if rest > 0 else "") + "."),
+            "action": (f"read `store/raw/{receipt}` for the reason, then fix the source or switch the "
+                       "collector off; a reason another system owns is that system's to change, and this "
+                       "row stays until it does"),
+            "evidence": [f"store/raw/{receipt}#degraded", f"store/{degradations.PERSISTENCE_FILE}"]})
+    return out
+
+
 def collect() -> list[dict]:
     out: list[dict] = []
     # WHERE THE ESTATE RUNS, on the same board as what it is made of. Absent is
@@ -3717,6 +3745,12 @@ def collect() -> list[dict]:
             "action": f"read `store/raw/{receipt}` for the full list, then fix "
                       f"the source or accept the gap — the reason names which",
             "evidence": [f"store/raw/{receipt}#degraded"]})
+
+    # THE SAME DEGRADATION FOR A DAY (degradations.persistence). The row above is info on purpose,
+    # and a collector that has done nothing for a day hid among the structural ones: the Fabric
+    # attribution collector wrote `degraded: access-refused` on every run from 2026-10-20 and the
+    # board never said it was a silent no-op.
+    out += persistent_degradation_findings(degradations.persistent())
 
     # WHAT DOES NOT APPLY HERE, kept visible. A collector moves a source to its
     # `not_applicable` list when it measured that the source does not apply to

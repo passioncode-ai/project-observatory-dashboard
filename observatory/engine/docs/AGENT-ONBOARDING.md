@@ -158,8 +158,13 @@ metadata excludes command/output/exception text, and its write failure does not
 replace the command's exit. See `tests/test_tick_progress.py` for fault controls.
 
 Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
-`ran`. Disabled steps preserve the last successful measurement time; they do not
-raise starvation. A collector absent from the last tick's `collector_order` is
+`ran`; a probe's "no" (`backup-due`) is `not_due`, not a failure. Disabled steps
+preserve the last successful measurement time; they do not raise starvation.
+Collectors take at most their share of the ceiling (`tick_budget.py`: 40 %, leaks
+30 %); one not started for 3 ticks runs first, a disabled one last.
+`tick.step_over_share` names a step past a third of the ceiling;
+`collector.degraded_persistent` a collector whose same degraded reason lasted
+over 24 hours (a reason another system owns stays until that system changes it). A collector absent from the last tick's `collector_order` is
 not classified as starved. Planned collectors warn after three missed starts or
 six hours without a completed measurement (`config/tick.json` `starve_hours`
 overrides the age bound); leaks and integrity use critical severity. Interrupted

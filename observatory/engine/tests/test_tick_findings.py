@@ -101,6 +101,7 @@ class TickFindings(unittest.TestCase):
                 return 'not_started' if name == 'integrity' else 'ran'
             runner.step = fake_step
             runner.bounded = lambda name, *args: (1, 'synthetic stop before merge')
+            runner.probe = lambda name, *args: False
             with patch.object(paths, 'STATE', state):
                 with self.assertRaises(SystemExit):
                     tick.steps(runner, scratch, state / 'dashboard.html')
@@ -110,6 +111,60 @@ class TickFindings(unittest.TestCase):
             self.assertIn('integrity', runner.order)
             self.assertEqual(receipt['collectors']['integrity']['not_started_streak'], 1)
             self.assertIsNone(receipt['collectors']['integrity']['last_ran_at'])
+
+class StepShare(unittest.TestCase):
+    """OBS-52: one step that takes most of the tick is reported, whether or not it finished.
+    Measured 2026-10-21: the leak scan took a median 1125 s of a 1500 s ceiling and nothing on the
+    board said that one step was eating the tick; only the steps it starved were reported."""
+
+    def tick_doc(self, stages, ceiling=1500):
+        progress = {'schema': 1, 'run_id': 'a' * 32, 'stages': stages, 'write_failures': 0}
+        if ceiling is not None:
+            progress['ceiling_seconds'] = ceiling
+        return {'progress': progress}
+
+    def test_a_step_over_its_share_is_reported_and_one_under_is_not(self):
+        import tick_budget
+        import tick_findings as F
+        over = tick_budget.ALERT_SHARE * 1500 + 1
+        found = F.findings(self.tick_doc([
+            {'step': 'leaks', 'duration_seconds': over, 'outcome': 'stopped', 'exit': 124},
+            {'step': 'scan-fs', 'duration_seconds': tick_budget.ALERT_SHARE * 1500 - 1, 'outcome': 'ran', 'exit': 0}]), None)
+        shares = [f for f in found if f['type'] == 'tick.step_over_share']
+        self.assertEqual([f['subject'] for f in shares], ['step:leaks'])
+        self.assertEqual(shares[0]['severity'], 'warning')
+        self.assertIn('{step}', shares[0]['title_id'])
+        self.assertIn('1500', shares[0]['detail'])
+
+    def test_the_ceiling_comes_from_the_receipt(self):
+        import tick_findings as F
+        found = F.findings(self.tick_doc([{'step': 'scan-fs', 'duration_seconds': 400, 'outcome': 'ran', 'exit': 0}],
+                                         ceiling=900), None)
+        self.assertEqual([f['subject'] for f in found if f['type'] == 'tick.step_over_share'], ['step:scan-fs'])
+
+    def test_unreadable_stages_raise_nothing_and_crash_nothing(self):
+        import tick_findings as F
+        for stages in (None, 'x', [None, {'step': 'leaks'}, {'step': 'leaks', 'duration_seconds': 'x'},
+                                   {'step': 'leaks', 'duration_seconds': float('nan')}]):
+            with self.subTest(stages=stages):
+                doc = {'progress': {'stages': stages, 'ceiling_seconds': 'x'}}
+                self.assertFalse([f for f in F.findings(doc, None) if f['type'] == 'tick.step_over_share'])
+
+    def test_one_row_per_step_even_when_it_ran_twice(self):
+        import tick_findings as F
+        found = F.findings(self.tick_doc([{'step': 'findings', 'duration_seconds': 900, 'outcome': 'ran', 'exit': 0},
+                                          {'step': 'findings', 'duration_seconds': 800, 'outcome': 'ran', 'exit': 0}]), None)
+        self.assertEqual(len([f for f in found if f['type'] == 'tick.step_over_share']), 1)
+
+    def test_starvation_begins_at_the_shared_threshold(self):
+        import tick_budget
+        import tick_findings as F
+        for streak, expected in ((tick_budget.STARVED_TICKS, True), (tick_budget.STARVED_TICKS - 1, False)):
+            with self.subTest(streak=streak):
+                found = F.findings({'collector_order': ['google']}, {'schema': 2, 'collectors': {'google': {
+                    'outcome': 'not_started', 'not_started_streak': streak, 'last_ran_at': 9990}}}, now=10000)
+                self.assertEqual('tick.collector_starved' in {f['type'] for f in found}, expected)
+
 
 if __name__ == '__main__':
     unittest.main()
