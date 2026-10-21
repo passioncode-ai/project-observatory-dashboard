@@ -37,6 +37,11 @@ extension XCTestCase {
         return Updates(defaults: defaults ?? scratchDefaults(), log: log, spawn: { _, _ in throw BridgeError.configuration }, terminate: {},
                        badge: { _ in })
     }
+    /// Open at login with the system replaced: nothing is registered for the person running the tests.
+    @MainActor func scratchLoginItem(_ status: LoginItemStatus = .enabled) -> LoginItem {
+        let log = AppLog(file: FileManager.default.temporaryDirectory.appendingPathComponent("obs-log-\(UUID().uuidString)/app.log"))
+        return LoginItem(defaults: scratchDefaults(), log: log, status: { status }, register: {}, unregister: {})
+    }
 }
 
 final class ScratchDefaultsTests: XCTestCase {

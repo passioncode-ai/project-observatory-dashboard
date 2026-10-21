@@ -2,16 +2,18 @@ import SwiftUI
 import AppKit
 import ObservatoryCore
 
-/// Activating a staged update (LC-16): the engine's hourly pass has verified the new app
-/// and waits for this one to quit. This object finds that out — at launch and every
-/// 15 minutes — shows it on the Dock icon, and activates it at a safe point: the person's
-/// *Restart to update*, the person's quit, or 30 minutes with no window on screen and no
-/// input. A running session is never stopped for it: the assistant's job is detached and
-/// resumes after the restart.
+/// Activating a staged update (LC-16): the engine's maintenance pass has verified the new
+/// app and waits for this one to quit. This object finds that out (at launch and every
+/// 5 minutes), shows it on the Dock icon, asks once per version «Restart to finish
+/// updating» (Restart now / Later) while a window is on screen, and activates it at a safe
+/// point: the person's *Restart to update*, the person's quit, or 30 minutes with no window
+/// on screen and no input. A running session is never stopped for it: the assistant's job
+/// is detached and resumes after the restart.
 @MainActor final class Updates: ObservableObject {
-    /// Reading the local record costs nothing; every 6 h made the prompt appear hours after
-    /// the update was ready (the operator, 2026-10-08). The engine stages hourly.
-    static let checkEvery: TimeInterval = 15 * 60
+    /// Reading the local record costs nothing: one small file, no network. Every product
+    /// checks for a new version every 5 minutes (the operator, 2026-10-17; it was 15 minutes
+    /// from 2026-10-08 and 6 hours before), so a staged update is seen within 5 minutes.
+    static let checkEvery: TimeInterval = 5 * 60
     /// The Dock badge while an update is staged: seen without opening a window.
     static let badgeLabel = "↑"
     @Published private(set) var staged: StagedUpdate? {
@@ -30,6 +32,13 @@ import ObservatoryCore
     private let badge: @MainActor (String?) -> Void
     /// Set by the windows: a question, or a dashboard build or start, is running.
     var workInFlight: () -> Bool = { false }
+    /// Whether a titled window of this app is on screen: a prompt is shown only then.
+    var windowOnScreen: () -> Bool = { NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) } }
+    /// Shows «Restart to finish updating» for a version and answers true for *Restart now*,
+    /// false for *Later*. Set by the dashboard window (it holds the language); nil asks nothing.
+    var prompt: ((String, @escaping (Bool) -> Void) -> Void)?
+    /// A prompt is on screen: the next check does not stack a second one.
+    private var prompting = false
     /// A helper has been started; a quit that follows must not start a second one.
     private(set) var helperStarted = false
     private var schedule: Task<Void, Never>?, idleTimer: Timer?, inputMonitor: Any?
@@ -53,7 +62,24 @@ import ObservatoryCore
         return staged
     }
 
-    /// The first check now, then every `checkEvery` while the app runs; the idle watch every minute.
+    /// Asks «Restart to finish updating» once per staged version, when a window is on
+    /// screen (`UpdatePrompt.shouldPrompt`). *Later* is remembered by version; the menu item
+    /// and the toolbar button stay until the update is installed.
+    func promptIfDue() {
+        guard !prompting, let prompt, let version = staged?.version,
+              UpdatePrompt.shouldPrompt(staged: version, prompted: defaults.string(forKey: UpdatePrompt.key),
+                                        windowOnScreen: windowOnScreen()) else { return }
+        defaults.set(version, forKey: UpdatePrompt.key)
+        prompting = true
+        prompt(version) { [weak self] now in
+            guard let self else { return }
+            self.prompting = false
+            if now { self.restartToUpdate() }
+        }
+    }
+
+    /// The first check now, then every `checkEvery` while the app runs; the idle watch (and a
+    /// prompt that waited for a window) every minute.
     func start() {
         check()
         schedule?.cancel()
@@ -62,6 +88,7 @@ import ObservatoryCore
                 try? await Task.sleep(for: .seconds(Self.checkEvery))
                 guard let self, !Task.isCancelled else { return }
                 self.check()
+                self.promptIfDue()
             }
         }
         inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]) { [weak self] event in
@@ -73,6 +100,8 @@ import ObservatoryCore
     }
 
     private func idleTick() {
+        // A prompt that waited for a window: the person opened one since.
+        promptIfDue()
         let onScreen = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
         if onScreen || NSApp.isActive { lastSeen = Date() }
         let seen = IdleRestart.Observation(staged: staged != nil, windowOnScreen: onScreen, active: NSApp.isActive,

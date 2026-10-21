@@ -98,12 +98,13 @@ import ApplicationServices
     func testSettingsReadsEveryControlByItsOwnName() async {
         for russian in [false, true] {
             let m = model(russian: russian) { _ in self.status(ready: true) }
-            let w = await host(SettingsView().environmentObject(m), size: NSSize(width: 600, height: 480))
+            let w = await host(SettingsView().environmentObject(m).environmentObject(scratchLoginItem()), size: NSSize(width: 600, height: 480))
             let found = elements(w)
             assertNamed(found)
             let labels = Set(found.map(\.label))
             XCTAssertTrue(labels.contains(m.t("Choose: {field}", ["field": m.t("Workspace")])), "\(labels)")
             XCTAssertTrue(labels.contains(m.t("Choose: {field}", ["field": m.t("Program")])), "\(labels)")
+            XCTAssertTrue(labels.contains(m.t("Open at login")), "the login-item switch is named: \(labels)")
         }
     }
 
@@ -133,7 +134,7 @@ import ApplicationServices
             let d = scratchDefaults("observatory-ax-dash")
             d.set(base, forKey: "workspace"); d.set("/usr/bin/false", forKey: "executable")
             let m = Model(defaults: d) { action, _ in action == "dashboard" ? answer : self.status(ready: true) }
-            let w = await host(DashboardView().environmentObject(m).environmentObject(WebController()).environmentObject(scratchUpdates()))
+            let w = await host(DashboardView().environmentObject(m).environmentObject(WebController()).environmentObject(scratchUpdates()).environmentObject(scratchLoginItem()))
             let found = elements(w)
             assertNamed(found)
             if i < 2 { XCTAssertTrue(found.contains { $0.label == m.t("Start server") }, "mode \(i): \(found.map(\.label))") }
