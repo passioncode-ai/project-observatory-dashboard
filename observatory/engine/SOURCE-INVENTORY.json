@@ -3474,6 +3474,13 @@
       "bytes": 9978
     },
     {
+      "path": "tests/test_degraded_persistence.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e60ded19f1daa0f1cd127b13d0aa21d29d1b812c73ec47b329b519713c0ab0b1",
+      "bytes": 5284
+    },
+    {
       "path": "tests/test_delegation_sealed.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4837,6 +4844,13 @@
       "bytes": 14742
     },
     {
+      "path": "tests/test_tick_budget.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "378b4a740592899f613ca43a1828112b6d1012debae50b7abed4f1216db675e6",
+      "bytes": 8675
+    },
+    {
       "path": "tests/test_tick_failures.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5152,6 +5166,13 @@
       "upstream_modified": true,
       "export_sha256": "98a0a987c1781cdf1116661561fd93a4728e4055bb101643865ec432fb181354",
       "bytes": 6704
+    },
+    {
+      "path": "tick_budget.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c8d8cbfc1e1eb2b758b0eae3610c709464dab21e38c450955c87152b40da7ec2",
+      "bytes": 4309
     },
     {
       "path": "tick_health.py",
@@ -6013,7 +6034,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 795,
+  "file_count": 798,
   "excluded": [
     "git-history",
     "operator-registries",
