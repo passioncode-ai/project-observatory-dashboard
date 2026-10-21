@@ -328,5 +328,110 @@ class AFullPassResumesAcrossTicks(LeakScan):
                          "a new value is looked for in every row, not from the old progress")
 
 
+class APendingPassMissesNothing(LeakScan):
+    """Confirming review of #328: a database finished earlier in a pending complete pass was re-read
+    only above its progress, without the change checks of an incremental read, so a row updated in
+    place meanwhile was never read, in that pass or any later one. A finished database is now read
+    incrementally from where the pass read it to, with its signature; an unfinished one is resumed
+    only if it is still the same file; a pass pending too long starts over; a database that will not
+    open does not hold the pass open."""
+
+    def database(self, name, rows, updated=False):
+        db = Path(self.tmp.name).resolve() / name
+        c = sqlite3.connect(db)
+        if updated:
+            c.execute("CREATE TABLE messages(body TEXT, updated_at INTEGER)")
+            c.executemany("INSERT INTO messages VALUES (?, ?)", [(f"row {i}", 100) for i in range(rows)])
+        else:
+            c.execute("CREATE TABLE messages(body TEXT)")
+            c.executemany("INSERT INTO messages VALUES (?)", [(f"row {i}",) for i in range(rows)])
+        c.commit(); c.close()
+        return db
+
+    def tick(self, cut=None):
+        """One pass; `cut` maps a database to the pages it may read before its time runs out."""
+        cut = {str(k): v for k, v in (cut or {}).items()}
+        budget = [None]
+        real = L.scan_sqlite
+
+        def scan(db, *args, **kwargs):
+            budget[0] = cut.get(str(db))
+            try:
+                return real(db, *args, **kwargs)
+            finally:
+                budget[0] = None
+
+        def remaining():
+            if budget[0] is None:
+                return 1000
+            budget[0] -= 1
+            return 1000 if budget[0] >= 0 else 0
+        with patch.object(L.step_budget, "remaining", remaining), patch.object(L, "scan_sqlite", scan), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(L.main(["leaks"]), 0)
+        return json.loads(L.OUT.read_text())
+
+    def stores(self, *dbs):
+        self.addCleanup(setattr, L, "transcript_stores", L.transcript_stores)
+        L.transcript_stores = lambda notes: list(dbs)
+
+    def pending(self):
+        return json.loads(L.STATE.read_text()).get("sqlite_pending")
+
+    def test_a_row_updated_in_place_in_a_finished_database_is_read(self):
+        small = self.database("small.sqlite", 10, updated=True)
+        big = self.database("big.sqlite", 4 * L.PAGE)
+        self.stores(small, big)
+        self.tick({big: 2})                        # small is finished, big is cut after two pages
+        pending = self.pending()
+        self.assertIn(str(small), pending["complete"])
+        self.assertNotIn(str(big), pending["complete"])
+        c = sqlite3.connect(small)
+        c.execute("UPDATE messages SET body = ?, updated_at = 200 WHERE rowid = 3", (f"edited {SECRET_A}",))
+        c.commit(); c.close()
+        seen = []
+        for _ in range(4):
+            out = self.tick()
+            seen += [h for h in out["hits"] if h["where"].startswith(str(small))]
+        self.assertTrue(seen, "the row updated in place was read")
+        self.assertIsNone(self.pending())
+
+    def test_an_unfinished_database_replaced_by_another_file_is_read_from_the_start(self):
+        big = self.database("big.sqlite", 4 * L.PAGE)
+        self.stores(big)
+        self.tick({big: 2})
+        self.assertTrue(self.pending()["stores"].get(str(big)), "partly read")
+        other = self.database("other.sqlite", 4 * L.PAGE)
+        c = sqlite3.connect(other)
+        c.execute("UPDATE messages SET body = ? WHERE rowid = 2", (f"early {SECRET_A}",))
+        c.commit(); c.close()
+        os.replace(other, big)
+        out = self.tick()
+        self.assertTrue([h for h in out["hits"] if h["where"].startswith(str(big))],
+                        "a low row of the new file was read")
+
+    def test_a_pass_pending_too_long_starts_over(self):
+        big = self.database("big.sqlite", 4 * L.PAGE)
+        self.stores(big)
+        self.tick({big: 2})
+        state = json.loads(L.STATE.read_text())
+        state["sqlite_pending"]["started_on"] = "2000-01-01"
+        L.STATE.write_text(json.dumps(state))
+        out = self.tick()
+        rows = sum(r["rows_read"] for r in out["coverage"]["transcript_stores"])
+        self.assertEqual(rows, 4 * L.PAGE, "read from the start, not from the old progress")
+        self.assertIsNone(self.pending())
+
+    def test_a_database_that_will_not_open_does_not_hold_the_pass_open(self):
+        good = self.database("good.sqlite", 10)
+        bad = Path(self.tmp.name).resolve() / "bad.sqlite"
+        bad.write_bytes(b"not a database" * 200)
+        self.stores(good, bad)
+        out = self.tick()
+        self.assertIsNone(self.pending(), "the pass is complete with the hole named")
+        self.assertIn("source-unreadable", {d["code"] for d in out["degraded"]})
+        self.assertIsNotNone(json.loads(L.STATE.read_text())["sqlite"]["full_on"])
+
+
 if __name__ == "__main__":
     unittest.main()

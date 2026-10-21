@@ -108,11 +108,14 @@ class Structural(unittest.TestCase):
         "disk-guard.json": [{"source": "holders", "reason": "what processes hold could not be read; no path is removed"}],
         "git-hygiene.json": [{"source": "local:alpha-web", "reason": "registered checkout could not be read"},
                              {"source": "repository:example-org/beta-api", "reason": "branch classification unavailable"},
-                             {"source": "worktree-registration", "reason": "registration budget exhausted"}],
+                             {"source": "worktree-registration", "reason": "registration budget exhausted"},
+                             {"source": "local:gamma-app", "reason": "no default branch could be resolved: origin/HEAD is unset"},
+                             {"source": "git-hygiene", "reason": "the step's time ran out after 88 of 146 checkouts; 61 carry"}],
         "local.json": [{"source": "folder:alpha-web", "reason": "remote: `git remote get-url` exited 128"}],
-        "worktree-registration.json": [{"source": "worktree-registration", "reason": "registration budget exhausted"}],
+        "worktree-registration.json": [{"source": "worktree-registration", "reason": "registration budget exhausted"},
+                                       {"source": "local:alpha-web", "reason": "worktree registration unavailable"}],
         "openrouter.json": [{"source": "openrouter:listing", "reason": "stopped after 12 pages"},
-                            {"source": "openrouter:gateway", "reason": "its key is not among the newest keys"}],
+                            {"source": "openrouter:gateway", "reason": "its key is not among the newest 21200 keys the account lists, and the listing goes further"}],
         "leak-scan.json": [{"source": "leak-scan:deadline-targets", "code": "deadline-targets", "reason": "cut"},
                            {"source": "leak-scan:source-unreadable", "code": "source-unreadable", "reason": "holes"}],
     }
@@ -126,6 +129,13 @@ class Structural(unittest.TestCase):
 
     def test_the_access_refusal_still_fires_beside_them(self):
         self.assertEqual(list(self.day({**self.LIVE, **REFUSED})), ["fabric-attribution.json"])
+
+    def test_a_real_failure_from_a_structural_source_still_fires(self):
+        current = {"openrouter.json": [{"source": "openrouter:listing",
+                                        "reason": "no provisioning key, so the account's keys cannot be listed at all"}],
+                   "spend.json": [{"source": "spend:openrouter:key:example-a", "reason": "GET /activity: refused"}],
+                   "disk-guard.json": [{"source": "holders", "reason": "something else entirely"}]}
+        self.assertEqual(sorted(self.day(current)), ["disk-guard.json", "openrouter.json", "spend.json"])
 
     def test_a_new_collector_and_an_unclassified_source_fire_by_default(self):
         current = {"new-collector.json": [{"source": "provider", "reason": "every request refused"}],

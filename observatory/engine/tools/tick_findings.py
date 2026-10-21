@@ -22,7 +22,7 @@ def _over(progress, ceiling):
     stages = progress.get('stages') if isinstance(progress, dict) and isinstance(progress.get('stages'), list) else []
     longest = {}
     for row in stages:
-        if not isinstance(row, dict) or not isinstance(row.get('step'), str):
+        if not isinstance(row, dict) or not isinstance(row.get('step'), str) or row['step'] in tick_budget.RESUMABLE:
             continue
         seconds = number(row.get('duration_seconds'))
         line = tick_budget.ALERT_FRACTION * tick_budget.share(row['step']) * ceiling

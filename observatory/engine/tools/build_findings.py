@@ -4419,22 +4419,11 @@ def collect() -> list[dict]:
     # complete — the contract's "completion blocks until every configured
     # backend attests" was true of the function and false of the system.
     import tick_findings
-    def _tick_runs(path):
-        """The earlier runs' stage receipts, oldest first; [] when the history cannot be read."""
+    def _tick_history():
+        # The earlier runs' stage receipts, `store/raw/tick-runs.jsonl`, read through tick_health.
         import tick_budget
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()[-tick_budget.ALERT_WINDOW:]
-        except OSError:
-            return []
-        runs = []
-        for line in lines:
-            try:
-                doc = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(doc, dict) and isinstance(doc.get("stage_progress"), dict):
-                runs.append(doc["stage_progress"])
-        return runs
+        import tick_health
+        return tick_health.stage_history(paths.SCRATCH, tick_budget.ALERT_WINDOW)
 
     def _tick_receipt(path):
         try:
@@ -4447,7 +4436,7 @@ def collect() -> list[dict]:
         _tick_receipt(paths.SCRATCH / "tick.json"),
         _tick_receipt(paths.STATE / "tick-rotation.json"),
         config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS,
-        runs=_tick_runs(paths.SCRATCH / "tick-runs.jsonl")))
+        runs=_tick_history()))
 
     # WORK GIT CAN NO LONGER PLACE. `tools/corroborate.py` refuses to promote
     # a `session` row whose recorded sha is gone or has fallen off its

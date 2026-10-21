@@ -141,13 +141,21 @@ class StepShare(unittest.TestCase):
 
     def test_a_step_over_its_share_in_enough_ticks_is_reported(self):
         import tick_budget
-        runs = [self.receipt(c, [self.stage('leaks', self.over('leaks'))]) for c in 'bc']
-        self.assertEqual(self.found(self.tick_doc([self.stage('leaks', self.over('leaks'))]), runs), ['step:leaks'])
+        runs = [self.receipt(c, [self.stage('git-hygiene', self.over('git-hygiene'))]) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))]), runs),
+                         ['step:git-hygiene'])
         self.assertEqual(tick_budget.ALERT_MIN, 3)
 
+    def test_a_resumable_step_using_its_share_by_design_does_not_fire(self):
+        import tick_budget
+        self.assertIn('leaks', tick_budget.RESUMABLE)
+        runs = [self.receipt(c, [self.stage('leaks', 0.98 * tick_budget.share_limit('leaks', 1500))]) for c in 'bcde']
+        doc = self.tick_doc([self.stage('leaks', 0.98 * tick_budget.share_limit('leaks', 1500))])
+        self.assertEqual(self.found(doc, runs), [])
+
     def test_one_slow_tick_does_not_fire(self):
-        runs = [self.receipt(c, [self.stage('leaks', 10)]) for c in 'bcde']
-        self.assertEqual(self.found(self.tick_doc([self.stage('leaks', self.over('leaks'))]), runs), [])
+        runs = [self.receipt(c, [self.stage('git-hygiene', 10)]) for c in 'bcde']
+        self.assertEqual(self.found(self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))]), runs), [])
 
     def test_a_collector_inside_its_share_never_fires(self):
         import tick_budget
@@ -157,8 +165,8 @@ class StepShare(unittest.TestCase):
         self.assertEqual(self.found(self.tick_doc([self.stage('scan-fs', inside)]), runs), [])
 
     def test_the_same_run_is_counted_once(self):
-        doc = self.tick_doc([self.stage('leaks', self.over('leaks'))], rid='a')
-        twice = [doc['progress'], doc['progress'], self.receipt('b', [self.stage('leaks', self.over('leaks'))])]
+        doc = self.tick_doc([self.stage('git-hygiene', self.over('git-hygiene'))], rid='a')
+        twice = [doc['progress'], doc['progress'], self.receipt('b', [self.stage('git-hygiene', self.over('git-hygiene'))])]
         self.assertEqual(self.found(doc, twice), [])
 
     def test_the_ceiling_comes_from_the_receipt(self):

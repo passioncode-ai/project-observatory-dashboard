@@ -1964,7 +1964,7 @@ Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
 `ran`; a yes/no probe such as `backup-due` records its "no" (exit 3) as `not_due`,
 never as a failed step. Disabled steps preserve the last successful measurement time; they do not
 raise starvation. A step that used 95 % of its share of the ceiling in 3 of the last
-5 ticks is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
+5 ticks (the leak scan, which resumes by design, excepted) is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
 `progress.ceiling_seconds` names), and a collector whose same degraded reason stays in
 its receipt for more than 24 hours as `collector.degraded_persistent`, unless the reason
 is structural (`degradations.STRUCTURAL`, or `structural: true` on the row); its first

@@ -108,6 +108,10 @@ def out_of_time(reserve: float):
 # Direct scanner callers may use names; main uses a name and version pair.
 SecretRef = str | tuple[str, str | None]
 
+#: Days a complete pass over the databases may stay pending across ticks before it starts over: a
+#: pass spread over a long time reads its first rows long before its last (confirming review of #328).
+PENDING_MAX_DAYS = 2
+
 STATE = paths.SCRATCH / "leak-scan-state.json"
 OUT = paths.SCRATCH / "leak-scan.json"
 VAULT = pathlib.Path(os.environ.get(
@@ -1522,12 +1526,22 @@ def main(argv: list[str]) -> int:
     # A COMPLETE PASS THAT A DEADLINE CUT RESUMES on the next tick (review of #328, M1): how far it
     # read each table of each store, under this value set, and which stores it finished. The
     # stores it has not finished go first. A different value set, or --full, starts it again.
+    # A database FINISHED earlier in the pass is read incrementally from what the pass read it to, with
+    # the signature taken then, so a row updated in place, a replaced file or a renumbered table is
+    # caught by the same checks as any incremental pass (confirming review of #328). An unfinished one
+    # resumes only if it is still the same file. A pass pending longer than PENDING_MAX_DAYS starts over.
     pending = saved.get("sqlite_pending") if full and not a.full else None
+    try:
+        age = (today - datetime.fromisoformat(str(pending.get("started_on"))).date()).days
+    except (AttributeError, TypeError, ValueError):
+        age = None
     if not (isinstance(pending, dict) and pending.get("values") == digest and digest is not None
-            and isinstance(pending.get("stores"), dict)):
-        pending = {"values": digest, "stores": {}, "complete": [], "signatures": {}}
-    if not isinstance(pending.get("signatures"), dict):
-        pending["signatures"] = {}
+            and isinstance(pending.get("stores"), dict) and age is not None and 0 <= age <= PENDING_MAX_DAYS):
+        pending = {"values": digest, "started_on": today.isoformat(), "stores": {}, "complete": [],
+                   "signatures": {}, "inodes": {}}
+    for field in ("signatures", "inodes"):
+        if not isinstance(pending.get(field), dict):
+            pending[field] = {}
     done = set(pending.get("complete") or []) if isinstance(pending.get("complete"), list) else set()
     order = list(dict.fromkeys((mem, own, *stores)))
     if full:
@@ -1538,16 +1552,28 @@ def main(argv: list[str]) -> int:
             results[store] = ({}, None, None, 0, None)
             stores_cut.append(str(store))
             continue
-        since = {} if full else marks.get(str(store))
+        key = str(store)
+        since = {} if full else marks.get(key)
+        signature = store_sigs.get(key)
         found: dict = {}
         tally: dict = {}
-        resume = pending["stores"].get(str(store)) if full else None
-        progress: dict = dict(resume) if isinstance(resume, dict) else {}
+        resume = None
+        progress: dict = {}
+        if full and key in done:
+            since, signature = pending["stores"].get(key) or {}, pending["signatures"].get(key)
+        elif full:
+            try:
+                inode = store.stat().st_ino
+            except OSError:
+                inode = None
+            resume = pending["stores"].get(key) if pending["inodes"].get(key) == inode else None
+            progress = dict(resume) if isinstance(resume, dict) else {}
+            pending["inodes"][key] = inode
         try:
-            results[store] = scan_sqlite(store, pattern, by_value, since, store_sigs.get(str(store)), found, tally,
+            results[store] = scan_sqlite(store, pattern, by_value, since, signature, found, tally,
                                          stop=out_of_time(ANSWER_RESERVE_S),
                                          resume=resume if isinstance(resume, dict) else None,
-                                         progress=progress if full else None)
+                                         progress=progress if full and key not in done else None)
         except step_budget.OutOfTime:
             # STOPPED BETWEEN PAGES (OBS-52): unread, not clean, its mark where it was; what it saw
             # before stopping is still reported.
@@ -1559,25 +1585,30 @@ def main(argv: list[str]) -> int:
             # The type only; a message can quote what was read.
             results[store] = (found, f"{STOPPED}({type(exc).__name__})", None, tally.get("rows", 0), None)
         if full and digest is not None:
-            key = str(store)
             finished = key not in stores_cut and not results[store][1]
             if finished:
-                pending["stores"][key] = progress
+                # What it was read to and the signature that describes it: the high-water rowids of an
+                # incremental read, or the progress of the read that finished it.
+                pending["stores"][key] = results[store][2] if key in done else progress
                 pending["signatures"][key] = results[store][4]
                 done.add(key)
             elif key not in done:
                 # A store not yet finished keeps how far it got. One finished earlier in this pass
-                # keeps the progress its signature describes; the rows it read now are read again.
+                # keeps the mark its signature describes; the rows it read now are read again.
                 pending["stores"][key] = progress
     succeeded = {str(store): r for store, r in results.items() if not r[1] and str(store) not in stores_cut}
     pending["complete"] = sorted(done)
     if full and digest is not None:
         # The complete pass ends when every store has been finished in it, over however many ticks
         # (review of #328, M1); the marks are what each store was read to.
-        complete = all(str(st) in done for st in order) and not any(r[1] for r in results.values())
+        # A store that would not open (or read only in part) is named as a hole in `degraded` and
+        # does not hold the pass open: it is read again from the start on the next pass.
+        holes = {str(st) for st, r in results.items() if r[1]}
+        complete = all(str(st) in done or str(st) in holes for st in order)
         keep_pending = not complete
         new_mark = sqlite_scan.next_mark(
-            sqlite_mark, digest, full, today, {st: pending["stores"].get(st) or {} for st in done}, complete)
+            sqlite_mark, digest, full, today, {st: pending["stores"].get(st) or {} for st in done - holes},
+            complete)
         for st in done:
             if pending["signatures"].get(st) is not None:
                 store_sigs[st] = pending["signatures"][st]

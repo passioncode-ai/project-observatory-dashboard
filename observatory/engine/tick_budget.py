@@ -58,6 +58,11 @@ STARVED_TICKS = 3
 #: ceiling (`share`: a collector's, so one that keeps inside its share never fires; a tail step is
 #: judged by the collector share) in ALERT_MIN of the last ALERT_WINDOW ticks, so one slow tick does
 #: not make the finding come and go (review of #328, L2).
+#: Collectors that stop themselves before their share runs out and resume where they stopped: they
+#: use their whole share by design whenever there is a backlog, so `tick.step_over_share` does not
+#: judge them (confirming review of #328: the leak scan stops its databases at about 435 s of its
+#: 450 s, above 95 % of its share). Their backlog is reported by their own findings.
+RESUMABLE = frozenset({"leaks"})
 ALERT_FRACTION = 0.95
 ALERT_WINDOW = 5
 ALERT_MIN = 3
