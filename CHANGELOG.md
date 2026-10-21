@@ -3,9 +3,22 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.28.0 (2026-10-21)
+
+A new release is found within five minutes from the release's static `SHA256SUMS`, without the GitHub API, and the
+apps open at login and ask to restart for a staged update. Every collector gets a turn in a tick with a bounded share,
+`full update --apply` measures free disk before it changes anything, and the documentation is held to the code by new
+checks. The Cloudflare door gains a zone preset for Cache Rules, Configuration Rules and AI-bot blocking
+(`zone-edge-rules`), and `google-auth` moves to 2.62.0 with its lock.
 
 ### Added
+
+- **A Cloudflare preset for one zone's edge rules** (`zone-edge-rules`): `issue --preset zone-edge-rules --zone <zone>
+  --vault PROJECT/ENV/NAME` grants Zone Read, Cache Settings Write, Config Settings Write and Bot Management Write on
+  that zone only, so a site can keep its own Cache Rules, Configuration Rules and AI-bot blocking, and nothing else (no
+  DNS, no purge, no other zone). The new value is proved by reading the zone's `http_request_cache_settings` phase
+  entrypoint; a zone with no Cache Rule yet answers 404 to a token that may read it and 403 to one that may not, so 404
+  counts as the proof, as for `redirect-rules`. The token is named after the zone and the slot.
 
 - **Checks that keep the documentation true after a merge** (an audit of main at 23a52296 found nine drifts).
   `tools/check_backlog.py` refuses an open row a merged commit delivers (`(OBS-n)` in a squash subject ending in
@@ -48,6 +61,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   each app quits only through its own Quit.
 - **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
   alone and could not resolve against the lock).
+- **The machine backup carries larger checkouts by default.** Measured on a working agent machine on 2026-10-20,
+  ten repositories' unpushed commits (bundles of 16.7 to 130 MB, one of 404 MB) and two patches (23 and 59 MB) were
+  left out under the old caps. The defaults are now 160 MB per bundle (was 16; caps count MiB, and the largest of those bundles is 130.0 MiB), 64 MB per patch (was 8), 32 MB per
+  untracked set (was 8) and 768 MB for all checkouts (was 64), which carries all of them but the 404 MB bundle and a
+  161 MB untracked set, for about 560 MB more per bundle. Carried parts are spooled to the private stage and
+  streamed into the bundle, so a larger cap costs disk, checked against `min_free_gb`, never memory.
 
 ### Fixed
 
@@ -141,15 +160,6 @@ while the major version is 0, a minor release may change behaviour and says so h
   carries a `fix` in the manifest, the answer and `full machine-backup status`: push the branch, or the exact
   `limits` value in `config/machine-backup.json` that would carry it. The only copies of work are listed first. One
   row per checkout and part (commits, changes, untracked files), so two parts of one checkout never share an id.
-
-### Changed
-
-- **The machine backup carries larger checkouts by default.** Measured on a working agent machine on 2026-10-20,
-  ten repositories' unpushed commits (bundles of 16.7 to 130 MB, one of 404 MB) and two patches (23 and 59 MB) were
-  left out under the old caps. The defaults are now 160 MB per bundle (was 16; caps count MiB, and the largest of those bundles is 130.0 MiB), 64 MB per patch (was 8), 32 MB per
-  untracked set (was 8) and 768 MB for all checkouts (was 64), which carries all of them but the 404 MB bundle and a
-  161 MB untracked set, for about 560 MB more per bundle. Carried parts are spooled to the private stage and
-  streamed into the bundle, so a larger cap costs disk, checked against `min_free_gb`, never memory.
 
 ## 0.27.0 (2026-10-20)
 

@@ -17,12 +17,11 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
-[2026-10-20: release 0.27.0](runs/2026-10-20-release-0.27.0/README.md): engine and `observatory-log` 0.27.0,
-carrying OBS-155 (#306, DigitalOcean teams and costs), OBS-161 (#308, organization enrollment), the Cloudflare
-presets `cache-purge` (#292) and `email-sending-domain` (#302), and `google-auth` 2.61.0 (#316). Published
-2026-10-20T16:47:49Z (release run 39454033288, attempt 2 after a guard refusal; sums, attestations and the GPG
-signature verified, receipts in the record). Next: re-pin Observatory Log in the PassionCode set, update the installed
-engines, then the first production enrollment.
+[2026-10-21: release 0.28.0](runs/2026-10-21-release-0.28.0/README.md): engine and `observatory-log` 0.28.0,
+carrying the five-minute release check on the static feed (OBS-176) and the apps' lifecycle defaults (OBS-177, #329),
+every collector a turn in the tick (OBS-52, #328), the update's free-space preflight and a bounded portable suite
+(OBS-167, #325), the documentation checks (#326), the Cloudflare preset `zone-edge-rules` (#331), and `google-auth`
+2.62.0 (#330). Next: merge, tag `v0.28.0`, verify, install, issue the first `zone-edge-rules` token.
 
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
