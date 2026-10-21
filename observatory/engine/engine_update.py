@@ -87,6 +87,14 @@ import update_events
 from store import compatibility, migrate  # noqa: F401
 
 DEFAULT_API = "https://api.github.com"
+#: Where "is there something newer" is read (operator rule, 2026-10-17): the newest release's
+#: own SHA256SUMS, served by github.com as a static release asset
+#: (`<host>/<repo>/releases/latest/download/SHA256SUMS`), never the REST API, whose anonymous
+#: limit is 60 requests an hour per address and which a check every five minutes from several
+#: workspaces and apps would exhaust. The wheel it names carries the version in its file name.
+#: The full signed verification of `--apply` still reads the API, once, when there is a release
+#: to install.
+FEED_HOST = "https://github.com"
 REPOSITORY_ENV, API_ENV = "OBSERVATORY_RELEASE_REPOSITORY", "OBSERVATORY_RELEASE_API"
 DISTRIBUTION = "project-observatory"
 WHEEL = "project_observatory-{version}-py3-none-any.whl"
@@ -335,6 +343,17 @@ class Fetcher:
             raise Undetermined("Release document is not an object")
         return doc
 
+    def get_text(self, url: str, limit: int) -> str:
+        """A small text file (the static release feed); anonymous unless the host is the API."""
+        with self._open(url, "application/octet-stream") as response:
+            body = response.read(limit + 1)
+        if len(body) > limit:
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} is larger than expected")
+        try:
+            return body.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Undetermined(f"{urllib.parse.urlsplit(url).path} is not text") from None
+
     def fetch_file(self, url: str, dest: Path, limit: int) -> tuple[str, int]:
         """Stream into a new private file; returns (sha256, size)."""
         digest, size = hashlib.sha256(), 0
@@ -411,6 +430,43 @@ def parse_release(doc: dict, expected: str | None = None) -> Release:
     return Release(version, tag, doc.get("html_url") if isinstance(doc.get("html_url"), str) else None,
                    _asset(wheel) if wheel else None, _asset(sums) if sums else None,
                    _asset(signature) if signature else None)
+
+
+def feed_url(repo: str, host: str = FEED_HOST) -> str:
+    return f"{host.rstrip('/')}/{repo}/releases/latest/download/{SUMS}"
+
+
+def latest_from_feed(fetcher: "Fetcher", url: str) -> str:
+    """The version of the newest release, read from its static SHA256SUMS.
+
+    Exactly one release wheel must be named; anything else is undetermined, never "current"."""
+    text = fetcher.get_text(url, MAX_SUMS)
+    try:
+        names = parse_sums(text)
+    except UpdateError as exc:
+        raise Undetermined(f"the release feed is not a SHA256SUMS file ({exc})") from None
+    versions = {m.group(1) for m in (re.fullmatch(r"project_observatory-(\d+\.\d+\.\d+)-py3-none-any\.whl", n)
+                                     for n in names) if m}
+    if len(versions) != 1:
+        raise Undetermined(f"the release feed names {len(versions)} engine wheels, not one")
+    return versions.pop()
+
+
+def feed_host_for(api: str, override: str | None = None) -> str | None:
+    """The static feed's host: the explicit one (a test, a development mirror), else github.com
+    when the release source is the organization's API; a person's own `--api-url` mirror keeps
+    the API route, which is the only layout it promises."""
+    if override:
+        return override
+    return FEED_HOST if api.rstrip("/") == DEFAULT_API else None
+
+
+def latest_version(fetcher: "Fetcher", api: str, repo: str, feed_host: str | None = None) -> tuple[str, str]:
+    """(version, source): the static feed when there is one, else the API's latest release."""
+    host = feed_host_for(api, feed_host)
+    if host:
+        return latest_from_feed(fetcher, feed_url(repo, host)), "feed"
+    return resolve_release(fetcher, api, repo, None).version, "api"
 
 
 def resolve_release(fetcher: Fetcher, api: str, repo: str, version: str | None) -> Release:
@@ -940,6 +996,8 @@ class Dependencies:
     idle_timeout: float = 60.0
     sessions: Callable[[], list[dict]] = session_servers
     machine_backup: Callable[[Path], dict] = machine_backup_before_update
+    #: The static feed's host for `--check`; None derives it (github.com for the organization's API).
+    feed: str | None = None
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -1010,6 +1068,20 @@ def restore_in_place(base: Path, snapshot: Path) -> Path:
 def relation(current: str, target: str) -> int:
     a, b = config.version_tuple(current), config.version_tuple(target)
     return (b > a) - (b < a)
+
+
+def feed_check_result(current: str, latest: str, repo: str, host: str) -> tuple[int, dict]:
+    """`--check` from the static feed: versions only, like the API check; `--apply` verifies."""
+    rel = relation(current, latest)
+    page = f"{FEED_HOST}/{repo}/releases/tag/v{latest}" if host == FEED_HOST else None
+    out = {"current": current, "target": latest, "release": page, "source": "feed", "degraded": []}
+    if rel == 0:
+        return EXIT_OK, {**out, "status": "up-to-date"}
+    if rel < 0:
+        return EXIT_OK, {**out, "status": "newer-installed",
+                         "note": "this machine runs a newer release than the target; update the other machine"}
+    return EXIT_UPDATE_AVAILABLE, {**out, "status": "update-available",
+                                   "next": f"project-observatory full update --version {latest} --apply"}
 
 
 def check_result(current: str, release: Release) -> tuple[int, dict]:
@@ -1492,6 +1564,14 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         if args.version:
             config.version_tuple(args.version)
         api, repo = release_source(args.repository, args.api_url, deps.origin)
+        host = None if args.version else feed_host_for(api, deps.feed)
+        if args.check and host:
+            # The cheap question first, off the rate-limited API (operator rule, 2026-10-17).
+            code, result = feed_check_result(current, latest_from_feed(deps.fetcher, feed_url(repo, host)), repo, host)
+            update_events.emit("update_check", {EXIT_OK: "current", EXIT_UPDATE_AVAILABLE: "ready"}.get(
+                code, "check_failed"), base=_workspace_or_none(base))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return code
         release = resolve_release(deps.fetcher, api, repo, args.version)
         if args.check:
             code, result = check_result(current, release)

@@ -2269,10 +2269,10 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     // A held release (LC-16): verified, not installed by the job; the step is the person's.
     "needs-migration": w => [T("release {version} needs a step by a person before it is installed: {step}",
                                {version: w.version || "?", step: w.step || ""}), fullCommand("update --apply")],
-    "deferred": w => [T("release {version} is ready and waits for a moment with no client; tried again within the hour",
+    "deferred": w => [T("release {version} is ready and waits for a moment with no client; tried again within 15 minutes",
                         {version: w.version || "?"}), status],
     "update-incomplete": w => [w.soon
-      ? T("the last automatic update did not complete ({result}: {detail}); tried again within the hour",
+      ? T("the last automatic update did not complete ({result}: {detail}); tried again within 15 minutes",
           {result: RESULT_WORD(w.result), detail: w.detail || ""})
       : T("the last automatic update did not complete ({result}: {detail}); tried again within six hours",
           {result: RESULT_WORD(w.result), detail: w.detail || ""}), status],

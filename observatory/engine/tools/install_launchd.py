@@ -257,6 +257,12 @@ def restart_job(label: str) -> tuple[bool, str]:
     return code == 0, out
 
 
+def kick_job(label: str) -> tuple[bool, str]:
+    """Run a loaded job now (`kickstart` without `-k`: a running instance is left alone)."""
+    code, out = _launchctl("kickstart", f"gui/{uid()}/{label}")
+    return code == 0, out
+
+
 def job_running(label: str) -> bool:
     """launchd reports the job's process as running right now."""
     code, out = _launchctl("print", f"gui/{uid()}/{label}")
