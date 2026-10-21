@@ -231,6 +231,10 @@ public struct AppLog: Sendable {
     public static let events: [String: Set<String>] = [
         "update_restart": ["requested", "refused"],
         "update_install": ["started", "installed", "failed", "timeout"],
+        // Open at login (AppLifecycle.swift): what the launch did, and why it could not.
+        "login_item": ["registered", "unregistered", "requires_approval", "failed"],
+        // A permission the app needs is missing (AppPermissions): the field `permission` names it.
+        "app_permission": ["missing"],
     ]
     /// Kept under 1 MB; the previous generation is `app.log.1`.
     public static let cap = 1_048_576

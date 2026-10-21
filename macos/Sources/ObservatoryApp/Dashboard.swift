@@ -186,6 +186,7 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PermissionBanner()
             banner
             switch m.dashboardMode {
             case .checking: placeholder { ProgressView(m.t("Opening the dashboard…")) }
@@ -211,6 +212,11 @@ struct DashboardView: View {
             web.onLiveFailure = { [weak model] in Task { await model?.refreshDashboard() } }
             web.t = { [weak model] key in model?.t(key) ?? key }
             updates.workInFlight = { [weak model] in model.map { $0.busy || $0.dashboardWorking } ?? false }
+            updates.prompt = { [weak model] version, answer in
+                guard let model else { return answer(false) }
+                UpdateAlert.show(model, version: version, answer: answer)
+            }
+            updates.promptIfDue()
             await m.refreshDashboard()
             await m.refresh()
         }

@@ -111,13 +111,21 @@ new conversation, refresh and dashboard (the project scope sits above the compos
 disclosure, composer and Send/Stop. Returning users see stored history. Empty state
 explains the job and offers concrete starter questions; loading/error states preserve
 input. Settings: program and workspace fields with pickers, Save and check connection,
-language (System/English/Русский), and visible backend/version status. A first launch looks for
+language (System/English/Русский), Open at login, and visible backend/version status. A first launch looks for
 the engine at `~/.local/bin/project-observatory`, then in the virtual environment README →
 Install creates (`~/.local/share/project-observatory-venv/bin/`), then Homebrew's prefixes;
 no engine is `backend-missing` with the path and an installation-guide link, a folder
 without `workspace.json` names `project-observatory full init`. Absolute executable path, argv
 array, no shell interpolation. The app never edits other agents' MCP configs. No hidden
 enrollment or automatic service takeover: a server starts only from Start server.
+
+**Lifecycle (operator rule, 2026-10-16).** The app opens at login by default: the first launch
+registers `SMAppService.mainApp` and stores the choice (`openAtLogin`); Settings → Open at login
+turns it off, and an update keeps the stored choice. Every launch checks what the app needs
+(`AppPermissions`; today only the login item's approval) and shows a missing grant as a banner in
+the dashboard window with how to grant it and an *Open System Settings* button, logged as
+`app_permission missing`. Closing the last window keeps the app running in the Dock; it quits
+only through Quit (⌘Q) or a shutdown or logout.
 
 **Language (2026-10-06, the organization's L10N-01…06).** The app's own interface — menus,
 alerts, both windows, Settings and the update affordance — speaks Russian when the first
@@ -138,14 +146,17 @@ app's language. Checked by `LocalizationTests` (every key the app uses has its R
 same placeholders, no stale entries, three Russian plural forms, the language resolution for
 `ru-RU`, `ru`, `en-US`, an empty list and an unknown stored value).
 
-**Updates (2026-10-06, LC-16 "Install vs activation").** The engine's hourly maintenance pass
+**Updates (2026-10-06, LC-16 "Install vs activation").** The engine's maintenance pass
 verifies and stages a new app and swaps it only while the app is not running, recording
 `app.result = "waiting-for-quit"` with the `pending` version in
-`<workspace>/store/maintenance.json`. The app reads that record at launch and every 15 minutes
-(and again before acting on it; every 6 h before 0.20.0, which put the prompt hours behind the
-staged update); a pending `X.Y.Z` strictly newer than its own `CFBundleShortVersionString` shows
+`<workspace>/store/maintenance.json`. The app reads that record at launch and every 5 minutes
+(operator rule, 2026-10-17; every 15 minutes before it, every 6 h before 0.20.0, which put the
+prompt hours behind the staged update) and again before acting on it; a pending `X.Y.Z` strictly newer than its own `CFBundleShortVersionString` shows
 **Restart to update** in the app menu and as a toolbar button in the dashboard window, and a
-badge (`↑`) on the Dock icon, so it is seen without opening a window — never a modal. Activation happens only at a safe point:
+badge (`↑`) on the Dock icon, so it is seen without opening a window. Once per version, while a
+window of the app is on screen, a sheet asks «Restart to finish updating» with *Restart now* (the
+same act as *Restart to update*) and *Later* (remembered for that version as `updatePromptedVersion`;
+the menu item, the toolbar button and the badge stay). Activation happens only at a safe point:
 the person's *Restart to update*, the person's quit (⌘Q), or 30 minutes with no titled window
 on screen, the app not frontmost, no key press, click or scroll, and no question, build or
 start in flight. Each starts one detached helper (`/bin/sh`, its own session, values as

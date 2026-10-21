@@ -5,6 +5,7 @@
 
 "100 conversations are stored. Delete old ones to start another." = "Сохранено 100 диалогов. Удалите старые, чтобы начать новый.";
 "All projects" = "Все проекты";
+"Allow it in System Settings › General › Login Items, or turn off “Open at login” in Project Observatory Settings." = "Разрешите это в Системных настройках › Основные › Объекты входа или выключите «Открывать при входе в систему» в настройках Project Observatory.";
 "Another question is running. Open its conversation or wait until it finishes." = "Другой вопрос ещё обрабатывается. Откройте его диалог или дождитесь ответа.";
 "Ask Observatory to explain its latest local snapshots. Every answer can show the facts it used. Missing or old data remains visible." = "Попросите Observatory объяснить последние локальные снимки. У каждого ответа можно раскрыть факты, на которых он основан. Отсутствующие и устаревшие данные остаются видны.";
 "Ask about your projects (⇧⌘A)" = "Спросить о проектах (⇧⌘A)";
@@ -35,6 +36,7 @@
 "Installation guide" = "Руководство по установке";
 "Its questions and answers are removed from this workspace. This cannot be undone." = "Вопросы и ответы диалога будут удалены из этой папки данных. Это действие нельзя отменить.";
 "Language" = "Язык";
+"Later" = "Позже";
 "Live" = "С сервера";
 "New Conversation" = "Новый диалог";
 "New conversation" = "Новый диалог";
@@ -51,6 +53,8 @@
 "Not connected" = "Нет подключения";
 "Not connected to an engine." = "Нет подключения к движку.";
 "Observatory is not installed yet" = "Observatory ещё не установлен";
+"Open System Settings" = "Открыть Системные настройки";
+"Open at login" = "Открывать при входе в систему";
 "Open in Browser" = "Открыть в браузере";
 "Open this page in the default browser" = "Открыть эту страницу в браузере по умолчанию";
 "Opening the dashboard…" = "Дашборд открывается…";
@@ -58,6 +62,8 @@
 "Overview (⇧⌘H)" = "Обзор (⇧⌘H)";
 "Previous Conversation" = "Предыдущий диалог";
 "Program" = "Программа";
+"Project Observatory cannot open at login" = "Project Observatory не может открываться при входе в систему";
+"Project Observatory opens when you log in and keeps working with its window closed. Quit it from its menu (⌘Q)." = "Project Observatory открывается при входе в систему и продолжает работать с закрытым окном. Выйти можно через его меню (⌘Q).";
 "Question" = "Вопрос";
 "Reading evidence and preparing an answer…" = "Чтение фактов и подготовка ответа…";
 "Reading works as usual. “Start server” serves the same pages on 127.0.0.1." = "Просмотр работает как обычно. Кнопка «Запустить сервер» отдаёт те же страницы по адресу 127.0.0.1.";
@@ -67,7 +73,9 @@
 "Reload" = "Обновить";
 "Reload (⌘R)" = "Обновить (⌘R)";
 "Repository and site links could not be read; only findings naming the project itself are included." = "Связи с репозиториями и сайтами не прочитаны; включены только находки о самом проекте.";
+"Restart now" = "Перезапустить сейчас";
 "Restart server" = "Перезапустить сервер";
+"Restart to finish updating" = "Перезапустите, чтобы завершить обновление";
 "Restart to update" = "Перезапустить для обновления";
 "Retry" = "Повторить";
 "Save and check connection" = "Сохранить и проверить подключение";
@@ -128,6 +136,7 @@
 "This machine's disk and memory are not measured yet: run `project-observatory full machine`." = "Диск и память этой машины ещё не измерены: выполните `project-observatory full machine`.";
 "This workspace has no dashboard yet" = "У этой папки данных ещё нет дашборда";
 "Too many recent requests are still tracked. Try again later." = "Слишком много недавних запросов ещё отслеживается. Попробуйте позже.";
+"Version {version} is downloaded and verified. Restart Project Observatory now to finish updating, or later: it also installs when you quit." = "Версия {version} загружена и проверена. Перезапустите Project Observatory сейчас, чтобы завершить обновление, или позже: оно также установится при выходе.";
 "Version {version} is ready. Restart to update; it also installs when you quit." = "Версия {version} готова. Перезапустите приложение, чтобы обновить его; иначе обновление установится при выходе.";
 "Wait for the answer before deleting this conversation." = "Дождитесь ответа, прежде чем удалять диалог.";
 "What is happening across your projects?" = "Что происходит с вашими проектами?";
