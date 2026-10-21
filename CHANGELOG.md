@@ -26,6 +26,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   off in Settings, starts in the tray when launched at login, names a login entry it could not write or that went
   missing, and downloads an update in the background before asking the same question. Closing a window still hides it;
   each app quits only through its own Quit.
+- **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
+  alone and could not resolve against the lock).
 
 ### Fixed
 

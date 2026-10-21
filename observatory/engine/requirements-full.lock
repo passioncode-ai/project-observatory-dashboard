@@ -5,7 +5,7 @@ attrs==26.1.0
 cffi==2.1.1
 click==8.5.0
 cryptography==50.0.2
-google-auth==2.61.0
+google-auth==2.62.0
 h11==0.16.0
 httpcore2==2.13.1
 httpx2==2.13.1
