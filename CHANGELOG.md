@@ -5,6 +5,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **google-auth 2.62.0** in the `[full]` pins and both lock copies (supersedes Dependabot #324, which moved the pin
+  alone and could not resolve against the lock).
+
 ### Fixed
 
 - **Every collector gets a turn, and none takes the tick** (OBS-52; OBS-40 superseded). One installed 0.27.0 timed
