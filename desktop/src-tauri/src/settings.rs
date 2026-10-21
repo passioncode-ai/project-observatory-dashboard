@@ -12,6 +12,10 @@ pub struct Settings {
     /// `system`, `en` or `ru`.
     #[serde(default = "system")]
     pub language: String,
+    /// Open at login (SCN-012): absent until the first launch turns it on; then the person's choice,
+    /// which an update keeps. A settings file from before this field loads as absent.
+    #[serde(default)]
+    pub launch_at_login: Option<bool>,
 }
 
 fn system() -> String {
@@ -60,6 +64,7 @@ pub fn defaults() -> Settings {
         program: program.to_string_lossy().to_string(),
         workspace: default_workspace().to_string_lossy().to_string(),
         language: system(),
+        launch_at_login: None,
     }
 }
 
@@ -141,7 +146,7 @@ mod tests {
     #[test]
     fn settings_round_trip_and_a_broken_file_falls_back_to_the_defaults() {
         let dir = std::env::temp_dir().join(format!("obs-settings-{}", std::process::id()));
-        let s = Settings { program: "/x/p".into(), workspace: "/x/w".into(), language: "ru".into() };
+        let s = Settings { program: "/x/p".into(), workspace: "/x/w".into(), language: "ru".into(), launch_at_login: Some(false) };
         save(&dir, &s).unwrap();
         assert_eq!(load(&dir), s);
         std::fs::write(dir.join("settings.json"), b"{not json").unwrap();
@@ -150,8 +155,20 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_from_before_launch_at_login_still_loads_and_the_choice_survives() {
+        let dir = std::env::temp_dir().join(format!("obs-settings-login-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), br#"{"program":"/x/p","workspace":"/x/w","language":"en"}"#).unwrap();
+        assert_eq!(load(&dir).launch_at_login, None, "an older file reads as a first launch of the feature");
+        let off = Settings { launch_at_login: Some(false), ..load(&dir) };
+        save(&dir, &off).unwrap();
+        assert_eq!(load(&dir).launch_at_login, Some(false), "the person's choice is kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_relative_path_is_refused_before_it_is_kept() {
-        let s = Settings { program: "project-observatory".into(), workspace: "ws".into(), language: "system".into() };
+        let s = Settings { program: "project-observatory".into(), workspace: "ws".into(), language: "system".into(), launch_at_login: None };
         assert_eq!(problems(&s), vec!["program-not-absolute", "workspace-not-absolute"]);
     }
 }

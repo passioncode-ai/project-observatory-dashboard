@@ -23,6 +23,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 button:disabled { opacity: .55; cursor: default; }
 label { display: block; margin: 18px 0 6px; font-weight: 600; }
 .row { display: flex; gap: 8px; }
+label.check { display: flex; gap: 8px; align-items: center; }
+label.check input { flex: 0 0 auto; width: auto; }
 input, select { flex: 1; font: inherit; padding: 8px 10px; border-radius: 8px;
   background: var(--pc-panel); color: var(--pc-text); border: 1px solid var(--pc-border-strong); }
 .hint { font-size: 13px; color: var(--pc-text-muted); margin: 4px 0 0; }
