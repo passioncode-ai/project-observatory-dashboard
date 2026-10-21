@@ -19,6 +19,11 @@ import warnings
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every test's git environment comes from the engine tests' helper: configuration shut out, no
+# background gc or maintenance left writing into a temporary repository.
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env", ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
 
 def load(name):
     spec=importlib.util.spec_from_file_location(name,ROOT/'tools'/f'{name}.py')
@@ -37,8 +42,8 @@ class ReleaseBoundaryTests(unittest.TestCase):
         file=self.root/path;file.parent.mkdir(parents=True,exist_ok=True)
         file.write_bytes(data if isinstance(data,bytes) else data.encode());return file
     def git(self,*args):
-        env={**os.environ,'GIT_AUTHOR_NAME':'Fixture Maintainer','GIT_COMMITTER_NAME':'Fixture Maintainer',
-             'GIT_AUTHOR_EMAIL':'fixture@example.invalid','GIT_COMMITTER_EMAIL':'fixture@example.invalid'}
+        env=git_env.git_env(GIT_AUTHOR_NAME='Fixture Maintainer',GIT_COMMITTER_NAME='Fixture Maintainer',
+                            GIT_AUTHOR_EMAIL='fixture@example.invalid',GIT_COMMITTER_EMAIL='fixture@example.invalid')
         return subprocess.run(['git','-C',str(self.root),*args],env=env,check=True,capture_output=True)
     def test_no_engine_comment_cites_the_private_predecessors_records(self):
         # CONTRIBUTING: comments must not cite decision records kept outside this

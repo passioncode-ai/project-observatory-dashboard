@@ -2,6 +2,16 @@ name: observatory-release-check
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+# No git a step runs, the root tests' included (`unittest discover -s tests` runs outside the
+# portable runner), may detach a `gc --auto` or maintenance that keeps writing into a temporary
+# repository after the command ends: v0.27.0's tag was refused for one. These are exactly what
+# observatory/engine/tests/git_env.py composes (pinned by tests/test_git_background_maintenance.py).
+env:
+  GIT_CONFIG_COUNT: '2'
+  GIT_CONFIG_KEY_0: gc.auto
+  GIT_CONFIG_VALUE_0: '0'
+  GIT_CONFIG_KEY_1: maintenance.auto
+  GIT_CONFIG_VALUE_1: 'false'
 jobs:
   test:
     strategy:

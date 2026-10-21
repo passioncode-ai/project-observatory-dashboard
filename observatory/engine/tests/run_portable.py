@@ -21,6 +21,20 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_git_env():
+    """The sibling `git_env.py`, by its path: this runner is itself loaded by path
+    (`observatory.py check`, the root tests), where `tests/` is not on `sys.path`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('observatory_runner_git_env', Path(__file__).with_name('git_env.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+git_env = _load_git_env()
+
 LEGACY = (
     'ledger', 'time', 'provider_boundary', 'provider_health', 'credential_doors',
     'vault', 'plugins', 'wire_contract', 'metric_series', 'analytics_plugins',
@@ -109,6 +123,8 @@ BOUNDARY += ('step_references',)
 BOUNDARY += ('honest_absence',)
 # docs/design/WINDOWS-LINUX.md W1: one lock API on every OS.
 BOUNDARY += ('oslocks',)
+# No test's git leaves a detached gc or maintenance behind (v0.27.0's refused tag).
+BOUNDARY += ('git_env',)
 # docs/design/WINDOWS-LINUX.md W2: process groups on every OS.
 BOUNDARY += ('osproc',)
 # docs/design/WINDOWS-LINUX.md W2b: who the engine runs as, on every OS.
@@ -215,6 +231,8 @@ HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py', 'fabric_interop.py', 'mcp_config_fixture.py',
     # Merged from the parallel port streams.
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
+    # Every test's git environment: configuration shut out, no background maintenance.
+    'git_env.py',
 )
 # Suites and helpers ported by the second port stream.
 HELPERS += (
@@ -344,7 +362,9 @@ def clean_env(base: Path) -> dict[str, str]:
     user, temporary = base / 'user', base / 'tmp'
     user.mkdir(); temporary.mkdir()
     runtime = base / 'runtime'
-    return {
+    # git_env: the operator's system and global git configuration shut out, and no background
+    # `gc --auto` or maintenance that outlives a git command and races the suite's cleanup.
+    return git_env.git_env({
         **runtime_environment(), 'PATH': os.environ.get('PATH', ''), 'HOME': str(user),
         'TMPDIR': str(temporary), 'LANG': 'C.UTF-8', 'LC_ALL': 'C',
         'PYTHONDONTWRITEBYTECODE': '1', 'OBSERVATORY_HOME': str(runtime),
@@ -352,14 +372,13 @@ def clean_env(base: Path) -> dict[str, str]:
         'OBSERVATORY_DB': str(runtime / 'store/observatory.db'),
         'OBSERVATORY_STATE': str(runtime / 'store'),
         'OBSERVATORY_SCRATCH': str(runtime / 'store/raw'),
-        'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
         # No suite may schedule a launchd/systemd job or write a Keychain item on the machine
         # running it (audit A07). HOME is temporary, so the backups root is too.
         'OBSERVATORY_SYSTEM_SETUP': '0',
         # The shared update log (update_events.py, LC-16) goes beside the suite, never into
         # ~/Library/Logs or ~/.local/state of the machine running it.
         'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
-    }
+    })
 
 
 LEGACY_BOOTSTRAP = '''

@@ -224,9 +224,10 @@ def test_a_tld_without_rdap_is_not_a_gap_when_the_domain_is_delegated() -> None:
 # ── a default branch that only the remote names ──────────────────────────────
 
 def git(*args, cwd=None) -> None:
+    from git_env import git_env
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
-                   env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"})
+                   env=git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+                               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com"))
 
 
 def checkout_with_remote_branches(names: list[str]) -> str:

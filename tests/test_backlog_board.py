@@ -27,6 +27,14 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every test's git environment comes from the engine tests' helper: configuration shut out, no
+# background gc or maintenance left writing into a temporary repository.
+_git_env_spec = importlib.util.spec_from_file_location("observatory_test_git_env",
+                                                       ROOT / "observatory/engine/tests/git_env.py")
+git_env = importlib.util.module_from_spec(_git_env_spec)
+_git_env_spec.loader.exec_module(git_env)
+IDENTITY = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
 HEAD = """# Local backlog
 
@@ -558,8 +566,7 @@ class StaleAtMerge(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             def git(*args):
                 subprocess.run(["git", "-C", tmp, *args], check=True, capture_output=True,
-                               env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"})
+                               env=git_env.git_env(**IDENTITY))
             git("init", "-q")
             for subject in ("feat(node): the relay session (OBS-108) (#293)",
                             "Node: estate record, envelope (OBS-109, OBS-113, DEC-0084) (#295)",
@@ -575,8 +582,7 @@ class StaleAtMerge(unittest.TestCase):
     def test_a_shallow_clone_is_named_never_read_as_clean(self):
         with tempfile.TemporaryDirectory() as tmp:
             source, clone = Path(tmp, "source"), Path(tmp, "clone")
-            env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+            env = git_env.git_env(**IDENTITY)
             subprocess.run(["git", "init", "-q", str(source)], check=True, env=env)
             for n in (1, 2):
                 subprocess.run(["git", "-C", str(source), "commit", "-q", "--allow-empty", "-m",
@@ -651,8 +657,7 @@ class Vacancies(unittest.TestCase):
 
 def git_repo(tmp: str):
     """A synthetic repository and a commit helper taking a subject and an optional age in days."""
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    env = git_env.git_env(**IDENTITY)
     subprocess.run(["git", "init", "-q", tmp], check=True, env=env)
 
     def commit(subject: str, days_ago: int = 0, board: str | None = None):
@@ -663,7 +668,7 @@ def git_repo(tmp: str):
             Path(tmp, "docs/backlog.md").write_text(board, encoding="utf-8")
             subprocess.run(["git", "-C", tmp, "add", "-A"], check=True, env=env)
         subprocess.run(["git", "-C", tmp, "commit", "-q", "--allow-empty", "-m", subject], check=True,
-                       env={**env, "GIT_AUTHOR_DATE": stamp, "GIT_COMMITTER_DATE": stamp})
+                       env=git_env.git_env(**IDENTITY, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp))
     return commit
 
 

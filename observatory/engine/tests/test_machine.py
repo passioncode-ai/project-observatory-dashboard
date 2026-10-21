@@ -27,10 +27,13 @@ for sub in ("collectors", "tools", "dashboard"):
 import workspace
 
 
+from git_env import git_env  # noqa: E402
+
+
 def git(repo, *args):
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
-                          env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
-                               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}).stdout
+                          env=git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.test",
+                                      GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.test")).stdout
 
 
 def commit(repo, name, text="x"):

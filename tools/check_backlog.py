@@ -533,7 +533,9 @@ def delivered(subjects: list[str]) -> tuple[dict[int, list[str]], int]:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120)
+    # Reads only, but the subcommand is spliced in: say so to git as the engine's other readers do.
+    return subprocess.run(["git", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-C", str(repo), *args],
+                          capture_output=True, text=True, timeout=120)
 
 
 def _history_unreadable(repo: Path) -> str | None:

@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 from emitter_fixture import seed as emitter_seed
+from git_env import git_env
 
 #: The owned organisation every fixture repository lives under.
 OWNER = 'example-org'
@@ -104,7 +105,7 @@ def git_estate(root):
     data=root/'data'; data.mkdir(exist_ok=True)
     checkout=data/'fixture-local'; checkout.mkdir(exist_ok=True)
     if not (checkout/'.git').exists():
-        env={**os.environ, 'GIT_CONFIG_NOSYSTEM':'1', 'GIT_CONFIG_GLOBAL':os.devnull}
+        env=git_env()
         subprocess.run(['git', 'init', '--template=', str(checkout)], env=env,
                        check=True, capture_output=True)
         subprocess.run(['git', '-C', str(checkout), '-c', 'user.name=Fixture',
