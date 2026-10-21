@@ -1668,9 +1668,9 @@ def persistent_degradation_findings(persistent: dict[str, list[tuple[str, float]
             "severity": "warning",
             **titled("{receipt} has reported the same degradation for {hours} hours",
                      receipt=receipt, hours=f"{(now - oldest) / 3600:.0f}"),
-            "detail": ("The collector has said the same thing about its coverage on every run for over "
-                       f"{degradations.PERSIST_HOURS} hours, so whatever it is meant to produce may not have "
-                       "been produced since. " + clipped("; ".join(shown), 900)
+            "detail": ("The collector's receipt has carried the same degradation, unchanged, for over "
+                       f"{degradations.PERSIST_HOURS} hours (measured each time the findings are built), so "
+                       "whatever it is meant to produce may not have been produced since. " + clipped("; ".join(shown), 900)
                        + (f" … and {rest} more" if rest > 0 else "") + "."),
             "action": (f"read `store/raw/{receipt}` for the reason, then fix the source or switch the "
                        "collector off; a reason another system owns is that system's to change, and this "
@@ -4419,6 +4419,23 @@ def collect() -> list[dict]:
     # complete — the contract's "completion blocks until every configured
     # backend attests" was true of the function and false of the system.
     import tick_findings
+    def _tick_runs(path):
+        """The earlier runs' stage receipts, oldest first; [] when the history cannot be read."""
+        import tick_budget
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()[-tick_budget.ALERT_WINDOW:]
+        except OSError:
+            return []
+        runs = []
+        for line in lines:
+            try:
+                doc = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(doc, dict) and isinstance(doc.get("stage_progress"), dict):
+                runs.append(doc["stage_progress"])
+        return runs
+
     def _tick_receipt(path):
         try:
             return json.loads(path.read_text(encoding="utf-8"))
@@ -4429,7 +4446,8 @@ def collect() -> list[dict]:
     out.extend(tick_findings.findings(
         _tick_receipt(paths.SCRATCH / "tick.json"),
         _tick_receipt(paths.STATE / "tick-rotation.json"),
-        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS))
+        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS,
+        runs=_tick_runs(paths.SCRATCH / "tick-runs.jsonl")))
 
     # WORK GIT CAN NO LONGER PLACE. `tools/corroborate.py` refuses to promote
     # a `session` row whose recorded sha is gone or has fallen off its

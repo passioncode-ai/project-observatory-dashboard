@@ -61,6 +61,9 @@ sys.path.insert(0, str(ROOT))
 PY = sys.executable
 #: The watchdog's exit for a step it stopped or did not start (tick_lease.TIMED_OUT).
 TIMED_OUT = 124
+#: A probe's "no" (`Tick.probe`): an exit of its own, never 1, which is what any uncaught exception
+#: gives (review of #328, M3). `tools/backup_store.py` NOT_DUE is the same number.
+PROBE_NO = 3
 LEASE = "tools/tick_lease.py"
 #: Hours before the remotes and Bitbucket listings are read again.
 STALE_HOURS = 6
@@ -406,10 +409,10 @@ class Tick:
         return p.returncode, output
 
     def probe(self, name: str, *argv) -> bool | None:
-        """A yes/no question under the same watchdog: exit 0 is yes, 1 is no (`not_due` in the stage
-        receipt, never a failed step), anything else a failed step and None. `backup_store.py --due`
-        answered "not due" with exit 1 and 17 tick receipts in a row recorded it as `failed`
-        (2026-10-21), so a real failure of the probe would have read like the usual noise."""
+        """A yes/no question under the same watchdog: exit 0 is yes, PROBE_NO is no (`not_due` in the
+        stage receipt, never a failed step), anything else a failed step, its output in the log, and
+        None. `backup_store.py --due` answered "not due" with exit 1 and 17 tick receipts in a row
+        recorded it as `failed` (2026-10-21); exit 1 is also an uncaught exception, so it is not a no."""
         self.progress.start(name)
         try:
             p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
@@ -419,12 +422,14 @@ class Tick:
             self.progress.finish(None, "unknown")
             raise
         output = p.stdout + p.stderr
-        if p.returncode in (0, 1):
+        if p.returncode in (0, PROBE_NO):
             self.progress.finish(p.returncode, "ran" if p.returncode == 0 else "not_due")
             return p.returncode == 0
         first = output.splitlines()[0] if output else None
         outcome = outcome_of(p.returncode, first)
         self.progress.finish(p.returncode, outcome)
+        for line in output.splitlines():
+            log(f"{name}: {line.rstrip()}")
         log(f"{name}: EXIT {p.returncode} — recorded as a failed step ({outcome.replace('_', ' ')})")
         self.failed.append((name, p.returncode))
         self.outcomes[name] = outcome

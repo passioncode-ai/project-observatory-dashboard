@@ -1961,12 +1961,15 @@ review exposure and revoke or rotate through its owner before treating it as saf
 ### Scheduled measurement freshness
 
 Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
-`ran`; a yes/no probe such as `backup-due` records its "no" as `not_due`, never as a
-failed step. Disabled steps preserve the last successful measurement time; they do not
-raise starvation. A step that ran past a third of the ceiling is reported as
-`tick.step_over_share` (the ceiling is the one `tick.json` `progress.ceiling_seconds`
-names), and a collector whose same degraded reason stays in its receipt for more than
-24 hours as `collector.degraded_persistent` (its first sightings are kept in the store as `degraded-since.json`).
+`ran`; a yes/no probe such as `backup-due` records its "no" (exit 3) as `not_due`,
+never as a failed step. Disabled steps preserve the last successful measurement time; they do not
+raise starvation. A step that used 95 % of its share of the ceiling in 3 of the last
+5 ticks is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
+`progress.ceiling_seconds` names), and a collector whose same degraded reason stays in
+its receipt for more than 24 hours as `collector.degraded_persistent`, unless the reason
+is structural (`degradations.STRUCTURAL`, or `structural: true` on the row); its first
+sightings are kept in the store as `degraded-since.json`. A probe's "no" is its own exit
+(3), so a crash of `backup_store.py --due` is a failed step, never "not due".
 Lines in `store/logs/tick.err` start with their UTC time. A collector absent from the last tick's `collector_order` is
 not classified as starved. Planned collectors warn after three missed starts or
 six hours without a completed measurement (`config/tick.json` `starve_hours`

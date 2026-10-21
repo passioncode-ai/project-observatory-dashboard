@@ -113,48 +113,70 @@ class TickFindings(unittest.TestCase):
             self.assertIsNone(receipt['collectors']['integrity']['last_ran_at'])
 
 class StepShare(unittest.TestCase):
-    """OBS-52: one step that takes most of the tick is reported, whether or not it finished.
-    Measured 2026-10-21: the leak scan took a median 1125 s of a 1500 s ceiling and nothing on the
-    board said that one step was eating the tick; only the steps it starved were reported."""
+    """OBS-52: one step that takes most of the tick is reported, whether or not it finished. Measured
+    2026-10-21: the leak scan took a median 1125 s of a 1500 s ceiling and nothing on the board said
+    one step was eating the tick. A step is over when it used ALERT_FRACTION of its own share (the
+    collectors' share, so a collector inside it never fires: review of #328, L2), and the finding needs
+    ALERT_MIN of the last ALERT_WINDOW ticks, so one slow tick does not make it flap."""
 
-    def tick_doc(self, stages, ceiling=1500):
-        progress = {'schema': 1, 'run_id': 'a' * 32, 'stages': stages, 'write_failures': 0}
+    def receipt(self, rid, stages):
+        return {'schema': 1, 'run_id': rid * 32, 'stages': stages}
+
+    def stage(self, step, seconds):
+        return {'step': step, 'duration_seconds': seconds, 'outcome': 'ran', 'exit': 0}
+
+    def tick_doc(self, stages, ceiling=1500, rid='a'):
+        progress = {**self.receipt(rid, stages), 'write_failures': 0}
         if ceiling is not None:
             progress['ceiling_seconds'] = ceiling
         return {'progress': progress}
 
-    def test_a_step_over_its_share_is_reported_and_one_under_is_not(self):
-        import tick_budget
+    def found(self, tick, runs=()):
         import tick_findings as F
-        over = tick_budget.ALERT_SHARE * 1500 + 1
-        found = F.findings(self.tick_doc([
-            {'step': 'leaks', 'duration_seconds': over, 'outcome': 'stopped', 'exit': 124},
-            {'step': 'scan-fs', 'duration_seconds': tick_budget.ALERT_SHARE * 1500 - 1, 'outcome': 'ran', 'exit': 0}]), None)
-        shares = [f for f in found if f['type'] == 'tick.step_over_share']
-        self.assertEqual([f['subject'] for f in shares], ['step:leaks'])
-        self.assertEqual(shares[0]['severity'], 'warning')
-        self.assertIn('{step}', shares[0]['title_id'])
-        self.assertIn('1500', shares[0]['detail'])
+        return [f['subject'] for f in F.findings(tick, None, runs=list(runs)) if f['type'] == 'tick.step_over_share']
+
+    def over(self, step, ceiling=1500):
+        import tick_budget
+        return tick_budget.ALERT_FRACTION * tick_budget.share(step) * ceiling + 1
+
+    def test_a_step_over_its_share_in_enough_ticks_is_reported(self):
+        import tick_budget
+        runs = [self.receipt(c, [self.stage('leaks', self.over('leaks'))]) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc([self.stage('leaks', self.over('leaks'))]), runs), ['step:leaks'])
+        self.assertEqual(tick_budget.ALERT_MIN, 3)
+
+    def test_one_slow_tick_does_not_fire(self):
+        runs = [self.receipt(c, [self.stage('leaks', 10)]) for c in 'bcde']
+        self.assertEqual(self.found(self.tick_doc([self.stage('leaks', self.over('leaks'))]), runs), [])
+
+    def test_a_collector_inside_its_share_never_fires(self):
+        import tick_budget
+        inside = tick_budget.ALERT_FRACTION * tick_budget.COLLECTOR_SHARE * 1500 - 1
+        runs = [self.receipt(c, [self.stage('scan-fs', inside)]) for c in 'bcde']
+        self.assertGreater(inside, 1500 / 3, 'a third of the ceiling is inside a collector share')
+        self.assertEqual(self.found(self.tick_doc([self.stage('scan-fs', inside)]), runs), [])
+
+    def test_the_same_run_is_counted_once(self):
+        doc = self.tick_doc([self.stage('leaks', self.over('leaks'))], rid='a')
+        twice = [doc['progress'], doc['progress'], self.receipt('b', [self.stage('leaks', self.over('leaks'))])]
+        self.assertEqual(self.found(doc, twice), [])
 
     def test_the_ceiling_comes_from_the_receipt(self):
-        import tick_findings as F
-        found = F.findings(self.tick_doc([{'step': 'scan-fs', 'duration_seconds': 400, 'outcome': 'ran', 'exit': 0}],
-                                         ceiling=900), None)
-        self.assertEqual([f['subject'] for f in found if f['type'] == 'tick.step_over_share'], ['step:scan-fs'])
+        runs = [self.receipt(c, [self.stage('scan-fs', self.over('scan-fs', 900))]) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc([self.stage('scan-fs', self.over('scan-fs', 900))], ceiling=900), runs),
+                         ['step:scan-fs'])
 
     def test_unreadable_stages_raise_nothing_and_crash_nothing(self):
-        import tick_findings as F
         for stages in (None, 'x', [None, {'step': 'leaks'}, {'step': 'leaks', 'duration_seconds': 'x'},
                                    {'step': 'leaks', 'duration_seconds': float('nan')}]):
             with self.subTest(stages=stages):
                 doc = {'progress': {'stages': stages, 'ceiling_seconds': 'x'}}
-                self.assertFalse([f for f in F.findings(doc, None) if f['type'] == 'tick.step_over_share'])
+                self.assertEqual(self.found(doc, [None, 'x', {'stages': 'x'}]), [])
 
     def test_one_row_per_step_even_when_it_ran_twice(self):
-        import tick_findings as F
-        found = F.findings(self.tick_doc([{'step': 'findings', 'duration_seconds': 900, 'outcome': 'ran', 'exit': 0},
-                                          {'step': 'findings', 'duration_seconds': 800, 'outcome': 'ran', 'exit': 0}]), None)
-        self.assertEqual(len([f for f in found if f['type'] == 'tick.step_over_share']), 1)
+        stages = [self.stage('findings', 900), self.stage('findings', 800)]
+        runs = [self.receipt(c, stages) for c in 'bc']
+        self.assertEqual(self.found(self.tick_doc(stages), runs), ['step:findings'])
 
     def test_starvation_begins_at_the_shared_threshold(self):
         import tick_budget

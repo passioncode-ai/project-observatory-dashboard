@@ -54,13 +54,13 @@ class Persistence(unittest.TestCase):
         self.assertEqual(persistent, {}, "a reason that came back starts again")
 
     def test_a_code_is_the_key_when_the_prose_carries_numbers(self):
-        a = {"leak-scan.json": [{"source": "leak-scan:deadline-targets", "code": "deadline-targets",
-                                 "reason": "after 732 of 4380 targets"}]}
-        b = {"leak-scan.json": [{"source": "leak-scan:deadline-targets", "code": "deadline-targets",
-                                 "reason": "after 900 of 4380 targets"}]}
+        a = {"example.json": [{"source": "example:queue", "code": "queue-behind",
+                               "reason": "after 732 of 4380 items"}]}
+        b = {"example.json": [{"source": "example:queue", "code": "queue-behind",
+                               "reason": "after 900 of 4380 items"}]}
         record, _ = D.persistence(a, {}, 0.0)
         _, persistent = D.persistence(b, record, 25 * HOUR)
-        self.assertEqual(list(persistent), ["leak-scan.json"])
+        self.assertEqual(list(persistent), ["example.json"])
 
     def test_a_damaged_record_is_read_as_empty(self):
         for record in (None, [], {"first_seen": "x"}, {"first_seen": {"k": "nan"}}, {"first_seen": {"k": None}}):
@@ -83,6 +83,64 @@ class Persistence(unittest.TestCase):
                 self.assertEqual(list(D.persistent(now=25 * HOUR)), ["fabric-attribution.json"])
                 (state / D.PERSISTENCE_FILE).write_text("{not json", encoding="utf-8")
                 self.assertEqual(D.persistent(now=50 * HOUR), {}, "an unreadable record starts again")
+
+
+class Cadence(unittest.TestCase):
+    """At the tick's own cadence the first sighting must hold: a record that stored `now` on every
+    run would never reach a day (review of #328, L4)."""
+
+    def test_every_thirty_minutes_for_a_day_and_an_hour(self):
+        record, persistent, t = {}, {}, 0.0
+        while t <= (D.PERSIST_HOURS + 1) * HOUR:
+            record, persistent = D.persistence(REFUSED, record, t)
+            t += HOUR / 2
+        self.assertEqual(list(persistent), ["fabric-attribution.json"])
+        self.assertEqual(persistent["fabric-attribution.json"][0][1], 0.0)
+
+
+class Structural(unittest.TestCase):
+    """Review of #328, M2: the info-level `collector.degraded` rows are mostly structural, and a day of
+    them is no news. Those never become a pushed warning; anything else, a new collector's included,
+    does, and the case this rule was built for still fires."""
+
+    LIVE = {  # the shapes a 2026-10-21 workspace carried, names made synthetic
+        "spend.json": [{"source": "spend:openrouter:key:example-a", "reason": "a retired key with no usage snapshot"}],
+        "disk-guard.json": [{"source": "holders", "reason": "what processes hold could not be read; no path is removed"}],
+        "git-hygiene.json": [{"source": "local:alpha-web", "reason": "registered checkout could not be read"},
+                             {"source": "repository:example-org/beta-api", "reason": "branch classification unavailable"},
+                             {"source": "worktree-registration", "reason": "registration budget exhausted"}],
+        "local.json": [{"source": "folder:alpha-web", "reason": "remote: `git remote get-url` exited 128"}],
+        "worktree-registration.json": [{"source": "worktree-registration", "reason": "registration budget exhausted"}],
+        "openrouter.json": [{"source": "openrouter:listing", "reason": "stopped after 12 pages"},
+                            {"source": "openrouter:gateway", "reason": "its key is not among the newest keys"}],
+        "leak-scan.json": [{"source": "leak-scan:deadline-targets", "code": "deadline-targets", "reason": "cut"},
+                           {"source": "leak-scan:source-unreadable", "code": "source-unreadable", "reason": "holes"}],
+    }
+
+    def day(self, current):
+        record, _ = D.persistence(current, {}, 0.0)
+        return D.persistence(current, record, 25 * HOUR)[1]
+
+    def test_structural_degradations_never_persist(self):
+        self.assertEqual(self.day(self.LIVE), {})
+
+    def test_the_access_refusal_still_fires_beside_them(self):
+        self.assertEqual(list(self.day({**self.LIVE, **REFUSED})), ["fabric-attribution.json"])
+
+    def test_a_new_collector_and_an_unclassified_source_fire_by_default(self):
+        current = {"new-collector.json": [{"source": "provider", "reason": "every request refused"}],
+                   "openrouter.json": [{"source": "openrouter:provisioning", "reason": "the key was refused"}]}
+        self.assertEqual(sorted(self.day(current)), ["new-collector.json", "openrouter.json"])
+
+    def test_a_row_marked_structural_at_its_source_does_not(self):
+        self.assertEqual(self.day({"new-collector.json": [{"source": "x", "reason": "y", "structural": True}]}), {})
+
+    def test_every_receipt_kept_off_the_push_channel_is_structural_whole(self):
+        import notify_findings
+        for kind in notify_findings.NOT_PUSHED:
+            receipt = D.NOT_PUSHED_RECEIPTS.get(kind)
+            self.assertIsNotNone(receipt, f"{kind} is not pushed: name the receipt it is built from")
+            self.assertTrue(D.structural(receipt, {"source": "anything"}), receipt)
 
 
 class Finding(unittest.TestCase):

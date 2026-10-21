@@ -154,8 +154,26 @@ def due(db: pathlib.Path, base: pathlib.Path, hours: int = 24) -> bool:
     return not newest or time.time() - max(newest) > hours * 3600
 
 
+#: `--due`'s "not due": an exit of its own. It was 1, the exit of any uncaught exception, so a crash
+#: while answering read as "a copy exists" on every tick (review of #328, M3). 0 is due, 2 an error.
+NOT_DUE = 3
+
+
+def due_answer(db: pathlib.Path) -> int:
+    """`--due`: 0 when a copy is due, NOT_DUE when not, 2 (with the exception's type on stderr) when
+    the question could not be answered. Nothing raised here can look like an answer."""
+    try:
+        import configuration
+        return 0 if (db.is_file() and due(db, configuration.home())) else NOT_DUE
+    except Exception as exc:  # noqa: BLE001 — every failure is the error answer, never "not due"
+        print(f"backup_store --due: could not answer ({type(exc).__name__})", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str]) -> int:
     db = paths.DB
+    if "--due" in argv:  # the tick's question (`Tick.probe`): before anything else can raise
+        return due_answer(db)
     store = db.parent
     import backup_vault
     import configuration
@@ -165,8 +183,6 @@ def main(argv: list[str]) -> int:
     except StampRefused as exc:
         print(f"backup_store: {exc}; nothing was copied", file=sys.stderr)
         return 2
-    if "--due" in argv:  # the tick's question: exit 0 when a copy is due, 1 when not
-        return 0 if (db.is_file() and due(db, base)) else 1
     if "--if-due" in argv and db.is_file() and not due(db, base):
         print("backup not due: a copy younger than 24 hours exists")
         return 0

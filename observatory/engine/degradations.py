@@ -218,6 +218,38 @@ PERSIST_HOURS = 24
 PERSISTENCE_FILE = "degraded-since.json"
 
 
+#: DEGRADATIONS THAT ARE THE STATE OF THINGS, not a collector doing nothing (review of #328, M2).
+#: `collector.degraded` is info on purpose: most of its rows are structural, explained and not the
+#: operator's to fix, and a day of them is no news. Per receipt, the row sources (by prefix; "" is the
+#: whole receipt) that never become `collector.degraded_persistent`, each with why. A collector can
+#: also mark one row `"structural": true` where it writes it. Anything else, a new collector's
+#: included, is reported once it lasts a day: that is how the Fabric attribution collector's
+#: `access-refused` (a capability that produced nothing in production) reaches a person.
+STRUCTURAL: dict[str, tuple[tuple[str, str], ...]] = {
+    "leak-scan.json": (("", "the leak scan's coverage; reported as `secret.leak_scan_partial`, which is kept "
+                            "off the push channel (ENG-001)"),),
+    "disk-guard.json": (("holders", "no removal is admitted until non-use can be proven: a policy (OBS-173)"),),
+    "spend.json": (("spend:openrouter:key:", "a retired or rotated key's history: nothing left to measure"),),
+    "git-hygiene.json": (("local:", "one checkout's own state"), ("repository:", "one repository's own state"),
+                         ("worktree-registration", "the registration budget; the rest is read next pass")),
+    "worktree-registration.json": (("", "the registration budget; the rest is read next pass"),),
+    "local.json": (("folder:", "one folder's own state (no remote, unreadable)"),),
+    "openrouter.json": (("openrouter:listing", "the account's key listing past its page budget"),
+                        ("openrouter:gateway", "a key the listing does not reach, asked about itself")),
+}
+#: Finding types kept off the push channel (tools/notify_findings.NOT_PUSHED), and the receipt each is
+#: built from: such a receipt must be STRUCTURAL whole, or a day of it would be pushed after all.
+NOT_PUSHED_RECEIPTS = {"secret.leak_scan_partial": "leak-scan.json"}
+
+
+def structural(receipt: str, row: dict) -> bool:
+    """True when `row` of `receipt` is a structural degradation (STRUCTURAL, or marked at its source)."""
+    if row.get("structural") is True:
+        return True
+    source = str(row.get("source", ""))
+    return any(source.startswith(prefix) for prefix, _ in STRUCTURAL.get(receipt, ()))
+
+
 def _persist_key(receipt: str, row: dict) -> tuple[str, str]:
     """(record key, the pair a person reads). The `code` when the row has one, else its reason:
     a reason that carries a count changes with the count and starts its clock again, which errs
@@ -230,7 +262,7 @@ def _persist_key(receipt: str, row: dict) -> tuple[str, str]:
 def persistence(current: dict[str, list[dict]], record, now: float
                 ) -> tuple[dict, dict[str, list[tuple[str, float]]]]:
     """(the new record, per receipt the degradations seen for more than PERSIST_HOURS with their
-    first sighting). `record` is the previous one, `{"first_seen": {key: epoch}}`; anything else is
+    first sighting). Structural rows (`structural`) are neither kept nor reported. `record` is the previous one, `{"first_seen": {key: epoch}}`; anything else is
     read as empty. A degradation absent from `current` is forgotten, so one that comes back starts
     again."""
     import math
@@ -240,7 +272,7 @@ def persistence(current: dict[str, list[dict]], record, now: float
     persistent: dict[str, list[tuple[str, float]]] = {}
     for receipt, rows in sorted(current.items()):
         for row in rows:
-            if not isinstance(row, dict):
+            if not isinstance(row, dict) or structural(receipt, row):
                 continue
             key, pair = _persist_key(receipt, row)
             seen = old.get(key)

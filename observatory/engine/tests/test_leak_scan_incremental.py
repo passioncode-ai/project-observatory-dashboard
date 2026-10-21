@@ -5,6 +5,7 @@ only rows added since; a complete pass again when the value set changes, with
 --full, or weekly. A sighting is reported by the pass that first reads its row.
 The mark never holds a value.
 """
+import importlib.util
 import io
 import json
 import os
@@ -202,6 +203,41 @@ class StopsInsideAUnit(LeakScan):
                          "the rest is read by the next pass, and the start is not counted twice")
         self.assertEqual(json.loads(L.STATE.read_text())["offsets"][str(big)], big.stat().st_size)
 
+    def test_a_value_split_across_the_stopping_chunk_is_found_by_the_next_pass(self):
+        """The resume offset steps back by the overlap kept between chunks (review of #328, L4): a value
+        that straddles the chunk the pass stopped after is read whole by the next pass."""
+        base = Path(self.tmp.name).resolve()
+        big = base / "split.jsonl"
+        half = len(SECRET_A) // 2
+        big.write_bytes(b"x" * (L.CHUNK - half) + SECRET_A.encode() + b"\n" + b"y" * L.CHUNK)
+        L.targets = lambda days: ([big], [])
+        self.clock(1000, 1000, 0)
+        with redirect_stdout(io.StringIO()):
+            L.main(["leaks"])
+        first = json.loads(L.OUT.read_text())
+        self.assertFalse([h for h in first["hits"] if h["where"] == str(big)], "the first pass saw half of it")
+        patch.stopall()
+        second = self.scan()
+        self.assertEqual(sum(h["occurrences"] for h in second["hits"] if h["where"] == str(big)), 1)
+
+    @unittest.skipUnless(importlib.util.find_spec("compression") and importlib.util.find_spec("compression.zstd"),
+                         "this Python has no zstd decoder")
+    def test_a_compressed_file_stopped_midway_is_not_recorded_as_read(self):
+        from compression import zstd
+        base = Path(self.tmp.name).resolve()
+        z = base / "rollout.jsonl.zst"
+        z.write_bytes(zstd.compress(b"x" * (L.CHUNK * 2) + f"\n{SECRET_A}\n".encode()))
+        L.targets = lambda days: ([z], [])
+        self.clock(1000, 1000, 0)
+        with redirect_stdout(io.StringIO()):
+            L.main(["leaks"])
+        first = json.loads(L.OUT.read_text())
+        self.assertIn("deadline-targets", {d["code"] for d in first["degraded"]})
+        self.assertNotIn(str(z), json.loads(L.STATE.read_text())["signatures"], "a cut read leaves no signature")
+        patch.stopall()
+        self.assertEqual(sum(h["occurrences"] for h in self.scan()["hits"] if h["where"] == str(z)), 1,
+                         "so the next pass reads it whole")
+
     def test_a_store_stops_between_pages_and_keeps_its_mark(self):
         self.scan()
         before = json.loads(L.STATE.read_text())["sqlite"]["stores"]
@@ -216,6 +252,80 @@ class StopsInsideAUnit(LeakScan):
         self.assertEqual(json.loads(L.STATE.read_text())["sqlite"]["stores"], before, "the mark did not move")
         patch.stopall()
         self.assertTrue(any(h["where"].startswith(str(self.db)) for h in self.scan()["hits"]))
+
+
+class AFullPassResumesAcrossTicks(LeakScan):
+    """Review of #328, M1: under its 30 % share the leak scan reaches the databases with a few minutes
+    left, and the set of known values changes almost daily, so most passes are full. A full pass kept no
+    progress per database: each tick began every database at rowid 0 in the same order, and one large
+    store (a 1.9 GB, 286,000-row Codex history was measured) kept the databases behind it unread for ever.
+    A full pass now keeps how far it read each table and resumes there, the databases it has not finished
+    first; it is recorded complete only once every database is."""
+
+    def database(self, name, rows):
+        db = Path(self.tmp.name).resolve() / name
+        c = sqlite3.connect(db)
+        c.execute("CREATE TABLE messages(body TEXT)")
+        c.executemany("INSERT INTO messages VALUES (?)", [(f"row {i}",) for i in range(rows)])
+        c.execute("INSERT INTO messages VALUES (?)", (f"late {SECRET_A}",))
+        c.commit(); c.close()
+        return db
+
+    def test_every_database_is_read_once_across_ticks_and_then_the_pass_is_complete(self):
+        dbs = [self.database(f"agent{n}.sqlite", 3 * L.PAGE) for n in range(3)]
+        self.addCleanup(setattr, L, "transcript_stores", L.transcript_stores)
+        L.transcript_stores = lambda notes: list(dbs)
+        checks = {"left": 0}
+
+        def remaining():
+            checks["left"] -= 1
+            return 1000 if checks["left"] >= 0 else 0
+        patcher = patch.object(L.step_budget, "remaining", remaining)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        seen, rows_read, passes = set(), 0, 0
+        while passes < 20:
+            passes += 1
+            checks["left"] = 5               # a few pages a tick: no database fits in one
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(L.main(["leaks"]), 0)
+            out = json.loads(L.OUT.read_text())
+            rows_read += sum(r["rows_read"] for r in out["coverage"]["transcript_stores"])
+            seen |= {h["where"].split("#")[0] for h in out["hits"]}
+            if "sqlite_pending" not in json.loads(L.STATE.read_text()):
+                break
+        self.assertLess(passes, 20, "the full pass never completed")
+        self.assertEqual(seen & {str(d) for d in dbs}, {str(d) for d in dbs}, "every database was read")
+        self.assertLessEqual(rows_read, 3 * (3 * L.PAGE + 1) + 3 * L.PAGE,
+                             "no database was read from the start again")
+        state = json.loads(L.STATE.read_text())
+        self.assertEqual(state["sqlite"]["values"], json.loads(L.STATE.read_text())["values_digest"])
+        self.assertIsNotNone(state["sqlite"]["full_on"], "the full pass is recorded complete")
+        self.assertNotIn("sqlite_pending", state, "nothing is left pending")
+        patch.stopall()
+        again = self.scan()
+        self.assertEqual(again["companion_store"]["mode"], "incremental")
+
+    def test_a_changed_value_set_starts_the_pending_pass_again(self):
+        db = self.database("agent.sqlite", 3 * L.PAGE)
+        self.addCleanup(setattr, L, "transcript_stores", L.transcript_stores)
+        L.transcript_stores = lambda notes: [db]
+        self.clock_left = {"n": 3}
+
+        def remaining():
+            self.clock_left["n"] -= 1
+            return 1000 if self.clock_left["n"] >= 0 else 0
+        with patch.object(L.step_budget, "remaining", remaining), redirect_stdout(io.StringIO()):
+            L.main(["leaks"])
+        pending = json.loads(L.STATE.read_text()).get("sqlite_pending")
+        self.assertTrue(pending, "a cut full pass keeps its progress")
+        self.values[SECRET_B] = "demo/B"
+        out = self.scan()
+        self.assertFalse(out["partial"])
+        state = json.loads(L.STATE.read_text())
+        self.assertNotIn("sqlite_pending", state)
+        self.assertEqual(sum(r["rows_read"] for r in out["coverage"]["transcript_stores"]), 3 * L.PAGE + 1,
+                         "a new value is looked for in every row, not from the old progress")
 
 
 if __name__ == "__main__":

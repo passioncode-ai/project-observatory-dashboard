@@ -240,9 +240,10 @@ raise SystemExit(tl.supervised([sys.executable,'-c',sys.argv[2],sys.argv[1]]))
 
 
 class ProbeSteps(unittest.TestCase):
-    """A yes/no question is not a failed step (2026-10-21: `backup-due` answers "not due" with exit 1,
-    and 17 consecutive tick receipts recorded it as `failed, exit 1`). `Tick.probe` records the no as
-    `not_due`; only an answer outside the protocol is a failure."""
+    """A yes/no question is not a failed step (2026-10-21: `backup-due` answered "not due" with exit 1,
+    and 17 consecutive tick receipts recorded it as `failed, exit 1`). `Tick.probe` records the no
+    (PROBE_NO, exit 3) as `not_due`. Exit 1 is what an uncaught exception gives, so it is a failure,
+    and the probe's output goes to the log (review of #328, M3)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="observatory-probe-")
@@ -252,19 +253,29 @@ class ProbeSteps(unittest.TestCase):
                                            "OBSERVATORY_TICK_RUN_ID": "c" * 32})
         self.env.start(); self.addCleanup(self.env.stop)
         self.tick = load_tick()
+        self.said = []
+        self.tick.log = self.said.append
         self.scratch = base / "raw"; self.scratch.mkdir()
         self.t = self.tick.Tick(self.scratch)
 
-    def answer(self, code):
-        with patch.object(self.tick.subprocess, "run", return_value=subprocess.CompletedProcess([], code, "", "")):
+    def answer(self, code, output=""):
+        with patch.object(self.tick.subprocess, "run", return_value=subprocess.CompletedProcess([], code, output, "")):
             return self.t.probe("backup-due", "synthetic")
+
+    def test_the_no_is_the_backup_scripts_own_code(self):
+        spec = importlib.util.spec_from_file_location("backup_store_probe", ROOT / "tools/backup_store.py")
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        self.assertEqual(self.tick.PROBE_NO, mod.NOT_DUE)
+        import tick_progress
+        self.assertEqual(self.tick.PROBE_NO, tick_progress.NOT_DUE_EXIT)
+        self.assertNotIn(self.tick.PROBE_NO, (0, 1, 2))
 
     def test_no_is_not_due_and_not_a_failure(self):
         import tick_progress
-        self.assertIs(self.answer(1), False)
+        self.assertIs(self.answer(self.tick.PROBE_NO), False)
         self.assertEqual(self.t.failed, [])
         row = json.loads((self.scratch / "tick.json").read_text())["progress"]["stages"][-1]
-        self.assertEqual((row["step"], row["outcome"], row["exit"]), ("backup-due", "not_due", 1))
+        self.assertEqual((row["step"], row["outcome"], row["exit"]), ("backup-due", "not_due", self.tick.PROBE_NO))
         snap = tick_progress.snapshot(self.scratch, "c" * 32)
         self.assertEqual(snap["coverage"], "observed")
         self.assertEqual(snap["stages"][-1]["outcome"], "not_due")
@@ -273,20 +284,26 @@ class ProbeSteps(unittest.TestCase):
         self.assertIs(self.answer(0), True)
         self.assertEqual(self.t.failed, [])
 
+    def test_a_crashing_probe_is_a_failed_step_and_its_output_is_logged(self):
+        self.assertIsNone(self.answer(1, "Traceback (most recent call last):\nRuntimeError: synthetic\n"))
+        self.assertEqual(self.t.failed, [("backup-due", 1)])
+        self.assertTrue(any("RuntimeError" in line for line in self.said), self.said)
+        self.t.write_report()
+        rows = json.loads((self.scratch / "tick.json").read_text())["failed_steps"]
+        self.assertEqual(rows, [{"step": "backup-due", "exit": 1, "outcome": "failed"}])
+
     def test_any_other_answer_is_a_failed_step(self):
         self.assertIsNone(self.answer(2))
         self.assertEqual(self.t.failed, [("backup-due", 2)])
-        self.t.write_report()
-        rows = json.loads((self.scratch / "tick.json").read_text())["failed_steps"]
-        self.assertEqual(rows, [{"step": "backup-due", "exit": 2, "outcome": "failed"}])
 
-    def test_not_due_needs_exit_one_in_the_projection(self):
+    def test_not_due_needs_its_own_exit_in_the_projection(self):
         import tick_progress
-        self.answer(1)
+        self.answer(self.tick.PROBE_NO)
         doc = json.loads((self.scratch / "tick.json").read_text())
-        doc["progress"]["stages"][-1]["exit"] = 0
-        (self.scratch / "tick.json").write_text(json.dumps(doc))
-        self.assertEqual(tick_progress.snapshot(self.scratch, "c" * 32)["coverage"], "unknown")
+        for code in (0, 1):
+            doc["progress"]["stages"][-1]["exit"] = code
+            (self.scratch / "tick.json").write_text(json.dumps(doc))
+            self.assertEqual(tick_progress.snapshot(self.scratch, "c" * 32)["coverage"], "unknown")
 
     def test_the_tick_never_reads_a_bounded_exit_as_a_yes(self):
         """The class, not the instance: a `bounded(...)[0] == 0` in tools/tick.py is a yes/no

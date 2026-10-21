@@ -14,16 +14,23 @@ while the major version is 0, a minor release may change behaviour and says so h
   Bitbucket listing the folder scan, to the head of every tick. A disabled collector now runs last, one not started for
   3 ticks runs first, and each collector's watchdog limit is at most its share of the ceiling (40 %, the leak scan 30 %;
   `tick_budget.py`). The leak scan also stops between the chunks of a file and the pages of a store and resumes there
-  next tick, instead of being killed with nothing written. A new finding, `tick.step_over_share`, names a step that ran
-  past a third of the ceiling.
-- **A probe's "no" is not a failed step.** `backup-due` answers "not due" with exit 1, and 17 tick receipts in a row
-  recorded it as `failed`. `Tick.probe` records it as `not_due`; only an exit other than 0 or 1 is a failure, and a
-  test refuses a `bounded(...)[0] == 0` in `tools/tick.py`.
+  next tick, instead of being killed with nothing written, and a complete pass over its databases (forced whenever the
+  set of known values changes, which is most days) now resumes across ticks from how far it read each table, the
+  databases it has not finished first; before, each tick began every database at rowid 0 in the same order, and one
+  large store kept the ones behind it unread. A new finding, `tick.step_over_share`, names a step that used 95 % of its
+  share of the ceiling in 3 of the last 5 ticks.
+- **A probe's "no" is not a failed step, and a crash is not a "no".** `backup-due` answered "not due" with exit 1, and
+  17 tick receipts in a row recorded it as `failed`. "Not due" is now exit 3 (`backup_store.NOT_DUE`, recorded as
+  `not_due`), anything that goes wrong while answering exits 2, and any other exit (an uncaught exception gives 1) is a
+  failed step whose output goes to the tick log. A test refuses a `bounded(...)[0] == 0` in `tools/tick.py`.
 - **Findings handed to Fabric Dashboards are not new again on the next tick.** With the host present the notifier
   returned before recording what it handed over, so every tick reported about ninety findings as new or escalated.
   They are now recorded as delivered `via: host`.
 - **A degradation that lasts a day is a warning** (`collector.degraded_persistent`). A collector whose same reason
-  (its `code`, else its text) stays in its receipt for more than 24 hours is reported on its own, for every collector:
+  (its `code`, else its text) stays in its receipt for more than 24 hours is reported on its own, for every collector
+  but the structural reasons `degradations.STRUCTURAL` names (the leak scan's coverage, kept off the push channel; the
+  disk guard's holder policy; retired keys; one checkout's or folder's own state; listing budgets) or a row marks
+  `structural: true`:
   the Fabric attribution collector had written `degraded: access-refused` on every run for over a day and produced
   nothing, while the board showed it as one more info row. First sightings are kept in the store, `degraded-since.json`.
 - **`tick.err` lines carry their time.** The supervisor's lines (`tick stopped: ...`) and the tick script's stderr now

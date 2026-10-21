@@ -933,7 +933,8 @@ def table_signature(conn: sqlite3.Connection, table: str, updated: str | None, s
 
 def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
                 since: dict[str, int] | None = None, signature: dict | None = None,
-                hits: dict | None = None, tally: dict | None = None, stop=None
+                hits: dict | None = None, tally: dict | None = None, stop=None,
+                resume: dict[str, int] | None = None, progress: dict[str, int] | None = None
                 ) -> tuple[dict[tuple[SecretRef, str], int], str | None, dict[str, int], int, dict | None]:
     """Occurrences by (secret name, `table.column`) across every text column
     of a SQLite store, read-only; the reason when it could not be read; the
@@ -965,6 +966,11 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
 
     `stop`, when given, is asked before every page; once it says so the read raises
     `step_budget.OutOfTime` and the caller keeps the store's old mark (OBS-52).
+
+    A COMPLETE PASS RESUMES (review of #328, M1). In a complete pass a table is read from
+    `resume[table]` rather than from rowid 0: the rows at or below it were read earlier in the
+    same complete pass, under the same value set. `progress`, when given, is filled as the read
+    goes: the highest rowid read so far per table, so a pass that `stop` ends keeps it.
 
     A table that cannot be read — a damaged page, a missing module — is a hole:
     the store comes back read in part (`PARTIAL`), its other tables still read,
@@ -1029,7 +1035,7 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
                         hits[key] = hits.get(key, 0) + n
 
     def pages(table: str, cols: list[str], low: int, top: int, extra: str = "", args: tuple = (),
-              rid: str = "rowid") -> tuple[int, int, int]:
+              rid: str = "rowid", track: bool = False) -> tuple[int, int, int]:
         """Read rowid in (low, top] page by page, each page a finished statement;
         (the rows read, their rowid sum modulo ROWID_MOD, their square sum modulo ROWID_SQ_MOD).
         `rid` is the name the real rowid answers to (`_rowid_alias`)."""
@@ -1046,6 +1052,8 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
             squares += sum(_mod(_mod(r[0], ROWID_SQ_MOD) ** 2, ROWID_SQ_MOD) for r in rows)
             after = rows[-1][0]
             scan_rows(table, cols, rows)
+            if track and progress is not None:
+                progress[table] = after
 
     def at_old_max(table: str, cols: list[str], plain: list[str], updated: str, mark: int, before: dict,
                    rid: str = "rowid") -> None:
@@ -1120,8 +1128,11 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
         if before is not None and before.get("max") != mark:
             before = None
         if not mark or now["max"] < mark:
-            # First pass, a complete pass, or a table emptied or recreated.
-            pages(table, cols, 0, now["max"], rid=rid)
+            # First pass, a complete pass, or a table emptied or recreated. A complete pass resumes
+            # from what it already read of this table (`resume`), unless the table shrank below it.
+            start = (resume or {}).get(table, 0)
+            start = start if isinstance(start, int) and not isinstance(start, bool) and 0 < start <= now["max"] else 0
+            pages(table, cols, start, now["max"], rid=rid, track=True)
         else:
             fresh, fresh_sum, fresh_sq = pages(table, cols, mark, now["max"], rid=rid)
             below_changed = (before is None
@@ -1138,6 +1149,8 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
                     pages(table, cols, 0, mark, f" AND {_q(updated)} > ?", (before["upd"],), rid=rid)
                 at_old_max(table, cols, names, updated, mark, before, rid)
         high[table] = now["max"]
+        if progress is not None:
+            progress[table] = now["max"]
         new_sig["tables"][table] = now
 
     try:
@@ -1506,7 +1519,20 @@ def main(argv: list[str]) -> int:
     # AND EVERY AGENT'S TRANSCRIPT DATABASE (I-5): Hermes `state.db`, opencode's `opencode.db`,
     # Codex's `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`, `goals_*`,
     # `agent_message_board_*`.
-    for store in dict.fromkeys((mem, own, *stores)):
+    # A COMPLETE PASS THAT A DEADLINE CUT RESUMES on the next tick (review of #328, M1): how far it
+    # read each table of each store, under this value set, and which stores it finished. The
+    # stores it has not finished go first. A different value set, or --full, starts it again.
+    pending = saved.get("sqlite_pending") if full and not a.full else None
+    if not (isinstance(pending, dict) and pending.get("values") == digest and digest is not None
+            and isinstance(pending.get("stores"), dict)):
+        pending = {"values": digest, "stores": {}, "complete": [], "signatures": {}}
+    if not isinstance(pending.get("signatures"), dict):
+        pending["signatures"] = {}
+    done = set(pending.get("complete") or []) if isinstance(pending.get("complete"), list) else set()
+    order = list(dict.fromkeys((mem, own, *stores)))
+    if full:
+        order.sort(key=lambda st: str(st) in done)
+    for store in order:
         if step_budget.remaining() < STORE_RESERVE_S:
             # Unread, not clean: the mark stays where it was, so the next pass reads what this one did not.
             results[store] = ({}, None, None, 0, None)
@@ -1515,9 +1541,13 @@ def main(argv: list[str]) -> int:
         since = {} if full else marks.get(str(store))
         found: dict = {}
         tally: dict = {}
+        resume = pending["stores"].get(str(store)) if full else None
+        progress: dict = dict(resume) if isinstance(resume, dict) else {}
         try:
             results[store] = scan_sqlite(store, pattern, by_value, since, store_sigs.get(str(store)), found, tally,
-                                         stop=out_of_time(ANSWER_RESERVE_S))
+                                         stop=out_of_time(ANSWER_RESERVE_S),
+                                         resume=resume if isinstance(resume, dict) else None,
+                                         progress=progress if full else None)
         except step_budget.OutOfTime:
             # STOPPED BETWEEN PAGES (OBS-52): unread, not clean, its mark where it was; what it saw
             # before stopping is still reported.
@@ -1528,15 +1558,39 @@ def main(argv: list[str]) -> int:
             # report is still written; the sightings counted before it stopped stand (round 5).
             # The type only; a message can quote what was read.
             results[store] = (found, f"{STOPPED}({type(exc).__name__})", None, tally.get("rows", 0), None)
+        if full and digest is not None:
+            key = str(store)
+            finished = key not in stores_cut and not results[store][1]
+            if finished:
+                pending["stores"][key] = progress
+                pending["signatures"][key] = results[store][4]
+                done.add(key)
+            elif key not in done:
+                # A store not yet finished keeps how far it got. One finished earlier in this pass
+                # keeps the progress its signature describes; the rows it read now are read again.
+                pending["stores"][key] = progress
     succeeded = {str(store): r for store, r in results.items() if not r[1] and str(store) not in stores_cut}
-    new_mark = sqlite_scan.next_mark(
-        sqlite_mark, digest, full, today, {s: r[2] for s, r in succeeded.items()},
-        not any(r[1] for r in results.values()) and not stores_cut)
-    for s, r in succeeded.items():
-        if r[4] is not None:
-            store_sigs[s] = r[4]
-        else:
-            store_sigs.pop(s, None)
+    pending["complete"] = sorted(done)
+    if full and digest is not None:
+        # The complete pass ends when every store has been finished in it, over however many ticks
+        # (review of #328, M1); the marks are what each store was read to.
+        complete = all(str(st) in done for st in order) and not any(r[1] for r in results.values())
+        keep_pending = not complete
+        new_mark = sqlite_scan.next_mark(
+            sqlite_mark, digest, full, today, {st: pending["stores"].get(st) or {} for st in done}, complete)
+        for st in done:
+            if pending["signatures"].get(st) is not None:
+                store_sigs[st] = pending["signatures"][st]
+    else:
+        keep_pending = False
+        new_mark = sqlite_scan.next_mark(
+            sqlite_mark, digest, full, today, {s: r[2] for s, r in succeeded.items()},
+            not any(r[1] for r in results.values()) and not stores_cut)
+        for s, r in succeeded.items():
+            if r[4] is not None:
+                store_sigs[s] = r[4]
+            else:
+                store_sigs.pop(s, None)
     for store, (store_hits, problem, _high, _rows, _sig) in results.items():
         for (name, where_in), n in store_hits.items():
             hits[(name, f"{store}#{where_in}")] = hits.get((name, f"{store}#{where_in}"), 0) + n
@@ -1554,7 +1608,8 @@ def main(argv: list[str]) -> int:
 
     _write_json(STATE, {"updated_at": now, "offsets": state, "signatures": signatures,
                         "values_digest": digest, "suppressions_digest": suppression_mark,
-                        **({"sqlite": new_mark, "sqlite_signatures": store_sigs} if new_mark else {})})
+                        **({"sqlite": new_mark, "sqlite_signatures": store_sigs} if new_mark else {}),
+                        **({"sqlite_pending": pending} if keep_pending else {})})
     transcript_store_rows = [
         {"store": _label(s), "read": str(s) not in stores_cut and not results[s][1],
          "rows_read": results[s][3]} for s in stores]

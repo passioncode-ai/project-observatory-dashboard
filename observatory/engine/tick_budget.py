@@ -9,8 +9,9 @@ and the GitHub scan) were `not started` 28 times. Two causes, both closed here:
   scan) or the time left before the tail's reserve, whichever came first, so one slow collector
   could take everything the collectors had. Now a collector's limit is also at most its share of
   the ceiling (`share_limit`): `COLLECTOR_SHARE` for any collector, `STEP_SHARES` for the ones
-  named there. The leak scan resumes from its offsets (`tools/scan_leaks.py`), so a bounded share
-  costs it time, never coverage.
+  named there. The leak scan resumes where it stopped (`tools/scan_leaks.py`): a file from its
+  offset, and a complete pass over the databases from how far it read each table, the databases it
+  has not finished first. So a bounded share costs it time; coverage it reaches over several ticks.
 * **A disabled reader pulled its heavy writer to the front.** A step whose feature is off keeps
   its old start (so it never looks freshly measured), which made it sort as the most starved
   collector of all; the rotation then moved the step it reads from before it. The disabled
@@ -18,8 +19,8 @@ and the GitHub scan) were `not started` 28 times. Two causes, both closed here:
   scan, to the head of every tick. `tools/tick.py` now orders by `priority`: a collector not
   started for `STARVED_TICKS` ticks first, a disabled one last.
 
-`ALERT_SHARE` is the share past which a single step's run is reported (`tick.step_over_share`,
-tools/tick_findings.py), and `STARVED_TICKS` is also where `tick.collector_starved` begins. The
+`ALERT_FRACTION`, `ALERT_WINDOW` and `ALERT_MIN` say when one step's runs are reported
+(`tick.step_over_share`, tools/tick_findings.py), and `STARVED_TICKS` is also where `tick.collector_starved` begins. The
 ceiling itself is read here too (`ceiling_seconds`), so the watchdog and the receipt that the
 findings judge name the same number. Nothing here reads the clock.
 """
@@ -53,8 +54,13 @@ COLLECTOR_SHARE = 0.4
 STEP_SHARES: dict[str, float] = {"leaks": 0.3}
 #: A collector not started for this many ticks in a row goes first, and is reported as starved.
 STARVED_TICKS = 3
-#: A step that ran longer than this share of the ceiling is reported, even when it finished.
-ALERT_SHARE = 1 / 3
+#: A step is reported (`tick.step_over_share`) when it used this fraction of its own share of the
+#: ceiling (`share`: a collector's, so one that keeps inside its share never fires; a tail step is
+#: judged by the collector share) in ALERT_MIN of the last ALERT_WINDOW ticks, so one slow tick does
+#: not make the finding come and go (review of #328, L2).
+ALERT_FRACTION = 0.95
+ALERT_WINDOW = 5
+ALERT_MIN = 3
 
 
 def share(name: str) -> float:
