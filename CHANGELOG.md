@@ -5,6 +5,28 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **A new release is found within five minutes, without the GitHub API** (operator rule of 2026-10-17 for every
+  PassionCode product; OBS-176). A second small job per workspace, `maintain.py check` (launchd
+  `org.project-observatory.<id>.check`, systemd `-check.timer`, the Task Scheduler task `check`), installed by
+  `full maintain ensure` beside the 15-minute maintenance job, reads the newest release's static `SHA256SUMS` on
+  github.com every five minutes, the retry after a failed check included, and starts the maintenance job at once when
+  it finds a newer release. `full update --check` reads the same file; the REST API (60 anonymous requests an hour) is
+  read only by `--apply`'s signed verification, `--version` and a person's `--api-url` mirror. A check that finds what
+  the last one found prints nothing and adds no line to the shared update log. The heavy pass keeps its 15 minutes, so
+  no job runs past its own interval (LC-03); an update that failed for a lasting reason waits six hours before the same
+  release is tried again. The Mac app reads the update record every five minutes, and the Windows and Linux app checks
+  its `latest.json` feed every five minutes and logs a check only when its result changes.
+- **The apps open at login, check what they need at every launch and ask to restart for a ready update** (operator
+  rule of 2026-10-16; OBS-177). The Mac app registers as a login item on its first launch (`SMAppService`; Settings →
+  Open at login turns it off, and an update keeps the choice), shows a banner naming a missing login-item approval and
+  how to grant it, and asks «Restart to finish updating» (Restart now / Later) once per staged version while a window is
+  on screen. The Windows and Linux app writes its own login entry (the `Run` value, an XDG autostart file) unless turned
+  off in Settings, starts in the tray when launched at login, names a login entry it could not write or that went
+  missing, and downloads an update in the background before asking the same question. Closing a window still hides it;
+  each app quits only through its own Quit.
+
 ### Fixed
 
 - **A machine restore never starts a background `git gc`** (OBS-157 follow-up). Every git command `full machine-restore
