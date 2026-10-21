@@ -51,8 +51,27 @@ Everything merged since `v0.27.0` (`git log v0.27.0..026bd297`, nine pull reques
   `test_plugin_manifests.py`, `test_desktop_app.py`: 121 tests OK; `observatory/engine/tests/test_cli_compatibility.py`:
   22 OK.
 
+## Published
+
+Recorded 2026-10-21 from the release itself (`gh release view v0.28.0 -R passioncode-ai/project-observatory-dashboard`):
+`v0.28.0` on `1becbb8d` (#332, merged by `land.sh` after every required check passed and the private-denylist
+privacy gate passed on head `5bbc26ef`), published 2026-10-21T23:03:17Z, not a draft or prerelease, 19 assets.
+
+- Release workflow run 39687268323, attempt 1: `guard`, `manifest`, `wheel`, `macos`, both `windows` and both
+  `linux` builds, `feed` and `publish` succeeded; `check.yml` run 39687267794 on the tag passed.
+- Re-downloaded `project_observatory-0.28.0-py3-none-any.whl` and `ProjectObservatory-0.28.0-macos.zip`:
+  `shasum -a 256 --ignore-missing -c SHA256SUMS` reads OK for both; `gpg --verify SHA256SUMS.asc SHA256SUMS` reads a
+  good signature from "PassionCode.ai releases" (EdDSA key `63B30DC324BD697487AA31944FAFB8AEC803B6A7`); `gh attestation
+  verify <file> -R passioncode-ai/project-observatory-dashboard --signer-repo passioncode-ai/.github` exits 0 for both
+  (SLSA provenance v1, signer `passioncode-ai/.github/.github/workflows/release-publish.yml@refs/tags/v1`).
+- One installation updated with `project-observatory full update --apply`: `status: updated`, 0.27.0 to 0.28.0, a
+  machine backup and an encrypted workspace snapshot taken first, no rollback; `project-observatory --version` reads
+  0.28.0 and `cloudflare.py issue --help` lists `zone-edge-rules`.
+- The first `zone-edge-rules` token was issued into its vault slot for one zone: the door printed `issued` (it prints
+  that only after the new value's probe passes, `cmd_issue_zone`). A zone held by one of several stashed accounts needs
+  `--account`; the door refuses without it and names the accounts.
+
 ## Next
 
-Merge this pull request, tag `v0.28.0` on the merge commit, verify the release (sums, attestation, GPG), install it
-with `project-observatory full update --apply`, then issue the first `zone-edge-rules` token into its vault slot and
-record the receipts here.
+Re-pin Observatory Log 0.28.0 in the PassionCode set (the installed plugin is managed by the launcher), and fix
+OBS-190 (the `ssh_keys` suite's timeout) before the next release's gate.

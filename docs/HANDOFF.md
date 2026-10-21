@@ -21,7 +21,9 @@ expectation. It changes test evidence and documentation, not the published engin
 carrying the five-minute release check on the static feed (OBS-176) and the apps' lifecycle defaults (OBS-177, #329),
 every collector a turn in the tick (OBS-52, #328), the update's free-space preflight and a bounded portable suite
 (OBS-167, #325), the documentation checks (#326), the Cloudflare preset `zone-edge-rules` (#331), and `google-auth`
-2.62.0 (#330). Next: merge, tag `v0.28.0`, verify, install, issue the first `zone-edge-rules` token.
+2.62.0 (#330). Published 2026-10-21T23:03:17Z (release run 39687268323; sums, attestations and the GPG
+signature verified, receipts in the record), installed, and the first `zone-edge-rules` token issued. Next: re-pin
+Observatory Log in the PassionCode set, then OBS-190.
 
 [2026-10-20: the Stop hook counts this turn's changes](runs/2026-10-20-stop-hook-noise/README.md) (OBS-169):
 standing untracked files no longer make every turn "changed"; SessionStart takes a per-session baseline, a turn
