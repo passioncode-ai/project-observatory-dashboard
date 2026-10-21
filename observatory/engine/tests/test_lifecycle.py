@@ -385,12 +385,12 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertGreater(plist["ExitTimeOut"], self.tl.SUPERVISOR_GRACE + self.tl.STEP_GRACE)
 
     def test_the_tick_runs_every_command_through_the_watchdog(self):
-        # Every process the tick starts goes through `tick_lease.py`: `step` and `bounded`
+        # Every process the tick starts goes through `tick_lease.py`: `step`, `bounded` and `probe`
         # hand the watchdog the command, `lease` asks it for the lease, and `supervise`
         # re-enters through it. A subprocess call anywhere else is a step nothing bounds.
         import ast
         tree = ast.parse((ROOT / "tools/tick.py").read_text())
-        allowed = {"step", "bounded", "lease", "supervise"}
+        allowed = {"step", "bounded", "probe", "lease", "supervise"}
         bare = []
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef) or fn.name in allowed:

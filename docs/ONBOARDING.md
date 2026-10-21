@@ -966,7 +966,9 @@ refuse a plist that names one. After installing a tool in a new directory, run
 both installers above again.
 
 The tick is bounded: every step runs in its own process group under a wall-clock
-limit (15 minutes, 20 for the leak scan), the whole tick stops at a 25-minute
+limit (15 minutes, 20 for the leak scan), and a collector also takes at most its share
+of the ceiling (40 %, the leak scan 30 %, which resumes where it stopped; `tick_budget.py`),
+so no one collector uses the time the others were due. The whole tick stops at a 25-minute
 ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
 run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
 stopped step is a failed step in the log and on the board, never a hung tick.
@@ -991,7 +993,9 @@ ceiling), the tail's optional steps — plugins, rollup, the agent, the vector i
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
 leaves the previous run's output in place, and the collectors take turns: after the store check they
-run least recently started first, so one that was not started goes first on the next tick
+run least recently started first, so one that was not started goes first on the next tick; one not
+started for 3 ticks in a row goes ahead of all others, and one whose feature is off runs last, so it
+never pulls the step it reads from to the front
 (`store/tick-rotation.json` keeps, per collector, when it last started, how it ended — ran, failed, stopped or
 not started — how many ticks in a row it was not started and when it last ran; `tick.json` names the order, what was
 not started, and each failed step's `outcome` beside its exit). A cycle in the collectors' same-tick reads is named
@@ -1987,8 +1991,16 @@ review exposure and revoke or rotate through its owner before treating it as saf
 ### Scheduled measurement freshness
 
 Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
-`ran`. Disabled steps preserve the last successful measurement time; they do not
-raise starvation. A collector absent from the last tick's `collector_order` is
+`ran`; a yes/no probe such as `backup-due` records its "no" (exit 3) as `not_due`,
+never as a failed step. Disabled steps preserve the last successful measurement time; they do not
+raise starvation. A step that used 95 % of its share of the ceiling in 3 of the last
+5 ticks (the leak scan, which resumes by design, excepted) is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
+`progress.ceiling_seconds` names), and a collector whose same degraded reason stays in
+its receipt for more than 24 hours as `collector.degraded_persistent`, unless the reason
+is structural (`degradations.STRUCTURAL`, or `structural: true` on the row); its first
+sightings are kept in the store as `degraded-since.json`. A probe's "no" is its own exit
+(3), so a crash of `backup_store.py --due` is a failed step, never "not due".
+Lines in `store/logs/tick.err` start with their UTC time. A collector absent from the last tick's `collector_order` is
 not classified as starved. Planned collectors warn after three missed starts or
 six hours without a completed measurement (`config/tick.json` `starve_hours`
 overrides the age bound); leaks and integrity use critical severity. Interrupted

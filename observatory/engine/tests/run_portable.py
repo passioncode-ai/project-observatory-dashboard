@@ -137,6 +137,8 @@ BOUNDARY += ('meter', 'meter_wire', 'spend')
 BOUNDARY += ('delegation_sealed',)
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_progress', 'tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
+# OBS-52: every collector a turn, none past its share of the ceiling.
+BOUNDARY += ('tick_budget', 'degraded_persistence')
 # ENG-003: the agent's deadline reaches providers.complete().
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -258,7 +260,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 's
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',

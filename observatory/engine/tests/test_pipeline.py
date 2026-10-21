@@ -303,6 +303,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "store/raw/sessions.json",
                             "store/raw/tick-lease.json",
                             "store/raw/tick.json",
+                            # the earlier runs' stage receipts, for `tick.step_over_share` over a
+                            # window of ticks; written by the tick's supervisor, outside the graph
+                            "store/raw/tick-runs.jsonl",
                             "store/raw/vault-links.json",
                             "registry/credentials.json",
                             "registry/mcp-servers.json",

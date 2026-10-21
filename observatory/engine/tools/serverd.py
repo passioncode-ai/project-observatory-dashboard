@@ -1001,30 +1001,9 @@ def status() -> int:
     return 0 if alive else 1
 
 
-class StampedLines:
-    """A stream that starts every line with a UTC timestamp (LC-12): launchd hands the
-    server's stderr to serverd.err, and its lines — refusals, heartbeat failures,
-    tracebacks — carried no time, so nobody could tell when a fault began."""
-
-    def __init__(self, stream, clock=None):
-        self.stream, self.at_line_start = stream, True
-        self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
-
-    def write(self, text: str) -> int:
-        out = []
-        for piece in text.splitlines(keepends=True):
-            if self.at_line_start and piece.strip():
-                out.append(self.clock() + " ")
-            out.append(piece)
-            self.at_line_start = piece.endswith("\n")
-        self.stream.write("".join(out))
-        return len(text)
-
-    def flush(self) -> None:
-        self.stream.flush()
-
-    def __getattr__(self, name):
-        return getattr(self.stream, name)
+#: Every line the server writes to its stderr starts with its UTC time (LC-12); the class lives in
+#: log_policy.py since the tick's supervisor stamps its lines the same way.
+from log_policy import StampedLines  # noqa: E402
 
 
 def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
