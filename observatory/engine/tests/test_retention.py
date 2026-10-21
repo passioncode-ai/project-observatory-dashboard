@@ -325,9 +325,9 @@ def test_the_collector_never_inserts_past_the_horizon() -> None:
     work = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-t25-"))
     repo = work / "history"
     repo.mkdir()
-    base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-    base.update(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
-                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+    from git_env import git_env
+    base = git_env(drop_git=True, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=base)
     shas = {}
     for label, days in (("old", horizon + 400), ("fresh", 1)):

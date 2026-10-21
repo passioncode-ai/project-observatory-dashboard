@@ -55,6 +55,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 import tmp as tmpdir  # noqa: E402
+from git_env import git_env  # noqa: E402
 
 PY = str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").exists() else sys.executable
 FAILURES: list[str] = []
@@ -111,7 +112,7 @@ def shipped_checkout() -> pathlib.Path:
     work = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sec-")) / "engine"
     shutil.copytree(ROOT, work, ignore=shutil.ignore_patterns(
         ".git", ".venv", "__pycache__", "*.pyc"))
-    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    env = git_env()
     for args in (("init", "-q", "-b", "main"), ("add", "-A"),
                  ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                   "-c", "commit.gpgsign=false", "commit", "-qm", "shipped tree")):
@@ -125,8 +126,7 @@ def run_checker(*args: str) -> subprocess.CompletedProcess:
     work = shipped_checkout()
     return subprocess.run([PY, "tools/check_secrets.py", *args], cwd=work,
                           capture_output=True, text=True, timeout=600,
-                          env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1",
-                               "GIT_CONFIG_GLOBAL": os.devnull})
+                          env=git_env())
 
 
 # ─────────── a real credential is refused ──────────────────────────────
@@ -627,7 +627,7 @@ def test_round9_tracked_names_survive_any_bytes() -> None:
     """L1: `git ls-files -z`, so a non-ASCII name is not quoted into a name that does not exist."""
     cs = _cs()
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sec-lsz-")).resolve()
-    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    env = git_env()
     (d / "café.txt").write_text("x")
     for args in (("init", "-q"), ("add", "-A")):
         subprocess.run(["git", *args], cwd=d, env=env, check=True, capture_output=True, timeout=60)
@@ -640,9 +640,8 @@ def test_round9_tracked_names_survive_any_bytes() -> None:
 def _repo(prefix: str):
     """A throw-away repository on `main`, git's user configuration shut out, and a `git` caller."""
     d = pathlib.Path(tmpdir.mkdtemp(prefix=prefix)).resolve()
-    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-           "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+    env = git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                  GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
 
     def git(*args, check=True):
         return subprocess.run(["git", *args], cwd=d, env=env, check=check, capture_output=True, timeout=60)

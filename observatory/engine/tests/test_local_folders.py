@@ -20,6 +20,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 import tmp as tmpdir                                                # noqa: E402
+from git_env import git_env                                         # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -34,10 +35,9 @@ def _environment(base: pathlib.Path) -> dict[str, str]:
     """Only what the collectors need: no inherited workspace, credential or Git config."""
     user = base / "user"
     user.mkdir()
-    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(user),
-            "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
-            "OBSERVATORY_HOME": str(base / "home"),
-            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    return git_env({"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(user),
+                    "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
+                    "OBSERVATORY_HOME": str(base / "home")})
 
 
 def _git_checkout_without_remote(folder: pathlib.Path, env: dict[str, str]) -> None:
