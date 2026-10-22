@@ -77,7 +77,7 @@ helper and 203 tests in four files.
 
 | Step | What | Release |
 |---|---|---|
-| L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #L1PR | 0.29.0 |
+| L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
 | L2 | `node/lifecycle/macos.py` and the Swift helper, built and signed by the app's release workflow; the adapter tests (signature parsing, requirement text, process groups) | 0.29.0 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status` | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
