@@ -241,7 +241,7 @@ def scans():
         {'name': 'plugin:switchboard:switchboard', 'agent': 'claude', 'scope': 'plugin:switchboard',
          'wire': 'streamable-http', 'liveness': 'needs-auth', 'target': 'https://h.example/mcp'},
         {'name': 'alpha-local', 'agent': 'claude', 'scope': 'project:~/projects/alpha-web', 'wire': 'sse'},
-        {'name': 'claude.ai Gmail', 'agent': 'claude', 'scope': 'claude.ai', 'liveness': 'connected'},
+        {'name': 'claude.ai Example Mail', 'agent': 'claude', 'scope': 'claude.ai', 'liveness': 'connected'},
         {'name': 'switched-off', 'agent': 'claude', 'scope': 'user', 'wire': 'stdio', 'disabled': True},
         {'name': None, 'agent': 'cursor', 'error': 'JSONDecodeError'}]}
     return harness, mcp
