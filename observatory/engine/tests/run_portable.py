@@ -235,6 +235,9 @@ BOUNDARY += ('node_org',)
 # OBS-79 step L1: the lifecycle broker (registry, authority, durable operations, receipts, the effect journal,
 # circuits, the restart budget, idle and takeover rules) against fake adapters.
 BOUNDARY += ('node_lifecycle_broker',)
+# OBS-79 step L2: the macOS adapter (signatures and requirements, trusted paths, process groups, the verification cache,
+# the product probes, the helper build) against injected tools; elsewhere it answers `unsupported_platform`.
+BOUNDARY += ('node_lifecycle_macos',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -337,6 +340,8 @@ def source_files() -> list[Path]:
     selected.add(ROOT / 'fabric/delegation-vectors/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
+    # The lifecycle broker's NSWorkspace helper, compiled from source by the macOS adapter's suite (OBS-79 L2).
+    selected.add(ROOT / 'node/lifecycle/native_app.swift')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
     selected |= set((ROOT / 'tests' / 'memory_eval').glob('*.json'))
     # The documentation suite checks the engine's own shipped docs.

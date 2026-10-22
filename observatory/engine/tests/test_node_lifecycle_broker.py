@@ -548,8 +548,9 @@ class RegistryTests(Folder, unittest.TestCase):
         self.refused(target() | {'approved': 'yes'})
         self.refused(target() | {'timeoutSeconds': 61})
         self.refused(target() | {'startupEffects': []}, 'startup_effects_required')
-        # The product readiness profiles come with their probes in step L2.
+        # A product readiness profile only on its product's app (test_node_lifecycle_macos.ProfileRegistryTests).
         self.refused(target() | {'readiness': {'kind': 'fabric-hub'}})
+        self.refused(target() | {'readiness': {'kind': 'switchboard-runtime'}})
         self.refused(target() | {'readiness': {'kind': 'process', 'origin': 'http://127.0.0.1:1'}})
         for origin in ('http://localhost:47999', 'https://127.0.0.1:47999', 'http://127.0.0.1:47999/path',
                        'http://user@127.0.0.1:47999', 'http://127.0.0.1'):

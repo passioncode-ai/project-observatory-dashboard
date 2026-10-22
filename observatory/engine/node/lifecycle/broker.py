@@ -58,9 +58,20 @@ TEAM_ID = re.compile(r'^[A-Z0-9]{10}$')
 BUNDLE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$')
 LAUNCHD_LABEL = re.compile(r'^[A-Za-z0-9._-]{3,200}$')
 SHA256_HEX = re.compile(r'^[0-9a-f]{64}$')
-#: Readiness kinds whose probe exists. The product profiles (a Fabric hub, a Switchboard runtime) arrive with the
-#: macOS adapter in step L2, together with their probes; until then a record naming one is refused, not ignored.
-READINESS_KINDS = ('process', 'fabric-service')
+#: Readiness kinds whose probe exists. `process`: a pid is ready. `fabric-service`: the service's well-known document
+#: answers at a loopback origin. The two product profiles are fixed probes of one public product each, and nothing of
+#: theirs (origin, path, port, command) comes from the record: `fabric-hub` (Fabric's own `hub.json` names the running
+#: pid and its loopback origin answers) and `switchboard-runtime` (Switchboard's bundled CLI, verified under the
+#: enrolled team, reports its runtime online). Their probes are the macOS adapter's (`macos.py`).
+READINESS_KINDS = ('process', 'fabric-service', 'fabric-hub', 'switchboard-runtime')
+#: The one app whose readiness may be `fabric-hub`, and the one whose readiness may be `switchboard-runtime`: public
+#: bundle ids of the PassionCode products the profiles probe.
+FABRIC_BUNDLE_ID = 'ai.passioncode.desktop'
+SWITCHBOARD_BUNDLE_ID = 'ai.passioncode.fabric-switchboard'
+#: Switchboard's command-line tool inside its bundle; its signature is checked under the app's enrolled team.
+SWITCHBOARD_CLI = 'Contents/MacOS/switchboard'
+#: The capability a product profile proves when it reads ready, which a caller may then require.
+PROFILE_CAPABILITY = {'fabric-hub': 'fabric-hub', 'switchboard-runtime': 'runtime-online'}
 TOOLS = (
     'lifecycle.list',
     'lifecycle.status',
@@ -345,6 +356,8 @@ def validate_registry(doc: Any) -> dict:
             _loopback_origin(readiness.get('origin'))
             if not all(isinstance(readiness.get(k), str) and readiness.get(k) for k in ('serviceId', 'instance', 'buildDigest')):
                 raise LifecycleError('invalid_registry')
+        elif readiness['kind'] in PROFILE_CAPABILITY:
+            _product_profile(target, readiness)
         elif set(readiness) - {'kind', 'capability'}:
             raise LifecycleError('invalid_registry')
     visited, stack = set(), set()
@@ -363,6 +376,17 @@ def validate_registry(doc: Any) -> dict:
     for key in doc['targets']:
         visit(key)
     return doc
+
+
+def _product_profile(target: dict, readiness: dict) -> None:
+    """A product profile is a fixed probe of one product: only on that product's app, and with no field of its own,
+    so no origin, port, path or capability rides in the record. `switchboard-runtime` also needs the CLI the app
+    was enrolled with (`identity.readinessCli`), whose signature the probe checks before it runs it."""
+    product = FABRIC_BUNDLE_ID if readiness['kind'] == 'fabric-hub' else SWITCHBOARD_BUNDLE_ID
+    if target['kind'] != 'app' or target['identity'].get('bundleId') != product or set(readiness) != {'kind'}:
+        raise LifecycleError('invalid_registry')
+    if readiness['kind'] == 'switchboard-runtime' and not target['identity'].get('readinessCli'):
+        raise LifecycleError('invalid_registry')
 
 
 def _absolute(path: Any) -> bool:
@@ -408,7 +432,7 @@ def app_identity(identity: Any) -> dict:
     adapter checks the installed bundle against."""
     _registry_closed(
         identity,
-        ('scheme', 'bundleId', 'teamId', 'requirement', 'designatedRequirement'),
+        ('scheme', 'bundleId', 'teamId', 'requirement', 'designatedRequirement', 'readinessCli'),
         ('scheme', 'bundleId', 'teamId', 'requirement'),
     )
     if (
@@ -422,6 +446,17 @@ def app_identity(identity: Any) -> dict:
         or not isinstance(identity.get('designatedRequirement', ''), (str, type(None)))
     ):
         raise LifecycleError('invalid_registry')
+    if 'readinessCli' in identity:
+        # Only Switchboard's bundle carries a CLI the broker runs, and only at its fixed place.
+        cli = identity['readinessCli']
+        _registry_closed(cli, ('path', 'identifier'), ('path', 'identifier'))
+        if (
+            identity['bundleId'] != SWITCHBOARD_BUNDLE_ID
+            or cli['path'] != SWITCHBOARD_CLI
+            or not isinstance(cli['identifier'], str)
+            or not BUNDLE_ID.fullmatch(cli['identifier'])
+        ):
+            raise LifecycleError('invalid_registry')
     return identity
 
 
@@ -792,7 +827,8 @@ class Broker:
         if args.get('force') and not self._is_owner(principal, tool):
             raise LifecycleError('denied')                  # killing a process is the owner's decision alone
         if kind != 'stop':
-            supported = (None, target['readiness'].get('capability'), 'process')
+            readiness = target['readiness']
+            supported = (None, readiness.get('capability'), 'process', PROFILE_CAPABILITY.get(readiness['kind']))
             if args.get('requiredCapability') not in supported:
                 raise LifecycleError('capability_missing')
         # A restart is a stop and a start: its budget is doubled, and so is its default deadline.
