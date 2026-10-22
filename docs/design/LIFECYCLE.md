@@ -146,7 +146,7 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
 ## Step L2: what was built
 
 `observatory/engine/node/lifecycle/macos.py` and `observatory/engine/node/lifecycle/native_app.swift`, tested by
-`observatory/engine/tests/test_node_lifecycle_macos.py` (suite `node_lifecycle_macos`, 71 cases: 50 ported, 21 new).
+`observatory/engine/tests/test_node_lifecycle_macos.py` (suite `node_lifecycle_macos`, 73 cases: 50 ported, 23 new).
 
 - **The designated requirement** (`requirement_for`): `anchor apple generic and identifier "<id>" and certificate
   leaf[subject.OU] = "<team>"`, built from a bundle id and a ten-character team that are validated first, never
@@ -192,7 +192,8 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   `macos.build_helper()`) compiles `native_app.swift` with the `swiftc` and macOS SDK `xcrun` finds (Xcode or the
   Command Line Tools: `xcode-select --install`), with the system PATH only, into
   `<state>/node-lifecycle/bin/lifecycle-native`: an owner-only folder, the file replaced whole, mode 0700. On Apple
-  silicon the linker signs it ad hoc. `macos.py helper` says where it is and whether it is built. Without it an app
+  silicon the linker signs it ad hoc. A `--dest` folder that is not this account's alone is refused, never re-moded,
+  and the adapter runs the helper only while it is a regular file of this account that no one else may change. `macos.py helper` says where it is and whether it is built. Without it an app
   probe answers `setup_required` (`helper_not_built`) and a start is refused with `setup_required`; launchd targets
   need no helper. Refusals: `swiftc_missing`, `helper_build_failed` (the compiler's last lines on `detail`),
   `unsupported_platform`.

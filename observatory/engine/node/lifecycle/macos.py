@@ -662,6 +662,19 @@ class MacAdapter:
 
     # -- observation -------------------------------------------------------------------------------------------------
 
+    def _helper_ready(self) -> bool:
+        """The helper is run only when it is a regular file of this account that no one else may change: whoever
+        could replace it would act with every grant the broker holds."""
+        try:
+            return (
+                self.helper.is_file()
+                and not self.helper.is_symlink()
+                and osprivacy.owned_by_me(self.helper)
+                and not osprivacy.others_may_write(self.helper)
+            )
+        except OSError:
+            return False
+
     def _helper_answer(self, args, timeout: float = 10) -> dict:
         try:
             answer = json.loads(self.run([str(self.helper), *args], timeout=timeout).stdout)
@@ -819,7 +832,7 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 return observation('login_required')
-            if not self.helper.is_file():
+            if not self._helper_ready():
                 return observation('setup_required', reason='helper_not_built')
             try:
                 response = self._helper_status(target)
@@ -849,7 +862,7 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 raise LifecycleError('login_required')
-            if not self.helper.is_file():
+            if not self._helper_ready():
                 raise LifecycleError('setup_required')
             args = ['open', target['path']]
             if target.get('backgroundLaunch') is True:
@@ -923,7 +936,7 @@ class MacAdapter:
         helper that crashes is started again with backoff (5 s, doubling to 300 s, reset after a minute of life)."""
         backoff = 5
         while not stop_event.is_set():
-            if not self.helper.is_file():
+            if not self._helper_ready():
                 return
             started = time.monotonic()
             try:
@@ -1043,8 +1056,14 @@ def build_helper(dest=None, *, swiftc: Optional[str] = None, sdk: Optional[str] 
     if not swiftc or not sdk:
         raise LifecycleError('swiftc_missing')
     dest = Path(dest) if dest else default_helper()
-    dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    osprivacy.private_folder(dest.parent)
+    if dest.parent.exists():
+        # A folder that is not ours alone is refused, never re-moded: `--dest` may name any folder.
+        folder = dest.parent
+        if folder.is_symlink() or not osprivacy.owned_by_me(folder) or osprivacy.others_may_write(folder):
+            raise LifecycleError('unsafe_config')
+    else:
+        dest.parent.mkdir(parents=True, mode=0o700)
+        osprivacy.private_folder(dest.parent)
     fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix='.' + dest.name + '.', suffix='.build')
     os.close(fd)
     try:

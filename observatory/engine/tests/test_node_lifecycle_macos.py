@@ -1071,6 +1071,36 @@ class HelperBuildTests(Folder, unittest.TestCase):
         self.assertIn('error: two', caught.exception.detail)
         self.assertEqual(list(dest.parent.iterdir()), [])
 
+    @unittest.skipUnless(POSIX, 'POSIX modes')
+    def test_a_shared_destination_folder_is_refused_not_re_moded(self):
+        shared = self.root / 'shared'
+        shared.mkdir()
+        os.chmod(shared, 0o777)
+        with self.assertRaisesRegex(broker.LifecycleError, 'unsafe_config'):
+            macos.build_helper(shared / macos.HELPER_NAME, swiftc='/usr/bin/swiftc', sdk='/sdk',
+                               run=lambda args, timeout=10: done(), platform='darwin')
+        self.assertEqual(oct(shared.stat().st_mode & 0o777), '0o777', 'the folder is left as it was')
+
+    @unittest.skipUnless(POSIX, 'POSIX modes')
+    def test_a_helper_others_may_change_is_never_run(self):
+        helper = self.root / 'helper'
+        helper.write_text('')
+        mac = FakeMac()
+        a = adapter(self.root, run=mac)
+        a.identity_matches = lambda target, *, deadline=None: True
+        os.chmod(helper, 0o666)
+        app = {'kind': 'app', 'path': '/Applications/X.app', 'readiness': {'kind': 'process'}}
+        self.assertEqual(a.probe(app)['state'], 'setup_required')
+        with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+            a.start(app)
+        link = self.root / 'linked-helper'
+        os.chmod(helper, 0o700)
+        link.symlink_to(helper)
+        linked = adapter(self.root, run=mac, helper=link)
+        linked.identity_matches = lambda target, *, deadline=None: True
+        self.assertEqual(linked.probe(app)['state'], 'setup_required', 'a linked helper is not run either')
+        self.assertFalse(any(c[0][0] in (str(helper), str(link)) for c in mac.calls), 'the helper never ran')
+
     def test_no_compiler_or_another_platform_is_named(self):
         with self.assertRaisesRegex(broker.LifecycleError, 'swiftc_missing'):
             macos.build_helper(self.root / 'h', run=lambda args, timeout=10: done('', 1), platform='darwin')
