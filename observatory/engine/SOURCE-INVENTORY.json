@@ -510,6 +510,13 @@
       "upstream_modified": true
     },
     {
+      "path": "contract_lock.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9bae6cf3002dabd6151129fe4922f210b5ba89c8bba40146cb96b1b53837a96b",
+      "bytes": 5485
+    },
+    {
       "path": "coverage_view.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -935,16 +942,16 @@
     },
     {
       "path": "fabric-contract.lock.json",
-      "source_sha256": "b3f14ff51ad696ca3b1bbd21676dc648c678058d9840f727362c2b14ca19589d",
-      "export_sha256": "0a88791c998dfca58458a87332c8e27f65c3ad1d63c3cb30be116db1c9ace59d",
-      "bytes": 2930,
-      "upstream_modified": true
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e63f8e1553c917b9e9095236425e1abb43783a1249a3f8892494cb40e0e2b1d3",
+      "bytes": 215
     },
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "5728441b5debd76f0a942d969b261ab84781e15e0012294db9e4182608e8af22",
-      "bytes": 13202,
+      "export_sha256": "45c0c4d3839d225d7682fe7aee4d153c25f1827d9827f16bde238232ff360b91",
+      "bytes": 14245,
       "upstream_modified": true
     },
     {
@@ -2291,6 +2298,13 @@
       "bytes": 11424
     },
     {
+      "path": "observatory-profile.lock.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0a88791c998dfca58458a87332c8e27f65c3ad1d63c3cb30be116db1c9ace59d",
+      "bytes": 2930
+    },
+    {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
       "export_sha256": "8159a8a7a5d71210e4c0a8f18cc7ea9233641ac349095faee22532faaf5c7752",
@@ -3050,8 +3064,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "e5b74daee79b148727b49ef298db4b4ed2ba956d2516129faece4d8c9f4642d6",
-      "bytes": 42593,
+      "export_sha256": "66f31bb8d93a5d2162be06f25ce75bbd76e516889d1ce28e90119d1c0ba766c2",
+      "bytes": 42778,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3363,8 +3377,15 @@
       "path": "tests/test_conformance_receipt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6dcc1f064308502744037e0e9d96035a86d155daee40883a0c35c2ce0f1f6664",
-      "bytes": 22642
+      "export_sha256": "cf42e930eaa46c68ef7d7cd433ebcbd696096a7f815a59dc4f2362e876118bee",
+      "bytes": 22684
+    },
+    {
+      "path": "tests/test_contract_lock.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9e13909e6bd18c973087a2338fe2ac7251f9a0fa6aaafa4078fba4c73451e2c5",
+      "bytes": 8694
     },
     {
       "path": "tests/test_corroboration.py",
@@ -5646,8 +5667,8 @@
     {
       "path": "tools/publish_contract.py",
       "source_sha256": "64a46fb9830596fab1d3d677944951b4480e7ec2c09d6acd2bd608893909a6e1",
-      "export_sha256": "233570f4c5a6f2eaeb5fc8789721aae7738331574c23db27d31c93c822fadfa9",
-      "bytes": 10238,
+      "export_sha256": "a801eebc2bf4dfb97e425150ae0143d50155b03228248ecdbee0681f39744c8e",
+      "bytes": 10396,
       "python_comments_removed": 0,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5740,8 +5761,8 @@
     {
       "path": "tools/run_probes.py",
       "source_sha256": "8da1722eddb4f7f15eebe624d643df74905167ff9a370a60bf315de9bbce605d",
-      "export_sha256": "cd3dd37a2df18bb889477a1c80963a48ac0c27a8b07159059f02f598f692861a",
-      "bytes": 42925,
+      "export_sha256": "3d4614b6e7acbe3289d98151be685630528ac9b59b908e3c6ec1466d83c97f5e",
+      "bytes": 43190,
       "python_comments_removed": 84,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -6048,7 +6069,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 800,
+  "file_count": 803,
   "excluded": [
     "git-history",
     "operator-registries",

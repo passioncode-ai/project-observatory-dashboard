@@ -187,6 +187,8 @@ BOUNDARY += ('http_transport_pin',)
 BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
 BOUNDARY += ('embedding_enforcement',)
+# The contract pin and the profile lock, each under its own name, read through one module (OBS-196).
+BOUNDARY += ('contract_lock',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
 BOUNDARY += ('memory_access', 'memory_freshness', 'checkout_inventory', 'checkout_state', 'cache_coverage', 'coverage_view')
 # Scope and validity filtered before the candidate window (PB-137 N-009).
@@ -277,7 +279,7 @@ ROOT_FILES = (
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
     'ed25519_order.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
