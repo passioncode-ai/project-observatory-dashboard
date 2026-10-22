@@ -168,7 +168,9 @@ def notice(org_id: str, state: dict, now: float) -> dict:
     """What a person must know about one enrollment, from its saved state alone (no network, no key): the
     certificate's expiry date, its state (`valid`, `expiring` in the last three days, `expired`, `needs-enrollment`
     when the server asked for it, `removed` when the organization no longer has this machine), and, when the person
-    has something to do, the step in words and the command. `org status`, Health and doctor all read this.
+    has something to do, the step in words and the command. An expired certificate still inside its renewal window
+    (DEC-0100) carries `renewUntil` and the check-in that renews it; a renewal the server refused, `renewalRefused`.
+    `org status`, Health and doctor all read this.
 
     `now` is this machine's clock; the expiry is judged on the server's, as the last check-in measured it
     (`skewSeconds`), the clock every request is signed on."""
