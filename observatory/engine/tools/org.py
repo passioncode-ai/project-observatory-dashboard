@@ -11,13 +11,17 @@
         whether rotation is due, last check-in, outbox depth, the last batch's result, share registrations, anything
         degraded, and, when a person has something to do, the step (`nextStep`) and its `command`. A machine its
         organization removed (a revoked certificate, an unknown one, an unknown organization) reads `removed`, with
-        the date and the server's code, and sends nothing more
+        the date and the server's code, and sends nothing more. An expired certificate still inside its renewal
+        window says until when (`renewUntil`); one the server refused to renew says why (`renewalRefused`)
     project-observatory full org check-in [--org ID]
-        one signed check-in now; an expired certificate or a removed machine is refused with the step to take
+        one signed check-in now. A certificate that expired at most 30 days ago (on the server's clock) is first
+        renewed by this machine's key on record, with no token (contract DEC-0100); past those 30 days, after the
+        server refused the renewal, or for a removed machine, it is refused with the step to take
     project-observatory full org rotate [--org ID]
         a new certificate for the same key before expiry
     project-observatory full org tick [--org ID]
-        everything due: rotation, check-in, share registrations, grant usage, the outbox (the maintenance job runs it)
+        everything due: a renewal by the key on record after expiry, rotation, check-in, share registrations, grant
+        usage, the outbox (the maintenance job runs it)
     project-observatory full org flush [--org ID]
         send the outbox now
     project-observatory full org leave --org ID

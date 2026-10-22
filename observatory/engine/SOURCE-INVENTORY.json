@@ -578,8 +578,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "1c22c3405fae63f61266ef1e6a63ff4d68438414519d1dc1b1b3a1bdeaf4fb3b",
-      "bytes": 275030,
+      "export_sha256": "c287b2fdb1fcd899b1110fac3a03b04a9227ccb74cf59356dd98483b1e1f8627",
+      "bytes": 275489,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -610,8 +610,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0093743841f487dc4f01b3c4e968fb9c068063f950b7da302d47b1e3fb98dec2",
-      "bytes": 178270
+      "export_sha256": "ea3f7c063b96ccf41dd6ffcbcad54449691f00e4197f3b209d64a0fa97639cc1",
+      "bytes": 178553
     },
     {
       "path": "dashboard/machine_page.py",
@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "93988e97a8507a199df2c1310c84f9d38827205e2d4538321f0ea49db7edc6af",
-      "bytes": 158353,
+      "export_sha256": "f1c7987f223742d591182b407ed91000de7f7e2bfe277a4eaf143a4daa1463d5",
+      "bytes": 158800,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "a1ceddb432bb1fa8bc5ee379cc389f61ba1061cef2c1e14a7e6b10bee8896436",
-      "bytes": 134114,
+      "export_sha256": "1b4778cf6ecf85eb1e93a10cd15ee917f5036c1e7b0861ee5b1dafba6a192739",
+      "bytes": 135113,
       "upstream_modified": true
     },
     {
@@ -944,7 +944,7 @@
       "path": "fabric-contract.lock.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e63f8e1553c917b9e9095236425e1abb43783a1249a3f8892494cb40e0e2b1d3",
+      "export_sha256": "0201a05ef99781e71cf5257cd0c182f4c45ab620685c74a10d969e789a0fe5eb",
       "bytes": 215
     },
     {
@@ -1232,8 +1232,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c97f584008b773ed5904088d1d189ba218fa0be338bdef862f21fcf12b07ac4f",
-      "bytes": 4258
+      "export_sha256": "272b186831db4b15d177f10422d3d7ab4142c32e1506def13df8c3d23a92bc70",
+      "bytes": 4515
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1246,8 +1246,8 @@
       "path": "fabric/node-vectors/device-enrollment.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0de4ddfa8af037d702fe2dec0e480a214e891bec140bf8d31479434e2a40682e",
-      "bytes": 12000
+      "export_sha256": "db895afa14641d93d2f677b2a02b0ac762ba3f10f57a14de5171018ac05893a5",
+      "bytes": 13384
     },
     {
       "path": "fabric/node-vectors/device/device-check-in-response-protocols.json",
@@ -1278,11 +1278,25 @@
       "bytes": 522
     },
     {
+      "path": "fabric/node-vectors/device/device-enrollment-key-on-record-with-token.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "df17dd6bb544c7f53fb7bb4be94bcec531daf4e9a9bcc3775745259d65e9b982",
+      "bytes": 568
+    },
+    {
       "path": "fabric/node-vectors/device/device-enrollment-request-file-key.json",
       "source_sha256": null,
       "upstream_modified": true,
       "export_sha256": "5ff4d130ad4ad406d730eb7b353581f9ab0058e4a5ecb2a674bda8a9c64a9091",
       "bytes": 523
+    },
+    {
+      "path": "fabric/node-vectors/device/device-enrollment-request-key-on-record.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "67932d96183358f4f977bdbef25b90159cea179fc9f3d9f0246ce15968b216c2",
+      "bytes": 544
     },
     {
       "path": "fabric/node-vectors/enroll-token.json",
@@ -1834,8 +1848,8 @@
       "path": "fabric/node-vectors/share-registration.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "43678e29f6246a8b66d7d88befb60118e25540e676c315f19e1c1c39d7e78f5f",
-      "bytes": 182918
+      "export_sha256": "20bd5c80462facc9e34ca557933cbf43d0098abefa50b5cf06e8aeb833b89733",
+      "bytes": 188252
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -2252,8 +2266,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "37fe7bf685514b54bf1c14cccb0653eeb68bf54e3c39412877e28f2651bc0e78",
-      "bytes": 81418
+      "export_sha256": "6766f60f27a62c6efb6dfc562cea85ec6e3ecb86a8939ff2b5f9859fe7b39986",
+      "bytes": 94644
     },
     {
       "path": "node/p256.py",
@@ -2294,8 +2308,8 @@
       "path": "node/share_registration.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "39f7eed4df1c3aa2c0a68936b287c59e140b6c592977938c73ecc0fe406eb872",
-      "bytes": 9262
+      "export_sha256": "90afbccc363c827e412d15f197b2cfd20bd32dd3abe13107866502bd68c90aff",
+      "bytes": 9684
     },
     {
       "path": "node/webauthn.py",
@@ -4279,8 +4293,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "28236f5ee4671b7a02ab84fdccfc7de82c943f160d1c5a78957e70a062b30c30",
-      "bytes": 74193
+      "export_sha256": "fbc4f5a4dfcdf161e87e7111d2714993bab5b4cb426d3ca5f68e8896272e94c0",
+      "bytes": 92228
     },
     {
       "path": "tests/test_node_pairing.py",
@@ -5672,8 +5686,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8bc44a7fd8f5e4ea2e5d1de9500e8a87dcc59f6ec8df436338e257d3d6ca5aed",
-      "bytes": 8186
+      "export_sha256": "38963c11485f3b32d89aa57442a508ce3e1daf7c22b85f04a6b2955f636693de",
+      "bytes": 8610
     },
     {
       "path": "tools/project_into_vault.py",
@@ -6090,7 +6104,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 806,
+  "file_count": 808,
   "excluded": [
     "git-history",
     "operator-registries",

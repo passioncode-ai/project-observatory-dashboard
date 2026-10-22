@@ -19,7 +19,7 @@ case; the first checks the digests below.
 `http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
 `device-enrollment.schema.json` (DEC-0031, DEC-0094), with the device fixtures in `device/` (`fixtures/positive/` and
 `fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
-`de9eae4d7f3c9fad89560d15ba0509092483749e` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+`1f31e5afa2cb2444ff44479de0c3f89fdbca76ff` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
 `gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors all three at another
 commit and rewrites the commit and digests here: `python3 tools/vendor_org_vectors.py --contract <checkout> --commit
@@ -39,11 +39,13 @@ the digests below.
 | `pairing.json` | `c5d99e2a54ba210a06b94350bebda635369bf50b470981c6d10aedbf914c498b` |
 | `relay.json` | `47563a359dc876500bb0405689eaa8c43bd9e148ab09c77c1a0f74e5850d42bb` |
 | `revocation-delta.json` | `cdb1fb989808bf0bc7843ef39571c1aa2a27d2f2dd2281572e921fc77bfb7217` |
-| `share-registration.json` | `43678e29f6246a8b66d7d88befb60118e25540e676c315f19e1c1c39d7e78f5f` |
+| `share-registration.json` | `20bd5c80462facc9e34ca557933cbf43d0098abefa50b5cf06e8aeb833b89733` |
 | `secret-envelope.json` | `3ed14f7f95857b10a8d7ec97ded697ea65ea564c9f4c731e11c221e9ef03a3b3` |
-| `device-enrollment.schema.json` | `0de4ddfa8af037d702fe2dec0e480a214e891bec140bf8d31479434e2a40682e` |
+| `device-enrollment.schema.json` | `db895afa14641d93d2f677b2a02b0ac762ba3f10f57a14de5171018ac05893a5` |
 | `device/device-enrollment-request-file-key.json` | `5ff4d130ad4ad406d730eb7b353581f9ab0058e4a5ecb2a674bda8a9c64a9091` |
 | `device/device-enrollment-file-key-not-exportable.json` | `fd07f7ec3be7be88cfe175524a8d08afea88bf31f1136ff25fa492a94e69dbdc` |
 | `device/device-enrollment-file-key-attested.json` | `27fec7d9be6b86f8e99b152c7025f6b9046006e77d949ae401ddf2df537e7a27` |
 | `device/device-enrollment-hardware-key-exportable.json` | `b3641681253c75eb971e23b245187f3b16c8dad674d69834d8e9b13134e5ad64` |
 | `device/device-check-in-response-protocols.json` | `f7d9a64a109c118d86b15d7b309fc880d595d4e2ea4d897add884d94b7ce6d41` |
+| `device/device-enrollment-request-key-on-record.json` | `67932d96183358f4f977bdbef25b90159cea179fc9f3d9f0246ce15968b216c2` |
+| `device/device-enrollment-key-on-record-with-token.json` | `df17dd6bb544c7f53fb7bb4be94bcec531daf4e9a9bcc3775745259d65e9b982` |

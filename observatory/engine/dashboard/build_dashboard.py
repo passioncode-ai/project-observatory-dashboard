@@ -2337,7 +2337,8 @@ if (H.access_bindings) {
       {reason: AB.reason || "?"}), show]);
 }
 // Organization enrollments (OBS-199, OBS-204): the certificate's expiry, a warning in its
-// last three days, and a removed machine said plainly, each with the command that acts.
+// last three days, its renewal by the key on record for 30 days after it (contract DEC-0100),
+// and a removed machine said plainly, each with the command that acts.
 if (Array.isArray(H.organizations)) {
   const orgStatus = fullCommand("org status");
   for (const O of H.organizations) {
@@ -2348,6 +2349,9 @@ if (Array.isArray(H.organizations)) {
       hb.push([label, T("removed from the organization on {date} (the server answered {code}); nothing more is sent to it",
         {date: ((O.removed || {}).at || "?").slice(0, 10), code: (O.removed || {}).code || "?"}),
         fullCommand("org leave --org", shellArg(O.org))]);
+    else if (O.state === "expired" && O.renewUntil)    // DEC-0100: renews by its key on record, no token
+      hb.push([label, T("certificate expired on {date}; it renews by itself with this machine's key when the server answers, until {until}",
+        {date: O.expiresOn || "?", until: (O.renewUntil || "?").slice(0, 10)}), fullCommand("org check-in --org", shellArg(O.org))]);
     else if (O.state === "expired")
       hb.push([label, T("certificate expired on {date}; enroll again with a new token from the organization's administrator",
         {date: O.expiresOn || "?"}), enroll]);

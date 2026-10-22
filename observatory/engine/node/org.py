@@ -21,6 +21,13 @@ certificate's serial (`http_signature.py`). A hardware key store (the Keychain h
 this machine verified and applied (`records/`), and only toward a server whose enrollment response lists
 `share-registration/1`; `grant.usage` for a grant is sent only when the server's latest answer to that grant's
 registration lets it (`share_registration.gate`).
+
+A certificate that ended while the machine was offline is renewed by the key on record (contract DEC-0100, OBS-199):
+within 30 days of its `notAfter`, on the server's clock, `org check-in` and `org tick` send an enrollment request with
+`auth.method: "key-on-record"`, no token and no `Authorization` header (the CSR's own signature by the enrollment's
+`#sig` key is the proof), under the enrollment's lock, and take the new certificate and epoch as any re-enrollment.
+A renewal the server refuses (a server pinned before DEC-0100 refuses it at its schema; a server may refuse it by
+policy) is not asked again for that certificate: from there, as past the 30 days, the machine needs a new token.
 """
 from __future__ import annotations
 
@@ -96,9 +103,13 @@ ENDING_CODES = frozenset({'epoch-superseded', 'certificate-expired'}) | REMOVED_
 
 def _ends(status: int, code: Optional[str]) -> bool:
     return code in ('epoch-superseded', 'certificate-expired') or (status == 401 and code in REMOVED_CODES)
-#: `org status`, Health and doctor warn this long before the certificate expires (OBS-199). A node offline past its
-#: certificate's lifetime needs a new enrollment token until the contract's re-enrollment rule lands.
+#: `org status`, Health and doctor warn this long before the certificate expires (OBS-199).
 EXPIRY_WARNING_SECONDS = 3 * 86400
+#: How long after its certificate ended a machine renews by its key on record, without a token (contract DEC-0100,
+#: `RENEWAL_GRACE_DAYS`): judged on the server's clock, the end included. Past it a new enrollment token is needed.
+RENEWAL_GRACE_SECONDS = 30 * 86400
+#: A renewal answered with one of these is retried with backoff: the server did not decide. Any other 4xx refuses it.
+RENEWAL_RETRY_STATUSES = frozenset({0, 408, 425, 429})
 TOKEN_SLOT_PLACEHOLDER = 'PROJECT/ENV/NAME'
 JOURNAL_BYTES = 256 * 1024
 _CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
@@ -122,11 +133,44 @@ def enroll_command(org_id: str, server: Optional[str]) -> str:
         server or 'https://ORG-SERVER', org_id, TOKEN_SLOT_PLACEHOLDER)
 
 
+def renewal(state: dict, now: float) -> Optional[dict]:
+    """Whether this enrollment renews by its key on record (contract DEC-0100), from its saved state alone: a
+    certificate that ended (on the server's clock, `skewSeconds`, or as the server answered `certificate-expired`) at
+    most `RENEWAL_GRACE_SECONDS` ago, of a machine not removed from its organization, that the server did not ask to
+    enroll again for another reason, and whose renewal the server did not refuse for that certificate. None otherwise.
+    `now` is this machine's clock. The answer is the window's end (`until`) and the retry state of a renewal that went
+    unanswered (`attempts`, `nextAt`, `last`)."""
+    if isinstance(state.get('removed'), dict):
+        return None
+    cert = state.get('certificate') if isinstance(state.get('certificate'), dict) else {}
+    ends = strict_time(str(cert.get('notAfter') or ''))
+    if ends is None:
+        return None
+    ends /= 1000
+    server_now = now + (state.get('skewSeconds') or 0)
+    said_expired = state.get('reEnrollReason') == 'certificate-expired'
+    if state.get('reEnroll') and not said_expired:          # `re-enroll`, a superseded epoch: a token, not a renewal
+        return None
+    if server_now < ends and not said_expired:
+        return None
+    if server_now - ends > RENEWAL_GRACE_SECONDS:
+        return None
+    held = state.get('renewal') if isinstance(state.get('renewal'), dict) else {}
+    if held.get('serial') != cert.get('serial'):
+        held = {}
+    if held.get('refused'):
+        return None
+    return {'by': 'key-on-record', 'until': iso(ends + RENEWAL_GRACE_SECONDS), 'attempts': held.get('attempts', 0),
+            'nextAt': held.get('nextAt', 0), 'last': held.get('last')}
+
+
 def notice(org_id: str, state: dict, now: float) -> dict:
     """What a person must know about one enrollment, from its saved state alone (no network, no key): the
     certificate's expiry date, its state (`valid`, `expiring` in the last three days, `expired`, `needs-enrollment`
     when the server asked for it, `removed` when the organization no longer has this machine), and, when the person
-    has something to do, the step in words and the command. `org status`, Health and doctor all read this.
+    has something to do, the step in words and the command. An expired certificate still inside its renewal window
+    (DEC-0100) carries `renewUntil` and the check-in that renews it; a renewal the server refused, `renewalRefused`.
+    `org status`, Health and doctor all read this.
 
     `now` is this machine's clock; the expiry is judged on the server's, as the last check-in measured it
     (`skewSeconds`), the clock every request is signed on."""
@@ -142,6 +186,12 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                  '(python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME, the token on stdin) '
                  'and run: ' + enroll)
     removed = state.get('removed')
+    renews = renewal(state, now - (state.get('skewSeconds') or 0))
+    held = state.get('renewal') if isinstance(state.get('renewal'), dict) else {}
+    refused = held.get('last') if held.get('refused') and held.get('serial') == \
+        (state.get('certificate') or {}).get('serial') else None
+    if isinstance(refused, dict):
+        out['renewalRefused'] = refused
     if isinstance(removed, dict):
         out.update(state='removed', removed=removed, command='project-observatory full org leave --org %s' % org_id,
                    enrollCommand=enroll,
@@ -149,11 +199,20 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                             'more is sent to it and what it held was dropped. Remove its local state with: '
                             'project-observatory full org leave --org %s; to join again, %s'
                             % (org_id, removed.get('at') or '?', removed.get('code') or '?', org_id, new_token))
-    elif left <= 0:
+    elif renews is not None:
+        check_in = 'project-observatory full org check-in --org %s' % org_id
+        out.update(state='expired', renewUntil=renews['until'], command=check_in,
+                   nextStep='the certificate expired on %s. This machine renews it by itself with its key on record, '
+                            'no token needed, the next time it reaches the organization server, until %s (the '
+                            'maintenance job tries; now: %s). After %s it needs a new enrollment token'
+                            % (not_after_text, renews['until'], check_in, renews['until']))
+    elif left <= 0 or state.get('reEnrollReason') == 'certificate-expired':
+        why = (' and the server refused its renewal by the key on record (%s, HTTP %s)'
+               % (refused.get('code'), refused.get('status')) if isinstance(refused, dict) else
+               ' more than 30 days ago' if left <= -RENEWAL_GRACE_SECONDS else '')
         out.update(state='expired', command=enroll,
-                   nextStep='the certificate expired on %s, so the organization accepts nothing from this machine; '
-                            'a node offline past its certificate needs a new enrollment token: %s'
-                            % (not_after_text, new_token))
+                   nextStep='the certificate expired on %s%s, so the organization accepts nothing from this machine; '
+                            'it needs a new enrollment token: %s' % (not_after_text, why, new_token))
     elif state.get('reEnroll'):
         out.update(state='needs-enrollment', command=enroll,
                    nextStep='the organization asked this machine to enroll again: ' + new_token)
@@ -161,8 +220,9 @@ def notice(org_id: str, state: dict, now: float) -> dict:
         out.update(state='expiring', command='project-observatory full org rotate --org %s' % org_id,
                    nextStep='the certificate expires on %s. The maintenance job renews it while the server answers; '
                             'renew it now with: project-observatory full org rotate --org %s. If this machine stays '
-                            'offline past %s it needs a new enrollment token' % (not_after_text, org_id,
-                                                                                 not_after_text))
+                            'offline past %s, an organization server that takes it renews it by its key on record '
+                            'for 30 days after that; past them it needs a new enrollment token'
+                            % (not_after_text, org_id, not_after_text))
     else:
         out['state'] = 'valid'
     unknown = state.get('unknownOrg')
@@ -591,11 +651,17 @@ class Enrollment:
             raise OrgError('key-mismatch', "the certificate does not certify this machine's #sig key")
         out = {'serial': serial, 'notBefore': cert['notBefore'], 'notAfter': cert['notAfter'],
                'issuer': cert.get('issuer'), 'user': bool(binding.get('user'))}
+        if isinstance(binding.get('role'), str):           # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100)
+            out['role'] = binding['role']
         return out
 
     # -- enrollment --------------------------------------------------------------------------------------------
-    def enrollment_request(self, token_id: str) -> dict:
+    def enrollment_request(self, token_id: Optional[str], at: Optional[float] = None) -> dict:
+        """An enrollment request with an enrollment token's id, or, with none, a renewal by the key on record
+        (DEC-0100): `auth` is then `{method: key-on-record}` alone and the CSR's signature is the proof."""
         spki = self.keys.sig_spki()
+        auth = {'method': 'enrollment-token', 'tokenId': token_id} if token_id is not None else \
+            {'method': 'key-on-record'}
         return {'protocol': DEVICE_PROTOCOL, 'kind': 'enrollment-request', 'org': {'id': self.org_id},
                 'device': {'id': self.keys.device_id, 'platform': platform_name()},
                 'key': {'algorithm': 'ecdsa-p256', 'storage': getattr(self.keys, 'storage', 'file'),
@@ -603,8 +669,7 @@ class Enrollment:
                         'publicKeySha256': 'sha256:' + hashlib.sha256(spki).hexdigest()},
                 'deviceKeys': self.keys.enrollment_keys(),
                 'csr': base64.b64encode(self.keys.csr()).decode('ascii'),
-                'auth': {'method': 'enrollment-token', 'tokenId': token_id},
-                'requestedAt': iso(self.clock())}
+                'auth': auth, 'requestedAt': iso(self.clock() if at is None else at)}
     def enroll(self, server: str, token: str) -> dict:
         origin = http_signature.public_origin(server)
         if origin is None:
@@ -626,34 +691,57 @@ class Enrollment:
                     raise OrgError('key-storage-refused', "the server's policy refuses this machine's %s-held device "
                                    'key: %s (HTTP %s)' % (getattr(self.keys, 'storage', 'file'), code, status))
                 raise OrgError('enroll-refused', 'the server refused the enrollment: %s (HTTP %s)' % (code, status))
-            cert = self._certificate(answer)
-            epoch = answer.get('streamEpoch')
-            if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1 \
-                    or (previous and not over and epoch <= previous.get('epoch', 0)):
-                raise OrgError('epoch-invalid', 'the stream epoch is not above every epoch issued to this device')
-            interval = (answer.get('checkIn') or {}).get('intervalSeconds')
-            doc = {'schema': 'org-enrollment/1', 'org': self.org_id, 'device': self.keys.device_id, 'server': origin,
-                   'certificate': cert, 'epoch': epoch, 'protocols': _protocols(answer) or [],
-                   'checkInSeconds': interval if isinstance(interval, int) and 30 <= interval <= 86400 else 300,
-                   'collectionStart': answer.get('collectionStart') if strict_time(answer.get('collectionStart'))
-                   is not None else None,
-                   'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
-                   'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
-                   'reEnroll': False, 'nextCheckInAt': 0, 'skewSeconds': 0}
-            if over:
-                doc['previousRemoval'] = previous['removed']
-            private_io.parent(self.folder)
-            self._save(doc)
-            with self._db() as conn:                       # a new enrollment: registrations are sent again
-                if over:                                   # nothing pending survived the removal; start a new stream
-                    conn.execute('DELETE FROM events')
-                    conn.execute('DELETE FROM registrations')
-                    conn.execute('DELETE FROM meta')
-                conn.execute("UPDATE registrations SET next_at = 0, sent_at = NULL WHERE gate != 'hold-degraded'")
-            self.journal('enrolled', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
-                         protocols=doc['protocols'], reEnrollment=previous is not None, afterRemoval=over)
+            self._accept(origin, answer, previous, over)
             self._register_quietly()
             return self.describe()
+
+    def _accept(self, origin: str, answer: dict, previous: Optional[dict], over: bool,
+                renewed: Optional[dict] = None) -> dict:
+        """Takes an enrollment's answer (a token's, or a renewal's by the key on record, `renewed`): the certificate
+        is checked, the epoch is above every one issued before, and the state is written afresh. Under the lock."""
+        cert = self._certificate(answer)
+        if renewed is not None and previous is not None:
+            # DEC-0100 (FAC-SEM-044): a renewal keeps the binding on record, the same user (or none) and role.
+            held = previous['certificate']
+            if bool(cert.get('user')) != bool(held.get('user')) or \
+                    ('role' in held and cert.get('role') != held.get('role')):
+                raise OrgError('binding-changed', 'the renewed certificate binds another user or role than the one '
+                               'on record')
+        epoch = answer.get('streamEpoch')
+        if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1 \
+                or (previous and not over and epoch <= previous.get('epoch', 0)):
+            raise OrgError('epoch-invalid', 'the stream epoch is not above every epoch issued to this device')
+        interval = (answer.get('checkIn') or {}).get('intervalSeconds')
+        doc = {'schema': 'org-enrollment/1', 'org': self.org_id, 'device': self.keys.device_id, 'server': origin,
+               'certificate': cert, 'epoch': epoch, 'protocols': _protocols(answer) or [],
+               'checkInSeconds': interval if isinstance(interval, int) and 30 <= interval <= 86400 else 300,
+               'collectionStart': answer.get('collectionStart') if strict_time(answer.get('collectionStart'))
+               is not None else None,
+               'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
+               'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
+               'reEnroll': False, 'nextCheckInAt': 0, 'skewSeconds': 0}
+        if over:
+            doc['previousRemoval'] = previous['removed']
+        if renewed is not None and previous is not None:
+            # The same enrollment, renewed: when it began and the server's clock as last measured stay.
+            doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=iso(self.clock()),
+                       skewSeconds=previous.get('skewSeconds') or 0)
+        private_io.parent(self.folder)
+        self._save(doc)
+        with self._db() as conn:                       # a new enrollment: registrations are sent again
+            if over:                                   # nothing pending survived the removal; start a new stream
+                conn.execute('DELETE FROM events')
+                conn.execute('DELETE FROM registrations')
+                conn.execute('DELETE FROM meta')
+            conn.execute("UPDATE registrations SET next_at = 0, sent_at = NULL WHERE gate != 'hold-degraded'")
+        if renewed is not None:
+            self.journal('renewed', by='key-on-record', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
+                         expired=renewed.get('expired'), protocols=doc['protocols'])
+        else:
+            self.journal('enrolled', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
+                         protocols=doc['protocols'], reEnrollment=previous is not None, afterRemoval=over)
+        return doc
+
     def rotate(self) -> dict:
         """A new certificate for the same key. The request is persisted before it is sent and sent again, unchanged,
         after a lost answer: the server answers the same request with the same certificate (CT-65)."""
@@ -672,7 +760,7 @@ class Enrollment:
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 self.journal('rotate-refused', status=status, code=code)
                 if _ends(status, code):
-                    state['reEnroll'] = True
+                    state['reEnroll'], state['reEnrollReason'] = True, code
                     state.pop('pendingRotation', None)
                 elif status in (400, 422):                 # refused for what it is: the next rotation asks anew
                     state.pop('pendingRotation', None)
@@ -699,20 +787,84 @@ class Enrollment:
         """On the server's clock, as the last check-in measured it: the clock every request is signed on."""
         return self.clock() + (state.get('skewSeconds') or 0) >= strict_time(state['certificate']['notAfter']) / 1000
 
-    def _require(self) -> dict:
+    def _require(self, renew: bool = False, force: bool = False) -> dict:
         """The saved state, or a refusal that names what happened and the person's next step (OBS-199, OBS-204):
-        a removed or expired enrollment never reaches the network."""
+        a removed or expired enrollment never reaches the network. With `renew` (a check-in, a tick), an expired
+        certificate inside its renewal window is renewed by the key on record first (DEC-0100); `force` (a person's
+        check-in) asks now even while an unanswered renewal backs off."""
         state = self.state()
         if state is None:
             raise OrgError('not-enrolled', 'this machine is not enrolled in that organization')
         if isinstance(state.get('removed'), dict):
             raise self._removed_error(state)
+        if renew and renewal(state, self.clock()) is not None:
+            self._renew(state, force=force)
+            return self.state()
         if self.expired(state):
-            said = notice(self.org_id, state, self.clock())
-            raise OrgError('certificate-expired', 'the certificate expired on %s: this machine needs a new enrollment '
-                           'token' % state['certificate']['notAfter'], next_step=said.get('nextStep'),
-                           command=said.get('command'))
+            raise self._expired_error(state)
         return state
+
+    def _expired_error(self, state: dict, detail: str = '') -> 'OrgError':
+        said = notice(self.org_id, state, self.clock())
+        renews = 'renewUntil' in said
+        return OrgError('certificate-expired', 'the certificate expired on %s%s: %s'
+                        % (state['certificate']['notAfter'], detail,
+                           'it renews by its key on record until %s' % said['renewUntil'] if renews
+                           else 'this machine needs a new enrollment token'),
+                        next_step=said.get('nextStep'), command=said.get('command'))
+
+    def _renew(self, state: dict, force: bool = False) -> dict:
+        """Renewal after expiry by the key on record (contract DEC-0100): the enrollment request with
+        `auth.method: "key-on-record"`, a CSR from this enrollment's `#sig` key, no token and no `Authorization` header,
+        `requestedAt` on the server's clock. Taken as any re-enrollment (a new certificate and epoch) with the binding
+        on record kept. Under the lock, which the callers hold. An unanswered renewal (no answer, 408, 425, 429, 5xx)
+        backs off and is asked again; a refusal is recorded for this certificate and not asked again, and the machine
+        then needs a new token; a `certificate-revoked` or `certificate-unknown` with 401 removes it (OBS-204)."""
+        with self._locked():
+            window = renewal(state, self.clock())
+            if window is None:
+                raise self._expired_error(state)
+            check_in = 'project-observatory full org check-in --org %s' % self.org_id
+            if not force and window['nextAt'] > self.clock():
+                raise OrgError('renewal-pending', 'the renewal by the key on record waits for its backoff until %s'
+                               % iso(window['nextAt']), next_step=notice(self.org_id, state, self.clock())['nextStep'],
+                               command=check_in)
+            serial = state['certificate']['serial']
+            expired = self.expired(state)
+            request = self.enrollment_request(None, at=self.clock() + (state.get('skewSeconds') or 0))
+            status, answer = self._post(state['server'], self.paths['enroll'], request, {})
+            if status == 200 and isinstance(answer, dict) and answer.get('kind') == 'enrollment-response':
+                try:
+                    self._accept(state['server'], answer, state, False, renewed={'expired': expired})
+                except OrgError as error:
+                    self._renewal_refused(state, serial, status, error.code)
+                    raise self._expired_error(self.state(), ' and its renewal was refused (%s)' % error.code) \
+                        from None
+                self._register_quietly()
+                return window
+            code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
+            self.journal('renewal-refused', status=status, code=code)
+            if status == 401 and code in REMOVED_CODES:         # a revoked or forgotten device never renews
+                self._remove(state, code, status)
+                raise self._removed_error(state)
+            last = {'at': iso(self.clock()), 'status': status, 'code': code}
+            if 400 <= status < 500 and status not in RENEWAL_RETRY_STATUSES:
+                self._renewal_refused(state, serial, status, code)
+                raise self._expired_error(self.state(), ' and the server refused its renewal by the key on record '
+                                          '(%s, HTTP %s)' % (code, status))
+            attempts = window['attempts'] + 1
+            state['renewal'] = {'serial': serial, 'attempts': attempts, 'nextAt': self._backoff(attempts - 1),
+                                'last': last}
+            self._save(state)
+            raise OrgError('renewal-failed', 'the renewal by the key on record went unanswered (%s, HTTP %s); it is '
+                           'asked again from %s' % (code, status, iso(state['renewal']['nextAt'])),
+                           next_step=notice(self.org_id, state, self.clock())['nextStep'], command=check_in)
+
+    def _renewal_refused(self, state: dict, serial: str, status: int, code: str) -> None:
+        """The server decided: no renewal for this certificate, and no request asks it again (a new token resets it)."""
+        state['renewal'] = {'serial': serial, 'refused': True,
+                            'last': {'at': iso(self.clock()), 'status': status, 'code': code}}
+        self._save(state)
 
     # -- check-in ----------------------------------------------------------------------------------------------
     def check_in_document(self, state: dict) -> dict:
@@ -738,9 +890,16 @@ class Enrollment:
         if state.get('fullState'):
             doc['fullState'] = True
         return doc
-    def check_in(self) -> dict:
+    def check_in(self, force_renewal: bool = True) -> dict:
+        """One signed check-in. An expired certificate inside its renewal window is renewed by the key on record
+        first (DEC-0100); the answer then names it (`renewed`). A person's check-in asks the renewal now
+        (`force_renewal`); the tick respects its backoff."""
         with self._locked():
-            state = self._require()
+            before = self.state()
+            state = self._require(renew=True, force=force_renewal)
+            renewed = {'by': 'key-on-record', 'epoch': state['epoch'], 'serial': state['certificate']['serial'],
+                       'notAfter': state['certificate']['notAfter']} \
+                if before is not None and before.get('epoch') != state.get('epoch') else None
             doc = self.check_in_document(state)
             state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
             self._save(state)
@@ -757,10 +916,12 @@ class Enrollment:
                 state['nextCheckInAt'] = 0 if code == 'signature-stale' else \
                     int(self.clock()) + min(state['checkInSeconds'], 300)
                 if _ends(status, code):
-                    state['reEnroll'] = True
+                    state['reEnroll'], state['reEnrollReason'] = True, code
                 self._save(state)
                 self.journal('check-in-failed', status=status, code=code)
                 out = {'ok': False, 'code': code, 'status': status}
+                if renewed:
+                    out['renewed'] = renewed
                 if _ends(status, code):                   # never a silent refusal: what happened and the step
                     said = notice(self.org_id, state, self.clock())
                     out.update({k: said[k] for k in ('removed', 'nextStep', 'command') if k in said})
@@ -780,6 +941,7 @@ class Enrollment:
                 else None
             state['rotate'] = state.get('rotate') or action == 'rotate'
             state['reEnroll'] = action == 're-enroll'
+            state.pop('reEnrollReason', None)
             server_at = strict_time(answer.get('at'))
             skew = None if server_at is None else round(server_at / 1000 - self.clock())
             if skew is not None and abs(skew) <= 86400:
@@ -790,7 +952,10 @@ class Enrollment:
             newly_listed = self.accepts_shares(state) and not listed_before
         if newly_listed:                                   # the server began to take registrations: send them now
             self._register_quietly()
-        return {'ok': True, 'nextCheckInSeconds': state['checkInSeconds'], 'action': action}
+        out = {'ok': True, 'nextCheckInSeconds': state['checkInSeconds'], 'action': action}
+        if renewed:
+            out['renewed'] = renewed
+        return out
     # -- the outbox --------------------------------------------------------------------------------------------
     def enqueue(self, kind: str, data: dict, *, occurred: str, key: Optional[str] = None, source: str = 'meter',
                 monotonic: str = '0') -> Optional[dict]:
@@ -1042,9 +1207,9 @@ class Enrollment:
                             continue                       # a typed refusal waits for the record to change
                         if row['gate'] == 'send' and registration['state'] == 'withdrawn':
                             continue                       # a withdrawal is final once taken
-                        if row['gate'] == 'send' and row['sent_at'] \
+                        if row['gate'] in ('send', 'hold-notice') and row['sent_at'] \
                                 and now - row['sent_at'] < share_registration.RESEND_SECONDS:
-                            continue
+                            continue                       # DEC-0100: a notice refusal waits for the weekly resend
                         if row['gate'] == 'hold' and row['next_at'] > now:
                             continue
                     status, answer = self._signed(state, self.paths['share-registration'], registration)
@@ -1162,13 +1327,29 @@ class Enrollment:
             step = {k: said[k] for k in ('removed', 'nextStep', 'command') if k in said}
             if said['state'] == 'removed':                 # recorded once, when it happened; nothing is retried
                 return {'org': self.org_id, 'result': 'removed', **step}
+            report: Dict[str, Any] = {'org': self.org_id}
+            if renewal(state, self.clock()) is not None:   # DEC-0100: renewed by the key on record, then what is due
+                try:
+                    self._renew(state)
+                except OrgError as error:
+                    state = self.state()
+                    said = notice(self.org_id, state, self.clock())
+                    step = {k: said[k] for k in ('removed', 'nextStep', 'command') if k in said}
+                    if error.code in ('renewal-pending', 'renewal-failed'):
+                        return {'org': self.org_id, 'result': 'renewal-pending', 'renewal': {
+                            k: v for k, v in (renewal(state, self.clock()) or {}).items() if k != 'by'}, **step}
+                    result = 'removed' if said['state'] == 'removed' else 'needs-enrollment'
+                    return {'org': self.org_id, 'result': result, 'error': error.code, **step}
+                state = self.state()
+                report['renewed'] = {'by': 'key-on-record', 'epoch': state['epoch'],
+                                     'serial': state['certificate']['serial'],
+                                     'notAfter': state['certificate']['notAfter']}
             if self.expired(state) or state.get('reEnroll'):
                 self.journal('needs-enrollment', expired=self.expired(state))
                 return {'org': self.org_id, 'result': 'needs-enrollment', **step}
-            report: Dict[str, Any] = {'org': self.org_id}
             steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
-                     ('checkIn', lambda: self.check_in() if self.clock() >= (self.state().get('nextCheckInAt') or 0)
-                      else 'not-due'),
+                     ('checkIn', lambda: self.check_in(force_renewal=False)
+                      if self.clock() >= (self.state().get('nextCheckInAt') or 0) else 'not-due'),
                      ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage),
                      ('outbox', self.flush)]
             for name, step in steps:
@@ -1197,10 +1378,12 @@ class Enrollment:
                                                         'rotationDue': self.rotation_due(state)},
                'protocols': state.get('protocols', []), 'shareRegistration': self.accepts_shares(state),
                'collectionStart': state.get('collectionStart'), 'lastCheckIn': state.get('lastCheckIn'),
-               'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': self.expired(state)
-               or bool(state.get('reEnroll')), 'rotationPending': isinstance(state.get('pendingRotation'), dict),
+               'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': 'renewUntil' not in said
+               and (self.expired(state) or bool(state.get('reEnroll'))),
+               'rotationPending': isinstance(state.get('pendingRotation'), dict),
                'key': self._key_declaration()}
-        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning') if k in said})
+        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning', 'renewUntil',
+                                         'renewalRefused') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
         out['registrations'] = {}
         path = self.folder / 'outbox.sqlite'

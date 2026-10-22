@@ -2222,6 +2222,7 @@
  "Fabric cannot tell which project {project} is": "Fabric не может определить, к какому проекту относится {project}",
  "organization {org}": "организация {org}",
  "removed from the organization on {date} (the server answered {code}); nothing more is sent to it": "машина исключена из организации {date} (ответ сервера: {code}); ей больше ничего не отправляется",
+ "certificate expired on {date}; it renews by itself with this machine's key when the server answers, until {until}": "сертификат истёк {date}; машина обновит его сама своим ключом, когда сервер ответит, до {until}",
  "certificate expired on {date}; enroll again with a new token from the organization's administrator": "сертификат истёк {date}; подключите машину заново с новым токеном от администратора организации",
  "the organization asked this machine to enroll again with a new token": "организация просит подключить эту машину заново с новым токеном",
  "certificate expires on {date}; renew it now while the server answers": "сертификат истекает {date}; обновите его сейчас, пока сервер отвечает",
