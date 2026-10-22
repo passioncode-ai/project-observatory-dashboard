@@ -1373,6 +1373,22 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   included), so a command can take as long as a tick in flight.
 - Share registrations come only from the estate revision this machine verified and applied
   (`org records apply --record FILE`, and `--delta FILE` for revocation-delta pages); a draft is never sent.
+- **The harness summary** (`node-summary/1`, contract DEC-0101): to a server that lists `node-summary/1` among its
+  protocols, a check-in carries what this machine's coding agents run: the coding agents of the contract's catalogue
+  installed here with their versions, the MCP servers they load (name, source, transport, health), the Claude Code
+  skills (name, source, digest) and enabled plugins (name, source, version), and how many hooks they load. It is sent
+  when it changed and at least once a day. The whole harness ships, whatever the machine's mode, because a work machine
+  is transparent to its organization (the operator's decision the contract records). Never a path, a command, an
+  argument, an environment value, a URL, a hook's command, a prompt, an output or a file's content; a name with a space
+  or a slash is left out (counted, not rewritten). It is built from the harness and MCP scans, so it needs
+  `integrations.harness` and `integrations.mcp` on: without them nothing is sent and `org status` says
+  `org:node-summary-unavailable` with the reason. `org summary --org <id>` prints the next summary exactly as it would
+  leave, sending nothing; `org status` (`nodeSummary`) and Health say when the server last took one and how much it
+  listed, and `org:node-summary-not-listed` when the server does not read it. Its drift from the organization's
+  baseline (`missing`, `stopped`, `changed`, `outdated`) is computed and shown once this machine applies the
+  organization's signed policy (not built yet: the check-in reports policy revision 0, so no baseline applies and the
+  summary carries no drift, as the contract asks). No agent service is listed yet: nothing on this machine ties a
+  service to an organization's context, and a person's other services are never listed.
 
 Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
 offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.

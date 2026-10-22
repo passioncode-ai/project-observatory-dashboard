@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/activity-common.schema.json",
+  "title": "Shared definitions of activity telemetry (fabric-activity/0.1, DEC-0030)",
+  "$defs": {
+    "protocol": {
+      "const": "fabric-activity/0.1"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}(\\.[a-z][a-z0-9_]{0,31}){0,3}$",
+      "description": "An open-vocabulary dotted identifier (a kind, a source, a runtime, a method, an outcome). A reader shows an unknown one as it is and never rejects it."
+    },
+    "opaqueId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}$",
+      "description": "An opaque identifier: no spaces and no @, so an e-mail address does not fit. The pattern cannot tell a name from a code; issuing opaque values is the issuer's duty (DEC-0030)."
+    },
+    "eventId": {
+      "type": "string",
+      "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|sha256:[a-f0-9]{64})$",
+      "description": "A ULID for an event the collector originates and persists once, or sha256: of the canonical {source, key} for an event read from a source that can be read again; a derived id comes with its sourceKey (FAC-SEM-039)."
+    },
+    "sourceKey": {
+      "type": "string",
+      "pattern": "^(hmac-sha256:[a-f0-9]{64}|(?![\\s\\S]*[-:]-(?:[Uu]sers|home)-[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._:~#-]{0,255})$",
+      "description": "The source's own id of a record (a request id, a line uuid), or hmac-sha256: of a path-derived key under the device's telemetry key. Never a path: no slash, no percent-encoding, and no dash-encoded home directory such as -Users-<name> (FAC-SEM-037)."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "epoch": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "monotonicNs": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$",
+      "description": "Nanoseconds of a monotonic clock that keeps counting during sleep, since the boot named by bootId, as a decimal string (OTLP's JSON encoding writes 64-bit times as strings too). At most 2^64-1 (FAC-SEM-039)."
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "user": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Opaque: an organization membership id or a local profile id. A receiver sets it from the client certificate, or the certificate a verified request signature names (FAC-SEM-045, DEC-0056)."
+    },
+    "device": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "collector": {
+      "type": "object",
+      "required": [
+        "id",
+        "epoch"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaqueId"
+        },
+        "epoch": {
+          "$ref": "#/$defs/epoch"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One sequence-emitting collector node on a device, and the stream epoch the organization server issued at the device's enrollment."
+    },
+    "stream": {
+      "type": "object",
+      "required": [
+        "collector",
+        "seq"
+      ],
+      "properties": {
+        "collector": {
+          "$ref": "#/$defs/collector"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "description": "A position in one (device.id, collector.id, collector.epoch) stream; seq 0 means nothing yet."
+    },
+    "range": {
+      "type": "object",
+      "required": [
+        "fromSeq",
+        "toSeq"
+      ],
+      "properties": {
+        "fromSeq": {
+          "$ref": "#/$defs/seq"
+        },
+        "toSeq": {
+          "$ref": "#/$defs/seq"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tokens": {
+      "type": "object",
+      "required": [
+        "input",
+        "output"
+      ],
+      "properties": {
+        "input": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "output": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cacheRead": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cacheWrite": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "cost": {
+      "type": "object",
+      "required": [
+        "usd"
+      ],
+      "properties": {
+        "usd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "basis": {
+          "enum": [
+            "provider",
+            "price-list",
+            "client-estimate"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "description": "An unknown cost is null and carries no basis; a known cost names its basis (FAC-SEM-038).",
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "usd": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "usd"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "basis": true
+            },
+            "required": [
+              "basis"
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "usd": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "usd"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "basis": false
+            }
+          }
+        }
+      ]
+    },
+    "durations": {
+      "type": "object",
+      "required": [
+        "agentSeconds",
+        "waitHumanSeconds",
+        "waitAgentSeconds",
+        "attendedSeconds"
+      ],
+      "properties": {
+        "agentSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "waitHumanSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "waitAgentSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "attendedSeconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "launchVia": {
+      "enum": [
+        "fabric",
+        "terminal",
+        "ide",
+        "desktop",
+        "switchboard",
+        "cron",
+        "agent",
+        "other"
+      ]
+    },
+    "taskRef": {
+      "type": "object",
+      "required": [
+        "system",
+        "key"
+      ],
+      "properties": {
+        "system": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:#-]{0,63}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "skill": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    },
+    "branch": {
+      "type": "string",
+      "pattern": "^([A-Za-z0-9][A-Za-z0-9._/-]{0,99}|hmac-sha256:[a-f0-9]{64})$",
+      "description": "A branch name of at most 100 characters from a fixed set, or hmac-sha256: of it under the device's telemetry key when the organization's policy asks for hashed branches."
+    },
+    "state": {
+      "enum": [
+        "agent_working",
+        "awaiting_input",
+        "idle"
+      ]
+    },
+    "extScalar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^(?![/~\\\\])(?![A-Za-z]:[\\\\/])(?![\\s\\S]*(/Users/|/home/|\\\\Users\\\\))[^\\s]*$"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "extData": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/extScalar"
+          },
+          {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/extScalar"
+            }
+          }
+        ]
+      },
+      "description": "The data of an extension kind or of a kind this reader does not know: at most two levels, scalar values, strings of at most 64 characters with no whitespace and no absolute path."
+    },
+    "accountClass": {
+      "enum": [
+        "organization",
+        "personal",
+        "unknown"
+      ],
+      "description": "The class of the account a session ran on: one of the organization's tenants, a person's own account, or not known (DEC-0052). It describes an account, never a person."
+    },
+    "tenantRef": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "sha256: and the hex SHA-256 of the RFC 8785 form of {provider, tenant} — the reference the organization's policy gives one of its tenants (accounts.tenants, DEC-0053). Only an organization account carries one (DEC-0052)."
+    },
+    "account": {
+      "type": "object",
+      "required": [
+        "class"
+      ],
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/accountClass"
+        },
+        "tenantRef": {
+          "$ref": "#/$defs/tenantRef"
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "type": "object",
+        "properties": {
+          "class": {
+            "const": "organization"
+          }
+        },
+        "required": [
+          "class"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "tenantRef": true
+        },
+        "required": [
+          "tenantRef"
+        ]
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "tenantRef": false
+        }
+      },
+      "description": "The account a session ran on (DEC-0052): its class, and for an organization account the tenant reference from the policy. A personal or unknown account carries no tenant reference, so no hash of a person's own tenant ever leaves the device."
+    },
+    "purposeId": {
+      "$ref": "#/$defs/name",
+      "description": "A purpose the organization's notice names (open vocabulary, DEC-0052)."
+    },
+    "noticeVersion": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "The version of the organization's notice to the people concerned (DEC-0052)."
+    }
+  }
+}

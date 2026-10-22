@@ -54,7 +54,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import osprivacy
 import private_io
 
-from . import http_signature, share_registration
+from . import http_signature, node_summary, share_registration
 from .relay import strict_time
 
 LOG = logging.getLogger('observatory.node.org')
@@ -62,6 +62,10 @@ LOG = logging.getLogger('observatory.node.org')
 DEVICE_PROTOCOL = 'fabric-device/0.1'
 ACTIVITY_PROTOCOL = 'fabric-activity/0.1'
 SHARE_PROTOCOL = share_registration.TYPE
+SUMMARY_PROTOCOL = node_summary.TYPE
+#: A summary is sent when what it says changed, and at least this often (DEC-0101: "when it changed and at least once a
+#: day").
+SUMMARY_EVERY_SECONDS = 86400
 COLLECTOR_ID = 'observatory-node'
 ORG_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z')
 TOKEN = re.compile(r'([A-Za-z0-9][A-Za-z0-9._:~-]{0,127})\.([A-Za-z0-9_-]{16,256})\Z')
@@ -225,6 +229,7 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                             % (not_after_text, org_id, not_after_text))
     else:
         out['state'] = 'valid'
+    out['summary'] = summary_notice(state)
     unknown = state.get('unknownOrg')
     if isinstance(unknown, dict) and not isinstance(removed, dict):
         out['unknownOrg'] = unknown
@@ -232,6 +237,46 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                           'are retried as usual; if it still does not know it an hour after that, this machine is '
                           'taken as removed from the organization (this code is provisional until the contract '
                           'defines it)' % (unknown.get('since') or '?', UNKNOWN_ORG))
+    return out
+
+
+#: The largest scan file a summary is built from; past it the scan is reported unreadable rather than read whole.
+SCAN_LIMIT = 64 * 1024 * 1024
+
+
+def read_harness_scans() -> Tuple[Any, Any, Optional[str]]:
+    """The two scans a node summary is built from (`store/raw/harness.json` from `collectors/scan_harness.py`,
+    `store/raw/mcp.json` from `collectors/scan_mcp.py`), and why it cannot be built when one is missing: both are
+    opt-in, and a summary built without one would tell the organization that this machine runs nothing of that kind."""
+    import paths as _paths
+    docs = []
+    for name, integration in (('harness.json', 'integrations.harness'), ('mcp.json', 'integrations.mcp')):
+        try:
+            doc = json.loads(osprivacy.read_regular(Path(_paths.SCRATCH) / name, SCAN_LIMIT))
+        except FileNotFoundError:
+            return None, None, ('no %s scan on this machine yet (%s off, or the tick has not run it)'
+                                % (name[:-5], integration))
+        except (OSError, ValueError) as error:
+            return None, None, 'the %s scan is unreadable (%s)' % (name[:-5], type(error).__name__)
+        if not isinstance(doc, dict):
+            return None, None, 'the %s scan is not an object' % name[:-5]
+        docs.append(doc)
+    return docs[0], docs[1], None
+
+
+def summary_notice(state: dict) -> dict:
+    """The node summary's state for a person (OBS-192), from the saved state alone: whether the server reads
+    `node-summary/1` (`listed`), the last one it took (`sentAt`, `sequence`, how much it listed, and its drift when the
+    organization's baseline applied: `drift` is null without one), and why the latest was not built (`note`)."""
+    last = state.get('nodeSummary') if isinstance(state.get('nodeSummary'), dict) else None
+    out: Dict[str, Any] = {'listed': SUMMARY_PROTOCOL in (state.get('protocols') or []),
+                           'sentAt': last.get('sentAt') if last else None,
+                           'sequence': last.get('sequence') if last else None,
+                           'counts': last.get('counts') if last else None,
+                           'drift': last.get('drift') if last else None}
+    note = state.get('nodeSummaryNote')
+    if isinstance(note, dict):
+        out['note'] = {k: note[k] for k in ('at', 'reason', 'code', 'detail') if k in note}
     return out
 
 
@@ -421,13 +466,15 @@ class Enrollment:
 
     def __init__(self, node: Path, org_id: str, *, keys=None, transport: Transport = default_transport,
                  clock: Callable[[], float] = time.time, meter_db: Optional[Path] = None,
-                 paths: Optional[Dict[str, str]] = None):
+                 paths: Optional[Dict[str, str]] = None,
+                 harness: Optional[Callable[[], Tuple[Any, Any, Optional[str]]]] = None):
         if not isinstance(org_id, str) or not ORG_ID.fullmatch(org_id):
             raise OrgError('org-id', 'an organization id is [A-Za-z0-9][A-Za-z0-9_-]{0,127}')
         self.node, self.org_id = Path(node), org_id
         self.folder = self.node / 'orgs' / org_id
         self._keys, self.transport, self.clock, self.meter_db = keys, transport, clock, meter_db
         self.paths = dict(PATHS, **(paths or {}))
+        self.harness = harness or read_harness_scans
         self._held = threading.local()                     # re-entry is per thread: another thread waits
 
     # -- the lock ----------------------------------------------------------------------------------------------
@@ -902,6 +949,10 @@ class Enrollment:
                 if before is not None and before.get('epoch') != state.get('epoch') else None
             doc = self.check_in_document(state)
             state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
+            pending = self._summary_due(state)
+            if pending is not None:                        # DEC-0101: a check-in record, inside the signed request
+                doc['records'] = {'nodeSummary': pending['summary']}
+                state['summarySequence'] = pending['summary']['sequence']   # spent once sent, as sequenceNum
             self._save(state)
             def again(current: dict) -> dict:              # resent under the previous certificate: it names that one
                 current['sequenceNum'] += 1
@@ -917,6 +968,8 @@ class Enrollment:
                     int(self.clock()) + min(state['checkInSeconds'], 300)
                 if _ends(status, code):
                     state['reEnroll'], state['reEnrollReason'] = True, code
+                if pending is not None:
+                    state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': 'check-in-failed', 'code': code}
                 self._save(state)
                 self.journal('check-in-failed', status=status, code=code)
                 out = {'ok': False, 'code': code, 'status': status}
@@ -947,8 +1000,14 @@ class Enrollment:
             if skew is not None and abs(skew) <= 86400:
                 state['skewSeconds'] = skew
             state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'ok', 'skewSeconds': skew}
+            if pending is not None:
+                state['nodeSummary'] = {'sequence': pending['summary']['sequence'], 'sentAt': iso(self.clock()),
+                                        'digest': pending['digest'], 'counts': node_summary.counts(pending['summary']),
+                                        'omitted': pending['omitted'], 'drift': pending['summary'].get('drift')}
+                state.pop('nodeSummaryNote', None)
             self._save(state)
-            self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags)
+            self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
+                         **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}))
             newly_listed = self.accepts_shares(state) and not listed_before
         if newly_listed:                                   # the server began to take registrations: send them now
             self._register_quietly()
@@ -1173,6 +1232,83 @@ class Enrollment:
     def accepts_shares(self, state: dict) -> bool:
         return SHARE_PROTOCOL in (state.get('protocols') or [])
 
+    # -- the node summary (DEC-0101, OBS-192) ------------------------------------------------------------------
+    def accepts_summary(self, state: dict) -> bool:
+        """A summary goes only to a server that lists `node-summary/1` in its protocols (DEC-0067, DEC-0094)."""
+        return SUMMARY_PROTOCOL in (state.get('protocols') or [])
+
+    def policy_layers(self) -> List[dict]:
+        """The signed policy layers this machine verified and applied for this organization, which the baseline is read
+        from. None yet: verifying and applying the server's signed policy and its key sets is OE-06 (the check-in
+        reports server revision 0), so the summary carries no drift until then, as the contract asks of a summary
+        under a policy without a baseline."""
+        return []
+
+    def services_in_context(self) -> List[dict]:
+        """The agent services placed in this organization's context, and no other. None yet: a Fabric service
+        descriptor names no context and no agent reference an estate placement could be matched to, so no service on
+        this machine can be shown to be placed in `org:<org.id>`; listing a person's other services would cross
+        contexts (DEC-0082), so the list stays empty rather than guessed."""
+        return []
+
+    def summary_for(self, state: dict, sequence: int) -> dict:
+        """The summary this enrollment would send now with `sequence`: `{summary, digest, omitted}`. Raises OrgError
+        `node-summary-unavailable` when the scans it is built from are missing or unreadable, and
+        `node-summary-refused` when what they hold would break FAC-SEM-128."""
+        harness_scan, mcp_scan, missing = self.harness()
+        if missing:
+            raise OrgError('node-summary-unavailable', missing,
+                           next_step='turn on the harness and MCP scans (integrations.harness, integrations.mcp) and '
+                                     'let the next tick take them', command='project-observatory full doctor')
+        baseline = node_summary.harness_baseline(self.policy_layers())
+        try:
+            summary, omitted = node_summary.build(device_id=self.keys.device_id, org_id=self.org_id,
+                                                  sequence=sequence, at=iso(self.clock()), harness_scan=harness_scan,
+                                                  mcp_scan=mcp_scan, services=self.services_in_context(),
+                                                  baseline=baseline)
+        except node_summary.SummaryRefused as error:
+            raise OrgError('node-summary-refused', str(error)) from None
+        return {'summary': summary, 'digest': node_summary.content_digest(summary), 'omitted': omitted}
+
+    def _summary_due(self, state: dict) -> Optional[dict]:
+        """The summary to put in this check-in, or None: none when the server does not read `node-summary/1`, when it
+        cannot be built (named in `nodeSummaryNote`), or when the last one the server took says the same and is less
+        than a day old."""
+        if not self.accepts_summary(state):
+            return None
+        try:
+            pending = self.summary_for(state, (state.get('summarySequence') or 0) + 1)
+        except OrgError as error:
+            state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': error.code, 'detail': str(error)[:300]}
+            self.journal('node-summary-not-built', code=error.code)
+            return None
+        state.pop('nodeSummaryNote', None)
+        last = state.get('nodeSummary') if isinstance(state.get('nodeSummary'), dict) else {}
+        sent = strict_time(last.get('sentAt'))
+        if last.get('digest') == pending['digest'] and sent is not None \
+                and self.clock() - sent / 1000 < SUMMARY_EVERY_SECONDS:
+            return None
+        return pending
+
+    def summary_preview(self) -> dict:
+        """What the next summary would say, read-only: nothing is saved, sent or spent (`org summary`)."""
+        with self._locked():
+            state = self.state()
+            if state is None:
+                raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
+                               command=enroll_command(self.org_id, None))
+            out = {'org': self.org_id, 'listed': self.accepts_summary(state),
+                   'lastSent': {k: v for k, v in (state.get('nodeSummary') or {}).items() if k != 'digest'} or None}
+            try:
+                pending = self.summary_for(state, (state.get('summarySequence') or 0) + 1)
+            except OrgError as error:
+                out.update(error=error.code, message=str(error)[:300])
+                out.update({k: v for k, v in (('nextStep', error.next_step), ('command', error.command)) if v})
+                return out
+            out.update(summary=pending['summary'], omitted=pending['omitted'],
+                       baseline='applied' if 'drift' in pending['summary'] else 'none')
+            return out
+
     def register_shares(self) -> dict:
         """Derives this enrollment's registrations from the applied estate revision and delta entries and sends what
         changed, what is due again (weekly) and what waits on a backoff. Nothing at all before the server lists
@@ -1381,7 +1517,7 @@ class Enrollment:
                'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': 'renewUntil' not in said
                and (self.expired(state) or bool(state.get('reEnroll'))),
                'rotationPending': isinstance(state.get('pendingRotation'), dict),
-               'key': self._key_declaration()}
+               'key': self._key_declaration(), 'nodeSummary': said['summary']}
         out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning', 'renewUntil',
                                          'renewalRefused') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
@@ -1418,6 +1554,10 @@ class Enrollment:
             degraded.append('org:share-registration-not-listed')
         if out['registrations'].get('hold-degraded'):
             degraded.append('org:share-registration-refused')
+        if not out['nodeSummary']['listed']:
+            degraded.append('org:node-summary-not-listed')
+        elif str((out['nodeSummary'].get('note') or {}).get('reason') or '').startswith('node-summary-'):
+            degraded.append('org:node-summary-unavailable')
         if out['outbox']['pending'] and (out['outbox']['retry'] or {}).get('attempts'):
             degraded.append('org:outbox-retrying')
         out['degraded'] = degraded

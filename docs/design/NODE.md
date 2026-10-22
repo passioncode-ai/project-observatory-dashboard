@@ -508,6 +508,51 @@ revision 0), a check-in scheduler at the server's interval (the maintenance job 
 `kid` and `iss` (CX-CON-06 in the contract). A settlement the meter accepts after its reservation expired lands after
 its day was sent and is not counted (the meter does not refuse late settlements).
 
+## The harness summary (OBS-192)
+
+An organization sees what each enrolled machine runs (its target S8) and how that differs from what it expects (S10):
+contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` there).
+
+- **The port.** `observatory/engine/node/node_summary.py` ports `src/node-summary.ts` at the engine's contract pin:
+  `harness_drift` (`harnessDrift`: one state per baseline item, in its order, the first of `missing`, `stopped`,
+  `changed`, `outdated` that holds; a digest compared only for a skill or a plugin, a version only for a coding agent
+  or a plugin), `version_below`, `resolve_policy`, `signed_policy_value` and `harness_baseline` (the baseline from the
+  `mdm` and `server` layers only, never a person's `user` layer), and FAC-SEM-128 (`summary_findings`,
+  `document_findings`: no credential, e-mail address or home path in any string, no item twice, `context` exactly
+  `org:` and the certificate's `org.id`, drift exactly `harness_drift` under the baseline's revision and none without
+  one). `tests/test_node_summary.py` runs it over the contract's six semantic fixtures, the kit's own drift, version
+  and baseline cases, and the schema over the positive and the eight negative fixtures (`fabric/node-vectors/summary/`,
+  vendored by `tools/vendor_org_vectors.py` with the coding-agent catalogue, DEC-0093).
+- **The source.** The harness scan (`collectors/scan_harness.py`, OBS-61, OBS-88) adds `plugins` (each enabled one by
+  `name@marketplace`, its source and the version Claude Code recorded) and `coding_agents` (an agent of the catalogue
+  is installed when its launch command is an executable in a bin folder of the scanned home, on `PATH`, or in
+  Homebrew's and `/usr/local`'s; its version is read from where the launcher resolves, a `versions/<v>` folder, a
+  Homebrew keg or cask, or its npm package's `package.json`, never by running it). The MCP scan (`collectors/scan_mcp.py`)
+  gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
+  declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
+  server Claude Code keeps per folder is `local`, its folder never sent.
+- **What leaves.** `build` copies an allow-list of fields into the schema's shape and checks the result with
+  FAC-SEM-128 before it hands it over (`SummaryRefused` otherwise): names, catalogue ids, versions, digests, sources,
+  transports, health and a hook count. A name the schema refuses (a space, a slash, a dotted `@` suffix) is left out and
+  counted in `omitted`, which stays on this machine.
+- **When.** `Enrollment.check_in` puts the summary in `records.nodeSummary` only when the server's latest protocols
+  list `node-summary/1`, and only when its content digest (everything but `sequence` and `at`) differs from the last
+  one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the check-in's
+  `sequenceNum`; a failed check-in leaves the summary due. Without the two scans nothing is sent and the reason is kept
+  (`nodeSummaryNote`): a summary built without one would tell the organization the machine runs nothing of that kind.
+- **Shown.** `org summary --org <id>` prints the next summary as it would leave, saving and sending nothing.
+  `org status` (`nodeSummary`, and `org:node-summary-not-listed` or `org:node-summary-unavailable` in `degraded`), doctor
+  and Health read the saved state (`summary_notice`): whether the server reads it, when it last took one, how much it
+  listed, and the drift.
+
+Not built here: the drift reaches an organization only once the node applies its signed policy (OE-06): until then
+`policy_layers` is empty, no baseline applies, and the summary carries no drift, as the contract asks of a summary
+under a policy without one. The agent services of the summary's context: a Fabric service descriptor names no context
+and no agent reference an estate placement could match, so `services_in_context` is empty rather than guessed, and a
+person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). A
+plugin's digest (a baseline naming one reads `changed` until it is computed), Codex's skills and a project's own skills
+are not listed yet.
+
 ## Lifecycle (OBS-79)
 
 The node wakes, stops and restarts enrolled desktop apps and background services for agents. Its plan, file by file

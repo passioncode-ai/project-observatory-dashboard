@@ -3922,7 +3922,7 @@
         "body": {
           "error": {
             "code": "purpose-not-collected",
-            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes or the person acknowledges it, and at the weekly resend"
           }
         }
       }
@@ -4640,6 +4640,63 @@
         "user": {
           "id": "m-4821"
         }
+      },
+      "expected": {
+        "status": 200,
+        "receipt": {
+          "type": "share-registration-receipt/1",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "withdrawn",
+          "digest": "sha256:c5adda821b8ef7252a1fbafaa99624f53da4fd6a89b37cf0ccdff60d5f139bfb"
+        },
+        "held": {
+          "user": "m-4821",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "withdrawn",
+          "grantRevision": 3,
+          "agentRef": "urn:fabric:agent:example:inbox-digest",
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "digest": "sha256:c5adda821b8ef7252a1fbafaa99624f53da4fd6a89b37cf0ccdff60d5f139bfb",
+          "withdrawnAt": "2026-10-20T12:00:00Z"
+        }
+      }
+    },
+    {
+      "name": "SR-5a: a withdrawal passes when the notice does not name the purposes (DEC-0102)",
+      "held": [
+        {
+          "user": "m-4821",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "active",
+          "grantRevision": 3,
+          "agentRef": "urn:fabric:agent:example:inbox-digest",
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "digest": "sha256:d431ae1fff886e40b43f7a5e15a00cb2e931fa8fd1544a0f7b38324076c1ff0b"
+        }
+      ],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "withdrawn",
+        "withdrawnAt": "2026-10-20T12:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": true
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        },
+        "purposeAdmitted": false
       },
       "expected": {
         "status": 200,
@@ -6290,7 +6347,7 @@
         "body": {
           "error": {
             "code": "purpose-not-collected",
-            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes or the person acknowledges it, and at the weekly resend"
           }
         }
       },
@@ -6303,7 +6360,7 @@
         "body": {
           "error": {
             "code": "purpose-not-collected",
-            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes or the person acknowledges it, and at the weekly resend"
           }
         }
       },

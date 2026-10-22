@@ -1,0 +1,77 @@
+{
+  "type": "node-summary/1",
+  "device": {
+    "id": "dev-01j9a"
+  },
+  "context": "org:org-7f3a",
+  "sequence": 12,
+  "at": "2026-10-22T09:00:00Z",
+  "harness": {
+    "codingAgents": [
+      {
+        "id": "claude-code",
+        "version": "2.1.296"
+      },
+      {
+        "id": "codex",
+        "version": "0.48.0"
+      }
+    ],
+    "mcpServers": [
+      {
+        "name": "fabric",
+        "source": "user",
+        "transport": "stdio",
+        "health": "ok"
+      },
+      {
+        "name": "plugin:switchboard:switchboard",
+        "source": "plugin",
+        "transport": "stdio",
+        "health": "degraded"
+      }
+    ],
+    "skills": [
+      {
+        "name": "task-pipeline",
+        "source": "plugin",
+        "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+      }
+    ],
+    "plugins": [
+      {
+        "name": "switchboard@passioncode",
+        "source": "marketplace",
+        "version": "0.6.61"
+      }
+    ],
+    "hooks": {
+      "count": 4
+    }
+  },
+  "services": [
+    {
+      "key": "observatory-node.default",
+      "state": "ok",
+      "protocols": [
+        "fabric-service/0.1"
+      ],
+      "mcpEndpoint": "https://svc.example.com/mcp?token=abc"
+    }
+  ],
+  "drift": {
+    "policyRevision": 7,
+    "items": [
+      {
+        "kind": "plugin",
+        "name": "switchboard@passioncode",
+        "state": "outdated"
+      },
+      {
+        "kind": "service",
+        "name": "inbox-agent.default",
+        "state": "missing"
+      }
+    ]
+  }
+}

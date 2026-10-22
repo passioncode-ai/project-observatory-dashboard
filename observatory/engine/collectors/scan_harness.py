@@ -13,6 +13,11 @@ concealment directives in a description, opaque content). The listing budget is
 OBSERVATORY_HARNESS_BUDGET_CHARS (default 30,000 characters); over it, descriptions are dropped and those
 skills cannot be matched to a request — the first thing this scan reports.
 
+It also lists, for the node summary an organization receives (OBS-192, contract DEC-0101), the ENABLED plugins by
+`name@marketplace` with the version Claude Code recorded, and the coding agents of the contract's catalogue (DEC-0093)
+installed here: an agent whose launch command is an executable in a bin folder, its version read from where the
+launcher resolves (a versions folder, a Homebrew keg, an npm package.json), never by running it. No path is recorded.
+
 The first sight of a skill records its digest in `store/state/harness-pins.json`; a later change is reported
 until `full harness --accept KEY` (tools/harness.py) records the new digest.
 """
@@ -32,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic  # noqa: E402
 import configuration  # noqa: E402
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 
 DEFAULT_BUDGET = 30_000
@@ -217,6 +223,112 @@ def plugin_skill_dirs(claude: Path, degraded: list) -> list[tuple[str, Path, str
         owner = repo.split("/", 1)[0] if "/" in repo else None
         for skill in sorted((path / "skills").glob("*/SKILL.md")):
             out.append((key, skill.parent, owner))
+    return out
+
+
+def enabled_plugins(claude: Path) -> list[dict]:
+    """Every ENABLED plugin by `name@marketplace`, its source and the version Claude Code recorded when it installed
+    it (OBS-192: the node summary's `plugins`). A plugin whose marketplace Claude Code knows is `marketplace`, one it
+    does not is `other`. Its folder is not read and never recorded."""
+    settings = read_json(claude / "settings.json")
+    enabled = {k for k, v in (settings.get("enabledPlugins") or {}).items() if v is True}
+    installed = read_json(claude / "plugins" / "installed_plugins.json").get("plugins") or {}
+    markets = read_json(claude / "plugins" / "known_marketplaces.json")
+    out = []
+    for key in sorted(enabled):
+        records = installed.get(key) if isinstance(installed, dict) else None
+        record = records[0] if isinstance(records, list) and records else records
+        record = record if isinstance(record, dict) else {}
+        market = key.split("@", 1)[1] if "@" in key else ""
+        row = {"name": key, "source": "marketplace" if market and market in markets else "other",
+               "installed": bool(record)}
+        version = record.get("version")
+        if isinstance(version, str) and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version):
+            row["version"] = version
+        out.append(row)
+    return out
+
+
+#: The coding-agent catalogue (contract DEC-0093), vendored at the engine's contract pin.
+CATALOGUE = ROOT / "fabric" / "node-vectors" / "summary" / "coding-agents.json"
+#: Where an installed coding agent's launcher is looked for, besides PATH: the folders install scripts and package
+#: managers put one in, under the home folder this scan reads and on the system.
+HOME_BIN_DIRS = (".local/bin", "bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", ".deno/bin", ".opencode/bin")
+SYSTEM_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
+PACKAGE_JSON_MAX = 256 * 1024
+
+
+def bin_dirs(home: Path) -> list[Path]:
+    dirs = [home / d for d in HOME_BIN_DIRS]
+    dirs += [Path(p) for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    dirs += [Path(p) for p in SYSTEM_BIN_DIRS]
+    seen, out = set(), []
+    for d in dirs:
+        if str(d) not in seen:
+            seen.add(str(d))
+            out.append(d)
+    return out
+
+
+def launcher_version(launcher: Path) -> str | None:
+    """A coding agent's version, read from where its launcher resolves, never by running it: a Homebrew keg or cask
+    (`Cellar/<name>/<version>/`, `Caskroom/<name>/<version>/`), a `versions/<version>` folder (Claude Code's own
+    installer), or the `package.json` of the npm package that holds it. None when none of those says."""
+    try:
+        real = launcher.resolve()
+    except (OSError, RuntimeError):
+        return None
+    parts = real.parts
+    shape = re.compile(r"[0-9][0-9A-Za-z.+-]{0,63}")
+    for i, part in enumerate(parts[:-1]):
+        if part in ("Cellar", "Caskroom") and i + 2 < len(parts):
+            version = re.sub(r"_[0-9]+$", "", parts[i + 2])          # a keg's revision suffix is not the version
+            return version if shape.fullmatch(version) else None
+        if part == "versions" and shape.fullmatch(parts[i + 1]):
+            return parts[i + 1]
+    for folder in list(real.parents)[:6]:
+        if "node_modules" not in folder.parts:
+            break
+        candidate = folder / "package.json"
+        try:
+            doc = json.loads(osprivacy.read_regular(candidate, PACKAGE_JSON_MAX))
+        except (OSError, ValueError):
+            continue
+        version = doc.get("version") if isinstance(doc, dict) else None
+        return version if isinstance(version, str) and shape.fullmatch(version) else None
+    return None
+
+
+def coding_agents(home: Path, degraded: list, dirs: list[Path] | None = None) -> list[dict]:
+    """The coding agents of the contract's catalogue (DEC-0093) installed here: an agent is installed when its
+    catalogue launch command is an executable file in one of `bin_dirs`. Its id is the catalogue's; its version is
+    `launcher_version`'s, or absent. Nothing is run, and no path is recorded."""
+    try:
+        catalogue = json.loads(CATALOGUE.read_text(encoding="utf-8"))
+        agents = [a for a in catalogue.get("agents") or [] if isinstance(a, dict)]
+    except (OSError, ValueError, AttributeError):
+        degraded.append({"source": "coding-agent catalogue", "reason": "unreadable: installed coding agents not read"})
+        return []
+    dirs = bin_dirs(home) if dirs is None else dirs
+    out = []
+    for agent in agents:
+        argv = (agent.get("launch") or {}).get("argv") if isinstance(agent.get("launch"), dict) else None
+        command = argv[0] if isinstance(argv, list) and argv and isinstance(argv[0], str) else None
+        if not isinstance(agent.get("id"), str) or not command or "/" in command or "\\" in command:
+            continue
+        for folder in dirs:
+            launcher = folder / command
+            try:
+                found = launcher.is_file() and os.access(launcher, os.X_OK)
+            except OSError:
+                found = False
+            if found:
+                row = {"id": agent["id"]}
+                version = launcher_version(launcher)
+                if version:
+                    row["version"] = version
+                out.append(row)
+                break
     return out
 
 
@@ -671,6 +783,8 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "codex": codex,
         "hooks": hooks,
         "hook_security": hooks_found,
+        "plugins": enabled_plugins(claude),
+        "coding_agents": coding_agents(home, degraded),
         "usage": {"days": USAGE_DAYS, "transcripts": transcripts,
                   "unused_offered": sum(1 for s in skills if s["model_invocable"] and not s["uses_30d"])},
         "degraded": degraded,

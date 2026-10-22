@@ -43,7 +43,22 @@ FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "device/device-enrollment-request-key-on-record.json":
              "fixtures/positive/device-enrollment-request-key-on-record.json",
          "device/device-enrollment-key-on-record-with-token.json":
-             "fixtures/negative/device-enrollment-key-on-record-with-token.json"}
+             "fixtures/negative/device-enrollment-key-on-record-with-token.json",
+         # The node's harness summary and its drift (DEC-0101, DEC-0102, OBS-192): the schema with the two it refers
+         # to, the coding-agent catalogue its ids come from (DEC-0093), the policy that carries a baseline, and every
+         # node-summary fixture, positive, negative and semantic, but one: `node-summary-path-in-name.json` names a home
+         # folder, a shape the public-release gate refuses, so tests/test_node_summary.py rebuilds it from the positive.
+         "summary/node-summary.schema.json": "schemas/node-summary.schema.json",
+         "summary/common.schema.json": "schemas/common.schema.json",
+         "summary/activity-common.schema.json": "schemas/activity-common.schema.json",
+         "summary/coding-agents.json": "catalogue/coding-agents.json",
+         "summary/device-policy-harness-baseline.json": "fixtures/positive/device-policy-harness-baseline.json",
+         "summary/positive/node-summary.json": "fixtures/positive/node-summary.json",
+         **{"summary/negative/node-summary-%s.json" % name: "fixtures/negative/node-summary-%s.json" % name
+            for name in ("dotted-suffix", "drift-dotted-suffix", "endpoint-query", "mcp-dotted-suffix",
+                         "personal-context", "server-arguments", "skill-two-at")},
+         **{"summary/semantic/node-summary-%s.json" % name: "fixtures/semantic/node-summary-%s.json" % name
+            for name in ("drift-hidden", "drift-without-baseline", "duplicate", "ok", "other-org", "person")}}
 #: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
 PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
 
@@ -80,7 +95,7 @@ def vendor(contract: Path, commit: str) -> dict:
         pattern = re.compile(r"^\| `%s` \| `[0-9a-f]{64}` \|$" % re.escape(name), re.M)
         readme = pattern.sub(row, readme) if pattern.search(readme) else readme.rstrip("\n") + "\n" + row + "\n"
         target = VECTORS / name
-        target.parent.mkdir(exist_ok=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_bytes() != data:
             changed.append(name)
         target.write_bytes(data)

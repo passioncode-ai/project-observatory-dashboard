@@ -325,6 +325,44 @@ class Harness(unittest.TestCase):
         self.assertEqual((p.returncode, p.stdout.strip()), (0, "harness: not configured (integration disabled)"))
         self.assertFalse((self.out / "harness.json").exists())
 
+    def test_enabled_plugins_are_listed_by_name_source_and_version(self):
+        installed = json.loads((self.home / ".claude/plugins/installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["version"] = "1.0.0"
+        (self.home / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installed))
+        plugins = self.scan()["plugins"]
+        self.assertEqual(plugins, [
+            {"name": "stranger@market", "source": "other", "installed": True},
+            {"name": "tool@family", "source": "marketplace", "installed": True, "version": "1.0.0"}])
+        self.assertNotIn(str(self.home), json.dumps(plugins), "no install path is recorded")
+
+    @unittest.skipUnless(os.name == "posix", "launchers are linked as package managers link them")
+    def test_installed_coding_agents_by_catalogue_id_and_version_never_run(self):
+        """OBS-192: an agent of the contract's catalogue is installed when its launch command is an executable in a
+        bin folder; its version is read from where the launcher resolves (a versions folder, a Homebrew keg, an npm
+        package), never by running it."""
+        bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        marker = self.home / "ran"
+
+        def launcher(target: Path) -> Path:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"#!/bin/sh\ntouch {marker}\n")
+            target.chmod(0o755)
+            return target
+        (bin_dir / "claude").symlink_to(launcher(self.home / ".local/share/claude/versions/2.1.296"))
+        (bin_dir / "codex").symlink_to(launcher(self.home / "brew/Cellar/codex/0.48.0_1/bin/codex"))
+        package = self.home / "npm/lib/node_modules/cline"
+        (bin_dir / "cline").symlink_to(launcher(package / "bin" / "cline.js"))
+        (package / "package.json").write_text(json.dumps({"name": "cline", "version": "3.4.5"}))
+        launcher(bin_dir / "openhands")                                 # a launcher that says no version
+        (bin_dir / "qwen").write_text("not executable\n")
+        agents = {a["id"]: a.get("version") for a in self.scan()["coding_agents"]}
+        self.assertEqual({k: agents.get(k, "absent") for k in ("claude-code", "codex", "cline", "openhands", "qwen-code")},
+                         {"claude-code": "2.1.296", "codex": "0.48.0", "cline": "3.4.5", "openhands": None,
+                          "qwen-code": "absent"})
+        self.assertFalse(marker.exists(), "a launcher is never run")
+        self.assertNotIn(str(self.home), json.dumps(self.scan()["coding_agents"]))
+
     def test_nothing_it_reads_is_run(self):
         marker = self.home / "ran"
         (self.home / ".claude/skills/tidy-notes/scripts/run.sh").write_text(f"#!/bin/sh\ntouch {marker}\n")
