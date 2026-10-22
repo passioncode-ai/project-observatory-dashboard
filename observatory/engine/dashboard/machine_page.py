@@ -160,6 +160,13 @@ def guard_html(g: dict | None, t: Translator) -> str:
     parts.append(_table(t, "Disk guard", [("What", False), ("Planned", True)],
                         [[_word(t, c), t.number(planned[c])] for c in GUARD_CLASSES if planned.get(c)],
                         "Nothing to free at this pressure."))
+    kept = [k for k in g.get("kept") or [] if isinstance(k, dict) and k.get("target")][:ROWS]
+    if kept:
+        # Live state an agent service keeps under a cleanup root (OBS-203): shown, so a person
+        # sees why a large folder there is never freed.
+        parts.append(_table(t, "Kept by the guard", [("Folder", False), ("Why kept", False)],
+                            [[f'<span class="mono">{_e(k["target"])}</span>', t.known(k.get("reason"))]
+                             for k in kept], ""))
     parts.append(t.mark("From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every "
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
                         "project-observatory full disk-guard --apply",

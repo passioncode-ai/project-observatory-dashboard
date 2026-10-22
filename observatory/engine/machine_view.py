@@ -140,7 +140,8 @@ def summary(explain_pid: int | None = None) -> dict:
                         "freeGbAfter": guard.get("free_gb_after"), "freedGb": guard.get("freed_gb"),
                         "planned": guard.get("planned"), "plannedGb": guard.get("planned_gb"),
                         "results": guard.get("results"), "seconds": guard.get("seconds"),
-                        "actions": guard.get("actions"), "largeFiles": guard.get("large_files"),
+                        "actions": guard.get("actions"), "kept": guard.get("kept") or [],
+                        "largeFiles": guard.get("large_files"),
                         "memory": guard.get("memory")}
         degraded += guard.get("degraded") or []
     if explain_pid is not None:

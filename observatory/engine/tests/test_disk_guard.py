@@ -428,6 +428,181 @@ class CacheDirs(Base):
         self.assertEqual(len(self.g.plan_cache_dirs(cfg, "low", self.free(), time.time())), 1)
 
 
+
+class LiveStateUnderCacheRoots(Base):
+    """OBS-203. A cache root holds regenerable folders, but an agent service may keep its
+    in-flight jobs in its own folder there. The service says so with a marker file at the
+    top of the folder, or by declaring the path as state in its Fabric descriptor; either
+    keeps the folder out of every tier, and the report names it with the reason."""
+
+    def setUp(self):
+        super().setUp()
+        self.caches = self.base / "Caches"
+        self.services = self.base / "services"
+        self.services.mkdir()
+        env = patch.dict(os.environ, {"FABRIC_SERVICES_DIR": str(self.services)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def folder(self, name, *, marker=False, days=9):
+        d = self.caches / name
+        (d / "jobs" / "job-1").mkdir(parents=True)
+        (d / "jobs" / "job-1" / "workspace.bin").write_bytes(b"x" * 10)
+        if marker:
+            (d / self.g.KEEP_MARKER).write_text("")
+        age(d, days)
+        return d
+
+    def descriptor(self, name, paths_, placement=None):
+        doc = {"protocol": "fabric-service/0.1", "id": name, "instance": "default", "name": name,
+               "origin": "http://127.0.0.1:1", "auth": {"tokenFile": str(self.base / "token")},
+               "lifecycle": {"manager": "none"}, "installedAt": "2026-10-20T00:00:00Z",
+               "installedBy": "test", "paths": paths_}
+        if placement:
+            doc["placement"] = placement
+        (self.services / f"{name}.default.json").write_text(json.dumps(doc))
+
+    def plan(self, kept=None, degraded=None, level="normal"):
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        return self.g.plan_cache_dirs(cfg, level, self.free(), time.time(), None, degraded, kept)
+
+    def test_the_marker_file_keeps_a_folder_and_the_report_says_why(self):
+        self.folder("svc-jobs", marker=True)
+        self.folder("com.example.editor")
+        age(self.caches, 9)
+        kept = []
+        plan = self.plan(kept)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["com.example.editor"])
+        self.assertEqual([(Path(k["target"]).name, k["class"]) for k in kept], [("svc-jobs", "cache-dir")])
+        self.assertIn(".observatory-keep", kept[0]["reason"])
+
+    def test_a_marker_deeper_in_the_folder_keeps_it_too(self):
+        d = self.folder("vendor")
+        (d / "jobs" / self.g.KEEP_MARKER).write_text("")
+        age(d, 9)
+        self.assertEqual(self.plan(), [])
+
+    def test_a_marker_keeps_the_folder_at_every_pressure(self):
+        self.folder("svc-jobs", marker=True, days=40)
+        for level in self.g.LEVELS:
+            self.assertEqual(self.plan(level=level), [], level)
+
+    def test_a_marker_written_after_the_plan_stops_the_removal(self):
+        d = self.folder("svc-jobs")
+        plan = self.plan()
+        self.assertEqual(len(plan), 1)
+        (d / self.g.KEEP_MARKER).write_text("")
+        age(d, 9)
+        rec = self.g.act(plan[0], self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertIn(".observatory-keep", rec["reason"])
+        self.assertTrue((d / "jobs" / "job-1" / "workspace.bin").exists())
+
+    def test_a_state_path_a_descriptor_declares_keeps_its_folder(self):
+        self.folder("svc-a")                              # paths.data is the folder itself
+        self.folder("vendor")                             # paths.config is inside this folder
+        self.folder("svc-c")                              # a log file inside it
+        self.folder("other")
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a"), "logs": []})
+        self.descriptor("svc-b", {"data": str(self.base / "elsewhere"),
+                                  "config": str(self.caches / "vendor" / "jobs"), "logs": []})
+        self.descriptor("svc-c", {"data": str(self.base / "elsewhere-c"),
+                                  "logs": [str(self.caches / "svc-c" / "jobs" / "run.log")]})
+        kept = []
+        plan = self.plan(kept)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["other"])
+        reasons = {Path(k["target"]).name: k["reason"] for k in kept}
+        self.assertEqual(sorted(reasons), ["svc-a", "svc-c", "vendor"])
+        self.assertIn("svc-a.default", reasons["svc-a"])
+        self.assertIn("paths.data", reasons["svc-a"])
+        self.assertIn("paths.config", reasons["vendor"])
+        self.assertIn("paths.logs", reasons["svc-c"])
+
+    def test_a_declared_state_path_that_holds_the_whole_root_keeps_every_folder(self):
+        self.folder("one")
+        self.descriptor("svc-a", {"data": str(self.caches), "logs": []})
+        self.assertEqual(self.plan(), [])
+
+    def test_a_declared_cache_path_stays_regenerable(self):
+        # The contract's own word: `paths.cache` is a cache. Live state there needs the marker.
+        self.folder("svc-a")
+        self.descriptor("svc-a", {"data": str(self.base / "elsewhere"), "cache": str(self.caches / "svc-a"),
+                                  "logs": []})
+        self.assertEqual([Path(a["target"]).name for a in self.plan()], ["svc-a"])
+
+    def test_a_descriptor_that_appears_after_the_plan_stops_the_removal(self):
+        self.folder("svc-a")
+        plan = self.plan()
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a"), "logs": []})
+        rec = self.g.act(plan[0], self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertIn("svc-a.default", rec["reason"])
+        self.assertTrue((self.caches / "svc-a").exists())
+
+    def test_a_remote_descriptor_declares_nothing_here(self):
+        self.folder("svc-a")
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a"), "logs": []}, placement="remote")
+        self.assertEqual(len(self.plan()), 1)
+
+    def test_an_unreadable_descriptor_is_named_in_degraded(self):
+        self.folder("svc-a", marker=True)
+        (self.services / "broken.default.json").write_text("{not json")
+        degraded = []
+        self.plan(degraded=degraded)
+        rows = [d for d in degraded if d.get("source") == "fabric-descriptors"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("broken.default.json", rows[0]["path"])
+
+    def test_a_temporary_root_honours_the_marker(self):
+        (self.t1 / "svc-scratch").mkdir()
+        (self.t1 / "svc-scratch" / self.g.KEEP_MARKER).write_text("")
+        (self.t1 / "plain").mkdir()
+        age(self.t1, 9)
+        kept = []
+        plan = self.g.plan_temp(self.cfg(), "normal", self.free(), time.time(), None, None, kept)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["plain"])
+        self.assertEqual([(Path(k["target"]).name, k["class"]) for k in kept], [("svc-scratch", "temp")])
+
+    def test_a_build_output_folder_with_the_marker_is_not_disposable(self):
+        import cleanup_safety
+        d = self.base / "node_modules"
+        (d / "pkg").mkdir(parents=True)
+        (d / "pkg" / self.g.KEEP_MARKER).write_text("")
+        self.assertIn(".observatory-keep", cleanup_safety.protected_tree_reason(str(d)))
+
+    def test_the_report_lists_what_was_kept(self):
+        self.folder("svc-jobs", marker=True)
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        with patch.object(self.g, "load_config", return_value=cfg), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "running", return_value=False):
+            doc = self.g.run(["--apply", "--level", "critical"])
+        self.assertTrue((self.caches / "svc-jobs" / "jobs" / "job-1").exists())
+        self.assertEqual([(Path(k["target"]).name, k["class"]) for k in doc["kept"]], [("svc-jobs", "cache-dir")])
+        import paths
+        report = json.loads((paths.SCRATCH / "disk-guard.json").read_text())
+        self.assertEqual(report["kept"], doc["kept"])
+
+    def test_the_machine_view_and_page_show_a_kept_folder(self):
+        import paths
+        import machine_view
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        kept = [{"class": "cache-dir", "target": str(self.caches / "svc-jobs"),
+                 "reason": "the folder carries .observatory-keep: an agent service keeps live state here"}]
+        (paths.SCRATCH / "disk-guard.json").write_text(json.dumps({"at": "2026-10-22T00:00:00Z", "kept": kept}))
+        view = importlib.reload(machine_view).summary()
+        self.assertEqual(view["guard"]["kept"], kept)
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        import machine_page
+        from i18n import Translator
+        html = machine_page.guard_html(view["guard"], Translator("en"))
+        self.assertIn("Kept by the guard", html)
+        self.assertIn("svc-jobs", html)
+        self.assertIn(".observatory-keep", html)
+
+
 class Cadence(Base):
     def run_auto(self, previous_at, free_gb):
         import paths
@@ -691,11 +866,11 @@ class RunBudget(Base):
         calls = []
         real = self.g.act
 
-        def act(a, holders):
+        def act(a, holders, *more):
             calls.append(a)
             if len(calls) == 2:
                 raise KeyboardInterrupt          # the job's kill, as far as this process can tell
-            return real(a, holders)
+            return real(a, holders, *more)
         with contextlib.ExitStack() as stack:
             for p in self.patched():
                 stack.enter_context(p)

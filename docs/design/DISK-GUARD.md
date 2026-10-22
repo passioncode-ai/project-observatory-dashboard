@@ -69,6 +69,33 @@ state markers, symlinks, special files, read errors and exhausted time/entry bud
 all retain it. The disk guard shares the entry predicate in its own bounded walk.
 This observation does not lock out an adversarial writer between a check and removal.
 
+## Live state under cache roots (OBS-203, 2026-10-22)
+
+`~/Library/Caches` and `~/.cache` are cache roots, so a folder in them was removable once nobody
+had touched or held it for `cache_days`. An agent service may keep in-flight jobs there, and on
+2026-10-20 one service's job workspaces and runner permissions in its own folder there were lost
+(this engine's journals hold no removal in that window, but the guard would have planned one).
+Until then only a person's `guard.cache_keep` list protected such a folder. Now a service says it
+itself, in one of two ways, and every class honours either at every pressure:
+
+- **A marker file**, `.observatory-keep` (`cleanup_safety.KEEP_MARKER`). At the top of a folder
+  under a cache or temporary root, `disk_guard.keep_reason` keeps it before any walk. Anywhere
+  deeper, the shared entry predicate refuses the tree, so the guard's walk and `cleanup.py`'s
+  build-output walk (`protected_tree_reason`) keep it too.
+- **A Fabric service descriptor.** The contract's descriptor already declares `paths.data`,
+  `paths.config`, `paths.cache` and `paths.logs`; no new field was added.
+  `disk_guard.declared_state_paths` reads the local descriptors (`fabric_service.services_dir()`,
+  remote ones skipped) and treats `data`, `config` and `logs` as state: a folder that is such a
+  path, holds one or lies inside one is kept. `paths.cache` stays removable, because the contract
+  calls it a cache; a service that keeps live work there writes the marker. Paths compare without
+  case on macOS and Windows, lexically and resolved; a declared path in a privacy-guarded place is
+  not resolved. A descriptor that cannot be read is named in `degraded` (`fabric-descriptors`).
+
+Both are checked again in `act` right before a removal, so a marker written or a service installed
+after the plan still stops it. The report carries `kept` (class, folder, reason; at most 200), and
+the Machine page shows it as "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots`
+pins each rule.
+
 ## Not done here, and why
 
 - A person's `full update --apply` started while a pass runs is refused by the snapshot's

@@ -218,6 +218,8 @@ DYNAMIC_IDS = {
     "Memory", "Processes",  # machine_page per-source freshness labels
 
     "No file above the size line.",        # machine_page.guard_html(): measured empty state via `empty`
+    # machine_page.guard_html(): a kept folder's reason via `t.known`, cleanup_safety.KEEP_REASON (OBS-203)
+    "the folder carries .observatory-keep: an agent service keeps live state here",
     "Projects — the operator's registry",  # build(): the single page's title, via `title`
     "Search",                              # render(): the placeholder when no tab matches
     "nothing to lose",                     # at_risk_total(): a stats value the script translates

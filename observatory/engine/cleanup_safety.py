@@ -11,11 +11,19 @@ import os
 import stat
 import time
 
-STATE_MARKERS = frozenset({".git", ".wrangler"})
+#: The file an agent service writes at the top of a folder that holds live state (in-flight
+#: jobs, runner permissions) under a root the cleanup counts as regenerable, such as
+#: `~/Library/Caches` or `~/.cache` (OBS-203). Wherever it appears in a tree, no tier removes
+#: the tree: one service's job workspaces in its cache folder were lost on 2026-10-20.
+KEEP_MARKER = ".observatory-keep"
+KEEP_REASON = f"the folder carries {KEEP_MARKER}: an agent service keeps live state here"
+STATE_MARKERS = frozenset({".git", ".wrangler", KEEP_MARKER})
 
 
 def protected_entry_reason(name: str, mode: int) -> str:
     """One predicate shared by cleanup and the disk guard's own bounded walker."""
+    if name == KEEP_MARKER:
+        return KEEP_REASON
     if name in STATE_MARKERS:
         return "repository or local-state marker"
     if stat.S_ISLNK(mode):
