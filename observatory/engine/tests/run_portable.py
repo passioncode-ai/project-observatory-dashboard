@@ -226,7 +226,16 @@ BOUNDARY += ('folder_attribution', 'fabric_attribution')
 BOUNDARY += ('machine_backup',)
 # A session MCP server moving itself onto the installed release over real pipes (OBS-159).
 BOUNDARY += ('session_reload',)
+# OBS-161, OBS-199, OBS-201, OBS-204: organization enrollment against the fake organization server. The suite
+# shipped with OBS-161 but was never listed here, so `full check` never ran it (OBS-201); RUN_ELSEWHERE below and
+# tests/test_runner_evidence.py now refuse an engine test file that no runner names.
+BOUNDARY += ('node_org',)
 SUITES = LEGACY + BOUNDARY
+#: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
+#: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
+RUN_ELSEWHERE = {
+    'j1_evidence': 'the root suite tests/test_j1_evidence.py runs it against the real runner',
+}
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',

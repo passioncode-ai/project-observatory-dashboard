@@ -262,6 +262,23 @@ jobs:
         name: Synthetic runtime and privacy tests
         continue-on-error: true
         run: python -m unittest discover -s tests
+      - id: org
+        # OBS-201: `full org enroll`, `org check-in` and `org rotate` against the fake organization server, the device
+        # key and the enrollment owner-only by this account's access list. Enforced: a failure fails this job. The
+        # import first, because the suite skips without the `full` extra and a skipped run proves nothing.
+        name: Organization enrollment, device key owner-only (OBS-201, enforced)
+        if: always()
+        run: |
+          cd observatory/engine
+          python -c "import cryptography"
+          python tests/test_node_org.py -v
+      - id: org_runner
+        # The same suite through the portable runner's sandbox, as `full check` runs it on the other rows. Informative
+        # until the runner itself is proven on Windows.
+        name: The organization suite through `full check` (informative)
+        if: always()
+        continue-on-error: true
+        run: project-observatory full check --suite node_org --report-dir "$RUNNER_TEMP/org-full-check"
       - id: holder_safety
         name: Unknown Windows holders preserve paths; shared-delete rename is not evidence
         if: always()
@@ -288,5 +305,7 @@ jobs:
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| OpenRouter ledger lock | ${{ steps.ledgerlock.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
+            echo "| Organization enrollment (enforced) | ${{ steps.org.outcome }} |"
+            echo "| Organization suite through full check | ${{ steps.org_runner.outcome }} |"
             echo "| Holder safety (enforced) | ${{ steps.holder_safety.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -211,6 +211,7 @@ class FakeServer:
         self.refuse_storage, self.skew, self.org, self.strict_schema = (), 0, ORG, False
         self.checkin_protocols, self.batch_answer, self.lose_rotation, self.rotations = None, None, False, {}
         self.pause = None                                  # (path, started Event, release Event): hold one request
+        self.closed = False                                # the organization was deleted: every request is unknown-org
         self._hashes = hashes
 
     def __call__(self, url, headers, body, timeout):
@@ -220,6 +221,8 @@ class FakeServer:
         handler = {'/v1/devices/enroll': self.enroll, '/v1/devices/check-in': self.check_in,
                    '/v1/devices/rotate': self.rotate, '/v1/activity/batches': self.batch,
                    '/v1/devices/share-registrations': self.share}[path]
+        if self.closed:                                    # contract refusal of a deleted organization (OBS-204)
+            return 404, json.dumps({'error': {'code': 'unknown-org'}}).encode()
         if self.pause and self.pause[0] == path:
             pause, self.pause = self.pause, None
             pause[1].set()
@@ -561,6 +564,190 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.now[0] += 8 * 86400
         self.assertEqual(self.make().tick()['result'], 'needs-enrollment')
         self.assertIn('org:needs-enrollment', self.make().describe()['degraded'])
+
+    # -- OBS-199: the certificate's expiry, named before and after it passes ------------------------------------
+    def test_status_names_the_expiry_date_and_warns_three_days_before(self):
+        enrolled = self.enroll()
+        not_after = enrolled['certificate']['notAfter']
+        self.assertEqual(enrolled['certificate']['expiresOn'], not_after[:10])
+        self.assertEqual(enrolled['certificate']['state'], 'valid')
+        self.assertNotIn('org:certificate-expiring', enrolled['degraded'])
+        self.assertIsNone(enrolled.get('nextStep'))
+        self.now[0] = strict_time(not_after) / 1000 - 3 * 86400 - 60          # a minute before the warning
+        self.assertEqual(self.make().describe()['certificate']['state'], 'valid')
+        self.now[0] += 120                                                      # inside the last three days
+        status = self.make().describe()
+        self.assertEqual(status['certificate']['state'], 'expiring')
+        self.assertIn('org:certificate-expiring', status['degraded'])
+        self.assertIn(not_after, status['nextStep'])
+        self.assertEqual(status['command'], 'project-observatory full org rotate --org ' + ORG)
+        self.assertFalse(status['needsEnrollment'])
+
+    def test_a_check_in_on_an_expired_certificate_names_it_and_the_exact_step(self):
+        from node.org import OrgError
+        not_after = self.enroll()['certificate']['notAfter']
+        self.now[0] = strict_time(not_after) / 1000 + 1
+        sent = len(self.server.log)
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        error = raised.exception
+        self.assertEqual(error.code, 'certificate-expired')
+        self.assertIn(not_after, str(error))
+        self.assertEqual(error.command, 'project-observatory full org enroll --server https://org.example --org '
+                         + ORG + ' --token-slot PROJECT/ENV/NAME')
+        self.assertIn('new enrollment token', error.next_step)
+        self.assertEqual(len(self.server.log), sent)                            # nothing went to the server
+        status = self.make().describe()
+        self.assertEqual(status['certificate']['state'], 'expired')
+        self.assertEqual(status['command'], error.command)
+        self.assertIn('org:certificate-expired', status['degraded'])
+        tick = self.make().tick()
+        self.assertEqual((tick['result'], tick['command']), ('needs-enrollment', error.command))
+
+    def test_the_terminal_says_an_expired_certificate_and_its_step_and_fails(self):
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import org as org_tool
+        not_after = self.enroll()['certificate']['notAfter']
+        self.now[0] = strict_time(not_after) / 1000 + 1
+        out = io.StringIO()
+        with mock.patch.object(org_tool, '_enrollment', lambda org_id: self.make()), \
+                mock.patch.object(org_tool, '_orgs', lambda args: [ORG]), contextlib.redirect_stdout(out):
+            code = org_tool.main(['check-in', '--org', ORG])
+        self.assertEqual(code, 1)
+        (row,) = json.loads(out.getvalue())['organizations']
+        self.assertEqual(row['error'], 'certificate-expired')
+        self.assertIn(not_after, row['message'])
+        self.assertIn('full org enroll --server https://org.example', row['command'])
+        self.assertIn('new enrollment token', row['nextStep'])
+
+    def test_health_lists_each_enrollments_expiry_without_the_network(self):
+        from node import org
+        not_after = self.enroll()['certificate']['notAfter']
+        sent = len(self.server.log)
+        (notice,) = org.notices(self.node, now=self.clock())
+        self.assertEqual((notice['org'], notice['state'], notice['expiresOn']), (ORG, 'valid', not_after[:10]))
+        (notice,) = org.notices(self.node, now=strict_time(not_after) / 1000 - 86400)
+        self.assertEqual((notice['state'], notice['command']), ('expiring', 'project-observatory full org rotate --org '
+                                                                + ORG))
+        (notice,) = org.notices(self.node, now=strict_time(not_after) / 1000 + 1)
+        self.assertEqual(notice['state'], 'expired')
+        self.assertEqual(org.notices(self.node.parent / 'no-node', now=self.clock()), [])
+        self.assertEqual(len(self.server.log), sent)
+
+    def test_doctor_and_health_read_the_same_notices(self):
+        from unittest import mock
+        import workspace
+        self.enroll()
+        with mock.patch.dict(os.environ, {'OBSERVATORY_NODE': str(self.node)}):
+            (row,) = workspace._organizations(self.node.parent / 'elsewhere')
+        self.assertEqual((row['org'], row['server']), (ORG, 'https://org.example'))
+        self.assertIn(row['state'], ('valid', 'expiring', 'expired'))
+        with mock.patch.dict(os.environ, {'OBSERVATORY_NODE': ''}):
+            self.assertEqual(len(workspace._organizations(self.node.parent)), 1)      # <base>/node, as `full org`
+            self.assertEqual(workspace._organizations(self.node.parent / 'elsewhere'), [])
+        source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
+        self.assertIn('node_org.notices(node_org.node_folder(', source)              # the Health data
+        for state in ('removed', 'expired', 'needs-enrollment', 'expiring'):          # each state has its row
+            self.assertIn('"%s"' % state, source[source.index('Array.isArray(H.organizations)'):])
+
+    # -- OBS-204: a machine removed from its organization ------------------------------------------------------
+    def _pending(self):
+        with self.make()._db() as conn:
+            return conn.execute("SELECT COUNT(*) AS n FROM events WHERE state = 'pending'").fetchone()['n']
+
+    def assert_removed(self, code):
+        from node.org import OrgError
+        state = self.make().state()
+        self.assertEqual((state['removed']['code'], state['removed']['droppedEvents']), (code, 3))
+        self.assertEqual(self._pending(), 0)
+        status = self.make().describe()
+        self.assertEqual(status['state'], 'removed')
+        self.assertEqual(status['removed']['code'], code)
+        self.assertIn('org:removed', status['degraded'])
+        self.assertIn('removed from', status['nextStep'])
+        self.assertEqual(status['command'], 'project-observatory full org leave --org ' + ORG)
+        sent = len(self.server.log)
+        for step in ('check_in', 'rotate', 'flush', 'register_shares', 'collect_grant_usage'):
+            with self.subTest(step), self.assertRaises(OrgError) as raised:
+                getattr(self.make(), step)()
+            self.assertEqual(raised.exception.code, 'removed-from-organization')
+        with self.assertRaises(OrgError):
+            self.make().enqueue('meter.call', {'n': 9}, occurred='2026-10-18T00:00:00Z')
+        self.now[0] += 86400
+        self.assertEqual(self.make().tick()['result'], 'removed')
+        self.assertEqual(len(self.server.log), sent)                            # no retry reaches the server
+        (notice,) = __import__('node.org', fromlist=['notices']).notices(self.node, now=self.clock())
+        self.assertEqual((notice['state'], notice['removed']['code']), ('removed', code))
+
+    def _three_events(self):
+        for n in range(3):
+            self.make().enqueue('meter.call', {'n': n}, occurred='2026-10-18T00:00:00Z')
+
+    def test_a_revoked_certificate_removes_the_machine_and_drops_what_it_buffered(self):
+        self.enroll()
+        self._three_events()
+        self.server.certs[self.make().state()['certificate']['serial']]['revoked'] = True
+        result = self.make().check_in()
+        self.assertFalse(result['ok'])
+        self.assertEqual((result['code'], result['removed']['code']), ('certificate-revoked', 'certificate-revoked'))
+        self.assertEqual(result['command'], 'project-observatory full org leave --org ' + ORG)
+        self.assert_removed('certificate-revoked')
+
+    def test_a_deleted_organization_ends_the_outbox_instead_of_retrying_it(self):
+        self.enroll()
+        self._three_events()
+        self.server.closed = True
+        self.assertEqual(self.make().flush()['held'], 'removed')
+        self.assert_removed('unknown-org')
+
+    def test_a_certificate_the_server_forgot_with_no_previous_one_removes_the_machine(self):
+        self.enroll()
+        self._three_events()
+        del self.server.certs[self.make().state()['certificate']['serial']]
+        self.assertEqual(self.make().check_in()['code'], 'certificate-unknown')
+        self.assert_removed('certificate-unknown')
+
+    def test_a_removed_machine_leaves_and_a_new_token_starts_over(self):
+        self.enroll()
+        self._three_events()
+        self.server.closed = True
+        self.make().check_in()
+        self.assertEqual(self.make().state()['removed']['code'], 'unknown-org')
+        self.server.closed, self.server.epoch = False, 0                       # the organization is created again
+        again = self.enroll('et_2.' + 'T' * 32)
+        self.assertEqual((again['epoch'], again['state']), (1, 'enrolled'))
+        self.assertNotIn('removed', again)
+        self.assertTrue(self.make().check_in()['ok'])
+        self.make().enqueue('meter.call', {'n': 'new'}, occurred='2026-10-18T00:00:00Z')
+        with self.make()._db() as conn:
+            self.assertEqual([r['seq'] for r in conn.execute('SELECT seq FROM events')], [1])  # a new stream
+        self.assertEqual(self.make().leave(), {'org': ORG, 'left': True})
+        self.assertFalse((self.node / 'orgs' / ORG).exists())
+
+    # -- OBS-201: the device key and the enrollment are owner-only on every system -----------------------------
+    def test_the_device_keys_and_the_enrollment_are_owner_only_on_this_system(self):
+        import osprivacy
+        self.enroll()
+        self.make().check_in()
+        self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        folder = self.node / 'orgs' / ORG
+        files = [folder / 'keys' / name for name in ('sig.pem', 'kem.pem', 'device.json')] + \
+            [folder / name for name in ('enrollment.json', 'outbox.sqlite', 'journal.jsonl')]
+        for path in files + [folder, folder / 'keys']:
+            with self.subTest(path.name):
+                self.assertTrue(path.exists())
+                self.assertTrue(osprivacy.private(path), osprivacy.explain(path))
+                self.assertFalse(osprivacy.others_may_write(path), osprivacy.explain(path))
+                self.assertTrue(osprivacy.owned_by_me(path), osprivacy.explain(path))
+                if os.name == 'nt':                    # Windows keeps no mode bits: the access list is the proof
+                    self.assertEqual(osprivacy.describe(path), 'owner-only')
+                else:
+                    want = 0o700 if path.is_dir() else 0o600
+                    self.assertEqual(path.stat().st_mode & 0o777, want, oct(path.stat().st_mode))
+        self.assertNotEqual(self.make().keys.sign(b'x'), '')                    # the key loads back from its file
 
 
     # -- fix cycle 1 (adversarial round 1 on PR #308) ----------------------------------------------------------

@@ -7,10 +7,13 @@
         request is signed by this machine's `#sig` device key (created on first use). Run again with a new token,
         it re-enrolls (a new stream epoch).
     project-observatory full org status [--org ID]
-        enrolled organizations: server, certificate expiry and whether rotation is due, last check-in, outbox depth,
-        the last batch's result, share registrations and anything degraded
+        enrolled organizations: server, the certificate's expiry date and state (a warning in its last three days),
+        whether rotation is due, last check-in, outbox depth, the last batch's result, share registrations, anything
+        degraded, and, when a person has something to do, the step (`nextStep`) and its `command`. A machine its
+        organization removed (a revoked certificate, an unknown one, an unknown organization) reads `removed`, with
+        the date and the server's code, and sends nothing more
     project-observatory full org check-in [--org ID]
-        one signed check-in now
+        one signed check-in now; an expired certificate or a removed machine is refused with the step to take
     project-observatory full org rotate [--org ID]
         a new certificate for the same key before expiry
     project-observatory full org tick [--org ID]
@@ -24,7 +27,9 @@
         apply an estate revision this machine verifies (against the one applied before it, or the first under the
         passkeys it pins) or a revocation-delta page: what share registrations are derived from
 
-Every answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1.
+Every answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
+refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
+failed, a check-in the server refused included.
 """
 from __future__ import annotations
 
@@ -109,9 +114,18 @@ def run(args) -> dict:
         try:
             results.append({"org": org_id, **getattr(one, action[args.command])()})
         except org.OrgError as error:
-            results.append({"org": org_id, "error": error.code, "message": str(error)[:200]})
+            results.append({"org": org_id, **_refusal(error)})
     return {"schema": "org-status/1" if args.command == "status" else "org-%s/1" % args.command,
             "organizations": results}
+
+
+def _refusal(error) -> dict:
+    """An OrgError for the terminal: its code and message, and the person's step and command when it has one."""
+    out = {"error": error.code, "message": str(error)[:300]}
+    for key, value in (("nextStep", getattr(error, "next_step", None)), ("command", getattr(error, "command", None))):
+        if value:
+            out[key] = value
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -124,13 +138,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         answer = run(args)
     except org.OrgError as error:
-        print(json.dumps({"error": error.code, "message": str(error)[:300]}), file=sys.stderr)
+        print(json.dumps(_refusal(error)), file=sys.stderr)
         return 1
     except (OSError, ValueError, RuntimeError) as error:
         print(json.dumps({"error": "refused", "message": type(error).__name__}), file=sys.stderr)
         return 1
     print(json.dumps(answer, indent=1, sort_keys=True))
-    failed = [r for r in answer.get("organizations", []) if "error" in r]
+    failed = [r for r in answer.get("organizations", []) if "error" in r or r.get("ok") is False]
     return 1 if failed and len(failed) == len(answer.get("organizations", [])) else 0
 
 

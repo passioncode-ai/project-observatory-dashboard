@@ -135,6 +135,15 @@ class SuiteEvidence(unittest.TestCase):
         self.assertEqual(row['status'],'PASS')
         self.assertEqual(row['test_protocol'],'unittest')
 
+    def test_every_engine_test_file_runs_somewhere(self):
+        # OBS-201: the organization-enrollment suite shipped and never ran, because nothing compared
+        # the files with the runner's lists. Each one is a suite, a helper, or named with what runs it.
+        files={p.stem[len('test_'):] for p in (runner.ROOT/'tests').glob('test_*.py')}
+        helpers={n[len('test_'):-len('.py')] for n in runner.HELPERS if n.startswith('test_') and n.endswith('.py')}
+        self.assertEqual(sorted(files-set(runner.SUITES)-helpers-set(runner.RUN_ELSEWHERE)),[])
+        self.assertEqual(sorted(set(runner.RUN_ELSEWHERE)-files),[])
+        self.assertFalse(set(runner.RUN_ELSEWHERE)&set(runner.SUITES))
+
     def test_legacy_protocol_list_matches_current_registered_sources(self):
         self.assertFalse(set(runner.ASSERTION_LINE_SUITES) - set(runner.SUITES))
         for name in runner.SUITES:

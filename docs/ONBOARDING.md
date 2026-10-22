@@ -1332,12 +1332,22 @@ keeps the 7-day certificate, the stream epoch and the protocols the server accep
 certificate at two thirds of its life, checks in, sends share registrations, collects `grant.usage` and empties the
 outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
 
-- `org status` shows each organization's server, certificate expiry and whether rotation is due, the last check-in,
-  the outbox depth and the last batch's result, and `degraded` lines: `org:needs-enrollment` (the certificate expired
-  or the server asked for re-enrollment: enroll again with a new token), `org:share-registration-not-listed` (the
+- `org status` shows each organization's server, the certificate's expiry date and state (`valid`, `expiring` in its
+  last three days, `expired`) and whether rotation is due, the last check-in, the outbox depth and the last batch's
+  result, and `degraded` lines: `org:certificate-expiring` (renew it now with `org rotate --org <id>` while the server
+  answers), `org:certificate-expired` and `org:needs-enrollment` (the certificate expired or the server asked for
+  re-enrollment: enroll again with a new token), `org:removed` (below), `org:share-registration-not-listed` (the
   server does not accept `share-registration/1` yet, so neither registrations nor `grant.usage` are sent),
   `org:share-registration-refused` (a typed refusal that waits for your estate record to change) and
-  `org:outbox-retrying`.
+  `org:outbox-retrying`. When you have something to do, `nextStep` says it in words and `command` is the command.
+  `full doctor` (`organizations`) and the Health page show the same expiry and state.
+- A machine offline past its certificate's 7 days needs a new enrollment token: `org check-in` then refuses with
+  `certificate-expired`, the date, the step and the `org enroll` command, and exits 1.
+- A machine its organization removed (the server answers `certificate-revoked`, `certificate-unknown` or
+  `unknown-org`, as it does when an administrator removes the machine or the organization is closed) is shown as
+  `removed`, with the date and the code. Nothing more is sent to that organization, and the events it still held
+  are dropped (they can be accepted nowhere) with one count kept. `org leave --org <id>` removes its local state;
+  `org enroll` with a new token starts over.
 - `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
 - `org leave --org <id>` removes this machine's local state for that organization, its own device keys with it. The
   organization keeps its records until an administrator retires the device.
