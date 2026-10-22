@@ -489,6 +489,15 @@ revision 0), a check-in scheduler at the server's interval (the maintenance job 
 `kid` and `iss` (CX-CON-06 in the contract). A settlement the meter accepts after its reservation expired lands after
 its day was sent and is not counted (the meter does not refuse late settlements).
 
+## Lifecycle (OBS-79)
+
+The node wakes, stops and restarts enrolled desktop apps and background services for agents. Its plan, file by file
+and step by step, is [LIFECYCLE.md](LIFECYCLE.md). Step L1 is built: `observatory/engine/node/lifecycle/broker.py`, the
+platform-neutral broker (the closed registry, the authority, durable operations and receipts, the effect journal,
+circuits, the restart budget, the idle and takeover rules), tested against fake adapters by
+`tests/test_node_lifecycle_broker.py`. The macOS adapter (L2), the six `lifecycle.*` tools (L3) and the supervisor
+thread (L4) follow.
+
 ## What comes next
 
 | Slice | What |

@@ -232,6 +232,9 @@ BOUNDARY += ('session_reload',)
 # shipped with OBS-161 but was never listed here, so `full check` never ran it (OBS-201); RUN_ELSEWHERE below and
 # tests/test_runner_evidence.py now refuse an engine test file that no runner names.
 BOUNDARY += ('node_org',)
+# OBS-79 step L1: the lifecycle broker (registry, authority, durable operations, receipts, the effect journal,
+# circuits, the restart budget, idle and takeover rules) against fake adapters.
+BOUNDARY += ('node_lifecycle_broker',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
