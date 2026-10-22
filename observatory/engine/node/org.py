@@ -128,7 +128,7 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                  'and run: ' + enroll)
     removed = state.get('removed')
     if isinstance(removed, dict):
-        out.update(state='removed', removed=removed, command='project-observatory full org leave --org ' + org_id,
+        out.update(state='removed', removed=removed, command='project-observatory full org leave --org %s' % org_id,
                    enrollCommand=enroll,
                    nextStep='this machine was removed from organization %s on %s (the server answered %s): nothing '
                             'more is sent to it and what it held was dropped. Remove its local state with: '
@@ -143,7 +143,7 @@ def notice(org_id: str, state: dict, now: float) -> dict:
         out.update(state='needs-enrollment', command=enroll,
                    nextStep='the organization asked this machine to enroll again: ' + new_token)
     elif left <= EXPIRY_WARNING_SECONDS:
-        out.update(state='expiring', command='project-observatory full org rotate --org ' + org_id,
+        out.update(state='expiring', command='project-observatory full org rotate --org %s' % org_id,
                    nextStep='the certificate expires on %s. The maintenance job renews it while the server answers; '
                             'renew it now with: project-observatory full org rotate --org %s. If this machine stays '
                             'offline past %s it needs a new enrollment token' % (not_after_text, org_id,

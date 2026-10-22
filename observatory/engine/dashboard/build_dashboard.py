@@ -2341,13 +2341,13 @@ if (H.access_bindings) {
 if (Array.isArray(H.organizations)) {
   const orgStatus = fullCommand("org status");
   for (const O of H.organizations) {
-    const enroll = fullCommand("org enroll --server " + shellArg(O.server || "https://ORG-SERVER") + " --org " +
-      shellArg(O.org) + " --token-slot PROJECT/ENV/NAME");
+    const enroll = fullCommand("org enroll --server", shellArg(O.server || "https://ORG-SERVER"), "--org", shellArg(O.org),
+      "--token-slot PROJECT/ENV/NAME");
     const label = T("organization {org}", {org: O.org || "?"});
     if (O.state === "removed")
       hb.push([label, T("removed from the organization on {date} (the server answered {code}); nothing more is sent to it",
         {date: ((O.removed || {}).at || "?").slice(0, 10), code: (O.removed || {}).code || "?"}),
-        fullCommand("org leave --org " + shellArg(O.org))]);
+        fullCommand("org leave --org", shellArg(O.org))]);
     else if (O.state === "expired")
       hb.push([label, T("certificate expired on {date}; enroll again with a new token from the organization's administrator",
         {date: O.expiresOn || "?"}), enroll]);
@@ -2355,7 +2355,7 @@ if (Array.isArray(H.organizations)) {
       hb.push([label, T("the organization asked this machine to enroll again with a new token"), enroll]);
     else if (O.state === "expiring")
       hb.push([label, T("certificate expires on {date}; renew it now while the server answers", {date: O.expiresOn || "?"}),
-        fullCommand("org rotate --org " + shellArg(O.org))]);
+        fullCommand("org rotate --org", shellArg(O.org))]);
     else if (O.state === "valid")
       hb.push([label, T("certificate valid until {date}", {date: O.expiresOn || "?"}), orgStatus]);
     else
