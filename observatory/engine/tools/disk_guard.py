@@ -46,6 +46,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import shutil
 import stat
 import subprocess
@@ -388,22 +389,72 @@ def _wide_roots(cfg: dict) -> list[str]:
     return sorted(out)
 
 
-def service_state(cfg: dict | None = None, degraded: list | None = None) -> dict:
+#: The contract's `localPath` (service-common.schema.json): absolute or under `~`, no NUL.
+LOCAL_PATH = re.compile(r"^(~[\\/]|/|[A-Za-z]:[\\/])")
+LOCAL_PATH_MAX = 1024
+#: A descriptor's file name, `<id>.<instance>.json` (fabric_service._ID, _INSTANCE).
+DESCRIPTOR_NAME = re.compile(r"^([a-z][a-z0-9-]{1,62})\.[a-z][a-z0-9-]{0,31}\.json$")
+
+
+def _declared(doc: dict, service: str, wide: list[str]) -> tuple[list[dict], list[tuple[str, str]]]:
+    """The state paths one descriptor declares, and the ones refused as too wide.
+    ValueError when a value breaks the contract's `localPath` or cannot be normalised (a NUL
+    once made `realpath` raise and stopped every guard run): the caller treats the whole
+    descriptor as unreadable."""
+    declared = doc.get("paths")
+    if doc.get("placement") == "remote" or declared is None:
+        return [], []
+    if not isinstance(declared, dict):
+        raise ValueError("paths is not an object")
+    out, refused = [], []
+    for field in STATE_FIELDS:
+        values = declared.get(field)
+        if values is None:
+            continue
+        for value in values if isinstance(values, list) else [values]:
+            if (not isinstance(value, str) or len(value) > LOCAL_PATH_MAX or "\x00" in value
+                    or not LOCAL_PATH.match(value)):
+                raise ValueError(f"paths.{field} is not a local path")
+            try:
+                path = os.path.expanduser(value)
+                if not os.path.isabs(path):
+                    continue                    # another system's grammar (a drive letter here)
+                forms = {_comparable(os.path.abspath(path))}
+                if not guarded(path):
+                    forms.add(_comparable(os.path.realpath(path)))
+            except (ValueError, OSError) as exc:
+                raise ValueError(f"paths.{field} could not be normalised") from exc
+            if any(os.path.dirname(x) == x for x in forms) or any(_covers(x, w) for x in forms for w in wide):
+                refused.append((value, f"the Fabric service {service} declares {value} as state (paths.{field}); "
+                                       "it is or holds a cleanup root, the home folder or a filesystem root, "
+                                       "so it is ignored"))
+                continue
+            out.append({"service": service, "field": f"paths.{field}", "forms": sorted(forms)})
+    return out, refused
+
+
+def service_state(cfg: dict | None = None, degraded: list | None = None,
+                  deadline: float | None = None) -> dict:
     """The state paths the local Fabric service descriptors on this machine declare:
-    {"paths": [{service, field, forms}], "complete": bool, "refused": int, "seconds": float}.
+    {"paths": [{service, field, forms}], "unknown_services": [id], "complete": bool,
+    "refused": int, "seconds": float}.
 
     A run reads it ONCE, inside its time budget, and plans and acts on it; `act` called on
     its own reads it again. No services folder means no Fabric here: complete and empty.
-    Any other failure to stat or list the folder, or to read one descriptor, makes it
-    incomplete and is named in `degraded` (`fabric-descriptors`): the cache-folder and
-    temporary classes then remove nothing (UNKNOWN_STATE). A declared path that is or holds a
+    A failure to stat or list the folder, or the `deadline`, makes it incomplete and is named
+    in `degraded` (`fabric-descriptors`): the cache-folder and temporary classes then remove
+    nothing that run (UNKNOWN_STATE). ONE descriptor that cannot be read (not JSON, not an
+    object, a folder, a path that breaks `localPath`) makes only its own service unknown: its
+    id comes from the file name, and folders named for it are kept that run (`keep_reason`);
+    a file named for no service is only named. One broken file must not stop the guard on
+    every run until a person removes it (review of #338). A declared path that is or holds a
     cleanup root, the home folder or a filesystem root would cover other programs' data: it is
     refused and named, never honoured. A remote service keeps nothing on this disk. A declared
     path inside a privacy-guarded place is not resolved: the guard never opens one."""
     import fabric_service
     started = time.monotonic()
     cfg = load_config() if cfg is None else cfg
-    state = {"paths": [], "complete": True, "refused": 0, "seconds": 0.0}
+    state = {"paths": [], "unknown_services": [], "complete": True, "refused": 0, "seconds": 0.0}
 
     def note(where: str, reason: str, incomplete: bool = True) -> None:
         state["complete"] = state["complete"] and not incomplete
@@ -443,39 +494,34 @@ def service_state(cfg: dict | None = None, degraded: list | None = None) -> dict
         return done()
     wide = _wide_roots(cfg)
     for f in files:
+        if deadline is not None and time.monotonic() >= deadline:
+            note(str(root), "the service descriptors were not all read before their time ran out; "
+                 "the state paths they declare are not known")
+            return done()
+        named = DESCRIPTOR_NAME.match(os.path.basename(f))
         try:
             with open(f, encoding="utf-8") as fh:
                 doc = json.load(fh)
             if not isinstance(doc, dict):
                 raise ValueError("not an object")
+            service = f"{doc.get('id')}.{doc.get('instance', 'default')}"[:160]
+            paths_, refused = _declared(doc, service, wide)
         except (OSError, ValueError):
-            note(f, "a service descriptor could not be read; the state paths it declares are not known")
+            if named:
+                state["unknown_services"].append(named.group(1))
+                note(f, f"a service descriptor could not be read; folders named for {named.group(1)} "
+                     "are kept this run", incomplete=False)
+            else:
+                note(f, "a file in the service descriptors folder could not be read and names no service",
+                     incomplete=False)
             continue
-        declared = doc.get("paths")
-        if doc.get("placement") == "remote" or not isinstance(declared, dict):
-            continue
-        service = f"{doc.get('id')}.{doc.get('instance', 'default')}"[:160]
-        for field in STATE_FIELDS:
-            values = declared.get(field)
-            for value in values if isinstance(values, list) else [values]:
-                if not isinstance(value, str) or not value.strip():
-                    continue
-                path = os.path.expanduser(value)
-                if not os.path.isabs(path):
-                    continue
-                if len(state["paths"]) >= STATE_PATHS_LIMIT:
-                    note(f, f"more than {STATE_PATHS_LIMIT} declared state paths; the rest are not known")
-                    return done()
-                forms = {_comparable(os.path.abspath(path))}
-                if not guarded(path):
-                    forms.add(_comparable(os.path.realpath(path)))
-                if any(os.path.dirname(x) == x for x in forms) or any(_covers(x, w) for x in forms for w in wide):
-                    state["refused"] += 1
-                    note(value, f"the Fabric service {service} declares {value} as state (paths.{field}); it is or "
-                         "holds a cleanup root, the home folder or a filesystem root, so it is ignored",
-                         incomplete=False)
-                    continue
-                state["paths"].append({"service": service, "field": f"paths.{field}", "forms": sorted(forms)})
+        if len(state["paths"]) + len(paths_) > STATE_PATHS_LIMIT:
+            note(f, f"more than {STATE_PATHS_LIMIT} declared state paths; the rest are not known")
+            return done()
+        state["paths"] += paths_
+        for value, reason in refused:
+            state["refused"] += 1
+            note(value, reason, incomplete=False)
     return done()
 
 
@@ -497,6 +543,10 @@ def keep_reason(path: str, state: dict | None = None) -> str:
         for declared in s_["forms"]:
             if any(_covers(declared, c) or _covers(c, declared) for c in mine):
                 return f"the Fabric service {s_['service']} declares state here ({s_['field']})"
+    name = os.path.basename(os.path.normpath(path)).casefold()
+    for service in (state or {}).get("unknown_services") or ():
+        if service.casefold() in name:
+            return f"the descriptor of the Fabric service {service} could not be read; folders named for it are kept this run"
     return ""
 
 
@@ -1449,7 +1499,7 @@ def run(argv: list[str]) -> dict:
                 if registration_room > 1 else "skipped: the run budget is spent")
             # The service descriptors, read once for the whole run and inside its budget (OBS-203).
             mark = time.monotonic()
-            state = service_state(cfg, degraded)
+            state = service_state(cfg, degraded, deadline=mark + max(1.0, min(30.0, left() / 10)))
             phases["service-state"] = round(time.monotonic() - mark)
             at = time.time()
             classes = list(CLASSES)
@@ -1546,7 +1596,7 @@ def run(argv: list[str]) -> dict:
                                | {"gb": round((a.get("bytes") or 0) / GB, 2)} for a in plan[:200]],
                    # Live state a service marked or declared under a cleanup root (OBS-203).
                    "kept": kept[:200],
-                   "service_state": ({k: state[k] for k in ("complete", "refused", "seconds")}
+                   "service_state": ({k: state[k] for k in ("complete", "refused", "seconds", "unknown_services")}
                                      | {"paths": len(state["paths"])}) if state else None,
                    "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
             if acting:

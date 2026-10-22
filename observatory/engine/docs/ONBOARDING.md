@@ -1241,8 +1241,10 @@ a path (cache folders, build output, temporary entries, Trash): the service writ
 or `paths.logs`) in its Fabric service descriptor. The report and the Machine page list each such
 folder under "Kept by the guard" with the reason. A descriptor's `paths.cache` stays removable:
 live work there needs the marker. A declaration that covers a whole cache or temporary root, the
-home folder or the disk is ignored and named in `degraded`; when the descriptors cannot be read,
-no cache folder or temporary entry is removed that run, and `degraded` says why.
+home folder or the disk is ignored and named in `degraded`. When the descriptors folder cannot be
+read, no cache folder or temporary entry is removed that run, and `degraded` says why; when one
+descriptor `<id>.<instance>.json` cannot be read, only the folders whose name contains that id are
+kept that run.
 Browser code-sign clones a crashed browser left behind go at any pressure, and
 the cleanup's own git auto tier runs after them — with its thresholds lowered by the same
 pressure (`pressure` in `config/cleanup.json`): a clean worktree or a merged branch nobody

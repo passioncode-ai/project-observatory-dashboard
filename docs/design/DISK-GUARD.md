@@ -103,11 +103,22 @@ installed while a run acts is honoured from the next run; its marker is honoured
 256 declared paths are resolved; past that the reading is incomplete.
 
 **When the descriptors cannot be read.** No services folder means no Fabric on the machine: nothing
-is degraded. Any other failure (the folder or its parent unreadable, the path not a folder, one
-descriptor unreadable) is named in `degraded` (`fabric-descriptors`), and the cache-folder and
-temporary classes then remove nothing that run, each saying so in `degraded`; `act` refuses those
-two classes too. The folder is listed with `os.scandir`, because `Path.is_dir` and `Path.glob`
-report an unreadable folder as an empty one, which once read as "no service".
+is degraded. When the folder itself cannot be read (it or its parent unreadable, the path not a
+folder, or the read's deadline, a tenth of the run's time and at most 30 seconds, reached), that is
+named in `degraded` (`fabric-descriptors`), and the cache-folder and temporary classes remove
+nothing that run, each saying so in `degraded`; `act` refuses those two classes too. The folder is
+listed with `os.scandir`, because `Path.is_dir` and `Path.glob` report an unreadable folder as an
+empty one, which once read as "no service".
+
+**One broken descriptor makes only its own service unknown.** A descriptor that is not JSON, not an
+object, a folder, or that declares a path breaking the contract's `localPath` (not a string, not
+absolute or under `~`, longer than 1,024 characters, or holding a NUL character, which once made
+`realpath` raise and stopped every guard run) is named in `degraded`, and its service id is taken
+from the file name `<id>.<instance>.json`. For that run, every folder whose name contains that id
+(any case) is kept with the reason "descriptor could not be read"; both classes run for everything
+else, so one broken file cannot stop the guard on every run until a person removes it. A file whose
+name matches no service is named in `degraded` and keeps nothing. The report's `service_state`
+lists these ids as `unknown_services`.
 
 **A declaration that is too wide is refused.** A declared state path that is or holds a cache
 root, a temporary root, the home folder or a filesystem root would keep other programs' data

@@ -668,6 +668,79 @@ class LiveStateUnderCacheRoots(Base):
         self.assertEqual(len(rows), 1)
         self.assertIn("broken.default.json", rows[0]["path"])
 
+    def scoped(self, write):
+        """One unreadable descriptor named `svc-j.default.json`: only ITS service is unknown.
+        Folders whose name holds its id (any case) are kept this run; the rest still go."""
+        self.folder("svc-j-jobs")
+        self.folder("other")
+        (self.t1 / "SVC-J-scratch").mkdir()
+        (self.t1 / "plain").mkdir()
+        age(self.t1, 9)
+        write(self.services / "svc-j.default.json")
+        kept, degraded = [], []
+        self.assertEqual([Path(a["target"]).name for a in self.plan(kept, degraded)], ["other"])
+        temp = self.g.plan_temp(self.cfg(), "normal", self.free(), time.time(), None, degraded, kept)
+        self.assertEqual([Path(a["target"]).name for a in temp], ["plain"])
+        self.assertEqual(sorted(Path(k["target"]).name for k in kept), ["SVC-J-scratch", "svc-j-jobs"])
+        self.assertTrue(all("svc-j" in k["reason"] and "descriptor" in k["reason"] for k in kept))
+        rows = [d for d in degraded if d.get("source") == "fabric-descriptors"]
+        self.assertEqual([Path(d["path"]).name for d in rows], ["svc-j.default.json"])
+        self.assertFalse([d for d in degraded if d.get("reason") == self.g.UNKNOWN_STATE])
+        rec = self.g.act({"class": "cache-dir", "target": str(self.caches / "svc-j-jobs"),
+                          "identity": self.identity(self.caches / "svc-j-jobs"), "cutoff": time.time()}, self.free())
+        self.assertEqual(rec["result"], "skipped")
+
+    def test_a_descriptor_that_is_not_json_keeps_only_its_own_service(self):
+        self.scoped(lambda f: f.write_text("{not json"))
+
+    def test_a_descriptor_that_is_not_an_object_keeps_only_its_own_service(self):
+        self.scoped(lambda f: f.write_text("[1, 2]"))
+
+    def test_a_folder_named_like_a_descriptor_keeps_only_its_own_service(self):
+        self.scoped(lambda f: f.mkdir())
+
+    def test_a_declared_path_with_a_null_character_keeps_only_its_own_service(self):
+        def write(f):
+            f.write_text(json.dumps({"protocol": "fabric-service/0.1", "id": "svc-j", "instance": "default",
+                                     "paths": {"data": "/tmp/a\u0000b", "logs": []}}))
+        self.scoped(write)
+
+    def test_a_relative_declared_path_keeps_only_its_own_service(self):
+        def write(f):
+            f.write_text(json.dumps({"protocol": "fabric-service/0.1", "id": "svc-j", "instance": "default",
+                                     "paths": {"data": "relative/state", "logs": []}}))
+        self.scoped(write)
+
+    def test_a_null_character_does_not_stop_a_run(self):
+        (self.services / "svc-j.default.json").write_text(json.dumps(
+            {"id": "svc-j", "instance": "default", "paths": {"data": "/tmp/a\u0000b", "logs": []}}))
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        with patch.object(self.g, "load_config", return_value=cfg), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "running", return_value=False):
+            doc = self.g.run(["--level", "critical"])
+        self.assertTrue(doc["service_state"]["complete"])
+        self.assertEqual(doc["service_state"]["unknown_services"], ["svc-j"])
+
+    def test_a_descriptor_file_named_for_no_service_keeps_nothing(self):
+        self.folder("one")
+        (self.services / "x.json").mkdir()
+        kept, degraded = [], []
+        self.assertEqual(len(self.plan(kept, degraded)), 1)
+        self.assertEqual(kept, [])
+        self.assertEqual([Path(d["path"]).name for d in degraded if d.get("source") == "fabric-descriptors"],
+                         ["x.json"])
+
+    def test_the_descriptor_read_stops_at_its_deadline(self):
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a"), "logs": []})
+        degraded = []
+        state = self.g.service_state(self.cfg(), degraded, deadline=time.monotonic() - 1)
+        self.assertFalse(state["complete"])
+        self.assertTrue([d for d in degraded if d.get("source") == "fabric-descriptors"
+                         and "time" in d.get("reason", "")])
+
     def test_a_temporary_root_honours_the_marker(self):
         (self.t1 / "svc-scratch").mkdir()
         (self.t1 / "svc-scratch" / self.g.KEEP_MARKER).write_text("")
