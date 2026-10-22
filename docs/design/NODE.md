@@ -444,7 +444,9 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   same codes with any other status, and every 5xx, are retried as usual. `unknown-org` (a deleted organization) is
   provisional until the contract defines it: a 4xx with it is recorded (`unknownOrg`, shown as `org:unknown-org` with
   the date in status, doctor and Health) and retried, and ends the enrollment only when answered again at least an
-  hour later with no successful request between (a success clears it). An ended enrollment's pending events are
+  hour later and in a later tick (`tickSeq`, which `org tick` counts, so a wall clock that jumps within one tick does
+  not count) with no successful request between (a success clears it). A batch refused with any of these codes, at
+  any status, is held and retried with backoff, never rejected as content. An ended enrollment's pending events are
   dropped (state `dropped`, reason `removed:<code>`) with one
   count kept in the state's `removed` (`at`, `code`, `status`, `droppedEvents`), the retry and in-flight batch are
   forgotten, and from then on check-in, rotation, share registrations, grant usage, enqueue and flush are refused as

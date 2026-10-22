@@ -507,7 +507,7 @@ class Enrollment:
                 state['nextCheckInAt'] = 0
                 self._save(state)
             elif code == 'certificate-unknown' and isinstance(previous, dict) \
-                    and self.clock() < strict_time(previous['notAfter']) / 1000:
+                    and self.clock() + (state.get('skewSeconds') or 0) < strict_time(previous['notAfter']) / 1000:
                 # The server does not know the rotated certificate; the previous one is still valid (CT-65). Back to
                 # it, and the same request once more under it: only a refusal of that one can end the enrollment.
                 state['certificate'] = state.pop('previousCertificate')
@@ -527,14 +527,17 @@ class Enrollment:
 
     def _unknown_org(self, state: dict, status: int) -> None:
         """`unknown-org` (provisional, not in the contract yet): the first answer is recorded and retried as usual; one
-        at least `UNKNOWN_ORG_CONFIRM_SECONDS` later, with no successful request between, ends the enrollment."""
+        at least `UNKNOWN_ORG_CONFIRM_SECONDS` later AND in a later tick (`tickSeq`, counted by `tick`), with no
+        successful request between, ends the enrollment. The tick keeps a wall clock that jumps an hour between two
+        requests of one tick from removing the machine."""
         now = self.clock()
+        tick = state.get('tickSeq') or 0
         first = state.get('unknownOrg')
         if not isinstance(first, dict) or not isinstance(first.get('at'), (int, float)):
-            state['unknownOrg'] = {'since': iso(now), 'at': int(now), 'status': status}
+            state['unknownOrg'] = {'since': iso(now), 'at': int(now), 'status': status, 'tick': tick}
             self._save(state)
             self.journal('unknown-org-seen', status=status)
-        elif now - first['at'] >= UNKNOWN_ORG_CONFIRM_SECONDS:
+        elif now - first['at'] >= UNKNOWN_ORG_CONFIRM_SECONDS and tick > (first.get('tick') or 0):
             self._remove(state, UNKNOWN_ORG, status)
 
     def _remove(self, state: dict, code: str, status: int) -> None:
@@ -937,12 +940,16 @@ class Enrollment:
                         return dict(sent, held='removed', removed=state['removed'])
                     code = None if status == 200 and isinstance(ack, dict) else \
                         _error_code(ack) or ('unreachable' if status == 0 else 'http-%d' % status)
-                    if status == 413 and len(run) > 1:
+                    # A refusal that names the organization or the certificate is not about the batch's content: it
+                    # is held and retried, never rejected, whatever its status (a 401 removal returned above).
+                    about_us = code in REMOVED_CODES or code == UNKNOWN_ORG
+                    if status == 413 and len(run) > 1 and not about_us:
                         self._set_meta(conn, 'batchLimit', max(1, len(run) // 2))
                         self._set_meta(conn, 'inflight', None)
                         self.journal('batch-too-large', events=len(run), batchId=batch_id)
                         continue
-                    if code is not None and (status in PERMANENT_BATCH_STATUSES or code in PERMANENT_BATCH_CODES):
+                    if code is not None and not about_us and (status in PERMANENT_BATCH_STATUSES
+                                                              or code in PERMANENT_BATCH_CODES):
                         conn.executemany("UPDATE events SET state = 'rejected', reason = ? WHERE epoch = ? AND seq = ?",
                                          [(code[:40], epoch, r['seq']) for r in run])
                         self._set_meta(conn, 'inflight', None)
@@ -1149,6 +1156,8 @@ class Enrollment:
             state = self.state()
             if state is None:
                 return {'org': self.org_id, 'result': 'not-enrolled'}
+            state['tickSeq'] = (state.get('tickSeq') or 0) + 1   # what a later tick means (`_unknown_org`)
+            self._save(state)
             said = notice(self.org_id, state, self.clock())
             step = {k: said[k] for k in ('removed', 'nextStep', 'command') if k in said}
             if said['state'] == 'removed':                 # recorded once, when it happened; nothing is retried

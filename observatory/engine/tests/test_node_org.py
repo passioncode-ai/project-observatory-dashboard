@@ -716,10 +716,10 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertIn('does not know this organization', status['warning'])
         self.assertEqual(status['unknownOrg']['since'], self.make().state()['unknownOrg']['since'])
         self.now[0] += 1800
-        self.assertFalse(self.make().check_in()['ok'])                          # half an hour on: still not removed
+        self.assertEqual(self.make().tick()['checkIn']['code'], 'unknown-org')  # half an hour on: still not removed
         self.assertNotIn('removed', self.make().state())
         self.now[0] += 1801
-        self.assertEqual(self.make().check_in()['code'], 'unknown-org')
+        self.assertEqual(self.make().tick()['checkIn']['code'], 'unknown-org')  # a later tick, an hour on
         self.assert_removed('unknown-org')
 
     def test_a_success_between_two_unknown_org_answers_starts_the_hour_again(self):
@@ -737,6 +737,50 @@ class EnrollmentEndToEnd(unittest.TestCase):
         state = self.make().state()
         self.assertNotIn('removed', state)
         self.assertEqual(state['unknownOrg']['since'], org_iso(self.now[0]))
+
+    def test_a_refused_batch_that_names_the_org_or_the_certificate_is_held_not_rejected(self):
+        # A 400 or 404 `unknown-org` and a 400 `certificate-unknown` are not refusals of the batch's content: the
+        # events stay pending and the flush stops for this tick, retried with backoff.
+        self.enroll()
+        self._three_events()
+        for status, code in ((400, 'unknown-org'), (404, 'unknown-org'), (400, 'certificate-unknown')):
+            with self.subTest(status=status, code=code):
+                self.server.refuse = (status, code)
+                result = self.make().flush()
+                self.assertEqual((result['held'], result['rejected'], result['batches']), (code, 0, 0))
+                self.assertEqual(self._pending(), 3)
+                self.assertNotIn('removed', self.make().state())
+                self.assertEqual(self.make().flush()['held'], 'backoff')        # retried later, not resent now
+                self.now[0] += 120
+        self.server.refuse = None
+        self.now[0] += 3601
+        self.assertEqual(self.make().flush()['accepted'], 3)
+
+    def test_unknown_org_twice_within_one_tick_never_removes_the_machine(self):
+        # A wall clock that jumps an hour between two requests of one tick is not two sightings in two ticks.
+        self.enroll()
+        self._three_events()
+        self.server.closed = True
+        self.assertEqual(self.make().check_in()['code'], 'unknown-org')         # the first sighting, no tick yet
+        self.now[0] += 7200
+        self.assertEqual(self.make().check_in()['code'], 'unknown-org')         # two hours on, the same tick
+        self.assertNotIn('removed', self.make().state())
+        self.assertEqual(self._pending(), 3)
+        self.make().tick()                                                      # a later tick: removed
+        self.assert_removed('unknown-org')
+
+    def test_the_fallback_judges_the_previous_certificate_on_the_servers_clock(self):
+        self.server.skew = -250                                                 # this clock runs ahead
+        self.enroll()
+        self.assertTrue(self.make().check_in()['ok'])
+        first = self.make().state()['certificate']
+        self.make().rotate()
+        del self.server.certs[self.make().state()['certificate']['serial']]
+        self.now[0] = strict_time(first['notAfter']) / 1000 + 60                # past it here, not on the server
+        self.assertTrue(self.make().check_in()['ok'])
+        state = self.make().state()
+        self.assertEqual(state['certificate']['serial'], first['serial'])
+        self.assertNotIn('removed', state)
 
     def test_only_a_401_ends_the_enrollment_and_a_5xx_never(self):
         # devices.md step table: certificate-unknown and certificate-revoked come with HTTP 401.
@@ -787,7 +831,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.closed = True
         self.make().check_in()
         self.now[0] += 3601
-        self.make().check_in()
+        self.make().tick()
         self.assertEqual(self.make().state()['removed']['code'], 'unknown-org')
         self.server.closed, self.server.epoch = False, 0                       # the organization is created again
         again = self.enroll('et_2.' + 'T' * 32)
