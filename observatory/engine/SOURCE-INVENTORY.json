@@ -4300,8 +4300,8 @@
       "path": "tests/test_node_lifecycle_broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "11882f1333fe8626d2f8a38edb02cf190ebd20a2ef4de0a3718c7da865598e0f",
-      "bytes": 73745
+      "export_sha256": "83f663ca6589d655228ed7bd58f6b449fa1cdc6162b12c65c8fbeee9d887d3a8",
+      "bytes": 74041
     },
     {
       "path": "tests/test_node_lifecycle_macos.py",
