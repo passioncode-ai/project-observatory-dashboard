@@ -2222,5 +2222,6 @@
  "the organization asked this machine to enroll again with a new token": "организация просит подключить эту машину заново с новым токеном",
  "certificate expires on {date}; renew it now while the server answers": "сертификат истекает {date}; обновите его сейчас, пока сервер отвечает",
  "certificate valid until {date}": "сертификат действует до {date}",
- "enrollment could not be read: {reason}": "не удалось прочитать подключение к организации: {reason}"
+ "enrollment could not be read: {reason}": "не удалось прочитать подключение к организации: {reason}",
+ "the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later": "сервер организации не знает эту организацию с {date}; запросы повторяются, и если через час он её так и не узнает, машина считается исключённой"
 }

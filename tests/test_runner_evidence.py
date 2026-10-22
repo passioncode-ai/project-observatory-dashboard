@@ -146,7 +146,7 @@ class SuiteEvidence(unittest.TestCase):
     def test_every_engine_test_file_runs_somewhere(self):
         # OBS-201: the organization-enrollment suite shipped and never ran, because nothing compared
         # the files with the runner's lists. Each one is a suite, a helper, or named with what runs it.
-        files={p.stem[len('test_'):] for p in (runner.ROOT/'tests').glob('test_*.py')}
+        files={p.stem[len('test_'):] for p in (runner.ROOT/'tests').rglob('test_*.py')}
         helpers={n[len('test_'):-len('.py')] for n in runner.HELPERS if n.startswith('test_') and n.endswith('.py')}
         self.assertEqual(sorted(files-set(runner.SUITES)-helpers-set(runner.RUN_ELSEWHERE)),[])
         self.assertEqual(sorted(set(runner.RUN_ELSEWHERE)-files),[])

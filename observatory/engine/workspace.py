@@ -578,7 +578,10 @@ def _organizations(base: Path) -> list[dict] | dict:
         from node import org
     except (ImportError, RuntimeError) as exc:                  # the engine's `full` extra
         return {"state": "unknown", "reason": type(exc).__name__}
-    return org.notices(org.node_folder(base))
+    try:
+        return org.notices(org.node_folder(base))
+    except (OSError, ValueError, RuntimeError) as exc:          # doctor answers whatever the node folder holds
+        return {"state": "unknown", "reason": type(exc).__name__}
 
 
 def _vector_namespaces(base: Path) -> list[dict]:

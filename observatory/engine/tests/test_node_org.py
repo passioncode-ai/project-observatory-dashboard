@@ -78,6 +78,10 @@ def pinned_key_admits(key: dict) -> bool:
     return True
 
 
+def org_iso(seconds: float) -> str:
+    return dt.datetime.fromtimestamp(int(seconds), dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def vectors(name: str) -> dict:
     return json.loads((VECTORS / (name + '.json')).read_text(encoding='utf-8'))
 
@@ -212,6 +216,7 @@ class FakeServer:
         self.checkin_protocols, self.batch_answer, self.lose_rotation, self.rotations = None, None, False, {}
         self.pause = None                                  # (path, started Event, release Event): hold one request
         self.closed = False                                # the organization was deleted: every request is unknown-org
+        self.refuse = None                                 # (status, code): every signed request answers that
         self._hashes = hashes
 
     def __call__(self, url, headers, body, timeout):
@@ -221,8 +226,10 @@ class FakeServer:
         handler = {'/v1/devices/enroll': self.enroll, '/v1/devices/check-in': self.check_in,
                    '/v1/devices/rotate': self.rotate, '/v1/activity/batches': self.batch,
                    '/v1/devices/share-registrations': self.share}[path]
-        if self.closed:                                    # contract refusal of a deleted organization (OBS-204)
+        if self.closed:                                    # a deleted organization's answer (OBS-204, provisional)
             return 404, json.dumps({'error': {'code': 'unknown-org'}}).encode()
+        if self.refuse and path != '/v1/devices/enroll':
+            return self.refuse[0], json.dumps({'error': {'code': self.refuse[1]}}).encode()
         if self.pause and self.pause[0] == path:
             pause, self.pause = self.pause, None
             pause[1].set()
@@ -235,7 +242,7 @@ class FakeServer:
 
     def _issue(self, csr, device):
         from cryptography import x509
-        now = dt.datetime.fromtimestamp(self.clock(), dt.timezone.utc)
+        now = dt.datetime.fromtimestamp(self.clock() + self.skew, dt.timezone.utc)   # on the server's own clock
         serial = os.urandom(8).hex()
         cert = (x509.CertificateBuilder().subject_name(csr.subject).issuer_name(self.ca_name)
                 .public_key(csr.public_key()).serial_number(int(serial, 16)).not_valid_before(now)
@@ -696,12 +703,76 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(result['command'], 'project-observatory full org leave --org ' + ORG)
         self.assert_removed('certificate-revoked')
 
-    def test_a_deleted_organization_ends_the_outbox_instead_of_retrying_it(self):
+    def test_a_deleted_organization_ends_the_outbox_only_when_seen_again_an_hour_later(self):
+        # `unknown-org` is not in the contract yet: provisional, terminal only on a second sighting an hour on.
         self.enroll()
         self._three_events()
         self.server.closed = True
-        self.assertEqual(self.make().flush()['held'], 'removed')
+        self.assertEqual(self.make().flush()['held'], 'unknown-org')            # retried as usual, nothing dropped
+        self.assertEqual(self._pending(), 3)
+        status = self.make().describe()
+        self.assertNotIn('removed', status)
+        self.assertIn('org:unknown-org', status['degraded'])
+        self.assertIn('does not know this organization', status['warning'])
+        self.assertEqual(status['unknownOrg']['since'], self.make().state()['unknownOrg']['since'])
+        self.now[0] += 1800
+        self.assertFalse(self.make().check_in()['ok'])                          # half an hour on: still not removed
+        self.assertNotIn('removed', self.make().state())
+        self.now[0] += 1801
+        self.assertEqual(self.make().check_in()['code'], 'unknown-org')
         self.assert_removed('unknown-org')
+
+    def test_a_success_between_two_unknown_org_answers_starts_the_hour_again(self):
+        self.enroll()
+        self.server.closed = True
+        self.make().check_in()
+        self.assertIn('unknownOrg', self.make().state())
+        self.server.closed = False
+        self.now[0] += 1800
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotIn('unknownOrg', self.make().state())
+        self.server.closed = True
+        self.now[0] += 3600
+        self.make().check_in()
+        state = self.make().state()
+        self.assertNotIn('removed', state)
+        self.assertEqual(state['unknownOrg']['since'], org_iso(self.now[0]))
+
+    def test_only_a_401_ends_the_enrollment_and_a_5xx_never(self):
+        # devices.md step table: certificate-unknown and certificate-revoked come with HTTP 401.
+        self.enroll()
+        self._three_events()
+        for status, code in ((503, 'certificate-unknown'), (403, 'certificate-unknown'), (502, 'unknown-org'),
+                             (503, 'certificate-revoked'), (500, 'unknown-org')):
+            with self.subTest(status=status, code=code):
+                self.server.refuse = (status, code)
+                result = self.make().check_in()
+                self.assertEqual((result['ok'], result['code']), (False, code))
+                self.make().flush()
+                state = self.make().state()
+                self.assertNotIn('removed', state)
+                self.assertFalse(state['reEnroll'])
+                self.assertEqual(self._pending(), 3)
+                self.now[0] += 3601                                             # past any backoff and any hour
+        self.server.refuse = None
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().flush()['accepted'], 3)
+
+    def test_a_401_certificate_unknown_falls_back_first_and_ends_only_when_that_is_refused(self):
+        self.enroll()
+        self._three_events()
+        first = self.make().state()['certificate']['serial']
+        self.make().rotate()
+        second = self.make().state()['certificate']['serial']
+        del self.server.certs[second]
+        self.assertTrue(self.make().check_in()['ok'])                           # fallen back, not removed
+        self.assertEqual(self.make().state()['certificate']['serial'], first)
+        self.make().rotate()
+        third = self.make().state()['certificate']['serial']
+        for serial in (first, third):
+            self.server.certs.pop(serial, None)                                 # both unknown to the server
+        self.assertEqual(self.make().check_in()['code'], 'certificate-unknown')
+        self.assert_removed('certificate-unknown')
 
     def test_a_certificate_the_server_forgot_with_no_previous_one_removes_the_machine(self):
         self.enroll()
@@ -715,6 +786,8 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self._three_events()
         self.server.closed = True
         self.make().check_in()
+        self.now[0] += 3601
+        self.make().check_in()
         self.assertEqual(self.make().state()['removed']['code'], 'unknown-org')
         self.server.closed, self.server.epoch = False, 0                       # the organization is created again
         again = self.enroll('et_2.' + 'T' * 32)
@@ -726,6 +799,49 @@ class EnrollmentEndToEnd(unittest.TestCase):
             self.assertEqual([r['seq'] for r in conn.execute('SELECT seq FROM events')], [1])  # a new stream
         self.assertEqual(self.make().leave(), {'org': ORG, 'left': True})
         self.assertFalse((self.node / 'orgs' / ORG).exists())
+
+    def test_expiry_is_judged_on_the_servers_clock(self):
+        # A local clock running ahead must not refuse a certificate the server still takes, nor one running behind
+        # keep using a certificate the server has seen expire (the fake server allows 300 s of skew in a signature).
+        self.server.skew = -250                                                 # the server's clock is behind
+        not_after = strict_time(self.enroll()['certificate']['notAfter']) / 1000
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['skewSeconds'], -250)
+        self.now[0] = not_after + 60                                            # past it here, not on the server
+        self.assertEqual(self.make().describe()['certificate']['state'], 'expiring')
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotEqual(self.make().tick().get('result'), 'needs-enrollment')
+        not_after = strict_time(self.make().state()['certificate']['notAfter']) / 1000   # the tick rotated it
+        self.server.skew = 250
+        self.now[0] = not_after - 3600
+        self.assertEqual(self.make().check_in()['code'], 'signature-stale')    # the jump is measured again
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['skewSeconds'], 250)
+        self.now[0] = not_after - 60                                            # not yet here, past on the server
+        self.assertEqual(self.make().describe()['certificate']['state'], 'expired')
+        from node.org import OrgError
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'certificate-expired')
+
+    @unittest.skipIf(os.name == 'nt' or (hasattr(os, 'geteuid') and os.geteuid() == 0),
+                     'needs a folder this account cannot list')
+    def test_an_unreadable_node_folder_is_named_and_doctor_still_answers(self):
+        from unittest import mock
+        import workspace
+        from node import org
+        self.enroll()
+        orgs = self.node / 'orgs'
+        orgs.chmod(0)
+        try:
+            (row,) = org.notices(self.node, now=self.clock())
+            self.assertEqual((row['state'], row['reason']), ('unreadable', 'PermissionError'))
+            with mock.patch.dict(os.environ, {'OBSERVATORY_NODE': str(self.node)}):
+                answer = workspace._organizations(self.node.parent)
+            self.assertEqual(answer[0]['state'] if isinstance(answer, list) else answer['state'],
+                             'unreadable' if isinstance(answer, list) else 'unknown')
+        finally:
+            orgs.chmod(0o700)
 
     # -- OBS-201: the device key and the enrollment are owner-only on every system -----------------------------
     def test_the_device_keys_and_the_enrollment_are_owner_only_on_this_system(self):

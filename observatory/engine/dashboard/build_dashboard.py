@@ -2360,6 +2360,10 @@ if (Array.isArray(H.organizations)) {
       hb.push([label, T("certificate valid until {date}", {date: O.expiresOn || "?"}), orgStatus]);
     else
       hb.push([label, T("enrollment could not be read: {reason}", {reason: O.reason || "?"}), orgStatus]);
+    // `unknown-org` is provisional (not in the contract yet): said beside the state, retried as usual.
+    if (O.unknownOrg && O.state !== "removed")
+      hb.push([label, T("the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later",
+        {date: (O.unknownOrg.since || "?").slice(0, 10)}), orgStatus]);
   }
 }
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);

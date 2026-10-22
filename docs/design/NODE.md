@@ -428,7 +428,8 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   action stops the schedule until the machine is enrolled again. `org status` reads the
   outbox read-only and creates nothing, so a status during `leave` never brings the folder back.
 - **The certificate's expiry, said before it passes** (OBS-199, the warning part): `org status`, `full doctor`
-  (`organizations`) and the Health page read one `notice` per enrollment from its saved state, without the network:
+  (`organizations`) and the Health page read one `notice` per enrollment from its saved state, without the network,
+  on the server's clock as the last check-in measured it (`skewSeconds`, the clock requests are signed on):
   the expiry date (`expiresOn`, `notAfter`) and a state, `valid`, `expiring` in the last three days
   (`EXPIRY_WARNING_SECONDS`, `org:certificate-expiring`, the step `org rotate --org ID` while the server answers),
   `expired` (`org:certificate-expired`), `needs-enrollment` or `removed`. A check-in, rotation, flush or registration
@@ -437,9 +438,14 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   `command` (`full org enroll --server ... --org ... --token-slot PROJECT/ENV/NAME`); `full org` exits 1 when every
   organization asked failed, a check-in the server refused included. A node offline past its certificate's 7 days
   still needs a new token: re-enrolling by itself with the device key on record waits for the contract's rule.
-- **A machine removed from its organization** (OBS-204): a refusal `certificate-revoked`, `certificate-unknown` (after
-  the fallback to a previous certificate above) or `unknown-org`, to any signed request, ends the enrollment in
-  `_signed`, for every caller: its pending events are dropped (state `dropped`, reason `removed:<code>`) with one
+- **A machine removed from its organization** (OBS-204): a refusal `certificate-revoked` or `certificate-unknown` with
+  HTTP 401, as the contract's step table sends them (`certificate-unknown` only after the fallback to a previous
+  certificate above is refused too), to any signed request, ends the enrollment in `_signed`, for every caller; the
+  same codes with any other status, and every 5xx, are retried as usual. `unknown-org` (a deleted organization) is
+  provisional until the contract defines it: a 4xx with it is recorded (`unknownOrg`, shown as `org:unknown-org` with
+  the date in status, doctor and Health) and retried, and ends the enrollment only when answered again at least an
+  hour later with no successful request between (a success clears it). An ended enrollment's pending events are
+  dropped (state `dropped`, reason `removed:<code>`) with one
   count kept in the state's `removed` (`at`, `code`, `status`, `droppedEvents`), the retry and in-flight batch are
   forgotten, and from then on check-in, rotation, share registrations, grant usage, enqueue and flush are refused as
   `removed-from-organization` before the network, and `org tick` answers `removed` without retrying. `org status`,

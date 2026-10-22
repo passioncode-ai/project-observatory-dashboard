@@ -1343,9 +1343,11 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `full doctor` (`organizations`) and the Health page show the same expiry and state.
 - A machine offline past its certificate's 7 days needs a new enrollment token: `org check-in` then refuses with
   `certificate-expired`, the date, the step and the `org enroll` command, and exits 1.
-- A machine its organization removed (the server answers `certificate-revoked`, `certificate-unknown` or
-  `unknown-org`, as it does when an administrator removes the machine or the organization is closed) is shown as
-  `removed`, with the date and the code. Nothing more is sent to that organization, and the events it still held
+- A machine its organization removed (the server answers `certificate-revoked` or `certificate-unknown` with HTTP
+  401, as it does when an administrator removes the machine or the organization is closed) is shown as `removed`,
+  with the date and the code. A server that answers `unknown-org` (the organization was deleted; provisional until
+  the contract defines it) is shown as `org:unknown-org` with the date and retried; the machine is taken as removed
+  only if the answer is the same an hour later. Nothing more is sent to that organization, and the events it still held
   are dropped (they can be accepted nowhere) with one count kept. `org leave --org <id>` removes its local state;
   `org enroll` with a new token starts over.
 - `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
