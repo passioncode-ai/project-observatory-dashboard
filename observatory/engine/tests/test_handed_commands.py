@@ -85,6 +85,9 @@ SAMPLES = {
     # The meter's values (tools/grant.py): an amount, a token jti, a receipt, a grant ref.
     "USD": "0.42", "JTI": "tok-callee-000000001", "RECEIPT": "rcpt_0123456789abcdef",
     "REF": "urn:grant:project-a:writer#3",
+    # The Health page's organization rows (OBS-199, OBS-204): the enrollment's id and server, and a vault slot.
+    "shellArg(O.org)": "org_example", 'shellArg(O.server || "https://ORG-SERVER")': "https://org.example",
+    "PROJECT/ENV/NAME": "my-org/prod/ENROLLMENT_TOKEN",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

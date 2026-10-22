@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from test_portable_mcp import setup as portable_setup                 # noqa: E402
 portable_setup()
 import tmp as tmpdir                                                  # noqa: E402
+import contract_lock                                                  # noqa: E402
 
 PY = str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").exists() else sys.executable
 FAILURES: list[str] = []
@@ -165,16 +166,16 @@ def test_the_first_run_writes_the_receipt_in_the_workspace() -> None:
 
 def test_the_receipt_says_what_it_was_measured_against() -> None:
     doc = json.loads(RECEIPT.read_text(encoding="utf-8"))
-    lock = json.loads((ROOT / "fabric-contract.lock.json").read_text(encoding="utf-8"))
+    pin = contract_lock.contract_pin(ROOT) or {}
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     check("the contract version is recorded",
           doc.get("contractVersion") == manifest["contractVersion"],
           f"{doc.get('contractVersion')} vs {manifest['contractVersion']}")
-    # The public lock pins a profile and schema release rather than a commit,
-    # so the receipt's `contractCommit` mirrors whatever the lock carries.
-    check("and the pinned contract commit, as the lock states it",
-          "contractCommit" in doc and doc.get("contractCommit") == lock.get("commit"),
-          f"{doc.get('contractCommit')} vs {lock.get('commit')}")
+    # The commit is the contract pin's (`fabric-contract.lock.json`, OBS-196),
+    # never the profile lock's, which names schema releases and no commit.
+    check("and the pinned contract commit, as the pin states it",
+          bool(pin.get("commit")) and doc.get("contractCommit") == pin.get("commit"),
+          f"{doc.get('contractCommit')} vs {pin.get('commit')}")
     check("and the provider revision",
           doc.get("providerRevision") == manifest["provider"]["revision"],
           f"{doc.get('providerRevision')} vs {manifest['provider']['revision']}")

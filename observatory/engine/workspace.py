@@ -539,6 +539,9 @@ def doctor(base: Path) -> dict:
             # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
             # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
             "meter": _meter_readiness(base),
+            # OBS-199, OBS-204: each organization enrollment's certificate expiry and state, with the
+            # person's next step when there is one (expiring, expired, removed), read without the network.
+            "organizations": _organizations(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -566,6 +569,19 @@ def _meter_readiness(base: Path) -> dict:
     sys.path.insert(0, str(config.SOURCE))
     import meter
     return meter.readiness_at(base / "config" / "meter.json")
+
+
+def _organizations(base: Path) -> list[dict] | dict:
+    """`full org status`'s notices, read-only: the certificate's expiry date and state per enrollment."""
+    sys.path.insert(0, str(config.SOURCE))
+    try:
+        from node import org
+    except (ImportError, RuntimeError) as exc:                  # the engine's `full` extra
+        return {"state": "unknown", "reason": type(exc).__name__}
+    try:
+        return org.notices(org.node_folder(base))
+    except (OSError, ValueError, RuntimeError) as exc:          # doctor answers whatever the node folder holds
+        return {"state": "unknown", "reason": type(exc).__name__}
 
 
 def _vector_namespaces(base: Path) -> list[dict]:

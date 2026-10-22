@@ -187,6 +187,8 @@ BOUNDARY += ('http_transport_pin',)
 BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
 BOUNDARY += ('embedding_enforcement',)
+# The contract pin and the profile lock, each under its own name, read through one module (OBS-196).
+BOUNDARY += ('contract_lock',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
 BOUNDARY += ('memory_access', 'memory_freshness', 'checkout_inventory', 'checkout_state', 'cache_coverage', 'coverage_view')
 # Scope and validity filtered before the candidate window (PB-137 N-009).
@@ -226,7 +228,16 @@ BOUNDARY += ('folder_attribution', 'fabric_attribution')
 BOUNDARY += ('machine_backup',)
 # A session MCP server moving itself onto the installed release over real pipes (OBS-159).
 BOUNDARY += ('session_reload',)
+# OBS-161, OBS-199, OBS-201, OBS-204: organization enrollment against the fake organization server. The suite
+# shipped with OBS-161 but was never listed here, so `full check` never ran it (OBS-201); RUN_ELSEWHERE below and
+# tests/test_runner_evidence.py now refuse an engine test file that no runner names.
+BOUNDARY += ('node_org',)
 SUITES = LEGACY + BOUNDARY
+#: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
+#: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
+RUN_ELSEWHERE = {
+    'j1_evidence': 'the root suite tests/test_j1_evidence.py runs it against the real runner',
+}
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
@@ -277,7 +288,7 @@ ROOT_FILES = (
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
     'ed25519_order.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -360,12 +371,19 @@ def copy_source(target: Path) -> None:
         shutil.copyfile(source, destination)
 
 
+#: Windows' own locations, which a child cannot work without and which name no user or credential: without
+#: SYSTEMROOT, OpenSSL finds no entropy source and every `cryptography` key generation fails ("entropy source strength
+#: too weak"), which is how the organization suite failed through this runner on Windows (OBS-201).
+WINDOWS_SYSTEM = ('SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT')
+
+
 def runtime_environment() -> dict[str, str]:
     # Hosted CPython builds can require their shared-library search path.
     # Keep only loader configuration, never provider tokens or user config.
-    return {name: os.environ[name] for name in
-            ('LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH')
-            if name in os.environ}
+    names = ('LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH')
+    if os.name == 'nt':
+        names += WINDOWS_SYSTEM
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def clean_env(base: Path) -> dict[str, str]:

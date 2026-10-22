@@ -27,6 +27,7 @@ import mcp.client.session as _mcp_session
 _mcp_session.DISCOVER_TIMEOUT_SECONDS = max(
     _mcp_session.DISCOVER_TIMEOUT_SECONDS, float(os.environ.get("OBSERVATORY_MCP_STARTUP_BUDGET", "60")))
 import atomic
+import contract_lock
 import paths                                                                       
 
 MANIFEST = json.loads((ROOT / "fabric-agent.json").read_text())
@@ -714,8 +715,12 @@ async def run() -> dict:
     # which contract those assertions were measured under, and `--check`
     # compared only `manifestContentHash`: a receipt taken against a DIFFERENT
     # contract revision passed silently. Three fields, from the two files that
-    # pin them, so the evidence can be tied to its subject.
-    lock = json.loads((ROOT / "fabric-contract.lock.json").read_text(encoding="utf-8"))
+    # pin them, so the evidence can be tied to its subject. The commit comes from
+    # the contract pin and the profile from the profile lock (OBS-196): until the
+    # two were separated the commit was read from the profile lock, which has none,
+    # so every receipt said `contractCommit: null`.
+    lock = contract_lock.profile_lock(ROOT)
+    pin = contract_lock.contract_pin(ROOT) or {}
     return {"ranAt": now(),
             "capabilities": [c["name"] for c in CAPS],
             "protocolNegotiated": negotiated,
@@ -723,7 +728,7 @@ async def run() -> dict:
             "offeredVersions": list(disc.supported_versions),
             "manifestContentHash": MANIFEST["provider"]["contentHash"],
             "contractVersion": MANIFEST.get("contractVersion"),
-            "contractCommit": lock.get("commit"),
+            "contractCommit": pin.get("commit"),
             "localProfile": lock.get("profile"),
             "schemaRelease": lock.get("schemaRelease"),
             "schemaReleases": [r.get("release") for r in lock.get("releases", [])]

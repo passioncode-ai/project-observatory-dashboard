@@ -135,6 +135,23 @@ class SuiteEvidence(unittest.TestCase):
         self.assertEqual(row['status'],'PASS')
         self.assertEqual(row['test_protocol'],'unittest')
 
+    def test_a_windows_child_keeps_the_systems_own_locations_and_nothing_else(self):
+        # OBS-201: without SYSTEMROOT a Windows child has no entropy source for OpenSSL.
+        env={'SYSTEMROOT':'C:\\Windows','WINDIR':'C:\\Windows','USERPROFILE':'C:\\Users\\someone','API_TOKEN':'x'}
+        with mock.patch.dict(runner.os.environ,env,clear=True), mock.patch.object(runner.os,'name','nt'):
+            self.assertEqual(runner.runtime_environment(),{'SYSTEMROOT':'C:\\Windows','WINDIR':'C:\\Windows'})
+        with mock.patch.dict(runner.os.environ,env,clear=True), mock.patch.object(runner.os,'name','posix'):
+            self.assertEqual(runner.runtime_environment(),{})
+
+    def test_every_engine_test_file_runs_somewhere(self):
+        # OBS-201: the organization-enrollment suite shipped and never ran, because nothing compared
+        # the files with the runner's lists. Each one is a suite, a helper, or named with what runs it.
+        files={p.stem[len('test_'):] for p in (runner.ROOT/'tests').rglob('test_*.py')}
+        helpers={n[len('test_'):-len('.py')] for n in runner.HELPERS if n.startswith('test_') and n.endswith('.py')}
+        self.assertEqual(sorted(files-set(runner.SUITES)-helpers-set(runner.RUN_ELSEWHERE)),[])
+        self.assertEqual(sorted(set(runner.RUN_ELSEWHERE)-files),[])
+        self.assertFalse(set(runner.RUN_ELSEWHERE)&set(runner.SUITES))
+
     def test_legacy_protocol_list_matches_current_registered_sources(self):
         self.assertFalse(set(runner.ASSERTION_LINE_SUITES) - set(runner.SUITES))
         for name in runner.SUITES:

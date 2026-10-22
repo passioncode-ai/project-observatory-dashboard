@@ -460,6 +460,14 @@ def from_store() -> dict:
                             for k in ("enabled", "newest_at", "size", "items", "not_carried_count")}}
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["maintenance"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
+        # ORGANIZATIONS (OBS-199, OBS-204): each enrollment's certificate expiry and state, the
+        # answer `full org status` and `full doctor` give, read without the network. A person
+        # sees the warning in the certificate's last three days, and a removed machine plainly.
+        try:
+            from node import org as node_org
+            out["health"]["organizations"] = node_org.notices(node_org.node_folder(Path(paths.HOME)))
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["organizations"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
         # memory over HTTP, read-only and by name — the answer `full doctor` gives.
         try:
@@ -2327,6 +2335,36 @@ if (H.access_bindings) {
   else
     hb.push([T("memory access"), T("bindings refused, only the local agent is served: {reason}",
       {reason: AB.reason || "?"}), show]);
+}
+// Organization enrollments (OBS-199, OBS-204): the certificate's expiry, a warning in its
+// last three days, and a removed machine said plainly, each with the command that acts.
+if (Array.isArray(H.organizations)) {
+  const orgStatus = fullCommand("org status");
+  for (const O of H.organizations) {
+    const enroll = fullCommand("org enroll --server", shellArg(O.server || "https://ORG-SERVER"), "--org", shellArg(O.org),
+      "--token-slot PROJECT/ENV/NAME");
+    const label = T("organization {org}", {org: O.org || "?"});
+    if (O.state === "removed")
+      hb.push([label, T("removed from the organization on {date} (the server answered {code}); nothing more is sent to it",
+        {date: ((O.removed || {}).at || "?").slice(0, 10), code: (O.removed || {}).code || "?"}),
+        fullCommand("org leave --org", shellArg(O.org))]);
+    else if (O.state === "expired")
+      hb.push([label, T("certificate expired on {date}; enroll again with a new token from the organization's administrator",
+        {date: O.expiresOn || "?"}), enroll]);
+    else if (O.state === "needs-enrollment")
+      hb.push([label, T("the organization asked this machine to enroll again with a new token"), enroll]);
+    else if (O.state === "expiring")
+      hb.push([label, T("certificate expires on {date}; renew it now while the server answers", {date: O.expiresOn || "?"}),
+        fullCommand("org rotate --org", shellArg(O.org))]);
+    else if (O.state === "valid")
+      hb.push([label, T("certificate valid until {date}", {date: O.expiresOn || "?"}), orgStatus]);
+    else
+      hb.push([label, T("enrollment could not be read: {reason}", {reason: O.reason || "?"}), orgStatus]);
+    // `unknown-org` is provisional (not in the contract yet): said beside the state, retried as usual.
+    if (O.unknownOrg && O.state !== "removed")
+      hb.push([label, T("the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later",
+        {date: (O.unknownOrg.since || "?").slice(0, 10)}), orgStatus]);
+  }
 }
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);
 if (H.handoffs_waiting) hb.push([T("handoffs waiting for a session"), H.handoffs_waiting]);

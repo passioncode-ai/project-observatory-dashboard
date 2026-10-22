@@ -53,6 +53,15 @@ class WindowsHolderWorkflow(unittest.TestCase):
         self.assertIn("if: always()", strict)
         self.assertIn("python tests/test_disk_guard.py -v WindowsHolderUnknown", strict)
 
+    def test_organization_enrollment_is_enforced_on_windows(self):
+        # OBS-201: the organization suite fails the job on Windows, and cannot pass by skipping
+        # every case for want of the `full` extra.
+        strict = self.step("org")
+        self.assertIsNone(re.search(r"^        continue-on-error:\s*true\s*$", strict, re.M))
+        self.assertIn("if: always()", strict)
+        self.assertLess(strict.index('python -c "import cryptography"'), strict.index("python tests/test_node_org.py -v"))
+        self.assertIn("steps.org.outcome", self.body)
+
     def test_historical_informative_steps_remain_separately_labelled(self):
         for name in ("tests", "compile", "oslocks"):
             self.assertRegex(self.step(name), r"continue-on-error:\s*true")

@@ -20,11 +20,14 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import configuration
+import contract_lock
 import workspace
 from fabric_hash import compute
 
 MANIFEST = ROOT / "fabric-agent.json"
-LOCK = json.loads((ROOT / "fabric-contract.lock.json").read_text())
+#: The engine's local-profile lock (`observatory-profile.lock.json`, OBS-196), not
+#: the contract pin: the pin names a contract commit, this names schema releases.
+LOCK = contract_lock.profile_lock(ROOT)
 PUBLIC_NWO = "ssheleg/project-observatory-open-source"
 RAW = "https://raw.githubusercontent.com/" + PUBLIC_NWO
 SCHEMA_RELEASE = LOCK["schemaRelease"]

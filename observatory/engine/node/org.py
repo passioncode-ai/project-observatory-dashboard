@@ -76,8 +76,30 @@ PERMANENT_BATCH_CODES = frozenset({'device-mismatch', 'payload-too-large', 'batc
 #: file-held key by policy): a named state, not a retry.
 STORAGE_REFUSALS = frozenset({'key-storage-refused', 'key-storage-not-allowed', 'storage-not-allowed',
                               'attestation-required', 'key-not-hardware'})
-#: The certificate refusals that end the enrollment: the machine needs a new token.
-ENDING_CODES = frozenset({'epoch-superseded', 'certificate-revoked', 'certificate-expired', 'certificate-unknown'})
+#: The refusals that mean this machine is no longer in the organization (OBS-204), each only with HTTP 401 as the
+#: contract sends them (devices.md, the step table): its certificate was revoked (an administrator removed the machine,
+#: or the organization was closed and every machine's certificate revoked), or the server no longer knows it and no
+#: previous certificate is left to fall back to (CT-65; the fallback runs first). The contract gives no code that
+#: tells a closed organization from one revoked machine, so neither does this. The enrollment ends there: nothing more
+#: is sent, its buffered events are dropped with one count recorded, and only `org leave` or a new token's
+#: `org enroll` follow. A 5xx is never terminal: it is retried as any other failure.
+REMOVED_CODES = frozenset({'certificate-revoked', 'certificate-unknown'})
+#: `unknown-org`, a deleted organization, is not in the contract yet (PROVISIONAL until it is): a 4xx answer with it is
+#: terminal only when it is answered again at least this long after the first, with no successful request between.
+#: Until then the enrollment is retried as usual and its status says the server does not know the organization.
+UNKNOWN_ORG = 'unknown-org'
+UNKNOWN_ORG_CONFIRM_SECONDS = 3600
+#: The certificate refusals that end the enrollment: the machine needs a new token. `REMOVED_CODES` end it only with
+#: HTTP 401 (`_ends`).
+ENDING_CODES = frozenset({'epoch-superseded', 'certificate-expired'}) | REMOVED_CODES
+
+
+def _ends(status: int, code: Optional[str]) -> bool:
+    return code in ('epoch-superseded', 'certificate-expired') or (status == 401 and code in REMOVED_CODES)
+#: `org status`, Health and doctor warn this long before the certificate expires (OBS-199). A node offline past its
+#: certificate's lifetime needs a new enrollment token until the contract's re-enrollment rule lands.
+EXPIRY_WARNING_SECONDS = 3 * 86400
+TOKEN_SLOT_PLACEHOLDER = 'PROJECT/ENV/NAME'
 JOURNAL_BYTES = 256 * 1024
 _CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 _BOOT = 'boot-' + secrets.token_hex(4)
@@ -86,11 +108,96 @@ Transport = Callable[[str, Dict[str, str], bytes, float], Tuple[int, bytes]]
 
 
 class OrgError(RuntimeError):
-    """A refusal with a code: `{'error': code, 'message': ...}` for the terminal, never a secret."""
+    """A refusal with a code: `{'error': code, 'message': ...}` for the terminal, never a secret. A refusal a person
+    resolves carries the step in words (`next_step`) and the command it ends with (`command`)."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, *, next_step: Optional[str] = None, command: Optional[str] = None):
         super().__init__(message)
         self.code = code
+        self.next_step, self.command = next_step, command
+
+
+def enroll_command(org_id: str, server: Optional[str]) -> str:
+    return 'project-observatory full org enroll --server %s --org %s --token-slot %s' % (
+        server or 'https://ORG-SERVER', org_id, TOKEN_SLOT_PLACEHOLDER)
+
+
+def notice(org_id: str, state: dict, now: float) -> dict:
+    """What a person must know about one enrollment, from its saved state alone (no network, no key): the
+    certificate's expiry date, its state (`valid`, `expiring` in the last three days, `expired`, `needs-enrollment`
+    when the server asked for it, `removed` when the organization no longer has this machine), and, when the person
+    has something to do, the step in words and the command. `org status`, Health and doctor all read this.
+
+    `now` is this machine's clock; the expiry is judged on the server's, as the last check-in measured it
+    (`skewSeconds`), the clock every request is signed on."""
+    now = now + (state.get('skewSeconds') or 0)
+    server = state.get('server') if isinstance(state.get('server'), str) else None
+    not_after_text = str((state.get('certificate') or {}).get('notAfter') or '')
+    not_after_ms = strict_time(not_after_text)
+    left = (not_after_ms / 1000 - now) if not_after_ms is not None else 0.0
+    out: Dict[str, Any] = {'org': org_id, 'server': server, 'notAfter': not_after_text,
+                           'expiresOn': not_after_text[:10], 'daysLeft': round(left / 86400, 2)}
+    enroll = enroll_command(org_id, server)
+    new_token = ("ask the organization's administrator for a new enrollment token, put it in a vault slot "
+                 '(python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME, the token on stdin) '
+                 'and run: ' + enroll)
+    removed = state.get('removed')
+    if isinstance(removed, dict):
+        out.update(state='removed', removed=removed, command='project-observatory full org leave --org %s' % org_id,
+                   enrollCommand=enroll,
+                   nextStep='this machine was removed from organization %s on %s (the server answered %s): nothing '
+                            'more is sent to it and what it held was dropped. Remove its local state with: '
+                            'project-observatory full org leave --org %s; to join again, %s'
+                            % (org_id, removed.get('at') or '?', removed.get('code') or '?', org_id, new_token))
+    elif left <= 0:
+        out.update(state='expired', command=enroll,
+                   nextStep='the certificate expired on %s, so the organization accepts nothing from this machine; '
+                            'a node offline past its certificate needs a new enrollment token: %s'
+                            % (not_after_text, new_token))
+    elif state.get('reEnroll'):
+        out.update(state='needs-enrollment', command=enroll,
+                   nextStep='the organization asked this machine to enroll again: ' + new_token)
+    elif left <= EXPIRY_WARNING_SECONDS:
+        out.update(state='expiring', command='project-observatory full org rotate --org %s' % org_id,
+                   nextStep='the certificate expires on %s. The maintenance job renews it while the server answers; '
+                            'renew it now with: project-observatory full org rotate --org %s. If this machine stays '
+                            'offline past %s it needs a new enrollment token' % (not_after_text, org_id,
+                                                                                 not_after_text))
+    else:
+        out['state'] = 'valid'
+    unknown = state.get('unknownOrg')
+    if isinstance(unknown, dict) and not isinstance(removed, dict):
+        out['unknownOrg'] = unknown
+        out['warning'] = ('the organization server does not know this organization (since %s, answer %s). Requests '
+                          'are retried as usual; if it still does not know it an hour after that, this machine is '
+                          'taken as removed from the organization (this code is provisional until the contract '
+                          'defines it)' % (unknown.get('since') or '?', UNKNOWN_ORG))
+    return out
+
+
+def node_folder(home: Path) -> Path:
+    """The node folder `full org` and the maintenance job use: `OBSERVATORY_NODE`, else `<home>/node`."""
+    return Path(os.environ.get('OBSERVATORY_NODE') or Path(home) / 'node').expanduser()
+
+
+def notices(node: Path, now: Optional[float] = None) -> List[dict]:
+    """Every enrollment's `notice`, read-only: nothing is created, locked or sent. An unreadable one is named, never
+    skipped."""
+    now = time.time() if now is None else now
+    out = []
+    try:
+        orgs = enrolled_orgs(node)
+    except OSError as error:                               # an unreadable node folder is a state, not a crash
+        return [{'org': None, 'state': 'unreadable', 'reason': type(error).__name__}]
+    for org_id in orgs:
+        try:
+            state = Enrollment(Path(node).resolve(), org_id).state()
+        except (OSError, ValueError, RuntimeError) as error:
+            out.append({'org': org_id, 'state': 'unreadable', 'reason': type(error).__name__})
+            continue
+        if state is not None:
+            out.append(notice(org_id, state, now))
+    return out
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -375,7 +482,11 @@ class Enrollment:
         server's clock as the last check-in measured it (`skewSeconds`). A `signature-stale` refusal forgets that
         measure and asks for a check-in now, which measures it again. The first answer past the signature check under
         a rotated certificate lets the previous certificate go (CT-65); a `certificate-unknown` before that goes back
-        to the previous one, which the server keeps valid until the new serial is first presented."""
+        to the previous one, which the server keeps valid until the new serial is first presented. A refusal that
+        says the machine is no longer in the organization (`REMOVED_CODES`) ends the enrollment here, for every
+        caller (OBS-204); a removed enrollment sends nothing."""
+        if isinstance(state.get('removed'), dict):
+            raise self._removed_error(state)
         body = json.dumps(doc, separators=(',', ':')).encode('utf-8')
         created = int(self.clock() + (state.get('skewSeconds') or 0))
         headers = http_signature.sign_request(self.keys.sign, method='POST', origin=state['server'], target=path,
@@ -396,17 +507,62 @@ class Enrollment:
                 state['nextCheckInAt'] = 0
                 self._save(state)
             elif code == 'certificate-unknown' and isinstance(previous, dict) \
-                    and self.clock() < strict_time(previous['notAfter']) / 1000:
+                    and self.clock() + (state.get('skewSeconds') or 0) < strict_time(previous['notAfter']) / 1000:
                 # The server does not know the rotated certificate; the previous one is still valid (CT-65). Back to
                 # it, and the same request once more under it: only a refusal of that one can end the enrollment.
                 state['certificate'] = state.pop('previousCertificate')
                 self._save(state)
                 self.journal('certificate-fallback', serial=state['certificate']['serial'])
                 return self._signed(state, path, rebuild(state) if rebuild else doc)
-        elif 200 <= status < 300 and state.get('previousCertificate'):
+        elif 200 <= status < 300 and (state.get('previousCertificate') or state.get('unknownOrg')):
             state.pop('previousCertificate', None)         # a 2xx proves the server took the new serial
+            state.pop('unknownOrg', None)                  # and that it knows the organization
             self._save(state)
+        code = _error_code(answer)
+        if status == 401 and code in REMOVED_CODES:        # only with 401, as the contract sends them
+            self._remove(state, code, status)
+        elif code == UNKNOWN_ORG and 400 <= status < 500:
+            self._unknown_org(state, status)
         return status, answer
+
+    def _unknown_org(self, state: dict, status: int) -> None:
+        """`unknown-org` (provisional, not in the contract yet): the first answer is recorded and retried as usual; one
+        at least `UNKNOWN_ORG_CONFIRM_SECONDS` later AND in a later tick (`tickSeq`, counted by `tick`), with no
+        successful request between, ends the enrollment. The tick keeps a wall clock that jumps an hour between two
+        requests of one tick from removing the machine."""
+        now = self.clock()
+        tick = state.get('tickSeq') or 0
+        first = state.get('unknownOrg')
+        if not isinstance(first, dict) or not isinstance(first.get('at'), (int, float)):
+            state['unknownOrg'] = {'since': iso(now), 'at': int(now), 'status': status, 'tick': tick}
+            self._save(state)
+            self.journal('unknown-org-seen', status=status)
+        elif now - first['at'] >= UNKNOWN_ORG_CONFIRM_SECONDS and tick > (first.get('tick') or 0):
+            self._remove(state, UNKNOWN_ORG, status)
+
+    def _remove(self, state: dict, code: str, status: int) -> None:
+        """The organization no longer has this machine (OBS-204): its pending events can be accepted nowhere, so they
+        are dropped with one count recorded, the retry and in-flight batch are forgotten, and the state says when and
+        why. `state` is the caller's own copy, changed in place, so what it saves next keeps the removal."""
+        if isinstance(state.get('removed'), dict):
+            return
+        with self._db() as conn:
+            dropped = conn.execute("UPDATE events SET state = 'dropped', key = NULL, reason = ? WHERE state = 'pending'",
+                                   (('removed:' + code)[:40],)).rowcount
+            conn.execute("DELETE FROM meta WHERE name IN ('retry', 'inflight')")
+        state['removed'] = {'at': iso(self.clock()), 'code': code, 'status': status, 'droppedEvents': dropped}
+        if isinstance(state.get('unknownOrg'), dict):
+            state['removed']['firstSeen'] = state.pop('unknownOrg').get('since')
+        state['reEnroll'] = True
+        state.pop('pendingRotation', None)
+        self._save(state)
+        self.journal('removed-from-organization', code=code, status=status, droppedEvents=dropped)
+
+    def _removed_error(self, state: dict) -> 'OrgError':
+        said = notice(self.org_id, state, self.clock())
+        return OrgError('removed-from-organization', 'this machine was removed from the organization on %s (%s)'
+                        % (state['removed'].get('at'), state['removed'].get('code')),
+                        next_step=said.get('nextStep'), command=said.get('command'))
     def _certificate(self, response: Any, epoch_expected: Optional[int] = None) -> dict:
         """The certificate an enrollment or rotation answered, checked against what was asked: this organization and
         device, a serial, a window, and the machine's own `#sig` key in the DER."""
@@ -458,6 +614,9 @@ class Enrollment:
             raise OrgError('token-malformed', 'an enrollment token is <tokenId>.<secret>')
         with self._locked():
             previous = self.state()
+            # A machine removed from its organization starts over with a new token (OBS-204): the organization it
+            # joins may be a new one whose epochs start again, and nothing of the old stream is carried.
+            over = previous is not None and isinstance(previous.get('removed'), dict)
             status, answer = self._post(origin, self.paths['enroll'], self.enrollment_request(match.group(1)),
                                         {'Authorization': 'EnrollmentToken ' + token})
             if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'enrollment-response':
@@ -470,7 +629,7 @@ class Enrollment:
             cert = self._certificate(answer)
             epoch = answer.get('streamEpoch')
             if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1 \
-                    or (previous and epoch <= previous.get('epoch', 0)):
+                    or (previous and not over and epoch <= previous.get('epoch', 0)):
                 raise OrgError('epoch-invalid', 'the stream epoch is not above every epoch issued to this device')
             interval = (answer.get('checkIn') or {}).get('intervalSeconds')
             doc = {'schema': 'org-enrollment/1', 'org': self.org_id, 'device': self.keys.device_id, 'server': origin,
@@ -481,12 +640,18 @@ class Enrollment:
                    'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
                    'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
                    'reEnroll': False, 'nextCheckInAt': 0, 'skewSeconds': 0}
+            if over:
+                doc['previousRemoval'] = previous['removed']
             private_io.parent(self.folder)
             self._save(doc)
             with self._db() as conn:                       # a new enrollment: registrations are sent again
+                if over:                                   # nothing pending survived the removal; start a new stream
+                    conn.execute('DELETE FROM events')
+                    conn.execute('DELETE FROM registrations')
+                    conn.execute('DELETE FROM meta')
                 conn.execute("UPDATE registrations SET next_at = 0, sent_at = NULL WHERE gate != 'hold-degraded'")
             self.journal('enrolled', epoch=epoch, serial=cert['serial'], notAfter=cert['notAfter'],
-                         protocols=doc['protocols'], reEnrollment=previous is not None)
+                         protocols=doc['protocols'], reEnrollment=previous is not None, afterRemoval=over)
             self._register_quietly()
             return self.describe()
     def rotate(self) -> dict:
@@ -506,7 +671,7 @@ class Enrollment:
             if status != 200 or not isinstance(answer, dict):
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 self.journal('rotate-refused', status=status, code=code)
-                if code in ENDING_CODES:
+                if _ends(status, code):
                     state['reEnroll'] = True
                     state.pop('pendingRotation', None)
                 elif status in (400, 422):                 # refused for what it is: the next rotation asks anew
@@ -531,14 +696,22 @@ class Enrollment:
         return bool(state.get('rotate')) or self.clock() >= start + (end - start) * 2 / 3
 
     def expired(self, state: dict) -> bool:
-        return self.clock() >= strict_time(state['certificate']['notAfter']) / 1000
+        """On the server's clock, as the last check-in measured it: the clock every request is signed on."""
+        return self.clock() + (state.get('skewSeconds') or 0) >= strict_time(state['certificate']['notAfter']) / 1000
 
     def _require(self) -> dict:
+        """The saved state, or a refusal that names what happened and the person's next step (OBS-199, OBS-204):
+        a removed or expired enrollment never reaches the network."""
         state = self.state()
         if state is None:
             raise OrgError('not-enrolled', 'this machine is not enrolled in that organization')
+        if isinstance(state.get('removed'), dict):
+            raise self._removed_error(state)
         if self.expired(state):
-            raise OrgError('certificate-expired', 'the certificate expired: enroll again with a new token')
+            said = notice(self.org_id, state, self.clock())
+            raise OrgError('certificate-expired', 'the certificate expired on %s: this machine needs a new enrollment '
+                           'token' % state['certificate']['notAfter'], next_step=said.get('nextStep'),
+                           command=said.get('command'))
         return state
 
     # -- check-in ----------------------------------------------------------------------------------------------
@@ -583,11 +756,15 @@ class Enrollment:
                 state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
                 state['nextCheckInAt'] = 0 if code == 'signature-stale' else \
                     int(self.clock()) + min(state['checkInSeconds'], 300)
-                if code in ENDING_CODES:
+                if _ends(status, code):
                     state['reEnroll'] = True
                 self._save(state)
                 self.journal('check-in-failed', status=status, code=code)
-                return {'ok': False, 'code': code, 'status': status}
+                out = {'ok': False, 'code': code, 'status': status}
+                if _ends(status, code):                   # never a silent refusal: what happened and the step
+                    said = notice(self.org_id, state, self.clock())
+                    out.update({k: said[k] for k in ('removed', 'nextStep', 'command') if k in said})
+                return out
             flags = answer.get('flags') if isinstance(answer.get('flags'), list) else []
             state['fullState'] = 'report_full_state' in flags
             nxt = answer.get('nextCheckInSeconds')
@@ -759,14 +936,20 @@ class Enrollment:
                     doc = {'protocol': ACTIVITY_PROTOCOL, 'device': {'id': self.keys.device_id}, 'batchId': batch_id,
                            'sent': iso(self.clock()), 'events': [json.loads(r['body']) for r in run]}
                     status, ack = self._signed(state, self.paths['batches'], doc)
+                    if isinstance(state.get('removed'), dict):  # nothing to retry: the organization is gone
+                        return dict(sent, held='removed', removed=state['removed'])
                     code = None if status == 200 and isinstance(ack, dict) else \
                         _error_code(ack) or ('unreachable' if status == 0 else 'http-%d' % status)
-                    if status == 413 and len(run) > 1:
+                    # A refusal that names the organization or the certificate is not about the batch's content: it
+                    # is held and retried, never rejected, whatever its status (a 401 removal returned above).
+                    about_us = code in REMOVED_CODES or code == UNKNOWN_ORG
+                    if status == 413 and len(run) > 1 and not about_us:
                         self._set_meta(conn, 'batchLimit', max(1, len(run) // 2))
                         self._set_meta(conn, 'inflight', None)
                         self.journal('batch-too-large', events=len(run), batchId=batch_id)
                         continue
-                    if code is not None and (status in PERMANENT_BATCH_STATUSES or code in PERMANENT_BATCH_CODES):
+                    if code is not None and not about_us and (status in PERMANENT_BATCH_STATUSES
+                                                              or code in PERMANENT_BATCH_CODES):
                         conn.executemany("UPDATE events SET state = 'rejected', reason = ? WHERE epoch = ? AND seq = ?",
                                          [(code[:40], epoch, r['seq']) for r in run])
                         self._set_meta(conn, 'inflight', None)
@@ -973,9 +1156,15 @@ class Enrollment:
             state = self.state()
             if state is None:
                 return {'org': self.org_id, 'result': 'not-enrolled'}
+            state['tickSeq'] = (state.get('tickSeq') or 0) + 1   # what a later tick means (`_unknown_org`)
+            self._save(state)
+            said = notice(self.org_id, state, self.clock())
+            step = {k: said[k] for k in ('removed', 'nextStep', 'command') if k in said}
+            if said['state'] == 'removed':                 # recorded once, when it happened; nothing is retried
+                return {'org': self.org_id, 'result': 'removed', **step}
             if self.expired(state) or state.get('reEnroll'):
                 self.journal('needs-enrollment', expired=self.expired(state))
-                return {'org': self.org_id, 'result': 'needs-enrollment'}
+                return {'org': self.org_id, 'result': 'needs-enrollment', **step}
             report: Dict[str, Any] = {'org': self.org_id}
             steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
                      ('checkIn', lambda: self.check_in() if self.clock() >= (self.state().get('nextCheckInAt') or 0)
@@ -996,17 +1185,22 @@ class Enrollment:
         state = self.state()
         if state is None:
             return {'org': self.org_id, 'enrolled': False}
-        not_after = strict_time(state['certificate']['notAfter']) / 1000
+        said = notice(self.org_id, state, self.clock())
+        cert_state = said['state'] if said['state'] in ('expiring', 'expired') else \
+            'expired' if self.expired(state) else 'valid'
         out = {'org': self.org_id, 'enrolled': True, 'server': state['server'], 'device': state['device'],
+               'state': 'enrolled' if said['state'] in ('valid', 'expiring') else said['state'],
                'epoch': state['epoch'], 'certificate': {'serial': state['certificate']['serial'],
                                                         'notAfter': state['certificate']['notAfter'],
-                                                        'daysLeft': round((not_after - self.clock()) / 86400, 2),
+                                                        'expiresOn': said['expiresOn'], 'state': cert_state,
+                                                        'daysLeft': said['daysLeft'],
                                                         'rotationDue': self.rotation_due(state)},
                'protocols': state.get('protocols', []), 'shareRegistration': self.accepts_shares(state),
                'collectionStart': state.get('collectionStart'), 'lastCheckIn': state.get('lastCheckIn'),
                'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': self.expired(state)
                or bool(state.get('reEnroll')), 'rotationPending': isinstance(state.get('pendingRotation'), dict),
                'key': self._key_declaration()}
+        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
         out['registrations'] = {}
         path = self.folder / 'outbox.sqlite'
@@ -1027,8 +1221,16 @@ class Enrollment:
             finally:
                 conn.close()
         degraded = []
-        if out['needsEnrollment']:
+        if 'removed' in out:
+            degraded.append('org:removed')
+        elif out['needsEnrollment']:
             degraded.append('org:needs-enrollment')
+        if 'unknownOrg' in out:
+            degraded.append('org:unknown-org')
+        if cert_state == 'expired' and 'removed' not in out:
+            degraded.append('org:certificate-expired')
+        elif cert_state == 'expiring':
+            degraded.append('org:certificate-expiring')
         if not out['shareRegistration']:
             degraded.append('org:share-registration-not-listed')
         if out['registrations'].get('hold-degraded'):
