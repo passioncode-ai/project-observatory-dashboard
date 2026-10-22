@@ -135,6 +135,14 @@ class SuiteEvidence(unittest.TestCase):
         self.assertEqual(row['status'],'PASS')
         self.assertEqual(row['test_protocol'],'unittest')
 
+    def test_a_windows_child_keeps_the_systems_own_locations_and_nothing_else(self):
+        # OBS-201: without SYSTEMROOT a Windows child has no entropy source for OpenSSL.
+        env={'SYSTEMROOT':'C:\\Windows','WINDIR':'C:\\Windows','USERPROFILE':'C:\\Users\\someone','API_TOKEN':'x'}
+        with mock.patch.dict(runner.os.environ,env,clear=True), mock.patch.object(runner.os,'name','nt'):
+            self.assertEqual(runner.runtime_environment(),{'SYSTEMROOT':'C:\\Windows','WINDIR':'C:\\Windows'})
+        with mock.patch.dict(runner.os.environ,env,clear=True), mock.patch.object(runner.os,'name','posix'):
+            self.assertEqual(runner.runtime_environment(),{})
+
     def test_every_engine_test_file_runs_somewhere(self):
         # OBS-201: the organization-enrollment suite shipped and never ran, because nothing compared
         # the files with the runner's lists. Each one is a suite, a helper, or named with what runs it.

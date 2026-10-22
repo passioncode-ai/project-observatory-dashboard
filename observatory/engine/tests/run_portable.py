@@ -369,12 +369,19 @@ def copy_source(target: Path) -> None:
         shutil.copyfile(source, destination)
 
 
+#: Windows' own locations, which a child cannot work without and which name no user or credential: without
+#: SYSTEMROOT, OpenSSL finds no entropy source and every `cryptography` key generation fails ("entropy source strength
+#: too weak"), which is how the organization suite failed through this runner on Windows (OBS-201).
+WINDOWS_SYSTEM = ('SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT')
+
+
 def runtime_environment() -> dict[str, str]:
     # Hosted CPython builds can require their shared-library search path.
     # Keep only loader configuration, never provider tokens or user config.
-    return {name: os.environ[name] for name in
-            ('LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH')
-            if name in os.environ}
+    names = ('LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'DYLD_FALLBACK_LIBRARY_PATH')
+    if os.name == 'nt':
+        names += WINDOWS_SYSTEM
+    return {name: os.environ[name] for name in names if name in os.environ}
 
 
 def clean_env(base: Path) -> dict[str, str]:
