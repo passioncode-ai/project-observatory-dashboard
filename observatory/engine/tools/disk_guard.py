@@ -377,10 +377,13 @@ def _covers(outer: str, inner: str) -> bool:
 
 
 def _wide_roots(cfg: dict) -> list[str]:
-    """What no declared state path may cover: the cleanup roots and the home folder."""
+    """What no declared state path may be or hold: the cache and temporary roots, the Trash,
+    the checkouts the build-output class plans from, `~/Library` and its `Application Support`
+    (every app's data), and the home folder. A filesystem root is refused on its own."""
     raw = [expand(r) for r in cfg.get("cache_roots") or []]
     raw += [expand(r["path"]) for r in cfg.get("temp_roots") or [] if isinstance(r, dict) and r.get("path")]
-    raw.append(os.path.expanduser("~"))
+    raw += trash_dirs() + checkouts([])
+    raw += [os.path.expanduser(p) for p in ("~/Library", "~/Library/Application Support", "~/.Trash", "~")]
     out = set()
     for r in filter(None, raw):
         out.add(_comparable(os.path.abspath(r)))
@@ -394,10 +397,51 @@ LOCAL_PATH = re.compile(r"^(~[\\/]|/|[A-Za-z]:[\\/])")
 LOCAL_PATH_MAX = 1024
 #: A descriptor's file name, `<id>.<instance>.json` (fabric_service._ID, _INSTANCE).
 DESCRIPTOR_NAME = re.compile(r"^([a-z][a-z0-9-]{1,62})\.[a-z][a-z0-9-]{0,31}\.json$")
+#: A descriptor is a small JSON file; anything larger is read as unreadable, never in full.
+DESCRIPTOR_MAX_BYTES = 1024 * 1024
+#: An unknown service's id shorter than this keeps nothing: `co` would match most of a root.
+UNKNOWN_ID_MIN = 3
+
+
+def _read_descriptor(path: str) -> bytes:
+    """One descriptor's bytes, or ValueError/OSError. Never waits and never reads without a
+    bound: a FIFO named `*.json` once blocked the guard inside the cleanup lock, and a link to
+    `/dev/zero` or a huge file was read without end (review of #338). Not followed when it is
+    a link, refused unless a regular file, at most DESCRIPTOR_MAX_BYTES."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    if not hasattr(os, "O_NOFOLLOW") and stat.S_ISLNK(os.lstat(path).st_mode):
+        raise ValueError("a link")                       # Windows: no O_NOFOLLOW, so look first
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError("not a regular file")
+        if st.st_size > DESCRIPTOR_MAX_BYTES:
+            raise ValueError("larger than a descriptor")
+        data = b""
+        while len(data) <= DESCRIPTOR_MAX_BYTES:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > DESCRIPTOR_MAX_BYTES:
+            raise ValueError("larger than a descriptor")
+        return data
+    finally:
+        os.close(fd)
+
+
+def _named_for(name: str, service: str) -> bool:
+    """A folder name that names this service: the id itself, the id followed by `.`, `-` or
+    `_`, or a reverse-DNS name whose last part is the id. Case does not count."""
+    name, service = name.casefold(), service.casefold()
+    return (name == service or any(name.startswith(service + sep) for sep in ".-_")
+            or ("." in name and name.rsplit(".", 1)[1] == service))
 
 
 def _declared(doc: dict, service: str, wide: list[str]) -> tuple[list[dict], list[tuple[str, str]]]:
-    """The state paths one descriptor declares, and the ones refused as too wide.
+    """The state paths one descriptor declares, and the ones refused (too wide, or written in
+    another operating system's grammar, which names nothing on this disk).
     ValueError when a value breaks the contract's `localPath` or cannot be normalised (a NUL
     once made `realpath` raise and stopped every guard run): the caller treats the whole
     descriptor as unreadable."""
@@ -418,7 +462,9 @@ def _declared(doc: dict, service: str, wide: list[str]) -> tuple[list[dict], lis
             try:
                 path = os.path.expanduser(value)
                 if not os.path.isabs(path):
-                    continue                    # another system's grammar (a drive letter here)
+                    refused.append((value, f"the Fabric service {service} declares {value} (paths.{field}) "
+                                           "in another operating system's grammar; it names nothing here"))
+                    continue
                 forms = {_comparable(os.path.abspath(path))}
                 if not guarded(path):
                     forms.add(_comparable(os.path.realpath(path)))
@@ -426,8 +472,8 @@ def _declared(doc: dict, service: str, wide: list[str]) -> tuple[list[dict], lis
                 raise ValueError(f"paths.{field} could not be normalised") from exc
             if any(os.path.dirname(x) == x for x in forms) or any(_covers(x, w) for x in forms for w in wide):
                 refused.append((value, f"the Fabric service {service} declares {value} as state (paths.{field}); "
-                                       "it is or holds a cleanup root, the home folder or a filesystem root, "
-                                       "so it is ignored"))
+                                       "it is or holds a cleanup root, the Trash, a checkout, ~/Library, "
+                                       "Application Support, the home folder or a filesystem root, so it is ignored"))
                 continue
             out.append({"service": service, "field": f"paths.{field}", "forms": sorted(forms)})
     return out, refused
@@ -500,17 +546,19 @@ def service_state(cfg: dict | None = None, degraded: list | None = None,
             return done()
         named = DESCRIPTOR_NAME.match(os.path.basename(f))
         try:
-            with open(f, encoding="utf-8") as fh:
-                doc = json.load(fh)
+            doc = json.loads(_read_descriptor(f).decode("utf-8"))
             if not isinstance(doc, dict):
                 raise ValueError("not an object")
             service = f"{doc.get('id')}.{doc.get('instance', 'default')}"[:160]
             paths_, refused = _declared(doc, service, wide)
-        except (OSError, ValueError):
-            if named:
+        except Exception:  # noqa: BLE001  ONE file, whatever it holds (RecursionError included), never the run
+            if named and len(named.group(1)) >= UNKNOWN_ID_MIN:
                 state["unknown_services"].append(named.group(1))
                 note(f, f"a service descriptor could not be read; folders named for {named.group(1)} "
                      "are kept this run", incomplete=False)
+            elif named:
+                note(f, f"a service descriptor could not be read; its id {named.group(1)} is too short "
+                     "to tell its folders apart, so none is kept", incomplete=False)
             else:
                 note(f, "a file in the service descriptors folder could not be read and names no service",
                      incomplete=False)
@@ -543,9 +591,9 @@ def keep_reason(path: str, state: dict | None = None) -> str:
         for declared in s_["forms"]:
             if any(_covers(declared, c) or _covers(c, declared) for c in mine):
                 return f"the Fabric service {s_['service']} declares state here ({s_['field']})"
-    name = os.path.basename(os.path.normpath(path)).casefold()
+    name = os.path.basename(os.path.normpath(path))
     for service in (state or {}).get("unknown_services") or ():
-        if service.casefold() in name:
+        if _named_for(name, service):
             return f"the descriptor of the Fabric service {service} could not be read; folders named for it are kept this run"
     return ""
 
@@ -1535,6 +1583,10 @@ def run(argv: list[str]) -> dict:
                 planner = dict(planners(cfg, level, holders, at, degraded, last_commands, kept, state))[name]
                 actions = planner(Budget(min(plan_cap, share / 2), degraded))
                 plan += actions
+                if acting and actions and name != "cache-command":
+                    # Read again before this class removes anything: a service installed while
+                    # the run planned counts (a marker is checked again at every removal).
+                    state = service_state(cfg, degraded, deadline=time.monotonic() + max(1.0, min(10.0, left() / 20)))
                 if acting:
                     class_end = mark + share
                     for i, a in enumerate(actions[:cap]):

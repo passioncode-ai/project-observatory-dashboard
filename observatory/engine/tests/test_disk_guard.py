@@ -724,6 +724,121 @@ class LiveStateUnderCacheRoots(Base):
         self.assertTrue(doc["service_state"]["complete"])
         self.assertEqual(doc["service_state"]["unknown_services"], ["svc-j"])
 
+    def test_a_deeply_nested_descriptor_keeps_only_its_own_service(self):
+        self.scoped(lambda f: f.write_text("[" * 200000))
+
+    def test_a_deeply_nested_descriptor_does_not_stop_a_run(self):
+        (self.services / "svc-j.default.json").write_text("[" * 200000)
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        with patch.object(self.g, "load_config", return_value=cfg), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "running", return_value=False):
+            doc = self.g.run(["--level", "critical"])
+        self.assertEqual(doc["service_state"]["unknown_services"], ["svc-j"])
+
+    def test_an_oversized_descriptor_keeps_only_its_own_service(self):
+        def write(f):
+            with open(f, "wb") as fh:
+                fh.write(b'{"id": "svc-j", "pad": "')
+                fh.write(b"x" * (self.g.DESCRIPTOR_MAX_BYTES + 10))
+                fh.write(b'"}')
+        self.scoped(write)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_a_fifo_named_like_a_descriptor_is_not_waited_on(self):
+        self.scoped(os.mkfifo)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX device files")
+    def test_a_link_to_a_device_is_not_read(self):
+        self.scoped(lambda f: f.symlink_to(os.devnull if not os.path.exists("/dev/zero") else "/dev/zero"))
+
+    @unittest.skipIf(sys.platform == "win32", "symlinks need a privilege there")
+    def test_a_link_to_a_large_file_is_not_read(self):
+        big = self.base / "big.json"
+        with open(big, "wb") as fh:
+            fh.write(b"[" + b"0," * (self.g.DESCRIPTOR_MAX_BYTES // 2 + 10) + b"0]")
+        self.scoped(lambda f: f.symlink_to(big))
+
+    def test_a_short_service_id_keeps_nothing(self):
+        # An id of two characters would match most of a cache root: named only.
+        self.folder("co.example.app")
+        self.folder("cocoa-tool")
+        (self.services / "co.default.json").write_text("{not json")
+        kept, degraded = [], []
+        self.assertEqual(len(self.plan(kept, degraded)), 2)
+        self.assertEqual(kept, [])
+        self.assertEqual([Path(d["path"]).name for d in degraded if d.get("source") == "fabric-descriptors"],
+                         ["co.default.json"])
+
+    def test_an_unknown_service_keeps_only_folders_named_for_it(self):
+        for name in ("abc", "ABC.cache", "abc-jobs", "abc_runs", "com.example.abc", "abcdef", "xabc", "com.abc.tool"):
+            self.folder(name)
+        (self.services / "abc.default.json").write_text("{not json")
+        kept = []
+        planned = sorted(Path(a["target"]).name for a in self.plan(kept))
+        self.assertEqual(planned, ["abcdef", "com.abc.tool", "xabc"])
+        self.assertEqual(sorted(Path(k["target"]).name for k in kept),
+                         ["ABC.cache", "abc", "abc-jobs", "abc_runs", "com.example.abc"])
+
+    def test_a_declared_trash_application_support_or_library_is_refused(self):
+        for declared in ("~/.Trash", "~/Library", "~/Library/Application Support"):
+            with self.subTest(declared=declared):
+                for f in self.services.iterdir():
+                    f.unlink()
+                degraded = []
+                self.descriptor("svc-wide", {"data": declared, "logs": []})
+                state = self.g.service_state(self.cfg(cache_roots=[str(self.caches)]), degraded)
+                self.assertEqual(state["paths"], [])
+                self.assertEqual([d["path"] for d in degraded if d.get("source") == "fabric-descriptors"], [declared])
+
+    def test_a_declared_application_support_subfolder_is_honoured(self):
+        degraded = []
+        self.descriptor("svc-a", {"data": "~/Library/Application Support/svc-a", "logs": []})
+        state = self.g.service_state(self.cfg(cache_roots=[str(self.caches)]), degraded)
+        self.assertEqual(len(state["paths"]), 1)
+        self.assertEqual(degraded, [])
+
+    def test_a_declared_checkout_root_is_refused(self):
+        repo = self.base / "repo"
+        repo.mkdir()
+        degraded = []
+        self.descriptor("svc-wide", {"data": str(self.base / "repo"), "logs": []})
+        with patch.object(self.g, "checkouts", return_value=[str(repo)]):
+            state = self.g.service_state(self.cfg(cache_roots=[str(self.caches)]), degraded)
+        self.assertEqual(state["paths"], [])
+        self.assertEqual(len([d for d in degraded if d.get("source") == "fabric-descriptors"]), 1)
+
+    def test_another_systems_path_is_named_not_dropped(self):
+        other = "/srv/svc-a" if sys.platform == "win32" else "C:\\svc-a"
+        degraded = []
+        self.descriptor("svc-a", {"data": other, "logs": []})
+        state = self.g.service_state(self.cfg(cache_roots=[str(self.caches)]), degraded)
+        self.assertEqual(state["paths"], [])
+        rows = [d for d in degraded if d.get("source") == "fabric-descriptors"]
+        self.assertEqual([d["path"] for d in rows], [other])
+        self.assertIn("another operating system", rows[0]["reason"])
+
+    def test_a_descriptor_installed_between_plan_and_act_stops_the_removal_in_a_run(self):
+        self.folder("svc-late")
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        real = self.g.plan_cache_dirs
+
+        def plan_then_install(*args, **kwargs):
+            out = real(*args, **kwargs)
+            self.descriptor("svc-late", {"data": str(self.caches / "svc-late"), "logs": []})
+            return out
+        with patch.object(self.g, "load_config", return_value=cfg), \
+                patch.object(self.g, "plan_cache_dirs", side_effect=plan_then_install), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "running", return_value=False):
+            doc = self.g.run(["--apply", "--level", "critical"])
+        self.assertTrue((self.caches / "svc-late" / "jobs").exists())
+        self.assertEqual(doc["results"]["removed"], 0)
+
     def test_a_descriptor_file_named_for_no_service_keeps_nothing(self):
         self.folder("one")
         (self.services / "x.json").mkdir()

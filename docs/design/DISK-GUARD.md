@@ -92,37 +92,49 @@ itself, in one of two ways:
   not resolved.
 
 **Which classes.** The planners of cache folders, build output, temporary entries and Trash consult
-both, and list what they keep in the report. `act` checks both again right before every path
-removal, browser clones included, so a marker written after the plan still stops it. The tools'
-own cache commands (`uv cache prune` and the like) remove nothing by path and are not covered.
+both, and list what they keep in the report. `act` checks the marker again right before every path
+removal, browser clones included, against the descriptors as last read (below). The tools' own
+cache commands (`uv cache prune` and the like) remove nothing by path and are not covered.
 
-**Read once per run, inside its budget.** A run reads the descriptors once, after it takes the
-lock, and plans and acts on that reading; the time is in the report's `phases.service-state`, and
-`service_state` in the report gives `complete`, the number of paths and of refused ones. A service
-installed while a run acts is honoured from the next run; its marker is honoured at once. At most
-256 declared paths are resolved; past that the reading is incomplete.
+**When the descriptors are read.** Once after a run takes the lock, for planning, with a deadline
+of a tenth of the run's time (at most 30 seconds); the time is in the report's
+`phases.service-state`. Then once more at the start of each class's removal phase, when that class
+has something to remove (deadline a twentieth of what is left, at most 10 seconds), so a service
+installed while the run planned is honoured before anything of that class goes. They are NOT read
+again before each single removal: a service installed during one class's removals is honoured from
+the next class or run. A marker is honoured at once. `act` called on its own reads them itself. The
+report's `service_state` gives `complete`, the number of paths, of refused ones, and
+`unknown_services`. At most 256 declared paths are resolved; past that the reading is incomplete.
 
-**When the descriptors cannot be read.** No services folder means no Fabric on the machine: nothing
-is degraded. When the folder itself cannot be read (it or its parent unreadable, the path not a
-folder, or the read's deadline, a tenth of the run's time and at most 30 seconds, reached), that is
-named in `degraded` (`fabric-descriptors`), and the cache-folder and temporary classes remove
-nothing that run, each saying so in `degraded`; `act` refuses those two classes too. The folder is
-listed with `os.scandir`, because `Path.is_dir` and `Path.glob` report an unreadable folder as an
-empty one, which once read as "no service".
+**When the descriptors folder cannot be read.** No services folder means no Fabric on the machine:
+nothing is degraded. When the folder itself cannot be read (it or its parent unreadable, the path
+not a folder, or the read's deadline reached), that is named in `degraded` (`fabric-descriptors`),
+and the cache-folder and temporary classes remove nothing that run, each saying so in `degraded`;
+`act` refuses those two classes too. The folder is listed with `os.scandir`, because `Path.is_dir`
+and `Path.glob` report an unreadable folder as an empty one, which once read as "no service".
 
-**One broken descriptor makes only its own service unknown.** A descriptor that is not JSON, not an
-object, a folder, or that declares a path breaking the contract's `localPath` (not a string, not
-absolute or under `~`, longer than 1,024 characters, or holding a NUL character, which once made
-`realpath` raise and stopped every guard run) is named in `degraded`, and its service id is taken
-from the file name `<id>.<instance>.json`. For that run, every folder whose name contains that id
-(any case) is kept with the reason "descriptor could not be read"; both classes run for everything
-else, so one broken file cannot stop the guard on every run until a person removes it. A file whose
-name matches no service is named in `degraded` and keeps nothing. The report's `service_state`
-lists these ids as `unknown_services`.
+**One broken descriptor makes only its own service unknown.** Each file is opened without following
+a link and without waiting (`O_NOFOLLOW`, `O_NONBLOCK`; on Windows a link is refused by `lstat`
+first), must be a regular file, and is read up to 1 MB: a FIFO named `*.json` once blocked the
+guard inside the cleanup lock, and a link to `/dev/zero` was read without end. A file that fails
+any of that, is not JSON (deep nesting included: its `RecursionError` once escaped the run), is not
+an object, or declares a path breaking the contract's `localPath` (not a string, not absolute or
+under `~`, longer than 1,024 characters, or holding a NUL character) is named in `degraded`, and
+its service id is taken from the file name `<id>.<instance>.json`. For that run, the folders named
+for that id are kept with the reason "descriptor could not be read": the folder name is the id, or
+starts with the id and `.`, `-` or `_`, or is a reverse-DNS name whose last part is the id, case
+ignored. An id shorter than 3 characters keeps nothing (`co` would match most of a cache root);
+it is named only. Both classes run for everything else, so one broken file cannot stop the guard on
+every run until a person removes it. A file whose name matches no service is named and keeps
+nothing.
 
-**A declaration that is too wide is refused.** A declared state path that is or holds a cache
-root, a temporary root, the home folder or a filesystem root would keep other programs' data
-forever. It is ignored, and `degraded` names the service and the path.
+**A declaration that is too wide, or foreign, is refused.** A declared state path that is or holds a
+cache root, a temporary root, the Trash, a checkout the build-output class plans from, `~/Library`,
+`~/Library/Application Support`, the home folder or a filesystem root would keep other programs'
+data forever. It is ignored, and `degraded` names the service and the path. A folder inside
+Application Support (`~/Library/Application Support/<service>`) is honoured. A path in another
+operating system's grammar (a drive letter on macOS or Linux) names nothing here and is named in
+`degraded` the same way.
 
 The report carries `kept` (class, path, reason; at most 200), and the Machine page shows it as
 "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots` pins each rule.
