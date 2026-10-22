@@ -7,9 +7,11 @@ Copies, byte for byte from that commit (read with `git show`, so the checkout's 
 matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
 `schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
 check-in fixtures CT-65 added into its `device/` folder, then rewrites the commit and those files' digest rows in that
-folder's README. `tests/test_node_foundation.py` checks the digests and
-`tests/test_node_org.py` runs the files, so a re-vendored commit is checked by the next test run. Prints what changed;
-exits 1 when the commit or a file cannot be read, and changes nothing then.
+folder's README, and the commit of the engine's contract pin (`observatory/engine/fabric-contract.lock.json`, OBS-196):
+the contract asks a consumer to pin it once and to move the pin with what it vendors, in one change.
+`tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
+`tests/test_contract_lock.py` holds the pin equal to the README's commit, so a re-vendored commit is checked by the next
+test run. Prints what changed; exits 1 when the commit or a file cannot be read, and changes nothing then.
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
+#: The engine's one pin of the contract, under the contract's own file name.
+CONTRACT_PIN = ROOT / "observatory" / "engine" / "fabric-contract.lock.json"
 FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "share-registration.json": "fixtures/vectors/share-registration.json",
          "device-enrollment.schema.json": "schemas/device-enrollment.schema.json",
@@ -75,6 +79,11 @@ def vendor(contract: Path, commit: str) -> dict:
             changed.append(name)
         target.write_bytes(data)
     readme_path.write_text(readme, encoding="utf-8")
+    pin = json.loads(CONTRACT_PIN.read_text(encoding="utf-8"))
+    if pin.get("commit") != full:
+        pin["commit"] = full
+        CONTRACT_PIN.write_text(json.dumps(pin, indent=2) + "\n", encoding="utf-8")
+        changed.append(CONTRACT_PIN.name)
     return {"commit": full, "changed": changed}
 
 

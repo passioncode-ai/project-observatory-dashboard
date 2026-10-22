@@ -2,9 +2,23 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 9. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
+is revision 9. `observatory-profile.lock.json` selects profile `observatory-local-mcp`
 version `1.2.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
 separate version axes.
+
+**Two lock files, each under its own name (OBS-196).** `fabric-contract.lock.json` is
+the engine's one pin of the Fabric Agent Contract, in the shape the contract's
+`contract-pin.schema.json` gives it: `contract`, `version` (`0.1.0`, the manifest's
+`contractVersion`), `repository`, the full 40-character `commit` and `profile` (`mcp`).
+It pins the commit the organization-enrollment files in `node-vectors/` were last
+vendored at; `tools/vendor_org_vectors.py` moves the files and the pin in one step, and
+`../tests/test_contract_lock.py` holds the pin to the schema and to that commit. The
+profile lock used to be called `fabric-contract.lock.json`, so a reader keyed on the
+name took it for the pin. Every reader now goes through `../contract_lock.py`,
+which still reads the profile lock under its old name for one release when no
+`observatory-profile.lock.json` is present and the old file has the profile's shape.
+The probe receipt's `contractCommit` comes from the pin, its `localProfile` and
+`schemaRelease` from the profile lock.
 
 **Three schema releases, one pin per file.** The lock's `releases` lists, for every
 bundled schema and fixture, the one release tag that published it: the first eight
