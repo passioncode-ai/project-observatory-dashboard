@@ -90,7 +90,7 @@ agents never lose the tools between steps.
 ## Step L1: what was built
 
 `observatory/engine/node/lifecycle/broker.py`, tested by `observatory/engine/tests/test_node_lifecycle_broker.py`
-(suite `node_lifecycle_broker`, 95 cases: 85 ported, 10 new).
+(suite `node_lifecycle_broker`, 102 cases: 85 ported, 17 new).
 
 - **The closed registry** (`validate_registry`): every field required but `idleStopMinutes` and
   `backgroundLaunch`; an unknown field, a cycle among dependencies, an idle stop on an always_on target or a
@@ -102,12 +102,21 @@ agents never lose the tools between steps.
 - **The authority** (`Authority`): a caller is the SHA-256 of its credential, compared in constant time
   against every grant; a grant names its tools and targets, and only an owner's `*` covers every target. The
   name `supervisor` is the broker's own pass and is refused as a caller.
-- **Durable operations**: admitted synchronously, run by a worker, polled by `get`; a process that dies leaves
-  them `running`, the next one takes them over under a new generation, and an old generation's worker cannot
-  finish them. **Idempotency receipts** answer a retry for 24 hours, before the revisions are compared; the same
-  request id with another meaning is `idempotency_conflict`.
+- **One broker per state folder.** The broker takes an exclusive lock on `broker.lock` beside its store
+  (`oslocks`, across processes) before it opens SQLite or recovers anything; a second broker, in the same process
+  or another, is refused with `already_running`, so two can never take over the same running operations.
+- **Durable operations**: admitted synchronously, run by a worker; the admitting call answers with the receipt
+  (no `lifecycle.operation.get` grant is needed to see it), and `get` reads it later by id. A process that dies
+  leaves them `running`, the next one takes them over under a new generation, and an old generation's worker
+  cannot finish them; one recovered past its deadline gets the target's own budget again instead of ending
+  `timeout` before it looks, and a start recovered after its effect is still recorded as the broker's.
+  **Idempotency receipts** answer a retry for 24 hours, before the policy and grant revisions are compared; the
+  same request id with another meaning is `idempotency_conflict`. Admission reads and writes its receipt in one
+  `BEGIN IMMEDIATE` transaction.
 - **The effect journal** (`effects`): committed before the only effect of a start, so a crash in between is
   `delivery_unknown`, never a second launch, until a live process or 120 s of a stopped target settles it.
+  The entry is read again inside the transaction that writes it, so another operation's dispatch found there
+  is never followed by a second start.
 - **Circuits and the restart budget**: two counted starts in 60 s open a five-minute circuit; three failed
   supervisor starts of an always_on target in 30 minutes stop the relaunching until a caller asks for it, the
   owner changes its policy, or a probe stronger than a pid sees it serve.
@@ -119,6 +128,10 @@ agents never lose the tools between steps.
 - **The adapter** (`Adapter`, a protocol): `identity_matches(target, *, deadline)`, `probe`, `start`,
   `stop(target, pid, *, force, mode)` and an optional `close`. The tests drive two fakes, a durable file seam
   and a process seam; no installed application is touched.
+
+Notes for L4: the store is pruned only when a broker opens (`prune`); the supervisor's sweep should prune
+too. An activation inside the 20 s launch grace is ignored by `note_activation`; the presence check at stop
+(frontmost with recent input) still protects the person then, and the watcher may deliver a later activation.
 
 What L1 does not do yet: no MCP tool, CLI verb or event log (L3), no thread runs `supervise` (L4), no adapter
 acts on a real app (L2). Nothing in the engine calls the broker, so no reader-facing surface changes in this

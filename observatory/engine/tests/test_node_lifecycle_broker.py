@@ -933,6 +933,13 @@ class EngineTests(BrokerFixture, unittest.TestCase):
         self.save_policy()
         self.broker = self.make_broker()
 
+    def die(self):
+        """The broker's process dies: it dispatches nothing more and its single-instance lock goes with it (the
+        operating system releases a dead process's lock). Its connection is closed at the end of the test."""
+        self.broker.closed = True
+        self.broker._release_instance_lock()
+        self.addCleanup(self.broker.close, 0)
+
     def effects_rows(self):
         with self.broker.db_lock:
             return self.broker.db.execute('SELECT target,state FROM effects').fetchall()
@@ -1071,10 +1078,9 @@ class EngineTests(BrokerFixture, unittest.TestCase):
         while ('quit', 'alpha.app') not in adapter.effects and time.monotonic() < end:
             time.sleep(0.01)
         time.sleep(0.2)
-        self.broker.closed = True
+        self.die()
         adapter.crash_on_start = False
         stops_before = [e for e in adapter.effects if e[0] in ('quit', 'term', 'kill')]
-        self.addCleanup(self.broker.close, 0)              # the "dead" process's connection, closed at the end
         self.broker = broker.Broker(self.data / 'registry.json', self.data / 'state', self.authority, adapter,
                                     clock=self.clock)
         got = self.wait(receipt, self.agent)
@@ -1083,6 +1089,123 @@ class EngineTests(BrokerFixture, unittest.TestCase):
         self.assertEqual(stops_after, stops_before, 'the stop half already happened')
         self.assertEqual([e for e in adapter.effects if e[0] == 'start'], [('start', 'alpha.app')] * 2,
                          'one initial start, one restart start: recovery adds none')
+
+    # -- review round 1 of #342
+
+    def test_a_caller_without_operation_get_still_receives_its_receipt(self):
+        self.grants['callers']['caller-a']['allowedTools'] = ['lifecycle.ensure_running']
+        write_private(self.data / 'callers.json', self.grants)
+        first = self.broker.ensure(self.agent, self.args('s-1'))
+        self.assertEqual(first['kind'], 'ensure')
+        end = time.monotonic() + 10
+        receipt = first
+        while receipt['state'] == 'running' and time.monotonic() < end:
+            time.sleep(0.02)
+            receipt = self.broker.ensure(self.agent, self.args('s-1'))   # polled by retrying, the one tool it holds
+        self.assertEqual((receipt['operationId'], receipt['state']), (first['operationId'], 'ready'))
+        self.assertEqual(self.adapter.effects, [('start', 'alpha.app')])
+        with self.assertRaisesRegex(broker.LifecycleError, 'denied'):
+            self.broker.get(self.agent, first['operationId'])          # reading by id is still its own tool
+
+    def test_a_retry_after_a_grant_revision_bump_gets_the_original_operation(self):
+        first = self.broker.ensure(self.agent, self.args('s-1'))
+        self.wait(first, self.agent)
+        self.grants['callers']['caller-a']['revision'] = 2
+        write_private(self.data / 'callers.json', self.grants)
+        agent = self.authority.authenticate('Bearer ' + self.tokens['caller-a'])
+        self.assertEqual(agent['grantRevision'], 2)
+        again = self.broker.ensure(agent, self.args('s-1'))              # the original arguments, grantRevision 1
+        self.assertEqual(again['operationId'], first['operationId'])
+        with self.assertRaisesRegex(broker.LifecycleError, 'denied'):
+            self.broker.ensure(agent, self.args('s-2'))                  # a new request still meets the precondition
+        self.assertEqual(self.adapter.effects, [('start', 'alpha.app')])
+
+    def test_a_second_broker_on_one_state_folder_is_refused(self):
+        with self.assertRaisesRegex(broker.LifecycleError, 'already_running'):
+            self.make_broker()
+        script = (
+            'import sys; sys.path[:0] = [sys.argv[1]]\n'
+            'from node.lifecycle import broker\n'
+            'try:\n'
+            '    broker.Broker(sys.argv[2] + "/registry.json", sys.argv[2] + "/state", None, None)\n'
+            'except broker.LifecycleError as e:\n'
+            '    print(e.code); sys.exit(3)\n'
+        )
+        other = subprocess.run([sys.executable, '-c', script, str(ROOT), str(self.data)],
+                               capture_output=True, text=True, timeout=20)
+        self.assertEqual((other.returncode, other.stdout.strip()), (3, 'already_running'), other.stderr)
+        self.broker.close()
+        self.broker = self.make_broker()                                 # released by close: the next one opens
+        self.assertEqual(self.wait(self.broker.ensure(self.agent, self.args('s-1')), self.agent)['state'], 'ready')
+
+    def test_a_lone_surrogate_in_a_header_is_unauthorized(self):
+        with self.assertRaisesRegex(broker.LifecycleError, 'unauthorized'):
+            self.authority.authenticate('Bearer \ud800' + 'x' * 32)
+
+    def test_another_operations_dispatch_found_inside_the_journal_transaction_blocks_the_start(self):
+        calls = 0
+        original = self.adapter.identity_matches
+
+        def check(target, *, deadline=None):
+            nonlocal calls
+            calls += 1
+            if calls == 2:                                  # after the journal was read, before the effect is written
+                with self.broker.db_lock, self.broker.db:
+                    self.broker.db.execute("INSERT OR REPLACE INTO effects VALUES('alpha.app','dispatching',?,'other-op')",
+                                           (self.clock(),))
+            return original(target, deadline=deadline)
+
+        self.adapter.identity_matches = check
+        got = self.wait(self.broker.ensure(self.agent, self.args('s-1')), self.agent)
+        self.assertEqual(got['state'], 'delivery_unknown', got)
+        self.assertEqual(self.adapter.effects, [])
+
+    def test_a_start_recovered_after_its_dispatch_is_still_the_brokers(self):
+        adapter = SlowReadyAdapter(self.data, warmup=0)
+        self.use_adapter(adapter)
+        adapter.crash_on_start = True
+        receipt = self.broker.ensure(self.agent, self.args('s-1'))
+        end = time.monotonic() + 5
+        while ('start', 'alpha.app') not in adapter.effects and time.monotonic() < end:
+            time.sleep(0.01)
+        time.sleep(0.2)
+        self.die()
+        adapter.crash_on_start = False
+        self.broker = self.make_broker(adapter)
+        got = self.wait(receipt, self.agent)
+        self.assertEqual(got['state'], 'already_ready', got)
+        self.assertEqual(self.broker.status(self.agent, 'alpha.app')['startedBy'], 'broker',
+                         'the recovered launch is recorded: an agent may stop it and it may idle out')
+        self.assertEqual(self.wait(self.broker.stop(self.agent, self.args('x-1')), self.agent)['state'], 'stopped')
+        self.assertEqual(adapter.effects.count(('start', 'alpha.app')), 1)
+
+    def test_a_restart_recovered_past_its_deadline_still_runs_its_start_half(self):
+        adapter = SlowReadyAdapter(self.data, warmup=0)
+        self.use_adapter(adapter)
+        self.wait(self.broker.ensure(self.agent, self.args('s-1')), self.agent)
+        lock = self.broker._lock('alpha.app')
+        receipt = self.broker.restart(self.agent, self.args('r-1'))
+        end = time.monotonic() + 5
+        while ('quit', 'alpha.app') not in adapter.effects and time.monotonic() < end:
+            time.sleep(0.01)
+        lock.acquire()                                      # hold the start half back until the process is gone
+        try:
+            end = time.monotonic() + 5
+            while time.monotonic() < end:
+                with self.broker.db_lock:
+                    if self.broker.db.execute('SELECT 1 FROM phases WHERE operation=?',
+                                              (receipt['operationId'],)).fetchone():
+                        break
+                time.sleep(0.01)
+            self.die()
+        finally:
+            lock.release()
+        self.clock.now += 120                               # recovered long after the original deadline
+        self.broker = self.make_broker(adapter)
+        got = self.wait(receipt, self.agent)
+        self.assertEqual((got['state'], got['stopState']), ('ready', 'stopped'), got)
+        self.assertEqual(adapter.effects.count(('start', 'alpha.app')), 2)
+        self.assertEqual(len([e for e in adapter.effects if e[0] in ('quit', 'term', 'kill')]), 1)
 
     # -- idempotency
 

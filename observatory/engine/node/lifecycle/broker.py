@@ -28,10 +28,12 @@ What this module keeps, and why:
   and nobody renewed is stopped by the supervision pass (`supervise`). `status` never renews, starts or stops.
 
 Callers are identified by the hash of their credential, compared in constant time, never by a name in a request.
+One broker owns a state folder at a time: a second, in this process or another, is refused (`already_running`).
 """
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import hashlib
 import hmac
 import json
@@ -45,6 +47,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol, Union
 
+import oslocks
 import osprivacy
 
 ID = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$')
@@ -116,6 +119,9 @@ MAX_DOCUMENT_BYTES = 1_048_576
 MAX_TARGETS = 128
 STORE_VERSION = 1
 STORE_FILE = 'lifecycle.db'
+#: One broker per state folder, across processes: two would both recover the same running operations and both pass
+#: the effect journal's check. Held for the broker's life on this file beside the store.
+LOCK_FILE = 'broker.lock'
 _TRACEPARENT = re.compile(r'^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$')
 TERMINAL = frozenset((
     'lease_renewed',
@@ -459,7 +465,10 @@ class Authority:
     def authenticate(self, header: Any) -> dict:
         if not isinstance(header, str) or not header.startswith('Bearer ') or len(header) > 512:
             raise LifecycleError('unauthorized')
-        digest = hashlib.sha256(header[7:].encode()).hexdigest()
+        try:
+            digest = hashlib.sha256(header[7:].encode()).hexdigest()
+        except UnicodeEncodeError:                          # a lone surrogate is no credential anyone was issued
+            raise LifecycleError('unauthorized') from None
         found = None
         # Every grant is compared, so the time taken does not say which caller's hash came close.
         for caller, grant in self.document()['callers'].items():
@@ -547,18 +556,24 @@ class Broker:
         self.authority, self.adapter, self.clock = authority, adapter, clock
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         osprivacy.private_folder(self.state_dir)
+        self._lock_fd: Optional[int] = None
+        self._take_instance_lock()                          # before the store is opened and anything recovered
         self.db_lock = threading.RLock()
         path = self.state_dir / STORE_FILE
-        self.db = sqlite3.connect(path, check_same_thread=False)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute('PRAGMA journal_mode=WAL')
-        self.db.execute('PRAGMA synchronous=FULL')
-        self.db.executescript(_SCHEMA)
-        if self.db.execute('SELECT version FROM meta').fetchone()[0] != STORE_VERSION:
-            self.db.close()
-            raise LifecycleError('store_newer_than_code')
-        self.db.commit()
-        osprivacy.make_private(path)
+        try:
+            self.db = sqlite3.connect(path, check_same_thread=False)
+            self.db.row_factory = sqlite3.Row
+            self.db.execute('PRAGMA journal_mode=WAL')
+            self.db.execute('PRAGMA synchronous=FULL')
+            self.db.executescript(_SCHEMA)
+            if self.db.execute('SELECT version FROM meta').fetchone()[0] != STORE_VERSION:
+                self.db.close()
+                raise LifecycleError('store_newer_than_code')
+            self.db.commit()
+            osprivacy.make_private(path)
+        except BaseException:
+            self._release_instance_lock()
+            raise
         self.locks: dict = {}
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix='lifecycle')
         self.closed = False
@@ -577,6 +592,38 @@ class Broker:
 
     def _registry(self) -> dict:
         return registry(self.registry_source)
+
+    def _take_instance_lock(self) -> None:
+        fd = osprivacy.open(self.state_dir / LOCK_FILE, os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
+        try:
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise LifecycleError('already_running') from None
+        except BaseException:
+            os.close(fd)
+            raise
+        self._lock_fd = fd
+
+    def _release_instance_lock(self) -> None:
+        fd, self._lock_fd = self._lock_fd, None
+        if fd is not None:
+            try:
+                oslocks.flock(fd, oslocks.LOCK_UN)
+            finally:
+                os.close(fd)
+
+    @contextlib.contextmanager
+    def _write(self):
+        """One write transaction, taken at once (`BEGIN IMMEDIATE`): what it reads cannot change before it writes."""
+        with self.db_lock:
+            self.db.execute('BEGIN IMMEDIATE')
+            try:
+                yield self.db
+            except BaseException:
+                self.db.rollback()
+                raise
+            self.db.commit()
 
     def _submit(self, operation_id: str, generation: int) -> None:
         future = self.executor.submit(self._work, operation_id, generation)
@@ -725,21 +772,22 @@ class Broker:
             raise LifecycleError('invalid_argument')
         if 'deadlineAt' in args and (type(args['deadlineAt']) not in (int, float) or args['deadlineAt'] != args['deadlineAt']):
             raise LifecycleError('invalid_argument')
-        if not principal.get('internal') and args['grantRevision'] != principal['grantRevision']:
-            raise LifecycleError('denied')
         if traceparent is not None and not (isinstance(traceparent, str) and _TRACEPARENT.fullmatch(traceparent)):
             traceparent = None                               # a malformed trace context is dropped, not stored
-        # A retry is answered by its receipt BEFORE the policy and revision checks: a client retrying a lost answer
-        # after a policy or grant change must get back the operation that may already have launched the app, not
-        # `policy_changed`. The digest is the request's meaning (target, tool, force, capability); revisions are
-        # preconditions and the deadline is the client's clock, so neither makes it another request.
+        # A retry is answered by its receipt BEFORE the policy and grant revisions are compared: a client retrying a
+        # lost answer after a policy or grant change must get back the operation that may already have launched the
+        # app, not `policy_changed` or `denied`. The digest is the request's meaning (target, tool, force,
+        # capability); revisions are preconditions and the deadline is the client's clock, so neither makes it
+        # another request. The caller's credential must still hold the tool for the target.
         if not principal.get('internal'):
             self.authority.check(principal, tool, target_id)
         meaning = {k: args[k] for k in ('targetId', 'force', 'requiredCapability') if k in args}
         digest = hashlib.sha256(canonical(meaning | {'_tool': tool}).encode()).hexdigest()
-        replay = self._receipt(principal, request_id, digest)
+        replay = self._receipt(principal, tool, request_id, digest)
         if replay is not None:
             return replay
+        if not principal.get('internal') and args['grantRevision'] != principal['grantRevision']:
+            raise LifecycleError('denied')
         target = self._target(principal, tool, target_id, args['expectedPolicyRevision'])
         if args.get('force') and not self._is_owner(principal, tool):
             raise LifecycleError('denied')                  # killing a process is the owner's decision alone
@@ -750,16 +798,16 @@ class Broker:
         # A restart is a stop and a start: its budget is doubled, and so is its default deadline.
         budget = target['timeoutSeconds'] * (2 if kind == 'restart' else 1)
         deadline = args.get('deadlineAt', int((self.clock() + budget) * 1000))
-        # The receipt is read again and written in one transaction under the lock: two concurrent retries of one
-        # request id get one operation, never two and never an integrity error.
-        with self.db_lock, self.db:
+        # The receipt is read again and written in one write transaction: two concurrent retries of one request id
+        # get one operation, never two and never an integrity error.
+        with self._write():
             existing = self.db.execute(
                 'SELECT * FROM requests WHERE caller=? AND request_id=?', (principal['caller'], request_id)
             ).fetchone()
             if existing:
                 if existing['digest'] != digest:
                     raise LifecycleError('idempotency_conflict')
-                return self.get(principal, existing['operation'])
+                return self._view(principal, existing['operation'])
             if deadline <= self.clock() * 1000:
                 raise LifecycleError('timeout')
             if self.db.execute("SELECT count(*) FROM operations WHERE state='running'").fetchone()[0] >= MAX_RUNNING:
@@ -803,9 +851,10 @@ class Broker:
                 })
             except Exception:  # noqa: BLE001 - a journal failure never undoes an admission
                 pass
-        return self.get(principal, op)
+        # The admitting call answers with its receipt; reading an operation by id later is `lifecycle.operation.get`.
+        return self._view(principal, op)
 
-    def _receipt(self, principal: dict, request_id: str, digest: str) -> Optional[dict]:
+    def _receipt(self, principal: dict, tool: str, request_id: str, digest: str) -> Optional[dict]:
         with self.db_lock:
             existing = self.db.execute(
                 'SELECT * FROM requests WHERE caller=? AND request_id=?', (principal['caller'], request_id)
@@ -814,7 +863,7 @@ class Broker:
             return None
         if existing['digest'] != digest:
             raise LifecycleError('idempotency_conflict')
-        return self.get(principal, existing['operation'])
+        return self._view(principal, existing['operation'], tool)
 
     @staticmethod
     def _closure(document: dict, target_id: str) -> dict:
@@ -832,14 +881,19 @@ class Broker:
         valid_id(operation_id)
         if not principal.get('internal'):
             self.authority.check(principal, 'lifecycle.operation.get')
+        return self._view(principal, operation_id, 'lifecycle.operation.get')
+
+    def _view(self, principal: dict, operation_id: str, tool: Optional[str] = None) -> dict:
+        """The caller's own operation as its receipt shows it. With `tool`, the caller must still be allowed that
+        tool on the operation's target; without, the caller has just been admitted for it."""
         with self.db_lock:
             row = self.db.execute(
                 'SELECT * FROM operations WHERE id=? AND caller=?', (operation_id, principal['caller'])
             ).fetchone()
         if row is None:
             raise LifecycleError('not_found')
-        if not principal.get('internal'):
-            self._target(principal, 'lifecycle.operation.get', row['target'])
+        if tool is not None and not principal.get('internal'):
+            self._target(principal, tool, row['target'])
         result = json.loads(row['result']) if row['result'] else {}
         arguments = json.loads(row['arguments'])
         return {
@@ -883,6 +937,11 @@ class Broker:
         principal, args, policy = (json.loads(row[k]) for k in ('principal', 'arguments', 'policy'))
         kind = args.get('_kind', 'ensure')
         deadline = args['deadlineAt'] / 1000
+        if generation > 1 and deadline <= self.clock():
+            # Recovered after its deadline: the journal and the restart's phase say what already happened, so the
+            # rest still gets the target's own budget instead of ending `timeout` before it looks.
+            own = (policy.get('targets', {}).get(args['targetId']) or {}).get('timeoutSeconds', 1)
+            deadline = self.clock() + own * (2 if kind == 'restart' else 1)
         try:
             if kind == 'ensure':
                 result = self._drive(principal, args['targetId'], deadline, policy, operation_id, generation)
@@ -1021,8 +1080,13 @@ class Broker:
             observation = self.adapter.probe(target)
             if observation['state'] in ('ready', 'already_ready'):
                 with self.db_lock, self.db:
+                    effect = self.db.execute('SELECT operation FROM effects WHERE target=?', (target_id,)).fetchone()
                     self.db.execute('DELETE FROM effects WHERE target=?', (target_id,))
                     self.db.execute('DELETE FROM circuits WHERE target=?', (target_id,))
+                if effect is not None and effect['operation'] == op:
+                    # This operation's own start, recovered after a crash between the effect and its receipt: the
+                    # process is the broker's, as if the answer had been written.
+                    self._record_launch(target_id, observation, op, principal)
                 self._reconcile_launch(target_id, observation)
                 self._note_ready(target, observation)
                 return observation | {'state': 'already_ready', 'action': 'none'}
@@ -1052,7 +1116,14 @@ class Broker:
                 return self._observation('identity_mismatch')
             if self.closed:
                 raise _Interrupted()
-            with self.db_lock, self.db:
+            with self._write():
+                # The journal is read again inside the transaction that writes it: an unknown dispatch another
+                # operation recorded since the check above is never followed by a second start.
+                pending = self.db.execute(
+                    "SELECT operation FROM effects WHERE target=? AND state='dispatching'", (target_id,)
+                ).fetchone()
+                if pending is not None and pending['operation'] != op:
+                    return self._observation('delivery_unknown', action='reconcile_only')
                 count = self.db.execute(
                     'SELECT count(*) FROM attempts WHERE target=? AND at>?',
                     (target_id, self.clock() - CRASH_WINDOW_SECONDS),
@@ -1428,3 +1499,4 @@ class Broker:
         concurrent.futures.wait(pending, timeout=grace)
         with self.db_lock:
             self.db.close()
+        self._release_instance_lock()

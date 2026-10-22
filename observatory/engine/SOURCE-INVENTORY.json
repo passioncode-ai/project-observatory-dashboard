@@ -2245,8 +2245,8 @@
       "path": "node/lifecycle/broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df894697b15c281c52b863367c1cfa1760ce6770e387cab259786d008168e8c8",
-      "bytes": 75329
+      "export_sha256": "3a5a3ce0de592400fe130c7ad4fb0610b257ce51f8fe9ab69747d6dbbcfe4d22",
+      "bytes": 79386
     },
     {
       "path": "node/org.py",
@@ -4272,8 +4272,8 @@
       "path": "tests/test_node_lifecycle_broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ee3084dcdbca6220111284394aaaaf0708e55f9f8740b33e8f3e30d6ff3bb5a6",
-      "bytes": 66707
+      "export_sha256": "a29a3328335f9df292f89d030cb7519a5d30835096e32a55d81737ae27d0e603",
+      "bytes": 73627
     },
     {
       "path": "tests/test_node_org.py",
