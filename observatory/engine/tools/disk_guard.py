@@ -19,7 +19,8 @@ The rules — and the review that set them — are docs/design/DISK-GUARD.md. In
   * NO LIVE STATE UNDER A CACHE ROOT (OBS-203): a folder that carries `.observatory-keep`
     anywhere in it, or that holds or lies inside a state path a local Fabric service
     descriptor declares (`paths.data`, `paths.config`, `paths.logs`), is kept by every class
-    at every pressure, re-checked at removal, and listed in the report's `kept` with why.
+    that removes a path, at every pressure, re-checked at removal, and listed in the report's
+    `kept` with why. Descriptors that cannot be read stop the cache and temporary classes.
   * NO PRIVACY-GUARDED PLACE is opened (`scan_machine.protected_place`), no symlink
     followed, no tree removed that holds another account's file, no process stopped, no
     daemon started.
@@ -361,40 +362,94 @@ def _comparable(path: str) -> str:
     return path.casefold() if CASE_BLIND else path
 
 
-def declared_state_paths(degraded: list | None = None) -> list[dict]:
-    """The state paths the local Fabric service descriptors on this machine declare.
+#: At most this many declared paths are resolved in one run; past it the reading is
+#: incomplete (a machine with that many services is not one this guard was measured on).
+STATE_PATHS_LIMIT = 256
+#: The degraded reason of a class that removes nothing while descriptors are unknown.
+UNKNOWN_STATE = ("the service descriptors could not all be read, so what they protect is not known; "
+                 "nothing in this class is removed this run")
 
-    Read fresh on each call (a service installed between the plan and the removal counts).
-    A descriptor that cannot be read is named in `degraded`: the paths it may declare are
-    unknown, and only its marker file can keep its folder meanwhile. A remote service keeps
-    nothing on this disk. A declared path inside a privacy-guarded place is not resolved:
-    the guard never opens one, so it cannot be under a root the guard walks."""
+
+def _covers(outer: str, inner: str) -> bool:
+    """`outer` is `inner` or holds it (both already comparable)."""
+    return inner == outer or inner.startswith(outer.rstrip(os.sep) + os.sep)
+
+
+def _wide_roots(cfg: dict) -> list[str]:
+    """What no declared state path may cover: the cleanup roots and the home folder."""
+    raw = [expand(r) for r in cfg.get("cache_roots") or []]
+    raw += [expand(r["path"]) for r in cfg.get("temp_roots") or [] if isinstance(r, dict) and r.get("path")]
+    raw.append(os.path.expanduser("~"))
+    out = set()
+    for r in filter(None, raw):
+        out.add(_comparable(os.path.abspath(r)))
+        if not guarded(r):
+            out.add(_comparable(os.path.realpath(r)))
+    return sorted(out)
+
+
+def service_state(cfg: dict | None = None, degraded: list | None = None) -> dict:
+    """The state paths the local Fabric service descriptors on this machine declare:
+    {"paths": [{service, field, forms}], "complete": bool, "refused": int, "seconds": float}.
+
+    A run reads it ONCE, inside its time budget, and plans and acts on it; `act` called on
+    its own reads it again. No services folder means no Fabric here: complete and empty.
+    Any other failure to stat or list the folder, or to read one descriptor, makes it
+    incomplete and is named in `degraded` (`fabric-descriptors`): the cache-folder and
+    temporary classes then remove nothing (UNKNOWN_STATE). A declared path that is or holds a
+    cleanup root, the home folder or a filesystem root would cover other programs' data: it is
+    refused and named, never honoured. A remote service keeps nothing on this disk. A declared
+    path inside a privacy-guarded place is not resolved: the guard never opens one."""
     import fabric_service
+    started = time.monotonic()
+    cfg = load_config() if cfg is None else cfg
+    state = {"paths": [], "complete": True, "refused": 0, "seconds": 0.0}
 
-    def unread(where: str, reason: str) -> None:
+    def note(where: str, reason: str, incomplete: bool = True) -> None:
+        state["complete"] = state["complete"] and not incomplete
         if degraded is not None and not any(d.get("source") == "fabric-descriptors" and d.get("path") == where
-                                            for d in degraded):
+                                            and d.get("reason") == reason for d in degraded):
             degraded.append({"source": "fabric-descriptors", "path": where, "reason": reason})
+
+    def done() -> dict:
+        state["seconds"] = round(time.monotonic() - started, 3)
+        return state
 
     try:
         root = fabric_service.services_dir()
     except (OSError, RuntimeError, KeyError):
-        unread("services", "where the service descriptors live could not be resolved; "
-               "the state paths they declare are not known")
-        return []
+        note("services", "where the service descriptors live could not be resolved; "
+             "the state paths they declare are not known")
+        return done()
     try:
-        files = sorted(root.glob("*.json")) if root.is_dir() else []
-    except OSError:
-        unread(str(root), "the service descriptors could not be listed; the state paths they declare are not known")
-        return []
-    out = []
+        st = os.stat(root)
+    except (FileNotFoundError, NotADirectoryError):
+        return done()                                    # no Fabric on this machine
+    except OSError as exc:
+        note(str(root), f"the service descriptors folder could not be read ({type(exc).__name__}); "
+             "the state paths they declare are not known")
+        return done()
+    if not stat.S_ISDIR(st.st_mode):
+        note(str(root), "the service descriptors path is not a folder; the state paths they declare are not known")
+        return done()
+    try:
+        # os.scandir, not Path.glob/is_dir: those return nothing on an error, which read as "no
+        # service" and made a protected folder removable (review of #338).
+        with os.scandir(root) as entries:
+            files = sorted(e.path for e in entries if e.name.endswith(".json"))
+    except OSError as exc:
+        note(str(root), f"the service descriptors could not be listed ({type(exc).__name__}); "
+             "the state paths they declare are not known")
+        return done()
+    wide = _wide_roots(cfg)
     for f in files:
         try:
-            doc = json.loads(f.read_text(encoding="utf-8"))
+            with open(f, encoding="utf-8") as fh:
+                doc = json.load(fh)
             if not isinstance(doc, dict):
                 raise ValueError("not an object")
         except (OSError, ValueError):
-            unread(str(f), "a service descriptor could not be read; the state paths it declares are not known")
+            note(f, "a service descriptor could not be read; the state paths it declares are not known")
             continue
         declared = doc.get("paths")
         if doc.get("placement") == "remote" or not isinstance(declared, dict):
@@ -408,15 +463,24 @@ def declared_state_paths(degraded: list | None = None) -> list[dict]:
                 path = os.path.expanduser(value)
                 if not os.path.isabs(path):
                     continue
-                forms = {_comparable(path)}
+                if len(state["paths"]) >= STATE_PATHS_LIMIT:
+                    note(f, f"more than {STATE_PATHS_LIMIT} declared state paths; the rest are not known")
+                    return done()
+                forms = {_comparable(os.path.abspath(path))}
                 if not guarded(path):
                     forms.add(_comparable(os.path.realpath(path)))
-                out.append({"service": service, "field": f"paths.{field}", "forms": sorted(forms)})
-    return out
+                if any(os.path.dirname(x) == x for x in forms) or any(_covers(x, w) for x in forms for w in wide):
+                    state["refused"] += 1
+                    note(value, f"the Fabric service {service} declares {value} as state (paths.{field}); it is or "
+                         "holds a cleanup root, the home folder or a filesystem root, so it is ignored",
+                         incomplete=False)
+                    continue
+                state["paths"].append({"service": service, "field": f"paths.{field}", "forms": sorted(forms)})
+    return done()
 
 
-def keep_reason(path: str, state: list[dict] | None = None) -> str:
-    """Why a folder under a cleanup root is live state and stays, or "" when it is not.
+def keep_reason(path: str, state: dict | None = None) -> str:
+    """Why a path under a cleanup root is live state and stays, or "" when it is not.
 
     The marker counts at the top of the folder here; anywhere deeper, the walk refuses the
     tree (`cleanup_safety.protected_entry_reason`). A declared state path keeps the folder
@@ -429,13 +493,25 @@ def keep_reason(path: str, state: list[dict] | None = None) -> str:
     except OSError:
         return f"whether the folder carries {KEEP_MARKER} could not be read"
     mine = {_comparable(os.path.abspath(path)), _comparable(os.path.realpath(path))}
-    for s in state or ():
-        for declared in s["forms"]:
-            for candidate in mine:
-                if (candidate == declared or candidate.startswith(declared.rstrip(os.sep) + os.sep)
-                        or declared.startswith(candidate.rstrip(os.sep) + os.sep)):
-                    return f"the Fabric service {s['service']} declares state here ({s['field']})"
+    for s_ in (state or {}).get("paths") or ():
+        for declared in s_["forms"]:
+            if any(_covers(declared, c) or _covers(c, declared) for c in mine):
+                return f"the Fabric service {s_['service']} declares state here ({s_['field']})"
     return ""
+
+
+def _unknown_state(state: dict, cls: str, degraded: list | None) -> bool:
+    """True when this class must remove nothing: descriptors that could protect it are unknown."""
+    if state.get("complete", True):
+        return False
+    if degraded is not None and not any(d.get("source") == cls and d.get("reason") == UNKNOWN_STATE for d in degraded):
+        degraded.append({"source": cls, "reason": UNKNOWN_STATE})
+    return True
+
+
+def _note_kept(kept: list | None, cls: str, target: str, reason: str) -> None:
+    if kept is not None:
+        kept.append({"class": cls, "target": target, "reason": reason})
 
 
 # --- the classes -------------------------------------------------------------------
@@ -468,10 +544,13 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
 
 
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
-              degraded: list | None = None, kept: list | None = None) -> list[dict]:
+              degraded: list | None = None, kept: list | None = None, state: dict | None = None) -> list[dict]:
     """Entries of the temporary roots nobody touched for `temp_days`, held by nobody.
-    One a service marks or declares as live state goes to `kept` instead."""
-    state = declared_state_paths(degraded)
+    One a service marks or declares as live state goes to `kept` instead; while the
+    descriptors are unknown, nothing goes."""
+    state = service_state(cfg, degraded) if state is None else state
+    if _unknown_state(state, "temp", degraded):
+        return []
     days = by_level(cfg, "temp_days", level, 3)
     cutoff = at - days * 86400
     keep = cfg.get("temp_keep") or []
@@ -511,10 +590,11 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                     continue
                 why = keep_reason(full, state)
                 if why:
-                    if kept is not None:
-                        kept.append({"class": "temp", "target": full, "reason": why})
+                    _note_kept(kept, "temp", full, why)
                     continue
                 r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
+                if r["reason"] == KEEP_REASON:          # a marker deeper inside
+                    _note_kept(kept, "temp", full, KEEP_REASON)
                 if r["complete"] and not holders.busy(full):
                     out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": cutoff, "identity": r["identity"],
                                 "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
@@ -531,7 +611,8 @@ def clone_root() -> pathlib.Path | None:
 
 
 def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
-                    degraded: list | None = None, kept: list | None = None) -> list[dict]:
+                    degraded: list | None = None, kept: list | None = None,
+                    state: dict | None = None) -> list[dict]:
     """Applications' and tools' own cache folders nobody touched for `cache_days`.
 
     The hand cleanup of 2026-10-10 freed about 10 GB here. A cache folder is regenerable —
@@ -539,8 +620,11 @@ def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: 
     (`cache_keep`), which stay. Anything held or used recently stays too. So does live state
     an agent service keeps here (OBS-203: one service's job workspaces in its cache folder
     were lost on 2026-10-20): a folder it marks with `.observatory-keep` or declares as state
-    in its Fabric descriptor goes to `kept`, with the reason, at every pressure."""
-    state = declared_state_paths(degraded)
+    in its Fabric descriptor goes to `kept`, with the reason, at every pressure. While the
+    descriptors are unknown, no cache folder goes."""
+    state = service_state(cfg, degraded) if state is None else state
+    if _unknown_state(state, "cache-dir", degraded):
+        return []
     days = by_level(cfg, "cache_days", level, 7)
     cutoff = at - days * 86400
     keep = cfg.get("cache_keep") or []
@@ -559,11 +643,12 @@ def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: 
                 continue
             why = keep_reason(e.path, state)
             if why:
-                if kept is not None:
-                    kept.append({"class": "cache-dir", "target": e.path, "reason": why})
+                _note_kept(kept, "cache-dir", e.path, why)
                 continue
             r = inspect(e.path, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None,
                         limit=200_000)
+            if r["reason"] == KEEP_REASON:              # a marker deeper inside
+                _note_kept(kept, "cache-dir", e.path, KEEP_REASON)
             if r["complete"] and not holders.busy(e.path):
                 out.append({"class": "cache-dir", "target": e.path, "bytes": r["size"], "cutoff": cutoff, "identity": r["identity"],
                             "why": f"a cache untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
@@ -605,9 +690,12 @@ def trash_dirs() -> list[str]:
     return []
 
 
-def plan_trash(cfg: dict, level: str, at: float, degraded: list) -> list[dict]:
+def plan_trash(cfg: dict, level: str, at: float, degraded: list, kept: list | None = None,
+               state: dict | None = None) -> list[dict]:
     """What has been in the Trash longer than `trash_days` — by the moment it was put there
-    (ctime: moving a file changes it), not by when it was last edited."""
+    (ctime: moving a file changes it), not by when it was last edited. An item a service
+    marks or declares as state stays (OBS-203)."""
+    state = service_state(cfg, degraded) if state is None else state
     days = by_level(cfg, "trash_days", level, 30)
     if days <= 0:
         return []
@@ -631,7 +719,13 @@ def plan_trash(cfg: dict, level: str, at: float, degraded: list) -> list[dict]:
             except OSError:
                 continue
             if age >= days:
+                why = keep_reason(e.path, state)
+                if why:
+                    _note_kept(kept, "trash", e.path, why)
+                    continue
                 r = inspect(e.path)
+                if r["reason"] == KEEP_REASON:
+                    _note_kept(kept, "trash", e.path, KEEP_REASON)
                 if r["complete"]:
                     out.append({"class": "trash", "target": e.path, "bytes": r["size"], "identity": r["identity"],
                                 "why": f"in the Trash {age:.0f} days"})
@@ -843,11 +937,14 @@ def _build_walk(root: str, deadline: float, degraded: list | None):
 
 
 def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[str],
-                budget: Budget | None = None, degraded: list | None = None) -> list[dict]:
+                budget: Budget | None = None, degraded: list | None = None, kept: list | None = None,
+                state: dict | None = None) -> list[dict]:
     """Regenerable build and dependency output of checkouts nobody worked in for
     `build_idle_days`: a folder git ignores, tracks nothing inside, nobody holds, and that
     holds no socket and no other account's file. Never inside `.git`, never in a checkout
-    nested in another (that one is judged on its own), never in a privacy-guarded place."""
+    nested in another (that one is judged on its own), never in a privacy-guarded place, never
+    one a service marks or declares as state (OBS-203)."""
+    state = service_state(cfg, degraded) if state is None else state
     days = by_level(cfg, "build_idle_days", level, 14)
     roots = checkouts(degraded)
     cursor = _read(paths.STATE / "disk-guard-build-cursor.json").get("last_attempted")
@@ -902,8 +999,14 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
                                                timeout=max(0.001, left())).returncode == 0
                     except (OSError, subprocess.SubprocessError):
                         ignored = False
+                    why = keep_reason(full, state) if ignored else ""
+                    if why:
+                        _note_kept(kept, "build-output", full, why)
+                        continue
                     if ignored and left() > 0 and not holders.busy(full) and not _force_tracked(dirpath, full, left()):
                         r = inspect(full, at, root_end, limit=500_000)
+                        if r["reason"] == KEEP_REASON:
+                            _note_kept(kept, "build-output", full, KEEP_REASON)
                         if r["complete"] and left() > 0:
                             out.append({"class": "build-output", "target": full, "bytes": r["size"], "identity": r["identity"],
                                         "checkout": root, "idle_days": days, "cutoff": at,
@@ -1049,9 +1152,9 @@ def refresh(script: str, out: pathlib.Path, hours: float, timeout: int, args: tu
 
 # --- acting -----------------------------------------------------------------------
 
-def act(a: dict, holders: Holders, state: list[dict] | None = None) -> dict:
+def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
     """Do one action after re-checking it, and measure what the disk got back. `state` is
-    the declared state paths read for this phase; None reads them now."""
+    the run's reading of the service descriptors (`service_state`); None reads them now."""
     rec = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard", "tier": "auto"}
     if a.get("bytes"):
         rec["kb"] = int(a["bytes"] / 1024)
@@ -1103,8 +1206,11 @@ def act(a: dict, holders: Holders, state: list[dict] | None = None) -> dict:
         deadline = min(a.get("deadline", float("inf")), time.monotonic() + 30)
         if guarded(target) or os.path.islink(target) or not owned(target):
             return {**rec, "result": "skipped", "reason": "the target is protected, linked or no longer owned"}
-        # A marker written, or a service installed, since the plan (OBS-203).
-        why = keep_reason(target, declared_state_paths() if state is None else state)
+        # A marker written since the plan, or (read again when called alone) a service installed.
+        state = service_state() if state is None else state
+        if a["class"] in ("cache-dir", "temp") and not state.get("complete", True):
+            return {**rec, "result": "skipped", "reason": UNKNOWN_STATE}
+        why = keep_reason(target, state)
         if why:
             return {**rec, "result": "skipped", "reason": why}
         if a["class"] == "temp" and git_ancestry(target):
@@ -1176,15 +1282,17 @@ def journal(rows: list[dict]) -> None:
 
 
 def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list,
-             last_commands: dict | None = None, kept: list | None = None) -> list[tuple[str, object]]:
+             last_commands: dict | None = None, kept: list | None = None,
+             state: dict | None = None) -> list[tuple[str, object]]:
     """Each class's planner, in the order a run takes them. Each takes a Budget; within a
     class the largest go first. What a service keeps as live state is appended to `kept`."""
     big = lambda xs: sorted(xs, key=lambda a: -(a.get("bytes") or 0))  # noqa: E731
+    state = service_state(cfg, degraded) if state is None else state
     return [
-        ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b, degraded, kept))),
-        ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b, degraded))),
-        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded, kept))),
-        ("trash", lambda b: big(plan_trash(cfg, level, at, degraded))),
+        ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b, degraded, kept, state))),
+        ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b, degraded, kept, state))),
+        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded, kept, state))),
+        ("trash", lambda b: big(plan_trash(cfg, level, at, degraded, kept, state))),
         ("browser-clone", lambda b: plan_clones(cfg, holders, at)),
         ("cache-command", lambda b: plan_commands(cfg, level, last_commands, at)),
     ]
@@ -1319,6 +1427,7 @@ def run(argv: list[str]) -> dict:
     phases: dict = {}
     plan: list[dict] = []
     kept: list[dict] = []
+    state: dict | None = None
     rows: list[dict] = []
     found = (previous or {}).get("large_files")
     last_commands = dict((previous or {}).get("commands_last") or {})
@@ -1338,6 +1447,10 @@ def run(argv: list[str]) -> dict:
                 refresh("collectors/scan_git_hygiene.py", paths.SCRATCH / "worktree-registration.json", 0,
                         registration_room, ("--registrations-only", "--budget-seconds", str(max(0.1, registration_room - 1))))
                 if registration_room > 1 else "skipped: the run budget is spent")
+            # The service descriptors, read once for the whole run and inside its budget (OBS-203).
+            mark = time.monotonic()
+            state = service_state(cfg, degraded)
+            phases["service-state"] = round(time.monotonic() - mark)
             at = time.time()
             classes = list(CLASSES)
             # The git tier's own share, kept back before the classes split the rest: as the last
@@ -1369,10 +1482,9 @@ def run(argv: list[str]) -> dict:
                                                                         "no path is removed"})
                     phases[name] = round(time.monotonic() - mark)
                     continue
-                planner = dict(planners(cfg, level, holders, at, degraded, last_commands, kept))[name]
+                planner = dict(planners(cfg, level, holders, at, degraded, last_commands, kept, state))[name]
                 actions = planner(Budget(min(plan_cap, share / 2), degraded))
                 plan += actions
-                state = declared_state_paths(degraded) if acting and name != "cache-command" else None
                 if acting:
                     class_end = mark + share
                     for i, a in enumerate(actions[:cap]):
@@ -1434,6 +1546,8 @@ def run(argv: list[str]) -> dict:
                                | {"gb": round((a.get("bytes") or 0) / GB, 2)} for a in plan[:200]],
                    # Live state a service marked or declared under a cleanup root (OBS-203).
                    "kept": kept[:200],
+                   "service_state": ({k: state[k] for k in ("complete", "refused", "seconds")}
+                                     | {"paths": len(state["paths"])}) if state else None,
                    "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,

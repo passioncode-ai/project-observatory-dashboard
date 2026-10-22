@@ -76,25 +76,45 @@ had touched or held it for `cache_days`. An agent service may keep in-flight job
 2026-10-20 one service's job workspaces and runner permissions in its own folder there were lost
 (this engine's journals hold no removal in that window, but the guard would have planned one).
 Until then only a person's `guard.cache_keep` list protected such a folder. Now a service says it
-itself, in one of two ways, and every class honours either at every pressure:
+itself, in one of two ways:
 
-- **A marker file**, `.observatory-keep` (`cleanup_safety.KEEP_MARKER`). At the top of a folder
-  under a cache or temporary root, `disk_guard.keep_reason` keeps it before any walk. Anywhere
-  deeper, the shared entry predicate refuses the tree, so the guard's walk and `cleanup.py`'s
-  build-output walk (`protected_tree_reason`) keep it too.
+- **A marker file**, `.observatory-keep` (`cleanup_safety.KEEP_MARKER`). At the top of a folder,
+  `disk_guard.keep_reason` keeps it before any walk. Anywhere deeper, the shared entry predicate
+  refuses the tree, so the guard's walk and `cleanup.py`'s build-output walk
+  (`protected_tree_reason`) keep it too.
 - **A Fabric service descriptor.** The contract's descriptor already declares `paths.data`,
   `paths.config`, `paths.cache` and `paths.logs`; no new field was added.
-  `disk_guard.declared_state_paths` reads the local descriptors (`fabric_service.services_dir()`,
+  `disk_guard.service_state` reads the local descriptors (`fabric_service.services_dir()`,
   remote ones skipped) and treats `data`, `config` and `logs` as state: a folder that is such a
   path, holds one or lies inside one is kept. `paths.cache` stays removable, because the contract
   calls it a cache; a service that keeps live work there writes the marker. Paths compare without
   case on macOS and Windows, lexically and resolved; a declared path in a privacy-guarded place is
-  not resolved. A descriptor that cannot be read is named in `degraded` (`fabric-descriptors`).
+  not resolved.
 
-Both are checked again in `act` right before a removal, so a marker written or a service installed
-after the plan still stops it. The report carries `kept` (class, folder, reason; at most 200), and
-the Machine page shows it as "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots`
-pins each rule.
+**Which classes.** The planners of cache folders, build output, temporary entries and Trash consult
+both, and list what they keep in the report. `act` checks both again right before every path
+removal, browser clones included, so a marker written after the plan still stops it. The tools'
+own cache commands (`uv cache prune` and the like) remove nothing by path and are not covered.
+
+**Read once per run, inside its budget.** A run reads the descriptors once, after it takes the
+lock, and plans and acts on that reading; the time is in the report's `phases.service-state`, and
+`service_state` in the report gives `complete`, the number of paths and of refused ones. A service
+installed while a run acts is honoured from the next run; its marker is honoured at once. At most
+256 declared paths are resolved; past that the reading is incomplete.
+
+**When the descriptors cannot be read.** No services folder means no Fabric on the machine: nothing
+is degraded. Any other failure (the folder or its parent unreadable, the path not a folder, one
+descriptor unreadable) is named in `degraded` (`fabric-descriptors`), and the cache-folder and
+temporary classes then remove nothing that run, each saying so in `degraded`; `act` refuses those
+two classes too. The folder is listed with `os.scandir`, because `Path.is_dir` and `Path.glob`
+report an unreadable folder as an empty one, which once read as "no service".
+
+**A declaration that is too wide is refused.** A declared state path that is or holds a cache
+root, a temporary root, the home folder or a filesystem root would keep other programs' data
+forever. It is ignored, and `degraded` names the service and the path.
+
+The report carries `kept` (class, path, reason; at most 200), and the Machine page shows it as
+"Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots` pins each rule.
 
 ## Not done here, and why
 

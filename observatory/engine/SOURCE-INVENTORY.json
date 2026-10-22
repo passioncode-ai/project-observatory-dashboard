@@ -884,8 +884,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "add4213fb6284bf1dd60d68dfee64837d043c7a9758c4559df543980150ccffe",
-      "bytes": 156327,
+      "export_sha256": "5646c97b8972361485a58ef53a844db9fcd70b157e0af409468bff2f296fab8c",
+      "bytes": 156633,
       "upstream_modified": true
     },
     {
@@ -3540,8 +3540,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0ed298ab79bc3da326ee10091e56971515152960d93059da17b4e175a2d84ec6",
-      "bytes": 127966
+      "export_sha256": "766a758315e3d51a9aa2baba57c9123e1f55d22ff5ee92e4d9462b62c8cd9c50",
+      "bytes": 134022
     },
     {
       "path": "tests/test_docs_current.py",
@@ -5402,8 +5402,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "42f5fbba0f92abc6e469cca225ecff567ea2ca4ca23880d435f7dd6595461242",
-      "bytes": 75775
+      "export_sha256": "156f4b382d01a1592afb9c6d2d2ae1ea338b6ca27c7968931c9684d0e233a30b",
+      "bytes": 82125
     },
     {
       "path": "tools/embedding_policy_cli.py",

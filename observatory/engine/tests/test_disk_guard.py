@@ -518,10 +518,125 @@ class LiveStateUnderCacheRoots(Base):
         self.assertIn("paths.config", reasons["vendor"])
         self.assertIn("paths.logs", reasons["svc-c"])
 
-    def test_a_declared_state_path_that_holds_the_whole_root_keeps_every_folder(self):
+    def test_a_declared_path_inside_a_cache_root_protects_exactly_that_folder(self):
+        self.folder("svc-a")
+        self.folder("neighbour")
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a" / "jobs"), "logs": []})
+        kept, degraded = [], []
+        self.assertEqual([Path(a["target"]).name for a in self.plan(kept, degraded)], ["neighbour"])
+        self.assertEqual([Path(k["target"]).name for k in kept], ["svc-a"])
+        self.assertFalse([d for d in degraded if d.get("source") == "fabric-descriptors"])
+
+    def refused(self, declared):
+        """A declared state path that covers a whole root, the home folder or the disk."""
         self.folder("one")
-        self.descriptor("svc-a", {"data": str(self.caches), "logs": []})
-        self.assertEqual(self.plan(), [])
+        self.descriptor("svc-wide", {"data": declared, "logs": []})
+        kept, degraded = [], []
+        plan = self.plan(kept, degraded)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["one"], declared)
+        self.assertEqual(kept, [])
+        rows = [d for d in degraded if d.get("source") == "fabric-descriptors"]
+        self.assertEqual(len(rows), 1, declared)
+        self.assertIn("svc-wide.default", rows[0]["reason"])
+        self.assertEqual(rows[0]["path"], declared)
+
+    def test_a_declared_path_that_is_a_cache_root_is_refused_and_named(self):
+        self.refused(str(self.caches))
+
+    def test_a_declared_path_that_holds_a_temporary_root_is_refused(self):
+        self.refused(str(self.t1.parent))
+
+    def test_a_declared_home_folder_is_refused(self):
+        self.refused("~/")
+
+    def test_a_declared_filesystem_root_is_refused(self):
+        self.refused(os.path.abspath(os.sep))
+
+    def unreadable(self, folder):
+        """The services folder, or its parent, cannot be read: what a descriptor there
+        protects is unknown, so no cache folder or temporary entry goes this run."""
+        self.folder("svc-a")
+        (self.t1 / "scratch").mkdir()
+        age(self.t1, 9)
+        self.descriptor("svc-a", {"data": str(self.caches / "svc-a"), "logs": []})
+        os.chmod(folder, 0)
+        try:
+            if os.access(folder, os.R_OK):
+                self.skipTest("this account reads a folder of mode 000 (an administrator)")
+            degraded = []
+            self.assertEqual(self.plan(degraded=degraded), [])
+            self.assertEqual(self.g.plan_temp(self.cfg(), "normal", self.free(), time.time(), None, degraded), [])
+            self.assertTrue([d for d in degraded if d.get("source") == "fabric-descriptors"])
+            self.assertEqual(sorted({d["source"] for d in degraded if "descriptors could not" in d.get("reason", "")
+                                     and d["source"] != "fabric-descriptors"}), ["cache-dir", "temp"])
+            plan = [{"class": "cache-dir", "target": str(self.caches / "svc-a"),
+                     "identity": self.identity(self.caches / "svc-a"), "cutoff": time.time()}]
+            rec = self.g.act(plan[0], self.free())
+            self.assertEqual(rec["result"], "skipped")
+        finally:
+            os.chmod(folder, 0o700)
+        self.assertTrue((self.caches / "svc-a" / "jobs").exists())
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX modes")
+    def test_an_unreadable_services_folder_removes_nothing_it_could_protect(self):
+        self.unreadable(self.services)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX modes")
+    def test_an_unreadable_parent_of_the_services_folder_removes_nothing_it_could_protect(self):
+        parent = self.base / "fabric"
+        self.services = parent / "services"
+        self.services.mkdir(parents=True)
+        with patch.dict(os.environ, {"FABRIC_SERVICES_DIR": str(self.services)}):
+            self.unreadable(parent)
+
+    def test_no_fabric_on_the_machine_is_not_degraded(self):
+        self.folder("one")
+        degraded = []
+        with patch.dict(os.environ, {"FABRIC_SERVICES_DIR": str(self.base / "absent" / "services")}):
+            self.assertEqual(len(self.plan(degraded=degraded)), 1)
+        self.assertEqual(degraded, [])
+
+    def test_a_deep_marker_is_listed_as_kept(self):
+        d = self.folder("vendor")
+        (d / "jobs" / self.g.KEEP_MARKER).write_text("")
+        age(d, 9)
+        kept = []
+        self.assertEqual(self.plan(kept), [])
+        self.assertEqual([(Path(k["target"]).name, k["reason"]) for k in kept], [("vendor", self.g.KEEP_REASON)])
+
+    def test_trash_honours_the_marker_and_the_descriptors(self):
+        trash = self.base / ".Trash"
+        for name in ("marked", "declared", "plain"):
+            (trash / name).mkdir(parents=True)
+        (trash / "marked" / self.g.KEEP_MARKER).write_text("")
+        self.descriptor("svc-t", {"data": str(trash / "declared"), "logs": []})
+        kept = []
+        with patch.object(self.g, "trash_dirs", return_value=[str(trash)]):
+            plan = self.g.plan_trash(self.cfg(), "normal", time.time() + 40 * DAY, [], kept=kept)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["plain"])
+        self.assertEqual(sorted(Path(k["target"]).name for k in kept), ["declared", "marked"])
+
+    def test_build_output_honours_the_descriptors(self):
+        target = self.base / "repo" / "node_modules"
+        target.mkdir(parents=True)
+        self.descriptor("svc-b", {"data": str(target / "cache"), "logs": []})
+        state = self.g.service_state(self.cfg(), [])
+        self.assertIn("svc-b.default", self.g.keep_reason(str(target), state))
+
+    def test_the_descriptors_are_read_once_per_run(self):
+        self.folder("svc-jobs", marker=True)
+        cfg = self.cfg(cache_roots=[str(self.caches)], cache_keep=[])
+        real = self.g.service_state
+        with patch.object(self.g, "load_config", return_value=cfg), \
+                patch.object(self.g, "service_state", side_effect=real) as read, \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "running", return_value=False):
+            doc = self.g.run(["--apply", "--level", "critical"])
+        self.assertEqual(read.call_count, 1)
+        self.assertIn("service-state", doc["phases"])
+        self.assertTrue(doc["service_state"]["complete"])
 
     def test_a_declared_cache_path_stays_regenerable(self):
         # The contract's own word: `paths.cache` is a cache. Live state there needs the marker.
