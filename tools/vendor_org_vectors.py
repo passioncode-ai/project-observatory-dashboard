@@ -6,9 +6,10 @@
 Copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch do not
 matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
 `schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
-check-in fixtures CT-65 added into its `device/` folder, then rewrites the commit and those files' digest rows in that
-folder's README, and the commit of the engine's contract pin (`observatory/engine/fabric-contract.lock.json`, OBS-196):
-the contract asks a consumer to pin it once and to move the pin with what it vendors, in one change.
+check-in fixtures CT-65 added and the key-on-record renewal fixtures of DEC-0100 into its `device/` folder, then
+rewrites the commit and those files' digest rows in that folder's README, and the commit of the engine's contract
+pin (`observatory/engine/fabric-contract.lock.json`, OBS-196): the contract asks a consumer to pin it once and to move
+the pin with what it vendors, in one change.
 `tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
 `tests/test_contract_lock.py` holds the pin equal to the README's commit, so a re-vendored commit is checked by the next
 test run. Prints what changed; exits 1 when the commit or a file cannot be read, and changes nothing then.
@@ -37,7 +38,12 @@ FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "device/device-enrollment-file-key-attested.json": "fixtures/negative/device-enrollment-file-key-attested.json",
          "device/device-enrollment-hardware-key-exportable.json":
              "fixtures/negative/device-enrollment-hardware-key-exportable.json",
-         "device/device-check-in-response-protocols.json": "fixtures/positive/device-check-in-response-protocols.json"}
+         "device/device-check-in-response-protocols.json": "fixtures/positive/device-check-in-response-protocols.json",
+         # A renewal by the key on record (DEC-0100): the request, and the same request carrying a token id.
+         "device/device-enrollment-request-key-on-record.json":
+             "fixtures/positive/device-enrollment-request-key-on-record.json",
+         "device/device-enrollment-key-on-record-with-token.json":
+             "fixtures/negative/device-enrollment-key-on-record-with-token.json"}
 #: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
 PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
 

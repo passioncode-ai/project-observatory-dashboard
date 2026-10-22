@@ -83,8 +83,7 @@
               "description": "False for the hardware and platform stores, true exactly for file (DEC-0094)."
             },
             "publicKeySha256": {
-              "type": "string",
-              "pattern": "^sha256:[a-f0-9]{64}$",
+              "$ref": "common.schema.json#/$defs/sha256",
               "description": "SHA-256 of the DER SubjectPublicKeyInfo in the CSR; the server checks it against the CSR, and it is the key on record for re-enrollment (FAC-SEM-044)."
             },
             "attestation": {
@@ -149,9 +148,22 @@
                 }
               },
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "method"
+              ],
+              "properties": {
+                "method": {
+                  "const": "key-on-record",
+                  "description": "DEC-0100: a device on record whose last certificate ended at most 30 days ago renews with a CSR from its key on record and no other proof; the server MAY refuse it by policy (a file-held key, a device it wants to see again)."
+                }
+              },
+              "additionalProperties": false
             }
           ],
-          "description": "How the request is authenticated. The proof itself (the SSO session or the enrollment token's secret) travels in the Authorization header, never in the body."
+          "description": "How the request is authenticated. The proof itself (the SSO session or the enrollment token's secret) travels in the Authorization header, never in the body; a renewal by the key on record (DEC-0100) carries none, the CSR's own signature by the key on record is its proof."
         },
         "requestedAt": {
           "$ref": "common.schema.json#/$defs/timestamp"
@@ -215,6 +227,10 @@
                 "org": {
                   "$ref": "device-common.schema.json#/$defs/org"
                 },
+                "role": {
+                  "const": "org-cloud",
+                  "description": "DEC-0099: the device is the organization's own cloud machine (an org-cloud or enterprise-cloud hosting), enrolled by an enrollment token of that role; it binds no person. Absent: a person's or an unassigned device, as before."
+                },
                 "user": {
                   "$ref": "activity-common.schema.json#/$defs/user"
                 },
@@ -222,7 +238,22 @@
                   "$ref": "activity-common.schema.json#/$defs/device"
                 }
               },
-              "additionalProperties": false
+              "additionalProperties": false,
+              "if": {
+                "properties": {
+                  "role": {
+                    "const": "org-cloud"
+                  }
+                },
+                "required": [
+                  "role"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "user": false
+                }
+              }
             },
             "issuer": {
               "$ref": "activity-common.schema.json#/$defs/opaqueId"

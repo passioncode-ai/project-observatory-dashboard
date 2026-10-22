@@ -424,10 +424,10 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   again unchanged after a lost answer, which the server answers with the same certificate (CT-65), and the previous
   certificate is kept until a 2xx under the new serial proves the server took it. A `certificate-unknown` before that
   goes back to the previous certificate and sends the request once more under it (a check-in rebuilt to name it, with
-  a fresh sequence number); only a refusal of that one ends the enrollment. An expired certificate or a `re-enroll`
-  action stops the schedule until the machine is enrolled again. `org status` reads the
-  outbox read-only and creates nothing, so a status during `leave` never brings the folder back.
-- **The certificate's expiry, said before it passes** (OBS-199, the warning part): `org status`, `full doctor`
+  a fresh sequence number); only a refusal of that one ends the enrollment. A `re-enroll` action, or an expired
+  certificate past its renewal window (below), stops the schedule until the machine is enrolled again. `org status`
+  reads the outbox read-only and creates nothing, so a status during `leave` never brings the folder back.
+- **The certificate's expiry, said before it passes** (OBS-199): `org status`, `full doctor`
   (`organizations`) and the Health page read one `notice` per enrollment from its saved state, without the network,
   on the server's clock as the last check-in measured it (`skewSeconds`, the clock requests are signed on):
   the expiry date (`expiresOn`, `notAfter`) and a state, `valid`, `expiring` in the last three days
@@ -436,8 +436,25 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   on an expired certificate is refused before the network as `certificate-expired`, naming the date, the step in
   words (`nextStep`: a new enrollment token from the organization's administrator, put in a vault slot) and the
   `command` (`full org enroll --server ... --org ... --token-slot PROJECT/ENV/NAME`); `full org` exits 1 when every
-  organization asked failed, a check-in the server refused included. A node offline past its certificate's 7 days
-  still needs a new token: re-enrolling by itself with the device key on record waits for the contract's rule.
+  organization asked failed, a check-in the server refused included.
+- **Renewal after expiry by the key on record** (OBS-199, contract DEC-0100): a certificate that ended at most 30 days
+  ago (`RENEWAL_GRACE_SECONDS`, the contract's `RENEWAL_GRACE_DAYS`, the end included), judged on the server's clock
+  (`skewSeconds`; a check-in the server refused as `certificate-expired` counts as ended), is renewed by `org check-in`
+  and `org tick` before anything else, instead of being refused: an enrollment request to the enroll path with
+  `auth: {method: "key-on-record"}` and nothing else in `auth`, no token and no `Authorization` header, a CSR from the
+  enrollment's own `#sig` key (its signature is the proof) and `requestedAt` on the server's clock. Its answer is
+  taken as any re-enrollment (the certificate checked, an epoch above every one before, registrations sent again),
+  keeping `enrolledAt` and the measured skew and adding `renewedAt`; a certificate that binds another user or role
+  than the one on record is refused (`binding-changed`, FAC-SEM-044). Inside the window `notice` keeps the state
+  `expired` and adds `renewUntil`, the step in words and `full org check-in --org ID`; `needsEnrollment` stays false.
+  An unanswered renewal (no answer, 408, 425, 429, 5xx) backs off (`renewal`: attempts, next time, last answer; the
+  tick answers `renewal-pending`, a person's `org check-in` asks now); `certificate-revoked` or `certificate-unknown`
+  with 401 removes the machine (OBS-204); any other refusal (a server pinned before DEC-0100 refuses `key-on-record`
+  at its schema, and a server may refuse it by policy) is recorded for that certificate (`renewalRefused`) and never
+  asked again, and from there, as past the 30 days, `certificate-expired` with the new-token step. A removed
+  enrollment, or one the server asked to `re-enroll` or whose epoch it superseded, never renews. Every step runs under
+  the enrollment's lock. The contract gives a node no way to know whether its server takes the renewal
+  (`contractVersion` stays 0.1.0), so the node asks once and keeps the answer.
 - **A machine removed from its organization** (OBS-204): a refusal `certificate-revoked` or `certificate-unknown` with
   HTTP 401, as the contract's step table sends them (`certificate-unknown` only after the fallback to a previous
   certificate above is refused too), to any signed request, ends the enrollment in `_signed`, for every caller; the
@@ -466,7 +483,9 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   `deriveShareRegistrations`, all 51 derive cases) from `records/estate-record.json` and `records/delta-state.json`,
   which only `org records apply` writes after `verify_estate_record` and `apply_delta`. Sent only when the enrollment
   response lists `share-registration/1`; on change, after an enrollment, at least weekly; a typed refusal waits for the
-  record to change, anything else (a held withdrawal included) retries with backoff. The answers are kept per grant.
+  record to change; a 403 `purpose-not-collected` (DEC-0100, SR-5a: the person's acknowledged notice does not name a
+  share registration's purposes) is `hold-notice`, held but not degraded, the sums kept, and sent again at the weekly
+  resend; anything else (a held withdrawal included) retries with backoff. The answers are kept per grant.
   `previouslyRegistered` is what share-registration.md says: the grants this node registered active toward this
   enrollment, so a grant the server took, then a resend left held, is still withdrawn when it leaves the record.
   Registrations go out on a change (an enrollment, `org records apply`, a newly listed protocol), not only on the tick.

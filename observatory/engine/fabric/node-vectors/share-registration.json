@@ -3890,6 +3890,159 @@
       }
     },
     {
+      "name": "SR-5a: the bound user's notice does not name a share registration's purposes",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": true
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        },
+        "purposeAdmitted": false
+      },
+      "expected": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": "purpose-not-collected",
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+          }
+        }
+      }
+    },
+    {
+      "name": "SR-5a: purposeAdmitted true is the registration as before",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": true
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        },
+        "purposeAdmitted": true
+      },
+      "expected": {
+        "status": 200,
+        "receipt": {
+          "type": "share-registration-receipt/1",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "registered",
+          "digest": "sha256:d431ae1fff886e40b43f7a5e15a00cb2e931fa8fd1544a0f7b38324076c1ff0b"
+        },
+        "held": {
+          "user": "m-4821",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "active",
+          "grantRevision": 3,
+          "agentRef": "urn:fabric:agent:example:inbox-digest",
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "digest": "sha256:d431ae1fff886e40b43f7a5e15a00cb2e931fa8fd1544a0f7b38324076c1ff0b"
+        }
+      }
+    },
+    {
+      "name": "SR-5 before SR-5a: an unassigned device whose notice is not known",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": true
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "purposeAdmitted": false
+      },
+      "expected": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": "unassigned-device",
+            "message": "no user is bound to this device's epoch, so no registrant"
+          }
+        }
+      }
+    },
+    {
+      "name": "SR-0: purposeAdmitted that is not a boolean",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": true
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        },
+        "purposeAdmitted": "no"
+      },
+      "expected": {
+        "fault": "context-invalid"
+      }
+    },
+    {
       "name": "SR-6: an active registration over a withdrawal",
       "held": [
         {
@@ -6129,6 +6282,32 @@
         }
       },
       "expected": "hold-degraded"
+    },
+    {
+      "name": "purpose-not-collected: sent again once the notice names its purposes",
+      "answer": {
+        "status": 403,
+        "body": {
+          "error": {
+            "code": "purpose-not-collected",
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+          }
+        }
+      },
+      "expected": "hold-notice"
+    },
+    {
+      "name": "purpose-not-collected under a status that is not its own",
+      "answer": {
+        "status": 409,
+        "body": {
+          "error": {
+            "code": "purpose-not-collected",
+            "message": "the notice this person acknowledged does not name the purposes a share registration serves; send it again when the notice changes"
+          }
+        }
+      },
+      "expected": "hold"
     },
     {
       "name": "malformed: the same bytes again do not clear it",

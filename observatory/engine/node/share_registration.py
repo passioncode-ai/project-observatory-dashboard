@@ -32,6 +32,10 @@ WITHDRAWN_MEMBERS = ('type', 'grantId', 'context', 'state', 'withdrawnAt')
 SEND_AFTER = {'stale-revision': 409, 'already-withdrawn': 409}
 DEGRADED_AFTER = {'revision-conflict': 409, 'agent-mismatch': 409, 'wrong-organization': 403,
                   'unassigned-device': 403, 'malformed': 400, 'schema-unsupported': 400}
+#: DEC-0100, SR-5a: the person's acknowledged notice does not name a share registration's purposes. Held, not degraded:
+#: the node keeps the sums and sends the registration again at the seven-day resend (or when its policy names a later
+#: `noticeVersion`).
+NOTICE_AFTER = {'purpose-not-collected': 403}
 
 
 def _str(value: Any) -> bool:
@@ -190,8 +194,8 @@ def derive(record: Any, applied_entries: Any, org_id: Any, previously_registered
 
 
 def gate(answer: Any) -> str:
-    """`gateGrantUsage`: `send`, `hold-degraded` or `hold` for a grant's usage toward one enrollment, given that
-    enrollment's latest answer to the grant's registration (None before any)."""
+    """`gateGrantUsage`: `send`, `hold-degraded`, `hold-notice` (DEC-0100) or `hold` for a grant's usage toward one
+    enrollment, given that enrollment's latest answer to the grant's registration (None before any)."""
     def own(value: Any, key: str) -> Any:
         return value.get(key) if isinstance(value, dict) else None
     status = own(answer, 'status')
@@ -203,4 +207,6 @@ def gate(answer: Any) -> str:
         return 'hold'
     if code in SEND_AFTER and SEND_AFTER[code] == status:
         return 'send'
+    if code in NOTICE_AFTER and NOTICE_AFTER[code] == status:
+        return 'hold-notice'
     return 'hold-degraded' if code in DEGRADED_AFTER and DEGRADED_AFTER[code] == status else 'hold'

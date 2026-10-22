@@ -217,6 +217,9 @@ class FakeServer:
         self.pause = None                                  # (path, started Event, release Event): hold one request
         self.closed = False                                # the organization was deleted: every request is unknown-org
         self.refuse = None                                 # (status, code): every signed request answers that
+        # DEC-0100: a server at or after it renews a device on record by its key; one pinned before refuses the
+        # request at its schema. `devices` is its record per device id, `renew_answer` a refusal of its own policy.
+        self.renewal, self.devices, self.renew_answer, self.renewed = False, {}, None, []
         self._hashes = hashes
 
     def __call__(self, url, headers, body, timeout):
@@ -265,6 +268,8 @@ class FakeServer:
 
     def enroll(self, path, headers, body):
         doc = json.loads(body)
+        if doc.get('auth') == {'method': 'key-on-record'}:
+            return self.renew(headers, doc)
         auth = headers.get('authorization', '')
         token_id, _, secret = auth[len('EnrollmentToken '):].partition('.')
         if not auth.startswith('EnrollmentToken ') or self.tokens.get(token_id) != secret or token_id in self.used \
@@ -284,11 +289,42 @@ class FakeServer:
             return 403, {'error': {'code': 'key-storage-refused', 'message': 'policy'}}
         self.used.add(token_id)
         self.org = doc['org']['id']
+        self.devices[doc['device']['id']] = {'keySha256': doc['key']['publicKeySha256']}
+        return 200, self._enrolled(csr, doc['device']['id'])
+
+    def _enrolled(self, csr, device):
         self.epoch += 1
-        return 200, {'protocol': 'fabric-device/0.1', 'kind': 'enrollment-response', 'protocols': self.protocols,
-                     'certificate': self._issue(csr, doc['device']['id']), 'streamEpoch': self.epoch,
-                     'policyRootKey': {'keyId': 'root', 'alg': 'ed25519', 'publicKey': 'x'},
-                     'checkIn': {'intervalSeconds': 300}, 'collectionStart': '2026-10-10T00:00:00Z'}
+        return {'protocol': 'fabric-device/0.1', 'kind': 'enrollment-response', 'protocols': self.protocols,
+                'certificate': self._issue(csr, device), 'streamEpoch': self.epoch,
+                'policyRootKey': {'keyId': 'root', 'alg': 'ed25519', 'publicKey': 'x'},
+                'checkIn': {'intervalSeconds': 300}, 'collectionStart': '2026-10-10T00:00:00Z'}
+
+    def renew(self, headers, doc):
+        """DEC-0100 as FAC-SEM-044 holds a server to it: a device on record, not revoked, whose last certificate ended
+        at most 30 days ago on the server's clock, with a CSR from its key on record and no other proof."""
+        assert 'authorization' not in headers             # the CSR's signature is the only proof
+        assert set(doc['auth']) == {'method'}
+        if not self.renewal:                               # a server pinned before DEC-0100: refused at its schema
+            return 422, {'error': {'code': 'schema-invalid', 'pointer': '/auth/method', 'message': 'not in enum'}}
+        if self.renew_answer:
+            return self.renew_answer[0], {'error': {'code': self.renew_answer[1]}}
+        device = doc['device']['id']
+        record = self.devices.get(device)
+        if record is None:
+            return 401, {'error': {'code': 'certificate-unknown'}}
+        if record.get('revoked'):
+            return 401, {'error': {'code': 'certificate-revoked'}}
+        csr = self._csr(doc['csr'])
+        from cryptography.hazmat.primitives import serialization
+        spki = csr.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+        if 'sha256:' + hashlib.sha256(spki).hexdigest() != doc['key']['publicKeySha256'] \
+                or doc['key']['publicKeySha256'] != record['keySha256']:
+            return 403, {'error': {'code': 'key-not-on-record'}}
+        ended = max(strict_time(c['notAfter']) for c in self.certs.values() if c['device'] == device) / 1000
+        if self.clock() + self.skew - ended > 30 * 86400:
+            return 403, {'error': {'code': 'renewal-window-closed'}}
+        self.renewed.append(device)
+        return 200, self._enrolled(csr, device)
 
     def _verify(self, path, headers, body):
         result = hs.verify_request({'method': 'POST', 'target': path, 'headers': headers, 'body': body},
@@ -593,7 +629,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_a_check_in_on_an_expired_certificate_names_it_and_the_exact_step(self):
         from node.org import OrgError
         not_after = self.enroll()['certificate']['notAfter']
-        self.now[0] = strict_time(not_after) / 1000 + 1
+        self.now[0] = strict_time(not_after) / 1000 + 30 * 86400 + 1          # past the renewal window (DEC-0100)
         sent = len(self.server.log)
         with self.assertRaises(OrgError) as raised:
             self.make().check_in()
@@ -659,6 +695,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertIn('node_org.notices(node_org.node_folder(', source)              # the Health data
         for state in ('removed', 'expired', 'needs-enrollment', 'expiring'):          # each state has its row
             self.assertIn('"%s"' % state, source[source.index('Array.isArray(H.organizations)'):])
+        self.assertIn('O.renewUntil', source[source.index('Array.isArray(H.organizations)'):])   # DEC-0100
 
     # -- OBS-204: a machine removed from its organization ------------------------------------------------------
     def _pending(self):
@@ -886,6 +923,292 @@ class EnrollmentEndToEnd(unittest.TestCase):
                              'unreadable' if isinstance(answer, list) else 'unknown')
         finally:
             orgs.chmod(0o700)
+
+    # -- OBS-199, contract DEC-0100: renewal by the key on record within 30 days of the certificate's end --------
+    def _expired_by(self, seconds):
+        """Enrolled, then `seconds` past the certificate's end; returns that end."""
+        not_after = strict_time(self.enroll()['certificate']['notAfter']) / 1000
+        self.now[0] = not_after + seconds
+        return not_after
+
+    def _renewals(self):
+        return [doc for path, doc in self.server.requests
+                if path == '/v1/devices/enroll' and doc['auth'] == {'method': 'key-on-record'}]
+
+    def test_a_check_in_past_expiry_renews_by_the_key_on_record_without_a_token(self):
+        self.server.renewal = True
+        old = self.enroll()
+        enrolled_at = self.make().state()['enrolledAt']
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 20 * 86400    # back from a holiday
+        result = self.make().check_in()
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['renewed']['by'], 'key-on-record')
+        (request,) = self._renewals()
+        self.assertNotIn('tokenId', request['auth'])
+        self.assertEqual(request['key']['publicKeySha256'],
+                         self.server.devices[request['device']['id']]['keySha256'])
+        self.assertEqual(strict_time(request['requestedAt']) / 1000, self.now[0])
+        state = self.make().state()
+        self.assertEqual(state['epoch'], old['epoch'] + 1)                      # a new epoch, as every re-enrollment
+        self.assertNotEqual(state['certificate']['serial'], old['certificate']['serial'])
+        self.assertFalse(state['reEnroll'])
+        self.assertEqual(state['enrolledAt'], enrolled_at)
+        self.assertEqual(state['renewedAt'], org_iso(self.now[0]))
+        status = self.make().describe()
+        self.assertEqual((status['state'], status['certificate']['state']), ('enrolled', 'valid'))
+        self.assertNotIn('org:certificate-expired', status['degraded'])
+        self.assertEqual(self.server.used, {'et_1'})                            # no second token was spent
+        journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
+        self.assertIn('"event": "renewed"', journal)
+
+    def test_the_terminal_check_in_renews_and_succeeds(self):
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import org as org_tool
+        self.server.renewal = True
+        self._expired_by(86400)
+        out = io.StringIO()
+        with mock.patch.object(org_tool, '_enrollment', lambda org_id: self.make()), \
+                mock.patch.object(org_tool, '_orgs', lambda args: [ORG]), contextlib.redirect_stdout(out):
+            code = org_tool.main(['check-in', '--org', ORG])
+        self.assertEqual(code, 0)
+        (row,) = json.loads(out.getvalue())['organizations']
+        self.assertTrue(row['ok'])
+        self.assertEqual(row['renewed']['epoch'], 2)
+
+    def test_the_renewal_request_is_the_contracts(self):
+        """The request matches the vendored DEC-0100 fixture member for member, carries no token id (the negative
+        fixture), and its `auth` is the schema's key-on-record branch exactly."""
+        fixture = json.loads((VECTORS / 'device' / 'device-enrollment-request-key-on-record.json').read_text())
+        negative = json.loads((VECTORS / 'device' / 'device-enrollment-key-on-record-with-token.json').read_text())
+        self.server.renewal = True
+        self._expired_by(86400)
+        self.make().check_in()
+        (request,) = self._renewals()
+        self.assertEqual(set(request) - {'deviceKeys'}, set(fixture))
+        self.assertEqual(request['auth'], fixture['auth'])
+        self.assertNotEqual(request['auth'], negative['auth'])
+        schema = json.loads((VECTORS / 'device-enrollment.schema.json').read_text(encoding='utf-8'))
+        found = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                method = (node.get('properties') or {}).get('method') if isinstance(node.get('properties'), dict) \
+                    else None
+                if isinstance(method, dict) and method.get('const') == 'key-on-record':
+                    found.append(node)
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+        walk(schema)
+        (branch,) = found
+        self.assertEqual(set(request['auth']), set(branch['required']))
+        self.assertIs(branch['additionalProperties'], False)
+
+    def test_a_tick_past_expiry_renews_and_then_does_what_is_due(self):
+        self.server.renewal = True
+        self._expired_by(3 * 86400)
+        report = self.make().tick()
+        self.assertEqual(report['renewed']['by'], 'key-on-record')
+        self.assertTrue(report['checkIn']['ok'], report)
+        self.assertEqual(len(self._renewals()), 1)
+        self.assertEqual(self.make().tick()['checkIn'], 'not-due')              # renewed once, not every tick
+
+    def test_the_window_is_thirty_days_on_the_servers_clock(self):
+        from node.org import OrgError
+        self.server.renewal = True
+        not_after = self._expired_by(30 * 86400)                                # the last second it is taken
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(len(self._renewals()), 1)
+        # Past the 30 days: refused before the network, with #339's step (a new token).
+        not_after = strict_time(self.make().state()['certificate']['notAfter']) / 1000
+        self.now[0] = not_after + 30 * 86400 + 1
+        sent = len(self.server.log)
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'certificate-expired')
+        self.assertIn('new enrollment token', raised.exception.next_step)
+        self.assertIn('full org enroll --server', raised.exception.command)
+        self.assertEqual(len(self.server.log), sent)
+        self.assertEqual(self.make().tick()['result'], 'needs-enrollment')
+        self.assertEqual(len(self.server.log), sent)
+        # The window is judged on the server's clock: a server an hour behind still takes it.
+        state = self.make().state()
+        state['skewSeconds'] = -3600
+        self.make()._save(state)
+        self.server.skew = -3600
+        self.assertTrue(self.make().check_in()['ok'])
+
+    def test_inside_the_window_status_says_it_renews_by_itself(self):
+        from node import org
+        self.server.renewal = True
+        not_after = self._expired_by(86400)
+        (said,) = org.notices(self.node, now=self.clock())
+        self.assertEqual(said['state'], 'expired')
+        self.assertEqual(said['renewUntil'], org.iso(not_after + 30 * 86400))
+        self.assertEqual(said['command'], 'project-observatory full org check-in --org ' + ORG)
+        self.assertIn('key on record', said['nextStep'])
+        self.assertIn(said['renewUntil'], said['nextStep'])
+        status = self.make().describe()
+        self.assertFalse(status['needsEnrollment'])
+        self.assertNotIn('org:needs-enrollment', status['degraded'])
+        self.assertIn('org:certificate-expired', status['degraded'])
+        (said,) = org.notices(self.node, now=not_after + 30 * 86400 + 1)          # past it: #339's step
+        self.assertNotIn('renewUntil', said)
+        self.assertIn('new enrollment token', said['nextStep'])
+
+    def test_a_server_that_refuses_the_renewal_is_asked_once_then_a_token_is_needed(self):
+        from node.org import OrgError
+        self._expired_by(86400)                                                 # pinned before DEC-0100: 422
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'certificate-expired')
+        self.assertIn('schema-invalid', str(raised.exception))
+        self.assertIn('new enrollment token', raised.exception.next_step)
+        sent = len(self.server.log)
+        with self.assertRaises(OrgError):
+            self.make().check_in()
+        self.assertEqual(self.make().tick()['result'], 'needs-enrollment')
+        self.assertEqual(len(self.server.log), sent)                            # never asked again for that certificate
+        status = self.make().describe()
+        self.assertEqual(status['renewalRefused']['code'], 'schema-invalid')
+        self.assertIn('org:needs-enrollment', status['degraded'])
+        self.assertNotIn('renewUntil', status)
+        # A new token starts over, and a later expiry may renew again.
+        self.server.renewal = True
+        self.enroll('et_2.' + 'T' * 32)
+        self.assertNotIn('renewal', self.make().state())
+
+    def test_a_policy_refusal_is_named(self):
+        from node.org import OrgError
+        self.server.renewal, self.server.renew_answer = True, (403, 'key-storage-refused')
+        self._expired_by(86400)
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'certificate-expired')
+        self.assertIn('key-storage-refused', str(raised.exception))
+        self.assertIn('new enrollment token', raised.exception.next_step)
+
+    def test_an_unanswered_renewal_is_retried_with_backoff(self):
+        from node.org import OrgError
+        self.server.renewal, self.server.renew_answer = True, (503, 'unavailable')
+        self._expired_by(86400)
+        report = self.make().tick()
+        self.assertEqual(report['result'], 'renewal-pending')
+        self.assertEqual(report['renewal']['attempts'], 1)
+        self.assertEqual(report['command'], 'project-observatory full org check-in --org ' + ORG)
+        sent = len(self.server.log)
+        self.assertEqual(self.make().tick()['result'], 'renewal-pending')       # the backoff holds the next tick
+        self.assertEqual(len(self.server.log), sent)
+        with self.assertRaises(OrgError) as raised:                             # a person's check-in asks now
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'renewal-failed')
+        self.assertEqual(len(self.server.log), sent + 1)
+        self.server.renew_answer = None
+        self.now[0] += 3600
+        self.assertEqual(self.make().tick()['renewed']['by'], 'key-on-record')
+        self.assertNotIn('renewal', self.make().state())
+
+    def test_a_revoked_device_does_not_renew_and_is_removed(self):
+        from node.org import OrgError
+        self.server.renewal = True
+        self._expired_by(86400)
+        self.server.devices[self.make().state()['device']]['revoked'] = True
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'removed-from-organization')
+        self.assertEqual(self.make().state()['removed']['code'], 'certificate-revoked')
+        self.assertEqual(self.server.renewed, [])
+
+    def test_a_removed_enrollment_never_renews(self):
+        from node.org import OrgError
+        self.server.renewal = True
+        self.enroll()
+        self.server.refuse = (401, 'certificate-revoked')
+        self.make().check_in()                                                  # OBS-204: removed
+        self.server.refuse = None
+        self.now[0] = strict_time(self.make().state()['certificate']['notAfter']) / 1000 + 86400
+        sent = len(self.server.log)
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'removed-from-organization')
+        self.assertEqual(self.make().tick()['result'], 'removed')
+        self.assertEqual(len(self.server.log), sent)
+        self.assertNotIn('renewUntil', self.make().describe())
+
+    def test_a_server_asked_re_enrollment_is_not_a_renewal(self):
+        self.server.renewal = True
+        self.enroll()
+        state = self.make().state()
+        state['reEnroll'] = True                                                # the server said `re-enroll`
+        self.make()._save(state)
+        self.now[0] = strict_time(state['certificate']['notAfter']) / 1000 + 86400
+        self.assertEqual(self.make().tick()['result'], 'needs-enrollment')
+        self.assertEqual(self._renewals(), [])
+
+    def test_a_server_that_saw_the_certificate_expire_lets_it_renew(self):
+        # The local clock is behind: the server refuses the check-in as expired before this machine sees it.
+        self.server.renewal = True
+        not_after = strict_time(self.enroll()['certificate']['notAfter']) / 1000
+        self.server.refuse = (401, 'certificate-expired')
+        self.now[0] = not_after - 600
+        self.assertEqual(self.make().check_in()['code'], 'certificate-expired')
+        self.server.refuse = None
+        self.assertEqual(self.make().tick()['renewed']['by'], 'key-on-record')
+
+    def test_a_renewal_that_changes_the_binding_is_refused(self):
+        from node.org import OrgError
+        self.server.renewal = True
+        self._expired_by(86400)
+        issue = self.server._issue
+
+        def with_user(csr, device):
+            cert = issue(csr, device)
+            cert['binding']['user'] = {'id': 'someone'}
+            return cert
+        self.server._issue = with_user
+        old = self.make().state()
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertEqual(raised.exception.code, 'certificate-expired')
+        self.assertIn('binding-changed', str(raised.exception))
+        self.assertEqual(self.make().state()['certificate'], old['certificate'])
+
+    def test_the_renewal_holds_the_enrollments_lock(self):
+        import threading
+        self.server.renewal = True
+        self._expired_by(86400)
+        started, release = threading.Event(), threading.Event()
+        self.server.pause = ('/v1/devices/enroll', started, release)
+        renewed, left = [], []
+        tick = self._thread(lambda: self.make().tick(), renewed)
+        self.assertTrue(started.wait(10))
+        leave = self._thread(lambda: self.make().leave(), left)
+        leave.join(0.5)
+        self.assertTrue(leave.is_alive())                                       # leave waits for the renewal
+        release.set()
+        tick.join(10)
+        leave.join(10)
+        self.assertEqual(renewed[0]['renewed']['by'], 'key-on-record')
+        self.assertEqual(left, [{'org': ORG, 'left': True}])
+
+    def test_a_notice_refusal_holds_without_degrading_and_waits_for_the_weekly_resend(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self.server.share_answer = (403, {'error': {'code': 'purpose-not-collected', 'message': 'notice'}})
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'hold-notice'})
+        self.assertEqual(self.make().register_shares()['sent'], 0)              # not every tick
+        self.assertEqual(self.make().collect_grant_usage()['enqueued'], 0)      # the sums wait in the meter
+        self.assertNotIn('org:share-registration-refused', self.make().describe()['degraded'])
+        self.server.share_answer = None
+        with self.make()._db() as conn:                                         # a week after it was sent
+            conn.execute('UPDATE registrations SET sent_at = sent_at - ?', (7 * 86400 + 1,))
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'send'})
 
     # -- OBS-201: the device key and the enrollment are owner-only on every system -----------------------------
     def test_the_device_keys_and_the_enrollment_are_owner_only_on_this_system(self):

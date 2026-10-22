@@ -1353,7 +1353,11 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `org:share-registration-refused` (a typed refusal that waits for your estate record to change) and
   `org:outbox-retrying`. When you have something to do, `nextStep` says it in words and `command` is the command.
   `full doctor` (`organizations`) and the Health page show the same expiry and state.
-- A machine offline past its certificate's 7 days needs a new enrollment token: `org check-in` then refuses with
+- A machine back after its certificate's 7 days renews it by itself with its key on record, no token needed, for 30
+  days after the certificate ended (on the server's clock): the next `org check-in` or maintenance tick sends the
+  renewal first, and `org status` meanwhile shows the certificate `expired` with `renewUntil` and the `org check-in`
+  command. Past those 30 days, or when the organization server refuses the renewal (a server that does not take it
+  yet, or its policy), the machine needs a new enrollment token: `org check-in` then refuses with
   `certificate-expired`, the date, the step and the `org enroll` command, and exits 1.
 - A machine its organization removed (the server answers `certificate-revoked` or `certificate-unknown` with HTTP
   401, as it does when an administrator removes the machine or the organization is closed) is shown as `removed`,
