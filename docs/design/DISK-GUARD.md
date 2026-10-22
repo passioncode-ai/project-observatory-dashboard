@@ -114,8 +114,8 @@ and the cache-folder and temporary classes remove nothing that run, each saying 
 and `Path.glob` report an unreadable folder as an empty one, which once read as "no service".
 
 **One broken descriptor makes only its own service unknown.** Each file is opened without following
-a link and without waiting (`O_NOFOLLOW`, `O_NONBLOCK`; on Windows a link is refused by `lstat`
-first), must be a regular file, and is read up to 1 MB: a FIFO named `*.json` once blocked the
+a link and without waiting by `osprivacy.read_regular` (`O_NOFOLLOW`, `O_NONBLOCK` on POSIX; on
+Windows a link is refused by `lstat` first), must be a regular file, and is read up to 1 MB: a FIFO named `*.json` once blocked the
 guard inside the cleanup lock, and a link to `/dev/zero` was read without end. A file that fails
 any of that, is not JSON (deep nesting included: its `RecursionError` once escaped the run), is not
 an object, or declares a path breaking the contract's `localPath` (not a string, not absolute or

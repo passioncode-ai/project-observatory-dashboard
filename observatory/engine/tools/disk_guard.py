@@ -406,29 +406,10 @@ UNKNOWN_ID_MIN = 3
 def _read_descriptor(path: str) -> bytes:
     """One descriptor's bytes, or ValueError/OSError. Never waits and never reads without a
     bound: a FIFO named `*.json` once blocked the guard inside the cleanup lock, and a link to
-    `/dev/zero` or a huge file was read without end (review of #338). Not followed when it is
-    a link, refused unless a regular file, at most DESCRIPTOR_MAX_BYTES."""
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    if not hasattr(os, "O_NOFOLLOW") and stat.S_ISLNK(os.lstat(path).st_mode):
-        raise ValueError("a link")                       # Windows: no O_NOFOLLOW, so look first
-    fd = os.open(path, flags)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            raise ValueError("not a regular file")
-        if st.st_size > DESCRIPTOR_MAX_BYTES:
-            raise ValueError("larger than a descriptor")
-        data = b""
-        while len(data) <= DESCRIPTOR_MAX_BYTES:
-            chunk = os.read(fd, 65536)
-            if not chunk:
-                break
-            data += chunk
-        if len(data) > DESCRIPTOR_MAX_BYTES:
-            raise ValueError("larger than a descriptor")
-        return data
-    finally:
-        os.close(fd)
+    `/dev/zero` or a huge file was read without end (review of #338). `osprivacy.read_regular`
+    does it on every OS: not followed when it is a link, refused unless a regular file, at most
+    DESCRIPTOR_MAX_BYTES."""
+    return osprivacy.read_regular(path, DESCRIPTOR_MAX_BYTES)
 
 
 def _named_for(name: str, service: str) -> bool:

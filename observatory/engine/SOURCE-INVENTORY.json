@@ -2325,8 +2325,8 @@
       "path": "osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4c4ad17a4cc3b05b61c1fa1ab27cac8d356afa093140b67ed6cad50909ee5c64",
-      "bytes": 21449
+      "export_sha256": "b6c68c83d7ac9daf86f7dd1507c015719441cd2f8b9741f4cf3ec581a67ef829",
+      "bytes": 22820
     },
     {
       "path": "osproc.py",
@@ -4300,8 +4300,8 @@
       "path": "tests/test_osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "92596824f68b7a904ff461e6747518e8be812c21dbe363e95c320e2e3f9e93b2",
-      "bytes": 9109
+      "export_sha256": "036ba3d4c2fb53544612b562d8f8ed471705cb95abeb2cba1b4a427765770d0a",
+      "bytes": 10759
     },
     {
       "path": "tests/test_osproc.py",
@@ -5402,8 +5402,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "90b007179fc9b53a3ba9bff2e00def96376b3d6fe083972ae0d4d37bd4d7ab78",
-      "bytes": 88222
+      "export_sha256": "4a966b2294d70ae4162d0d2c8949bc4544413b531c2cb16d529be5822e99b97c",
+      "bytes": 87446
     },
     {
       "path": "tools/embedding_policy_cli.py",

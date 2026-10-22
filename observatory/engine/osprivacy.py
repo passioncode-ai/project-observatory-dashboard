@@ -15,6 +15,7 @@ Every privacy decision goes through here:
     osprivacy.describe(path_or_fd)         # "0600" on POSIX, "owner-only"/"shared" on Windows
     osprivacy.explain(path_or_fd)          # the mode and uid, or the owner and ACL, for a diagnostic
     osprivacy.real_home()                  # the account's home, never from HOME/USERPROFILE
+    osprivacy.read_regular(path, limit)    # a regular file's bytes: no link, no wait, at most `limit`
 
 POSIX: the calls the engine made before — `O_NOFOLLOW`, `S_IMODE(st_mode) & 0o077`, `st_uid`,
 `chmod`, the password database.
@@ -430,3 +431,31 @@ else:  # pragma: no cover - exercised by the Windows CI job
             return Path(out.value) if out.value else None
         finally:
             ole32.CoTaskMemFree(out)
+
+
+def read_regular(path, limit: int) -> bytes:
+    """A regular file's bytes, at most `limit` of them, read on every OS without following a
+    link and without waiting: a FIFO is opened non-blocking and refused, not read, and a file
+    past `limit` (by its size, or by what a read returns) is a ValueError, never read whole.
+    Anything that is not a regular file (a folder, a device, a socket) is a ValueError; a link
+    is the OSError of `open` with NOFOLLOW. The disk guard reads Fabric service descriptors with
+    it: a FIFO named `*.json` once blocked it, a link to `/dev/zero` was read without end."""
+    fd = open(path, os.O_RDONLY | NOFOLLOW | NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("not a regular file")
+        if info.st_size > limit:
+            raise ValueError("larger than the limit")
+        chunks, total = [], 0
+        while total <= limit:
+            chunk = os.read(fd, min(65536, limit + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > limit:
+            raise ValueError("larger than the limit")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)

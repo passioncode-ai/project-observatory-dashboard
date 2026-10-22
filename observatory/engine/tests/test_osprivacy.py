@@ -121,6 +121,47 @@ class Privacy(unittest.TestCase):
             os.close(osprivacy.open(self.dir, os.O_RDONLY | osprivacy.DIRECTORY))
 
 
+class ReadRegular(unittest.TestCase):
+    """A small file read with no wait and no bound left open: the disk guard reads Fabric
+    service descriptors with it, and a FIFO, a link to a device or a huge file named like one
+    once blocked or flooded it (OBS-203)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+        self.file = self.dir / "small.json"
+        self.file.write_bytes(b'{"id": "alpha-web"}')
+
+    def test_a_regular_file_is_read_whole(self):
+        self.assertEqual(osprivacy.read_regular(self.file, 1024), b'{"id": "alpha-web"}')
+
+    def test_a_file_at_the_limit_is_read_and_past_it_refused(self):
+        self.assertEqual(len(osprivacy.read_regular(self.file, 19)), 19)
+        with self.assertRaises(ValueError):
+            osprivacy.read_regular(self.file, 18)
+
+    def test_a_folder_is_refused(self):
+        with self.assertRaises((ValueError, OSError)):
+            osprivacy.read_regular(self.dir, 1024)
+
+    def test_a_link_is_refused(self):
+        link = self.dir / "link.json"
+        try:
+            os.symlink(self.file, link)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"this account cannot create a symbolic link: {exc}")
+        with self.assertRaises(OSError):
+            osprivacy.read_regular(link, 1024)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_a_fifo_is_refused_without_waiting(self):
+        fifo = self.dir / "fifo.json"
+        os.mkfifo(fifo)
+        with self.assertRaises(ValueError):
+            osprivacy.read_regular(fifo, 1024)
+
+
 class RealHome(unittest.TestCase):
     def test_the_real_home_is_an_existing_folder(self):
         home = osprivacy.real_home()
