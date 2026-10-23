@@ -2228,6 +2228,7 @@
  "certificate expires on {date}; renew it now while the server answers": "сертификат истекает {date}; обновите его сейчас, пока сервер отвечает",
  "certificate valid until {date}": "сертификат действует до {date}",
  "enrollment could not be read: {reason}": "не удалось прочитать подключение к организации: {reason}",
+ "{kind} events are not sent since {date}: the organization does not collect them under the notice you acknowledged ({version}); they resume when you acknowledge another": "события {kind} не отправляются с {date}: организация не собирает их по уведомлению, которое вы подтвердили ({version}); отправка возобновится, когда вы подтвердите другое",
  "the organization closed on {date}; nothing more is sent to it, and what this machine held for it was dropped": "организация закрыта {date}; ей больше ничего не отправляется, а всё, что машина хранила для неё, удалено",
  "the organization server does not read harness summaries (node-summary/1); none is sent": "сервер организации не принимает сводку окружения агентов (node-summary/1); она не отправляется",
  "harness summary not sent: {detail}": "сводка окружения агентов не отправлена: {detail}",

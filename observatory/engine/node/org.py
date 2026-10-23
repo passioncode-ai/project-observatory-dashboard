@@ -270,6 +270,12 @@ def notice(org_id: str, state: dict, now: float) -> dict:
     else:
         out['state'] = 'valid'
     out['summary'] = summary_notice(state)
+    holds = Enrollment.purpose_holds(state)
+    if holds and not isinstance(removed, dict):        # DEC-0100: what this machine does not send, and why
+        out['purposeHolds'] = [{'kind': kind, 'since': hold.get('at'),
+                                'waitsFor': {'acknowledgedNoticeVersion': hold.get('acknowledged'),
+                                             'noticeVersion': hold.get('noticeVersion')}}
+                               for kind, hold in sorted(holds.items())]
     return out
 
 
@@ -818,7 +824,7 @@ class Enrollment:
         if closed_at is not None:
             state['removed'].update(closedAt=closed_at, droppedRegistrations=registrations)
             for held in ('collectionStart', 'policyRootKey', 'keySet', 'serverPolicy', 'purposeHolds',
-                         'acknowledgedNoticeVersion', 'noticeVersion'):
+                         'purposeRefused', 'acknowledgedNoticeVersion', 'noticeVersion'):
                 state.pop(held, None)
         state.pop('unknownOrg', None)                      # the provisional rule's record, before DEC-0103
         state['reEnroll'] = True
@@ -1503,16 +1509,41 @@ class Enrollment:
         holds = state.get('purposeHolds')
         return {k: v for k, v in holds.items() if isinstance(v, dict)} if isinstance(holds, dict) else {}
 
+    @staticmethod
+    def purpose_holdable(state: dict) -> bool:
+        """Whether a release signal can reach a hold on this enrollment: it binds a person (not `org-cloud`, not an
+        unassigned device) and has received that person's `acknowledgedNoticeVersion` at least once. Until OE-06
+        applies the signed policy, its `noticeVersion` is no signal this node can read, so a hold on any other
+        enrollment would drop that kind for good (an `org-cloud` machine, or a managed one collecting under the mdm
+        deadline before any acknowledgement)."""
+        cert = state.get('certificate') if isinstance(state.get('certificate'), dict) else {}
+        return cert.get('user') is True and cert.get('role') != 'org-cloud' \
+            and isinstance(state.get('acknowledgedNoticeVersion'), str)
+
     def _hold_purpose(self, state: dict, kinds: List[str]) -> Dict[str, dict]:
         """Records a hold per kind the receiver rejected for its purpose, with the notice versions held now, and saves
-        the state; a kind already held keeps the versions of its first rejection."""
+        the state; a kind already held keeps the versions of its first rejection. Where no release signal can arrive
+        (`purpose_holdable`), and for `buffer.overflow` (the stream's own record: holding it would make the next drop
+        write another), the rejection is consumed like `before-purpose`: the kind is still collected and sent, the
+        server refuses it until its notice covers it, and the refusal is logged once per kind per UTC day."""
         holds = self.purpose_holds(state)
+        holdable = self.purpose_holdable(state)
+        logged = state.get('purposeRefused') if isinstance(state.get('purposeRefused'), dict) else {}
+        today = iso(self.clock())[:10]
         for kind in kinds:
+            if not holdable or kind == 'buffer.overflow':
+                if logged.get(kind) != today:
+                    logged[kind] = today
+                    self.journal('purpose-refused', kind=kind, held=False)
+                continue
             if kind not in holds:
                 holds[kind] = {'at': iso(self.clock()), 'noticeVersion': self.notice_version(),
                                'acknowledged': state.get('acknowledgedNoticeVersion')}
                 self.journal('purpose-held', kind=kind)
-        state['purposeHolds'] = holds
+        if logged:
+            state['purposeRefused'] = logged
+        if holds:
+            state['purposeHolds'] = holds
         self._save(state)
         return holds
 
@@ -1880,8 +1911,8 @@ class Enrollment:
                and (self.expired(state) or bool(state.get('reEnroll'))),
                'rotationPending': isinstance(state.get('pendingRotation'), dict),
                'key': self._key_declaration(), 'nodeSummary': said['summary']}
-        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'renewUntil', 'renewalRefused')
-                    if k in said})
+        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'renewUntil', 'renewalRefused',
+                                         'purposeHolds') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
         out['registrations'] = {}
         path = self.folder / 'outbox.sqlite'
@@ -1917,6 +1948,8 @@ class Enrollment:
         summary_state = out['nodeSummary']['state']
         if summary_state in ('not-listed', 'unavailable', 'refused'):
             degraded.append('org:node-summary-' + summary_state)
+        if out.get('purposeHolds'):
+            degraded.append('org:purpose-held')
         if out['outbox']['pending'] and (out['outbox']['retry'] or {}).get('attempts'):
             degraded.append('org:outbox-retrying')
         out['degraded'] = degraded

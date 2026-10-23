@@ -2399,6 +2399,12 @@ if (Array.isArray(H.organizations)) {
       } else
         hb.push([label, T("harness summary not sent yet; the next check-in sends it"), show]);
     }
+    // DEC-0100: an event kind the organization refused for its purpose, held until the person acknowledges another
+    // notice (the version it waits to change is named).
+    if (Array.isArray(O.purposeHolds) && O.state !== "removed")
+      for (const P of O.purposeHolds)
+        hb.push([label, T("{kind} events are not sent since {date}: the organization does not collect them under the notice you acknowledged ({version}); they resume when you acknowledge another",
+          {kind: P.kind || "?", date: (P.since || "?").slice(0, 10), version: ((P.waitsFor || {}).acknowledgedNoticeVersion) || "?"}), orgStatus]);
   }
 }
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);

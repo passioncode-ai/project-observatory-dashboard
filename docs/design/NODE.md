@@ -534,12 +534,19 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   consumed by its `eventId` whatever its reason, a reason the node does not know included (DEC-0100).
 - **A purpose rejection** (DEC-0100, DEC-0102): an event rejected `purpose` (the receiver does not collect it for this
   person under the notice they acknowledged) holds its kind (`purposeHolds`, with the applied policy's `noticeVersion`
-  and the `acknowledgedNoticeVersion` held at the rejection, absence kept as such): no new event of that kind is
-  collected and a pending one is named dropped in a `buffer.overflow`, never sent. The hold ends only when the applied
-  policy names another `noticeVersion` than at the rejection, or a check-in response names an
-  `acknowledgedNoticeVersion` other than the one held then (a first acknowledgement after none is a change); a value
-  that becomes absent is no signal, and no timer ends it. `before-purpose` holds nothing. The applied policy's version
-  comes with OE-06 (`notice_version`, None until then), so today the acknowledgement is the signal.
+  and the `acknowledgedNoticeVersion` held at the rejection): no new event of that kind is collected and a pending one
+  is named dropped in a `buffer.overflow`, never sent. The hold ends only when the applied policy names another
+  `noticeVersion` than at the rejection, or a check-in response names an `acknowledgedNoticeVersion` other than the
+  one held then; a value that becomes absent is no signal, and no timer ends it. `before-purpose` holds nothing. A
+  kind is held only where a release signal can arrive (`purpose_holdable`): the enrollment binds a person (not
+  `org-cloud`, not an unassigned device) and has received that person's `acknowledgedNoticeVersion` at least once.
+  Until OE-06 applies the signed policy, its `noticeVersion` cannot be read (`notice_version` is None), so anywhere
+  else a hold would drop the kind for good: there the rejection is consumed like `before-purpose`, the kind is still
+  sent and refused until the organization's notice covers it, and the refusal is logged once per kind per day
+  (`purpose-refused`). A `buffer.overflow` is never held, so a drop never writes another overflow. `org status`
+  (`purposeHolds`: kind, since, the versions it waits to change; `org:purpose-held` in `degraded`), doctor and
+  Health show every held kind. When OE-06 lands, the applied policy's `noticeVersion` becomes the second release
+  signal and `purpose_holdable` widens to enrollments that only it can release.
 - **Share registrations** (DEC-0086): derived by `share_registration.derive` (the contract's
   `deriveShareRegistrations`, all 51 derive cases) from `records/estate-record.json` and `records/delta-state.json`,
   which only `org records apply` writes after `verify_estate_record` and `apply_delta`. Sent only when the enrollment

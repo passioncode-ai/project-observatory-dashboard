@@ -355,7 +355,7 @@ def dropped_findings(parent: dict, nxt: dict) -> list:
 
 #: DEC-0106: what a machine of the estate may be. Absent is `full`, and a writer omits `full`.
 MACHINE_PROFILES = ('full', 'member', 'view')
-_ANCHOR_SHA = re.compile(r'^[a-f0-9]{64}$')
+_ANCHOR_SHA = re.compile(r'[a-f0-9]{64}\Z')
 
 
 def machine_profile(record: Any, machine_id: Any) -> Optional[str]:
@@ -405,7 +405,7 @@ def delta_anchor_of(record: Any) -> Optional[dict]:
     if not isinstance(record, dict) or not isinstance(record.get('deltaAnchor'), dict):
         return None
     sequence, sha = record['deltaAnchor'].get('sequence'), record['deltaAnchor'].get('sha256')
-    if _safe_integer(sequence) and sequence >= 1 and isinstance(sha, str) and _ANCHOR_SHA.match(sha):
+    if _safe_integer(sequence) and sequence >= 1 and isinstance(sha, str) and _ANCHOR_SHA.fullmatch(sha):
         return {'sequence': int(sequence), 'sha256': sha}
     return None
 

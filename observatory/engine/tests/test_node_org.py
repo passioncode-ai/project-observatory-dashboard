@@ -244,6 +244,8 @@ class FakeServer:
         self.closed_at = None                              # DEC-0103: the organization ended at this time
         self.closed_body = None                            # a 410 body of the server's choosing instead
         self.acknowledged = None                           # DEC-0102: the notice version the person acknowledged
+        self.user = None                                   # the person a certificate binds (none: unassigned)
+        self.role = None                                   # `org-cloud` (DEC-0099): a machine no person uses
         self.refuse = None                                 # (status, code): every signed request answers that
         # DEC-0100: a server at or after it renews a device on record by its key; one pinned before refuses the
         # request at its schema. `devices` is its record per device id, `renew_answer` a refusal of its own policy.
@@ -291,7 +293,9 @@ class FakeServer:
                               'device': device, 'org': self.org, 'epoch': self.epoch}
         return {'der': base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(), 'serial': serial,
                 'notBefore': self.certs[serial]['notBefore'], 'notAfter': self.certs[serial]['notAfter'],
-                'binding': {'org': {'id': self.org}, 'device': {'id': device}}, 'issuer': 'test-ca'}
+                'binding': dict({'org': {'id': self.org}, 'device': {'id': device}},
+                                **({'user': {'id': self.user}} if self.user else {}),
+                                **({'role': self.role} if self.role else {})), 'issuer': 'test-ca'}
 
     def _csr(self, text):
         from cryptography import x509
@@ -1398,14 +1402,22 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def held(self):
         return set((self.make().state().get('purposeHolds') or {}))
 
-    def test_a_purpose_rejection_holds_that_kind_until_the_person_acknowledges_a_notice(self):
+    def bound(self, acknowledged='v1'):
+        """An enrollment bound to a person who acknowledged a notice: the only one a release signal reaches."""
+        self.server.user = 'm-4821'
         self.enroll()
+        if acknowledged:
+            self.server.acknowledged = acknowledged
+            self.assertTrue(self.make().check_in()['ok'])
+
+    def test_a_purpose_rejection_holds_that_kind_until_the_person_acknowledges_another_notice(self):
+        self.bound()
         for kind in ('meter.call', 'meter.call', 'meter.other'):
             self.make().enqueue(kind, {'n': 1}, occurred='2026-10-18T00:00:00Z')
         self.reject_first('purpose')
         self.assertEqual(self.make().flush()['rejected'], 1)
         self.assertEqual(self.held(), {'meter.call'})
-        self.assertIsNone(self.make().state()['purposeHolds']['meter.call']['acknowledged'])   # absent: held as such
+        self.assertEqual(self.make().state()['purposeHolds']['meter.call']['acknowledged'], 'v1')
         self.assertIsNone(self.make().enqueue('meter.call', {'n': 2}, occurred='2026-10-18T00:00:00Z'))
         self.assertIsNotNone(self.make().enqueue('meter.other', {'n': 2}, occurred='2026-10-18T00:00:00Z'))
         self.make().flush()                             # the pending meter.call is named dropped, never sent
@@ -1415,9 +1427,11 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(kinds.count('meter.other'), 2)
         for _ in range(3):                              # never on a timer, nor on a response without the member
             self.now[0] += 86400
+            self.server.acknowledged = None
             self.make().tick()
         self.assertEqual(self.held(), {'meter.call'})
         self.server.acknowledged = '2026-11'
+        self.now[0] += 301
         self.assertTrue(self.make().check_in()['ok'])
         self.assertEqual(self.held(), set())
         self.assertIsNotNone(self.make().enqueue('meter.call', {'n': 3}, occurred='2026-10-18T00:00:00Z'))
@@ -1425,9 +1439,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(self.server.batches[-1][2], ['meter.call'])
 
     def test_only_another_acknowledged_version_than_at_the_rejection_resumes(self):
-        self.enroll()
-        self.server.acknowledged = 'v1'
-        self.make().check_in()
+        self.bound()
         self._three_events()
         self.reject_first('purpose')
         self.make().flush()
@@ -1442,8 +1454,69 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.make().check_in()
         self.assertEqual(self.held(), set())
 
+    def assert_not_held(self, why):
+        """A rejection no release signal could ever end is consumed like `before-purpose`: nothing held, the kind
+        still collected and sent, and the refusal logged once per kind per day."""
+        self._three_events()
+        self.reject_first('purpose')
+        self.assertEqual(self.make().flush()['rejected'], 1, why)
+        self.assertEqual(self.held(), set(), why)
+        self.assertIsNotNone(self.make().enqueue('meter.call', {'n': 9}, occurred='2026-10-18T00:00:00Z'))
+        self.reject_first('purpose')
+        self.make().flush()
+        journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
+        self.assertEqual(journal.count('"event": "purpose-refused"'), 1, why)   # once per kind per day
+        self.assertNotIn('org:purpose-held', self.make().describe()['degraded'])
+
+    def test_an_org_cloud_machine_never_holds(self):
+        self.server.role = 'org-cloud'                  # DEC-0099: no person, no acknowledgement ever arrives
+        self.enroll()
+        self.assert_not_held('org-cloud')
+
+    def test_a_machine_bound_to_no_person_never_holds(self):
+        self.enroll()
+        self.server.acknowledged = 'v1'                 # even a stray value: no person's acknowledgement
+        self.make().check_in()
+        self.assert_not_held('unassigned')
+
+    def test_a_person_who_never_acknowledged_is_not_held(self):
+        # A managed machine collecting under the mdm deadline before any acknowledgement: no signal has arrived, so
+        # none is known to come.
+        self.bound(acknowledged=None)
+        self.assert_not_held('no acknowledgement yet')
+
+    def test_a_buffer_overflow_is_never_held_and_adds_no_overflow(self):
+        self.bound()
+        with self.make()._db() as conn:
+            self.make()._insert(conn, self.make().state()['epoch'], 'buffer.overflow',
+                                {'dropped': {'events': 1, 'ranges': [{'fromSeq': 1, 'toSeq': 1}], 'byKind': []}},
+                                occurred='2026-10-18T00:00:00Z')
+        self.reject_first('purpose')
+        self.make().flush()
+        self.assertEqual(self.held(), set())
+        with self.make()._db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM events WHERE kind = 'buffer.overflow' AND "
+                                          "state = 'pending'").fetchone()['n'], 0)
+
+    def test_status_doctor_and_health_show_every_held_kind(self):
+        from node import org
+        self.bound()
+        self._three_events()
+        self.reject_first('purpose')
+        self.make().flush()
+        status = self.make().describe()
+        self.assertIn('org:purpose-held', status['degraded'])
+        (row,) = status['purposeHolds']
+        self.assertEqual(row['kind'], 'meter.call')
+        self.assertEqual(row['waitsFor'], {'acknowledgedNoticeVersion': 'v1', 'noticeVersion': None})
+        self.assertTrue(row['since'])
+        (said,) = org.notices(self.node, now=self.clock())                      # doctor and Health read this
+        self.assertEqual(said['purposeHolds'], status['purposeHolds'])
+        source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
+        self.assertIn('O.purposeHolds', source)
+
     def test_a_purpose_hold_survives_a_renewal_by_the_key_on_record(self):
-        self.server.renewal = True
+        self.server.renewal, self.server.user = True, 'm-4821'
         old = self.enroll()
         self.server.acknowledged = 'v1'
         self.make().check_in()
@@ -1459,7 +1532,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_a_later_notice_version_in_the_applied_policy_resumes(self):
         from unittest import mock
         from node.org import Enrollment
-        self.enroll()
+        self.bound()
         self._three_events()
         self.reject_first('purpose')
         self.make().flush()
@@ -1503,7 +1576,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_the_purpose_fixture_is_consumed_as_the_contract_sends_it(self):
         fixture = json.loads((VECTORS / 'device' / 'activity-batch-ack-purpose.json').read_text())
         self.assertEqual(fixture['rejected'], [{'eventId': fixture['rejected'][0]['eventId'], 'reason': 'purpose'}])
-        self.enroll()
+        self.bound()
         event = self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
         ack = dict(fixture, rejected=[dict(fixture['rejected'][0], eventId=event['eventId'])],
                    acks=[{'collector': event['collector'], 'seq': event['seq']}])

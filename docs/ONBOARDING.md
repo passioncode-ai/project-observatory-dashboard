@@ -1421,7 +1421,10 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `unknown-org` to `org enroll` does not know the organization id: check it with the organization's administrator.
 - When the organization says it does not collect a kind of event for you under the notice you acknowledged (a
   `purpose` refusal), this machine stops collecting and sending that kind for that organization until you acknowledge
-  a newer notice; it does not try again on a timer.
+  another notice; it does not try again on a timer. `org status` (`purposeHolds`, `org:purpose-held`), doctor and
+  Health name each kind held and the notice version it waits to change. A machine no person is bound to, or whose
+  person has not acknowledged a notice yet, holds nothing: it keeps sending, and the organization keeps refusing until
+  its notice covers that kind.
 - `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
 - `org leave --org <id>` removes this machine's local state for that organization, its own device keys with it. The
   organization keeps its records until an administrator retires the device.
