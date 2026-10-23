@@ -2280,8 +2280,8 @@
       "path": "node/lifecycle/service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "999f64ce2385d465e7e8b7cd218a2952743eeef4682a45a5abeebd6290ea8585",
-      "bytes": 32404
+      "export_sha256": "f08b4ce0e9f07d5d9b02bd867f871925417c6a3e7f668656dc942d7f91cf4220",
+      "bytes": 32552
     },
     {
       "path": "node/org.py",

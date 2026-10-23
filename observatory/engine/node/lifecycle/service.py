@@ -366,7 +366,9 @@ class Service:
         self.broker = broker.Broker(lambda: registry_of(self.read()), self.state, self.authority, self.adapter,
                                     clock=clock, on_finish=self.operation_finished, on_admit=self.operation_admitted,
                                     on_gave_up=self.supervision_gave_up)
-        self.log.write('info', 'service.started', event='service.started', platform=sys.platform)
+        # Through `note`, which never raises: the broker above already holds the state's lock, and a log that
+        # cannot be written must not leave a half-built service holding it.
+        self.note('service.started', platform=sys.platform)
 
     def read(self) -> dict:
         return read_config(self.config_path)
