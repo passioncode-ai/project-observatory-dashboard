@@ -232,10 +232,6 @@ VENDORED_AT_OTHER_COMMITS: dict[str, dict[str, str]] = {
     "fabric/memory-schemas": {
         "aa2f0977bbbb32e9940e16b2654af84960abfb54":
             "both schemas differ at the pin, and `mcp/memory_wire.py` validates every memory call against them."},
-    "fabric/node-vectors": {
-        "1531f21014171f5168fba43a504276e487a7b363":
-            "the relay, pairing and estate vectors are byte-identical at the pin, but 17 of the 69 `estate-*` "
-            "semantic fixtures differ, and `tests/test_node_pairing.py` runs them."},
 }
 
 

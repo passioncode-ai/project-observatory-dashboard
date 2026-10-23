@@ -2364,6 +2364,38 @@ if (Array.isArray(H.organizations)) {
       hb.push([label, T("certificate valid until {date}", {date: O.expiresOn || "?"}), orgStatus]);
     else
       hb.push([label, T("enrollment could not be read: {reason}", {reason: O.reason || "?"}), orgStatus]);
+    // OBS-192: the harness summary (node-summary/1, contract DEC-0101) this machine sends to the organization, what
+    // it listed, and its drift from the organization's baseline, each with the command that shows the summary itself.
+    const S = O.summary;
+    if (S && O.state !== "removed") {
+      const show = fullCommand("org summary --org", shellArg(O.org));
+      const note = S.note && String(S.note.reason || "").startsWith("node-summary-") ? S.note : null;
+      const DRIFT_STATE = {missing: T("not installed"), stopped: T("not running"), changed: T("a different build"),
+                           outdated: T("an older version")};
+      if (!S.listed)
+        hb.push([label, T("the organization server does not read harness summaries (node-summary/1); none is sent"), show]);
+      else if (S.state === "consent-off")
+        hb.push([label, T("harness summary: not shared (consent off)"),
+          fullCommand("org summary --org", shellArg(O.org), "--consent on")]);
+      else if (note)
+        hb.push([label, T("harness summary not sent: {detail}", {detail: note.detail || note.reason}), show]);
+      else if (S.refused)
+        hb.push([label, T("the organization server refused the harness summary ({code}) on {date}; check-ins go on without it, and it is tried again on {retry}",
+          {code: S.refused.code || "?", date: (S.refused.at || "?").slice(0, 10), retry: (S.refused.retryAt || "?").slice(0, 10)}), show]);
+      else if (S.sentAt) {
+        const c = S.counts || {};
+        hb.push([label, T("harness summary taken on {date}: {agents} coding agents, {servers} MCP servers, {skills} skills, {plugins} plugins, {hooks} hooks",
+          {date: S.sentAt.slice(0, 10), agents: c.codingAgents ?? "?", servers: c.mcpServers ?? "?", skills: c.skills ?? "?",
+           plugins: c.plugins ?? "?", hooks: c.hooks ?? "?"}), show]);
+        const drift = S.drift && Array.isArray(S.drift.items) ? S.drift.items : null;
+        if (drift && drift.length)
+          hb.push([label, T("differs from the organization's baseline: {items}",
+            {items: drift.map(d => d.kind + " " + d.name + ": " + (DRIFT_STATE[d.state] || d.state)).join("; ")}), show]);
+        else if (drift)
+          hb.push([label, T("matches the organization's baseline"), show]);
+      } else
+        hb.push([label, T("harness summary not sent yet; the next check-in sends it"), show]);
+    }
     // `unknown-org` is provisional (not in the contract yet): said beside the state, retried as usual.
     if (O.unknownOrg && O.state !== "removed")
       hb.push([label, T("the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later",

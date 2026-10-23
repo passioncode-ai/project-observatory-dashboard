@@ -43,6 +43,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -54,7 +55,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import osprivacy
 import private_io
 
-from . import http_signature, share_registration
+from . import http_signature, node_summary, share_registration
 from .relay import strict_time
 
 LOG = logging.getLogger('observatory.node.org')
@@ -62,6 +63,18 @@ LOG = logging.getLogger('observatory.node.org')
 DEVICE_PROTOCOL = 'fabric-device/0.1'
 ACTIVITY_PROTOCOL = 'fabric-activity/0.1'
 SHARE_PROTOCOL = share_registration.TYPE
+SUMMARY_PROTOCOL = node_summary.TYPE
+#: A summary is sent when what it says changed, and at least this often (DEC-0101: "when it changed and at least once a
+#: day").
+SUMMARY_EVERY_SECONDS = 86400
+#: How long a summary the server refused waits before it is tried again; the check-ins go on without it meanwhile.
+SUMMARY_BACKOFF_SECONDS = 86400
+#: The oldest scan a summary is built from: past it the scan no longer says what this machine runs (the tick takes
+#: one every 30 minutes, so two days without one means it stopped).
+SCAN_MAX_AGE_SECONDS = 48 * 3600
+#: Answers to a check-in that carried a summary which may be the summary's fault: a malformed or too large request
+#: whatever its code, or another refusal that names the summary or the records.
+SUMMARY_SUSPECT_STATUSES = frozenset({400, 413, 422})
 COLLECTOR_ID = 'observatory-node'
 ORG_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z')
 TOKEN = re.compile(r'([A-Za-z0-9][A-Za-z0-9._:~-]{0,127})\.([A-Za-z0-9_-]{16,256})\Z')
@@ -225,6 +238,7 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                             % (not_after_text, org_id, not_after_text))
     else:
         out['state'] = 'valid'
+    out['summary'] = summary_notice(state)
     unknown = state.get('unknownOrg')
     if isinstance(unknown, dict) and not isinstance(removed, dict):
         out['unknownOrg'] = unknown
@@ -232,6 +246,143 @@ def notice(org_id: str, state: dict, now: float) -> dict:
                           'are retried as usual; if it still does not know it an hour after that, this machine is '
                           'taken as removed from the organization (this code is provisional until the contract '
                           'defines it)' % (unknown.get('since') or '?', UNKNOWN_ORG))
+    return out
+
+
+#: The largest scan file a summary is built from; past it the scan is reported unreadable rather than read whole.
+SCAN_LIMIT = 32 * 1024 * 1024
+#: The person's list of names never to send, owner-only, in the workspace's `config/` (`{"exclude": [glob, ...]}`).
+EXCLUSIONS_FILE = 'node-summary.json'
+EXCLUSIONS_MAX = 1000
+
+
+def read_harness_scans(now: float, scratch: Optional[Path] = None,
+                       enabled: Optional[Callable[[str], bool]] = None) -> Tuple[Any, Any, Optional[str]]:
+    """The two scans a node summary is built from (`store/raw/harness.json` from `collectors/scan_harness.py`,
+    `store/raw/mcp.json` from `collectors/scan_mcp.py`), and why it cannot be built when it cannot. Both are opt-in,
+    and a summary built without one would tell the organization that this machine runs nothing of that kind, so each
+    is refused when its integration is off (a scan left from before is not sent), when it is older than
+    `SCAN_MAX_AGE_SECONDS` by its own time, when it cannot be read, and, for the harness scan, when it predates the
+    node summary (no `plugins` or `coding_agents`)."""
+    if scratch is None or enabled is None:
+        import configuration as _configuration
+        import paths as _paths
+        scratch = Path(_paths.SCRATCH) if scratch is None else scratch
+        enabled = _configuration.enabled if enabled is None else enabled
+    docs = []
+    for name, integration, stamp in (('harness', 'harness', 'generated_at'), ('mcp', 'mcp', 'scanned_at')):
+        if not enabled(integration):
+            return None, None, ('integrations.%s is off: the %s scan is not taken, and one left from before is not '
+                                'sent' % (integration, name))
+        try:
+            doc = json.loads(osprivacy.read_regular(Path(scratch) / (name + '.json'), SCAN_LIMIT))
+        except FileNotFoundError:
+            return None, None, 'no %s scan on this machine yet (the tick has not run it)' % name
+        except (OSError, ValueError) as error:
+            return None, None, 'the %s scan is unreadable (%s)' % (name, type(error).__name__)
+        if not isinstance(doc, dict):
+            return None, None, 'the %s scan is not an object' % name
+        taken = strict_time(doc.get(stamp))
+        if taken is None:
+            return None, None, 'the %s scan carries no time, so it cannot be called current' % name
+        age = now - taken / 1000
+        if age > SCAN_MAX_AGE_SECONDS:
+            return None, None, ('the %s scan was taken %s, %d h ago, past the %d h a summary is built from'
+                                % (name, doc.get(stamp), age // 3600, SCAN_MAX_AGE_SECONDS // 3600))
+        if name == 'harness' and not all(isinstance(doc.get(k), list) for k in ('plugins', 'coding_agents')):
+            return None, None, ('the harness scan predates the node summary (no plugins or coding agents listed); '
+                                'the next tick takes a new one')
+        docs.append(doc)
+    return docs[0], docs[1], None
+
+
+def read_exclusions(path: Optional[Path] = None) -> Tuple[List[str], Optional[str]]:
+    """The person's exclusion list (`config/node-summary.json`, `{"exclude": [glob, ...]}`): shell-style globs matched
+    against each whole name, applied before anything is checked or sent. Absent: none. The file itself must be a
+    regular file, not a link, readable and writable by its owner only, in a folder nobody else may write to (the
+    folder's own parents are resolved, so a workspace under a linked folder such as `/tmp` is fine). Anything else is
+    a reason not to send at all, worded by what failed, never an empty list."""
+    if path is None:
+        import paths as _paths
+        path = Path(_paths.CONFIG) / EXCLUSIONS_FILE
+    path = Path(path)
+    if not path.exists() and not path.is_symlink():
+        return [], None
+    where = 'the exclusion list config/%s' % EXCLUSIONS_FILE
+    if path.is_symlink():
+        return [], '%s is a symbolic link; make it a regular file' % where
+    folder = path.parent.resolve()
+    target = folder / path.name
+    try:
+        if osprivacy.others_may_write(folder):
+            return [], '%s is in a folder others may write to; make the folder writable by its owner only' % where
+        fd = osprivacy.open(target, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+        with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return [], '%s is not a regular file' % where
+            if not osprivacy.private(stream.fileno()):
+                return [], ('%s is readable by others; make it owner-only (chmod 600 on POSIX)' % where)
+            if info.st_size > 1024 * 1024:
+                return [], '%s is larger than 1 MB' % where
+            doc = json.loads(stream.read())
+    except (OSError, ValueError) as error:
+        return [], '%s is unreadable (%s)' % (where, type(error).__name__)
+    globs = doc.get('exclude') if isinstance(doc, dict) else None
+    if not isinstance(globs, list) or len(globs) > EXCLUSIONS_MAX or not all(isinstance(g, str) and g for g in globs):
+        return [], ('%s must be {"exclude": [glob, ...]}, at most %d non-empty strings' % (where, EXCLUSIONS_MAX))
+    return list(globs), None
+
+
+def _summary_carried(previous: Optional[dict], org_id: str, renewal: bool) -> dict:
+    """What of the harness summary outlives a renewal or a re-enrollment, which write the state afresh (OBS-192):
+    the sequence always (DEC-0101: it rises with every summary of this device and context, and a server may refuse one
+    that goes back); the person's consent only into the same organization (another starts with it off); and, across a
+    renewal of the same enrollment, the last summary the server took with its digest and a refusal still waited out,
+    so a renewal changes nothing the person sees. A re-enrollment sends the summary again at its first check-in."""
+    if not isinstance(previous, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    sequence = previous.get('summarySequence')
+    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
+        out['summarySequence'] = sequence
+    if previous.get('org') == org_id and isinstance(previous.get('summaryConsent'), dict):
+        out['summaryConsent'] = previous['summaryConsent']
+    if renewal and previous.get('org') == org_id:
+        for key in ('nodeSummary', 'summaryRefused', 'summaryBackoffUntil'):
+            if key in previous:
+                out[key] = previous[key]
+    return out
+
+
+def summary_notice(state: dict) -> dict:
+    """The node summary's state for a person (OBS-192), from the saved state alone: whether the server reads
+    `node-summary/1` (`listed`), the last one it took (`sentAt`, `sequence`, how much it listed, and its drift when the
+    organization's baseline applied: `drift` is null without one), and why the latest was not built (`note`)."""
+    last = state.get('nodeSummary') if isinstance(state.get('nodeSummary'), dict) else None
+    out: Dict[str, Any] = {'listed': SUMMARY_PROTOCOL in (state.get('protocols') or []),
+                           'sentAt': last.get('sentAt') if last else None,
+                           'sequence': last.get('sequence') if last else None,
+                           'counts': last.get('counts') if last else None,
+                           'drift': last.get('drift') if last else None}
+    consent = state.get('summaryConsent') if isinstance(state.get('summaryConsent'), dict) else {}
+    out['consent'] = {'on': consent.get('on') is True, 'at': consent.get('at')}
+    note = state.get('nodeSummaryNote')
+    if isinstance(note, dict):
+        out['note'] = {k: note[k] for k in ('at', 'reason', 'code', 'detail') if k in note}
+    refused = state.get('summaryRefused')
+    if isinstance(refused, dict):
+        out['refused'] = {k: refused[k] for k in ('at', 'status', 'code', 'retryAt') if k in refused}
+    if not out['listed']:
+        out['state'] = 'not-listed'
+    elif not out['consent']['on']:
+        out.update(state='consent-off', said='harness summary: not shared (consent off)')
+    elif str((out.get('note') or {}).get('reason') or '').startswith('node-summary-'):
+        out['state'] = 'unavailable'
+    elif 'refused' in out:
+        out['state'] = 'refused'
+    else:
+        out['state'] = 'sent' if out['sentAt'] else 'pending'
     return out
 
 
@@ -315,6 +466,19 @@ def _key_schema_refusal(status: int, code: str, answer: Any) -> bool:
     error = answer.get('error') if isinstance(answer, dict) else None
     detail = json.dumps({k: v for k, v in error.items() if k != 'code'}) if isinstance(error, dict) else ''
     return bool(re.search(r'/key/(storage|exportable)\b', detail))
+
+
+def _summary_suspect(status: int, answer: Any) -> bool:
+    """Whether a refused check-in that carried a summary may have been refused for the summary: a malformed or too
+    large request (400, 413, 422) whatever it says, or another client error whose code, pointer or message names the
+    summary or the records. A signature, certificate or rate refusal is the check-in's own."""
+    if status in SUMMARY_SUSPECT_STATUSES:
+        return True
+    if not 400 <= status < 500 or status in (401, 408, 425, 429):
+        return False
+    error = answer.get('error') if isinstance(answer, dict) and isinstance(answer.get('error'), dict) else {}
+    said = ' '.join(str(error.get(k) or '') for k in ('code', 'pointer', 'message')).lower()
+    return 'summary' in said or 'records' in said
 
 
 def _error_code(doc: Any) -> Optional[str]:
@@ -421,13 +585,17 @@ class Enrollment:
 
     def __init__(self, node: Path, org_id: str, *, keys=None, transport: Transport = default_transport,
                  clock: Callable[[], float] = time.time, meter_db: Optional[Path] = None,
-                 paths: Optional[Dict[str, str]] = None):
+                 paths: Optional[Dict[str, str]] = None,
+                 harness: Optional[Callable[[], Tuple[Any, Any, Optional[str]]]] = None,
+                 exclusions: Optional[Callable[[], Tuple[List[str], Optional[str]]]] = None):
         if not isinstance(org_id, str) or not ORG_ID.fullmatch(org_id):
             raise OrgError('org-id', 'an organization id is [A-Za-z0-9][A-Za-z0-9_-]{0,127}')
         self.node, self.org_id = Path(node), org_id
         self.folder = self.node / 'orgs' / org_id
         self._keys, self.transport, self.clock, self.meter_db = keys, transport, clock, meter_db
         self.paths = dict(PATHS, **(paths or {}))
+        self.harness = harness or (lambda: read_harness_scans(self.clock()))
+        self.exclusions = exclusions or read_exclusions
         self._held = threading.local()                     # re-entry is per thread: another thread waits
 
     # -- the lock ----------------------------------------------------------------------------------------------
@@ -726,6 +894,7 @@ class Enrollment:
             # The same enrollment, renewed: when it began and the server's clock as last measured stay.
             doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=iso(self.clock()),
                        skewSeconds=previous.get('skewSeconds') or 0)
+        doc.update(_summary_carried(previous, self.org_id, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
         with self._db() as conn:                       # a new enrollment: registrations are sent again
@@ -890,10 +1059,18 @@ class Enrollment:
         if state.get('fullState'):
             doc['fullState'] = True
         return doc
-    def check_in(self, force_renewal: bool = True) -> dict:
+    def check_in(self, force_renewal: bool = True, inputs: Optional[dict] = None) -> dict:
         """One signed check-in. An expired certificate inside its renewal window is renewed by the key on record
         first (DEC-0100); the answer then names it (`renewed`). A person's check-in asks the renewal now
-        (`force_renewal`); the tick respects its backoff."""
+        (`force_renewal`); the tick respects its backoff.
+
+        A due harness summary rides in it (`records.nodeSummary`). A check-in the server refuses in a way the summary
+        may cause (`SUMMARY_SUSPECT_STATUSES`, or a refusal naming the summary) is sent again at once without it; when
+        that one is taken, the refusal is recorded (`summaryRefused`) and the summary waits
+        `SUMMARY_BACKOFF_SECONDS`, so a server that will not read it never stops check-ins, rotation or renewal."""
+        if inputs is None:
+            current = self.state() or {}
+            inputs = self.summary_inputs() if self._summary_wanted(current) else None   # outside the lock
         with self._locked():
             before = self.state()
             state = self._require(renew=True, force=force_renewal)
@@ -902,14 +1079,38 @@ class Enrollment:
                 if before is not None and before.get('epoch') != state.get('epoch') else None
             doc = self.check_in_document(state)
             state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
+            pending = self._summary_due(state, inputs)
+            if pending is not None:                        # DEC-0101: a check-in record, inside the signed request
+                doc['records'] = {'nodeSummary': pending['summary']}
+                state['summarySequence'] = pending['summary']['sequence']   # spent once sent, as sequenceNum
             self._save(state)
-            def again(current: dict) -> dict:              # resent under the previous certificate: it names that one
-                current['sequenceNum'] += 1
-                self._save(current)
-                return dict(doc, sequenceNum=current['sequenceNum'],
-                            certificate={'serial': current['certificate']['serial'],
-                                         'notAfter': current['certificate']['notAfter']})
-            status, answer = self._signed(state, self.paths['check-in'], doc, again)
+            def resend(sent: dict):
+                def again(current: dict) -> dict:          # resent under the previous certificate: it names that one
+                    current['sequenceNum'] += 1
+                    self._save(current)
+                    return dict(sent, sequenceNum=current['sequenceNum'],
+                                certificate={'serial': current['certificate']['serial'],
+                                             'notAfter': current['certificate']['notAfter']})
+                return again
+            status, answer = self._signed(state, self.paths['check-in'], doc, resend(doc))
+            if pending is not None and _summary_suspect(status, answer):
+                code, first_status = _error_code(answer) or 'http-%d' % status, status
+                state['sequenceNum'] += 1                  # the same check-in, without the summary, signed afresh
+                bare = dict({k: v for k, v in doc.items() if k != 'records'}, sequenceNum=state['sequenceNum'])
+                self._save(state)
+                status, answer = self._signed(state, self.paths['check-in'], bare, resend(bare))
+                if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
+                    # Refused without it too: the summary is not to blame, and it waits for the next check-in that
+                    # is taken, so a refusing server gets one request per check-in, not two.
+                    state['summaryHeld'] = True
+                else:
+                    retry = int(self.clock()) + SUMMARY_BACKOFF_SECONDS
+                    state['summaryRefused'] = {'at': iso(self.clock()), 'status': first_status,
+                                               'code': code, 'sequence': pending['summary']['sequence'],
+                                               'retryAt': iso(retry)}
+                    state['summaryBackoffUntil'] = retry
+                    self.journal('node-summary-refused', code=code)
+                    pending = None
             if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
@@ -917,6 +1118,8 @@ class Enrollment:
                     int(self.clock()) + min(state['checkInSeconds'], 300)
                 if _ends(status, code):
                     state['reEnroll'], state['reEnrollReason'] = True, code
+                if pending is not None:
+                    state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': 'check-in-failed', 'code': code}
                 self._save(state)
                 self.journal('check-in-failed', status=status, code=code)
                 out = {'ok': False, 'code': code, 'status': status}
@@ -947,8 +1150,17 @@ class Enrollment:
             if skew is not None and abs(skew) <= 86400:
                 state['skewSeconds'] = skew
             state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'ok', 'skewSeconds': skew}
+            if pending is not None:
+                state['nodeSummary'] = {'sequence': pending['summary']['sequence'], 'sentAt': iso(self.clock()),
+                                        'digest': pending['digest'], 'counts': node_summary.counts(pending['summary']),
+                                        'omitted': pending['omitted'], 'drift': pending['summary'].get('drift')}
+                state.pop('nodeSummaryNote', None)
+                state.pop('summaryRefused', None)
+                state.pop('summaryBackoffUntil', None)
+            state.pop('summaryHeld', None)                 # a check-in was taken: a held summary may ride again
             self._save(state)
-            self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags)
+            self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
+                         **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}))
             newly_listed = self.accepts_shares(state) and not listed_before
         if newly_listed:                                   # the server began to take registrations: send them now
             self._register_quietly()
@@ -1173,6 +1385,130 @@ class Enrollment:
     def accepts_shares(self, state: dict) -> bool:
         return SHARE_PROTOCOL in (state.get('protocols') or [])
 
+    # -- the node summary (DEC-0101, OBS-192) ------------------------------------------------------------------
+    def accepts_summary(self, state: dict) -> bool:
+        """A summary goes only to a server that lists `node-summary/1` in its protocols (DEC-0067, DEC-0094)."""
+        return SUMMARY_PROTOCOL in (state.get('protocols') or [])
+
+    def policy_layers(self) -> List[dict]:
+        """The signed policy layers this machine verified and applied for this organization, which the baseline is read
+        from. None yet: verifying and applying the server's signed policy and its key sets is OE-06 (the check-in
+        reports server revision 0), so the summary carries no drift until then, as the contract asks of a summary
+        under a policy without a baseline."""
+        return []
+
+    def services_in_context(self) -> List[dict]:
+        """The agent services placed in this organization's context, and no other. None yet: a Fabric service
+        descriptor names no context and no agent reference an estate placement could be matched to, so no service on
+        this machine can be shown to be placed in `org:<org.id>`; listing a person's other services would cross
+        contexts (DEC-0082), so the list stays empty rather than guessed."""
+        return []
+
+    def consents(self, state: dict) -> bool:
+        """Whether the person agreed to share this machine's harness with this organization (`org summary --consent`).
+        Off until they do: a summary names every agent, skill and plugin here, whatever the context it serves, and the
+        contract's question about other contexts (CT-92) is still open."""
+        consent = state.get('summaryConsent')
+        return isinstance(consent, dict) and consent.get('on') is True
+
+    def set_summary_consent(self, on: bool) -> dict:
+        """Turns sharing the harness summary with this organization on or off, recorded with its time."""
+        with self._locked():
+            state = self.state()
+            if state is None:
+                raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
+                               command=enroll_command(self.org_id, None))
+            state['summaryConsent'] = {'on': bool(on), 'at': iso(self.clock())}
+            if on:
+                state.pop('summaryBackoffUntil', None)     # a fresh consent sends at the next check-in
+            self._save(state)
+            self.journal('node-summary-consent', on=bool(on))
+            return {'org': self.org_id, 'consent': state['summaryConsent'], 'nodeSummary': summary_notice(state)}
+
+    def summary_inputs(self) -> dict:
+        """What a summary is built from, read without the enrollment's lock (the scans can be large): the two scans
+        or why they cannot be used, and the person's exclusion list or why it cannot be read."""
+        harness_scan, mcp_scan, missing = self.harness()
+        exclude, unreadable = self.exclusions()
+        return {'harness': harness_scan, 'mcp': mcp_scan, 'missing': missing, 'exclude': exclude,
+                'exclusionsUnreadable': unreadable}
+
+    def summary_for(self, state: dict, sequence: int, inputs: Optional[dict] = None) -> dict:
+        """The summary this enrollment would send now with `sequence`: `{summary, digest, omitted, excluded}`. Raises
+        OrgError `node-summary-unavailable` when the scans or the exclusion list cannot be used, and
+        `node-summary-refused` when what they hold would break FAC-SEM-128."""
+        inputs = self.summary_inputs() if inputs is None else inputs
+        if inputs.get('missing'):
+            raise OrgError('node-summary-unavailable', inputs['missing'],
+                           next_step='turn on the harness and MCP scans (integrations.harness, integrations.mcp) and '
+                                     'let the next tick take them', command='project-observatory full doctor')
+        if inputs.get('exclusionsUnreadable'):
+            raise OrgError('node-summary-unavailable', inputs['exclusionsUnreadable'],
+                           next_step='fix or remove the exclusion list; nothing is sent until it can be read',
+                           command='project-observatory full org summary --org %s' % self.org_id)
+        baseline = node_summary.harness_baseline(self.policy_layers())
+        try:
+            summary, omitted, excluded = node_summary.build(
+                device_id=self.keys.device_id, org_id=self.org_id, sequence=sequence, at=iso(self.clock()),
+                harness_scan=inputs.get('harness'), mcp_scan=inputs.get('mcp'), services=self.services_in_context(),
+                baseline=baseline, exclude=inputs.get('exclude') or ())
+        except node_summary.SummaryRefused as error:
+            raise OrgError('node-summary-refused', str(error)) from None
+        return {'summary': summary, 'digest': node_summary.content_digest(summary), 'omitted': omitted,
+                'excluded': excluded}
+
+    def _summary_wanted(self, state: dict) -> bool:
+        """Whether a summary may go in this check-in at all: the server reads it, the person consented, and no refusal
+        by the server is still being waited out."""
+        backoff = state.get('summaryBackoffUntil')
+        return self.accepts_summary(state) and self.consents(state) and not state.get('summaryHeld') and \
+            not (isinstance(backoff, (int, float)) and self.clock() < backoff)
+
+    def _summary_due(self, state: dict, inputs: Optional[dict] = None) -> Optional[dict]:
+        """The summary to put in this check-in, or None: none when the server does not read `node-summary/1`, the
+        person has not consented, the server's last refusal is being waited out, it cannot be built (named in
+        `nodeSummaryNote`), or the last one the server took says the same and is less than a day old."""
+        if not self._summary_wanted(state):
+            return None
+        try:
+            pending = self.summary_for(state, (state.get('summarySequence') or 0) + 1, inputs)
+        except OrgError as error:
+            state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': error.code, 'detail': str(error)[:300]}
+            self.journal('node-summary-not-built', code=error.code)
+            return None
+        state.pop('nodeSummaryNote', None)
+        last = state.get('nodeSummary') if isinstance(state.get('nodeSummary'), dict) else {}
+        sent = strict_time(last.get('sentAt'))
+        if last.get('digest') == pending['digest'] and sent is not None \
+                and self.clock() - sent / 1000 < SUMMARY_EVERY_SECONDS:
+            return None
+        return pending
+
+    def summary_preview(self) -> dict:
+        """What the next summary would say, read-only: nothing is saved, sent or spent (`org summary`). It works
+        without consent, so a person can read what they would share before they agree."""
+        state = self.state()
+        if state is None:
+            raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
+                           command=enroll_command(self.org_id, None))
+        inputs = self.summary_inputs()                      # read without the lock: the scans can be large
+        with self._locked():
+            state = self.state() or state
+            out = {'org': self.org_id, 'listed': self.accepts_summary(state), 'consent': summary_notice(state)['consent'],
+                   'lastSent': {k: v for k, v in (state.get('nodeSummary') or {}).items() if k != 'digest'} or None}
+            if not self.consents(state):
+                out.update(said='harness summary: not shared (consent off)',
+                           command='project-observatory full org summary --org %s --consent on' % self.org_id)
+            try:
+                pending = self.summary_for(state, (state.get('summarySequence') or 0) + 1, inputs)
+            except OrgError as error:
+                out.update(error=error.code, message=str(error)[:300])
+                out.update({k: v for k, v in (('nextStep', error.next_step), ('command', error.command)) if v})
+                return out
+            out.update(summary=pending['summary'], omitted=pending['omitted'], excluded=pending['excluded'],
+                       baseline='applied' if 'drift' in pending['summary'] else 'none')
+            return out
+
     def register_shares(self) -> dict:
         """Derives this enrollment's registrations from the applied estate revision and delta entries and sends what
         changed, what is due again (weekly) and what waits on a backoff. Nothing at all before the server lists
@@ -1316,7 +1652,11 @@ class Enrollment:
     # -- the schedule ------------------------------------------------------------------------------------------
     def tick(self) -> dict:
         """What is due, in order: rotation, check-in, share registrations, grant usage, the outbox. Each step's
-        failure is recorded and the next still runs. The whole tick holds the enrollment's lock."""
+        failure is recorded and the next still runs. The whole tick holds the enrollment's lock; what a harness summary
+        is built from is read before it is taken (the scans can be large)."""
+        current = self.state() or {}
+        due = self.clock() >= (current.get('nextCheckInAt') or 0)
+        inputs = self.summary_inputs() if due and self._summary_wanted(current) else None
         with self._locked():
             state = self.state()
             if state is None:
@@ -1348,7 +1688,7 @@ class Enrollment:
                 self.journal('needs-enrollment', expired=self.expired(state))
                 return {'org': self.org_id, 'result': 'needs-enrollment', **step}
             steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
-                     ('checkIn', lambda: self.check_in(force_renewal=False)
+                     ('checkIn', lambda: self.check_in(force_renewal=False, inputs=inputs)
                       if self.clock() >= (self.state().get('nextCheckInAt') or 0) else 'not-due'),
                      ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage),
                      ('outbox', self.flush)]
@@ -1381,7 +1721,7 @@ class Enrollment:
                'checkInSeconds': state.get('checkInSeconds'), 'needsEnrollment': 'renewUntil' not in said
                and (self.expired(state) or bool(state.get('reEnroll'))),
                'rotationPending': isinstance(state.get('pendingRotation'), dict),
-               'key': self._key_declaration()}
+               'key': self._key_declaration(), 'nodeSummary': said['summary']}
         out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning', 'renewUntil',
                                          'renewalRefused') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
@@ -1418,6 +1758,9 @@ class Enrollment:
             degraded.append('org:share-registration-not-listed')
         if out['registrations'].get('hold-degraded'):
             degraded.append('org:share-registration-refused')
+        summary_state = out['nodeSummary']['state']
+        if summary_state in ('not-listed', 'unavailable', 'refused'):
+            degraded.append('org:node-summary-' + summary_state)
         if out['outbox']['pending'] and (out['outbox']['retry'] or {}).get('attempts'):
             degraded.append('org:outbox-retrying')
         out['degraded'] = degraded

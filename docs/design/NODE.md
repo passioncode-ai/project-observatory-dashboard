@@ -214,15 +214,39 @@ sendable. Among them:
 | `observatory/engine/node/identifiers.py` | identifier equality by normal form (RFC 3986 §6.2.2, RFC 8141 §3.1) | `src/identifiers.ts`, `identifiers.json` |
 | `observatory/engine/node/ed25519.py` | Ed25519 verification that refuses small-order keys first | `src/ed25519.ts` |
 | `observatory/engine/node/webauthn.py` | offline passkey assertions (WebAuthn Level 3 §7.2) and the register of passkey-signed statements: a dedicated `sign.<domain>` RP, origins pinned within it | `src/webauthn.ts`, `src/signing-challenges.ts` |
-| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111 | `src/estate-record-rules.ts`, `estate-record.json` |
+| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111, 122 (DEC-0090: a revision that breaks the partner channel's scope is refused whole, `rule-violation`) | `src/estate-record-rules.ts`, `estate-record.json` |
 | `observatory/engine/node/revocation.py` | the signed revocation delta, the heartbeat and freshness: `current`, `behind`, `stale` (no heartbeat for 72 hours) or `broken` (two signed histories); only `current` accepts what other machines send | `src/revocation-delta.ts`, `revocation-delta.json` |
 
 A node believes a peer's `#sig` key only from a revision `verify_estate_record` accepted (`relay.peer_keys` reads it),
 minus what the delta revokes (`revocation.effective_revocations`). `tests/test_node_estate.py` also re-signs revisions
 with the vectors' EdDSA test passkey to hold each rule: two signing keys on one machine, a key named for another
 machine, an off-curve device key, a small-order hub key, an unpinned publisher key, a credential-shaped secret slot, a
-grant listed twice, a share grant in the personal context, an organization instance without its grant, a pinned origin
-outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+grant listed twice, a share grant in the personal context, an organization instance without its grant, a partner's
+publisher key scoped away from a personal placement and a scope naming a key the record does not pin (FAC-SEM-122), a
+pinned origin outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+
+**A partner's publisher key (OBS-171, contract DEC-0090, PA-06).** A partner (an integrator, an agency, an agent
+studio) signs the packages it builds for a company with its own publisher key. The estate record pins that key in
+`publisherKeys` like any other and names it in `publisherScopes[]`, `{kid, partner, contexts}`: the partner
+organization that holds it (`org:<partnerOrgId>`) and the 1 to 64 organization contexts a placement under it may be
+in, never `personal`. `placement_trust(record, machine, agentRef, context)` hands such a key only for a placement in
+one of those contexts and answers no key (`{'publisher': []}`) elsewhere, so the package's signature finds no key and
+the install is refused (`unknown-key`, PK-6). The key is always the record's own `publisherKeys` entry: the node reads
+publisher keys from no other source, so a scope can never be sidestepped by a key that arrived another way. FAC-SEM-122
+refuses, on a record, a scoped key outside its contexts, a key scoped twice and a scope naming a key the record does
+not pin; `verify_estate_record` then answers `rule-violation` (ER-11) and the node keeps the revision it had. A key no
+scope names keeps its earlier meaning, so a record without `publisherScopes` reads as before. The checks run over the
+contract's five `estate-partner-*` fixtures and the cases of its `test/contexts.test.ts` (`tests/test_node_pairing.py`
+`test_a_partners_publisher_key_is_trusted_only_in_its_scope`, `test_a_scope_is_read_as_the_reference_reads_it`), and
+over re-signed revisions (`tests/test_node_estate.py` `test_each_rule`).
+
+The rest of DEC-0090 is the hub's, the meter's and the adapter's. The hub signs a revision that carries
+`publisherScopes` only once every machine of the estate is at or after DEC-0090, and mints under a partner grant only
+once the meter is. This engine's delegation verifier (`delegation.py`, the meter's too) does not port the partner
+actor yet: it refuses every token whose chain holds one at DL-13 row 5 (`malformed-chain`), the option DEC-0090 gives
+a verifier (`tests/test_delegation_sealed.py` `test_a_partner_grant_token_is_refused_at_row_5`); and the meter's
+`governance.schema.json` is still the one vendored at `7931c1d`, so a projected partner grant reads `unknown-state`, a
+denial. Both stay open in OBS-171, the schemas' re-vendor with OBS-205.
 
 Planted defects that failed the suites:
 - estate:
@@ -339,12 +363,16 @@ runs the ceremony therefore shows the key fingerprint the token binds before the
 **Before installing a package** (`installation_findings`, the contract's `estate-placement` kind), a machine checks
 that it is in the record, that the package is the one its digest names, that the record places that package on this
 machine in this context (FAC-SEM-074), that every secret of the agent fills a slot the package declares (FAC-SEM-075),
-and that the placement's share grant holds (FAC-SEM-111). The install itself is packet P6. A revocation delta entry
+that the placement's share grant holds (FAC-SEM-111), and that a partner's publisher key is trusted in this context
+(FAC-SEM-122, DEC-0090). The install itself is packet P6. A revocation delta entry
 whose device-key ref holds `@` but is no key reference is refused as malformed, since no revision could list it.
 
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
-`enroll-token.json` and the 70 `estate-*` fixtures of `semantic/`. Then they run the add, re-key and remove ceremonies
-end to end between two device-key sets, on a test estate. The vectors are pinned to #113's merge commit `1531f21`.
+`enroll-token.json` and the `estate-*` fixtures of `semantic/` (74 of the contract's 75). Then they run the add, re-key
+and remove ceremonies end to end between two device-key sets, on a test estate. Since OBS-171 the whole `node-vectors/`
+folder is at one commit, the engine's contract pin `1f31e5a` (after DEC-0090's `3d8cb17`); until then the estate set
+was at #113's merge commit `1531f21`, and between the two only the `estate-*` fixtures changed: the five partner
+fixtures, and share grant ids rewritten to `urn:fabric:share:` form, with the record digests that follow, in seventeen others.
 
 ## The walking skeleton
 
@@ -508,6 +536,87 @@ Not built here: verifying and applying the server's signed policy and key sets (
 revision 0), a check-in scheduler at the server's interval (the maintenance job runs hourly), and the per-context
 `kid` and `iss` (CX-CON-06 in the contract). A settlement the meter accepts after its reservation expired lands after
 its day was sent and is not counted (the meter does not refuse late settlements).
+
+## The harness summary (OBS-192)
+
+An organization sees what each enrolled machine runs (its target S8) and how that differs from what it expects (S10):
+contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` there).
+
+- **The port.** `observatory/engine/node/node_summary.py` ports `src/node-summary.ts` at the engine's contract pin:
+  `harness_drift` (`harnessDrift`: one state per baseline item, in its order, the first of `missing`, `stopped`,
+  `changed`, `outdated` that holds; a digest compared only for a skill or a plugin, a version only for a coding agent
+  or a plugin), `version_below`, `resolve_policy`, `signed_policy_value` and `harness_baseline` (the baseline from the
+  `mdm` and `server` layers only, never a person's `user` layer), and FAC-SEM-128 (`summary_findings`,
+  `document_findings`: no credential, e-mail address or home path in any string, no item twice, `context` exactly
+  `org:` and the certificate's `org.id`, drift exactly `harness_drift` under the baseline's revision and none without
+  one). `tests/test_node_summary.py` runs it over the contract's six semantic fixtures, the kit's own drift, version
+  and baseline cases, and the schema over the positive and the eight negative fixtures (`fabric/node-vectors/summary/`,
+  vendored by `tools/vendor_org_vectors.py` with the coding-agent catalogue, DEC-0093).
+- **The source.** The harness scan (`collectors/scan_harness.py`, OBS-61, OBS-88) adds `plugins` (each enabled and
+  installed one by `name@marketplace`, its source and the version Claude Code recorded) and `coding_agents` (an agent of
+  the catalogue is installed when its launch command is an executable in a bin folder of the scanned home, on `PATH`,
+  or in Homebrew's and `/usr/local`'s; a generic command, `agent`, `cmd`, `cn`, `pi`, `omp` or `zed`, counts only when
+  it resolves into the agent's own package or bundle; its version is read from where the launcher resolves, a
+  `versions/<v>` folder, a Homebrew keg or cask, or its npm package's `package.json`, never by running it, and kept
+  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`). The MCP scan (`collectors/scan_mcp.py`)
+  gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
+  declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
+  server Claude Code keeps per folder is `local`, its folder never sent.
+- **Consent, per organization.** The contract sends the whole harness whatever the machine's mode (S8), and whether an
+  organization also sees what serves a person's other contexts is still the contract's open question CT-92. Until it
+  is answered the node takes the safest reversible choice: sending is OFF for each organization until the person runs
+  `full org summary --org ID --consent on` (recorded in that enrollment's state with its time; `--consent off` stops
+  it). `org status` and Health say `harness summary: not shared (consent off)` with that command; the dry run
+  `full org summary --org ID` works before consent, so the person reads what they would share first.
+- **The person's exclusion list.** `config/node-summary.json`, `{"exclude": [glob, ...]}`, owner-only: shell-style
+  globs matched against each whole name (a coding agent's id, an MCP server, a skill, a plugin, a service key), applied
+  before anything is checked or sent. What it keeps back is counted in `excluded`, which stays here. A list that is a
+  link, not owner-only, in a folder others may write to, not a list of strings, or unreadable sends nothing
+  (`org:node-summary-unavailable`, the reason worded by what failed), never an empty list; the folder's own parents
+  are resolved, so a workspace under a linked folder such as `/tmp` reads it.
+- **What leaves.** `build` copies an allow-list of fields into the schema's shape and checks the result with
+  FAC-SEM-128 before it hands it over (`SummaryRefused` otherwise): names, catalogue ids, versions, digests, sources,
+  transports, health and a hook count. A name the schema refuses (a space, a slash, a dotted `@` suffix) is left out and
+  counted in `omitted`, which stays on this machine. So is a name holding a dashed home folder: the contract's
+  home-path shapes miss one after a dot or an `@`, so the node refuses `-Users-<x>` or `-home-<x>` right after a
+  separator (`notes.-Users-alice-x`, `x@-home-alice`) or followed by two more dash segments as a flattened path
+  continues (`a-Users-alice-projects-x`), beside FAC-SEM-128 (raised with the contract); `smart-home-mcp` and
+  `end-users-guide` pass. Drift is capped at the schema's 1,024 items; the count past it stays here.
+- **When.** `Enrollment.check_in` puts the summary in `records.nodeSummary` only when the server's latest protocols
+  list `node-summary/1`, the person consented, and its content digest (everything but `sequence` and `at`) differs from
+  the last one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the
+  check-in's `sequenceNum`; a failed check-in leaves the summary due. The scans are read before the enrollment's lock is
+  taken (they can be large; at most 32 MB each), and a tick reads them only when a check-in is due.
+- **Across a renewal or a re-enrollment** (both write the enrollment's state afresh): the sequence keeps rising
+  (DEC-0101: per device and context; a server may refuse one that goes back); the consent is carried into the same
+  organization only; a renewal by the key on record also keeps the last summary taken (its digest) and a refusal still
+  waited out, so it changes nothing the person sees, while a re-enrollment sends the summary again at its first
+  check-in (`_summary_carried`).
+- **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
+  sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
+  (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
+  `org:node-summary-unavailable`. A summary built from a missing, stale or partial scan would tell the organization the
+  machine runs nothing of that kind, or what it ran days ago.
+- **A server that refuses it never stops check-ins.** A check-in carrying a summary that the server refuses in a way
+  the summary may cause (400, 413 or 422 whatever it says, or another client error whose code, pointer or message names
+  the summary or the records; never a signature, certificate or rate refusal) is sent again at once without it. When
+  that one is taken, the refusal is recorded (`summaryRefused`: when, status, code, retry time) and the summary waits a
+  day, so heartbeats, rotation and renewal go on; `org status` says `org:node-summary-refused` and Health when it is
+  tried again. A refusal that the bare check-in gets too is the check-in's, not the summary's: the summary is then held
+  until a check-in is taken, so a refusing server gets one request per check-in, not two.
+- **Shown.** `org summary --org <id>` prints the next summary as it would leave, saving and sending nothing.
+  `org status` (`nodeSummary` with its `state`: `not-listed`, `consent-off`, `unavailable`, `refused`, `pending` or
+  `sent`; the first, third and fourth also as `org:node-summary-*` in `degraded`), doctor and Health read the saved
+  state (`summary_notice`): whether the server reads it, the consent, when it last took one, how much it listed, and
+  the drift.
+
+Not built here: the drift reaches an organization only once the node applies its signed policy (OE-06): until then
+`policy_layers` is empty, no baseline applies, and the summary carries no drift, as the contract asks of a summary
+under a policy without one. The agent services of the summary's context: a Fabric service descriptor names no context
+and no agent reference an estate placement could match, so `services_in_context` is empty rather than guessed, and a
+person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). A
+plugin's digest (a baseline naming one reads `changed` until it is computed), Codex's skills and a project's own skills
+are not listed yet.
 
 ## Lifecycle (OBS-79)
 

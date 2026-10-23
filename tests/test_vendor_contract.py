@@ -65,6 +65,10 @@ class VendoringMovesThePinWithTheFiles(unittest.TestCase):
             target = self.contract / source
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / "fabric" / "node-vectors" / name, target)
+        semantic = self.contract / "fixtures" / "semantic"
+        semantic.mkdir(parents=True, exist_ok=True)
+        for path in (ROOT / "fabric" / "node-vectors" / "semantic").glob("estate-*.json"):
+            shutil.copy2(path, semantic / path.name)
         (self.contract / "schemas").mkdir(exist_ok=True)
         for folder in self.schemas.FOLDERS:
             for path in (ROOT / folder).glob("*.schema.json"):
@@ -157,6 +161,28 @@ class VendoringMovesThePinWithTheFiles(unittest.TestCase):
         with self.assertRaises(self.schemas.VendorError) as caught:
             self.schemas.pinned_commit(self.engine)
         self.assertEqual(caught.exception.detail["error"], "pin-missing")
+
+    def test_a_failed_write_leaves_the_old_file_whole(self) -> None:
+        """A write goes through a temporary file and a rename (the #348 review's LOW 1)."""
+        target = self.engine / "fabric" / "node-vectors" / "README.md"
+        before = target.read_bytes()
+
+        class Boom(Exception):
+            pass
+
+        real = self.vectors.os.fsync
+
+        def failing(fd):
+            raise Boom()
+
+        self.vectors.os.fsync = failing
+        try:
+            with self.assertRaises(Boom):
+                self.vectors.write_atomic(target, b"partial")
+        finally:
+            self.vectors.os.fsync = real
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual([p.name for p in target.parent.iterdir() if p.name.endswith(".tmp")], [])
 
     def test_vendoring_twice_changes_nothing_the_second_time(self) -> None:
         self.vectors.vendor(self.contract, self.commit, self.engine)

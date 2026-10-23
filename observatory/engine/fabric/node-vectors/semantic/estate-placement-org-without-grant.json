@@ -76,7 +76,7 @@
               "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
               "publisherKid": "example-publisher-2026",
               "context": "org:org_7kq2m4xw",
-              "grant": "urn:grant:estate:share-inbox-digest-org-a"
+              "grant": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8"
             },
             {
               "agentRef": "urn:fabric:agent:example:inbox-digest",
@@ -200,7 +200,7 @@
         {
           "kind": "standing-grant",
           "meta": {
-            "id": "urn:grant:estate:share-inbox-digest-org-a",
+            "id": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
             "revision": 1,
             "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
             "createdAt": "2026-10-12T08:00:00Z",
@@ -251,7 +251,7 @@
         {
           "kind": "standing-grant",
           "meta": {
-            "id": "urn:grant:estate:share-inbox-digest-org-b",
+            "id": "urn:fabric:share:8b1e4d7a2c9f05e3b6a17d40c2e9f851",
             "revision": 1,
             "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
             "createdAt": "2026-10-12T08:00:00Z",
@@ -301,7 +301,7 @@
         }
       ],
       "revocations": [],
-      "digest": "sha256:f4e6b559d35b5a7f329ca9b844dae37faac42ef9a8e9529366acac9f6cd4a8ce",
+      "digest": "sha256:fd67dcbacd569381b2dbe024cf22816dc4f7f352c27f98cc751673135cd427b7",
       "signature": {
         "format": "webauthn-assertion",
         "credentialId": "0nGFzb4RDddKfO7TtqkdYA",

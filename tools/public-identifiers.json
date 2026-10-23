@@ -232,6 +232,22 @@
   {
    "token": ".worktrees",
    "reason": "a generic folder name for git worktrees (git's own convention and many tools'); it names no project or person, though a private registry path contains it"
+  },
+  {
+   "token": "deepseek-ai",
+   "reason": "a third-party coding agent, or its maker's GitHub owner, in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192)"
+  },
+  {
+   "token": "deepseek-harness",
+   "reason": "a third-party coding agent, or its maker's GitHub owner, in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192)"
+  },
+  {
+   "token": "openclaw",
+   "reason": "the name of a public third-party coding agent in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192); the operator's private uses are covered by other denylist tokens"
+  },
+  {
+   "token": "warpdotdev",
+   "reason": "a third-party coding agent, or its maker's GitHub owner, in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192)"
   }
  ]
 }

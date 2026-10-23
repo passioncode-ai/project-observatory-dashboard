@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""Vendors the contract files organization enrollment (OBS-161) is pinned to, in one step.
+"""Vendors the node's contract files (`observatory/engine/fabric/node-vectors/`) at one commit, in one step.
 
     python3 tools/vendor_org_vectors.py --contract <fabric-agent-contract checkout> --commit <sha>
 
 Copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch do not
-matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
-`schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
-check-in fixtures CT-65 added and the key-on-record renewal fixtures of DEC-0100 into its `device/` folder, then
-rewrites the commit and those files' digest rows in that folder's README, and the commit of the engine's contract
-pin (OBS-196), and re-vendors the interop schemas `tools/vendor_contract_schemas.py` keeps at the pin (OBS-205): the contract
-asks a consumer to pin it once and to move the pin with what it vendors, in one change.
-`tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
-`tests/test_contract_lock.py` holds the pin equal to the READMEs' commits, so a re-vendored commit is checked by the next
-test run. The pin is read through `observatory/engine/contract_lock.py`, the one reader of it, and checked before
-anything is read from the contract; every file is read and every README checked before anything is written. Prints what
-changed; exits 1 when the pin is missing or invalid, or the commit, a file or a README cannot be read, and changes
-nothing then.
+matter), the node's vectors of `fixtures/vectors/` (the estate record, the relay, the ceremonies and the organization
+enrollment's `http-signature.json` and `share-registration.json`) and `schemas/device-enrollment.schema.json` into
+`observatory/engine/fabric/node-vectors/`, the device request and check-in fixtures CT-65 added and the key-on-record
+renewal fixtures of DEC-0100 into its `device/` folder, the node summary's schema, catalogue and fixtures
+(OBS-192) into its `summary/` folder, and every `estate-*` fixture of `fixtures/semantic/` into its
+`semantic/` folder but the one the public-release gate refuses (`SEMANTIC_LEFT_OUT`), removing a vendored `estate-*`
+fixture the commit no longer has (OBS-171). Then it rewrites every commit the folder's README names and the digest
+rows of the files outside `semantic/`, re-vendors the interop schemas `tools/vendor_contract_schemas.py` keeps at the
+pin (OBS-205), and moves the commit of the engine's contract pin (OBS-196): the contract asks a consumer to pin it once
+and to move the pin with what it vendors, in one change.
+`tests/test_node_foundation.py` checks the digests, the node suites run the files and `tests/test_contract_lock.py`
+holds the pin equal to the READMEs' commits, so a re-vendored commit is checked by the next test run.
+
+The pin is read through `observatory/engine/contract_lock.py`, the one reader of it, and checked before anything is
+read from the contract; every file is read and every README checked before anything is written; each file is written
+to a temporary file beside it and renamed over it, and the pin is written last (OBS-205). Prints what changed; exits 1
+when the pin is missing or invalid, or the commit, a file or a README cannot be read, and changes nothing then.
 """
 from __future__ import annotations
 
@@ -23,14 +28,21 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
 ENGINE = ROOT / "observatory" / "engine"
-FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
+FILES = {**{name: "fixtures/vectors/" + name for name in (
+             # The estate record, its revocation delta, the secret envelope, the relay and the ceremonies (OBS-109,
+             # OBS-113, OBS-133); the estate fixtures of `fixtures/semantic/` go to `semantic/` (SEMANTIC below).
+             "canonical.json", "enroll-token.json", "estate-record.json", "identifiers.json", "p256.json",
+             "pairing.json", "relay.json", "revocation-delta.json", "secret-envelope.json")},
+         "http-signature.json": "fixtures/vectors/http-signature.json",
          "share-registration.json": "fixtures/vectors/share-registration.json",
          "device-enrollment.schema.json": "schemas/device-enrollment.schema.json",
          # The device fixtures the node's requests and answers are held to (CT-65, DEC-0094).
@@ -45,9 +57,29 @@ FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "device/device-enrollment-request-key-on-record.json":
              "fixtures/positive/device-enrollment-request-key-on-record.json",
          "device/device-enrollment-key-on-record-with-token.json":
-             "fixtures/negative/device-enrollment-key-on-record-with-token.json"}
-#: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
-PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
+             "fixtures/negative/device-enrollment-key-on-record-with-token.json",
+         # The node's harness summary and its drift (DEC-0101, DEC-0102, OBS-192): the schema with the two it refers
+         # to, the coding-agent catalogue its ids come from (DEC-0093), the policy that carries a baseline, and every
+         # node-summary fixture, positive, negative and semantic, but one: `node-summary-path-in-name.json` names a home
+         # folder, a shape the public-release gate refuses, so tests/test_node_summary.py rebuilds it from the positive.
+         "summary/node-summary.schema.json": "schemas/node-summary.schema.json",
+         "summary/common.schema.json": "schemas/common.schema.json",
+         "summary/activity-common.schema.json": "schemas/activity-common.schema.json",
+         "summary/coding-agents.json": "catalogue/coding-agents.json",
+         "summary/device-policy-harness-baseline.json": "fixtures/positive/device-policy-harness-baseline.json",
+         "summary/positive/node-summary.json": "fixtures/positive/node-summary.json",
+         **{"summary/negative/node-summary-%s.json" % name: "fixtures/negative/node-summary-%s.json" % name
+            for name in ("dotted-suffix", "drift-dotted-suffix", "endpoint-query", "mcp-dotted-suffix",
+                         "personal-context", "server-arguments", "skill-two-at")},
+         **{"summary/semantic/node-summary-%s.json" % name: "fixtures/semantic/node-summary-%s.json" % name
+            for name in ("drift-hidden", "drift-without-baseline", "duplicate", "ok", "other-org", "person")}}
+#: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
+SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
+#: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;
+#: `test_node_pairing.py` rebuilds it from `estate-record-ok.json`.
+SEMANTIC_LEFT_OUT = frozenset({"estate-secret-value-as-slot.json"})
+#: Every commit the README names ("... at commit `<40 hex>`"): the whole folder is at one commit.
+PIN = re.compile(r"(at commit\s+`)([0-9a-f]{40})(`)")
 
 
 def _load(path: Path, name: str):
@@ -67,6 +99,57 @@ def _contract_lock():
 
 def _schemas():
     return _load(ROOT / "tools" / "vendor_contract_schemas.py", "contract_schemas")
+
+
+def write_atomic(target: Path, data: bytes) -> None:
+    """`data` into `target` through a temporary file in the same folder and a rename: a failed write leaves the old
+    file whole, never a truncated one."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(prefix="." + target.name + ".", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _semantic_blobs(git, contract: Path, full: str) -> dict:
+    """The commit's `estate-*` fixtures of `fixtures/semantic/` but SEMANTIC_LEFT_OUT, read before anything is written."""
+    listed = git.run(["ls-tree", "--name-only", full, "fixtures/semantic/"], repo=contract)
+    if listed.returncode != 0:
+        raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/", "commit": full}))
+    names = sorted(name for name in (Path(line).name for line in listed.stdout.splitlines())
+                   if SEMANTIC.match(name) and name not in SEMANTIC_LEFT_OUT)
+    if not names:
+        raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/estate-*", "commit": full}))
+    blobs = {}
+    for name in names:
+        shown = git.run(["show", "%s:fixtures/semantic/%s" % (full, name)], repo=contract, text=False)
+        if shown.returncode != 0:
+            raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/" + name,
+                                         "commit": full}))
+        blobs[name] = shown.stdout
+    return blobs
+
+
+def _write_semantic(blobs: dict, vectors: Path = VECTORS) -> list:
+    """Writes `semantic/` as the commit has it: each fixture byte for byte, and an `estate-*` fixture it dropped gone."""
+    folder = vectors / "semantic"
+    folder.mkdir(exist_ok=True)
+    changed = []
+    for stale in sorted(p for p in folder.glob("estate-*.json") if p.name not in blobs):
+        stale.unlink()
+        changed.append("semantic/" + stale.name)
+    for name, data in blobs.items():
+        target = folder / name
+        if not target.exists() or target.read_bytes() != data:
+            changed.append("semantic/" + name)
+            write_atomic(target, data)
+    return changed
 
 
 def vendor(contract: Path, commit: str, engine: Path = ENGINE) -> dict:
@@ -93,6 +176,7 @@ def vendor(contract: Path, commit: str, engine: Path = ENGINE) -> dict:
         if shown.returncode != 0:
             raise SystemExit(json.dumps({"error": "file-unreadable", "file": path, "commit": full}))
         blobs[name] = shown.stdout
+    semantic = _semantic_blobs(git, contract, full)
     vectors = engine / VECTORS.relative_to(ENGINE)
     readme_path = vectors / "README.md"
     readme = readme_path.read_text(encoding="utf-8")
@@ -103,24 +187,24 @@ def vendor(contract: Path, commit: str, engine: Path = ENGINE) -> dict:
         schema_files = schemas.plan(contract, full, engine)
     except schemas.VendorError as error:
         raise SystemExit(json.dumps(error.detail)) from None
-    # Everything is read and checked; from here on the run only writes.
-    readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme, count=1)
-    changed = []
+    # Everything is read and checked; from here on the run only writes, and the pin last.
+    readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme)
+    changed = _write_semantic(semantic, vectors)
     for name, data in blobs.items():
         digest = hashlib.sha256(data).hexdigest()
         row = "| `%s` | `%s` |" % (name, digest)
         pattern = re.compile(r"^\| `%s` \| `[0-9a-f]{64}` \|$" % re.escape(name), re.M)
         readme = pattern.sub(row, readme) if pattern.search(readme) else readme.rstrip("\n") + "\n" + row + "\n"
         target = vectors / name
-        target.parent.mkdir(exist_ok=True)
         if not target.exists() or target.read_bytes() != data:
             changed.append(name)
-        target.write_bytes(data)
-    readme_path.write_text(readme, encoding="utf-8")
+            write_atomic(target, data)
+    encoded = readme.encode("utf-8")
+    if readme_path.read_bytes() != encoded:
+        write_atomic(readme_path, encoded)
     changed += schemas.write(schema_files, engine)
     if pin["commit"] != full:
-        pin_path = engine / lock.CONTRACT_PIN
-        pin_path.write_text(json.dumps(moved, indent=2) + "\n", encoding="utf-8")
+        write_atomic(engine / lock.CONTRACT_PIN, (json.dumps(moved, indent=2) + "\n").encode("utf-8"))
         changed.append(lock.CONTRACT_PIN)
     return {"commit": full, "changed": changed}
 

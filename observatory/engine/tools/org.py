@@ -24,6 +24,15 @@
         usage, the outbox (the maintenance job runs it)
     project-observatory full org flush [--org ID]
         send the outbox now
+    project-observatory full org summary [--org ID]
+        the harness summary (`node-summary/1`, contract DEC-0101) the next check-in would send to that organization,
+        exactly as it would leave, and what was left out (counts: `omitted` for a name's shape, `excluded` by the
+        exclusion list `config/node-summary.json`); nothing is saved, sent or spent, and it works before consent
+    project-observatory full org summary --org ID --consent on|off
+        share this machine's harness summary with organization ID, or stop; off until a person turns it on, recorded
+        with its time. Once on, a server that lists `node-summary/1` gets one in a check-in when it changed and at
+        least once a day; `org status` says when the last one was taken (`nodeSummary`), `not shared (consent off)`,
+        why none could be built, or that the server refused one (check-ins go on without it; it is tried a day later)
     project-observatory full org leave --org ID
         remove this machine's local enrollment state for one organization, its own device keys with it
     project-observatory full org records apply --record FILE [--authorities FILE]
@@ -60,9 +69,13 @@ def parser() -> argparse.ArgumentParser:
     enroll.add_argument("--org", required=True, help="the organization id the token was issued for")
     for name, text in (("status", "enrollments and their state"), ("check-in", "one signed check-in now"),
                        ("rotate", "a new certificate for the same key"), ("tick", "everything that is due"),
-                       ("flush", "send the outbox now")):
+                       ("flush", "send the outbox now"),
+                       ("summary", "the harness summary the next check-in would send, sending nothing")):
         one = sub.add_parser(name, help=text)
         one.add_argument("--org", help="one organization; default every enrolled one")
+        if name == "summary":
+            one.add_argument("--consent", choices=("on", "off"),
+                             help="share this machine's harness summary with that organization, or stop (needs --org)")
     leave = sub.add_parser("leave", help="remove this machine's local state for one organization")
     leave.add_argument("--org", required=True)
     records = sub.add_parser("records", help="the estate revision and delta this machine applied")
@@ -111,7 +124,15 @@ def run(args) -> dict:
         applied["registrations"] = {org_id: _enrollment(org_id)._register_quietly()
                                     for org_id in org.enrolled_orgs(NODE)}
         return applied
-    action = {"status": "describe", "check-in": "check_in", "rotate": "rotate", "tick": "tick", "flush": "flush"}
+    if args.command == "summary" and args.consent:
+        if not args.org:
+            raise org.OrgError("org-required", "consent is given per organization: name it with --org",
+                               command="project-observatory full org summary --org ID --consent on"
+                               if args.consent == "on" else "project-observatory full org summary --org ID --consent off")
+        return {"schema": "org-summary-consent/1",
+                "organizations": [_enrollment(args.org).set_summary_consent(args.consent == "on")]}
+    action = {"status": "describe", "check-in": "check_in", "rotate": "rotate", "tick": "tick", "flush": "flush",
+              "summary": "summary_preview"}
     results = []
     for org_id in _orgs(args):
         one = _enrollment(org_id)

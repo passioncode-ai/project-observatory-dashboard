@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/node-summary.schema.json",
+  "title": "A node's summary of its harness, node-summary/1 (DEC-0101)",
+  "description": "What an enrolled machine runs, for one context, sent as a check-in record (records.nodeSummary) inside the device request DEC-0056 signs. It names software and services, never a person, a path, an argument, an environment value, a prompt, an output or a file's content (FAC-SEM-128). docs/specification/node-summary.md.",
+  "type": "object",
+  "required": [
+    "type",
+    "device",
+    "context",
+    "sequence",
+    "at",
+    "harness",
+    "services"
+  ],
+  "properties": {
+    "type": {
+      "const": "node-summary/1"
+    },
+    "device": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "context": {
+      "$ref": "common.schema.json#/$defs/orgContextId",
+      "description": "DEC-0102: the enrollment's own organization, org:<org.id>, compared as written with the certificate's org.id by the receiver, which refuses another (FAC-SEM-128). Never personal."
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Rises by at least one with every summary of this device and context; a receiver keeps the highest."
+    },
+    "at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "harness": {
+      "type": "object",
+      "required": [
+        "codingAgents",
+        "mcpServers",
+        "skills",
+        "plugins",
+        "hooks"
+      ],
+      "properties": {
+        "codingAgents": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "common.schema.json#/$defs/slug",
+                "description": "The coding-agent catalogue's id (DEC-0093), or a host's own runner kind."
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "mcpServers": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "source",
+              "transport",
+              "health"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}(?:@[A-Za-z0-9_:+-]{1,64})?$",
+                "description": "A name as the harness shows it: no slash, backslash, tilde or space, so it can carry no path, and at most one @ suffix without a dot, a plugin's marketplace, so it can carry no e-mail address with a dotted domain (FAC-SEM-128, DEC-0102)."
+              },
+              "source": {
+                "enum": [
+                  "user",
+                  "project",
+                  "local",
+                  "plugin",
+                  "managed",
+                  "other"
+                ]
+              },
+              "transport": {
+                "enum": [
+                  "stdio",
+                  "http",
+                  "sse",
+                  "other"
+                ]
+              },
+              "health": {
+                "enum": [
+                  "ok",
+                  "degraded",
+                  "down",
+                  "unknown"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "skills": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "source"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}(?:@[A-Za-z0-9_:+-]{1,64})?$",
+                "description": "A name as the harness shows it: no slash, backslash, tilde or space, so it can carry no path, and at most one @ suffix without a dot, a plugin's marketplace, so it can carry no e-mail address with a dotted domain (FAC-SEM-128, DEC-0102)."
+              },
+              "source": {
+                "enum": [
+                  "user",
+                  "project",
+                  "plugin",
+                  "managed",
+                  "other"
+                ]
+              },
+              "digest": {
+                "$ref": "common.schema.json#/$defs/sha256",
+                "description": "SHA-256 of the skill's files as installed, the version digest a baseline compares."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "plugins": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "source"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}(?:@[A-Za-z0-9_:+-]{1,64})?$",
+                "description": "A name as the harness shows it: no slash, backslash, tilde or space, so it can carry no path, and at most one @ suffix without a dot, a plugin's marketplace, so it can carry no e-mail address with a dotted domain (FAC-SEM-128, DEC-0102)."
+              },
+              "source": {
+                "enum": [
+                  "marketplace",
+                  "local",
+                  "managed",
+                  "other"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$"
+              },
+              "digest": {
+                "$ref": "common.schema.json#/$defs/sha256"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "required": [
+            "count"
+          ],
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          },
+          "additionalProperties": false,
+          "description": "How many hooks the coding agents load; never their commands."
+        }
+      },
+      "additionalProperties": false
+    },
+    "services": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "The agent services placed in this summary's context on the machine, and no other.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "state"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "id.instance, the service's descriptor key."
+          },
+          "state": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down",
+              "stopped",
+              "unknown"
+            ]
+          },
+          "protocols": {
+            "$ref": "common.schema.json#/$defs/protocols"
+          },
+          "a2aCardDigest": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "mcpEndpoint": {
+            "type": "string",
+            "pattern": "^https://[^\\s?#@/]+(?:/[^\\s?#@]*)?$",
+            "maxLength": 2048,
+            "description": "The MCP endpoint as the service publishes it: https, no query, fragment or user information."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "drift": {
+      "type": "object",
+      "required": [
+        "policyRevision",
+        "items"
+      ],
+      "properties": {
+        "policyRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The revision of the policy layer whose harness.baseline the node compared against."
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "name",
+              "state"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "coding-agent",
+                  "mcp-server",
+                  "skill",
+                  "plugin",
+                  "service"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}(?:@[A-Za-z0-9_:+-]{1,64})?$",
+                "description": "A name as the harness shows it: no slash, backslash, tilde or space, so it can carry no path, and at most one @ suffix without a dot, a plugin's marketplace, so it can carry no e-mail address with a dotted domain (FAC-SEM-128, DEC-0102)."
+              },
+              "state": {
+                "enum": [
+                  "missing",
+                  "stopped",
+                  "changed",
+                  "outdated"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "How the harness differs from the organization's baseline, as harnessDrift computes it (FAC-SEM-128). Absent when the policy carries no baseline."
+    }
+  },
+  "additionalProperties": false
+}

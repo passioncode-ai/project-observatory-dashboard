@@ -73,14 +73,14 @@
             "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
             "publisherKid": "example-publisher-2026",
             "context": "org:org_7kq2m4xw",
-            "grant": "urn:grant:estate:share-inbox-digest-org-a"
+            "grant": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8"
           },
           {
             "agentRef": "urn:fabric:agent:example:inbox-digest",
             "digest": "sha256:faca8faf8f69930d6bb3fb1e3b3f902531cf2b97f54297e87569cf4a94a5d1ee",
             "publisherKid": "example-publisher-2026",
             "context": "org:org_3fh9p1zc",
-            "grant": "urn:grant:estate:share-inbox-digest-org-b"
+            "grant": "urn:fabric:share:8b1e4d7a2c9f05e3b6a17d40c2e9f851"
           }
         ],
         "secrets": [
@@ -198,7 +198,7 @@
       {
         "kind": "standing-grant",
         "meta": {
-          "id": "urn:grant:estate:share-inbox-digest-org-a",
+          "id": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
           "revision": 1,
           "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
           "createdAt": "2026-10-12T08:00:00Z",
@@ -249,7 +249,7 @@
       {
         "kind": "standing-grant",
         "meta": {
-          "id": "urn:grant:estate:share-inbox-digest-org-b",
+          "id": "urn:fabric:share:8b1e4d7a2c9f05e3b6a17d40c2e9f851",
           "revision": 1,
           "contentHash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
           "createdAt": "2026-10-12T08:00:00Z",
@@ -299,7 +299,7 @@
       }
     ],
     "revocations": [],
-    "digest": "sha256:ce82fccc13a9b547acf60e85ed23b228775a54c62bb20fde16bbc915ff0805d4",
+    "digest": "sha256:95dad6378ec6bc3b318b21ddc527bd6eb998d606d6d3c234cbbf1f78b2ea7876",
     "signature": {
       "format": "webauthn-assertion",
       "credentialId": "0nGFzb4RDddKfO7TtqkdYA",

@@ -19,8 +19,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,13 +113,29 @@ def plan(contract: Path, commit: str, engine: Path = ENGINE) -> dict[Path, bytes
     return out
 
 
+def write_atomic(target: Path, data: bytes) -> None:
+    """`data` into `target` through a temporary file in the same folder and a rename: a failed write leaves the old
+    file whole, never a truncated one."""
+    handle, temporary = tempfile.mkstemp(prefix="." + target.name + ".", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def write(files: dict[Path, bytes], root: Path = ROOT) -> list[str]:
-    """Writes `files`; the paths, relative to `root`, whose bytes changed."""
+    """Writes `files`, each through a temporary file and a rename; the paths, relative to `root`, whose bytes
+    changed."""
     changed = []
     for path, data in files.items():
         if not path.exists() or path.read_bytes() != data:
             changed.append(path.relative_to(root).as_posix())
-            path.write_bytes(data)
+            write_atomic(path, data)
     return changed
 
 

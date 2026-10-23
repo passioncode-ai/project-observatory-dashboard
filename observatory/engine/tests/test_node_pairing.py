@@ -90,12 +90,64 @@ class PairingVectors(unittest.TestCase):
 class SemanticFixtures(unittest.TestCase):
     def test_every_estate_fixture(self):
         fixtures = sorted((VECTORS / 'semantic').glob('*.json'))
-        self.assertGreaterEqual(len(fixtures), 69)
+        self.assertGreaterEqual(len(fixtures), 74)
+        # DEC-0090 (OBS-171): the partner channel's FAC-SEM-122 fixtures are among them.
+        self.assertGreaterEqual(len([p for p in fixtures if p.name.startswith('estate-partner-')]), 5)
         for path in fixtures:
             fixture = json.loads(path.read_text(encoding='utf-8'))
             with self.subTest(path.name):
                 codes = sorted({f['code'] for f in estate.estate_record_rules(fixture['kind'], fixture['input'])})
                 self.assertEqual(codes, sorted(fixture['expect']))
+
+    def test_a_partners_publisher_key_is_trusted_only_in_its_scope(self):
+        """DEC-0090 (FAC-SEM-122), the contract's `test/contexts.test.ts` cases: `placement_trust` hands a partner's key
+        only for a placement in a context its scope names, and gives no key elsewhere, so `verifyPackage` refuses the
+        package `unknown-key` (PK-6); an installation under it outside its scope is refused."""
+        partner = json.loads((VECTORS / 'semantic' / 'estate-partner-key-ok.json').read_text(encoding='utf-8'))['input']
+        setup, agent, org_a, org_b = ('urn:fabric:agent:acme:setup-desk', 'urn:fabric:agent:example:inbox-digest',
+                                      'org:org_7kq2m4xw', 'org:org_3fh9p1zc')
+        key = next(k for k in partner['publisherKeys'] if k['kid'] == 'partner-acme-2026')
+        self.assertEqual(estate.placement_trust(partner, 'm-4c1e', setup, org_a), {'publisher': [key]})
+        moved = copy.deepcopy(partner)
+        moved['machines'][0]['packages'][3]['context'] = org_b
+        self.assertEqual(estate.placement_trust(moved, 'm-4c1e', setup, org_b), {'publisher': []})
+        # A key no scope names keeps DEC-0051's meaning, in any context.
+        self.assertEqual(estate.placement_trust(partner, 'm-4c1e', agent, org_a), {'publisher': [partner['publisherKeys'][0]]})
+        self.assertEqual(estate.placement_trust(partner, 'm-4c1e', agent), {'publisher': [partner['publisherKeys'][0]]})
+        self.assertIsNone(estate.placement_trust(partner, 'm-4c1e', setup, org_b))
+        moved['machines'][0]['packages'][3]['grant'] = next(g['meta']['id'] for g in moved['shareGrants']
+                                                            if g.get('context') == org_b)
+        package = {'agentRef': setup}
+        codes = lambda value: {f['code'] for f in estate.estate_record_rules('estate-placement', value)}
+        self.assertIn('FAC-SEM-122', codes({'record': moved, 'machine': 'm-4c1e', 'package': package, 'context': org_b}))
+        self.assertNotIn('FAC-SEM-122', codes({'record': partner, 'machine': 'm-4c1e', 'package': package,
+                                               'context': org_a}))
+        paths = [f['instancePath'] for f in estate.estate_record_rules(
+            'estate-placement', {'record': moved, 'machine': 'm-4c1e', 'package': package, 'context': org_b})
+            if f['code'] == 'FAC-SEM-122']
+        self.assertEqual(paths, ['/record/machines/0/packages/3/publisherKid'])
+
+    def test_a_scope_is_read_as_the_reference_reads_it(self):
+        """`publisherScopes` entries that are not objects are skipped, a scope whose `contexts` is not a list admits
+        no context, a key is compared by value (a boolean never equals a number), and a record without the member reads
+        as before DEC-0090."""
+        partner = json.loads((VECTORS / 'semantic' / 'estate-partner-key-ok.json').read_text(encoding='utf-8'))['input']
+        setup, org_a = 'urn:fabric:agent:acme:setup-desk', 'org:org_7kq2m4xw'
+        odd = copy.deepcopy(partner)
+        odd['publisherScopes'] = [7, 'x', None] + odd['publisherScopes']
+        self.assertEqual(len(estate.placement_trust(odd, 'm-4c1e', setup, org_a)['publisher']), 1)
+        odd['publisherScopes'][-1]['contexts'] = org_a
+        self.assertEqual(estate.placement_trust(odd, 'm-4c1e', setup, org_a), {'publisher': []})
+        scoped_one = {'publisherScopes': [{'kid': 1, 'contexts': []}]}
+        self.assertFalse(estate._scope_admits(scoped_one, 1.0, org_a))
+        self.assertTrue(estate._scope_admits(scoped_one, True, org_a))
+        self.assertTrue(estate._scope_admits(scoped_one, 'k', org_a))
+        self.assertTrue(estate._scope_admits({}, 'partner-acme-2026', 'personal'))
+        bare = copy.deepcopy(partner)
+        del bare['publisherScopes']
+        self.assertNotIn('FAC-SEM-122', {f['code'] for f in estate.estate_record_rules('estate-record', bare)})
+        twice = estate.estate_record_rules('estate-record', dict(partner, publisherScopes=partner['publisherScopes'] * 2))
+        self.assertEqual([f['instancePath'] for f in twice if f['code'] == 'FAC-SEM-122'], ['/publisherScopes/1/kid'])
 
     def test_a_secret_value_as_slot_name(self):
         """The contract's `estate-secret-value-as-slot` fixture, rebuilt here: its slot is the AWS documentation's example

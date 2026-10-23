@@ -1373,6 +1373,31 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   included), so a command can take as long as a tick in flight.
 - Share registrations come only from the estate revision this machine verified and applied
   (`org records apply --record FILE`, and `--delta FILE` for revocation-delta pages); a draft is never sent.
+- **The harness summary** (`node-summary/1`, contract DEC-0101): what this machine's coding agents run: the coding
+  agents of the contract's catalogue installed here with their versions, the MCP servers they load (name, source,
+  transport, health), the Claude Code skills (name, source, digest) and enabled plugins (name, source, version), and
+  how many hooks they load. **It is not shared until you say so, per organization**: run
+  `project-observatory full org summary --org ID` to read exactly what would leave (it sends nothing and works before
+  you agree), then `project-observatory full org summary --org ID --consent on` (or `--consent off` to stop; the time
+  is recorded). Until then `org status` and Health say `harness summary: not shared (consent off)`. Why off: the
+  contract ships the whole harness whatever the machine's mode, and whether an organization should also see what serves
+  your other contexts is still its open question CT-92. To keep names back, list them in
+  `config/node-summary.json` as `{"exclude": ["private-*", "plugin:*:mine"]}` (shell-style globs on whole names), mode
+  0600 in a folder only you can write to: they are never sent, only counted here (`excluded`); a list that is a
+  link, not owner-only, in a folder others may write to or not readable sends nothing, and says which. The consent
+  and the summary's rising sequence survive a renewal and a re-enrollment into the same organization. Once on, a server that lists `node-summary/1` gets it in a check-in when it changed and at least once a day.
+  Never a path, a command, an argument, an environment value, a URL, a hook's command, a prompt, an output or a file's
+  content; a name with a space, a slash or a dashed home folder is left out (counted, not rewritten). It is built from
+  the harness and MCP scans, so it needs `integrations.harness` and `integrations.mcp` on and scans younger than
+  48 hours that already list plugins and coding agents: otherwise nothing is sent and `org status` says
+  `org:node-summary-unavailable` with the reason. A server that refuses the summary never stops check-ins: the check-in
+  goes again without it, the refusal is shown (`org:node-summary-refused`) and the summary is tried a day later.
+  `org status` (`nodeSummary`) and Health say when the server last took one and how much it listed, and
+  `org:node-summary-not-listed` when the server does not read it. Its drift from the organization's baseline
+  (`missing`, `stopped`, `changed`, `outdated`) is computed and shown once this machine applies the organization's
+  signed policy (not built yet: the check-in reports policy revision 0, so no baseline applies and the summary carries
+  no drift, as the contract asks). No agent service is listed yet: nothing on this machine ties a service to an
+  organization's context, and a person's other services are never listed.
 
 Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
 offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.
