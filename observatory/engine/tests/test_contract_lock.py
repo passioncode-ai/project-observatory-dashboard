@@ -72,6 +72,14 @@ class TheShippedFiles(unittest.TestCase):
         self.assertIsNotNone(named, "the node vectors README no longer names the OBS-161 commit")
         self.assertEqual(contract_lock.contract_pin(ROOT)["commit"], named.group(1))
 
+    def test_every_commit_the_node_vectors_readme_names_is_the_pin(self) -> None:
+        """The whole folder is at one commit (OBS-171): the estate vectors and fixtures
+        move with the organization-enrollment files, never left at an older commit."""
+        readme = (ROOT / "fabric/node-vectors/README.md").read_text(encoding="utf-8")
+        named = re.findall(r"at commit\s+`([0-9a-f]{40})`", readme)
+        self.assertGreaterEqual(len(named), 2, "the README names the estate set's commit and the OBS-161 one")
+        self.assertEqual(set(named), {contract_lock.contract_pin(ROOT)["commit"]})
+
     def test_the_profile_lock_reads_from_the_new_name(self) -> None:
         lock = contract_lock.profile_lock(ROOT)
         self.assertEqual(lock["profile"], "observatory-local-mcp")

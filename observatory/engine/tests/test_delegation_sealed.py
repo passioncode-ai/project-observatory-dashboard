@@ -215,6 +215,20 @@ class Sealed(unittest.TestCase):
         self.assertEqual(self.call(self.estate.sign(without_act)), "unauthenticated/malformed-chain")   # CT-31
         self.assertEqual(self.call(self.token(spend={"mode": "unlimited"}, project="urn:project:b", nbf=IAT)), "ok")
 
+    def test_a_partner_grant_token_is_refused_at_row_5(self):
+        """DEC-0090 (OBS-171): a verifier not yet at the partner channel's `verifyDelegation` refuses every token whose
+        chain holds a partner actor at DL-13 step 5, innermost or outermost, for a callee and for the meter. The
+        engine takes that option until it ports the partner actor (OBS-171's open part), so no partner-grant token is
+        read as an ordinary chain."""
+        partner = {"partner": "org:acme_partners"}
+        for act in ({"sub": "example-media", "act": {"sub": "acme-setup.default", "act": partner}},
+                    {"sub": "example-media", "act": partner}, partner):
+            with self.subTest(act=act):
+                self.assertEqual(self.call(self.token(act=act)), "unauthenticated/malformed-chain")
+                self.assertEqual(self.meter(self.estate.sign({**load("delegation-mint-meter-ok.json")["token"],
+                                                              "act": {"sub": "example-meter", "act": act}})),
+                                 "principal-unproven/unauthenticated:malformed-chain")
+
     def test_F_B_307_the_first_row_that_applies_answers(self):
         late = EXP + 61
         order = (

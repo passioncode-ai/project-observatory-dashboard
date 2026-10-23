@@ -5,7 +5,7 @@ passkey assertion over a challenge derived from its own digest.
 
 `verify_estate_record` is what a node applies a revision on, in the order of estate-record.md's ER table:
 shape, digest, the chain to the parent, the signing passkey among the trusted ones, the assertion, the validity window,
-then the record's own rules (FAC-SEM-072…076, 092, 110, 111). The caller has validated the record against
+then the record's own rules (FAC-SEM-072…076, 092, 110, 111, 122). The caller has validated the record against
 `estate-record.schema.json`; this function does not. A node trusts its peers' keys only from a revision this accepted
 (`relay.peer_keys` reads them).
 """
@@ -236,13 +236,32 @@ def verify_estate_record(record: Any, *, at_ms: Optional[int], parent: Any = _MI
 
 def placement_trust(record: dict, machine_id: str, agent_ref: str, context: str = PERSONAL_CONTEXT) -> Optional[dict]:
     """The publisher keys a package placed on a machine in a context is verified under, or None when the record places
-    no such agent there."""
+    no such agent there. A partner's key (DEC-0090) is handed only for a placement in a context its scope names: out
+    of scope the answer is no key, `{'publisher': []}`, so `verifyPackage` refuses the package `unknown-key` (PK-6).
+    The key is the record's own `publisherKeys` entry, never one read from elsewhere."""
     machine = next((m for m in _list(record.get('machines')) if m.get('id') == machine_id), None)
     placement = next((p for p in _list(machine.get('packages') if machine else None)
                       if p.get('agentRef') == agent_ref and _context_of(p) == context), None)
     if placement is None:
         return None
+    if not _scope_admits(record, placement.get('publisherKid'), context):
+        return {'publisher': []}
     return {'publisher': [k for k in _list(record.get('publisherKeys')) if k.get('kid') == placement.get('publisherKid')]}
+
+
+def _scopes_of(record: dict, kid: Any) -> List[dict]:
+    """The `publisherScopes[]` entries naming `kid` (DEC-0090): a partner's publisher key and the contexts it is
+    trusted in. Compared as the reference's `===`: by value, a boolean never equal to a number."""
+    return [scope for scope in _list(record.get('publisherScopes')) if _same_value(scope.get('kid'), kid)]
+
+
+def _scope_admits(record: dict, kid: Any, context: Any) -> bool:
+    """Whether a placement in `context` under `kid` may use that key: a key no scope names anywhere, a scoped one only
+    in the contexts its scope lists (a scope whose `contexts` is not a list admits none)."""
+    scopes = _scopes_of(record, kid)
+    return not scopes or any(isinstance(scope.get('contexts'), list)
+                             and any(_same_value(entry, context) for entry in scope['contexts'])
+                             for scope in scopes)
 
 # ---- The record's own rules ---------------------------------------------------------------------------------------
 
@@ -368,7 +387,8 @@ def installation_findings(value: dict) -> list:
     """What a machine checks before it installs a package (`estate-placement`: `{record, machine, package[, context]}`):
     the machine is in the record, the package is the one its digest names and the record places it on this machine in
     this context (FAC-SEM-074); every secret of this agent fills a slot the package declares (FAC-SEM-075); the
-    placement's share grant holds (FAC-SEM-111)."""
+    placement's share grant holds (FAC-SEM-111); a partner's publisher key is trusted in this context (FAC-SEM-122,
+    DEC-0090)."""
     findings: list = []
     record = value.get('record') if isinstance(value.get('record'), dict) else {}
     pkg = value.get('package') if isinstance(value.get('package'), dict) else {}
@@ -403,6 +423,10 @@ def installation_findings(value: dict) -> list:
             flag075(f'/record/machines/{machine_index}/secrets/{index}/slot',
                     f"the package declares no slot {_show(secret.get('slot'))}: a secret goes only where a placed "
                     'package declares it')
+    if placement is not None and not _scope_admits(record, placement.get('publisherKid'), context):
+        _flagger(findings, 'FAC-SEM-122')(
+            f'/record/machines/{machine_index}/packages/{placement_index}/publisherKid',
+            f"publisher key {_show(placement.get('publisherKid'))} is a partner's, not trusted in {_show(context)}")
     if placement is not None:
         flag111 = _flagger(findings, 'FAC-SEM-111')
         for suffix, message in _placement_grant_problems(record, placement):
@@ -494,6 +518,27 @@ _JWT_SHAPE = re.compile(r'eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]
 _SECRET_VALUE = re.compile(r'(^bearer\s.+|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}'
                            r'|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,})', re.I)
 _LONG_RUN = re.compile(r'[A-Za-z0-9+/=_-]{40,}')
+
+
+def _partner_scopes(value: dict, flag) -> None:
+    """FAC-SEM-122 on one record (DEC-0090): a partner's publisher key is scoped once, to a key the record pins, and a
+    placement under it is in one of the organization contexts its scope names, never `personal` or another."""
+    pinned = [key.get('kid') for key in _list(value.get('publisherKeys'))]
+    scoped: list = []
+    for scope, index in _indexed(value.get('publisherScopes')):
+        kid = scope.get('kid')
+        if any(_same_value(kid, seen) for seen in scoped):
+            flag(f'/publisherScopes/{index}/kid', f'publisher key {_show(kid)} is scoped twice')
+        scoped.append(kid)
+        if not any(_same_value(kid, pin) for pin in pinned):
+            flag(f'/publisherScopes/{index}/kid',
+                 f'publisher key {_show(kid)} is not in publisherKeys, so the scope limits no key')
+    for machine, m in _indexed(value.get('machines')):
+        for placement, p in _indexed(machine.get('packages')):
+            if not _scope_admits(value, placement.get('publisherKid'), _context_of(placement)):
+                flag(f'/machines/{m}/packages/{p}/publisherKid',
+                     f"publisher key {_show(placement.get('publisherKid'))} is a partner's, trusted only in the "
+                     f'contexts its scope names, not in {_show(_context_of(placement))}')
 
 
 def secret_value(value: str) -> bool:
@@ -597,12 +642,13 @@ def _grants_and_revocations(value: dict, flag) -> None:
 
 
 def record_findings(value: dict) -> list:
-    """FAC-SEM-072…076 over one record, FAC-SEM-092 on each passkey, FAC-SEM-110 on each share grant and FAC-SEM-111 on
-    each placement."""
+    """FAC-SEM-072…076 over one record, FAC-SEM-092 on each passkey, FAC-SEM-110 on each share grant, FAC-SEM-111 on
+    each placement and FAC-SEM-122 on each partner's publisher key (DEC-0090), in the reference's order."""
     findings: list = []
     _revision_whole(value, _flagger(findings, 'FAC-SEM-072'))
     _keys(value, _flagger(findings, 'FAC-SEM-073'))
     _placements(value, _flagger(findings, 'FAC-SEM-074'))
+    _partner_scopes(value, _flagger(findings, 'FAC-SEM-122'))
     _secret_references(value, _flagger(findings, 'FAC-SEM-075'))
     _grants_and_revocations(value, _flagger(findings, 'FAC-SEM-076'))
     for grant, index in _indexed(value.get('shareGrants')):
