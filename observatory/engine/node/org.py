@@ -314,7 +314,7 @@ def read_exclusions(path: Optional[Path] = None) -> Tuple[List[str], Optional[st
     folder = path.parent.resolve()
     target = folder / path.name
     try:
-        if os.name == 'posix' and os.stat(folder).st_mode & 0o022:
+        if osprivacy.others_may_write(folder):
             return [], '%s is in a folder others may write to; make the folder writable by its owner only' % where
         fd = osprivacy.open(target, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
         with os.fdopen(fd, 'r', encoding='utf-8') as stream:
