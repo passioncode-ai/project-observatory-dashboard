@@ -145,6 +145,13 @@ class RecordRules(unittest.TestCase):
                 context='personal'), 'FAC-SEM-110'),
             'FAC-SEM-111 an organization instance without its grant': (lambda r: machine(r)['packages'][0].update(
                 context='org:acme'), 'FAC-SEM-111'),
+            # DEC-0090: a revision that scopes the key of a personal placement to an organization is refused whole.
+            'FAC-SEM-122 a partner key outside its scope': (lambda r: r.update(publisherScopes=[{
+                'kid': machine(r)['packages'][0]['publisherKid'], 'partner': 'org:acme_partners',
+                'contexts': ['org:org_7kq2m4xw']}]), 'FAC-SEM-122'),
+            'FAC-SEM-122 a scope naming a key the record does not pin': (lambda r: r.update(publisherScopes=[{
+                'kid': 'partner-unpinned', 'partner': 'org:acme_partners', 'contexts': ['org:org_7kq2m4xw']}]),
+                'FAC-SEM-122'),
             'FAC-SEM-092 a pinned origin outside the signing RP': (lambda r: r['authorities'][0].update(
                 origins=['https://sign.example.org', 'https://evil.example']), 'FAC-SEM-092'),
         }

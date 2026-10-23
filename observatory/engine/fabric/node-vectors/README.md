@@ -1,16 +1,21 @@
 # fabric-relay/0.1 node vectors (vendored)
 
 Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit
-`1531f21014171f5168fba43a504276e487a7b363` (`fixtures/vectors/`, and the `estate-*` fixtures of `fixtures/semantic/` in `semantic/`, 69 of 70: `estate-secret-value-as-slot.json` names the AWS documentation's example access key id as a slot, a shape the public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`). They are the contract kit's own vectors for RFC 8785
-(`canonical.json`), P-256 key validation (`p256.json`) and fabric-relay/0.1 (`relay.json`, DEC-0047, DEC-0066), written
-by the contract's generators, never by hand, plus identifier equality (`identifiers.json`, DEC-0076), the estate record
-(`estate-record.json`, DEC-0055) the revocation delta with its heartbeat (`revocation-delta.json`, DEC-0054) and the secret envelope
-(`secret-envelope.json`, DEC-0047 item 7).
+`1f31e5afa2cb2444ff44479de0c3f89fdbca76ff`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
+every file here: `fixtures/vectors/`, `schemas/`, and the `estate-*` fixtures of `fixtures/semantic/` in `semantic/`, all
+but one: `estate-secret-value-as-slot.json` names the AWS documentation's example access key id as a slot, a shape the
+public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`. They are the contract
+kit's own vectors for RFC 8785 (`canonical.json`), P-256 key validation (`p256.json`) and fabric-relay/0.1
+(`relay.json`, DEC-0047, DEC-0066), written by the contract's generators, never by hand, plus identifier equality
+(`identifiers.json`, DEC-0076), the estate record (`estate-record.json`, DEC-0055) the revocation delta with its
+heartbeat (`revocation-delta.json`, DEC-0054) and the secret envelope (`secret-envelope.json`, DEC-0047 item 7).
 
-The same commit (the merge of contract pull request #113, DEC-0084) carries the estate ceremonies: `enroll-token.json`
-(the headless join), `pairing.json` (commit, reveal and the comparison code), and the DEC-0084 revisions of
-`relay.json` (the admission set and open sessions), `revocation-delta.json` (a device-key reference) and
-`secret-envelope.json` (revocations of verified deltas).
+The estate ceremonies (DEC-0084, contract pull request #113): `enroll-token.json` (the headless join), `pairing.json`
+(commit, reveal and the comparison code), and the DEC-0084 revisions of `relay.json` (the admission set and open
+sessions), `revocation-delta.json` (a device-key reference) and `secret-envelope.json` (revocations of verified
+deltas). The partner channel (DEC-0090, contract pull request #130, OBS-171): the five `estate-partner-*` fixtures of
+`semantic/` (FAC-SEM-122, a partner's publisher key trusted only in the organization contexts `publisherScopes[]`
+names).
 
 `tests/test_node_foundation.py`, `test_node_estate.py`, `test_node_revocation.py`, `test_node_envelope.py`,
 `test_node_pairing.py` and `test_node_enroll.py` run the node's ports over every
@@ -21,9 +26,9 @@ case; the first checks the digests below.
 `fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
 `1f31e5afa2cb2444ff44479de0c3f89fdbca76ff` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
-`gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors all three at another
-commit and rewrites the commit and digests here: `python3 tools/vendor_org_vectors.py --contract <checkout> --commit
-<sha>`.
+`gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors the whole folder at
+another commit, removes an `estate-*` fixture the commit no longer has, and rewrites every commit and the digests here:
+`python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>`.
 
 Do not edit them here. When the contract changes, copy the files again from the new commit and update the commit and
 the digests below.

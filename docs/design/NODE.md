@@ -214,15 +214,39 @@ sendable. Among them:
 | `observatory/engine/node/identifiers.py` | identifier equality by normal form (RFC 3986 §6.2.2, RFC 8141 §3.1) | `src/identifiers.ts`, `identifiers.json` |
 | `observatory/engine/node/ed25519.py` | Ed25519 verification that refuses small-order keys first | `src/ed25519.ts` |
 | `observatory/engine/node/webauthn.py` | offline passkey assertions (WebAuthn Level 3 §7.2) and the register of passkey-signed statements: a dedicated `sign.<domain>` RP, origins pinned within it | `src/webauthn.ts`, `src/signing-challenges.ts` |
-| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111 | `src/estate-record-rules.ts`, `estate-record.json` |
+| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111, 122 (DEC-0090: a revision that breaks the partner channel's scope is refused whole, `rule-violation`) | `src/estate-record-rules.ts`, `estate-record.json` |
 | `observatory/engine/node/revocation.py` | the signed revocation delta, the heartbeat and freshness: `current`, `behind`, `stale` (no heartbeat for 72 hours) or `broken` (two signed histories); only `current` accepts what other machines send | `src/revocation-delta.ts`, `revocation-delta.json` |
 
 A node believes a peer's `#sig` key only from a revision `verify_estate_record` accepted (`relay.peer_keys` reads it),
 minus what the delta revokes (`revocation.effective_revocations`). `tests/test_node_estate.py` also re-signs revisions
 with the vectors' EdDSA test passkey to hold each rule: two signing keys on one machine, a key named for another
 machine, an off-curve device key, a small-order hub key, an unpinned publisher key, a credential-shaped secret slot, a
-grant listed twice, a share grant in the personal context, an organization instance without its grant, a pinned origin
-outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+grant listed twice, a share grant in the personal context, an organization instance without its grant, a partner's
+publisher key scoped away from a personal placement and a scope naming a key the record does not pin (FAC-SEM-122), a
+pinned origin outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+
+**A partner's publisher key (OBS-171, contract DEC-0090, PA-06).** A partner (an integrator, an agency, an agent
+studio) signs the packages it builds for a company with its own publisher key. The estate record pins that key in
+`publisherKeys` like any other and names it in `publisherScopes[]`, `{kid, partner, contexts}`: the partner
+organization that holds it (`org:<partnerOrgId>`) and the 1 to 64 organization contexts a placement under it may be
+in, never `personal`. `placement_trust(record, machine, agentRef, context)` hands such a key only for a placement in
+one of those contexts and answers no key (`{'publisher': []}`) elsewhere, so the package's signature finds no key and
+the install is refused (`unknown-key`, PK-6). The key is always the record's own `publisherKeys` entry: the node reads
+publisher keys from no other source, so a scope can never be sidestepped by a key that arrived another way. FAC-SEM-122
+refuses, on a record, a scoped key outside its contexts, a key scoped twice and a scope naming a key the record does
+not pin; `verify_estate_record` then answers `rule-violation` (ER-11) and the node keeps the revision it had. A key no
+scope names keeps its earlier meaning, so a record without `publisherScopes` reads as before. The checks run over the
+contract's five `estate-partner-*` fixtures and the cases of its `test/contexts.test.ts` (`tests/test_node_pairing.py`
+`test_a_partners_publisher_key_is_trusted_only_in_its_scope`, `test_a_scope_is_read_as_the_reference_reads_it`), and
+over re-signed revisions (`tests/test_node_estate.py` `test_each_rule`).
+
+The rest of DEC-0090 is the hub's, the meter's and the adapter's. The hub signs a revision that carries
+`publisherScopes` only once every machine of the estate is at or after DEC-0090, and mints under a partner grant only
+once the meter is. This engine's delegation verifier (`delegation.py`, the meter's too) does not port the partner
+actor yet: it refuses every token whose chain holds one at DL-13 row 5 (`malformed-chain`), the option DEC-0090 gives
+a verifier (`tests/test_delegation_sealed.py` `test_a_partner_grant_token_is_refused_at_row_5`); and the meter's
+`governance.schema.json` is still the one vendored at `7931c1d`, so a projected partner grant reads `unknown-state`, a
+denial. Both stay open in OBS-171, the schemas' re-vendor with OBS-205.
 
 Planted defects that failed the suites:
 - estate:
@@ -339,12 +363,16 @@ runs the ceremony therefore shows the key fingerprint the token binds before the
 **Before installing a package** (`installation_findings`, the contract's `estate-placement` kind), a machine checks
 that it is in the record, that the package is the one its digest names, that the record places that package on this
 machine in this context (FAC-SEM-074), that every secret of the agent fills a slot the package declares (FAC-SEM-075),
-and that the placement's share grant holds (FAC-SEM-111). The install itself is packet P6. A revocation delta entry
+that the placement's share grant holds (FAC-SEM-111), and that a partner's publisher key is trusted in this context
+(FAC-SEM-122, DEC-0090). The install itself is packet P6. A revocation delta entry
 whose device-key ref holds `@` but is no key reference is refused as malformed, since no revision could list it.
 
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
-`enroll-token.json` and the 70 `estate-*` fixtures of `semantic/`. Then they run the add, re-key and remove ceremonies
-end to end between two device-key sets, on a test estate. The vectors are pinned to #113's merge commit `1531f21`.
+`enroll-token.json` and the `estate-*` fixtures of `semantic/` (74 of the contract's 75). Then they run the add, re-key
+and remove ceremonies end to end between two device-key sets, on a test estate. Since OBS-171 the whole `node-vectors/`
+folder is at one commit, the engine's contract pin `1f31e5a` (after DEC-0090's `3d8cb17`); until then the estate set
+was at #113's merge commit `1531f21`, and between the two only the `estate-*` fixtures changed: the five partner
+fixtures, and share grant ids rewritten to `urn:fabric:share:` form, with the record digests that follow, in seventeen others.
 
 ## The walking skeleton
 

@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Vendors the contract files organization enrollment (OBS-161) is pinned to, in one step.
+"""Vendors the node's contract files (`observatory/engine/fabric/node-vectors/`) at one commit, in one step.
 
     python3 tools/vendor_org_vectors.py --contract <fabric-agent-contract checkout> --commit <sha>
 
 Copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch do not
-matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registration.json` and
-`schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
-check-in fixtures CT-65 added and the key-on-record renewal fixtures of DEC-0100 into its `device/` folder, then
-rewrites the commit and those files' digest rows in that folder's README, and the commit of the engine's contract
-pin (`observatory/engine/fabric-contract.lock.json`, OBS-196): the contract asks a consumer to pin it once and to move
-the pin with what it vendors, in one change.
-`tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
-`tests/test_contract_lock.py` holds the pin equal to the README's commit, so a re-vendored commit is checked by the next
-test run. Prints what changed; exits 1 when the commit or a file cannot be read, and changes nothing then.
+matter), the node's vectors of `fixtures/vectors/` (the estate record, the relay, the ceremonies and the organization
+enrollment's `http-signature.json` and `share-registration.json`) and `schemas/device-enrollment.schema.json` into
+`observatory/engine/fabric/node-vectors/`, the device request and check-in fixtures CT-65 added and the key-on-record
+renewal fixtures of DEC-0100 into its `device/` folder, and every `estate-*` fixture of `fixtures/semantic/` into its
+`semantic/` folder but the one the public-release gate refuses (`SEMANTIC_LEFT_OUT`), removing a vendored `estate-*`
+fixture the commit no longer has (OBS-171). Then it rewrites every commit the folder's README names and the digest
+rows of the files outside `semantic/`, and the commit of the engine's contract pin
+(`observatory/engine/fabric-contract.lock.json`, OBS-196): the contract asks a consumer to pin it once and to move the
+pin with what it vendors, in one change.
+`tests/test_node_foundation.py` checks the digests, the node suites run the files and `tests/test_contract_lock.py`
+holds the pin equal to the README's commit, so a re-vendored commit is checked by the next test run. Prints what
+changed; exits 1 when the commit or a file cannot be read, and changes nothing then.
 """
 from __future__ import annotations
 
@@ -28,7 +31,12 @@ ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
 #: The engine's one pin of the contract, under the contract's own file name.
 CONTRACT_PIN = ROOT / "observatory" / "engine" / "fabric-contract.lock.json"
-FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
+FILES = {**{name: "fixtures/vectors/" + name for name in (
+             # The estate record, its revocation delta, the secret envelope, the relay and the ceremonies (OBS-109,
+             # OBS-113, OBS-133); the estate fixtures of `fixtures/semantic/` go to `semantic/` (SEMANTIC below).
+             "canonical.json", "enroll-token.json", "estate-record.json", "identifiers.json", "p256.json",
+             "pairing.json", "relay.json", "revocation-delta.json", "secret-envelope.json")},
+         "http-signature.json": "fixtures/vectors/http-signature.json",
          "share-registration.json": "fixtures/vectors/share-registration.json",
          "device-enrollment.schema.json": "schemas/device-enrollment.schema.json",
          # The device fixtures the node's requests and answers are held to (CT-65, DEC-0094).
@@ -44,8 +52,13 @@ FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
              "fixtures/positive/device-enrollment-request-key-on-record.json",
          "device/device-enrollment-key-on-record-with-token.json":
              "fixtures/negative/device-enrollment-key-on-record-with-token.json"}
-#: The README sentence that names the OBS-161 commit; the vendored commit is the one 40-hex id in it.
-PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
+#: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
+SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
+#: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;
+#: `test_node_pairing.py` rebuilds it from `estate-record-ok.json`.
+SEMANTIC_LEFT_OUT = frozenset({"estate-secret-value-as-slot.json"})
+#: Every commit the README names ("... at commit `<40 hex>`"): the whole folder is at one commit.
+PIN = re.compile(r"(at commit\s+`)([0-9a-f]{40})(`)")
 
 
 def _safe_git():
@@ -54,6 +67,41 @@ def _safe_git():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _semantic_blobs(git, contract: Path, full: str) -> dict:
+    """The commit's `estate-*` fixtures of `fixtures/semantic/` but SEMANTIC_LEFT_OUT, read before anything is written."""
+    listed = git.run(["ls-tree", "--name-only", full, "fixtures/semantic/"], repo=contract)
+    if listed.returncode != 0:
+        raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/", "commit": full}))
+    names = sorted(name for name in (Path(line).name for line in listed.stdout.splitlines())
+                   if SEMANTIC.match(name) and name not in SEMANTIC_LEFT_OUT)
+    if not names:
+        raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/estate-*", "commit": full}))
+    blobs = {}
+    for name in names:
+        shown = git.run(["show", "%s:fixtures/semantic/%s" % (full, name)], repo=contract, text=False)
+        if shown.returncode != 0:
+            raise SystemExit(json.dumps({"error": "file-unreadable", "file": "fixtures/semantic/" + name,
+                                         "commit": full}))
+        blobs[name] = shown.stdout
+    return blobs
+
+
+def _write_semantic(blobs: dict) -> list:
+    """Writes `semantic/` as the commit has it: each fixture byte for byte, and an `estate-*` fixture it dropped gone."""
+    folder = VECTORS / "semantic"
+    folder.mkdir(exist_ok=True)
+    changed = []
+    for stale in sorted(p for p in folder.glob("estate-*.json") if p.name not in blobs):
+        stale.unlink()
+        changed.append("semantic/" + stale.name)
+    for name, data in blobs.items():
+        target = folder / name
+        if not target.exists() or target.read_bytes() != data:
+            changed.append("semantic/" + name)
+            target.write_bytes(data)
+    return changed
 
 
 def vendor(contract: Path, commit: str) -> dict:
@@ -68,12 +116,13 @@ def vendor(contract: Path, commit: str) -> dict:
         if shown.returncode != 0:
             raise SystemExit(json.dumps({"error": "file-unreadable", "file": path, "commit": full}))
         blobs[name] = shown.stdout
+    semantic = _semantic_blobs(git, contract, full)
     readme_path = VECTORS / "README.md"
     readme = readme_path.read_text(encoding="utf-8")
     if not PIN.search(readme):
         raise SystemExit(json.dumps({"error": "readme-pin-missing"}))
-    readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme, count=1)
-    changed = []
+    readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme)
+    changed = _write_semantic(semantic)
     for name, data in blobs.items():
         digest = hashlib.sha256(data).hexdigest()
         row = "| `%s` | `%s` |" % (name, digest)

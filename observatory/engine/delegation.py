@@ -12,6 +12,8 @@ algorithm or of small order is the issuer's fault (row 3, CT-29), every DL-2 typ
 
 Not ported: DL-14's estate-record check (row 4a, DEC-0060), which the contract runs only when the callee reads the
 estate record; the meter does not read one yet.
+Not ported either: DEC-0090's partner actor (`{partner: org:<id>}`, innermost under a partner grant). A chain that holds
+one fails row 5 as `malformed-chain`, the option DEC-0090 gives a verifier not yet at its `verifyDelegation` (OBS-171).
 
 A refusal carries a contract code and a short machine word (`detail`); never the token, never a key. The token is
 read from a header and nowhere else (DL-11): never argv, a URL, a tool argument or a log line.

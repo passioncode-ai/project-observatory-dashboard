@@ -10,9 +10,10 @@ separate version axes.
 the engine's one pin of the Fabric Agent Contract, in the shape the contract's
 `contract-pin.schema.json` gives it: `contract`, `version` (`0.1.0`, the manifest's
 `contractVersion`), `repository`, the full 40-character `commit` and `profile` (`mcp`).
-It pins the commit the organization-enrollment files in `node-vectors/` were last
-vendored at; `tools/vendor_org_vectors.py` moves the files and the pin in one step, and
-`../tests/test_contract_lock.py` holds the pin to the schema and to that commit. The
+It pins the commit every file in `node-vectors/` was last vendored at (one commit for
+the whole folder since OBS-171); `tools/vendor_org_vectors.py` moves the files and the
+pin in one step, and `../tests/test_contract_lock.py` holds the pin to the schema and to
+each commit that folder's README names. The
 profile lock used to be called `fabric-contract.lock.json`, so a reader keyed on the
 name took it for the pin. Every reader now goes through `../contract_lock.py`,
 which still reads the profile lock under its old name for one release when no
