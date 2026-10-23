@@ -1442,6 +1442,20 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.make().check_in()
         self.assertEqual(self.held(), set())
 
+    def test_a_purpose_hold_survives_a_renewal_by_the_key_on_record(self):
+        self.server.renewal = True
+        old = self.enroll()
+        self.server.acknowledged = 'v1'
+        self.make().check_in()
+        self._three_events()
+        self.reject_first('purpose')
+        self.make().flush()
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 86400
+        self.assertTrue(self.make().check_in()['ok'])                            # renewed, then checked in on v1
+        state = self.make().state()
+        self.assertIn('renewedAt', state)
+        self.assertEqual((self.held(), state['acknowledgedNoticeVersion']), ({'meter.call'}, 'v1'))
+
     def test_a_later_notice_version_in_the_applied_policy_resumes(self):
         from unittest import mock
         from node.org import Enrollment

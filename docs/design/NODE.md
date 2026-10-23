@@ -480,7 +480,8 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   taken as any re-enrollment (the certificate checked, an epoch above every one before, registrations sent again),
   keeping `enrolledAt` and adding `renewedAt`, both on the server's clock: DEC-0102 judges a renewal by the server's
   clock, which the new certificate's `notBefore` reads, so `renewedAt` is that `notBefore` and the skew is measured
-  again from it (kept as before when it is a day or more off); a certificate that binds another user or role
+  again from it (kept as before when it is a day or more off); a purpose hold and the notice versions it waits on
+  are kept too (the same person under the same notice); a certificate that binds another user or role
   than the one on record is refused (`binding-changed`, FAC-SEM-044). Inside the window `notice` keeps the state
   `expired` and adds `renewUntil`, the step in words and `full org check-in --org ID`; `needsEnrollment` stays false.
   An unanswered renewal (no answer, 408, 425, 429, 5xx) backs off (`renewal`: attempts, next time, last answer; the

@@ -943,6 +943,9 @@ class Enrollment:
             skew = round(issued - self.clock())
             doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=cert['notBefore'],
                        skewSeconds=skew if abs(skew) <= 86400 else previous.get('skewSeconds') or 0)
+            # The same person under the same notice: a purpose hold and the notice versions it waits on stay (DEC-0100).
+            doc.update({k: previous[k] for k in ('purposeHolds', 'acknowledgedNoticeVersion', 'noticeVersion')
+                        if k in previous})
         doc.update(_summary_carried(previous, self.org_id, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
