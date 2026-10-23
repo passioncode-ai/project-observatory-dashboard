@@ -25,6 +25,7 @@ Every function answers and never raises on malformed input: malformed input is a
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import math
@@ -319,7 +320,40 @@ def _mcp_source(scope: Any) -> str:
     return 'other'
 
 
-def _mcp_servers(scan: dict, omitted: Dict[str, int]) -> List[dict]:
+#: A name a dashed home folder could hide in (`-Users-alice-...`, `-home-alice-...`): the contract's home-path shapes
+#: miss one after a dot or an `@` (`plugin.-Users-alice-x`, `x@-home-alice`), so the node refuses it itself, beside
+#: FAC-SEM-128, and leaves the name out.
+DASHED_HOME = re.compile(r'-(?:[Uu]sers|home)-[A-Za-z0-9]')
+#: The most drift items a summary carries (the schema's `drift.items` bound).
+MAX_DRIFT = 1024
+
+
+class _Gate:
+    """Which names may leave: the schema's shape, no dashed home folder, and none the person excluded
+    (`exclude`, shell-style globs matched against the whole name). A name refused for its shape is counted in
+    `omitted`, one the person excluded in `excluded`; both stay on this machine."""
+
+    def __init__(self, exclude: Any = ()):
+        self.exclude = [g for g in (exclude or ()) if isinstance(g, str) and g]
+        self.omitted: Dict[str, int] = {}
+        self.excluded: Dict[str, int] = {}
+        self._refused: set = set()
+
+    def admit(self, name: Any, member: str, pattern: 're.Pattern' = NAME) -> bool:
+        """Whether `name` may leave; a refused name is counted once per list however often the scans repeat it."""
+        if isinstance(name, str) and pattern.fullmatch(name) and not DASHED_HOME.search(name) \
+                and not any(fnmatch.fnmatchcase(name, glob) for glob in self.exclude):
+            return True
+        key = (member, name if isinstance(name, str) else repr(name))
+        if key not in self._refused:
+            self._refused.add(key)
+            shaped = isinstance(name, str) and pattern.fullmatch(name) and not DASHED_HOME.search(name)
+            counts = self.excluded if shaped else self.omitted
+            counts[member] = counts.get(member, 0) + 1
+        return False
+
+
+def _mcp_servers(scan: dict, gate: _Gate) -> List[dict]:
     """One row per server name the coding agents load: a declaration switched off is not loaded and not listed; the
     strongest verdict of its declarations is its health."""
     rows: Dict[str, dict] = {}
@@ -327,8 +361,7 @@ def _mcp_servers(scan: dict, omitted: Dict[str, int]) -> List[dict]:
         name = row.get('name')
         if not isinstance(name, str) or row.get('disabled') is True:
             continue
-        if not NAME.fullmatch(name):
-            omitted['mcpServers'] = omitted.get('mcpServers', 0) + 1
+        if name not in rows and not gate.admit(name, 'mcpServers'):
             continue
         health = MCP_HEALTH.get(row.get('liveness'), 'unknown')
         transport = MCP_TRANSPORT.get(row.get('wire') or row.get('transport'), 'other')
@@ -341,7 +374,7 @@ def _mcp_servers(scan: dict, omitted: Dict[str, int]) -> List[dict]:
     return [rows[name] for name in sorted(rows)]
 
 
-def _skills(scan: dict, omitted: Dict[str, int]) -> List[dict]:
+def _skills(scan: dict, gate: _Gate) -> List[dict]:
     """Claude Code's user-level and plugin skills, by the name the harness shows (a plugin's skill under its own
     name), once each: the first the scan read wins, the user's own before a plugin's."""
     out: Dict[str, dict] = {}
@@ -349,10 +382,7 @@ def _skills(scan: dict, omitted: Dict[str, int]) -> List[dict]:
         name, source = row.get('name'), row.get('source')
         if not isinstance(name, str) or not isinstance(source, str):
             continue
-        if not NAME.fullmatch(name):
-            omitted['skills'] = omitted.get('skills', 0) + 1
-            continue
-        if name in out:
+        if name in out or not gate.admit(name, 'skills'):
             continue
         entry = {'name': name, 'source': 'plugin' if source.startswith('plugin:') else SKILL_SOURCES.get(source, 'other')}
         digest = row.get('digest')
@@ -362,14 +392,11 @@ def _skills(scan: dict, omitted: Dict[str, int]) -> List[dict]:
     return list(out.values())
 
 
-def _plugins(scan: dict, omitted: Dict[str, int]) -> List[dict]:
+def _plugins(scan: dict, gate: _Gate) -> List[dict]:
     out: Dict[str, dict] = {}
     for row in _list(scan.get('plugins')):
         name = row.get('name')
-        if not isinstance(name, str):
-            continue
-        if not NAME.fullmatch(name):
-            omitted['plugins'] = omitted.get('plugins', 0) + 1
+        if not isinstance(name, str) or name in out or not gate.admit(name, 'plugins'):
             continue
         entry = {'name': name, 'source': row.get('source') if row.get('source') in PLUGIN_SOURCES else 'other'}
         if isinstance(row.get('version'), str) and VERSION.fullmatch(row['version']):
@@ -378,12 +405,11 @@ def _plugins(scan: dict, omitted: Dict[str, int]) -> List[dict]:
     return list(out.values())
 
 
-def _coding_agents(scan: dict, omitted: Dict[str, int]) -> List[dict]:
+def _coding_agents(scan: dict, gate: _Gate) -> List[dict]:
     out: Dict[str, dict] = {}
     for row in _list(scan.get('coding_agents')):
         agent = row.get('id')
-        if not isinstance(agent, str) or not SLUG.fullmatch(agent):
-            omitted['codingAgents'] = omitted.get('codingAgents', 0) + 1
+        if agent in out or not gate.admit(agent, 'codingAgents', SLUG):
             continue
         entry = {'id': agent}
         if isinstance(row.get('version'), str) and VERSION.fullmatch(row['version']):
@@ -392,12 +418,11 @@ def _coding_agents(scan: dict, omitted: Dict[str, int]) -> List[dict]:
     return list(out.values())
 
 
-def _services(services: Any, omitted: Dict[str, int]) -> List[dict]:
+def _services(services: Any, gate: _Gate) -> List[dict]:
     out: Dict[str, dict] = {}
     for row in _list(services):
         key = row.get('key')
-        if not isinstance(key, str) or not SERVICE_KEY.fullmatch(key):
-            omitted['services'] = omitted.get('services', 0) + 1
+        if key in out or not gate.admit(key, 'services', SERVICE_KEY):
             continue
         entry = {'key': key, 'state': row.get('state') if row.get('state') in ('ok', 'degraded', 'down', 'stopped')
                  else 'unknown'}
@@ -421,15 +446,16 @@ def _bounded(rows: List[dict], member: str, omitted: Dict[str, int]) -> List[dic
     return rows[:limit]
 
 
-def harness_of(harness_scan: Any, mcp_scan: Any) -> Tuple[dict, Dict[str, int]]:
-    """The `harness` member from the two scans, and what was left out of each list (counts only)."""
+def harness_of(harness_scan: Any, mcp_scan: Any, gate: Optional[_Gate] = None) -> Tuple[dict, Dict[str, int]]:
+    """The `harness` member from the two scans, and what was left out of each list for its shape (counts only)."""
+    gate = gate or _Gate()
     harness_scan = harness_scan if isinstance(harness_scan, dict) else {}
     mcp_scan = mcp_scan if isinstance(mcp_scan, dict) else {}
-    omitted: Dict[str, int] = {}
-    harness = {'codingAgents': _bounded(_coding_agents(harness_scan, omitted), 'codingAgents', omitted),
-               'mcpServers': _bounded(_mcp_servers(mcp_scan, omitted), 'mcpServers', omitted),
-               'skills': _bounded(_skills(harness_scan, omitted), 'skills', omitted),
-               'plugins': _bounded(_plugins(harness_scan, omitted), 'plugins', omitted),
+    omitted = gate.omitted
+    harness = {'codingAgents': _bounded(_coding_agents(harness_scan, gate), 'codingAgents', omitted),
+               'mcpServers': _bounded(_mcp_servers(mcp_scan, gate), 'mcpServers', omitted),
+               'skills': _bounded(_skills(harness_scan, gate), 'skills', omitted),
+               'plugins': _bounded(_plugins(harness_scan, gate), 'plugins', omitted),
                'hooks': {'count': min(len(_list(harness_scan.get('hooks'))), 100000)}}
     return harness, omitted
 
@@ -451,23 +477,32 @@ class SummaryRefused(ValueError):
 
 
 def build(*, device_id: str, org_id: str, sequence: int, at: str, harness_scan: Any, mcp_scan: Any,
-          services: Any = (), baseline: Optional[dict] = None) -> Tuple[dict, Dict[str, int]]:
-    """The summary this machine sends to organization `org_id`, and the counts it left out (kept on this machine).
+          services: Any = (), baseline: Optional[dict] = None,
+          exclude: Any = ()) -> Tuple[dict, Dict[str, int], Dict[str, int]]:
+    """The summary this machine sends to organization `org_id`, the counts it left out for their shape (`omitted`),
+    and the counts the person's exclusion list kept back (`excluded`, the globs of `exclude`); both stay here.
 
     `services` are the agent services placed in this organization's context and no other; `baseline` is
     `harness_baseline(layers)` over the policy layers this machine verified and applied, or None, when the summary
     carries no drift. Raises SummaryRefused rather than hand over a summary FAC-SEM-128 would flag."""
-    harness, omitted = harness_of(harness_scan, mcp_scan)
+    gate = _Gate(exclude)
+    harness, omitted = harness_of(harness_scan, mcp_scan, gate)
     summary = {'type': TYPE, 'device': {'id': device_id}, 'context': 'org:' + org_id, 'sequence': int(sequence),
-               'at': at, 'harness': harness, 'services': _bounded(_services(services, omitted), 'services', omitted)}
+               'at': at, 'harness': harness, 'services': _bounded(_services(services, gate), 'services', omitted)}
     if baseline is not None:
-        summary['drift'] = {'policyRevision': baseline.get('revision'),
-                            'items': harness_drift(baseline.get('items'), summary)}
+        drift = harness_drift(baseline.get('items'), summary)
+        if len(drift) > MAX_DRIFT:
+            omitted['drift'] = len(drift) - MAX_DRIFT
+        summary['drift'] = {'policyRevision': baseline.get('revision'), 'items': drift[:MAX_DRIFT]}
     findings = summary_findings({'summary': summary, 'org': org_id,
                                  **({'baseline': baseline} if baseline is not None else {})})
+    if 'drift' in omitted:
+        # Past the schema's 1024 drift items the summary carries the first 1024, so it cannot equal harnessDrift's
+        # whole list; the contract has no rule for that case yet, and the count left out stays here.
+        findings = [f for f in findings if f['instancePath'] != '/summary/drift/items']
     if findings:
         raise SummaryRefused(findings)
-    return summary, omitted
+    return summary, omitted, gate.excluded
 
 
 def counts(summary: dict) -> dict:

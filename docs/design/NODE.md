@@ -523,27 +523,53 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   one). `tests/test_node_summary.py` runs it over the contract's six semantic fixtures, the kit's own drift, version
   and baseline cases, and the schema over the positive and the eight negative fixtures (`fabric/node-vectors/summary/`,
   vendored by `tools/vendor_org_vectors.py` with the coding-agent catalogue, DEC-0093).
-- **The source.** The harness scan (`collectors/scan_harness.py`, OBS-61, OBS-88) adds `plugins` (each enabled one by
-  `name@marketplace`, its source and the version Claude Code recorded) and `coding_agents` (an agent of the catalogue
-  is installed when its launch command is an executable in a bin folder of the scanned home, on `PATH`, or in
-  Homebrew's and `/usr/local`'s; its version is read from where the launcher resolves, a `versions/<v>` folder, a
-  Homebrew keg or cask, or its npm package's `package.json`, never by running it). The MCP scan (`collectors/scan_mcp.py`)
+- **The source.** The harness scan (`collectors/scan_harness.py`, OBS-61, OBS-88) adds `plugins` (each enabled and
+  installed one by `name@marketplace`, its source and the version Claude Code recorded) and `coding_agents` (an agent of
+  the catalogue is installed when its launch command is an executable in a bin folder of the scanned home, on `PATH`,
+  or in Homebrew's and `/usr/local`'s; a generic command, `agent`, `cmd`, `cn`, `pi`, `omp` or `zed`, counts only when
+  it resolves into the agent's own package or bundle; its version is read from where the launcher resolves, a
+  `versions/<v>` folder, a Homebrew keg or cask, or its npm package's `package.json`, never by running it, and kept
+  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`). The MCP scan (`collectors/scan_mcp.py`)
   gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
   declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
   server Claude Code keeps per folder is `local`, its folder never sent.
+- **Consent, per organization.** The contract sends the whole harness whatever the machine's mode (S8), and whether an
+  organization also sees what serves a person's other contexts is still the contract's open question CT-92. Until it
+  is answered the node takes the safest reversible choice: sending is OFF for each organization until the person runs
+  `full org summary --org ID --consent on` (recorded in that enrollment's state with its time; `--consent off` stops
+  it). `org status` and Health say `harness summary: not shared (consent off)` with that command; the dry run
+  `full org summary --org ID` works before consent, so the person reads what they would share first.
+- **The person's exclusion list.** `config/node-summary.json`, `{"exclude": [glob, ...]}`, owner-only: shell-style
+  globs matched against each whole name (a coding agent's id, an MCP server, a skill, a plugin, a service key), applied
+  before anything is checked or sent. What it keeps back is counted in `excluded`, which stays here. A list that is not
+  owner-only, not a list of strings, or unreadable sends nothing (`org:node-summary-unavailable`), never an empty list.
 - **What leaves.** `build` copies an allow-list of fields into the schema's shape and checks the result with
   FAC-SEM-128 before it hands it over (`SummaryRefused` otherwise): names, catalogue ids, versions, digests, sources,
   transports, health and a hook count. A name the schema refuses (a space, a slash, a dotted `@` suffix) is left out and
-  counted in `omitted`, which stays on this machine.
+  counted in `omitted`, which stays on this machine. So is a name holding a dashed home folder (`-Users-<name>`,
+  `-home-<name>`): the contract's home-path shapes miss one after a dot or an `@`, so the node refuses it itself, beside
+  FAC-SEM-128 (raised with the contract). Drift is capped at the schema's 1,024 items; the count past it stays here.
 - **When.** `Enrollment.check_in` puts the summary in `records.nodeSummary` only when the server's latest protocols
-  list `node-summary/1`, and only when its content digest (everything but `sequence` and `at`) differs from the last
-  one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the check-in's
-  `sequenceNum`; a failed check-in leaves the summary due. Without the two scans nothing is sent and the reason is kept
-  (`nodeSummaryNote`): a summary built without one would tell the organization the machine runs nothing of that kind.
+  list `node-summary/1`, the person consented, and its content digest (everything but `sequence` and `at`) differs from
+  the last one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the
+  check-in's `sequenceNum`; a failed check-in leaves the summary due. The scans are read before the enrollment's lock is
+  taken (they can be large; at most 32 MB each).
+- **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
+  sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
+  (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
+  `org:node-summary-unavailable`. A summary built from a missing, stale or partial scan would tell the organization the
+  machine runs nothing of that kind, or what it ran days ago.
+- **A server that refuses it never stops check-ins.** A check-in carrying a summary that the server refuses in a way
+  the summary may cause (400, 413 or 422 whatever it says, or another client error whose code, pointer or message names
+  the summary or the records; never a signature, certificate or rate refusal) is sent again at once without it. When
+  that one is taken, the refusal is recorded (`summaryRefused`: when, status, code, retry time) and the summary waits a
+  day, so heartbeats, rotation and renewal go on; `org status` says `org:node-summary-refused` and Health when it is
+  tried again. A refusal that the bare check-in gets too is the check-in's, not the summary's.
 - **Shown.** `org summary --org <id>` prints the next summary as it would leave, saving and sending nothing.
-  `org status` (`nodeSummary`, and `org:node-summary-not-listed` or `org:node-summary-unavailable` in `degraded`), doctor
-  and Health read the saved state (`summary_notice`): whether the server reads it, when it last took one, how much it
-  listed, and the drift.
+  `org status` (`nodeSummary` with its `state`: `not-listed`, `consent-off`, `unavailable`, `refused`, `pending` or
+  `sent`; the first, third and fourth also as `org:node-summary-*` in `degraded`), doctor and Health read the saved
+  state (`summary_notice`): whether the server reads it, the consent, when it last took one, how much it listed, and
+  the drift.
 
 Not built here: the drift reaches an organization only once the node applies its signed policy (OE-06): until then
 `policy_layers` is empty, no baseline applies, and the summary carries no drift, as the contract asks of a summary

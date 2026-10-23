@@ -329,10 +329,13 @@ class Harness(unittest.TestCase):
         installed = json.loads((self.home / ".claude/plugins/installed_plugins.json").read_text())
         installed["plugins"]["tool@family"][0]["version"] = "1.0.0"
         (self.home / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installed))
+        settings = json.loads((self.home / ".claude/settings.json").read_text())
+        settings["enabledPlugins"]["ghost@family"] = True             # enabled, never installed: loads nothing
+        (self.home / ".claude/settings.json").write_text(json.dumps(settings))
         plugins = self.scan()["plugins"]
         self.assertEqual(plugins, [
-            {"name": "stranger@market", "source": "other", "installed": True},
-            {"name": "tool@family", "source": "marketplace", "installed": True, "version": "1.0.0"}])
+            {"name": "stranger@market", "source": "other"},
+            {"name": "tool@family", "source": "marketplace", "version": "1.0.0"}])
         self.assertNotIn(str(self.home), json.dumps(plugins), "no install path is recorded")
 
     @unittest.skipUnless(os.name == "posix", "launchers are linked as package managers link them")
@@ -356,10 +359,29 @@ class Harness(unittest.TestCase):
         (package / "package.json").write_text(json.dumps({"name": "cline", "version": "3.4.5"}))
         launcher(bin_dir / "openhands")                                 # a launcher that says no version
         (bin_dir / "qwen").write_text("not executable\n")
+        # A version folder named like a person or a path piece is no version.
+        (bin_dir / "kimi").symlink_to(launcher(self.home / "kimi/versions/alice-build/kimi"))
+        (bin_dir / "auggie").symlink_to(launcher(self.home / "aug/versions/1.2.0-beta.3/auggie"))
+        # A generic launch command says which agent only from the agent's own package or bundle.
+        launcher(bin_dir / "agent")                                    # some other tool's `agent`
+        launcher(bin_dir / "pi")
+        (bin_dir / "cn").symlink_to(launcher(self.home / "npm/lib/node_modules/@continuedev/cli/dist/cn.js"))
+        (self.home / "npm/lib/node_modules/@continuedev/cli/package.json").write_text(json.dumps({"version": "1.5.0"}))
+        (bin_dir / "omp").symlink_to(launcher(self.home / "brew/Cellar/omp/2.0.1/bin/omp"))
         agents = {a["id"]: a.get("version") for a in self.scan()["coding_agents"]}
-        self.assertEqual({k: agents.get(k, "absent") for k in ("claude-code", "codex", "cline", "openhands", "qwen-code")},
-                         {"claude-code": "2.1.296", "codex": "0.48.0", "cline": "3.4.5", "openhands": None,
-                          "qwen-code": "absent"})
+        expect = {"claude-code": "2.1.296", "codex": "0.48.0", "cline": "3.4.5", "openhands": None,
+                  "qwen-code": "absent", "kimi-code": None, "auggie": "1.2.0-beta.3", "continue": "1.5.0",
+                  "omp": "2.0.1"}
+        self.assertEqual({k: agents.get(k, "absent") for k in expect}, expect)
+        # The generic ones read from this bin folder alone: the machine running the test may have its own on PATH.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("scan_harness_under_test", ROOT / "collectors/scan_harness.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        only = {a["id"]: a.get("version") for a in module.coding_agents(self.home, [], dirs=[bin_dir])}
+        self.assertNotIn("cursor-agent", only, "`agent` alone is not Cursor's")
+        self.assertNotIn("pi", only)
+        self.assertEqual((only["continue"], only["omp"]), ("1.5.0", "2.0.1"))
         self.assertFalse(marker.exists(), "a launcher is never run")
         self.assertNotIn(str(self.home), json.dumps(self.scan()["coding_agents"]))
 

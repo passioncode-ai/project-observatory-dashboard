@@ -2374,8 +2374,14 @@ if (Array.isArray(H.organizations)) {
                            outdated: T("an older version")};
       if (!S.listed)
         hb.push([label, T("the organization server does not read harness summaries (node-summary/1); none is sent"), show]);
+      else if (S.state === "consent-off")
+        hb.push([label, T("harness summary: not shared (consent off)"),
+          fullCommand("org summary --org", shellArg(O.org), "--consent on")]);
       else if (note)
         hb.push([label, T("harness summary not sent: {detail}", {detail: note.detail || note.reason}), show]);
+      else if (S.refused)
+        hb.push([label, T("the organization server refused the harness summary ({code}) on {date}; check-ins go on without it, and it is tried again on {retry}",
+          {code: S.refused.code || "?", date: (S.refused.at || "?").slice(0, 10), retry: (S.refused.retryAt || "?").slice(0, 10)}), show]);
       else if (S.sentAt) {
         const c = S.counts || {};
         hb.push([label, T("harness summary taken on {date}: {agents} coding agents, {servers} MCP servers, {skills} skills, {plugins} plugins, {hooks} hooks",

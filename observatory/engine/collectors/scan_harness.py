@@ -227,9 +227,10 @@ def plugin_skill_dirs(claude: Path, degraded: list) -> list[tuple[str, Path, str
 
 
 def enabled_plugins(claude: Path) -> list[dict]:
-    """Every ENABLED plugin by `name@marketplace`, its source and the version Claude Code recorded when it installed
-    it (OBS-192: the node summary's `plugins`). A plugin whose marketplace Claude Code knows is `marketplace`, one it
-    does not is `other`. Its folder is not read and never recorded."""
+    """Every ENABLED and installed plugin by `name@marketplace`, its source and the version Claude Code recorded when
+    it installed it (OBS-192: the node summary's `plugins`). A plugin enabled in the settings but not installed loads
+    nothing and is not listed. A plugin whose marketplace Claude Code knows is `marketplace`, one it does not is
+    `other`. Its folder is not read and never recorded."""
     settings = read_json(claude / "settings.json")
     enabled = {k for k, v in (settings.get("enabledPlugins") or {}).items() if v is True}
     installed = read_json(claude / "plugins" / "installed_plugins.json").get("plugins") or {}
@@ -238,10 +239,10 @@ def enabled_plugins(claude: Path) -> list[dict]:
     for key in sorted(enabled):
         records = installed.get(key) if isinstance(installed, dict) else None
         record = records[0] if isinstance(records, list) and records else records
-        record = record if isinstance(record, dict) else {}
+        if not isinstance(record, dict) or not record:
+            continue
         market = key.split("@", 1)[1] if "@" in key else ""
-        row = {"name": key, "source": "marketplace" if market and market in markets else "other",
-               "installed": bool(record)}
+        row = {"name": key, "source": "marketplace" if market and market in markets else "other"}
         version = record.get("version")
         if isinstance(version, str) and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version):
             row["version"] = version
@@ -256,6 +257,13 @@ CATALOGUE = ROOT / "fabric" / "node-vectors" / "summary" / "coding-agents.json"
 HOME_BIN_DIRS = (".local/bin", "bin", ".npm-global/bin", ".bun/bin", ".cargo/bin", ".deno/bin", ".opencode/bin")
 SYSTEM_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 PACKAGE_JSON_MAX = 256 * 1024
+#: A version as a release names it: dotted numbers, and at most one prerelease word with numbers after it. Anything
+#: else (a folder named after a person, a path piece, a build tag with a name in it) is no version and is omitted.
+STRICT_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){0,3}"
+                            r"(?:-(?:alpha|beta|rc|pre|preview|dev|canary|next|nightly)(?:[.-]?[0-9]+){0,3})?")
+#: Catalogue launch commands too generic to say which agent is installed (`agent` is Cursor's, `cn` Continue's...):
+#: such an agent is reported only when its launcher resolves into the agent's own package or bundle.
+GENERIC_COMMANDS = frozenset({"agent", "cmd", "cn", "pi", "omp", "zed"})
 
 
 def bin_dirs(home: Path) -> list[Path]:
@@ -279,13 +287,13 @@ def launcher_version(launcher: Path) -> str | None:
     except (OSError, RuntimeError):
         return None
     parts = real.parts
-    shape = re.compile(r"[0-9][0-9A-Za-z.+-]{0,63}")
+    shape = STRICT_VERSION
     for i, part in enumerate(parts[:-1]):
         if part in ("Cellar", "Caskroom") and i + 2 < len(parts):
             version = re.sub(r"_[0-9]+$", "", parts[i + 2])          # a keg's revision suffix is not the version
             return version if shape.fullmatch(version) else None
-        if part == "versions" and shape.fullmatch(parts[i + 1]):
-            return parts[i + 1]
+        if part == "versions":
+            return parts[i + 1] if shape.fullmatch(parts[i + 1]) else None
     for folder in list(real.parents)[:6]:
         if "node_modules" not in folder.parts:
             break
@@ -299,10 +307,36 @@ def launcher_version(launcher: Path) -> str | None:
     return None
 
 
+def own_package(launcher: Path, agent: dict) -> bool:
+    """Whether a launcher resolves into the agent's own package or bundle: a path piece named as its catalogue id, its
+    app bundle (`<id>.app`), its npm package's folders (`@scope/name`), or its Homebrew keg or cask."""
+    try:
+        parts = [p.lower() for p in launcher.resolve().parts[:-1]]   # the launcher's own file name proves nothing
+    except (OSError, RuntimeError):
+        return False
+    agent_id = str(agent.get("id") or "").lower()
+    if agent_id and (agent_id in parts or agent_id + ".app" in parts):
+        return True
+
+    def runs(pieces: list[str]) -> bool:
+        return any(parts[i:i + len(pieces)] == pieces for i in range(len(parts) - len(pieces) + 1))
+    installs = agent.get("install") if isinstance(agent.get("install"), list) else []
+    for install in (i for i in installs if isinstance(i, dict) and isinstance(i.get("package"), str)):
+        package = install["package"].lower()
+        if install.get("via") == "npm" and runs(["node_modules", *package.split("/")]):
+            return True
+        if install.get("via") in ("brew", "brew-cask"):
+            name = package.rsplit("/", 1)[-1]
+            if runs(["cellar", name]) or runs(["caskroom", name]) or name + ".app" in parts:
+                return True
+    return False
+
+
 def coding_agents(home: Path, degraded: list, dirs: list[Path] | None = None) -> list[dict]:
     """The coding agents of the contract's catalogue (DEC-0093) installed here: an agent is installed when its
-    catalogue launch command is an executable file in one of `bin_dirs`. Its id is the catalogue's; its version is
-    `launcher_version`'s, or absent. Nothing is run, and no path is recorded."""
+    catalogue launch command is an executable file in one of `bin_dirs` (for a generic command, `GENERIC_COMMANDS`, only
+    when it resolves into the agent's own package or bundle). Its id is the catalogue's; its version is
+    `launcher_version`'s (`STRICT_VERSION`), or absent. Nothing is run, and no path is recorded."""
     try:
         catalogue = json.loads(CATALOGUE.read_text(encoding="utf-8"))
         agents = [a for a in catalogue.get("agents") or [] if isinstance(a, dict)]
@@ -322,6 +356,8 @@ def coding_agents(home: Path, degraded: list, dirs: list[Path] | None = None) ->
                 found = launcher.is_file() and os.access(launcher, os.X_OK)
             except OSError:
                 found = False
+            if found and command in GENERIC_COMMANDS and not own_package(launcher, agent):
+                continue                                # a generic name alone says nothing about which agent it is
             if found:
                 row = {"id": agent["id"]}
                 version = launcher_version(launcher)

@@ -243,7 +243,7 @@
   },
   {
    "token": "openclaw",
-   "reason": "a third-party coding agent, or its maker's GitHub owner, in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192)"
+   "reason": "the name of a public third-party coding agent in the contract's public coding-agent catalogue (DEC-0093), vendored byte for byte as observatory/engine/fabric/node-vectors/summary/coding-agents.json (OBS-192); the operator's private uses are covered by other denylist tokens"
   },
   {
    "token": "warpdotdev",

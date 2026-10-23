@@ -256,7 +256,7 @@ class Build(unittest.TestCase):
                         harness_scan=harness, mcp_scan=mcp, **extra)
 
     def test_the_harness_from_the_scans(self):
-        summary, omitted = self.build()
+        summary, omitted, _ = self.build()
         harness = summary['harness']
         self.assertEqual(summary['context'], 'org:org-7f3a')
         self.assertEqual(harness['codingAgents'], [{'id': 'claude-code', 'version': '2.1.296'}, {'id': 'codex'}])
@@ -277,7 +277,7 @@ class Build(unittest.TestCase):
         self.assertEqual(omitted, {'mcpServers': 1, 'skills': 1})
 
     def test_it_matches_the_schema_and_carries_nothing_it_never_carries(self):
-        summary, _ = self.build()
+        summary, _, _ = self.build()
         check = validator()
         if check is not None:
             self.assertEqual(list(check.iter_errors(summary)), [])
@@ -291,7 +291,7 @@ class Build(unittest.TestCase):
                                              {'kind': 'skill', 'name': 'tidy-notes', 'digest': DIGEST_A},
                                              {'kind': 'mcp-server', 'name': 'fabric'},
                                              {'kind': 'service', 'name': 'inbox-agent.default'}]}
-        summary, _ = self.build(baseline=baseline)
+        summary, _, _ = self.build(baseline=baseline)
         self.assertEqual(summary['drift'], {'policyRevision': 7, 'items': [
             {'kind': 'coding-agent', 'name': 'codex', 'state': 'outdated'},
             {'kind': 'skill', 'name': 'tidy-notes', 'state': 'changed'},
@@ -299,7 +299,7 @@ class Build(unittest.TestCase):
         self.assertEqual(ns.summary_findings({'summary': summary, 'baseline': baseline, 'org': 'org-7f3a'}), [])
 
     def test_services_are_copied_by_allow_list(self):
-        summary, omitted = self.build(services=[
+        summary, omitted, _ = self.build(services=[
             {'key': 'inbox-agent.default', 'state': 'ok', 'protocols': ['fabric-service/0.1'],
              'mcpEndpoint': 'https://inbox.example/mcp', 'token': 'x', 'origin': 'http://127.0.0.1:9'},
             {'key': 'Bad Key', 'state': 'ok'},
@@ -320,15 +320,48 @@ class Build(unittest.TestCase):
         self.assertIn('/summary/harness/plugins/1/name', str(refused.exception))
 
     def test_malformed_scans_are_an_empty_harness_never_an_exception(self):
-        summary, omitted = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
+        summary, omitted, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
                                     harness_scan={'skills': 'no', 'hooks': None, 'plugins': [1, 'x']},
                                     mcp_scan=['not', 'an', 'object'])
         self.assertEqual(summary['harness'], {'codingAgents': [], 'mcpServers': [], 'skills': [], 'plugins': [],
                                               'hooks': {'count': 0}})
         self.assertEqual(omitted, {})
 
+    def test_the_persons_exclusion_list_keeps_names_back_before_anything_is_checked(self):
+        harness, mcp = scans()
+        harness['plugins'].append({'name': 'someone@example', 'source': 'other'})   # FAC-SEM-128 would refuse it
+        summary, omitted, excluded = ns.build(device_id='dev-1', org_id='org-1', sequence=1,
+                                              at='2026-10-22T09:00:00Z', harness_scan=harness, mcp_scan=mcp,
+                                              exclude=['tidy-*', 'someone@*', 'plugin:*', 'codex'])
+        said = json.dumps(summary)
+        for gone in ('tidy-notes', 'someone@example', 'plugin:switchboard:switchboard', '"codex"'):
+            self.assertNotIn(gone, said)
+        self.assertEqual(excluded, {'skills': 1, 'plugins': 1, 'mcpServers': 1, 'codingAgents': 1})
+        self.assertEqual(omitted, {'mcpServers': 1, 'skills': 1})
+
+    def test_a_dashed_home_folder_in_a_name_is_left_out(self):
+        harness, mcp = scans()
+        dashed = '-'.join(('', 'Users', 'alice', 'x'))
+        harness['skills'].append({'name': 'notes.' + dashed, 'source': 'plain'})
+        harness['plugins'].append({'name': 'tool@' + '-'.join(('', 'home', 'alice')), 'source': 'other'})
+        self.assertEqual(ns.document_findings({'harness': {'skills': [{'name': 'notes.' + dashed}]}}), [],
+                         'the contract does not catch it after a dot: the node does')
+        summary, omitted, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
+                                       harness_scan=harness, mcp_scan=mcp)
+        self.assertNotIn('alice', json.dumps(summary))
+        self.assertEqual((omitted['skills'], omitted['plugins']), (2, 1))
+
+    def test_the_drift_is_capped_at_the_schemas_bound(self):
+        baseline = {'revision': 3, 'items': [{'kind': 'skill', 'name': 's%d' % i} for i in range(1100)]}
+        summary, omitted, _ = self.build(baseline=baseline)
+        self.assertEqual(len(summary['drift']['items']), 1024)
+        self.assertEqual(omitted['drift'], 76)
+        check = validator()
+        if check is not None:
+            self.assertEqual(list(check.iter_errors(summary)), [])
+
     def test_the_digest_ignores_the_sequence_and_the_time(self):
-        a, _ = self.build()
+        a, _, _ = self.build()
         b = dict(a, sequence=9, at='2026-10-23T09:00:00Z')
         self.assertEqual(ns.content_digest(a), ns.content_digest(b))
         c = copy.deepcopy(a)
@@ -343,9 +376,8 @@ except ImportError:
     HAVE_CRYPTO = False
 
 
-@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
-class CheckIn(unittest.TestCase):
-    """An enrollment sends its summary in a check-in only to a server that lists `node-summary/1`."""
+class _Enrolled(unittest.TestCase):
+    """One enrollment against the fake organization server, the person's consent given."""
 
     def setUp(self):
         import tmp as tmpdir
@@ -357,13 +389,21 @@ class CheckIn(unittest.TestCase):
         self.server = FakeServer(self.clock, protocols=('fabric-device/0.1', 'fabric-activity/0.1', ns.TYPE))
         self.node = Path(tmpdir.mkdtemp()).resolve() / 'node'
         self.inputs = list(scans()) + [None]
-        self.make = lambda: Enrollment(self.node, ORG, transport=self.server, clock=self.clock,
-                                       harness=lambda: tuple(self.inputs))
+        self.exclusions = ([], None)
+        self.transport = self.server
+        self.make = lambda: Enrollment(self.node, ORG, transport=lambda *a: self.transport(*a), clock=self.clock,
+                                       harness=lambda: tuple(self.inputs), exclusions=lambda: self.exclusions)
         self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        self.make().set_summary_consent(True)
 
     def sent(self) -> list:
         return [body.get('records', {}).get('nodeSummary') for path, body in self.server.requests
                 if path == '/v1/devices/check-in']
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class CheckIn(_Enrolled):
+    """An enrollment sends its summary in a check-in only to a server that lists `node-summary/1`."""
 
     def test_the_first_check_in_carries_the_summary(self):
         self.assertTrue(self.make().check_in()['ok'])
@@ -439,7 +479,8 @@ class CheckIn(unittest.TestCase):
         from node import org
         (notice,) = org.notices(self.node, now=self.clock())
         self.assertEqual(notice['summary'], {'listed': True, 'sentAt': None, 'sequence': None, 'counts': None,
-                                             'drift': None})
+                                             'drift': None, 'consent': {'on': True, 'at': org.iso(self.clock())},
+                                             'state': 'pending'})
         self.make().check_in()
         sent = len(self.server.log)
         (notice,) = org.notices(self.node, now=self.clock())
@@ -447,7 +488,8 @@ class CheckIn(unittest.TestCase):
         self.assertEqual(len(self.server.log), sent, 'Health reads the saved state, never the network')
         source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
         rows = source[source.index('Array.isArray(H.organizations)'):]
-        for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-'):
+        for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-', '"consent-off"',
+                     '--consent on', 'S.refused'):
             self.assertIn(said, rows)
 
     def test_the_preview_shows_the_next_summary_and_changes_nothing(self):
@@ -457,6 +499,147 @@ class CheckIn(unittest.TestCase):
         self.assertEqual((preview['listed'], preview['baseline'], preview['lastSent']), (True, 'none', None))
         self.assertEqual(self.make().state(), before)
         self.assertEqual(self.sent(), [])
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class Consent(_Enrolled):
+    """Off until the person turns it on, per organization (until the contract's CT-92 answers the other-contexts
+    question): nothing is sent, the person is told, and the dry run still shows what would be shared."""
+
+    def setUp(self):
+        super().setUp()
+        self.make().set_summary_consent(False)
+
+    def test_off_sends_nothing_and_says_so(self):
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.sent(), [None])
+        status = self.make().describe()
+        self.assertEqual((status['nodeSummary']['state'], status['nodeSummary']['said']),
+                         ('consent-off', 'harness summary: not shared (consent off)'))
+        self.assertFalse(status['nodeSummary']['consent']['on'])
+        preview = self.make().summary_preview()
+        self.assertEqual(preview['summary']['type'], ns.TYPE, 'the dry run works before consent')
+        self.assertEqual(preview['command'], 'project-observatory full org summary --org %s --consent on' % self.org)
+
+    def test_the_terminal_turns_it_on_for_one_organization_with_its_time(self):
+        import contextlib
+        import io
+        from unittest import mock
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import org as org_tool
+        self.now[0] += 120
+        with mock.patch.object(org_tool, '_enrollment', lambda org_id: self.make()), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(org_tool.main(['summary', '--org', self.org, '--consent', 'on']), 0)
+        (row,) = json.loads(out.getvalue())['organizations']
+        from node.org import iso
+        self.assertEqual(row['consent'], {'on': True, 'at': iso(self.clock())})
+        self.assertEqual(self.make().state()['summaryConsent']['at'], iso(self.clock()))
+        self.make().check_in()
+        self.assertEqual(self.sent()[-1]['sequence'], 1)
+        with mock.patch.object(org_tool, '_enrollment', lambda org_id: self.make()), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(org_tool.main(['summary', '--consent', 'off']), 1)
+        self.assertEqual(json.loads(err.getvalue())['error'], 'org-required')
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class Refusal(_Enrolled):
+    """A server that refuses the summary never stops check-ins: the check-in goes again without it at once, the
+    refusal is recorded, and the summary waits a day."""
+
+    def refusing(self, status=422, code='schema-invalid', pointer='/records/nodeSummary', always=False):
+        def transport(url, headers, body, timeout):
+            doc = json.loads(body)
+            if url.endswith('/v1/devices/check-in') and (always or 'records' in doc):
+                self.server.requests.append(('/v1/devices/check-in', doc))
+                return status, json.dumps({'error': {'code': code, 'pointer': pointer}}).encode()
+            return self.server(url, headers, body, timeout)
+        self.transport = transport
+
+    def test_the_check_in_goes_on_without_the_summary(self):
+        self.refusing()
+        result = self.make().check_in()
+        self.assertTrue(result['ok'], result)
+        self.assertEqual([s and s['sequence'] for s in self.sent()], [1, None])
+        state = self.make().state()
+        self.assertEqual((state['summaryRefused']['code'], state['summaryRefused']['status']), ('schema-invalid', 422))
+        self.assertIn('org:node-summary-refused', self.make().describe()['degraded'])
+        self.make().check_in()                         # within the day: no summary, no second refusal
+        self.assertEqual(self.sent()[2:], [None])
+        self.now[0] += 86400 + 1
+        self.transport = self.server
+        self.make().check_in()
+        self.assertEqual(self.sent()[-1]['sequence'], 2, 'tried again after a day, and taken')
+        self.assertNotIn('summaryRefused', self.make().state())
+
+    def test_a_refusal_that_names_the_summary_under_another_status(self):
+        self.refusing(status=403, code='node-summary-not-accepted', pointer=None)
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['summaryRefused']['status'], 403)
+
+    def test_a_refusal_of_the_check_in_itself_is_not_blamed_on_the_summary(self):
+        self.refusing(status=422, always=True)
+        self.assertFalse(self.make().check_in()['ok'])
+        self.assertNotIn('summaryRefused', self.make().state())
+        self.refusing(status=401, code='signature-invalid', pointer=None)
+        self.assertFalse(self.make().check_in()['ok'])
+        self.assertEqual(sum(1 for s in self.sent() if s is None), 1, 'a signature refusal is not retried bare')
+
+
+class Scans(unittest.TestCase):
+    """`read_harness_scans`: a scan whose integration is off, older than 48 h, or written before the summary existed
+    is never sent; `read_exclusions`: the person's list, owner-only or nothing is sent."""
+
+    NOW = 1792396800.0                                   # 2026-10-19T08:00:00Z
+
+    def setUp(self):
+        import tmp as tmpdir
+        self.folder = Path(tmpdir.mkdtemp()).resolve()
+        harness, mcp = scans()
+        self.harness = dict(harness, generated_at='2026-10-19T07:30:00Z')
+        self.mcp = dict(mcp, scanned_at='2026-10-19T07:30:00Z')
+        self.on = {'harness': True, 'mcp': True}
+
+    def read(self):
+        from node.org import read_harness_scans
+        (self.folder / 'harness.json').write_text(json.dumps(self.harness))
+        (self.folder / 'mcp.json').write_text(json.dumps(self.mcp))
+        return read_harness_scans(self.NOW, scratch=self.folder, enabled=lambda name: self.on[name])
+
+    def test_fresh_scans_are_read(self):
+        harness, mcp, missing = self.read()
+        self.assertIsNone(missing)
+        self.assertEqual(len(harness['skills']), 4)
+
+    def test_a_switched_off_integration_leaves_its_old_scan_unsent(self):
+        self.on['mcp'] = False
+        self.assertIn('integrations.mcp is off', self.read()[2])
+
+    def test_a_scan_older_than_two_days_is_refused(self):
+        self.harness['generated_at'] = '2026-10-17T07:59:00Z'
+        self.assertIn('past the 48 h', self.read()[2])
+        self.harness['generated_at'] = 'not a time'
+        self.assertIn('carries no time', self.read()[2])
+
+    def test_a_harness_scan_written_before_the_summary_is_refused(self):
+        del self.harness['coding_agents']
+        self.assertIn('predates the node summary', self.read()[2])
+
+    def test_the_exclusion_list_is_owner_only_or_nothing_is_sent(self):
+        import os
+        from node.org import read_exclusions
+        path = self.folder / 'node-summary.json'
+        self.assertEqual(read_exclusions(path), ([], None))
+        path.write_text(json.dumps({'exclude': ['private-*', 'plugin:*:secret']}))
+        path.chmod(0o600)
+        self.assertEqual(read_exclusions(path), (['private-*', 'plugin:*:secret'], None))
+        if os.name == 'posix':
+            path.chmod(0o644)
+            self.assertIn('owner-only', read_exclusions(path)[1])
+            path.chmod(0o600)
+        path.write_text(json.dumps({'exclude': 'private-*'}))
+        self.assertIn('must be {"exclude"', read_exclusions(path)[1])
 
 
 if __name__ == '__main__':
