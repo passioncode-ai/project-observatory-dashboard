@@ -1544,6 +1544,41 @@
       "bytes": 5675
     },
     {
+      "path": "fabric/node-vectors/semantic/estate-partner-key-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ba484462ef04a168334ab0d45a437b8072c2a4f11e2c4dd5746a70ce8c9dd647",
+      "bytes": 10585
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-partner-key-other-context.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "899e1c1a9b11065d4b5888ef70d8237ae3249a49cc6543542649e247664eb050",
+      "bytes": 10605
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-partner-key-personal.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "79068c61cdb5f986e2abbe29aa08a2ebc407373405898b2d44481facedd4ea93",
+      "bytes": 10450
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-partner-scope-twice.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "36a827d4c9e168b5d125b5f9d107d14086ab9dc57dcb098ba24b17ffe06b61c7",
+      "bytes": 10347
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-partner-scope-unknown-kid.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b2bbbd040cd20a1f63e6344a3ed8ef14e0f6a8e3cf1e53f9f64a5779da9238df",
+      "bytes": 10237
+    },
+    {
       "path": "fabric/node-vectors/semantic/estate-personal-placement-with-grant.json",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6125,7 +6160,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 811,
+  "file_count": 816,
   "excluded": [
     "git-history",
     "operator-registries",
