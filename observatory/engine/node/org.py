@@ -43,6 +43,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import stat
 import sys
 import threading
 import time
@@ -297,25 +298,61 @@ def read_harness_scans(now: float, scratch: Optional[Path] = None,
 
 def read_exclusions(path: Optional[Path] = None) -> Tuple[List[str], Optional[str]]:
     """The person's exclusion list (`config/node-summary.json`, `{"exclude": [glob, ...]}`): shell-style globs matched
-    against each whole name, applied before anything is checked or sent. Absent: none. A file that is not owner-only,
-    not a list of strings, or unreadable is a reason not to send at all, never an empty list."""
+    against each whole name, applied before anything is checked or sent. Absent: none. The file itself must be a
+    regular file, not a link, readable and writable by its owner only, in a folder nobody else may write to (the
+    folder's own parents are resolved, so a workspace under a linked folder such as `/tmp` is fine). Anything else is
+    a reason not to send at all, worded by what failed, never an empty list."""
     if path is None:
         import paths as _paths
         path = Path(_paths.CONFIG) / EXCLUSIONS_FILE
     path = Path(path)
     if not path.exists() and not path.is_symlink():
         return [], None
+    where = 'the exclusion list config/%s' % EXCLUSIONS_FILE
+    if path.is_symlink():
+        return [], '%s is a symbolic link; make it a regular file' % where
+    folder = path.parent.resolve()
+    target = folder / path.name
     try:
-        doc = json.loads(private_io.read(path.absolute()))
-    except RuntimeError:
-        return [], 'the exclusion list config/%s must be an owner-only regular file' % EXCLUSIONS_FILE
+        if os.name == 'posix' and os.stat(folder).st_mode & 0o022:
+            return [], '%s is in a folder others may write to; make the folder writable by its owner only' % where
+        fd = osprivacy.open(target, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+        with os.fdopen(fd, 'r', encoding='utf-8') as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                return [], '%s is not a regular file' % where
+            if not osprivacy.private(stream.fileno()):
+                return [], ('%s is readable by others; make it owner-only (chmod 600 on POSIX)' % where)
+            if info.st_size > 1024 * 1024:
+                return [], '%s is larger than 1 MB' % where
+            doc = json.loads(stream.read())
     except (OSError, ValueError) as error:
-        return [], 'the exclusion list config/%s is unreadable (%s)' % (EXCLUSIONS_FILE, type(error).__name__)
+        return [], '%s is unreadable (%s)' % (where, type(error).__name__)
     globs = doc.get('exclude') if isinstance(doc, dict) else None
     if not isinstance(globs, list) or len(globs) > EXCLUSIONS_MAX or not all(isinstance(g, str) and g for g in globs):
-        return [], ('the exclusion list config/%s must be {"exclude": [glob, ...]}, at most %d non-empty strings'
-                    % (EXCLUSIONS_FILE, EXCLUSIONS_MAX))
+        return [], ('%s must be {"exclude": [glob, ...]}, at most %d non-empty strings' % (where, EXCLUSIONS_MAX))
     return list(globs), None
+
+
+def _summary_carried(previous: Optional[dict], org_id: str, renewal: bool) -> dict:
+    """What of the harness summary outlives a renewal or a re-enrollment, which write the state afresh (OBS-192):
+    the sequence always (DEC-0101: it rises with every summary of this device and context, and a server may refuse one
+    that goes back); the person's consent only into the same organization (another starts with it off); and, across a
+    renewal of the same enrollment, the last summary the server took with its digest and a refusal still waited out,
+    so a renewal changes nothing the person sees. A re-enrollment sends the summary again at its first check-in."""
+    if not isinstance(previous, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    sequence = previous.get('summarySequence')
+    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
+        out['summarySequence'] = sequence
+    if previous.get('org') == org_id and isinstance(previous.get('summaryConsent'), dict):
+        out['summaryConsent'] = previous['summaryConsent']
+    if renewal and previous.get('org') == org_id:
+        for key in ('nodeSummary', 'summaryRefused', 'summaryBackoffUntil'):
+            if key in previous:
+                out[key] = previous[key]
+    return out
 
 
 def summary_notice(state: dict) -> dict:
@@ -857,6 +894,7 @@ class Enrollment:
             # The same enrollment, renewed: when it began and the server's clock as last measured stay.
             doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=iso(self.clock()),
                        skewSeconds=previous.get('skewSeconds') or 0)
+        doc.update(_summary_carried(previous, self.org_id, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
         with self._db() as conn:                       # a new enrollment: registrations are sent again
@@ -1061,7 +1099,11 @@ class Enrollment:
                 bare = dict({k: v for k, v in doc.items() if k != 'records'}, sequenceNum=state['sequenceNum'])
                 self._save(state)
                 status, answer = self._signed(state, self.paths['check-in'], bare, resend(bare))
-                if status == 200 and isinstance(answer, dict) and answer.get('kind') == 'check-in-response':
+                if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
+                    # Refused without it too: the summary is not to blame, and it waits for the next check-in that
+                    # is taken, so a refusing server gets one request per check-in, not two.
+                    state['summaryHeld'] = True
+                else:
                     retry = int(self.clock()) + SUMMARY_BACKOFF_SECONDS
                     state['summaryRefused'] = {'at': iso(self.clock()), 'status': first_status,
                                                'code': code, 'sequence': pending['summary']['sequence'],
@@ -1115,6 +1157,7 @@ class Enrollment:
                 state.pop('nodeSummaryNote', None)
                 state.pop('summaryRefused', None)
                 state.pop('summaryBackoffUntil', None)
+            state.pop('summaryHeld', None)                 # a check-in was taken: a held summary may ride again
             self._save(state)
             self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
                          **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}))
@@ -1418,7 +1461,7 @@ class Enrollment:
         """Whether a summary may go in this check-in at all: the server reads it, the person consented, and no refusal
         by the server is still being waited out."""
         backoff = state.get('summaryBackoffUntil')
-        return self.accepts_summary(state) and self.consents(state) and \
+        return self.accepts_summary(state) and self.consents(state) and not state.get('summaryHeld') and \
             not (isinstance(backoff, (int, float)) and self.clock() < backoff)
 
     def _summary_due(self, state: dict, inputs: Optional[dict] = None) -> Optional[dict]:
@@ -1612,7 +1655,8 @@ class Enrollment:
         failure is recorded and the next still runs. The whole tick holds the enrollment's lock; what a harness summary
         is built from is read before it is taken (the scans can be large)."""
         current = self.state() or {}
-        inputs = self.summary_inputs() if self._summary_wanted(current) else None
+        due = self.clock() >= (current.get('nextCheckInAt') or 0)
+        inputs = self.summary_inputs() if due and self._summary_wanted(current) else None
         with self._locked():
             state = self.state()
             if state is None:

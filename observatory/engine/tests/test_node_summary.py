@@ -350,6 +350,10 @@ class Build(unittest.TestCase):
                                        harness_scan=harness, mcp_scan=mcp)
         self.assertNotIn('alice', json.dumps(summary))
         self.assertEqual((omitted['skills'], omitted['plugins']), (2, 1))
+        for name in ('smart-home-mcp', 'end-users-guide', 'my-home-page', 'Users-guide'):   # names, not folders
+            self.assertIsNone(ns.DASHED_HOME.search(name), name)
+        for name in ('notes.-Users-alice-x', 'x@-home-alice', 'a-Users-alice-projects-x', 'p:-home-bob'):
+            self.assertIsNotNone(ns.DASHED_HOME.search(name), name)
 
     def test_the_drift_is_capped_at_the_schemas_bound(self):
         baseline = {'revision': 3, 'items': [{'kind': 'skill', 'name': 's%d' % i} for i in range(1100)]}
@@ -582,9 +586,71 @@ class Refusal(_Enrolled):
         self.refusing(status=422, always=True)
         self.assertFalse(self.make().check_in()['ok'])
         self.assertNotIn('summaryRefused', self.make().state())
-        self.refusing(status=401, code='signature-invalid', pointer=None)
+        sent = len(self.sent())
         self.assertFalse(self.make().check_in()['ok'])
-        self.assertEqual(sum(1 for s in self.sent() if s is None), 1, 'a signature refusal is not retried bare')
+        self.assertEqual(self.sent()[sent:], [None], 'held until a check-in is taken: one request, not two')
+        self.transport = self.server
+        self.assertTrue(self.make().check_in()['ok'])              # taken bare: the summary may ride again
+        self.make().check_in()
+        self.assertEqual([s and s['sequence'] for s in self.sent()[sent + 1:]], [None, 2])
+        before = len(self.sent())
+        self.inputs[0]['hooks'] = []                          # a changed summary is due again
+        self.refusing(status=401, code='signature-invalid', pointer=None, always=True)
+        self.assertFalse(self.make().check_in()['ok'])
+        self.assertEqual(len(self.sent()) - before, 1, 'a signature refusal is not retried bare')
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class Lifetime(_Enrolled):
+    """A renewal or a re-enrollment writes the state afresh; the consent, the rising sequence and (across a renewal)
+    the last summary taken survive it."""
+
+    def test_a_renewal_by_the_key_on_record_keeps_consent_sequence_and_the_last_summary(self):
+        from node.relay import strict_time
+        self.make().check_in()
+        before = self.make().state()
+        self.server.renewal = True
+        self.now[0] = strict_time(before['certificate']['notAfter']) / 1000 + 3600
+        result = self.make().check_in()
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['renewed']['by'], 'key-on-record')
+        after = self.make().state()
+        self.assertEqual(after['summaryConsent'], before['summaryConsent'])
+        self.assertEqual(after['nodeSummary']['digest'], before['nodeSummary']['digest'])
+        self.assertEqual(self.sent()[-1]['sequence'], 2, 'the day passed: sent again, the sequence still rising')
+
+    def test_a_re_enrollment_keeps_the_sequence_rising_and_the_consent_of_the_same_organization(self):
+        self.make().check_in()
+        self.make().check_in()
+        self.inputs[0]['hooks'] = []
+        self.make().check_in()                                # sequences 1 and 2 sent
+        self.make().enroll('https://org.example', 'et_2.' + 'T' * 32)
+        state = self.make().state()
+        self.assertEqual((state['summarySequence'], state['summaryConsent']['on']), (2, True))
+        self.assertNotIn('nodeSummary', state, 'a new enrollment sends the summary again')
+        self.make().check_in()
+        self.assertEqual(self.sent()[-1]['sequence'], 3)
+
+    def test_consent_is_not_carried_from_another_organization(self):
+        from node.org import _summary_carried
+        previous = {'org': 'org_other', 'summarySequence': 4, 'summaryConsent': {'on': True, 'at': 'x'},
+                    'nodeSummary': {'digest': 'sha256:x'}}
+        self.assertEqual(_summary_carried(previous, self.org, renewal=False), {'summarySequence': 4})
+        self.assertEqual(_summary_carried(None, self.org, renewal=True), {})
+
+    def test_a_tick_reads_the_scans_only_when_a_check_in_is_due(self):
+        reads = []
+        harness = lambda: (reads.append(1), tuple(self.inputs))[1]       # noqa: E731
+        from node.org import Enrollment
+        make = lambda: Enrollment(self.node, self.org, transport=self.server, clock=self.clock,   # noqa: E731
+                                  harness=harness, exclusions=lambda: self.exclusions)
+        make().tick()
+        self.assertEqual(len(reads), 1)
+        make().tick()                                        # the next check-in is 300 s away
+        self.assertEqual(len(reads), 1)
+        self.now[0] += 301
+        make().tick()
+        self.assertEqual(len(reads), 2)
 
 
 class Scans(unittest.TestCase):
@@ -640,6 +706,23 @@ class Scans(unittest.TestCase):
             path.chmod(0o600)
         path.write_text(json.dumps({'exclude': 'private-*'}))
         self.assertIn('must be {"exclude"', read_exclusions(path)[1])
+
+    @unittest.skipUnless(__import__('os').name == 'posix', 'links and modes as POSIX keeps them')
+    def test_the_exclusion_list_under_a_linked_folder_is_read_and_failures_are_named(self):
+        import os
+        from node.org import read_exclusions
+        real = self.folder / 'real-config'
+        real.mkdir(mode=0o700)
+        (real / 'node-summary.json').write_text(json.dumps({'exclude': ['private-*']}))
+        (real / 'node-summary.json').chmod(0o600)
+        linked = self.folder / 'linked'
+        linked.symlink_to(real)                               # a workspace under a linked folder, as /tmp is
+        self.assertEqual(read_exclusions(linked / 'node-summary.json'), (['private-*'], None))
+        os.symlink(real / 'node-summary.json', real / 'other.json')
+        self.assertIn('symbolic link', read_exclusions(real / 'other.json')[1])
+        real.chmod(0o777)
+        self.assertIn('folder others may write to', read_exclusions(real / 'node-summary.json')[1])
+        real.chmod(0o700)
 
 
 if __name__ == '__main__':

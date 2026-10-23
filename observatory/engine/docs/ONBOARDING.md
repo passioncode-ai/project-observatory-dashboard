@@ -1383,8 +1383,9 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   contract ships the whole harness whatever the machine's mode, and whether an organization should also see what serves
   your other contexts is still its open question CT-92. To keep names back, list them in
   `config/node-summary.json` as `{"exclude": ["private-*", "plugin:*:mine"]}` (shell-style globs on whole names), mode
-  0600: they are never sent, only counted here (`excluded`); a list that is not owner-only or not readable sends
-  nothing. Once on, a server that lists `node-summary/1` gets it in a check-in when it changed and at least once a day.
+  0600 in a folder only you can write to: they are never sent, only counted here (`excluded`); a list that is a
+  link, not owner-only, in a folder others may write to or not readable sends nothing, and says which. The consent
+  and the summary's rising sequence survive a renewal and a re-enrollment into the same organization. Once on, a server that lists `node-summary/1` gets it in a check-in when it changed and at least once a day.
   Never a path, a command, an argument, an environment value, a URL, a hook's command, a prompt, an output or a file's
   content; a name with a space, a slash or a dashed home folder is left out (counted, not rewritten). It is built from
   the harness and MCP scans, so it needs `integrations.harness` and `integrations.mcp` on and scans younger than

@@ -541,19 +541,28 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `full org summary --org ID` works before consent, so the person reads what they would share first.
 - **The person's exclusion list.** `config/node-summary.json`, `{"exclude": [glob, ...]}`, owner-only: shell-style
   globs matched against each whole name (a coding agent's id, an MCP server, a skill, a plugin, a service key), applied
-  before anything is checked or sent. What it keeps back is counted in `excluded`, which stays here. A list that is not
-  owner-only, not a list of strings, or unreadable sends nothing (`org:node-summary-unavailable`), never an empty list.
+  before anything is checked or sent. What it keeps back is counted in `excluded`, which stays here. A list that is a
+  link, not owner-only, in a folder others may write to, not a list of strings, or unreadable sends nothing
+  (`org:node-summary-unavailable`, the reason worded by what failed), never an empty list; the folder's own parents
+  are resolved, so a workspace under a linked folder such as `/tmp` reads it.
 - **What leaves.** `build` copies an allow-list of fields into the schema's shape and checks the result with
   FAC-SEM-128 before it hands it over (`SummaryRefused` otherwise): names, catalogue ids, versions, digests, sources,
   transports, health and a hook count. A name the schema refuses (a space, a slash, a dotted `@` suffix) is left out and
-  counted in `omitted`, which stays on this machine. So is a name holding a dashed home folder (`-Users-<name>`,
-  `-home-<name>`): the contract's home-path shapes miss one after a dot or an `@`, so the node refuses it itself, beside
-  FAC-SEM-128 (raised with the contract). Drift is capped at the schema's 1,024 items; the count past it stays here.
+  counted in `omitted`, which stays on this machine. So is a name holding a dashed home folder: the contract's
+  home-path shapes miss one after a dot or an `@`, so the node refuses `-Users-<x>` or `-home-<x>` right after a
+  separator (`notes.-Users-alice-x`, `x@-home-alice`) or followed by two more dash segments as a flattened path
+  continues (`a-Users-alice-projects-x`), beside FAC-SEM-128 (raised with the contract); `smart-home-mcp` and
+  `end-users-guide` pass. Drift is capped at the schema's 1,024 items; the count past it stays here.
 - **When.** `Enrollment.check_in` puts the summary in `records.nodeSummary` only when the server's latest protocols
   list `node-summary/1`, the person consented, and its content digest (everything but `sequence` and `at`) differs from
   the last one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the
   check-in's `sequenceNum`; a failed check-in leaves the summary due. The scans are read before the enrollment's lock is
-  taken (they can be large; at most 32 MB each).
+  taken (they can be large; at most 32 MB each), and a tick reads them only when a check-in is due.
+- **Across a renewal or a re-enrollment** (both write the enrollment's state afresh): the sequence keeps rising
+  (DEC-0101: per device and context; a server may refuse one that goes back); the consent is carried into the same
+  organization only; a renewal by the key on record also keeps the last summary taken (its digest) and a refusal still
+  waited out, so it changes nothing the person sees, while a re-enrollment sends the summary again at its first
+  check-in (`_summary_carried`).
 - **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
   sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
   (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
@@ -564,7 +573,8 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   the summary or the records; never a signature, certificate or rate refusal) is sent again at once without it. When
   that one is taken, the refusal is recorded (`summaryRefused`: when, status, code, retry time) and the summary waits a
   day, so heartbeats, rotation and renewal go on; `org status` says `org:node-summary-refused` and Health when it is
-  tried again. A refusal that the bare check-in gets too is the check-in's, not the summary's.
+  tried again. A refusal that the bare check-in gets too is the check-in's, not the summary's: the summary is then held
+  until a check-in is taken, so a refusing server gets one request per check-in, not two.
 - **Shown.** `org summary --org <id>` prints the next summary as it would leave, saving and sending nothing.
   `org status` (`nodeSummary` with its `state`: `not-listed`, `consent-off`, `unavailable`, `refused`, `pending` or
   `sent`; the first, third and fourth also as `org:node-summary-*` in `degraded`), doctor and Health read the saved

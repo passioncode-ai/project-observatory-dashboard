@@ -320,10 +320,13 @@ def _mcp_source(scope: Any) -> str:
     return 'other'
 
 
-#: A name a dashed home folder could hide in (`-Users-alice-...`, `-home-alice-...`): the contract's home-path shapes
-#: miss one after a dot or an `@` (`plugin.-Users-alice-x`, `x@-home-alice`), so the node refuses it itself, beside
-#: FAC-SEM-128, and leaves the name out.
-DASHED_HOME = re.compile(r'-(?:[Uu]sers|home)-[A-Za-z0-9]')
+#: A name a dashed home folder could hide in: the contract's home-path shapes miss one after a dot or an `@`
+#: (`notes.-Users-alice-x`, `x@-home-alice`), so the node refuses it itself, beside FAC-SEM-128, and leaves the name
+#: out. Two shapes: `-Users-`/`-home-` right after a separator (start, `.`, `@`, `_`, `+`, `:`), or one followed by two
+#: more dash segments, the way a flattened path continues (`a-Users-alice-projects-x`). `smart-home-mcp` and
+#: `end-users-guide` are names, not folders, and pass.
+DASHED_HOME = re.compile(r'(?:^|[.@_+:])-(?:[Uu]sers|home)-[A-Za-z0-9]'
+                         r'|-(?:[Uu]sers|home)-[A-Za-z0-9_.+]+-[A-Za-z0-9_.+]+-[A-Za-z0-9]')
 #: The most drift items a summary carries (the schema's `drift.items` bound).
 MAX_DRIFT = 1024
 
