@@ -401,9 +401,9 @@ class Meter:
         return doc
 
     def _grant(self, ref: str, now: int) -> tuple[Optional[dict], Optional[dict]]:
-        """The grant the ref names, or the denial. The contract's `readProjectedGrant` (DEC-0041 DL-23/DL-24 at
-        fabric-agent-contract 7931c1d), in its order: the projection authorises nothing alone, and every doubt
-        about it is a denial."""
+        """The grant the ref names, or the denial. The contract's `readProjectedGrant` (DEC-0041 DL-23/DL-24,
+        `src/grant-projection.ts`, the same at the pin as at the commit `fabric/delegation-schemas/` names), in
+        its order: the projection authorises nothing alone, and every doubt about it is a denial."""
         def deny(code: str, detail: str) -> tuple[None, dict]:
             return None, self._denied(now, code, f"the hub's projection of the grant: {detail}")
         directory = self.grants_dir()

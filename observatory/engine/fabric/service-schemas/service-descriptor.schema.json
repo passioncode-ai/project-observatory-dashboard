@@ -8,7 +8,6 @@
     "id",
     "instance",
     "name",
-    "origin",
     "auth",
     "lifecycle",
     "installedAt",
@@ -16,22 +15,27 @@
   ],
   "properties": {
     "protocol": {
-      "$ref": "service-common.schema.json#/$defs/protocol"
+      "$ref": "service-common.schema.json#/$defs/protocol",
+      "description": "The extension's protocol revision, fabric-service/0.1 (docs/specification/service.md#descriptor)."
     },
     "id": {
-      "$ref": "service-common.schema.json#/$defs/serviceId"
+      "$ref": "service-common.schema.json#/$defs/serviceId",
+      "description": "The service's id, a slug; with instance it names the descriptor's file, <id>.<instance>.json (docs/specification/service.md#descriptor)."
     },
     "instance": {
-      "$ref": "service-common.schema.json#/$defs/instance"
+      "$ref": "service-common.schema.json#/$defs/instance",
+      "description": "Which copy of the service this is; a second copy (a preview, a branch build) is a second instance, never a second id (docs/specification/service.md#descriptor)."
     },
     "name": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 80
+      "maxLength": 80,
+      "description": "The service's name as a host shows it, 1 to 80 characters (docs/specification/service.md#descriptor)."
     },
     "summary": {
       "type": "string",
-      "maxLength": 200
+      "maxLength": 200,
+      "description": "One line on what the service does, at most 200 characters (docs/specification/service.md#descriptor)."
     },
     "placement": {
       "enum": [
@@ -39,7 +43,54 @@
         "remote"
       ],
       "default": "local",
-      "description": "local: a process on this computer at http://127.0.0.1:<port>, supervised by launchd or by nothing. remote: an online agent or dashboard at an https origin, supervised by its platform (DEC-0019)."
+      "description": "local: a process on this computer at http://127.0.0.1:<port>, supervised by launchd, systemd, the Task Scheduler, Project Observatory's node or nothing (DEC-0032, DEC-0061). remote: an online agent or dashboard at an https origin, supervised by its platform (DEC-0019). Either placement may also be offered to others, which `peer` declares (DEC-0061)."
+    },
+    "peer": {
+      "type": "object",
+      "description": "DEC-0061: the service is offered to others — a colleague, an organization, a guest — beside its operator. It declares where they reach it, who controls the machine or account it runs on, where it runs and the most sensitive data it may receive. It grants nobody access: a share grant or an organization listing does.",
+      "required": [
+        "endpoint",
+        "custody",
+        "residency",
+        "maxDataClass"
+      ],
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$",
+          "description": "Where others reach the service: https://<dns-name>[:<port>][/<path>], with no query, fragment or userinfo, never an IP literal; a reserved name is refused by FAC-SEM-085."
+        },
+        "custody": {
+          "enum": [
+            "organization-managed",
+            "personal",
+            "processor-hosted"
+          ],
+          "description": "Who controls the machine or the account the service runs on: an organization (its managed machine or its own cloud account), a person (their own machine or account), or a processor that runs it for an organization under a processing agreement (processor-hosted, DEC-0099: the organization's cloud on PassionCode's hosting; the organization controls the data, the processor the machine)."
+        },
+        "residency": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(A[B-Z]|[B-PR-WY][A-Z]|Q[A-L]|Z[A-Y])$"
+          },
+          "description": "Where the service runs and keeps the data it receives: ISO 3166-1 alpha-2 codes in upper case, EU (reserved by ISO 3166-1 for the European Union) admitted, the user-assigned codes AA, QM–QZ, XA–XZ and ZZ refused."
+        },
+        "maxDataClass": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "description": "The most sensitive data class the service may receive, in the organization edition's order public < internal < confidential < restricted (the classes of device policy, DEC-0053). A host sends it nothing above (FAC-SEM-088)."
+        }
+      },
+      "additionalProperties": false
     },
     "origin": {
       "type": "string",
@@ -62,19 +113,22 @@
       ],
       "properties": {
         "tokenFile": {
-          "$ref": "service-common.schema.json#/$defs/localPath"
+          "$ref": "service-common.schema.json#/$defs/localPath",
+          "description": "The file that holds the service token, mode 0600 (on Windows the ACL of the token-file rule); a host reads it in a privileged process (docs/specification/service.md#authentication-and-network, docs/specification/service.md#windows-token-files)."
         },
         "header": {
           "type": "string",
           "pattern": "^[A-Za-z][A-Za-z0-9-]{0,63}$",
-          "default": "Authorization"
+          "default": "Authorization",
+          "description": "The request header the token travels in; Authorization when absent (docs/specification/service.md#authentication-and-network)."
         },
         "scheme": {
           "enum": [
             "Bearer",
             "none"
           ],
-          "default": "Bearer"
+          "default": "Bearer",
+          "description": "The scheme before the token in that header: Bearer (the default) or none for a bare token (docs/specification/service.md#authentication-and-network)."
         }
       },
       "allOf": [
@@ -103,7 +157,62 @@
           }
         }
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Where the service token is and how it travels: the token file, the header and its scheme; never the token (docs/specification/service.md#authentication-and-network)."
+    },
+    "channels": {
+      "type": "object",
+      "properties": {
+        "local": {
+          "type": "object",
+          "required": [
+            "protocol"
+          ],
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "pattern": "^fabric-local-channel/[0-9]{1,4}(\\.[0-9]{1,4}){0,2}$",
+              "description": "The local channel's protocol revision, fabric-local-channel/<revision> (docs/specification/local-channel.md)."
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/[\\x21-\\x7e]{1,98}$",
+              "maxLength": 99,
+              "description": "POSIX: the absolute socket path, printable ASCII and so at most 99 bytes as published (sun_path), in a directory of mode 0700 the node owns; never under ~."
+            },
+            "pipe": {
+              "type": "string",
+              "pattern": "^\\\\\\\\\\.\\\\pipe\\\\[A-Za-z0-9._-]{1,64}-S-1-[0-9]+(-[0-9]+){1,14}$",
+              "description": "Windows: \\\\.\\pipe\\<node>-<user SID>."
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": true
+              }
+            },
+            {
+              "required": [
+                "pipe"
+              ],
+              "properties": {
+                "pipe": true
+              }
+            }
+          ],
+          "additionalProperties": false,
+          "description": "Where a client reaches the service's local channel: its protocol revision and a socket path or a Windows pipe; a client never computes it (docs/specification/local-channel.md, DEC-0075)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "DEC-0075: where a client finds the node's local channel; a client never computes the path. Meaningful on the node's own descriptor; a remote placement carries none.",
+      "required": [
+        "local"
+      ]
     },
     "lifecycle": {
       "type": "object",
@@ -116,12 +225,20 @@
             "launchd",
             "systemd",
             "task-scheduler",
+            "node",
+            "person",
             "none"
-          ]
+          ],
+          "description": "The one supervisor (DEC-0032, DEC-0057, DEC-0061): launchd (label, plist), systemd (unit), the Task Scheduler (task), Project Observatory's node, which supervises the service as its child and keeps no supervisor file here (no label, plist, unit or task), or none. person (DEC-0069): an app a person installs and starts, with no supervisor; its descriptor says it is installed, never that it runs."
+        },
+        "app": {
+          "$ref": "service-common.schema.json#/$defs/localPath",
+          "description": "DEC-0069, for manager person only: the installed app (a bundle or an executable). A reader that finds it gone treats the descriptor as stale."
         },
         "label": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,254}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,254}$",
+          "description": "The launchd job label, beside manager launchd only (docs/specification/service.md#lifecycle)."
         },
         "plist": {
           "allOf": [
@@ -132,7 +249,8 @@
               "type": "string",
               "pattern": "\\.plist$"
             }
-          ]
+          ],
+          "description": "The launchd property list file, beside manager launchd only (docs/specification/service.md#lifecycle)."
         },
         "unit": {
           "type": "string",
@@ -163,6 +281,30 @@
             "properties": {
               "label": true,
               "plist": true
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "manager"
+            ],
+            "properties": {
+              "manager": {
+                "enum": [
+                  "systemd",
+                  "task-scheduler",
+                  "node",
+                  "person"
+                ]
+              }
+            }
+          },
+          "then": {
+            "description": "DEC-0057, DEC-0061: a descriptor names one supervisor, so launchd's label and plist are refused beside systemd, the Task Scheduler, the node and a person (DEC-0069).",
+            "properties": {
+              "label": false,
+              "plist": false
             }
           }
         },
@@ -219,6 +361,84 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "required": [
+              "manager"
+            ],
+            "properties": {
+              "manager": {
+                "const": "person"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "app"
+            ],
+            "properties": {
+              "app": true
+            }
+          },
+          "else": {
+            "properties": {
+              "app": false
+            }
+          }
+        }
+      ],
+      "description": "Who supervises the service and the supervisor's own names for it; one supervisor per descriptor (docs/specification/service.md#lifecycle)."
+    },
+    "runner": {
+      "type": "object",
+      "description": "DEC-0061: how the service's model calls are signed in — the kind of the credential, never the credential. subscription: the operator's own login, in its vendor's runner only (DEC-0046); key: an issued key; platform-metered: the hosting platform's own metered models under the deployment's account; none: no model calls.",
+      "required": [
+        "credentialKind"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "common.schema.json#/$defs/slug",
+          "description": "A shared runner kind (runners.md); a node placing the service checks it against its runner catalogue (FAC-SEM-087)."
+        },
+        "credentialKind": {
+          "enum": [
+            "subscription",
+            "key",
+            "platform-metered",
+            "none"
+          ],
+          "description": "The kind of the credential the service's model calls use: subscription, key, platform-metered or none; never the credential itself (docs/specification/service.md#descriptor, DEC-0061)."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "credentialKind"
+            ],
+            "properties": {
+              "credentialKind": {
+                "const": "subscription"
+              }
+            }
+          },
+          "then": {
+            "description": "DEC-0046, DEC-0061: a subscription is a vendor's login and runs only in that vendor's runner: claude in claude-code, kimi in kimi-code, chatgpt in codex.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "claude-code",
+                  "kimi-code",
+                  "codex"
+                ]
+              }
+            }
+          }
         }
       ]
     },
@@ -230,58 +450,136 @@
       ],
       "properties": {
         "data": {
-          "$ref": "service-common.schema.json#/$defs/localPath"
+          "$ref": "service-common.schema.json#/$defs/localPath",
+          "description": "The data and configuration directory; it holds service.lock (docs/specification/service.md#directories-per-system)."
         },
         "config": {
-          "$ref": "service-common.schema.json#/$defs/localPath"
+          "$ref": "service-common.schema.json#/$defs/localPath",
+          "description": "The configuration directory, when it is not the data directory (docs/specification/service.md#directories-per-system)."
         },
         "cache": {
-          "$ref": "service-common.schema.json#/$defs/localPath"
+          "$ref": "service-common.schema.json#/$defs/localPath",
+          "description": "The cache directory, rebuilt when deleted (docs/specification/service.md#directories-per-system)."
         },
         "logs": {
           "type": "array",
           "maxItems": 16,
           "items": {
             "$ref": "service-common.schema.json#/$defs/localPath"
-          }
+          },
+          "description": "The log directories, at most 16 (docs/specification/service.md#directories-per-system)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The directories the service uses; where a writer puts them is per system (docs/specification/service.md#directories-per-system)."
     },
     "commands": {
       "type": "object",
       "properties": {
         "doctor": {
-          "$ref": "service-common.schema.json#/$defs/argv"
+          "$ref": "service-common.schema.json#/$defs/argv",
+          "description": "The argument array that checks the installation (docs/specification/service.md#descriptor)."
         },
         "update": {
-          "$ref": "service-common.schema.json#/$defs/argv"
+          "$ref": "service-common.schema.json#/$defs/argv",
+          "description": "The argument array that updates the service (docs/specification/service.md#descriptor)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The commands a host may run, as argument arrays: doctor and update only; a host runs no other (docs/specification/service.md#descriptor)."
     },
     "source": {
       "type": "object",
       "properties": {
         "repository": {
-          "$ref": "common.schema.json#/$defs/uri"
+          "$ref": "common.schema.json#/$defs/uri",
+          "description": "The repository of the service's code, which tells code apart from a store that versions data (docs/specification/service.md#lifecycle)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Where the service's code comes from (docs/specification/service.md#lifecycle)."
     },
     "fabricManifest": {
-      "$ref": "service-common.schema.json#/$defs/localPath"
+      "$ref": "service-common.schema.json#/$defs/localPath",
+      "description": "The provider manifest of a service that has capabilities; that manifest names this descriptor back (FAC-SEM-020, docs/specification/service.md)."
     },
     "installedAt": {
-      "$ref": "common.schema.json#/$defs/timestamp"
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the instance was installed, an RFC 3339 date-time (docs/specification/service.md#descriptor)."
     },
     "installedBy": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "The installer program and its version (DEC-0015)."
+        },
+        {
+          "type": "object",
+          "description": "DEC-0061: who installed it, by role and never by name, and with which installer.",
+          "required": [
+            "by",
+            "tool"
+          ],
+          "properties": {
+            "by": {
+              "enum": [
+                "person",
+                "node",
+                "organization"
+              ],
+              "description": "person: a person ran the installer, or had their coding agent run it; node: Project Observatory's node installed it from a placement in the person's estate record; organization: the node installed it from an organization's listing."
+            },
+            "role": {
+              "enum": [
+                "operator",
+                "administrator"
+              ],
+              "description": "For by: person only — the person who uses this machine, or an organization's administrator."
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "The installer program and its version, as the string form."
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "by"
+                ],
+                "properties": {
+                  "by": {
+                    "const": "person"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": true
+                }
+              },
+              "else": {
+                "properties": {
+                  "role": false
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Who installed the instance: the installer and its version as a string, or {by, role?, tool}; a role, never a person (docs/specification/service.md#descriptor, DEC-0061)."
     },
     "extensions": {
-      "$ref": "common.schema.json#/$defs/extensions"
+      "$ref": "common.schema.json#/$defs/extensions",
+      "description": "Extension values keyed by URI; a host preserves and ignores the ones it does not know (docs/specification/service.md#descriptor)."
     }
   },
   "additionalProperties": false,
@@ -317,7 +615,8 @@
               "update": false
             },
             "type": "object"
-          }
+          },
+          "channels": false
         }
       },
       "else": {
@@ -331,6 +630,79 @@
           },
           "paths": true
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "peer": true
+        },
+        "required": [
+          "peer"
+        ]
+      },
+      "then": {
+        "description": "DEC-0061: a service offered to others names how its model calls are signed in, and never a subscription: a subscription serves only its owner's own sessions.",
+        "required": [
+          "runner"
+        ],
+        "properties": {
+          "runner": {
+            "type": "object",
+            "properties": {
+              "credentialKind": {
+                "not": {
+                  "const": "subscription"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "lifecycle"
+        ],
+        "properties": {
+          "lifecycle": {
+            "type": "object",
+            "required": [
+              "manager"
+            ],
+            "properties": {
+              "manager": {
+                "const": "person"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "description": "DEC-0069: an app's descriptor names who installed it as a person, with the installer's or the app's version in tool; its origin is optional, since a live origin is in the app's own liveness file.",
+        "properties": {
+          "installedBy": {
+            "type": "object",
+            "required": [
+              "by",
+              "role",
+              "tool"
+            ],
+            "properties": {
+              "by": {
+                "const": "person"
+              },
+              "role": true,
+              "tool": true
+            }
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "origin"
+        ]
       }
     }
   ]

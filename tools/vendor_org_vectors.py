@@ -8,11 +8,14 @@ matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registr
 `schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
 check-in fixtures CT-65 added and the key-on-record renewal fixtures of DEC-0100 into its `device/` folder, then
 rewrites the commit and those files' digest rows in that folder's README, and the commit of the engine's contract
-pin (`observatory/engine/fabric-contract.lock.json`, OBS-196): the contract asks a consumer to pin it once and to move
-the pin with what it vendors, in one change.
+pin (OBS-196), and re-vendors the schemas `tools/vendor_contract_schemas.py` keeps at the pin (OBS-205): the contract
+asks a consumer to pin it once and to move the pin with what it vendors, in one change.
 `tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
-`tests/test_contract_lock.py` holds the pin equal to the README's commit, so a re-vendored commit is checked by the next
-test run. Prints what changed; exits 1 when the commit or a file cannot be read, and changes nothing then.
+`tests/test_contract_lock.py` holds the pin equal to the READMEs' commits, so a re-vendored commit is checked by the next
+test run. The pin is read through `observatory/engine/contract_lock.py`, the one reader of it, and checked before
+anything is read from the contract; every file is read and every README checked before anything is written. Prints what
+changed; exits 1 when the pin is missing or invalid, or the commit, a file or a README cannot be read, and changes
+nothing then.
 """
 from __future__ import annotations
 
@@ -26,8 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS = ROOT / "observatory" / "engine" / "fabric" / "node-vectors"
-#: The engine's one pin of the contract, under the contract's own file name.
-CONTRACT_PIN = ROOT / "observatory" / "engine" / "fabric-contract.lock.json"
+ENGINE = ROOT / "observatory" / "engine"
 FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
          "share-registration.json": "fixtures/vectors/share-registration.json",
          "device-enrollment.schema.json": "schemas/device-enrollment.schema.json",
@@ -48,30 +50,60 @@ FILES = {"http-signature.json": "fixtures/vectors/http-signature.json",
 PIN = re.compile(r"(\(OBS-161 pin\)[^`]*`)([0-9a-f]{40})(`)")
 
 
-def _safe_git():
-    spec = importlib.util.spec_from_file_location("observatory_vendor_safe_git",
-                                                  ROOT / "observatory" / "engine" / "safe_git.py")
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location("observatory_vendor_" + name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def vendor(contract: Path, commit: str) -> dict:
+def _safe_git():
+    return _load(ENGINE / "safe_git.py", "safe_git")
+
+
+def _contract_lock():
+    return _load(ENGINE / "contract_lock.py", "contract_lock")
+
+
+def _schemas():
+    return _load(ROOT / "tools" / "vendor_contract_schemas.py", "contract_schemas")
+
+
+def vendor(contract: Path, commit: str, engine: Path = ENGINE) -> dict:
+    # The pin first: a missing or invalid pin stops the run before the contract is read or a file is written.
+    lock = _contract_lock()
+    try:
+        pin = lock.contract_pin(engine)
+    except (ValueError, OSError) as error:
+        raise SystemExit(json.dumps({"error": "pin-invalid", "detail": str(error)})) from None
+    if pin is None:
+        raise SystemExit(json.dumps({"error": "pin-missing", "file": lock.CONTRACT_PIN}))
     git = _safe_git()
     resolved = git.run(["rev-parse", "--verify", commit + "^{commit}"], repo=contract)
     if resolved.returncode != 0:
         raise SystemExit(json.dumps({"error": "commit-unreadable", "commit": commit}))
     full = resolved.stdout.strip()
+    moved = {**pin, "commit": full}
+    problems = lock.pin_problems(moved)
+    if problems:
+        raise SystemExit(json.dumps({"error": "pin-invalid", "detail": "; ".join(problems)}))
     blobs = {}
     for name, path in FILES.items():
         shown = git.run(["show", "%s:%s" % (full, path)], repo=contract, text=False)
         if shown.returncode != 0:
             raise SystemExit(json.dumps({"error": "file-unreadable", "file": path, "commit": full}))
         blobs[name] = shown.stdout
-    readme_path = VECTORS / "README.md"
+    vectors = engine / VECTORS.relative_to(ENGINE)
+    readme_path = vectors / "README.md"
     readme = readme_path.read_text(encoding="utf-8")
     if not PIN.search(readme):
         raise SystemExit(json.dumps({"error": "readme-pin-missing"}))
+    schemas = _schemas()
+    try:
+        schema_files = schemas.plan(contract, full, engine)
+    except schemas.VendorError as error:
+        raise SystemExit(json.dumps(error.detail)) from None
+    # Everything is read and checked; from here on the run only writes.
     readme = PIN.sub(lambda m: m.group(1) + full + m.group(3), readme, count=1)
     changed = []
     for name, data in blobs.items():
@@ -79,17 +111,17 @@ def vendor(contract: Path, commit: str) -> dict:
         row = "| `%s` | `%s` |" % (name, digest)
         pattern = re.compile(r"^\| `%s` \| `[0-9a-f]{64}` \|$" % re.escape(name), re.M)
         readme = pattern.sub(row, readme) if pattern.search(readme) else readme.rstrip("\n") + "\n" + row + "\n"
-        target = VECTORS / name
+        target = vectors / name
         target.parent.mkdir(exist_ok=True)
         if not target.exists() or target.read_bytes() != data:
             changed.append(name)
         target.write_bytes(data)
     readme_path.write_text(readme, encoding="utf-8")
-    pin = json.loads(CONTRACT_PIN.read_text(encoding="utf-8"))
-    if pin.get("commit") != full:
-        pin["commit"] = full
-        CONTRACT_PIN.write_text(json.dumps(pin, indent=2) + "\n", encoding="utf-8")
-        changed.append(CONTRACT_PIN.name)
+    changed += schemas.write(schema_files, engine)
+    if pin["commit"] != full:
+        pin_path = engine / lock.CONTRACT_PIN
+        pin_path.write_text(json.dumps(moved, indent=2) + "\n", encoding="utf-8")
+        changed.append(lock.CONTRACT_PIN)
     return {"commit": full, "changed": changed}
 
 

@@ -3,7 +3,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-output.schema.json",
   "title": "grant.check — output",
-  "description": "The grant-check answer of fabric-agent-contract DEC-0037/0039/0041 at 7931c1d, self-contained: allowed with a receipt, or denied with the code, the level and the window.",
+  "description": "The grant-check answer of fabric-agent-contract DEC-0037/0039/0041 (its grant-check schema, vendored in fabric/delegation-schemas/), self-contained: allowed with a receipt, or denied with the code, the level and the window.",
   "oneOf": [
     {
       "$ref": "#/$defs/allowed"

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import plistlib
+import re
 import signal
 import shutil
 import socket
@@ -133,10 +134,20 @@ class VendoredKit(unittest.TestCase):
                              f"{path.name} differs from the kit it was copied from")
 
     def test_contract_schemas_are_bundled(self):
+        # The four the server is held to, and the `$ref` closure of them at the contract pin (OBS-205).
         names = {p.name for p in SCHEMAS.glob("*.schema.json")}
         self.assertEqual(names, {"common.schema.json", "service-common.schema.json",
                                  "service-descriptor.schema.json", "service-well-known.schema.json",
-                                 "service-events-page.schema.json", "service-usage.schema.json"})
+                                 "service-events-page.schema.json", "service-usage.schema.json",
+                                 "model-profile.schema.json", "registry-models.schema.json"})
+
+    def test_contract_schemas_are_the_recorded_bytes(self):
+        """`tools/vendor_contract_schemas.py` records each file's digest in the README."""
+        recorded = dict(re.findall(r"^\| `([^`]+)` \| `([0-9a-f]{64})` \|$",
+                                   (SCHEMAS / "README.md").read_text(encoding="utf-8"), re.M))
+        self.assertEqual(set(recorded), {p.name for p in SCHEMAS.glob("*.schema.json")})
+        for name, digest in recorded.items():
+            self.assertEqual(hashlib.sha256((SCHEMAS / name).read_bytes()).hexdigest(), digest, name)
 
 
 # --- identity ------------------------------------------------------------------------

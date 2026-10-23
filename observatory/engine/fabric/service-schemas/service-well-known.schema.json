@@ -13,7 +13,12 @@
   ],
   "properties": {
     "protocol": {
-      "$ref": "service-common.schema.json#/$defs/protocol"
+      "$ref": "service-common.schema.json#/$defs/protocol",
+      "description": "The extension's protocol revision, fabric-service/0.1 (docs/specification/service.md#well-known-document)."
+    },
+    "protocols": {
+      "$ref": "common.schema.json#/$defs/protocols",
+      "description": "DEC-0067: the protocol revisions this service accepts, N and N−1 per protocol. A request in another revision is refused with schema-unsupported before it is read."
     },
     "service": {
       "type": "object",
@@ -26,34 +31,42 @@
       ],
       "properties": {
         "id": {
-          "$ref": "service-common.schema.json#/$defs/serviceId"
+          "$ref": "service-common.schema.json#/$defs/serviceId",
+          "description": "The service's id; it equals the descriptor's, or a host reports the port's holder as foreign (FAC-SEM-009, docs/specification/service.md#well-known-document)."
         },
         "instance": {
-          "$ref": "service-common.schema.json#/$defs/instance"
+          "$ref": "service-common.schema.json#/$defs/instance",
+          "description": "The instance; it equals the descriptor's (FAC-SEM-009, docs/specification/service.md#well-known-document)."
         },
         "name": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 80
+          "maxLength": 80,
+          "description": "The service's name as a host shows it, 1 to 80 characters (docs/specification/service.md#well-known-document)."
         },
         "version": {
-          "$ref": "common.schema.json#/$defs/semver"
+          "$ref": "common.schema.json#/$defs/semver",
+          "description": "The running version, a semantic version (docs/specification/service.md#well-known-document)."
         },
         "build": {
           "type": "object",
           "properties": {
             "commit": {
               "type": "string",
-              "pattern": "^[0-9a-f]{7,40}$"
+              "pattern": "^[0-9a-f]{7,40}$",
+              "description": "The source commit the build was made from, 7 to 40 lower-case hex digits (docs/specification/service.md#well-known-document)."
             },
             "digest": {
-              "$ref": "common.schema.json#/$defs/sha256"
+              "$ref": "common.schema.json#/$defs/sha256",
+              "description": "The package digest of the build (docs/specification/service.md#well-known-document)."
             },
             "dirty": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "True when the build carries changes that are not in the commit (docs/specification/service.md#well-known-document)."
             },
             "builtAt": {
-              "$ref": "common.schema.json#/$defs/timestamp"
+              "$ref": "common.schema.json#/$defs/timestamp",
+              "description": "When the build was made, an RFC 3339 date-time (docs/specification/service.md#well-known-document)."
             }
           },
           "anyOf": [
@@ -74,10 +87,12 @@
               }
             }
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "The running build: a commit or a package digest, so a host tells a restart onto new code from one onto old code (docs/specification/service.md#well-known-document)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Which service answers: id and instance equal to its descriptor's, its name, version and build (docs/specification/service.md#well-known-document)."
     },
     "process": {
       "type": "object",
@@ -88,13 +103,16 @@
       "properties": {
         "pid": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "The process id; a host compares it with the supervisor's to detect a second copy (docs/specification/service.md#well-known-document)."
         },
         "startedAt": {
-          "$ref": "common.schema.json#/$defs/timestamp"
+          "$ref": "common.schema.json#/$defs/timestamp",
+          "description": "When the process started, an RFC 3339 date-time (docs/specification/service.md#well-known-document)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The live process: its pid and when it started; a host compares the pid with its supervisor's (docs/specification/service.md#well-known-document)."
     },
     "status": {
       "enum": [
@@ -102,7 +120,8 @@
         "ready",
         "degraded",
         "stopping"
-      ]
+      ],
+      "description": "starting, ready, degraded or stopping; a process that cannot serve does not answer, and the host derives down (docs/specification/service.md#well-known-document)."
     },
     "degraded": {
       "type": "array",
@@ -117,16 +136,23 @@
           "source": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 80
+            "maxLength": 80,
+            "description": "What is degraded, 1 to 80 characters; equal to a connection's id it is that connection failing (docs/specification/service.md#well-known-document, docs/specification/connections.md)."
           },
           "reason": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 300
+            "maxLength": 300,
+            "description": "Why, in one line of 1 to 300 characters; for a setup state, what the person does (docs/specification/service.md#well-known-document)."
+          },
+          "setup": {
+            "description": "DEC-0044. true: the source waits for a person to finish setting it up (a key not entered, a model not chosen); it is not an outage, and a watcher does not alert on it. Absent or false: the source is failing.",
+            "type": "boolean"
           }
         },
         "additionalProperties": false
-      }
+      },
+      "description": "What does not work now, always present: an empty list asserts full health, and ready with entries is inconsistent (FAC-SEM-011, docs/specification/service.md#well-known-document)."
     },
     "summary": {
       "type": "array",
@@ -141,7 +167,8 @@
           "label": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 40
+            "maxLength": 40,
+            "description": "The tile's label, 1 to 40 characters (docs/specification/service.md#well-known-document)."
           },
           "value": {
             "oneOf": [
@@ -152,14 +179,17 @@
                 "type": "string",
                 "maxLength": 40
               }
-            ]
+            ],
+            "description": "The tile's value: a number or a string of at most 40 characters (docs/specification/service.md#well-known-document)."
           },
           "attention": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "True when the tile asks for the operator (docs/specification/service.md#well-known-document)."
           }
         },
         "additionalProperties": false
-      }
+      },
+      "description": "At most six tiles for a host's card (docs/specification/service.md#well-known-document)."
     },
     "surfaces": {
       "type": "object",
@@ -175,13 +205,16 @@
           ],
           "properties": {
             "path": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The dashboard's path on the service origin (docs/specification/service.md#operator-login)."
             },
             "login": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "True when the dashboard requires an operator session begun with a login code (docs/specification/service.md#operator-login)."
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "The dashboard page and whether it requires an operator session (docs/specification/service.md#operator-login)."
         },
         "mcp": {
           "type": "object",
@@ -191,10 +224,12 @@
           ],
           "properties": {
             "path": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The MCP surface's path on the service origin (docs/specification/service.md#surfaces)."
             },
             "transport": {
-              "const": "streamable-http"
+              "const": "streamable-http",
+              "description": "The MCP transport, streamable-http (docs/specification/service.md#surfaces)."
             },
             "capabilities": {
               "type": "array",
@@ -202,7 +237,8 @@
               "uniqueItems": true,
               "items": {
                 "$ref": "common.schema.json#/$defs/capabilityName"
-              }
+              },
+              "description": "The capability names the surface serves, so a host shows them without the token; the manifest remains the authority (docs/specification/service.md#well-known-document)."
             },
             "auth": {
               "description": "DEC-0024, DEC-0039. descriptor (default): the MCP surface takes the descriptor's token in its header. own: it authenticates its callers with credentials of its own (a token per agent, a gateway's caller identity); the descriptor's token is the host's and is not an MCP credential. delegation: it takes only the estate's delegation tokens (auth.delegation), and the descriptor's token is not an MCP credential.",
@@ -213,7 +249,8 @@
               ]
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "The MCP surface: its path, its transport, the capabilities it serves and the credential it takes (docs/specification/service.md#surfaces, docs/specification/service.md#mcp-credentials)."
         },
         "events": {
           "type": "object",
@@ -222,13 +259,16 @@
           ],
           "properties": {
             "path": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The events feed's path on the service origin (docs/specification/service.md#events-feed)."
             },
             "stream": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The path of the events feed's stream, when it has one (docs/specification/service.md#events-feed)."
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "The events feed (docs/specification/service.md#events-feed)."
         },
         "usage": {
           "type": "object",
@@ -237,10 +277,12 @@
           ],
           "properties": {
             "path": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The usage report's path on the service origin (docs/specification/service.md#usage-report)."
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "description": "The usage report (DEC-0021, docs/specification/service.md#usage-report)."
         },
         "operatorChannel": {
           "description": "DEC-0034. Where the service answers its operator-channel status (fabric-operator-channel/0.1); token-protected like the events feed.",
@@ -250,13 +292,15 @@
           ],
           "properties": {
             "path": {
-              "$ref": "service-common.schema.json#/$defs/originPath"
+              "$ref": "service-common.schema.json#/$defs/originPath",
+              "description": "The operator-channel status's path on the service origin; it requires the service token (docs/specification/operator-channel.md, docs/specification/service.md#well-known-document)."
             }
           },
           "additionalProperties": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The paths the service serves on its origin; the events feed is required (docs/specification/service.md#surfaces)."
     },
     "auth": {
       "description": "DEC-0039. How the service authenticates calls beyond the descriptor's token.",
@@ -284,6 +328,72 @@
       },
       "additionalProperties": false
     },
+    "configuration": {
+      "description": "DEC-0046. What the operator can configure for this agent, and what applies now — read-only: a change is made in Fabric and reaches the agent through its binding, never through this document.",
+      "type": "object",
+      "required": [
+        "slots",
+        "resolved"
+      ],
+      "properties": {
+        "slots": {
+          "description": "The configurable slots: the runner, the model, or both.",
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "runner",
+              "model"
+            ]
+          }
+        },
+        "resolved": {
+          "description": "The profiles that apply now, after the resolution order (request, agent, binding or project, estate default) and the project's model classes.",
+          "type": "object",
+          "properties": {
+            "from": {
+              "enum": [
+                "request",
+                "agent",
+                "binding",
+                "estate"
+              ],
+              "description": "The level the resolved profiles came from: the request, the agent, the binding or the estate (docs/specification/runners.md#resolution)."
+            },
+            "runnerProfile": {
+              "$ref": "model-profile.schema.json#/$defs/profileId",
+              "description": "The runner profile that applies now (docs/specification/runners.md#what-an-agent-declares)."
+            },
+            "runnerKind": {
+              "$ref": "common.schema.json#/$defs/slug",
+              "description": "That runner profile's runner kind, a slug (docs/specification/runners.md#what-an-agent-declares)."
+            },
+            "route": {
+              "enum": [
+                "subscription",
+                "key"
+              ],
+              "description": "That runner profile's route: subscription or key (docs/specification/runners.md#routes)."
+            },
+            "modelProfile": {
+              "$ref": "model-profile.schema.json#/$defs/profileId",
+              "description": "The model profile that applies now (docs/specification/runners.md#what-an-agent-declares)."
+            },
+            "models": {
+              "description": "The profile's models the project's classes admit, first choice first.",
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "$ref": "registry-models.schema.json#/$defs/modelId"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "update": {
       "type": "object",
       "required": [
@@ -298,13 +408,16 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "A newer version the service knows about, or null (docs/specification/service.md#well-known-document)."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Whether a newer version is known (docs/specification/service.md#well-known-document)."
     },
     "extensions": {
-      "$ref": "common.schema.json#/$defs/extensions"
+      "$ref": "common.schema.json#/$defs/extensions",
+      "description": "Extension values keyed by URI, such as the embedded dashboard's and the connections declaration (docs/specification/service.md#well-known-document)."
     }
   },
   "additionalProperties": false,

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-input.schema.json",
   "title": "grant.check — input",
-  "description": "The grant-check request of fabric-agent-contract DEC-0037/0039 at 7931c1d, self-contained: the amount and the jti of the token the callee was called with. The caller is proven by the onward delegation token in the request's Authorization header, never by a field.",
+  "description": "The grant-check request of fabric-agent-contract DEC-0037/0039 (its grant-check-request schema, vendored in fabric/delegation-schemas/), self-contained: the amount and the jti of the token the callee was called with. The caller is proven by the onward delegation token in the request's Authorization header, never by a field.",
   "type": "object",
   "required": [
     "amountUsd",

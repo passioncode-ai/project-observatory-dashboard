@@ -334,6 +334,7 @@ def source_files() -> list[Path]:
     selected.add(ROOT / 'plugins/README.md')
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
+    selected.add(ROOT / 'fabric/service-schemas/README.md')   # its digests, and the commit the pin holds (OBS-205)
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')

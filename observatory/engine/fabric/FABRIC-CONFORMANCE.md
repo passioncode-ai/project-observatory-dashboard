@@ -11,8 +11,12 @@ the engine's one pin of the Fabric Agent Contract, in the shape the contract's
 `contract-pin.schema.json` gives it: `contract`, `version` (`0.1.0`, the manifest's
 `contractVersion`), `repository`, the full 40-character `commit` and `profile` (`mcp`).
 It pins the commit the organization-enrollment files in `node-vectors/` were last
-vendored at; `tools/vendor_org_vectors.py` moves the files and the pin in one step, and
-`../tests/test_contract_lock.py` holds the pin to the schema and to that commit. The
+vendored at; `tools/vendor_org_vectors.py` moves the files and the pin in one step, with the
+service and interop schemas `tools/vendor_contract_schemas.py` keeps at the pin, and
+`../tests/test_contract_lock.py` holds the pin to the schema and to that commit. The same test runs
+the contract's `pin:check` rule over this folder (OBS-205): every commit a line about the contract
+names is the pin, and the vendored folders still copied from another commit are listed, each with
+why, in `contract_lock.VENDORED_AT_OTHER_COMMITS`. The
 profile lock used to be called `fabric-contract.lock.json`, so a reader keyed on the
 name took it for the pin. Every reader now goes through `../contract_lock.py`,
 which still reads the profile lock under its old name for one release when no
@@ -87,7 +91,8 @@ repository's [interop design](https://github.com/passioncode-ai/project-observat
   carries a trace pair (DEC-0017, OQ-0007).
 
 The contract schemas these answers are validated against are vendored in
-`interop-schemas/` from fabric-agent-contract commit `9cd778eb6f14` (DEC-0017).
+`interop-schemas/` at the contract pin, `fabric-contract.lock.json` (DEC-0017): its README names the commit, and
+`tests/test_contract_lock.py` holds that commit equal to the pin (OBS-205).
 
 ## Per-install manifest
 

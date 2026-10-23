@@ -96,13 +96,70 @@
         },
         "additionalProperties": false
       }
+    },
+    "byProject": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "DEC-0065 (CON-OE-13): spend in the report's window by the project the service ran it for, the service's own run attribution. It names no caller, session or person (DL-22). A call the service ran for no project is in no row. Sums and unknown costs: FAC-SEM-025.",
+      "items": {
+        "type": "object",
+        "required": [
+          "projectId",
+          "calls",
+          "costUsd"
+        ],
+        "properties": {
+          "projectId": {
+            "$ref": "common.schema.json#/$defs/uri"
+          },
+          "calls": {
+            "$ref": "#/$defs/count"
+          },
+          "unpricedCalls": {
+            "$ref": "#/$defs/count"
+          },
+          "costUsd": {
+            "$ref": "#/$defs/money"
+          },
+          "taskRuns": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "required": [
+                "taskRunId",
+                "calls",
+                "costUsd"
+              ],
+              "properties": {
+                "taskRunId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                  "description": "The service's own id of the task run that spent: never a caller's identity (DL-22)."
+                },
+                "calls": {
+                  "$ref": "#/$defs/count"
+                },
+                "unpricedCalls": {
+                  "$ref": "#/$defs/count"
+                },
+                "costUsd": {
+                  "$ref": "#/$defs/money"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false,
   "$defs": {
     "date": {
       "type": "string",
-      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$"
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
     },
     "money": {
       "oneOf": [
@@ -134,6 +191,10 @@
         },
         "unpricedCalls": {
           "$ref": "#/$defs/count"
+        },
+        "unmeasuredCalls": {
+          "$ref": "#/$defs/count",
+          "description": "Every call whose token count the service did not measure in full, whatever it wrote to its caller (a null to a fabric-interop/0.2 reader, the measured lower bound to a 0.1 reader, a number beside partial: true, a call outside a job): while above 0 the token totals are a lower bound. Absent is 0 (DEC-0091)."
         },
         "inputTokens": {
           "$ref": "#/$defs/count"
@@ -181,6 +242,14 @@
             "mixed",
             "unknown"
           ]
+        },
+        "route": {
+          "enum": [
+            "subscription",
+            "key",
+            "platform-metered"
+          ],
+          "description": "DEC-0046, DEC-0061: the route the row's calls took — the operator's own login in its vendor's runner, an issued key, or the hosting platform's own metered models under the deployment's account (a listing in the cloud, the descriptor's runner.credentialKind platform-metered). Absent: not stated (a report written before DEC-0046)."
         }
       },
       "unevaluatedProperties": false

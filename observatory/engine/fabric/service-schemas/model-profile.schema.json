@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/model-profile.schema.json",
+  "title": "Model profile, or the estate's set of them (DEC-0046)",
+  "description": "A named, ordered list of catalogue model ids with a fallback policy (Fabric ADR-0147). The estate's profiles are Fabric's registry/model-profiles.json, a `model-profiles` document; an agent may declare a profile of its own.",
+  "oneOf": [
+    { "$ref": "#/$defs/profile" },
+    {
+      "type": "object",
+      "required": ["kind", "profiles"],
+      "properties": {
+        "kind": { "const": "model-profiles" },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/profile" },
+          "description": "One profile per id (FAC-SEM-058)."
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "reads": {
+      "description": "The closed vocabulary of what a lane reads (DEC-0083): `user-content`, what a member, a client or the public sends; `operator`, only what the estate's own operator or its agents write; `web`, pages fetched from the open web. Only `user-content` carries a model rule (FAC-SEM-112), also beside another value; `operator` and `web` let a lane declare that it does not read user content. A new value takes a decision; a reader refuses an unknown one.",
+      "enum": ["user-content", "operator", "web"]
+    },
+    "profileId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "profile": {
+      "type": "object",
+      "required": ["kind", "id", "models", "fallback"],
+      "properties": {
+        "kind": { "const": "model-profile" },
+        "id": { "$ref": "#/$defs/profileId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "registry-models.schema.json#/$defs/modelId" },
+          "description": "Catalogue ids, first choice first. On a key route this list is the key's model allow-list."
+        },
+        "fallback": {
+          "enum": ["none", "between-turns"],
+          "description": "none: only the first model the policy admits; between-turns: the next one after a failed turn, never within one."
+        },
+        "reads": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reads" },
+          "description": "What the lane this profile serves reads (DEC-0083); absent: not declared, which stays valid. A profile listing `user-content` — what a member, a client or the public sends: messages, questions, images, reviews, screenshots, voice — has an open-vendor route (FAC-SEM-112), whatever else it lists, and its runner treats a content refusal or an empty answer as a failed turn. `operator` and `web` carry no model rule in this revision."
+        },
+        "agent": {
+          "$ref": "common.schema.json#/$defs/uri",
+          "description": "The agent that declares this profile for itself; absent: the estate's."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

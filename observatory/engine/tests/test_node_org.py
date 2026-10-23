@@ -1539,7 +1539,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(self.server.sequences, [1, 2])
 
 
-    # -- the contract pin (CT-65, DEC-0094, at de9eae4d) --------------------------------------------------------
+    # -- the contract pin (CT-65, DEC-0094; the commit is node-vectors/README.md's OBS-161 pin) --------------------
     def device_fixture(self, name):
         return json.loads((VECTORS / 'device' / name).read_text(encoding='utf-8'))
 

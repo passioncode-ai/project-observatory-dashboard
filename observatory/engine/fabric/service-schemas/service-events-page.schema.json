@@ -65,6 +65,28 @@
           "minLength": 1,
           "maxLength": 500
         },
+        "data": {
+          "type": "object",
+          "required": [
+            "schema",
+            "value"
+          ],
+          "additionalProperties": false,
+          "description": "DEC-0070: optional machine-readable fields of the event. A host that ignores it loses nothing: text stays the sentence a person reads. Never a secret or personal data (FAC-SEM-101 refuses a credential-shaped value or name). A host validates value against schema when it knows that schema, and otherwise treats value as opaque and never fails the event for it.",
+          "properties": {
+            "schema": {
+              "$ref": "common.schema.json#/$defs/uri",
+              "description": "An absolute URI of the payload schema the service publishes (under its origin or its repository)."
+            },
+            "value": {
+              "type": "object",
+              "maxProperties": 32,
+              "additionalProperties": {
+                "$ref": "#/$defs/dataValue"
+              }
+            }
+          }
+        },
         "subject": {
           "type": "object",
           "required": [
@@ -110,6 +132,45 @@
           "traceId"
         ]
       }
+    },
+    "dataScalar": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 500
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dataValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/dataScalar"
+        },
+        {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/dataScalar"
+          }
+        },
+        {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {
+            "$ref": "#/$defs/dataScalar"
+          }
+        }
+      ],
+      "description": "A scalar, a list of at most 32 scalars, or an object of at most 32 scalar members: two levels at most."
     }
   }
 }

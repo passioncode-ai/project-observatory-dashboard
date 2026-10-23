@@ -16,6 +16,10 @@
     "baggage": {
       "type": "string",
       "maxLength": 8192
+    },
+    "protocols": {
+      "$ref": "common.schema.json#/$defs/protocols",
+      "description": "DEC-0087 (DEC-0067's list): the revisions the caller reads. A caller that names `fabric-interop/0.2` accepts `null` and `partial` in a job's `usage`; absent, it reads `fabric-interop/0.1`."
     }
   },
   "additionalProperties": true

@@ -6,19 +6,28 @@
     "uri": {
       "type": "string",
       "format": "uri",
-      "minLength": 1
+      "minLength": 1,
+      "description": "A URI (RFC 3986), at least one character. `format: uri` is an assertion only where the validator asserts formats (this contract's validator loads ajv-formats); a validator that treats format as an annotation also accepts a string that is not a URI."
     },
     "timestamp": {
       "type": "string",
-      "format": "date-time"
+      "format": "date-time",
+      "description": "An RFC 3339 date-time. `format: date-time` is an assertion only where the validator asserts formats (this contract's validator loads ajv-formats); a validator that treats format as an annotation accepts any string here."
     },
     "semver": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+      "description": "A semantic version, major.minor.patch with an optional pre-release and build (semver.org 2.0.0), no leading zeros in the numbers."
     },
     "sha256": {
       "type": "string",
-      "pattern": "^sha256:[a-f0-9]{64}$"
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "A content hash: sha256: and 64 lower-case hex digits. The bare 64-digit form, without the prefix, is sha256Hex."
+    },
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "A bare SHA-256: 64 lower-case hex digits, without the sha256: prefix that sha256 carries."
     },
     "revisionRef": {
       "type": "object",
@@ -39,7 +48,8 @@
           "$ref": "#/$defs/sha256"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "A reference to one immutable revision of a versioned document: its id, its revision number and the content hash of that revision (docs/specification/versioning.md#revision-shape)."
     },
     "revisionMeta": {
       "type": "object",
@@ -68,7 +78,8 @@
           "$ref": "#/$defs/uri"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "The meta block of a versioned document: id, revision, content hash, when and by whom the revision was created (docs/specification/versioning.md#revision-shape)."
     },
     "dataClass": {
       "enum": [
@@ -78,7 +89,8 @@
         "personal",
         "credential",
         "regulated"
-      ]
+      ],
+      "description": "The classification of data, least to most sensitive (docs/specification/governance-and-roles.md#data-classification)."
     },
     "effectClass": {
       "enum": [
@@ -92,14 +104,16 @@
         "merge",
         "deploy",
         "change-policy"
-      ]
+      ],
+      "description": "The class of an external effect a capability may have; none is read-only (docs/specification/governance-and-roles.md#external-effects)."
     },
     "extensions": {
       "type": "object",
       "propertyNames": {
         "format": "uri"
       },
-      "additionalProperties": true
+      "additionalProperties": true,
+      "description": "An extensions object: every key is a URI that names its extension, and each value is that extension's own (docs/specification/overview.md#extension-rule)."
     },
     "artifact": {
       "type": "object",
@@ -139,7 +153,8 @@
           "$ref": "#/$defs/uri"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "A produced artifact: its id, media type, location, content hash, classification and the revision that produced it (docs/specification/results-and-evidence.md#artifacts)."
     },
     "agentId": {
       "type": "string",
@@ -148,15 +163,43 @@
     },
     "capabilityName": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9._-]{1,127}$"
+      "pattern": "^[a-z][a-z0-9._-]{1,127}$",
+      "description": "A capability's name as a tool is called (DEC-0020): a lower-case letter, then 1 to 127 of [a-z0-9._-] (docs/specification/interop.md#capability-names). A capability's identity in an admission, a binding or a route is a URI: capabilityUri."
+    },
+    "capabilityUri": {
+      "$ref": "#/$defs/uri",
+      "description": "A capability's identity in an admission, a binding or a runner route: a URI. The name a tool is called by is capabilityName (DEC-0020, docs/specification/interop.md#capability-names)."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$",
+      "description": "A lower-case identifier of 2 to 63 characters: a letter, then letters, digits and hyphens. The shape of a service id, a runner kind, a pipeline id and a product id (DEC-0016)."
+    },
+    "contextId": {
+      "type": "string",
+      "pattern": "^(?:personal|org:[A-Za-z0-9][A-Za-z0-9_-]{0,127})$",
+      "description": "DEC-0082: the context a grant is used in or an agent instance runs in: personal, or org:<orgId>, where orgId is the organization server's opaque id of the organization: a letter or digit, then up to 127 of [A-Za-z0-9_-] (1-128 characters, an enrollment's org.id can be any such id). Compared as written: never case-folded, never by prefix (docs/specification/contexts.md)."
+    },
+    "orgContextId": {
+      "type": "string",
+      "pattern": "^org:[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+      "description": "DEC-0086: an organization's context, org:<orgId>: contextId without personal. What a share registration and a grant.usage carry, the grant's own context. Compared as written (docs/specification/contexts.md)."
+    },
+    "shareGrantId": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^urn:fabric:share:(?!0{32}$)[0-9a-f]{32}$",
+      "description": "DEC-0086, FAC-SEM-117: the meta.id of a share grant into an organization: urn:fabric:share: and 32 lower-case hex digits, 128 bits from a CSPRNG, never derived from a name, an address, an estate id, an agentRef or the organization, and never all zeros. The pattern admits only its own normal form (DEC-0076), so it is compared as written; it holds no person's name, address or estate id (docs/specification/share-registration.md)."
     },
     "traceId": {
       "type": "string",
-      "pattern": "^(?!0{32}$)[0-9a-f]{32}$"
+      "pattern": "^(?!0{32}$)[0-9a-f]{32}$",
+      "description": "A W3C Trace Context trace id: 32 lower-case hex digits, never all zeros."
     },
     "spanId": {
       "type": "string",
-      "pattern": "^(?!0{16}$)[0-9a-f]{16}$"
+      "pattern": "^(?!0{16}$)[0-9a-f]{16}$",
+      "description": "A W3C Trace Context span id: 16 lower-case hex digits, never all zeros."
     },
     "usage": {
       "type": "object",
@@ -167,31 +210,115 @@
       ],
       "properties": {
         "inputTokens": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "outputTokens": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "cacheReadTokens": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "cacheWriteTokens": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "costUsd": {
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0
         },
         "wallMs": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
+        },
+        "partial": {
+          "type": "boolean",
+          "description": "DEC-0087: true when a number is a lower bound or unknown (null). An unknown number is null, never 0; 0 is a measured zero."
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "A job's or a result's usage. A number nobody measured is null, never 0; `partial` is true when a number is a lower bound or unknown (DEC-0087). A provider writes null and `partial` only toward a caller whose request `_meta.protocols` names fabric-interop/0.2; toward any other it writes the lower bound it measured."
+    },
+    "protocolRevision": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]{0,63}/[0-9]{1,4}(\\.[0-9]{1,4}){0,2}$",
+      "description": "A protocol revision, <name>/<revision> (DEC-0009, DEC-0067)."
+    },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/protocolRevision"
+      },
+      "description": "The protocol revisions a party reads (DEC-0067): for each protocol at most N and N−1, consecutive in the contract's register (FAC-SEM-099)."
+    },
+    "ed25519PublicKeyBase64url": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+      "not": {
+        "enum": [
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+          "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA",
+          "JuiVj8KyJ7BFw_SJ8u-Y8NXfrAXTxjM5sTgCiG1T_AU",
+          "JuiVj8KyJ7BFw_SJ8u-Y8NXfrAXTxjM5sTgCiG1T_IU",
+          "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA3o",
+          "xxdqcD1N2E-6PAt2DRBnDyogU_osOczGTsf9d5KsA_o",
+          "7P_______________________________________38",
+          "7P________________________________________8",
+          "7f_______________________________________38",
+          "7f________________________________________8",
+          "7v_______________________________________38",
+          "7v________________________________________8"
+        ]
+      },
+      "description": "A 32-byte Ed25519 public key, base64url without padding, canonical (the last character's two spare bits zero). Never a key of small order (DEC-0045, CT-29): the enum lists libsodium's seven encodings with the sign bit clear and set. The same key in standard base64 is ed25519PublicKeyBase64."
+    },
+    "ed25519PublicKeyBase64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "not": {
+        "enum": [
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA=",
+          "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIA=",
+          "JuiVj8KyJ7BFw/SJ8u+Y8NXfrAXTxjM5sTgCiG1T/AU=",
+          "JuiVj8KyJ7BFw/SJ8u+Y8NXfrAXTxjM5sTgCiG1T/IU=",
+          "xxdqcD1N2E+6PAt2DRBnDyogU/osOczGTsf9d5KsA3o=",
+          "xxdqcD1N2E+6PAt2DRBnDyogU/osOczGTsf9d5KsA/o=",
+          "7P///////////////////////////////////////38=",
+          "7P////////////////////////////////////////8=",
+          "7f///////////////////////////////////////38=",
+          "7f////////////////////////////////////////8=",
+          "7v///////////////////////////////////////38=",
+          "7v////////////////////////////////////////8="
+        ]
+      },
+      "description": "A raw 32-byte Ed25519 public key, standard base64 with its padding, canonical (the last character's two spare bits zero). Never a key of small order (DEC-0045, CT-29): the enum lists libsodium's seven encodings with the sign bit clear and set. The same key in base64url is ed25519PublicKeyBase64url."
     }
   }
 }

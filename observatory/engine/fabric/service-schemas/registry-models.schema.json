@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/registry-models.schema.json",
+  "title": "Model catalogue (DEC-0046)",
+  "description": "Every model the estate may use, with the classes an L1 policy restricts by. The estate's catalogue is Fabric's registry/models.json, versioned with the app (Fabric ADR-0147); prices are a reference into the live feed, never a number here.",
+  "type": "object",
+  "required": ["kind", "asOf", "models"],
+  "properties": {
+    "kind": { "const": "model-catalogue" },
+    "asOf": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": { "$ref": "#/$defs/model" },
+      "description": "One row per model id (FAC-SEM-058)."
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "modelId": {
+      "type": "string",
+      "description": "<vendor>/<model>, the form OpenRouter names models in, lower case.",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}/[a-z0-9][a-z0-9._:-]{0,127}$"
+    },
+    "modelClass": {
+      "description": "The closed vocabulary of model classes (DEC-0046). A new class takes a decision; a reader refuses an unknown one. `open-vendor` (DEC-0083): the model's vendor publishes its weights openly, which the catalogue's writer states; it is independent of `chinese-vendor`, which says where the vendor is.",
+      "enum": ["frontier", "strong", "cheap", "code", "vision", "chinese-vendor", "open-vendor"]
+    },
+    "admissionClass": {
+      "description": "A model class a spend policy or a grant may name (DEC-0083): every class but the descriptive `open-vendor`, which admits and excludes nothing (a deliberate exception to DEC-0046's every-class rule).",
+      "allOf": [
+        { "$ref": "#/$defs/modelClass" },
+        { "not": { "const": "open-vendor" } }
+      ]
+    },
+    "providerSlug": {
+      "type": "string",
+      "description": "An upstream provider as OpenRouter's provider routing names it: a base slug (azure, google-vertex) or a variant after a slash (deepinfra/turbo).",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}(/[a-z0-9][a-z0-9._-]{0,63})?$"
+    },
+    "providerRouting": {
+      "type": "object",
+      "description": "Fabric ADR-0147 amendment 2: OpenRouter's provider-routing object, field names as OpenRouter spells them, which the key route's proxy passes on. It changes the upstream that serves the model, never the model; a profile's allow-list is unchanged. A provider is never both ordered and ignored (FAC-SEM-058).",
+      "minProperties": 1,
+      "properties": {
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/providerSlug" },
+          "description": "Providers to try first, in this order."
+        },
+        "ignore": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/providerSlug" },
+          "description": "Providers never used for this model."
+        },
+        "allow_fallbacks": {
+          "type": "boolean",
+          "description": "false: only the ordered providers serve; OpenRouter's default when absent is true."
+        },
+        "sort": {
+          "enum": ["price", "throughput", "latency"],
+          "description": "Rank the eligible providers by this attribute (OpenRouter's string form)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolUse": {
+      "description": "Whether the model calls a tool through the estate's route, as last measured (Project Observatory's weekly probe).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["status", "at"],
+          "properties": {
+            "status": { "const": "measured" },
+            "at": { "type": "string", "format": "date" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["status", "at", "reason"],
+          "properties": {
+            "status": { "const": "blocked" },
+            "at": { "type": "string", "format": "date" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 300 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "model": {
+      "type": "object",
+      "required": ["id", "family", "classes", "endpoints", "toolUse", "priceRef"],
+      "properties": {
+        "id": { "$ref": "#/$defs/modelId" },
+        "family": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/modelClass" },
+          "contains": { "$ref": "#/$defs/admissionClass" },
+          "description": "At least one admission class (DEC-0083): the descriptive `open-vendor` alone gives a policy nothing to admit the model by."
+        },
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["anthropic-messages", "openai-chat", "responses"] },
+          "description": "The request shapes the estate's route serves this model through."
+        },
+        "toolUse": { "$ref": "#/$defs/toolUse" },
+        "priceRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "The model's key in the estate's live price feed (Project Observatory's); the catalogue carries no price."
+        },
+        "provider": { "$ref": "#/$defs/providerRouting" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-common.schema.json",
-  "title": "Local service extension common definitions",
+  "title": "Service extension common definitions",
   "$defs": {
     "protocol": {
       "const": "fabric-service/0.1"
@@ -16,9 +16,9 @@
     },
     "localPath": {
       "type": "string",
-      "pattern": "^(~[\\\\/]|/|[A-Za-z]:[\\\\/])[^\\u0000]*$",
+      "pattern": "^(~[\\\\/]|/(?![\\\\/])|[A-Za-z]:[\\\\/])[^\\u0000]*$",
       "maxLength": 1024,
-      "description": "An absolute path or one under the home folder (~). POSIX: `/…` or `~/…`; Windows (DEC-0032): drive-absolute (`C:\\\\…`, `C:/…`) or `~\\\\…`. Never a network share. A host reads the grammar of its own operating system."
+      "description": "An absolute path or one under the home folder (~). POSIX: `/…` or `~/…`; Windows (DEC-0032): drive-absolute (`C:\\\\…`, `C:/…`) or `~\\\\…`. Never a network share: not `\\\\server\\\\…`, `\\\\?\\\\…`, `//server/…` or `/\\\\server…`, which Windows reads as a share too (DEC-0057). A host reads the grammar of its own operating system."
     },
     "originPath": {
       "type": "string",

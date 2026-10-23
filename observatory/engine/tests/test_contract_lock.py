@@ -158,7 +158,10 @@ class TheLegacyName(unittest.TestCase):
 class EveryReaderGoesThroughOneModule(unittest.TestCase):
     """The defect was a reader keyed on a file NAME. No engine source holds either
     name as a string any more (a comment may still name a file in backticks); the
-    sandbox runner's list of files to copy is the one other place allowed to."""
+    sandbox runner's list of files to copy is the one other place allowed to. The
+    repository's `tools/`, which vendor contract files and move the pin, are held to
+    the same rule by the root test `tests/test_vendor_contract.py` (OBS-205): this
+    suite runs in the portable sandbox, which holds the engine alone."""
 
     ALLOWED = {"contract_lock.py", "tests/test_contract_lock.py", "tests/run_portable.py"}
 
@@ -173,6 +176,132 @@ class EveryReaderGoesThroughOneModule(unittest.TestCase):
             offenders += [f"{relative} holds {name!r}" for name in names
                           if re.search(r"[\"']" + re.escape(name) + r"[\"']", text)]
         self.assertEqual(offenders, [])
+
+
+# The cases' hashes are kept off the lines that name the contract, so this file is no drift itself.
+OTHER = "20a818e648a4c09a60df0126d11626922e8b9094"
+LINKED = "489737051828fafec92463df04b6a6fd3280c7b7"
+NAME = "fabric-agent-contract"
+
+
+class PinDriftIsPinChecksRule(unittest.TestCase):
+    """`find_pin_drift` against the contract's own cases of `findPinDrift`
+    (`test/consistency.test.ts`, G-11), with the contract's own example pin."""
+
+    def drift(self, text: str) -> list:
+        return contract_lock.find_pin_drift([("README.md", text)], PIN["commit"])
+
+    def test_accepts_mentions_that_equal_the_pin_in_full_or_abbreviated(self) -> None:
+        self.assertEqual(self.drift(f"Fabric Agent Contract `0.1.0` at `{PIN['commit']}`\ncontract pin {PIN['commit'][:7]}"), [])
+
+    def test_flags_a_contract_commit_that_is_not_the_pin(self) -> None:
+        self.assertEqual(self.drift(f"- contract commit: `{OTHER}`"), [("README.md", 1, OTHER)])
+
+    def test_flags_a_tree_link_to_another_contract_revision(self) -> None:
+        link = f"[contract](https://github.com/passioncode-ai/{NAME}/tree/{LINKED})"
+        self.assertEqual(len(self.drift(link)), 1)
+
+    def test_ignores_hashes_on_lines_that_are_not_about_the_contract(self) -> None:
+        self.assertEqual(self.drift("build 8b80be9 shipped; sha256:" + "0" * 64), [])
+
+    def test_reads_a_line_under_a_heading_that_names_the_contract_pin(self) -> None:
+        text = f"## Contract pin\n\n- version: `0.1.0`\n- commit: `{OTHER}`\n\n## License\n\nbuilt at {OTHER[:7]}"
+        self.assertEqual([line for _, line, _ in self.drift(text)], [4])
+
+    def test_does_not_read_another_contract_of_the_same_word(self) -> None:
+        self.assertEqual(self.drift("the persistence contract landed in 82bc950"), [])
+
+    def test_takes_words_and_plain_numbers_for_no_commit(self) -> None:
+        self.assertEqual(self.drift("fabric-agent-contract deadbeefcafe at 1234567890"), [])
+
+    def test_a_hash_on_the_line_after_the_contracts_name_is_not_read(self) -> None:
+        """Why the vendored READMEs put the commit on the line that names the contract:
+        `pin:check` reads only that line, and a commit wrapped onto the next is never checked."""
+        self.assertEqual(self.drift(f"from `passioncode-ai/fabric-agent-contract` at commit\n`{OTHER}`"), [])
+
+
+class PinChecksWalk(unittest.TestCase):
+    """The files `pin:check` reads: its cases for dated records, `.git`, `node_modules`,
+    file types and `--exclude` (`test/pin-check.test.ts`)."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._dir.name)
+        write(self.root, contract_lock.CONTRACT_PIN, PIN)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def put(self, files: dict[str, str]) -> None:
+        for relative, text in files.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+    def found(self, excluded: tuple[str, ...] = ()) -> list[str]:
+        return sorted(path for path, _, _ in contract_lock.pin_drift(self.root, excluded))
+
+    def test_skips_changelogs_handoffs_evidence_and_task_pipeline_runs(self) -> None:
+        mention = f"fabric-agent-contract {OTHER}"
+        self.put({"CHANGELOG.md": mention, "docs/handoffs/a.md": mention, "docs/evidence/run/proof.md": mention,
+                  ".task-pipeline/run/state.json": mention, "README.md": f"Fabric Agent Contract `{PIN['commit'][:7]}`"})
+        self.assertEqual(self.found(), [])
+
+    def test_knows_a_dated_record_by_its_path(self) -> None:
+        dated = ["CHANGELOG", "CHANGELOG.md", "a/b/CHANGELOG.txt", "docs/handoffs", "docs/handoffs/x.md",
+                 "docs/evidence/a/b.json", ".task-pipeline/x"]
+        self.assertEqual([p for p in dated if not contract_lock.is_dated_record(p)], [])
+        other = ["README.md", "docs/handoffs-old/x.md", "docs/specification/x.md", "changelog.md", "src/evidence/x.ts"]
+        self.assertEqual([p for p in other if contract_lock.is_dated_record(p)], [])
+
+    def test_reads_only_text_files_outside_git_and_node_modules(self) -> None:
+        mention = f"fabric-agent-contract {OTHER}"
+        self.put({".git/notes.md": mention, "node_modules/kit/README.md": mention, "logo.png": mention,
+                  "deep/node_modules/x.md": mention})
+        self.assertEqual(self.found(), [])
+        self.put({"src/a.py": f"# fabric-agent-contract {OTHER}", "notes.txt": mention})
+        self.assertEqual(self.found(), ["notes.txt", "src/a.py"])
+
+    def test_takes_exclude_paths(self) -> None:
+        self.put({"vendor/notes.md": f"fabric-agent-contract {OTHER}"})
+        self.assertEqual(self.found(), ["vendor/notes.md"])
+        self.assertEqual(self.found(("vendor/",)), [])
+        self.assertEqual(self.found(("vendor",)), [])
+
+    def test_never_reads_the_pin_itself(self) -> None:
+        self.assertEqual(contract_lock.pin_check_files(self.root), [])
+
+
+class TheEngineNamesOneContractRevision(unittest.TestCase):
+    """G-11 on this folder, as `pnpm --dir <contract checkout> pin:check observatory/engine`
+    runs it: zero drift, with no path excluded (OBS-205)."""
+
+    def test_pin_check_finds_no_drift_in_the_engine(self) -> None:
+        drift = contract_lock.pin_drift(ROOT)
+        self.assertEqual(drift, [], "\n".join(f"{p}:{n} names contract revision {f}" for p, n, f in drift))
+
+    def test_every_exclude_names_a_path_that_exists_and_says_why(self) -> None:
+        for path, why in contract_lock.PIN_CHECK_EXCLUDES.items():
+            self.assertTrue((ROOT / path).exists(), path)
+            self.assertGreater(len(why), 20, path)
+
+    def test_a_vendored_folder_names_the_pin_or_a_listed_commit(self) -> None:
+        """A README may name its commit where `pin:check` does not read it; this check
+        reads every id in it. A folder off the pin is listed, with why, in
+        `VENDORED_AT_OTHER_COMMITS`; a listed commit the README no longer names fails too."""
+        listed = {folder: set(commits) for folder, commits in contract_lock.VENDORED_AT_OTHER_COMMITS.items()}
+        self.assertEqual(contract_lock.vendored_off_pin(ROOT), listed)
+        for folder, commits in contract_lock.VENDORED_AT_OTHER_COMMITS.items():
+            for commit, why in commits.items():
+                self.assertGreater(len(why), 40, (folder, commit))
+
+    def test_the_schemas_vendored_at_the_pin_name_it_on_the_contracts_line(self) -> None:
+        commit = contract_lock.contract_pin(ROOT)["commit"]
+        for folder in ("fabric/interop-schemas", "fabric/service-schemas"):
+            readme = (ROOT / folder / "README.md").read_text(encoding="utf-8")
+            named = re.search(r"`passioncode-ai/fabric-agent-contract` at commit `([0-9a-f]{40})`", readme)
+            self.assertIsNotNone(named, folder)
+            self.assertEqual(named.group(1), commit, folder)
 
 
 if __name__ == "__main__":

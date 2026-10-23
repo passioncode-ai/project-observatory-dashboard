@@ -196,7 +196,31 @@
         },
         "data": true
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "quota-exhausted"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "data"
+            ],
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/quotaExhaustedData"
+              }
+            }
+          }
+        }
+      ]
     },
     "trace": {
       "type": "object",
@@ -212,6 +236,37 @@
         }
       },
       "additionalProperties": false
+    },
+    "quotaExhaustedData": {
+      "type": "object",
+      "description": "DEC-0087: the data of a job error `quota-exhausted`. `retryable`: the same intent may run again once the limit resets (true), or a person must act (false). `resetsAt`, when the limit resets, only with `retryable: true`.",
+      "required": [
+        "retryable"
+      ],
+      "properties": {
+        "retryable": {
+          "type": "boolean"
+        },
+        "resetsAt": {
+          "$ref": "#/$defs/utcInstant"
+        }
+      },
+      "dependentSchemas": {
+        "resetsAt": {
+          "properties": {
+            "retryable": {
+              "const": true
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "utcInstant": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9](\\.[0-9]{1,3})?Z$",
+      "description": "An RFC 3339 instant in UTC: `T` and `Z` upper-case, seconds 00 to 59, at most three fraction digits, so every port compares it at millisecond precision (DEC-0087)."
     }
   }
 }
