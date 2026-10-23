@@ -134,7 +134,7 @@ python tools/check_public_release.py --history
 ```sh
 observatory                              # the short name; with no arguments it opens the dashboard
 project-observatory full open            # builds the pages if needed, opens them as local files
-project-observatory full open --serve    # serves them read-only on 127.0.0.1:47311 (GET only; changes nothing)
+project-observatory full open --serve    # serves them on 127.0.0.1:47311 (GET only, except the lifecycle tools at POST /mcp)
 project-observatory full open --stop     # stops that server; it runs detached, so closing the terminal does not
 ```
 

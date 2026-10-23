@@ -88,6 +88,8 @@ SAMPLES = {
     # The Health page's organization rows (OBS-199, OBS-204): the enrollment's id and server, and a vault slot.
     "shellArg(O.org)": "org_example", 'shellArg(O.server || "https://ORG-SERVER")': "https://org.example",
     "PROJECT/ENV/NAME": "my-org/prod/ENROLLMENT_TOKEN",
+    # node.lifecycle's verbs (OBS-79 L3): a target id and one of its six tools.
+    "TARGET_ID": "alpha.app", "TARGET": "alpha.app", "TOOL": "lifecycle.list",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

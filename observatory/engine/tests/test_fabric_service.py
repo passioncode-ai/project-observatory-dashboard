@@ -873,7 +873,13 @@ class RunningServer(unittest.TestCase):
         self.assertTrue(doc["service"]["build"].get("commit") or doc["service"]["build"].get("digest"))
         self.assertEqual(doc["surfaces"], {"dashboard": {"path": "/", "login": False},
                                            "events": {"path": "/fabric/v1/events"},
-                                           "usage": {"path": "/fabric/v1/usage"}})
+                                           "usage": {"path": "/fabric/v1/usage"},
+                                           # node.lifecycle (OBS-79 L3): callers bring access bindings (DEC-0024).
+                                           "mcp": {"path": "/mcp", "transport": "streamable-http", "auth": "own"}})
+        entry = doc["extensions"]["https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/"
+                                  "design/LIFECYCLE.md"]
+        self.assertEqual((entry["service"], entry["lifecycle"], entry["state"]),
+                         ("node.lifecycle", {"manager": "node"}, "inert"), "nothing enrolled: nothing built")
         self.assertEqual({t["label"]: t["value"] for t in doc["summary"]}["Projects"], 1)
         self.assertLess(sorted(timings)[2], 100, f"median {sorted(timings)[2]:.1f} ms")
 
@@ -986,6 +992,8 @@ class RunningServer(unittest.TestCase):
                          "only declared unsupported surfaces and an explicitly absent lsof may be NOT_RUN; "
                          "tests/test_interop.py checks the stdio MCP surface")
         self.assertEqual(verdicts["interop.manifest-link"]["verdict"], "PASS")
+        # node.lifecycle's surface takes access bindings (auth: own) and refuses the descriptor's token.
+        self.assertEqual(verdicts["interop.mcp-own-auth"]["verdict"], "PASS")
         self.assertEqual(verdicts["interop.events-trace"]["verdict"], "PASS")
         self.assertEqual(verdicts["lifecycle.instance-lock"]["verdict"], "PASS")
         self.assertEqual(verdicts["events.page"]["verdict"], "PASS")
