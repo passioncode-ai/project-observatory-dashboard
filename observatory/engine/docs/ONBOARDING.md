@@ -1093,7 +1093,7 @@ until then every caller is refused and no state is created.
 project-observatory full lifecycle status                  # targets, callers, the last events; starts nothing
 project-observatory full lifecycle build-helper            # macOS: compile the helper once (needs swiftc)
 project-observatory full lifecycle enroll alpha.app --kind app --path /Applications/Alpha.app --caller agent:alpha --startup-effect TEXT
-project-observatory full lifecycle allow agent:alpha --target alpha.app --tool lifecycle.list --tool lifecycle.status --tool lifecycle.ensure_running --tool lifecycle.operation.get
+project-observatory full lifecycle allow agent:alpha --binding BINDING_ID --target alpha.app --tool lifecycle.list --tool lifecycle.status --tool lifecycle.ensure_running --tool lifecycle.operation.get
 project-observatory full lifecycle policy alpha.app --idle-minutes 30    # or --desired always_on, --background-launch on
 project-observatory full lifecycle hold alpha.app          # off on purpose: agents get held_off; --release undoes it
 project-observatory full lifecycle revoke agent:alpha      # refused from its next call
@@ -1106,13 +1106,19 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
   matching and anything else is refused; a LaunchAgent is recorded by its label and the hashes
   of its definition and the files it runs. `--startup-effect TEXT` is your own sentence for
   what starting it does (for example "opens its main window"), and it is required.
-- The caller proves who it is with an access binding (above): `allow` names the binding's
-  principal, never a bearer. A caller acts on a target only when the target lists it (`enroll
-  --caller`) and its grant lists the tool and the target (`allow`). The service token in the
-  descriptor opens the events feed, never these tools.
+- The caller proves who it is with an access binding (above), and the grant names that ONE
+  binding: `allow PRINCIPAL --binding BINDING_ID` (the id `full access-binding show` lists),
+  never a bearer. A binding's memory scopes and ceilings do not reach the apps, so another
+  binding of the same principal, issued to read memory, is refused here. A caller acts on a
+  target only when the target lists it (`enroll --caller`) and its grant lists the tool and the
+  target (`allow`). The service token in the descriptor opens the events feed, never these
+  tools.
 - The person comes first: an agent may stop or restart only an app the node started that you
   have not taken over and are not using right now, otherwise it is told `in_use_by_person`. A
   forced stop and holding an always_on target off are yours, at the terminal.
+- A damaged lifecycle store does not take the server down: `/mcp` answers 503 with the fault,
+  the well-known document names it in `degraded`, and the dashboard, `/health` and the events
+  feed keep answering.
 - What happened is one sentence per operation in `store/node-lifecycle/events.jsonl` (the last
   ten in `status`), and the detail in `store/node-lifecycle/logs/lifecycle.jsonl`, both
   owner-only. Enrollments and grants are in `config/node-lifecycle.json`, owner-only.

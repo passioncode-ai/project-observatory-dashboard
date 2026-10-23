@@ -18,6 +18,7 @@ import contextlib
 import io
 import json
 import os
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -56,19 +57,20 @@ def stamp(at: datetime) -> str:
     return at.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
-def binding(principal: str, n: int, *, revoked: bool = False, days: int = 30, audience: str = AUDIENCE) -> dict:
+def binding(principal: str, n: int, *, revoked: bool = False, days: int = 30, audience: str = AUDIENCE,
+            token: str | None = None) -> dict:
     now = datetime.now(timezone.utc)
     return {'bindingId': f'bnd_fixture{n:04d}', 'principal': principal, 'channel': 'http', 'audience': audience,
-            'credentialRef': {'kind': 'bearer-sha256', 'digest': AB.bearer_digest(bearer(principal))},
+            'credentialRef': {'kind': 'bearer-sha256', 'digest': AB.bearer_digest(token or bearer(principal))},
             'projects': ['project:alpha-web'], 'workflows': None, 'scopes': ['memory.read'],
             'classCeiling': 'public', 'effectCeiling': 'read', 'issuedAt': stamp(now - timedelta(days=1)),
             'expiresAt': stamp(now + timedelta(days=days)), 'revokedAt': stamp(now) if revoked else None,
             'issuedBy': 'operator', 'via': 'terminal'}
 
 
-def grant(tools=broker.TOOLS, targets=('alpha.app',), revision=1, **extra) -> dict:
-    return {'revision': revision, 'revoked': False, 'allowedTools': list(tools), 'allowedTargets': list(targets),
-            **extra}
+def grant(tools=broker.TOOLS, targets=('alpha.app',), revision=1, binding_id='bnd_fixture0001', **extra) -> dict:
+    return {'bindingId': binding_id, 'revision': revision, 'revoked': False, 'allowedTools': list(tools),
+            'allowedTargets': list(targets), **extra}
 
 
 def lifecycle_target(key='alpha.app', **extra) -> dict:
@@ -76,6 +78,8 @@ def lifecycle_target(key='alpha.app', **extra) -> dict:
 
 
 FABRIC_IDENTITY = app_identity(broker.FABRIC_BUNDLE_ID)
+#: A second bearer of agent:alpha, for a second binding of the same principal (one issued to read memory, say).
+SECOND = bearer(ALPHA) + '-second'
 
 
 class Workspace:
@@ -151,7 +155,7 @@ class ServiceTests(Workspace, unittest.TestCase):
     def test_a_caller_is_listed_only_the_tools_its_grant_names(self):
         # Adapted: the source widened its owner's tools at every start. Here no bearer is an owner, so nothing is
         # widened by a start, and a caller sees exactly what `full lifecycle allow` gave it.
-        self.doc['callers'][BETA] = grant(tools=('lifecycle.list',))
+        self.doc['callers'][BETA] = grant(tools=('lifecycle.list',), binding_id='bnd_fixture0002')
         self.save()
         before = self.config.read_bytes()
         service = self.service()
@@ -233,6 +237,39 @@ class AuthorityTests(Workspace, unittest.TestCase):
                 with self.subTest(header=header and header[:12]):
                     with self.assertRaisesRegex(broker.LifecycleError, 'unauthorized'):
                         service.authenticate(header)
+        finally:
+            service.close()
+
+    def test_only_the_bound_binding_opens_the_tools_not_another_of_the_same_principal(self):
+        # A second binding of agent:alpha, issued (say) to read memory, shares the principal but not the grant.
+        self.bindings.append(binding(ALPHA, 3, token=SECOND))
+        service = self.service()
+        try:
+            with self.assertRaisesRegex(broker.LifecycleError, 'denied'):
+                service.authenticate('Bearer ' + SECOND)
+        finally:
+            service.close()
+
+    def test_revoking_the_bound_binding_refuses_even_with_another_in_force(self):
+        service = self.service()
+        try:
+            alpha = service.authenticate('Bearer ' + bearer(ALPHA))
+            self.bindings = [binding(ALPHA, 1, revoked=True), binding(ALPHA, 3, token=SECOND)]
+            self.assertEqual(self.call(service, alpha, 'lifecycle.list')['structuredContent']['error'], 'denied')
+            with self.assertRaisesRegex(broker.LifecycleError, 'unauthorized'):
+                service.authenticate('Bearer ' + bearer(ALPHA))
+        finally:
+            service.close()
+
+    def test_a_grant_rebound_to_another_binding_refuses_the_old_one(self):
+        self.bindings.append(binding(ALPHA, 3, token=SECOND))
+        service = self.service()
+        try:
+            alpha = service.authenticate('Bearer ' + bearer(ALPHA))
+            self.doc['callers'][ALPHA] = grant(revision=2, binding_id='bnd_fixture0003')
+            self.save()
+            alpha['grantRevision'] = 2
+            self.assertEqual(self.call(service, alpha, 'lifecycle.list')['structuredContent']['error'], 'denied')
         finally:
             service.close()
 
@@ -352,8 +389,39 @@ class HostTests(Workspace, unittest.TestCase):
         self.assertEqual(entry['capabilities'], list(broker.TOOLS))
         self.assertEqual(entry['state'], 'failed')
         self.assertEqual(host.degraded(), [{'source': 'node-lifecycle',
-                                            'reason': 'node.lifecycle could not start: already_running'}])
+                                            'reason': 'lifecycle: unavailable, already_running'}])
         host.close()
+
+    def corrupt_store(self):
+        self.state.mkdir(mode=0o700)
+        store = self.state / broker.STORE_FILE
+        store.write_bytes(b'this is not a database ' * 512)
+        os.chmod(store, 0o600)
+        return store
+
+    def test_a_damaged_store_is_a_degraded_row_and_a_repaired_one_starts(self):
+        store = self.corrupt_store()
+        host = S.Host(factory=self.service, config=self.config)
+        host.start()                                    # never raises
+        self.assertIsNone(host.service())
+        self.assertEqual(host.entry()['state'], 'failed')
+        self.assertEqual(host.degraded(), [{'source': 'node-lifecycle',
+                                            'reason': 'lifecycle: unavailable, DatabaseError'}])
+        # The failed broker let go of its lock: once the store is repaired the next attempt starts, never
+        # `already_running` against a broker that never existed.
+        store.unlink()
+        try:
+            self.assertIsNotNone(host.service())
+            self.assertEqual((host.degraded(), host.entry()['state']), ([], 'serving'))
+        finally:
+            host.close()
+
+    def test_a_store_that_fails_during_recovery_releases_the_lock(self):
+        with mock.patch.object(broker.Broker, 'prune', side_effect=sqlite3.DatabaseError('database disk image is '
+                                                                                            'malformed')):
+            with self.assertRaises(sqlite3.DatabaseError):
+                self.service()
+        self.service().close()                          # not `already_running`
 
 
 # -- the local server ----------------------------------------------------------------------------------------------------
@@ -457,6 +525,31 @@ class HTTPTests(Workspace, unittest.TestCase):
         status, _ = self.request('/mcp', {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}},
                                  {'Authorization': 'Bearer ' + self.token})
         self.assertEqual(status, 401)
+
+    def test_a_damaged_lifecycle_store_keeps_the_server_up(self):
+        class Broken(S.Host):
+            def start(self):
+                raise sqlite3.DatabaseError('database disk image is malformed')
+        self.serverd.LIFECYCLE = Broken(config=self.config)
+        with mock.patch.object(self.serverd, 'heartbeat', return_value={}):
+            self.serverd.beat_once(self.serverd.RUNTIME)    # the heartbeat thread survives
+        status, doc = self.request()
+        self.assertEqual(status, 200, 'the well-known document still answers')
+        self.assertIn({'source': 'node-lifecycle-start', 'reason': 'lifecycle: unavailable, DatabaseError'},
+                      doc['degraded'])
+        store = self.state / broker.STORE_FILE
+        self.host.close()
+        store.unlink()
+        for suffix in ('-wal', '-shm'):
+            (self.state / (broker.STORE_FILE + suffix)).unlink(missing_ok=True)
+        store.write_bytes(b'not a database ' * 512)
+        os.chmod(store, 0o600)
+        self.serverd.LIFECYCLE = S.Host(factory=self.service, config=self.config)
+        self.serverd.LIFECYCLE.start()
+        status, refused = self.mcp(self.LIST)
+        self.assertEqual((status, refused['error']), (503, 'unavailable'))
+        self.assertEqual(self.request('/health')[0], 200)
+        self.serverd.LIFECYCLE.close()
 
     def test_post_elsewhere_is_still_405_and_nothing_enrolled_is_refused(self):
         self.assertEqual(self.request('/health', {})[0], 405)
@@ -565,7 +658,9 @@ class CliTests(Workspace, unittest.TestCase):
         self.save()
         patches = [mock.patch.object(S, 'config_path', return_value=self.config),
                    mock.patch.object(S, 'state_dir', return_value=self.state),
-                   mock.patch.object(lifecycle_cli, '_is_terminal', return_value=True)]
+                   mock.patch.object(lifecycle_cli, '_is_terminal', return_value=True),
+                   mock.patch.object(lifecycle_cli, '_bindings_registry',
+                                     side_effect=lambda: (self.registry(), AUDIENCE))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -600,8 +695,14 @@ class CliTests(Workspace, unittest.TestCase):
         self.assertEqual(self.cli('allow', ALPHA, '--tool', 'shell.exec'), 1)
         self.assertEqual(self.cli('allow', ALPHA, '--tool', 'lifecycle.stop', '--remove'), 0)
         self.assertNotIn('lifecycle.stop', self.now()['callers'][ALPHA]['allowedTools'])
-        self.assertEqual(self.cli('allow', BETA, '--tool', 'lifecycle.list'), 0, 'a new caller gets a grant')
-        self.assertEqual(self.now()['callers'][BETA]['revision'], 1)
+        self.assertEqual(self.cli('allow', BETA, '--tool', 'lifecycle.list'), 1,
+                         'a new grant names the binding that proves its caller')
+        self.assertEqual(self.cli('allow', BETA, '--binding', 'bnd_fixture0001', '--tool', 'lifecycle.list'), 1,
+                         'a binding of another principal')
+        self.assertEqual(self.cli('allow', BETA, '--binding', 'bnd_fixture0002', '--tool', 'lifecycle.list'), 0,
+                         'a new caller gets a grant tied to its binding')
+        g = self.now()['callers'][BETA]
+        self.assertEqual((g['revision'], g['bindingId']), (1, 'bnd_fixture0002'))
 
     def test_allow_target_adds_an_enrolled_target_and_bumps_the_revision(self):
         self.assertEqual(self.cli('allow', ALPHA, '--target', 'alpha.app'), 0)
@@ -746,16 +847,16 @@ class CliTests(Workspace, unittest.TestCase):
 
     def test_status_reads_and_writes_nothing(self):
         self.bindings = [binding(ALPHA, 1)]
-        with mock.patch.object(lifecycle_cli, '_adapter', return_value=self.adapter), \
-                mock.patch.object(lifecycle_cli, '_bindings_in_force', return_value={ALPHA: 1}):
+        with mock.patch.object(lifecycle_cli, '_adapter', return_value=self.adapter):
             doc = lifecycle_cli.status()
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(lifecycle_cli.main(['status']), 0)
         self.assertEqual([t['targetId'] for t in doc['targets']], ['alpha.app'])
         self.assertEqual(doc['targets'][0]['observed']['state'], 'stopped')
-        self.assertEqual(doc['callers'][0]['bindingsInForce'], 1)
-        self.assertIn('agent:alpha rev 1 · bound', out.getvalue())
+        self.assertEqual((doc['callers'][0]['binding'], doc['callers'][0]['bindingState']),
+                         ('bnd_fixture0001', 'in force'))
+        self.assertIn('agent:alpha rev 1 · binding bnd_fixture0001 in force', out.getvalue())
         self.assertFalse(self.state.exists(), 'status creates no state')
         self.assertEqual(self.adapter.effects, [])
 

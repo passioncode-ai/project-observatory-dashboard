@@ -33,6 +33,17 @@ is N-015/N-016.
 | 10 | **A binding vouches for its queries at its ceiling.** `query_context` hands embedding-policy/1 an `authority: binding` context classified at the binding's ceiling. A binding that may see `confidential` text therefore never exports its queries, and that includes `local:stdio`. | The query text is the principal's. The most it may read is the most its words may carry. |
 | 11 | **A broken registry is refused whole.** A caller then serves stdio alone and denies every HTTP request. | As embedding-policy/1: half-reading an authority file is the one way this could grant more than it says. |
 
+### A binding outside memory: node.lifecycle
+
+The local server's lifecycle tools (`POST /mcp`, OBS-79 step L3, [LIFECYCLE.md](LIFECYCLE.md)) use a binding as
+**proof of identity only**, never as an authority. The scopes, projects, class ceiling and effect ceiling above are
+memory's, and they top out at `propose`; stopping or restarting an app is destructive and none of them covers it. So
+lifecycle is a separate grant, outside every binding's ceiling: `full lifecycle allow PRINCIPAL --binding BINDING_ID`
+records in `config/node-lifecycle.json` which tools and targets ONE binding's caller may use. Another binding of the
+same principal (one issued to read memory, say) is refused there (403), and revoking or letting the named binding
+expire refuses the caller's next lifecycle call. The memory tools never read that grant, and a binding's memory scopes
+never read the lifecycle grant either.
+
 ## The refusal envelope
 
 A denial is the wire's existing typed refusal. It carries no `isError` and no credential

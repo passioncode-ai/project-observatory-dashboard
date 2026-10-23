@@ -224,16 +224,20 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
 
 `observatory/engine/node/lifecycle/service.py` (the door), `observatory/engine/tools/lifecycle_cli.py` (the verbs under
 `full lifecycle`) and the `POST /mcp` route of `observatory/engine/tools/serverd.py`, tested by
-`observatory/engine/tests/test_node_lifecycle_service.py` (suite `node_lifecycle_service`, 46 cases: 28 ported, 18 new).
+`observatory/engine/tests/test_node_lifecycle_service.py` (suite `node_lifecycle_service`, 52 cases: 28 ported, 24 new).
 
 - **One server, one port, no token files.** The six tools are served at `POST /mcp` on the engine's local server
   (127.0.0.1:47311 by default), the only route there that changes anything. A caller proves itself with the bearer of an
   access binding of this workspace's audience (`full access-binding issue`; hashed at once, never logged or passed on),
   and the binding's principal is the caller. What it may do is a second grant, `callers.<principal>` in
-  `config/node-lifecycle.json`: `{revision, revoked, allowedTools, allowedTargets, operatorProxy?}`. No binding is 401
-  with the command that issues one, a binding without a grant 403, the descriptor's service token (which opens the events
-  feed) 401. `BindingAuthority.grant` asks again for both the grant and the binding at admission and before every effect,
-  so revoking either refuses the next call and stops an admitted start before it launches.
+  `config/node-lifecycle.json`: `{bindingId, revision, revoked, allowedTools, allowedTargets, operatorProxy?}`. The
+  grant names ONE binding (`full lifecycle allow PRINCIPAL --binding ID`): a binding's scopes, projects and effect
+  ceiling are memory's and stop at `propose`, while stopping an app is destructive, so lifecycle is a separate grant
+  outside the binding's ceiling ([ACCESS-BINDING.md](ACCESS-BINDING.md#a-binding-outside-memory-nodelifecycle)) and a
+  second binding of the same principal, issued to read memory, opens nothing here. No binding is 401 with the command
+  that issues one, a binding without a grant or not the bound one 403, the descriptor's service token (which opens the
+  events feed) 401. `BindingAuthority.grant` asks again for both the grant and the bound binding at admission and before
+  every effect, so revoking either refuses the next call and stops an admitted start before it launches.
 - **No owner over the wire.** A grant cannot name an owner, a token or its hash (the schema refuses the whole document);
   enrolling, holding a target off and forced stops are the operator's at a terminal, and `operatorProxy` (may hold an
   always_on target off) is the most a caller holds. So the broker's owner-only branches (`*` targets, force, the person's
@@ -243,8 +247,12 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   (`unsafe_config`, `invalid_config`). The broker's store is `<state>/node-lifecycle/` as planned.
 - **Inert until enrolled.** `lifecycle.Host` builds the broker over `macos.platform_adapter(cache_path=macos.default_cache())`
   only once `config/node-lifecycle.json` exists (at the server's start or its next heartbeat); before that no state is
-  created and `/mcp` answers 403 `nothing is enrolled`. A start that fails is a `node-lifecycle` row in the well-known
-  `degraded`, never a crash of the server. Off macOS the adapter answers `unsupported_platform` to everything.
+  created and `/mcp` answers 403 `nothing is enrolled`. A start that fails, whatever raised it (a corrupt or locked
+  `lifecycle.db` raises `sqlite3.DatabaseError`), is a `lifecycle: unavailable, <class>` row in the well-known
+  `degraded` and a 503 on `/mcp`, never a crash of the server or of its heartbeat thread: `Host.service`, the server's
+  start and every heartbeat catch it. The broker releases its instance lock when its construction fails at any point
+  (the store's open, recovery or pruning), so the next attempt starts once the store is repaired instead of answering
+  `already_running` forever. Off macOS the adapter answers `unsupported_platform` to everything.
 - **The MCP surface**: `initialize` (with the `instructions` text: how to wake an app, renew the lease every 10 minutes,
   what `in_use_by_person`, `held_off`, `denied` and `unsupported_platform` mean; neutral, at most 1,800 characters),
   `ping`, `tools/list` (only the tools the caller's grant names; stop and restart carry `destructiveHint`) and
@@ -270,7 +278,9 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   `allow` (creates or changes a grant; `--remove`; `--operator-proxy on|off`; never the wildcard; an unenrolled target
   is refused), `policy` (`--desired`, `--idle-minutes`, `--background-launch`, `--readiness`), `hold [--release]`,
   `revoke`, and `build-helper` (`macos.main`). Every verb that changes the document needs a terminal, like
-  `full access-binding`, and edits under a lock (`<state>/node-lifecycle/config.lock`).
+  `full access-binding`, and edits under a lock (`<state>/node-lifecycle/config.lock`). The terminal check is the
+  engine's existing convention (`sys.stdin.isatty()`): it keeps an agent's ordinary tool calls out, not a process that
+  allocates a pseudo-terminal on purpose; the owner-only document is the boundary that holds against that.
 
 Notes for L4: the supervisor runs inside the server (`lifecycle.Host`) and must also join the event log into the events
 feed; the Health page and `observatory_machine` show each target (acceptance below). For L5: the `unenroll` verb with its
@@ -282,8 +292,9 @@ adapted to the engine: the owner's token and the tools it gained at start, the h
 folder, the reserved names, re-enrolling); 5 wait for the `unenroll` verb
 (L5); 3 are the server's own behaviour, already tested where it lives: a second copy exits 75 and touches nothing
 (`tests/test_fabric_service.py`), the launchd output files are rotated (`serverd.rotate_own_logs`), a client that went
-away is not a server failure (`tests/test_serverd.py`). 18 new cases cover the binding authority, revocation before the
-effect, the unsupported platform, the inert host, the config document's refusals and the verbs the source did not have.
+away is not a server failure (`tests/test_serverd.py`). 24 new cases cover the binding authority (the bound binding only, rebinding,
+revocation before the effect), the unsupported platform, the inert host, a damaged store (a degraded row, the server up,
+the lock released), the config document's refusals and the verbs the source did not have.
 
 ## Acceptance
 

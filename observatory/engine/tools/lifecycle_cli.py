@@ -4,7 +4,7 @@
     project-observatory full lifecycle status [--json] [--no-probe]
     project-observatory full lifecycle enroll TARGET_ID --path PATH --caller PRINCIPAL --startup-effect TEXT --kind app|launchd
                                               [--dependency ID] [--timeout SECONDS]
-    project-observatory full lifecycle allow PRINCIPAL [--tool TOOL] [--target TARGET] [--remove]
+    project-observatory full lifecycle allow PRINCIPAL --binding BINDING_ID [--tool TOOL] [--target TARGET] [--remove]
                                              [--operator-proxy on|off]
     project-observatory full lifecycle policy TARGET_ID [--desired on_demand|always_on] [--idle-minutes N]
                                               [--background-launch on|off] [--readiness KIND ...]
@@ -23,7 +23,9 @@ the files it runs are hashed (`macos.MacAdapter.fingerprint`). The startup effec
 what starting the target does; the record is refused without one. A target acts for a caller only when both agree:
 the target lists the caller (`enroll --caller`) and the caller's grant lists the tool and the target (`allow`). The
 caller proves who it is with an access binding (`full access-binding issue`); this file names principals, never a
-bearer or its hash.
+bearer or its hash, and each grant names the ONE binding that proves its caller (`allow --binding ID`): a binding's
+scopes and effect ceiling are memory's, so another binding of the same principal, issued to read memory, opens nothing
+here.
 
 Every change raises the revision the agents send back (`policyRevision` of a target, `grantRevision` of a caller),
 so an agent acting on what it read before the change is refused `policy_changed`, never served the old decision.
@@ -132,8 +134,9 @@ def cmd_enroll(a: argparse.Namespace) -> int:
 
 def cmd_allow(a: argparse.Namespace) -> int:
     require_terminal("change a caller's grant")
-    if not a.tools and not a.targets and a.operator_proxy is None:
-        print("lifecycle: refused, invalid_argument: name a --tool, a --target or --operator-proxy to change",
+    if not a.tools and not a.targets and a.operator_proxy is None and not a.binding:
+        print("lifecycle: refused, invalid_argument: name a --tool, a --target, a --binding or --operator-proxy to "
+              "change",
               file=sys.stderr)
         return 1
 
@@ -146,10 +149,17 @@ def cmd_allow(a: argparse.Namespace) -> int:
         if a.targets and not a.remove and any(t not in doc["targets"] for t in a.targets):
             raise LifecycleError("not_enrolled")               # a grant to nothing is a typo, not a decision
         grant = doc["callers"].get(principal)
+        binding_id = _bound(principal, a.binding) if a.binding else None
         if grant is None:
             if a.remove:
                 raise LifecycleError("not_found")
-            grant = {"revision": 0, "revoked": False, "allowedTools": [], "allowedTargets": []}
+            if binding_id is None:
+                print("lifecycle: a new grant names the one access binding that proves the caller: --binding ID "
+                      "(`project-observatory full access-binding show` lists them)", file=sys.stderr)
+                raise LifecycleError("invalid_argument")
+            grant = {"bindingId": binding_id, "revision": 0, "revoked": False, "allowedTools": [],
+                     "allowedTargets": []}
+        rebound = binding_id is not None and binding_id != grant["bindingId"]
         tools, targets = list(grant["allowedTools"]), list(grant["allowedTargets"])
         for items, wanted in ((tools, a.tools), (targets, a.targets)):
             for item in wanted:
@@ -162,15 +172,16 @@ def cmd_allow(a: argparse.Namespace) -> int:
             # Only a caller that relays the operator's own commands may hold an always_on target off; an agent never.
             proxy = a.operator_proxy == "on"
         revoked = grant["revoked"] and a.remove                # an allow is a fresh grant; a removal keeps a revoke
-        if (tools, targets, proxy, revoked) != (grant["allowedTools"], grant["allowedTargets"],
-                                                grant.get("operatorProxy") is True, grant["revoked"]):
-            grant.update(allowedTools=tools, allowedTargets=targets, revoked=revoked, revision=grant["revision"] + 1)
+        if rebound or grant["revision"] == 0 or (tools, targets, proxy, revoked) != (
+                grant["allowedTools"], grant["allowedTargets"], grant.get("operatorProxy") is True, grant["revoked"]):
+            grant.update(allowedTools=tools, allowedTargets=targets, revoked=revoked, revision=grant["revision"] + 1,
+                         bindingId=binding_id or grant["bindingId"])
             if proxy:
                 grant["operatorProxy"] = True
             else:
                 grant.pop("operatorProxy", None)
             doc["callers"][principal] = grant
-        out = {"caller": principal, "allowedTools": tools, "allowedTargets": targets,
+        out = {"caller": principal, "binding": grant["bindingId"], "allowedTools": tools, "allowedTargets": targets,
                "operatorProxy": proxy, "grantRevision": grant["revision"]}
         missing = [t for t in targets if principal not in doc["targets"].get(t, {}).get("allowedCallers", [principal])]
         if missing:
@@ -247,20 +258,46 @@ def cmd_policy(a: argparse.Namespace) -> int:
     return _change(edit)
 
 
-def _bindings_in_force() -> dict:
-    """principal -> number of its bindings in force for this workspace; names only, never a digest."""
+def _bindings_registry():
+    """(the access bindings in force, this workspace's audience); raises AB.BindingError on a broken registry."""
     import memory_access as MA
+    return MA.registry(), MA.own_audience()
+
+
+def binding_state(binding_id: str) -> str:
+    """`in force`, `revoked`, `expired`, `another workspace`, `absent` or `unreadable`: names only, never a digest."""
     from datetime import datetime, timezone
     try:
-        registry, audience = MA.registry(), MA.own_audience()
+        registry, audience = _bindings_registry()
     except AB.BindingError:
-        return {}
-    now = datetime.now(timezone.utc)
-    out: dict = {}
-    for b in registry.bindings:
-        if b.audience == audience and b.revoked_at is None and AB._when(b.expires_at) > now:
-            out[b.principal] = out.get(b.principal, 0) + 1
-    return out
+        return "unreadable"
+    b = next((b for b in registry.bindings if b.binding_id == binding_id), None)
+    if b is None:
+        return "absent"
+    if b.audience != audience:
+        return "another workspace"
+    if b.revoked_at is not None:
+        return "revoked"
+    if AB._when(b.expires_at) <= datetime.now(timezone.utc):
+        return "expired"
+    return "in force"
+
+
+def _bound(principal: str, binding_id: str) -> str:
+    """The binding a grant may name: one of this workspace, of this principal, not revoked. A binding's scopes and
+    ceilings are memory's; the lifecycle grant is a separate decision, tied to this one binding only."""
+    if not AB.BINDING_ID.match(binding_id):
+        raise LifecycleError("invalid_argument")
+    try:
+        registry, audience = _bindings_registry()
+    except AB.BindingError:
+        raise LifecycleError("invalid_argument") from None
+    b = next((b for b in registry.bindings if b.binding_id == binding_id), None)
+    if b is None or b.principal != principal or b.audience != audience or b.revoked_at is not None:
+        print(f"lifecycle: {binding_id} is not a binding of {principal} in force for this workspace "
+              "(`project-observatory full access-binding show`)", file=sys.stderr)
+        raise LifecycleError("invalid_argument")
+    return binding_id
 
 
 def status(probe: bool = True) -> dict:
@@ -295,12 +332,11 @@ def status(probe: bool = True) -> dict:
         close = getattr(adapter, "close", None)
         if close:
             close()
-    bound = _bindings_in_force()
     for principal, g in sorted(doc["callers"].items()):
         out["callers"].append({"caller": principal, "revoked": g["revoked"], "grantRevision": g["revision"],
                                "allowedTools": g["allowedTools"], "allowedTargets": g["allowedTargets"],
                                "operatorProxy": g.get("operatorProxy", False),
-                               "bindingsInForce": bound.get(principal, 0)})
+                               "binding": g["bindingId"], "bindingState": binding_state(g["bindingId"])})
     try:
         out["events"] = S.EventLog(S.state_dir() / S.EVENTS_FILE).fetch(None, 10)
     except (OSError, ValueError):
@@ -328,7 +364,7 @@ def cmd_status(a: argparse.Namespace) -> int:
         print(f"  {t['targetId']} ({t['kind']}) {t['desiredState']} rev {t['policyRevision']} · {seen} · "
               f"callers {', '.join(t['allowedCallers'])}")
     for c in doc["callers"]:
-        state = "revoked" if c["revoked"] else ("bound" if c["bindingsInForce"] else "no binding in force")
+        state = "revoked" if c["revoked"] else f"binding {c['binding']} {c['bindingState']}"
         print(f"  {c['caller']} rev {c['grantRevision']} · {state} · tools {', '.join(c['allowedTools']) or 'none'}"
               f" · targets {', '.join(c['allowedTargets']) or 'none'}")
     for e in doc["events"]:
@@ -362,6 +398,8 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="seconds to readiness, 1..60; default 30")
     al = sub.add_parser("allow", help="give or take a caller's tools and targets (terminal only)")
     al.add_argument("principal", help="agent:<name> or service:<name>, as its access binding names it")
+    al.add_argument("--binding", help="bnd_...: the one access binding that proves this caller; required for a new "
+                                      "grant. Another binding of the same principal opens nothing here")
     al.add_argument("--tool", dest="tools", action="append", default=[], choices=TOOLS, help="repeatable")
     al.add_argument("--target", dest="targets", action="append", default=[], help="an enrolled target id; repeatable")
     al.add_argument("--remove", action="store_true", help="take the named tools and targets away")

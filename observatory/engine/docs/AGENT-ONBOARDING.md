@@ -37,9 +37,12 @@ admits a start; poll `lifecycle.operation.get` until a final state (`ready` and 
 are success). While you keep using an app it started, call `ensure_running` again at least every
 10 minutes to renew your lease. `in_use_by_person` means I opened it, took it over or am using
 it: tell me, do not retry. `held_off` means I switched it off on purpose: do not work around it.
-`denied` means I have not allowed you that tool or target; the command is mine, at my terminal
-(`full lifecycle allow`), and so are enrolling, holding and forced stops. Nothing is served
-until I enroll a target; on Linux and Windows every tool answers `unsupported_platform`.
+`denied` means I have not allowed you that tool or target, or your bearer is not the binding
+your grant names; the command is mine, at my terminal (`full lifecycle allow --binding`), and so
+are enrolling, holding and forced stops. Nothing is served until I enroll a target: until then
+this `/mcp` answers 403. Where a lifecycle broker of its own already serves this machine, keep
+using it until I import its enrollments here (OBS-79 step L5); do not switch on your own. On
+Linux and Windows every tool answers `unsupported_platform`.
 
 ## Reading offline verification receipts
 

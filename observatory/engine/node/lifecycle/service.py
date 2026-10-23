@@ -8,9 +8,12 @@ it keeps, and why:
   (access-bindings/1, `full access-binding issue`): the server hashes the bearer, `access_binding.resolve` finds the
   binding for this workspace's audience, unexpired and unrevoked, and the binding's principal (`agent:<name>`) is the
   caller. What that caller may do with which target is a second, separate grant in `config/node-lifecycle.json`
-  (`full lifecycle allow`). A binding without such a grant is `denied`; the descriptor's service token, which opens
-  the events feed, is not a binding and opens nothing here. Revoking the binding, or the grant, refuses the caller's
-  next call and stops an admitted operation before its effect, because the broker reads the grant again then.
+  (`full lifecycle allow --binding ID`), and the grant names ONE binding by its id: the binding's scopes, projects and
+  effect ceiling are memory's and say nothing about apps, so a binding the operator issued for reading memory never
+  gains lifecycle powers by sharing a principal with the bound one. Another binding of the same principal is `denied`
+  (403), as is a binding without a grant; the descriptor's service token, which opens the events feed, is not a
+  binding and opens nothing here. Revoking the bound binding, or the grant, refuses the caller's next call and stops
+  an admitted operation before its effect, because the broker reads both again then.
 - **No owner over the wire.** The operator's authority (enrolling, holding a target off, a forced stop) is a terminal
   (`tools/lifecycle_cli.py`), never a bearer: a grant has no `owner` field, and `operatorProxy`, which may hold an
   always_on target off, is the most a caller is given.
@@ -56,7 +59,7 @@ MCP_PATH = '/mcp'
 #: Not `config/lifecycle.json`, which configures the lifecycle watch (collectors/scan_lifecycle.py), another thing.
 CONFIG_NAME = 'node-lifecycle.json'
 SCHEMA_VERSION = 1
-GRANT_FIELDS = ('revision', 'revoked', 'allowedTools', 'allowedTargets')
+GRANT_FIELDS = ('bindingId', 'revision', 'revoked', 'allowedTools', 'allowedTargets')
 GRANT_OPTIONAL = ('operatorProxy',)
 EVENTS_FILE = 'events.jsonl'
 EVENTS_KEEP = 5000
@@ -113,8 +116,8 @@ INSTRUCTIONS = (
 HINTS = {
     'unauthorized': 'send the bearer of an access binding the operator issued for this workspace '
                     '(`project-observatory full access-binding issue PRINCIPAL --project PROJECT --token-file PATH`)',
-    'denied': 'the operator has not allowed this caller that tool or target: '
-              '`project-observatory full lifecycle allow PRINCIPAL --tool TOOL --target TARGET`',
+    'denied': 'the operator has not allowed this binding that tool or target: '
+              '`project-observatory full lifecycle allow PRINCIPAL --binding BINDING_ID --tool TOOL --target TARGET`',
     'not_enrolled': 'the operator has not enrolled that target: `project-observatory full lifecycle status` lists them',
     'policy_changed': 'call lifecycle.list for the current policyRevision and grantRevision, then ask again',
     'idempotency_conflict': 'this requestId already names another request; use a fresh one',
@@ -155,8 +158,9 @@ def empty_config() -> dict:
 
 def validate_config(doc: Any) -> dict:
     """The closed schema: `{schemaVersion: 1, targets: {id: target}, callers: {principal: grant}}`. The targets are
-    the broker's registry and are checked by it; a grant is `{revision, revoked, allowedTools, allowedTargets,
-    operatorProxy?}` and never carries `owner`, a token or a token hash: the caller's credential is its binding."""
+    the broker's registry and are checked by it; a grant is `{bindingId, revision, revoked, allowedTools,
+    allowedTargets, operatorProxy?}` and never carries `owner`, a token or a token hash: the caller's credential is
+    the one binding the grant names."""
     if not isinstance(doc, dict) or set(doc) != {'schemaVersion', 'targets', 'callers'}:
         raise ConfigError('the document must be {schemaVersion, targets, callers}')
     if doc['schemaVersion'] != SCHEMA_VERSION:
@@ -174,7 +178,10 @@ def validate_config(doc: Any) -> dict:
             raise ConfigError(f'{where}: a caller is agent:<name> or service:<name>, the principal of its binding')
         if not isinstance(grant, dict) or set(grant) - set(GRANT_FIELDS + GRANT_OPTIONAL) \
                 or set(GRANT_FIELDS) - set(grant):
-            raise ConfigError(f'{where} must be {{revision, revoked, allowedTools, allowedTargets, operatorProxy?}}')
+            raise ConfigError(f'{where} must be {{bindingId, revision, revoked, allowedTools, allowedTargets, '
+                              f'operatorProxy?}}')
+        if not isinstance(grant['bindingId'], str) or not AB.BINDING_ID.match(grant['bindingId']):
+            raise ConfigError(f'{where}: bindingId names the one access binding that proves this caller')
         if type(grant['revision']) is not int or grant['revision'] < 1 or type(grant['revoked']) is not bool:
             raise ConfigError(f'{where}: revision is an integer of at least 1 and revoked a boolean')
         if 'operatorProxy' in grant and grant['operatorProxy'] is not True:
@@ -226,9 +233,10 @@ def _audience() -> str:
 class BindingAuthority(broker.Authority):
     """The broker's authority with the access bindings as its credentials.
 
-    `authenticate` turns a bearer into a principal only through a binding of this workspace's audience; `grant` is
-    asked again by the broker at admission and before every effect, and answers only while BOTH the caller's grant in
-    `config/node-lifecycle.json` and the binding that proved it still stand."""
+    `authenticate` turns a bearer into a principal only through the binding the caller's grant names (`bindingId`),
+    of this workspace's audience; another binding of the same principal is `denied`. `grant` is asked again by the
+    broker at admission and before every effect, and answers only while BOTH the caller's grant in
+    `config/node-lifecycle.json` and that very binding still stand."""
 
     def __init__(self, config: Callable[[], dict], *, bindings: Callable[[], AB.Registry] = _bindings,
                  audience: Callable[[], str] = _audience, now: Callable[[], str] = _now_iso):
@@ -257,8 +265,8 @@ class BindingAuthority(broker.Authority):
         if binding is None:
             raise LifecycleError('unauthorized')
         grant = self.config()['callers'].get(binding.principal)
-        if grant is None or grant['revoked'] is not False:
-            raise LifecycleError('denied')
+        if grant is None or grant['revoked'] is not False or grant['bindingId'] != binding.binding_id:
+            raise LifecycleError('denied')                  # a binding the lifecycle grant does not name
         return {'caller': binding.principal, 'grantRevision': grant['revision'], 'tokenHash': digest}
 
     def grant(self, principal: dict) -> dict:
@@ -266,8 +274,8 @@ class BindingAuthority(broker.Authority):
         if grant is None or grant['revoked'] is not False or grant['revision'] != principal.get('grantRevision'):
             raise LifecycleError('denied')
         binding = self._binding(str(principal.get('tokenHash', '')))
-        if binding is None or binding.principal != principal['caller']:
-            raise LifecycleError('denied')                  # the binding was revoked or expired since
+        if binding is None or binding.principal != principal['caller'] or binding.binding_id != grant['bindingId']:
+            raise LifecycleError('denied')                  # revoked, expired or no longer the bound binding
         return dict(grant, owner=False)
 
 
@@ -551,22 +559,29 @@ class Host:
         return self.config or config_path()
 
     def start(self) -> None:
-        if self._config().exists():
+        """Never raises: the local server calls it at its start and on every heartbeat."""
+        try:
+            exists = self._config().exists()
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                self._problem = f'lifecycle: unavailable, {type(exc).__name__}'
+            return
+        if exists:
             self.service()
 
     def service(self) -> Optional[Service]:
         with self._lock:
             if self._service is not None or self._closed:
                 return self._service
-            if not self._config().exists():
-                return None
             try:
+                if not self._config().exists():
+                    return None
                 self._service = self.factory()
                 self._problem = None
             except LifecycleError as exc:
-                self._problem = f'node.lifecycle could not start: {exc.code}'
-            except OSError as exc:
-                self._problem = f'node.lifecycle could not start: {type(exc).__name__}'
+                self._problem = f'lifecycle: unavailable, {exc.code}'
+            except Exception as exc:  # noqa: BLE001 - a damaged store (sqlite3.DatabaseError) is a degraded row,
+                self._problem = f'lifecycle: unavailable, {type(exc).__name__}'  # never the server's crash
             return self._service
 
     def degraded(self) -> list:

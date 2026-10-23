@@ -477,7 +477,12 @@ def beat_once(runtime: Runtime) -> None:
         runtime.note_failure("heartbeat", f"the heartbeat receipt could not be written: {type(exc).__name__}: {exc}")
     if LIFECYCLE is not None:
         # The operator may enroll while the server runs: the service is built at the next beat, not a restart.
-        LIFECYCLE.start()
+        # Never a reason for the beat to die: a failure is the lifecycle's degraded row.
+        try:
+            LIFECYCLE.start()
+            runtime.note_failure("node-lifecycle-start", None)
+        except Exception as exc:  # noqa: BLE001
+            runtime.note_failure("node-lifecycle-start", f"lifecycle: unavailable, {type(exc).__name__}")
     runtime.refresh(leaks)
 
 
@@ -731,7 +736,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              self.headers.get("Sec-Fetch-Site"), self.server.server_address[1]):
             self._json({"error": "only local browser origins are accepted"}, 403)
             return
-        note_client(lifecycle.MCP_PATH)
         self._mcp()
 
     def _refuse(self, code: int, doc: dict, headers: dict | None = None) -> None:
@@ -756,9 +760,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._refuse(400, {"error": "Send one Authorization header."})
             return
         host = LIFECYCLE
-        service = host.service() if host else None
+        try:
+            service = host.service() if host else None
+        except Exception:  # noqa: BLE001 - Host.service records its own failure; this keeps the request answered
+            service = None
         if service is None:
-            # Nothing enrolled (or the service could not start): no binding opens anything, so say why.
+            problems = host.degraded() if host else []
+            if problems:
+                # Enrolled, but the service could not start (a damaged store): say so, and why, without a crash.
+                self._refuse(503, {"error": "unavailable", "detail": problems[0]["reason"],
+                                   "hint": "`project-observatory full lifecycle status` names the fault",
+                                   "degraded": problems})
+                return
+            # Nothing enrolled: no binding opens anything, so say why.
             self._refuse(403, lifecycle.refusal("denied") | {
                 "detail": "node.lifecycle is not set up on this workspace: nothing is enrolled"},
                 {"WWW-Authenticate": "Bearer"})
@@ -769,6 +783,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             code = 401 if exc.code == "unauthorized" else 403
             self._refuse(code, lifecycle.refusal(exc.code), {"WWW-Authenticate": "Bearer"})
             return
+        # A client only once it authenticated: an unauthenticated caller must not hold an update back (LC-16).
+        note_client(lifecycle.MCP_PATH)
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -847,7 +863,10 @@ def serve(port: int) -> int:
     # over. Builds nothing until the operator enrolled a target (`config/node-lifecycle.json`); a failure is a
     # degraded row, never a crash.
     LIFECYCLE = lifecycle.Host()
-    LIFECYCLE.start()
+    try:
+        LIFECYCLE.start()
+    except Exception as exc:  # noqa: BLE001 - the dashboard, /health and the events feed stay up
+        RUNTIME.note_failure("node-lifecycle-start", f"lifecycle: unavailable, {type(exc).__name__}")
     stop = threading.Event()
 
     def beat():
