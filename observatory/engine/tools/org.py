@@ -127,7 +127,8 @@ def run(args) -> dict:
     if args.command == "summary" and args.consent:
         if not args.org:
             raise org.OrgError("org-required", "consent is given per organization: name it with --org",
-                               command="project-observatory full org summary --org ID --consent %s" % args.consent)
+                               command="project-observatory full org summary --org ID --consent on"
+                               if args.consent == "on" else "project-observatory full org summary --org ID --consent off")
         return {"schema": "org-summary-consent/1",
                 "organizations": [_enrollment(args.org).set_summary_consent(args.consent == "on")]}
     action = {"status": "describe", "check-in": "check_in", "rotate": "rotate", "tick": "tick", "flush": "flush",

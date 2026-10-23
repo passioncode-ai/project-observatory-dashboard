@@ -1377,8 +1377,8 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   agents of the contract's catalogue installed here with their versions, the MCP servers they load (name, source,
   transport, health), the Claude Code skills (name, source, digest) and enabled plugins (name, source, version), and
   how many hooks they load. **It is not shared until you say so, per organization**: run
-  `project-observatory full org summary --org <id>` to read exactly what would leave (it sends nothing and works before
-  you agree), then `project-observatory full org summary --org <id> --consent on` (or `--consent off` to stop; the time
+  `project-observatory full org summary --org ID` to read exactly what would leave (it sends nothing and works before
+  you agree), then `project-observatory full org summary --org ID --consent on` (or `--consent off` to stop; the time
   is recorded). Until then `org status` and Health say `harness summary: not shared (consent off)`. Why off: the
   contract ships the whole harness whatever the machine's mode, and whether an organization should also see what serves
   your other contexts is still its open question CT-92. To keep names back, list them in
