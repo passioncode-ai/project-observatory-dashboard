@@ -232,6 +232,8 @@ BOUNDARY += ('session_reload',)
 # shipped with OBS-161 but was never listed here, so `full check` never ran it (OBS-201); RUN_ELSEWHERE below and
 # tests/test_runner_evidence.py now refuse an engine test file that no runner names.
 BOUNDARY += ('node_org',)
+# OBS-192: the node's harness summary (node-summary/1, contract DEC-0101) and its drift, over the contract's vectors.
+BOUNDARY += ('node_summary',)
 # OBS-79 step L1: the lifecycle broker (registry, authority, durable operations, receipts, the effect journal,
 # circuits, the restart budget, idle and takeover rules) against fake adapters.
 BOUNDARY += ('node_lifecycle_broker',)
@@ -362,6 +364,7 @@ def source_files() -> list[Path]:
     # The contract's estate fixtures the node's rules run over (fabric/node-vectors/README.md).
     selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
     selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
+    selected |= set((ROOT / 'fabric/node-vectors/summary').rglob('*.json'))    # OBS-192: node-summary/1 and the catalogue
     out = []
     for source in sorted(selected):
         if not source.is_file():

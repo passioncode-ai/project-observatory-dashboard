@@ -1,0 +1,741 @@
+{
+  "schema": "coding-agents/1",
+  "revision": 1,
+  "agents": [
+    {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "maker": "Nous Research",
+      "url": "https://github.com/NousResearch/hermes-agent",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://hermes-agent.nousresearch.com/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "hermes"
+        ]
+      },
+      "mcp": true,
+      "openrouter": {
+        "modelArgv": [
+          "--provider",
+          "openrouter",
+          "-m",
+          "{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/NousResearch/hermes-agent"
+      ]
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code + Kilo CLI",
+      "maker": "Kilo-Org",
+      "url": "https://github.com/Kilo-Org/kilocode",
+      "install": [
+        {
+          "via": "npm",
+          "package": "@kilocode/cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "kilo"
+        ]
+      },
+      "mcp": true,
+      "openrouter": {
+        "modelArgv": [
+          "-m",
+          "openrouter/{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/Kilo-Org/kilocode"
+      ]
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "maker": "Anthropic",
+      "url": "https://code.claude.com/docs/en/setup",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://claude.ai/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "claude"
+        ]
+      },
+      "permissions": {
+        "skip": {
+          "argv": [
+            "--dangerously-skip-permissions"
+          ]
+        },
+        "source": "https://code.claude.com/docs/en/cli-reference"
+      },
+      "mcp": true,
+      "sources": [
+        "https://code.claude.com/docs/en/setup",
+        "https://code.claude.com/docs/en/cli-reference"
+      ]
+    },
+    {
+      "id": "cline",
+      "name": "Cline + Cline CLI",
+      "maker": "Cline",
+      "url": "https://github.com/cline/cline",
+      "install": [
+        {
+          "via": "npm",
+          "package": "cline"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "cline"
+        ]
+      },
+      "permissions": {
+        "skip": {
+          "argv": [
+            "--auto-approve",
+            "true"
+          ]
+        },
+        "measured": {
+          "argv": [
+            "cline",
+            "--help"
+          ],
+          "version": "3.0.73",
+          "date": "2026-10-19"
+        }
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/cline/cline"
+      ]
+    },
+    {
+      "id": "freebuff",
+      "name": "Freebuff",
+      "maker": "Codebuff",
+      "url": "https://github.com/CodebuffAI/freebuff",
+      "install": [
+        {
+          "via": "npm",
+          "package": "freebuff"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "freebuff"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/CodebuffAI/freebuff"
+      ]
+    },
+    {
+      "id": "omp",
+      "name": "omp (oh-my-pi)",
+      "maker": "can1357",
+      "url": "https://github.com/can1357/oh-my-pi",
+      "install": [
+        {
+          "via": "brew",
+          "package": "can1357/tap/omp"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "omp"
+        ]
+      },
+      "mcp": true,
+      "openrouter": {
+        "modelArgv": [
+          "--model",
+          "openrouter/{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/can1357/oh-my-pi"
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "maker": "OpenAI",
+      "url": "https://github.com/openai/codex",
+      "install": [
+        {
+          "via": "brew-cask",
+          "package": "codex"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "codex"
+        ]
+      },
+      "permissions": {
+        "skip": {
+          "argv": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ]
+        },
+        "measured": {
+          "argv": [
+            "codex",
+            "--help"
+          ],
+          "version": "codex-cli 0.163.0",
+          "date": "2026-10-19"
+        }
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/openai/codex"
+      ]
+    },
+    {
+      "id": "command-code",
+      "name": "Command Code",
+      "maker": "Command Code (commandcode.ai)",
+      "url": "https://commandcode.ai/docs",
+      "install": [
+        {
+          "via": "npm",
+          "package": "command-code"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "cmd"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://commandcode.ai/docs"
+      ]
+    },
+    {
+      "id": "pi",
+      "name": "pi",
+      "maker": "Earendil (earendil-works)",
+      "url": "https://github.com/earendil-works/pi",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://pi.dev/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "pi"
+        ]
+      },
+      "mcp": true,
+      "openrouter": {
+        "modelArgv": [
+          "--provider",
+          "openrouter",
+          "--model",
+          "{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/earendil-works/pi"
+      ]
+    },
+    {
+      "id": "deepseek-harness",
+      "name": "DeepSeek Harness",
+      "maker": "DeepSeek",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "launch": {
+        "argv": [
+          "dsh"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/deepseek-ai/deepseek-harness"
+      ]
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "maker": "OpenClaw",
+      "url": "https://github.com/openclaw/openclaw",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://openclaw.ai/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "openclaw"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/openclaw/openclaw"
+      ]
+    },
+    {
+      "id": "openhands",
+      "name": "OpenHands CLI",
+      "maker": "OpenHands",
+      "url": "https://github.com/OpenHands/OpenHands-CLI",
+      "install": [
+        {
+          "via": "uv",
+          "package": "openhands"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "openhands"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/OpenHands/OpenHands-CLI"
+      ]
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "maker": "Z.ai",
+      "url": "https://github.com/zai-org/ZCode",
+      "launch": {
+        "argv": [
+          "zcode"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/zai-org/ZCode"
+      ]
+    },
+    {
+      "id": "kimi-code",
+      "name": "Kimi Code CLI",
+      "maker": "Moonshot AI",
+      "url": "https://github.com/MoonshotAI/kimi-code",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://code.kimi.com/kimi-code/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "kimi"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/MoonshotAI/kimi-code"
+      ]
+    },
+    {
+      "id": "auggie",
+      "name": "Auggie CLI",
+      "maker": "Augment Code",
+      "url": "https://github.com/augmentcode/auggie",
+      "install": [
+        {
+          "via": "npm",
+          "package": "@augmentcode/auggie"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "auggie"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/augmentcode/auggie"
+      ]
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "maker": "Aider-AI",
+      "url": "https://github.com/Aider-AI/aider",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://aider.chat/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "aider"
+        ]
+      },
+      "mcp": false,
+      "openrouter": {
+        "modelArgv": [
+          "--model",
+          "openrouter/{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/Aider-AI/aider"
+      ]
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "maker": "anomalyco (formerly sst)",
+      "url": "https://github.com/anomalyco/opencode",
+      "install": [
+        {
+          "via": "brew",
+          "package": "anomalyco/tap/opencode"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "opencode"
+        ]
+      },
+      "mcp": true,
+      "openrouter": {
+        "modelArgv": [
+          "-m",
+          "openrouter/{model}"
+        ]
+      },
+      "sources": [
+        "https://github.com/anomalyco/opencode"
+      ]
+    },
+    {
+      "id": "continue",
+      "name": "Continue + cn",
+      "maker": "Continue (continuedev)",
+      "url": "https://github.com/continuedev/continue",
+      "install": [
+        {
+          "via": "npm",
+          "package": "@continuedev/cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "cn"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/continuedev/continue"
+      ]
+    },
+    {
+      "id": "goose",
+      "name": "Goose",
+      "maker": "aaif-goose (formerly Block)",
+      "url": "https://github.com/aaif-goose/goose",
+      "install": [
+        {
+          "via": "brew",
+          "package": "block-goose-cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "goose"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/aaif-goose/goose"
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "maker": "Google",
+      "url": "https://github.com/google-gemini/gemini-cli",
+      "install": [
+        {
+          "via": "brew",
+          "package": "gemini-cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "gemini"
+        ]
+      },
+      "permissions": {
+        "skip": {
+          "argv": [
+            "--approval-mode",
+            "yolo"
+          ]
+        },
+        "measured": {
+          "argv": [
+            "gemini",
+            "--help"
+          ],
+          "version": "0.63.0",
+          "date": "2026-10-19"
+        }
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/google-gemini/gemini-cli"
+      ]
+    },
+    {
+      "id": "qwen-code",
+      "name": "Qwen Code",
+      "maker": "QwenLM",
+      "url": "https://github.com/QwenLM/qwen-code",
+      "install": [
+        {
+          "via": "brew",
+          "package": "qwen-code"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "qwen"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/QwenLM/qwen-code"
+      ]
+    },
+    {
+      "id": "crush",
+      "name": "Crush",
+      "maker": "Charm",
+      "url": "https://github.com/charmbracelet/crush",
+      "install": [
+        {
+          "via": "brew",
+          "package": "charmbracelet/tap/crush"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "crush"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/charmbracelet/crush"
+      ]
+    },
+    {
+      "id": "zed",
+      "name": "Zed agent",
+      "maker": "Zed Industries",
+      "url": "https://github.com/zed-industries/zed",
+      "install": [
+        {
+          "via": "brew-cask",
+          "package": "zed"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "zed"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/zed-industries/zed"
+      ]
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "maker": "Sourcegraph",
+      "url": "https://ampcode.com",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://ampcode.com/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "amp"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://ampcode.com"
+      ]
+    },
+    {
+      "id": "cursor-agent",
+      "name": "Cursor CLI",
+      "maker": "Cursor",
+      "url": "https://cursor.com/docs/cli/installation.md",
+      "aliases": [
+        "cursor-cli"
+      ],
+      "install": [
+        {
+          "via": "script",
+          "script": "https://cursor.com/install"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "agent"
+        ]
+      },
+      "permissions": {
+        "skip": {
+          "argv": [
+            "--force"
+          ]
+        },
+        "measured": {
+          "argv": [
+            "agent",
+            "--help"
+          ],
+          "version": "2026.09.02-c22c1a3",
+          "date": "2026-10-19"
+        }
+      },
+      "mcp": true,
+      "sources": [
+        "https://cursor.com/docs/cli/installation.md"
+      ]
+    },
+    {
+      "id": "copilot-cli",
+      "name": "GitHub Copilot CLI",
+      "maker": "GitHub",
+      "url": "https://github.com/github/copilot-cli",
+      "install": [
+        {
+          "via": "brew",
+          "package": "copilot-cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "copilot"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/github/copilot-cli"
+      ]
+    },
+    {
+      "id": "factory-droid",
+      "name": "Factory Droid",
+      "maker": "Factory",
+      "url": "https://docs.factory.com/droid-cli/quickstart.md",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://app.factory.ai/cli"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "droid"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://docs.factory.com/droid-cli/quickstart.md"
+      ]
+    },
+    {
+      "id": "warp",
+      "name": "Warp",
+      "maker": "Warp",
+      "url": "https://github.com/warpdotdev/Warp",
+      "install": [
+        {
+          "via": "brew-cask",
+          "package": "warp"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "warp"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://github.com/warpdotdev/Warp"
+      ]
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro CLI",
+      "maker": "AWS (Kiro)",
+      "url": "https://kiro.dev/docs/getting-started/installation.md",
+      "aliases": [
+        "kiro-cli"
+      ],
+      "install": [
+        {
+          "via": "script",
+          "script": "https://cli.kiro.dev/install"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "kiro-cli"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://kiro.dev/docs/getting-started/installation.md"
+      ]
+    },
+    {
+      "id": "devin",
+      "name": "Devin Desktop / Devin CLI (formerly Windsurf/Cascade)",
+      "maker": "Devin (formerly Windsurf)",
+      "url": "https://docs.devin.ai/desktop/getting-started.md",
+      "install": [
+        {
+          "via": "script",
+          "script": "https://cli.devin.ai/install.sh"
+        }
+      ],
+      "launch": {
+        "argv": [
+          "devin"
+        ]
+      },
+      "mcp": true,
+      "sources": [
+        "https://docs.devin.ai/desktop/getting-started.md"
+      ]
+    }
+  ]
+}
