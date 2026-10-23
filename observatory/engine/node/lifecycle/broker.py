@@ -595,6 +595,7 @@ class Broker:
         self._take_instance_lock()                          # before the store is opened and anything recovered
         self.db_lock = threading.RLock()
         path = self.state_dir / STORE_FILE
+        self.db = None
         try:
             self.db = sqlite3.connect(path, check_same_thread=False)
             self.db.row_factory = sqlite3.Row
@@ -607,6 +608,11 @@ class Broker:
             self.db.commit()
             osprivacy.make_private(path)
         except BaseException:
+            # A damaged or locked store (sqlite3.DatabaseError) must not keep the lock: the next attempt would be
+            # refused `already_running` by a broker that never existed.
+            if self.db is not None:
+                with contextlib.suppress(Exception):
+                    self.db.close()
             self._release_instance_lock()
             raise
         self.locks: dict = {}
@@ -618,12 +624,22 @@ class Broker:
         self.on_gave_up = on_gave_up
         # Operations a dead process left running get a new generation; the old one can no longer finish them. An
         # unknown launch is probed, never repeated: `effects` survives even when the worker never wrote its receipt.
-        with self.db_lock, self.db:
-            rows = self.db.execute("SELECT id,generation FROM operations WHERE state='running'").fetchall()
-            for row in rows:
-                self.db.execute('UPDATE operations SET generation=generation+1 WHERE id=?', (row['id'],))
-                self._submit(row['id'], row['generation'] + 1)
-        self.prune()
+        try:
+            with self.db_lock, self.db:
+                rows = self.db.execute("SELECT id,generation FROM operations WHERE state='running'").fetchall()
+                for row in rows:
+                    self.db.execute('UPDATE operations SET generation=generation+1 WHERE id=?', (row['id'],))
+                    self._submit(row['id'], row['generation'] + 1)
+            self.prune()
+        except BaseException:
+            # Recovery or pruning failed on a store that opened (a corrupt page is found only when read): end what
+            # was submitted, close the store and let go of the lock, so a later attempt can start cleanly.
+            self.closed = True
+            self.executor.shutdown(wait=False, cancel_futures=True)
+            with contextlib.suppress(Exception):
+                self.db.close()
+            self._release_instance_lock()
+            raise
 
     def _registry(self) -> dict:
         return registry(self.registry_source)

@@ -182,7 +182,7 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         check("and its Content-Length is the GET body's", length == str(len(page)), f"{length} vs {len(page)}")
         c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
         c.request("POST", "/health")
-        check("POST is 405 — this server changes nothing", c.getresponse().status == 405)
+        check("POST outside /mcp is 405: only node.lifecycle's tools change anything", c.getresponse().status == 405)
         c.close()
     finally:
         p.terminate()

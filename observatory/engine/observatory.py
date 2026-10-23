@@ -467,7 +467,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "memory-http", "forget",
-                       "ssh-keys", "org")
+                       "ssh-keys", "org", "lifecycle")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -523,6 +523,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   access-binding show|issue|revoke  which agent may reach memory over HTTP; issue writes the
                                bearer to a new owner-only file; issue and revoke need a terminal
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
+  lifecycle status|enroll|allow|policy|hold|revoke|build-helper   which enrolled apps and background
+                               jobs the node may wake, stop and restart, and for which caller (an access
+                               binding's principal); served at POST /mcp on the local server. Every change
+                               needs a terminal; nothing is served until you enroll a target
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
   ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
@@ -811,6 +815,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
+    if name == "lifecycle":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import lifecycle_cli
+        return argparse_refusal(lambda: lifecycle_cli.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -1187,6 +1195,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import access_binding_cli
         return access_binding_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "lifecycle":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import lifecycle_cli
+        return lifecycle_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] == "memory-http":
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service

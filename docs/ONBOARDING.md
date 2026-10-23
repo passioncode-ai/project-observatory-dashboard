@@ -893,7 +893,9 @@ into any agent configuration; only this explicit command does.
 dashboard of the workspace in `OBSERVATORY_HOME`, or the default one; with no workspace yet it says
 how to create one, on stderr, and exits 2, because nothing was opened. Open it explicitly with `project-observatory full open` (local files) or
 `project-observatory full open --serve` (a read-only loopback server on
-127.0.0.1:47311; it answers GET only and changes nothing).
+127.0.0.1:47311; it answers GET only and changes nothing, except `POST /mcp`, the
+lifecycle tools of [node.lifecycle](#which-apps-an-agent-may-wake-stop-and-restart-nodelifecycle),
+which serve only callers you allowed).
 
 The Keys and ENV pages' buttons — mint, cap or revoke a provider key, mark a leak,
 reveal one inventoried value — act only when the pages are served by the
@@ -1076,6 +1078,54 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   ([design/HTTP-TRANSPORT.md](design/HTTP-TRANSPORT.md)).
 
 Rules and reasons: [design/ACCESS-BINDING.md](design/ACCESS-BINDING.md).
+
+### Which apps an agent may wake, stop and restart: node.lifecycle
+
+An agent should never launch, quit or kill your desktop apps or background jobs itself. The
+local server (`serverd.py`, the same port as the dashboard) serves six MCP tools at
+`POST http://127.0.0.1:47311/mcp` that do it for the agent, on targets you enrolled and only for
+callers you allowed (OBS-79; [design/LIFECYCLE.md](design/LIFECYCLE.md)):
+`lifecycle.list`, `lifecycle.status`, `lifecycle.ensure_running`, `lifecycle.stop`,
+`lifecycle.restart` and `lifecycle.operation.get`. Nothing is served until you enroll a target:
+until then every caller is refused and no state is created.
+
+```sh
+project-observatory full lifecycle status                  # targets, callers, the last events; starts nothing
+project-observatory full lifecycle build-helper            # macOS: compile the helper once (needs swiftc)
+project-observatory full lifecycle enroll alpha.app --kind app --path /Applications/Alpha.app --caller agent:alpha --startup-effect TEXT
+project-observatory full lifecycle allow agent:alpha --binding BINDING_ID --target alpha.app --tool lifecycle.list --tool lifecycle.status --tool lifecycle.ensure_running --tool lifecycle.operation.get
+project-observatory full lifecycle policy alpha.app --idle-minutes 30    # or --desired always_on, --background-launch on
+project-observatory full lifecycle hold alpha.app          # off on purpose: agents get held_off; --release undoes it
+project-observatory full lifecycle revoke agent:alpha      # refused from its next call
+```
+
+- Every verb that changes something needs your terminal; there is no `--yes`. `status` and
+  `build-helper` grant nothing.
+- `enroll` takes the path you name and never looks for one. On macOS it verifies the app's
+  signature and records its signing team and bundle id, so an update from the same team keeps
+  matching and anything else is refused; a LaunchAgent is recorded by its label and the hashes
+  of its definition and the files it runs. `--startup-effect TEXT` is your own sentence for
+  what starting it does (for example "opens its main window"), and it is required.
+- The caller proves who it is with an access binding (above), and the grant names that ONE
+  binding: `allow PRINCIPAL --binding BINDING_ID` (the id `full access-binding show` lists),
+  never a bearer. A binding's memory scopes and ceilings do not reach the apps, so another
+  binding of the same principal, issued to read memory, is refused here. A caller acts on a
+  target only when the target lists it (`enroll --caller`) and its grant lists the tool and the
+  target (`allow`). The service token in the descriptor opens the events feed, never these
+  tools.
+- The person comes first: an agent may stop or restart only an app the node started that you
+  have not taken over and are not using right now, otherwise it is told `in_use_by_person`. A
+  forced stop and holding an always_on target off are yours, at the terminal.
+- A damaged lifecycle store does not take the server down: `/mcp` answers 503 with the fault,
+  the well-known document names it in `degraded`, and the dashboard, `/health` and the events
+  feed keep answering.
+- What happened is one sentence per operation in `store/node-lifecycle/events.jsonl` (the last
+  ten in `status`), and the detail in `store/node-lifecycle/logs/lifecycle.jsonl`, both
+  owner-only. Enrollments and grants are in `config/node-lifecycle.json`, owner-only.
+- On Linux and Windows there is no adapter yet: every tool answers `unsupported_platform` and
+  nothing is started or stopped.
+- Not yet: the supervisor that stops an idle app and brings an always_on target back after a
+  crash (step L4), and importing an existing broker's enrollments (step L5).
 
 ## The machine: what runs, where the disk goes, cleanup
 

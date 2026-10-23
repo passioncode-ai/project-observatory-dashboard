@@ -27,6 +27,23 @@ only when I ask for an unattended key), copy its public line with `ssh-keys copy
 it with `ssh-keys send NAME --to github` or `--to server:ALIAS --verify`. A cloud has no door yet:
 say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`).
 
+## Waking, stopping and restarting my apps
+
+Never launch, quit or kill an app or background job I enrolled (no `open -a`, `osascript`,
+`pkill`): ask node.lifecycle, the MCP surface at `POST http://127.0.0.1:47311/mcp` on the local
+server, with the bearer of an access binding I issued you. `lifecycle.list` gives the
+`policyRevision` and your `grantRevision`; `lifecycle.ensure_running` with a fresh `requestId`
+admits a start; poll `lifecycle.operation.get` until a final state (`ready` and `already_ready`
+are success). While you keep using an app it started, call `ensure_running` again at least every
+10 minutes to renew your lease. `in_use_by_person` means I opened it, took it over or am using
+it: tell me, do not retry. `held_off` means I switched it off on purpose: do not work around it.
+`denied` means I have not allowed you that tool or target, or your bearer is not the binding
+your grant names; the command is mine, at my terminal (`full lifecycle allow --binding`), and so
+are enrolling, holding and forced stops. Nothing is served until I enroll a target: until then
+this `/mcp` answers 403. Where a lifecycle broker of its own already serves this machine, keep
+using it until I import its enrollments here (OBS-79 step L5); do not switch on your own. On
+Linux and Windows every tool answers `unsupported_platform`.
+
 ## Reading offline verification receipts
 
 `full check` emits JSON. A suite whose setup, execution or log capture raises is

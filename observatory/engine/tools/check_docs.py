@@ -90,6 +90,8 @@ PATH_PREFIX_ALLOWLIST = {
     # The engine ships inside a package; the documents also name files the engine WRITES
     # into a workspace, which this source tree never holds (OBS-42).
     "docs/dashboard/": "the dashboard pages a tick builds into the workspace's docs/",
+    "store/node-lifecycle/": "node.lifecycle's state, events and logs, written into the workspace by the local "
+                             "server once a target is enrolled (OBS-79)",
 }
 
 PATH_ALLOWLIST = {

@@ -19,6 +19,7 @@ person or an agent between pulses talks to files. This daemon is the third shape
     http://127.0.0.1:47311/skills    shipped skill versions vs what sessions report
     http://127.0.0.1:47311/.well-known/fabric-service   who answers, which build, is it healthy
     http://127.0.0.1:47311/fabric/v1/events             what happened, as sentences (token)
+    POST http://127.0.0.1:47311/mcp                     node.lifecycle's six tools (an access binding)
 
 A FABRIC SERVICE. The last two routes are the `fabric-service/0.1` protocol of
 the Fabric Agent Contract, which lets a host such as Fabric Dashboards find,
@@ -75,8 +76,14 @@ activates a new release only when no person or agent is using the server (LC-16)
 
 SECURITY. Binds 127.0.0.1 only. Serves NO secret values anywhere: `/leaks` is
 names, places and dates from the register, which never held values to begin
-with. GET only; anything else is 405. The events token opens the events feed
-and nothing else; it never travels in a URL, an argument or the plist.
+with. GET only, with one exception: `POST /mcp` serves node.lifecycle's six
+tools (OBS-79 step L3, `node/lifecycle/service.py`), which wake, stop and
+restart the apps the operator enrolled, and only for a caller holding an access
+binding the operator issued AND a lifecycle grant (`full lifecycle allow`).
+Without `config/node-lifecycle.json` nothing is built and every caller is
+refused. Any other POST is 405. The events token opens the events feed and
+nothing else, never the tools; it never travels in a URL, an argument or the
+plist.
 """
 from __future__ import annotations
 import argparse
@@ -105,6 +112,7 @@ import paths
 import service_events  # noqa: E402
 import service_health  # noqa: E402
 import service_identity  # noqa: E402
+from node.lifecycle import service as lifecycle  # noqa: E402
 
 PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 RECEIPT = paths.SCRATCH / "serverd.json"
@@ -140,7 +148,12 @@ EXIT_TIMEOUT = 30
 SURFACES = {"dashboard": {"path": "/", "login": False},
             "events": {"path": "/fabric/v1/events"},
             # What the assistant's paid model calls cost, self-reported (contract DEC-0021, OBS-53).
-            "usage": {"path": "/fabric/v1/usage"}}
+            "usage": {"path": "/fabric/v1/usage"},
+            # node.lifecycle (OBS-79 L3). `own`: callers bring an access binding's bearer; the descriptor's token is
+            # the host's and opens nothing here (contract DEC-0024, DEC-0039). No `capabilities` list: the manifest
+            # is the authority for that list and the six tools are not manifest capabilities yet, so they are named
+            # in the well-known `node.lifecycle` entry (`extensions`) instead.
+            "mcp": {"path": lifecycle.MCP_PATH, "transport": "streamable-http", "auth": "own"}}
 
 
 def now_z() -> str:
@@ -432,17 +445,23 @@ class Runtime:
     def well_known(self) -> dict:
         with self._lock:
             snap, status = self._snapshot, self._status
-        own = self._own_degraded()
+        own = self._own_degraded() + (LIFECYCLE.degraded() if LIFECYCLE else [])
         degraded = (snap["degraded"] + [d for d in own if d not in snap["degraded"]]) if snap else own
-        return fs.build_well_known(
+        doc = fs.build_well_known(
             service_id=service_identity.SERVICE_ID, instance=self.instance,
             name=service_identity.NAME, version=VERSION, build=self.build,
             started_at=self.started_at, status=status, degraded=degraded,
             summary=snap["summary"] if snap else None, surfaces=SURFACES)
+        # The node.lifecycle entry: this node is the lifecycle manager of what the operator enrolled
+        # (`lifecycle.manager: node`), served at `surfaces.mcp`. This server itself stays under launchd.
+        doc["extensions"] = {lifecycle.EXTENSION_KEY: (LIFECYCLE or lifecycle.Host()).entry()}
+        return doc
 
 
 #: Set by `serve()`; None in a process that only imports this module.
 RUNTIME: Runtime | None = None
+#: node.lifecycle's service, built by `serve()` once the operator enrolled something; None before `serve()`.
+LIFECYCLE: lifecycle.Host | None = None
 
 
 def beat_once(runtime: Runtime) -> None:
@@ -456,6 +475,14 @@ def beat_once(runtime: Runtime) -> None:
     except Exception as exc:  # noqa: BLE001 — the beat survives a bad cycle
         print(f"heartbeat: {type(exc).__name__}: {exc}", file=sys.stderr)
         runtime.note_failure("heartbeat", f"the heartbeat receipt could not be written: {type(exc).__name__}: {exc}")
+    if LIFECYCLE is not None:
+        # The operator may enroll while the server runs: the service is built at the next beat, not a restart.
+        # Never a reason for the beat to die: a failure is the lifecycle's degraded row.
+        try:
+            LIFECYCLE.start()
+            runtime.note_failure("node-lifecycle-start", None)
+        except Exception as exc:  # noqa: BLE001
+            runtime.note_failure("node-lifecycle-start", f"lifecycle: unavailable, {type(exc).__name__}")
     runtime.refresh(leaks)
 
 
@@ -673,6 +700,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._events()
         elif route == "/fabric/v1/usage":
             self._usage()
+        elif route == lifecycle.MCP_PATH:
+            self.send_response(405)
+            self.send_header("Allow", "POST")
+            body = json.dumps({"error": "POST required: the node.lifecycle MCP surface"}).encode()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self._body(body)
         elif route == "/health":
             # The published health document keeps its shape (fabric-service/0.1): the
             # `clients` field is the update job's input and stays in the receipt file.
@@ -689,10 +724,92 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "no such route",
                         "routes": ["/", "/dashboard/<page>.html", "/health", "/remote",
                                    "/leaks", "/skills", "/agents", "/.well-known/fabric-service",
-                                   "/fabric/v1/events", "/fabric/v1/usage"]}, 404)
+                                   "/fabric/v1/events", "/fabric/v1/usage", "POST /mcp"]}, 404)
 
     def do_POST(self):                                    # noqa: N802
-        self._json({"error": "GET only — this server changes nothing"}, 405)
+        if self.path.split("?", 1)[0] != lifecycle.MCP_PATH:
+            self._json({"error": "GET only, except POST /mcp (node.lifecycle); nothing else here changes anything"},
+                       405)
+            return
+        note_request()
+        if not local_request(self.headers.get("Host", ""), self.headers.get("Origin"),
+                             self.headers.get("Sec-Fetch-Site"), self.server.server_address[1]):
+            self._json({"error": "only local browser origins are accepted"}, 403)
+            return
+        self._mcp()
+
+    def _refuse(self, code: int, doc: dict, headers: dict | None = None) -> None:
+        body = json.dumps(doc).encode("utf-8")
+        self.send_response(code)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self._body(body)
+
+    def _mcp(self) -> None:
+        """`POST /mcp`: the bearer first, before the body is read, then one JSON-RPC message.
+
+        401 without a binding of this workspace (the refusal names the command that issues one), 403 for a
+        binding the operator has not given a lifecycle grant, 413 for a body over 64 KiB or chunked, 400 for one
+        that is not a JSON-RPC object with object `params`, `_meta` and `arguments`. The bearer is hashed and
+        goes no further: it is not logged, not stored, not passed to the broker."""
+        presented = self.headers.get_all("Authorization") or []
+        if len(presented) > 1:
+            self._refuse(400, {"error": "Send one Authorization header."})
+            return
+        host = LIFECYCLE
+        try:
+            service = host.service() if host else None
+        except Exception:  # noqa: BLE001 - Host.service records its own failure; this keeps the request answered
+            service = None
+        if service is None:
+            problems = host.degraded() if host else []
+            if problems:
+                # Enrolled, but the service could not start (a damaged store): say so, and why, without a crash.
+                self._refuse(503, {"error": "unavailable", "detail": problems[0]["reason"],
+                                   "hint": "`project-observatory full lifecycle status` names the fault",
+                                   "degraded": problems})
+                return
+            # Nothing enrolled: no binding opens anything, so say why.
+            self._refuse(403, lifecycle.refusal("denied") | {
+                "detail": "node.lifecycle is not set up on this workspace: nothing is enrolled"},
+                {"WWW-Authenticate": "Bearer"})
+            return
+        try:
+            principal = service.authenticate(presented[0] if presented else None)
+        except lifecycle.LifecycleError as exc:
+            code = 401 if exc.code == "unauthorized" else 403
+            self._refuse(code, lifecycle.refusal(exc.code), {"WWW-Authenticate": "Bearer"})
+            return
+        # A client only once it authenticated: an unauthenticated caller must not hold an update back (LC-16).
+        note_client(lifecycle.MCP_PATH)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if not 1 <= length <= lifecycle.MAX_BODY_BYTES or self.headers.get("Transfer-Encoding"):
+            self._refuse(413, {"error": "invalid_body", "detail": f"one JSON body of 1 to "
+                                                                  f"{lifecycle.MAX_BODY_BYTES} bytes"})
+            return
+        try:
+            message = json.loads(self.rfile.read(length))
+            params = message.get("params", {}) if isinstance(message, dict) else None
+            if not isinstance(params, dict) or not isinstance(params.get("_meta", {}), dict) \
+                    or not isinstance(params.get("arguments", {}), dict):
+                raise ValueError
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            self._refuse(400, {"error": "invalid_request",
+                               "detail": "one JSON-RPC object whose params, _meta and arguments are objects"})
+            return
+        response = service.handle(principal, message)
+        if response is None:
+            self.send_response(202)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._json(response)
 
 
 class LoopbackServer(http.server.ThreadingHTTPServer):
@@ -719,7 +836,7 @@ def serve(port: int) -> int:
     job must leave nothing behind — no token, no receipt, no socket. It exits
     75 with one sentence naming the holder (`fs.hold_single_instance`).
     """
-    global RUNTIME
+    global RUNTIME, LIFECYCLE
     lock = fs.hold_single_instance(service_identity.lock_dir())
     token, problem = None, None
     try:
@@ -742,6 +859,14 @@ def serve(port: int) -> int:
               f"Another program holds the port; pass --port.", file=sys.stderr)
         lock.release()
         return 1
+    # After the lock and the bind: a second copy, or one that could not listen, never takes the lifecycle state
+    # over. Builds nothing until the operator enrolled a target (`config/node-lifecycle.json`); a failure is a
+    # degraded row, never a crash.
+    LIFECYCLE = lifecycle.Host()
+    try:
+        LIFECYCLE.start()
+    except Exception as exc:  # noqa: BLE001 - the dashboard, /health and the events feed stay up
+        RUNTIME.note_failure("node-lifecycle-start", f"lifecycle: unavailable, {type(exc).__name__}")
     stop = threading.Event()
 
     def beat():
@@ -780,6 +905,7 @@ def serve(port: int) -> int:
     finally:
         stop.set()
         srv.server_close()
+        LIFECYCLE.close()
         lock.release()
     return 0
 

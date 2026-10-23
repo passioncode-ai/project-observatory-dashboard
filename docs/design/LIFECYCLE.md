@@ -1,6 +1,7 @@
 # `node.lifecycle`: the port plan (OBS-79)
 
-Status: plan, 2026-10-22; steps L1 and L2 built (see "Step L1: what was built" and "Step L2: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
+Status: plan, 2026-10-22; steps L1, L2 and L3 built (see "Step L1: what was built", "Step L2: what was built" and
+"Step L3: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
 node wakes, stops and restarts enrolled desktop apps and background services for agents, and the
 mechanics (code, protocol, design) move in from an existing private broker under the operator's standing
 permission. Its records, logs, keys, the names of the apps it manages and its private paths and
@@ -54,8 +55,9 @@ helper and 203 tests in four files.
 
 1. **One service, not two.** The tools are served by the engine's existing local server
    (`tools/serverd.py`) under its access bindings, not by a second process on its own port with its own
-   token files. The service descriptor says `lifecycle.manager: node`, and the well-known endpoint lists
-   a `node.lifecycle` service entry.
+   token files. The well-known endpoint lists a `node.lifecycle` service entry that names the node as the
+   targets' lifecycle manager (`lifecycle.manager: node`); the server's own descriptor stays `launchd`, the
+   supervisor of that process (see "Step L3: what was built" for why).
 2. **The workspace store.** Operations, receipts, the journal and circuits live in a SQLite file of the
    module's own under the workspace's state folder, `<state>/node-lifecycle/lifecycle.db` (owner only),
    under the same retention rules (receipts 24 h, terminal operations 7 days, failed always_on starts
@@ -79,7 +81,7 @@ helper and 203 tests in four files.
 |---|---|---|
 | L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
 | L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app is its own pull request before L3's tools are served | 0.29.0 |
-| L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status` | 0.29.0, by 2026-10-31 |
+| L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
 | L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
 
@@ -217,6 +219,82 @@ own install, release, rollback and uninstall, and 7 that L1 counted for L2 but t
 the interpreter of its own launchd plist: the engine's installer owns its plists (`tools/install_launchd.py`,
 `lint_plist`), so they leave with that machinery. The adapter's own rule for a target's interpreter
 (`stable_executable`) is ported.
+
+## Step L3: what was built
+
+`observatory/engine/node/lifecycle/service.py` (the door), `observatory/engine/tools/lifecycle_cli.py` (the verbs under
+`full lifecycle`) and the `POST /mcp` route of `observatory/engine/tools/serverd.py`, tested by
+`observatory/engine/tests/test_node_lifecycle_service.py` (suite `node_lifecycle_service`, 52 cases: 28 ported, 24 new).
+
+- **One server, one port, no token files.** The six tools are served at `POST /mcp` on the engine's local server
+  (127.0.0.1:47311 by default), the only route there that changes anything. A caller proves itself with the bearer of an
+  access binding of this workspace's audience (`full access-binding issue`; hashed at once, never logged or passed on),
+  and the binding's principal is the caller. What it may do is a second grant, `callers.<principal>` in
+  `config/node-lifecycle.json`: `{bindingId, revision, revoked, allowedTools, allowedTargets, operatorProxy?}`. The
+  grant names ONE binding (`full lifecycle allow PRINCIPAL --binding ID`): a binding's scopes, projects and effect
+  ceiling are memory's and stop at `propose`, while stopping an app is destructive, so lifecycle is a separate grant
+  outside the binding's ceiling ([ACCESS-BINDING.md](ACCESS-BINDING.md#a-binding-outside-memory-nodelifecycle)) and a
+  second binding of the same principal, issued to read memory, opens nothing here. No binding is 401 with the command
+  that issues one, a binding without a grant or not the bound one 403, the descriptor's service token (which opens the
+  events feed) 401. `BindingAuthority.grant` asks again for both the grant and the bound binding at admission and before
+  every effect, so revoking either refuses the next call and stops an admitted start before it launches.
+- **No owner over the wire.** A grant cannot name an owner, a token or its hash (the schema refuses the whole document);
+  enrolling, holding a target off and forced stops are the operator's at a terminal, and `operatorProxy` (may hold an
+  always_on target off) is the most a caller holds. So the broker's owner-only branches (`*` targets, force, the person's
+  raw input-idle time) are unreachable from MCP in this step.
+- **`config/node-lifecycle.json`**, owner-only, closed schema: the broker's registry under `targets` and the grants under
+  `callers`. It is read on every call; a document others may read, a link, or one that fails the schema refuses every call
+  (`unsafe_config`, `invalid_config`). The broker's store is `<state>/node-lifecycle/` as planned.
+- **Inert until enrolled.** `lifecycle.Host` builds the broker over `macos.platform_adapter(cache_path=macos.default_cache())`
+  only once `config/node-lifecycle.json` exists (at the server's start or its next heartbeat); before that no state is
+  created and `/mcp` answers 403 `nothing is enrolled`. A start that fails, whatever raised it (a corrupt or locked
+  `lifecycle.db` raises `sqlite3.DatabaseError`), is a `lifecycle: unavailable, <class>` row in the well-known
+  `degraded` and a 503 on `/mcp`, never a crash of the server or of its heartbeat thread: `Host.service`, the server's
+  start and every heartbeat catch it. The broker releases its instance lock when its construction fails at any point
+  (the store's open, recovery or pruning), so the next attempt starts once the store is repaired instead of answering
+  `already_running` forever. Off macOS the adapter answers `unsupported_platform` to everything.
+- **The MCP surface**: `initialize` (with the `instructions` text: how to wake an app, renew the lease every 10 minutes,
+  what `in_use_by_person`, `held_off`, `denied` and `unsupported_platform` mean; neutral, at most 1,800 characters),
+  `ping`, `tools/list` (only the tools the caller's grant names; stop and restart carry `destructiveHint`) and
+  `tools/call`. A malformed argument is `isError` with `invalid_argument`; any other refusal is a typed answer `{error,
+  hint}` naming the command that changes it. Results carry `_meta.traceparent`, a child of the caller's.
+- **The well-known document** declares `surfaces.mcp` (`/mcp`, `streamable-http`, `auth: own`, contract DEC-0024) and an
+  extension keyed by this document's URL: `{service: node.lifecycle, lifecycle: {manager: node}, path, capabilities,
+  platform, supported, state: inert | serving | failed}`. Two decisions here. The surface carries no `capabilities`
+  list, because the manifest is that list's authority (the conformance probe's `interop.well-known-capabilities`) and
+  the six tools are not manifest capabilities yet; the entry names them. And `lifecycle.manager: node` is in the entry,
+  not in the server's descriptor: in the contract (DEC-0057, DEC-0061) a descriptor's `lifecycle.manager` names the
+  supervisor of THAT service, the server is supervised by launchd, `label` and `plist` are refused beside `node`, and
+  the vendored fabric-service kit (`fabric_service.validate_descriptor`, pinned bytes) does not admit `node` yet. The
+  descriptors of services the node itself starts as children will say `node` when the node starts children.
+- **What happened**: one sentence per admitted operation and per result in `<state>/node-lifecycle/events.jsonl` (it names
+  the app, and why when it failed; a correct refusal wakes nobody, a failure sets `notify`; appends are serialized), and
+  one structured line in `<state>/node-lifecycle/logs/lifecycle.jsonl` (5 x 5 MB, owner-only). `full lifecycle status`
+  shows the last ten. They are not in the server's `/fabric/v1/events` feed yet, which is a view over the tick's store;
+  joining them comes with the supervisor (L4), whose gave-up event is the one a host must be told.
+- **The verbs**: `status` (targets with a live probe that starts nothing, callers with their bindings in force, the
+  helper, the last events), `enroll` (an absolute path the operator names, `adapter.fingerprint(kind, path)`, which
+  verifies an app's signature; the operator's `--startup-effect` sentences; a new `policyRevision` past the old one),
+  `allow` (creates or changes a grant; `--remove`; `--operator-proxy on|off`; never the wildcard; an unenrolled target
+  is refused), `policy` (`--desired`, `--idle-minutes`, `--background-launch`, `--readiness`), `hold [--release]`,
+  `revoke`, and `build-helper` (`macos.main`). Every verb that changes the document needs a terminal, like
+  `full access-binding`, and edits under a lock (`<state>/node-lifecycle/config.lock`). The terminal check is the
+  engine's existing convention (`sys.stdin.isatty()`): it keeps an agent's ordinary tool calls out, not a process that
+  allocates a pseudo-terminal on purpose; the owner-only document is the boundary that holds against that.
+
+Notes for L4: the supervisor runs inside the server (`lifecycle.Host`) and must also join the event log into the events
+feed; the Health page and `observatory_machine` show each target (acceptance below). For L5: the `unenroll` verb with its
+retired revisions comes with the import. The release build of the helper inside the signed app is still its own pull
+request; until it lands, a source install runs `full lifecycle build-helper`.
+
+The source's 36 tests for this step, by where they went: 28 ported here (21 with neutral fixtures and a binding's bearer in place of the broker's token, 7
+adapted to the engine: the owner's token and the tools it gained at start, the host's token twice, the disposable log
+folder, the reserved names, re-enrolling); 5 wait for the `unenroll` verb
+(L5); 3 are the server's own behaviour, already tested where it lives: a second copy exits 75 and touches nothing
+(`tests/test_fabric_service.py`), the launchd output files are rotated (`serverd.rotate_own_logs`), a client that went
+away is not a server failure (`tests/test_serverd.py`). 24 new cases cover the binding authority (the bound binding only, rebinding,
+revocation before the effect), the unsupported platform, the inert host, a damaged store (a degraded row, the server up,
+the lock released), the config document's refusals and the verbs the source did not have.
 
 ## Acceptance
 
