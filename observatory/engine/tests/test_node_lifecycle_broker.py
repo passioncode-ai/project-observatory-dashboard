@@ -308,9 +308,13 @@ class BrokerTests(Folder, unittest.TestCase):
         self.assertEqual(self.effects(), ['alpha.app'])
 
     def test_completed_receipt_replays_after_original_deadline(self):
-        args = self.args() | {'deadlineAt': int((time.time() + 0.2) * 1000)}
+        # The deadline leaves a loaded runner time to finish the start (0.2 s timed out on a macOS runner, #344); the
+        # replay then comes after it, whenever the start finished.
+        deadline = time.time() + 2.0
+        args = self.args() | {'deadlineAt': int(deadline * 1000)}
         first = self.wait(self.instance.ensure(self.principal, args))
-        time.sleep(0.25)
+        self.assertEqual(first['state'], 'ready')
+        time.sleep(max(0.0, deadline - time.time()) + 0.05)
         second = self.instance.ensure(self.principal, args)
         self.assertEqual(first['operationId'], second['operationId'])
         self.assertEqual(second['state'], 'ready')
@@ -548,8 +552,9 @@ class RegistryTests(Folder, unittest.TestCase):
         self.refused(target() | {'approved': 'yes'})
         self.refused(target() | {'timeoutSeconds': 61})
         self.refused(target() | {'startupEffects': []}, 'startup_effects_required')
-        # The product readiness profiles come with their probes in step L2.
+        # A product readiness profile only on its product's app (test_node_lifecycle_macos.ProfileRegistryTests).
         self.refused(target() | {'readiness': {'kind': 'fabric-hub'}})
+        self.refused(target() | {'readiness': {'kind': 'switchboard-runtime'}})
         self.refused(target() | {'readiness': {'kind': 'process', 'origin': 'http://127.0.0.1:1'}})
         for origin in ('http://localhost:47999', 'https://127.0.0.1:47999', 'http://127.0.0.1:47999/path',
                        'http://user@127.0.0.1:47999', 'http://127.0.0.1'):

@@ -1,6 +1,6 @@
 # `node.lifecycle`: the port plan (OBS-79)
 
-Status: plan, 2026-10-22; step L1 built (see "Step L1: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
+Status: plan, 2026-10-22; steps L1 and L2 built (see "Step L1: what was built" and "Step L2: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
 node wakes, stops and restarts enrolled desktop apps and background services for agents, and the
 mechanics (code, protocol, design) move in from an existing private broker under the operator's standing
 permission. Its records, logs, keys, the names of the apps it manages and its private paths and
@@ -41,7 +41,7 @@ helper and 203 tests in four files.
 |---|---|---|---|---|
 | `broker.py` | 1,387 lines | the closed registry schema and its validation, the authority (callers, per-tool scopes, token hashes compared in constant time), admission, durable operations, idempotency receipts, the effect journal, crash circuits, the restart budget, idle and takeover rules | the names of its callers; nothing else is hard-coded beyond the public bundle ids of Fabric and Switchboard, which stay as built-in readiness profiles | `node/lifecycle/broker.py` |
 | `native.py` | 911 lines | `codesign` reading, the designated requirement built from team and bundle id, trusted paths, child processes in their own process group and killed with it, the NSWorkspace adapter (status, open with `--background`, quit, watch), the Fabric hub and Switchboard probes | none | `node/lifecycle/macos.py` |
-| `native_app.swift` | 103 lines | the NSWorkspace helper (status, open, quit, an event stream of launch, terminate and activate) | none | `node/lifecycle/native_app.swift`, built by the desktop app's release workflow and signed with it; a local `swiftc` build only for a source install |
+| `native_app.swift` | 103 lines | the NSWorkspace helper (status, open, quit, an event stream of launch, terminate and activate) | none | `node/lifecycle/native_app.swift`; a source install compiles it with `swiftc` (L2), and the desktop app's release workflow is to build it into the app and sign it with the app (see "How the helper is built") |
 | `lifecycle.py` | 1,952 lines | the supervisor (always_on, idle stop, a 600 s safety sweep, 60 s while a started app runs), the MCP handler and its `instructions` text, the event log, the private log file handler, the admin CLI verbs, identity migration | its fixed port and launchd label, its own install, release, rollback and uninstall machinery (the engine's install and update replace it), its own credential files (the engine's access bindings replace them), and the one trusted signing team its migration names (a configuration value here, empty by default) | `node/lifecycle/service.py` (supervisor and MCP), `tools/lifecycle_cli.py` (verbs under `full lifecycle`) |
 | `selftest.py` | 117 lines | a disposable broker on an ephemeral loopback port, authenticated MCP, the second-instance exit | none | a test in `tests/test_node_lifecycle_service.py` |
 | `vendor/` | 2 files | none: the engine has its own `fabric_service.py` and Fabric interop | the vendored copies and their provenance | dropped |
@@ -78,7 +78,7 @@ helper and 203 tests in four files.
 | Step | What | Release |
 |---|---|---|
 | L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
-| L2 | `node/lifecycle/macos.py` and the Swift helper, built and signed by the app's release workflow; the adapter tests (signature parsing, requirement text, process groups) | 0.29.0 |
+| L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app is its own pull request before L3's tools are served | 0.29.0 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status` | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
 | L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
@@ -143,10 +143,86 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
 4 with the supervisor in L4 (the watcher's wake-ups, the sweep); 7 with the identity migration at L5's import;
 14 dropped with the private broker's own install, release, rollback and uninstall.
 
+## Step L2: what was built
+
+`observatory/engine/node/lifecycle/macos.py` and `observatory/engine/node/lifecycle/native_app.swift`, tested by
+`observatory/engine/tests/test_node_lifecycle_macos.py` (suite `node_lifecycle_macos`, 73 cases: 50 ported, 23 new).
+
+- **The designated requirement** (`requirement_for`): `anchor apple generic and identifier "<id>" and certificate
+  leaf[subject.OU] = "<team>"`, built from a bundle id and a ten-character team that are validated first, never
+  copied from the bundle or the registry. Enrollment (`MacAdapter.fingerprint('app', path)`, `inspect_app`) reads
+  `codesign -d --verbose=2` and refuses an ad hoc or unsigned bundle, a signing identifier other than the
+  Info.plist bundle id, and a bundle that changes while it is checked; it runs `codesign --verify --deep --strict
+  -R =<requirement>` and records the bundle's own designated requirement for audit only. A same-team rebuild keeps
+  matching; another team, another bundle id or a broken seal does not.
+- **Trusted places** (`trusted_path`): the path is its own resolution; it and every folder above it belong to root or
+  this account and nobody else may write them. `/Applications` as macOS ships it (`root:admin 0775`) is the one
+  admin-writable parent an app may have, and Homebrew's `Cellar` the one a launchd job's interpreter may have. An app
+  outside `/Applications` and `~/Applications` is `not_installed`.
+- **Background jobs** (`launchd_fingerprint`): a LaunchAgent of this account, its label, the hash of its plist and of
+  every file it runs; an interpreter behind a stable path (Homebrew's `opt` link, a sealed system folder) is pinned by
+  that path, so `brew upgrade` is not a new identity. Start is `launchctl kickstart` (loaded) or `bootstrap` (not
+  loaded); stop is `bootout` (SIGTERM, its ExitTimeOut, unloaded) or, on the owner's force, `kill SIGKILL`; a job the
+  operator disabled is `held_off` and is never enabled here.
+- **Process groups** (`Runner`): every tool runs with the system PATH only, in a group of its own
+  (`osproc.new_group`), and the whole group is killed on a timeout or when the adapter closes. A `codesign` that times
+  out is `verification_timeout`, one that cannot start `verification_unavailable`; neither is a false
+  `identity_mismatch`.
+- **The verification cache**: one daemon verifier runs the deep checks in turn, concurrent callers of one bundle wait
+  on one check, and a caller waits only to its operation's deadline (`verification_pending`, then the result is
+  cached). The key is a walk of the bundle's metadata (5 s budget; out of time is `verification_pending`). The cache
+  holds at most 256 entries (`CACHE_LIMIT`, oldest dropped) and is persisted to an owner-only file that is ignored,
+  not trusted, when it is readable by others or a link.
+- **Readiness probes**: `process`; `fabric-service` (the well-known document names this service, instance, build
+  and pid); `fabric-hub` (Fabric's `hub.json`, read only when it is an owner-only regular file, names the running pid
+  and its loopback origin answers; the door token it names is never opened); `switchboard-runtime` (Switchboard's
+  bundled CLI, checked against the enrolled team's requirement before it is run, reports its runtime online while the
+  enrolled app runs). The registry now accepts the two profiles, each only on its product's app
+  (`ai.passioncode.desktop`, `ai.passioncode.fabric-switchboard`) and with no field of its own; a caller may require
+  the capability a profile proves (`fabric-hub`, `runtime-online`).
+- **The helper** (`native_app.swift`): `status`, `open [--background]` (no activation; `--background` only for a
+  target enrolled with `backgroundLaunch`), `quit <app> <pid>` (the app's own quit path) and `watch` (launch, terminate
+  and activate events until stdin closes). The adapter keeps only the fields it knows from an answer.
+- **Other systems**: `platform_adapter` returns `UnsupportedAdapter` off macOS; every call answers
+  `unsupported_platform`, and a broker over it reports that, never a start.
+
+### How the helper is built
+
+- **Source install (built in L2).** `python3 observatory/engine/node/lifecycle/macos.py build-helper` (or
+  `macos.build_helper()`) compiles `native_app.swift` with the `swiftc` and macOS SDK `xcrun` finds (Xcode or the
+  Command Line Tools: `xcode-select --install`), with the system PATH only, into
+  `<state>/node-lifecycle/bin/lifecycle-native`: an owner-only folder, the file replaced whole, mode 0700. On Apple
+  silicon the linker signs it ad hoc. A `--dest` folder that is not this account's alone is refused, never re-moded,
+  and the adapter runs the helper only while it is a regular file of this account that no one else may change. `macos.py helper` says where it is and whether it is built. Without it an app
+  probe answers `setup_required` (`helper_not_built`) and a start is refused with `setup_required`; launchd targets
+  need no helper. Refusals: `swiftc_missing`, `helper_build_failed` (the compiler's last lines on `detail`),
+  `unsupported_platform`.
+- **Release (next, its own pull request before L3's tools are served).** `macos/scripts/build-app.sh` compiles the
+  same source for both architectures (`swiftc -target arm64-apple-macos14` and `x86_64-apple-macos14`, joined with
+  `lipo`), places it at `Project Observatory.app/Contents/Helpers/lifecycle-native`, and signs it with the release
+  identity and the hardened runtime before it signs the app (nested code first), so `.github/workflows/release.yml`
+  notarises it with the app. The adapter then prefers the app's helper when the installed app satisfies
+  `requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)`, and falls back to a source-built one. It is not in this
+  step because a nested executable's notarisation can be proven only by a release run, and the adapter must check the
+  app's signature before it runs a helper from inside it.
+
+Notes for L3: the tools construct the broker over `macos.platform_adapter(cache_path=macos.default_cache())`;
+`full lifecycle enroll` calls `adapter.fingerprint(kind, path)` and writes what it returns; `full lifecycle helper
+build` wraps `macos.main`. Notes for L4: the supervisor feeds `MacAdapter.watch` events to `note_activation` and calls
+`stop_watch` and `close` when it stops.
+
+The source's 203 tests, by where they land now: 85 in L1; 50 here; 36 with the tools and verbs in L3; 4 with the
+supervisor in L4; 7 with the identity migration at L5's import; 21 dropped. The 21 are the 14 of the private broker's
+own install, release, rollback and uninstall, and 7 that L1 counted for L2 but that test how the private broker chose
+the interpreter of its own launchd plist: the engine's installer owns its plists (`tools/install_launchd.py`,
+`lint_plist`), so they leave with that machinery. The adapter's own rule for a target's interpreter
+(`stable_executable`) is ported.
+
 ## Acceptance
 
-- The 189 behaviours of the broker's tests that move pass here, with neutral fixtures (the other 14 test
-  the private broker's own install, release, rollback and uninstall, which the engine's install replaces).
+- The 182 behaviours of the broker's tests that move pass here, with neutral fixtures (the other 21 test
+  the private broker's own install, release, rollback and uninstall and the interpreter of its own plist, which the
+  engine's install replaces).
 - On a test Mac: an enrolled app is woken, renewed, left alone while the person uses it, stopped after
   its idle minutes, and an always_on one comes back after a quit and gives up after three failed starts.
 - `observatory_machine` and Health show each target's state and the last operation per caller.

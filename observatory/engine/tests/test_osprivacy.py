@@ -208,7 +208,7 @@ class Boundary(unittest.TestCase):
     #: Modules that only run on macOS, under launchd or for the Mac app — W4 gives them a
     #: scheduler per OS; until then `os.getuid` there names a launchd domain.
     MACOS_ONLY = {"tools/install_launchd.py", "app_update.py", "tools/serverd.py",
-                  "engine_update.py", "agent/assistant.py"}
+                  "engine_update.py", "agent/assistant.py", "node/lifecycle/macos.py"}
     FLAGS = re.compile(r"os\.O_(NOFOLLOW|DIRECTORY|NONBLOCK)\b|getattr\(os,\s*['\"]O_|\bos\.open\(")
     MODES = re.compile(r"st_mode\s*&\s*0o0[0-7][0-7]\b|S_IMODE\([^)]*\)\s*&\s*0o0|\bmode\s*&\s*0o0[0-7][0-7]\b|\bst_uid\b")
 

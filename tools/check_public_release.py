@@ -165,6 +165,8 @@ NATIVE_SOURCES = {
     "macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift",
     "macos/Sources/ObservatoryCore/AppLifecycle.swift", "macos/Sources/ObservatoryApp/Lifecycle.swift",
     "macos/Tests/ObservatoryCoreTests/AppLifecycleTests.swift",
+    # The lifecycle broker's NSWorkspace helper (OBS-79 L2): shipped in the wheel as source, compiled on the Mac.
+    "observatory/engine/node/lifecycle/native_app.swift",
 }
 # The Windows and Linux app (docs/desktop/, W8), file by file like the macOS sources above.
 DESKTOP_SOURCES = {
