@@ -368,9 +368,14 @@ that the placement's share grant holds (FAC-SEM-111), and that a partner's publi
 whose device-key ref holds `@` but is no key reference is refused as malformed, since no revision could list it.
 
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
-`enroll-token.json` and the `estate-*` fixtures of `semantic/` (74 of the contract's 75). Then they run the add, re-key
+`enroll-token.json` and the `estate-*` fixtures of `semantic/` (83 of the contract's 84). Then they run the add, re-key
 and remove ceremonies end to end between two device-key sets, on a test estate. Since OBS-171 the whole `node-vectors/`
-folder is at one commit, the engine's contract pin `1f31e5a` (after DEC-0090's `3d8cb17`); until then the estate set
+folder is at one commit, the engine's contract pin (`588748ab` since OBS-217; `1f31e5a` before it, after DEC-0090's
+`3d8cb17`). The re-pin brought two estate rules the port now runs: FAC-SEM-134 (DEC-0106: a machine's `profile` is
+`full`, `member` or `view`; only a full machine carries a hub key; a view machine has no placement, no secret and is
+the source of none; `estate.machine_profile`) and FAC-SEM-137 (DEC-0107: a revision keeps its parent's `deltaAnchor`,
+never at an earlier sequence or another hash at the same one; `estate.anchor_findings`, run by
+`verify_estate_record` with a parent too). Until OBS-171 the estate set
 was at #113's merge commit `1531f21`, and between the two only the `estate-*` fixtures changed: the five partner
 fixtures, and share grant ids rewritten to `urn:fabric:share:` form, with the record digests that follow, in seventeen others.
 
@@ -473,7 +478,9 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   `auth: {method: "key-on-record"}` and nothing else in `auth`, no token and no `Authorization` header, a CSR from the
   enrollment's own `#sig` key (its signature is the proof) and `requestedAt` on the server's clock. Its answer is
   taken as any re-enrollment (the certificate checked, an epoch above every one before, registrations sent again),
-  keeping `enrolledAt` and the measured skew and adding `renewedAt`; a certificate that binds another user or role
+  keeping `enrolledAt` and adding `renewedAt`, both on the server's clock: DEC-0102 judges a renewal by the server's
+  clock, which the new certificate's `notBefore` reads, so `renewedAt` is that `notBefore` and the skew is measured
+  again from it (kept as before when it is a day or more off); a certificate that binds another user or role
   than the one on record is refused (`binding-changed`, FAC-SEM-044). Inside the window `notice` keeps the state
   `expired` and adds `renewUntil`, the step in words and `full org check-in --org ID`; `needsEnrollment` stays false.
   An unanswered renewal (no answer, 408, 425, 429, 5xx) backs off (`renewal`: attempts, next time, last answer; the
@@ -487,34 +494,59 @@ each organization enrollment of a machine gets keys of its own), so no two organ
 - **A machine removed from its organization** (OBS-204): a refusal `certificate-revoked` or `certificate-unknown` with
   HTTP 401, as the contract's step table sends them (`certificate-unknown` only after the fallback to a previous
   certificate above is refused too), to any signed request, ends the enrollment in `_signed`, for every caller; the
-  same codes with any other status, and every 5xx, are retried as usual. `unknown-org` (a deleted organization) is
-  provisional until the contract defines it: a 4xx with it is recorded (`unknownOrg`, shown as `org:unknown-org` with
-  the date in status, doctor and Health) and retried, and ends the enrollment only when answered again at least an
-  hour later and in a later tick (`tickSeq`, which `org tick` counts, so a wall clock that jumps within one tick does
-  not count) with no successful request between (a success clears it). A batch refused with any of these codes, at
-  any status, is held and retried with backoff, never rejected as content. An ended enrollment's pending events are
+  same codes with any other status, and every 5xx, are retried as usual. `unknown-org` is the first organization
+  server's own enrollment refusal, not a contract code (DEC-0103): `org enroll` refused with it says the server does
+  not know the organization id; on a signed request it is any other failure, retried, and the provisional rule that
+  ended an enrollment on a second sighting an hour later (OBS-204's `unknownOrg` and `tickSeq`) is retired with
+  OBS-217 (a state that still carries `unknownOrg` loses it at the next check-in taken). A batch refused with any of
+  these codes, at any status, is held and retried with backoff, never rejected as content. An ended enrollment's pending events are
   dropped (state `dropped`, reason `removed:<code>`) with one
   count kept in the state's `removed` (`at`, `code`, `status`, `droppedEvents`), the retry and in-flight batch are
   forgotten, and from then on check-in, rotation, share registrations, grant usage, enqueue and flush are refused as
   `removed-from-organization` before the network, and `org tick` answers `removed` without retrying. `org status`,
-  doctor and Health say so with the date and the code (`org:removed`). The contract gives no code that tells a closed
-  organization from one revoked machine, so neither does the node. `org leave` removes the folder; `org enroll` with a
+  doctor and Health say so with the date and the code (`org:removed`). `org leave` removes the folder; `org enroll` with a
   new token starts over: a new stream (the old events, registrations and outbox state are cleared), an epoch the new
   server issues even if it is not above the old one, and the old removal kept as `previousRemoval`.
+- **An organization that ended** (contract DEC-0103, OBS-217): a server answers any device request of an organization
+  whose closing can no longer be cancelled with HTTP 410 and the body `device-organization-closed`
+  (`{error: {code: "organization-closed", message}, closedAt}`), to a node pinned at or after DEC-0103. The node takes
+  it as final on one answer, in `_signed` for every caller (check-in, batch, share registration, rotation): it ends
+  that enrollment as above and drops whole what it buffered for that organization (the stream's rows, the share
+  registrations and their answers; the meter's sums belong to no organization and stay), and the organization's
+  `collectionStart`, policy root key, key set and any server policy layer it held. An `mdm` layer is the operating
+  system's and stays; the machine's other enrollments are untouched. A batch answered 410 is the enrollment's end, not
+  a rejection of its events; a share registration's gate answers `stop` for both the reference's shape and the wire's
+  nested body (`share_registration.gate`). The state's `removed` adds `closedAt` and `droppedRegistrations`, and
+  status, doctor and Health say the organization closed on that date (`org:removed`). Only the contract's exact body
+  ends an enrollment (`organization_closed_at`, held to `device-organization-closed.schema.json` and its positive and
+  negative fixtures): a 410 without a readable `closedAt`, with another code, a flat body or a path in its message is
+  retried as any failure, because the end cannot be undone. The receiver's half, `http_signature.verify_request`,
+  answers `{code: organization-closed, status: 410, closedAt}` at step 4, after the certificate is found and before its
+  revocation, and a record whose `organizationClosedAt` does not read as a time is its own `context-invalid`.
 - **Outbox**: events persisted once with a ULID and the next seq before they are sent; batches are the oldest stream's
   consecutive run of at most 1000, keep their `batchId` across retries of the same slice, back off from 30 s to an
   hour, and are consumed by the ack (`seq`, `held`, `rejected`). A 200 that acknowledges none of the batch is held and
   retried under the same `batchId`. A batch refused for what it is (400, 422, `device-mismatch`) is consumed as
   rejected and never retried; a 413 halves the batch size first; 409 `activation-closed`, 429, 5xx and no answer are
   retried. Past 10 000 pending events the oldest are dropped down to 9 000 and named in one `buffer.overflow`: a later
-  drop joins the newest overflow not yet sent, so a burst ends in one event.
+  drop joins the newest overflow not yet sent, so a burst ends in one event. Every `rejected[]` entry of an ack is
+  consumed by its `eventId` whatever its reason, a reason the node does not know included (DEC-0100).
+- **A purpose rejection** (DEC-0100, DEC-0102): an event rejected `purpose` (the receiver does not collect it for this
+  person under the notice they acknowledged) holds its kind (`purposeHolds`, with the applied policy's `noticeVersion`
+  and the `acknowledgedNoticeVersion` held at the rejection, absence kept as such): no new event of that kind is
+  collected and a pending one is named dropped in a `buffer.overflow`, never sent. The hold ends only when the applied
+  policy names another `noticeVersion` than at the rejection, or a check-in response names an
+  `acknowledgedNoticeVersion` other than the one held then (a first acknowledgement after none is a change); a value
+  that becomes absent is no signal, and no timer ends it. `before-purpose` holds nothing. The applied policy's version
+  comes with OE-06 (`notice_version`, None until then), so today the acknowledgement is the signal.
 - **Share registrations** (DEC-0086): derived by `share_registration.derive` (the contract's
   `deriveShareRegistrations`, all 51 derive cases) from `records/estate-record.json` and `records/delta-state.json`,
   which only `org records apply` writes after `verify_estate_record` and `apply_delta`. Sent only when the enrollment
   response lists `share-registration/1`; on change, after an enrollment, at least weekly; a typed refusal waits for the
   record to change; a 403 `purpose-not-collected` (DEC-0100, SR-5a: the person's acknowledged notice does not name a
   share registration's purposes) is `hold-notice`, held but not degraded, the sums kept, and sent again at the weekly
-  resend; anything else (a held withdrawal included) retries with backoff. The answers are kept per grant.
+  resend, or at once when a check-in response names a new `acknowledgedNoticeVersion` (DEC-0102); a 410
+  `organization-closed` is `stop` (DEC-0103, above); anything else (a held withdrawal included) retries with backoff. The answers are kept per grant.
   `previouslyRegistered` is what share-registration.md says: the grants this node registered active toward this
   enrollment, so a grant the server took, then a resend left held, is still withdrawn when it leaves the record.
   Registrations go out on a change (an enrollment, `org records apply`, a newly listed protocol), not only on the tick.
@@ -549,9 +581,16 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `mdm` and `server` layers only, never a person's `user` layer), and FAC-SEM-128 (`summary_findings`,
   `document_findings`: no credential, e-mail address or home path in any string, no item twice, `context` exactly
   `org:` and the certificate's `org.id`, drift exactly `harness_drift` under the baseline's revision and none without
-  one). `tests/test_node_summary.py` runs it over the contract's six semantic fixtures, the kit's own drift, version
+  one). `tests/test_node_summary.py` runs it over the contract's eight semantic fixtures, the kit's own drift, version
   and baseline cases, and the schema over the positive and the eight negative fixtures (`fabric/node-vectors/summary/`,
-  vendored by `tools/vendor_org_vectors.py` with the coding-agent catalogue, DEC-0093).
+  vendored by `tools/vendor_org_vectors.py` with the coding-agent catalogue, DEC-0093). DEC-0102's narrowing of a
+  baseline is `baseline_problems` (a name in a summary's shape, a coding agent's a slug and a service's `id.instance`;
+  `minVersion` only for a coding agent or a plugin, `digest` only for a skill or a plugin), held to the contract's nine
+  negative baseline fixtures; the step that applies a signed policy (OE-06) refuses a policy it flags whole and keeps
+  the revision it holds. DEC-0114 is `check_in_summary_findings` (the summary read with the check-in: FAC-SEM-128's
+  clauses that need no policy, its device the check-in's) and `check_in_attribution_findings` (FAC-SEM-045 on the
+  check-in's records against the client certificate: the summary's device and `org:<org.id>`, and the context of every
+  credential request and call record), held to the contract's seven check-in fixtures.
 - **The source.** The harness scan (`collectors/scan_harness.py`, OBS-61, OBS-88) adds `plugins` (each enabled and
   installed one by `name@marketplace`, its source and the version Claude Code recorded) and `coding_agents` (an agent of
   the catalogue is installed when its launch command is an executable in a bin folder of the scanned home, on `PATH`,
@@ -577,14 +616,22 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
 - **What leaves.** `build` copies an allow-list of fields into the schema's shape and checks the result with
   FAC-SEM-128 before it hands it over (`SummaryRefused` otherwise): names, catalogue ids, versions, digests, sources,
   transports, health and a hook count. A name the schema refuses (a space, a slash, a dotted `@` suffix) is left out and
-  counted in `omitted`, which stays on this machine. So is a name holding a dashed home folder: the contract's
-  home-path shapes miss one after a dot or an `@`, so the node refuses `-Users-<x>` or `-home-<x>` right after a
-  separator (`notes.-Users-alice-x`, `x@-home-alice`) or followed by two more dash segments as a flattened path
-  continues (`a-Users-alice-projects-x`), beside FAC-SEM-128 (raised with the contract); `smart-home-mcp` and
-  `end-users-guide` pass. Drift is capped at the schema's 1,024 items; the count past it stays here.
+  counted in `omitted`, which stays on this machine. So is a name holding a home folder (`hides_home`): the contract's
+  `hasHomePath`, which since DEC-0105 catches the dashed `-Users-<x>` or `-home-<x>` after any character that is not
+  an ASCII letter or digit (`notes.-Users-alice-x`, `x@-home-alice`), and the node's own remaining check for the one
+  shape the contract leaves to a reader, a dashed home glued to a letter or digit and continued by two more dash
+  segments as a flattened path continues (`a-Users-alice-projects-x`, `DASHED_HOME`); `smart-home-mcp`,
+  `end-users-guide`, `my-home-page` and `Users-guide` pass both. Drift is capped at the schema's 1,024 items; the count
+  past it stays here.
 - **When.** `Enrollment.check_in` puts the summary in `records.nodeSummary` only when the server's latest protocols
   list `node-summary/1`, the person consented, and its content digest (everything but `sequence` and `at`) differs from
-  the last one the server took or that one is a day old. Its `sequence` is spent once sent, answered or not, like the
+  the last one the server took or that one is a day old. Before it leaves it is judged with the check-in and against
+  this enrollment's certificate (DEC-0114, above); one that fails stays here with `nodeSummaryNote` reason
+  `attribution`. The check-in's own `protocols` lists only what the node reads, `fabric-device/0.1`
+  (`NODE_READS`): a server gates on it what it sends (DEC-0116, DEC-0117), so no server sends this node
+  `records.repairs` (`repair-request/1` joins the list with the repair runner, OBS-193), credential decisions,
+  envelopes, revocations or `callRecordsAccepted`; and the node sends none of DEC-0111's members (`credentialRequests`,
+  `callRecords`), whatever the server lists, until the credential exchange (OBS-191, OBS-194). Its `sequence` is spent once sent, answered or not, like the
   check-in's `sequenceNum`; a failed check-in leaves the summary due. The scans are read before the enrollment's lock is
   taken (they can be large; at most 32 MB each), and a tick reads them only when a check-in is due.
 - **Across a renewal or a re-enrollment** (both write the enrollment's state afresh): the sequence keeps rising

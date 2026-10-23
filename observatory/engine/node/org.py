@@ -64,6 +64,15 @@ DEVICE_PROTOCOL = 'fabric-device/0.1'
 ACTIVITY_PROTOCOL = 'fabric-activity/0.1'
 SHARE_PROTOCOL = share_registration.TYPE
 SUMMARY_PROTOCOL = node_summary.TYPE
+#: What this node's check-in lists in its own `protocols`: what it READS from the server (DEC-0067, DEC-0094). A server
+#: gates what it sends on this list (DEC-0116, DEC-0117), so a revision belongs here only once the node reads it:
+#: `repair-request/1` with the repair runner (OBS-193); `credential-decision/1`, `fabric-credential-envelope/1`,
+#: `credential-revocation/1` and `call-record/1` with the credential exchange (OBS-191, OBS-194). Until then no server
+#: sends this node `records.repairs`, credential members or `callRecordsAccepted`.
+NODE_READS = (DEVICE_PROTOCOL,)
+#: DEC-0111's check-in members this node never sends yet (the credential exchange is OBS-191 and OBS-194): each would
+#: go only to a server whose response lists `credential-request/1` or `call-record/1` (DEC-0116).
+UNSENT_RECORDS = ('credentialRequests', 'callRecords')
 #: A summary is sent when what it says changed, and at least this often (DEC-0101: "when it changed and at least once a
 #: day").
 SUMMARY_EVERY_SECONDS = 86400
@@ -98,17 +107,31 @@ STORAGE_REFUSALS = frozenset({'key-storage-refused', 'key-storage-not-allowed', 
                               'attestation-required', 'key-not-hardware'})
 #: The refusals that mean this machine is no longer in the organization (OBS-204), each only with HTTP 401 as the
 #: contract sends them (devices.md, the step table): its certificate was revoked (an administrator removed the machine,
-#: or the organization was closed and every machine's certificate revoked), or the server no longer knows it and no
-#: previous certificate is left to fall back to (CT-65; the fallback runs first). The contract gives no code that
-#: tells a closed organization from one revoked machine, so neither does this. The enrollment ends there: nothing more
-#: is sent, its buffered events are dropped with one count recorded, and only `org leave` or a new token's
-#: `org enroll` follow. A 5xx is never terminal: it is retried as any other failure.
+#: or a server pinned before DEC-0103 revoked every machine of a closing organization), or the server no longer knows it
+#: and no previous certificate is left to fall back to (CT-65; the fallback runs first). An organization that ended
+#: answers `ORGANIZATION_CLOSED` instead (DEC-0103, below) to a node pinned at or after it, so this node tells the
+#: two apart when the server does. The enrollment ends there: nothing more is sent, its buffered events are dropped with
+#: one count recorded, and only `org leave` or a new token's `org enroll` follow. A 5xx is never terminal: it is
+#: retried as any other failure.
 REMOVED_CODES = frozenset({'certificate-revoked', 'certificate-unknown'})
-#: `unknown-org`, a deleted organization, is not in the contract yet (PROVISIONAL until it is): a 4xx answer with it is
-#: terminal only when it is answered again at least this long after the first, with no successful request between.
-#: Until then the enrollment is retried as usual and its status says the server does not know the organization.
+#: DEC-0103: the final refusal of an organization that ended, HTTP 410 with the body `device-organization-closed`
+#: (`{error: {code, message}, closedAt}`), on any device request. Final on one answer: every request to that
+#: organization stops, what was buffered for it (events, sums, registrations) is dropped, and the enrollment ends,
+#: discarding that organization's server policy layer, key set, collection start and stream. A 410 whose body is not
+#: that shape is no such answer: it is retried as any other failure, because ending an enrollment cannot be undone.
+ORGANIZATION_CLOSED = 'organization-closed'
+#: `unknown-org` is the first organization server's own enrollment refusal (DEC-0103: not a contract code): an
+#: enrollment it refuses so names the organization id the server does not know. On a signed device request it means
+#: nothing more than any other failure, and is retried as one.
 UNKNOWN_ORG = 'unknown-org'
-UNKNOWN_ORG_CONFIRM_SECONDS = 3600
+#: `device-common.schema.json#/$defs/detail`: one line of at most 200 characters with no path in it.
+DETAIL = re.compile(r"""(?![\s\S]*(?:(?:^|[\s"'`=(\[{<,;:])[/\\~]|[A-Za-z]:[/\\]|%(?:25)?2[fF]"""
+                    r"""|(?:^|[^A-Za-z0-9])(?:[Uu]sers|home)[/\\]|-(?:[Uu]sers|home)-[A-Za-z0-9]))[^\r\n]{1,200}\Z""")
+#: `activity-common.schema.json#/$defs/noticeVersion`: the version of the organization's notice (DEC-0052).
+NOTICE_VERSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z')
+#: DEC-0100: the receiver does not collect this event for this person under the notice they acknowledged. The collector
+#: sends no event of that kind until the notice moves (DEC-0102, `purpose_held`), never on a timer.
+PURPOSE = 'purpose'
 #: The certificate refusals that end the enrollment: the machine needs a new token. `REMOVED_CODES` end it only with
 #: HTTP 401 (`_ends`).
 ENDING_CODES = frozenset({'epoch-superseded', 'certificate-expired'}) | REMOVED_CODES
@@ -205,7 +228,15 @@ def notice(org_id: str, state: dict, now: float) -> dict:
         (state.get('certificate') or {}).get('serial') else None
     if isinstance(refused, dict):
         out['renewalRefused'] = refused
-    if isinstance(removed, dict):
+    if isinstance(removed, dict) and removed.get('code') == ORGANIZATION_CLOSED:
+        out.update(state='removed', removed=removed, command='project-observatory full org leave --org %s' % org_id,
+                   enrollCommand=enroll,
+                   nextStep='organization %s closed on %s (the server answered %s on %s): nothing more is sent to it, '
+                            'and what this machine held for it was dropped, its policy and keys with it. Remove its '
+                            'local state with: project-observatory full org leave --org %s'
+                            % (org_id, str(removed.get('closedAt') or '?')[:10], ORGANIZATION_CLOSED,
+                               removed.get('at') or '?', org_id))
+    elif isinstance(removed, dict):
         out.update(state='removed', removed=removed, command='project-observatory full org leave --org %s' % org_id,
                    enrollCommand=enroll,
                    nextStep='this machine was removed from organization %s on %s (the server answered %s): nothing '
@@ -239,13 +270,6 @@ def notice(org_id: str, state: dict, now: float) -> dict:
     else:
         out['state'] = 'valid'
     out['summary'] = summary_notice(state)
-    unknown = state.get('unknownOrg')
-    if isinstance(unknown, dict) and not isinstance(removed, dict):
-        out['unknownOrg'] = unknown
-        out['warning'] = ('the organization server does not know this organization (since %s, answer %s). Requests '
-                          'are retried as usual; if it still does not know it an hour after that, this machine is '
-                          'taken as removed from the organization (this code is provisional until the contract '
-                          'defines it)' % (unknown.get('since') or '?', UNKNOWN_ORG))
     return out
 
 
@@ -481,6 +505,20 @@ def _summary_suspect(status: int, answer: Any) -> bool:
     return 'summary' in said or 'records' in said
 
 
+def organization_closed_at(status: int, body: Any) -> Optional[str]:
+    """`closedAt` when an answer is DEC-0103's `organization-closed`: HTTP 410 and exactly the body
+    `device-organization-closed.schema.json` admits (`{error: {code: organization-closed, message}, closedAt}`, the
+    message one path-free line, `closedAt` an RFC 3339 date-time); None for anything else."""
+    if status != 410 or not isinstance(body, dict) or set(body) != {'error', 'closedAt'}:
+        return None
+    error, closed_at = body['error'], body['closedAt']
+    if not isinstance(error, dict) or set(error) != {'code', 'message'} or error['code'] != ORGANIZATION_CLOSED:
+        return None
+    if not isinstance(error['message'], str) or not DETAIL.match(error['message']):
+        return None
+    return closed_at if isinstance(closed_at, str) and strict_time(closed_at) is not None else None
+
+
 def _error_code(doc: Any) -> Optional[str]:
     """The receiver's refusal code, bounded: `{error: {code}}` or `{error: code}` or `{code}`."""
     if isinstance(doc, dict):
@@ -711,8 +749,9 @@ class Enrollment:
         measure and asks for a check-in now, which measures it again. The first answer past the signature check under
         a rotated certificate lets the previous certificate go (CT-65); a `certificate-unknown` before that goes back
         to the previous one, which the server keeps valid until the new serial is first presented. A refusal that
-        says the machine is no longer in the organization (`REMOVED_CODES`) ends the enrollment here, for every
-        caller (OBS-204); a removed enrollment sends nothing."""
+        says the machine is no longer in the organization (`REMOVED_CODES`, OBS-204) or that the organization ended
+        (`ORGANIZATION_CLOSED`, DEC-0103) ends the enrollment here, for every caller; a removed enrollment sends
+        nothing."""
         if isinstance(state.get('removed'), dict):
             raise self._removed_error(state)
         body = json.dumps(doc, separators=(',', ':')).encode('utf-8')
@@ -742,49 +781,51 @@ class Enrollment:
                 self._save(state)
                 self.journal('certificate-fallback', serial=state['certificate']['serial'])
                 return self._signed(state, path, rebuild(state) if rebuild else doc)
-        elif 200 <= status < 300 and (state.get('previousCertificate') or state.get('unknownOrg')):
+        elif 200 <= status < 300 and state.get('previousCertificate'):
             state.pop('previousCertificate', None)         # a 2xx proves the server took the new serial
-            state.pop('unknownOrg', None)                  # and that it knows the organization
             self._save(state)
         code = _error_code(answer)
-        if status == 401 and code in REMOVED_CODES:        # only with 401, as the contract sends them
+        closed_at = organization_closed_at(status, answer)
+        if closed_at is not None:                          # DEC-0103: final on one answer
+            self._remove(state, ORGANIZATION_CLOSED, status, closed_at=closed_at)
+        elif status == 401 and code in REMOVED_CODES:      # only with 401, as the contract sends them
             self._remove(state, code, status)
-        elif code == UNKNOWN_ORG and 400 <= status < 500:
-            self._unknown_org(state, status)
         return status, answer
 
-    def _unknown_org(self, state: dict, status: int) -> None:
-        """`unknown-org` (provisional, not in the contract yet): the first answer is recorded and retried as usual; one
-        at least `UNKNOWN_ORG_CONFIRM_SECONDS` later AND in a later tick (`tickSeq`, counted by `tick`), with no
-        successful request between, ends the enrollment. The tick keeps a wall clock that jumps an hour between two
-        requests of one tick from removing the machine."""
-        now = self.clock()
-        tick = state.get('tickSeq') or 0
-        first = state.get('unknownOrg')
-        if not isinstance(first, dict) or not isinstance(first.get('at'), (int, float)):
-            state['unknownOrg'] = {'since': iso(now), 'at': int(now), 'status': status, 'tick': tick}
-            self._save(state)
-            self.journal('unknown-org-seen', status=status)
-        elif now - first['at'] >= UNKNOWN_ORG_CONFIRM_SECONDS and tick > (first.get('tick') or 0):
-            self._remove(state, UNKNOWN_ORG, status)
-
-    def _remove(self, state: dict, code: str, status: int) -> None:
+    def _remove(self, state: dict, code: str, status: int, closed_at: Optional[str] = None) -> None:
         """The organization no longer has this machine (OBS-204): its pending events can be accepted nowhere, so they
         are dropped with one count recorded, the retry and in-flight batch are forgotten, and the state says when and
-        why. `state` is the caller's own copy, changed in place, so what it saves next keeps the removal."""
+        why. `state` is the caller's own copy, changed in place, so what it saves next keeps the removal.
+
+        With `closed_at` the organization ended (DEC-0103, `organization-closed`): what was buffered for it goes
+        whole, the stream's rows, the share registrations and their answers (the sums they gated stay in the meter,
+        which belongs to no organization), and so do the organization's server policy layer, key set and collection
+        start. An `mdm` layer is the operating system's and stays; the machine's other enrollments are untouched. A
+        removal on `certificate-revoked` or `certificate-unknown` keeps what OBS-204 keeps (the contract does not
+        decide that end)."""
         if isinstance(state.get('removed'), dict):
             return
         with self._db() as conn:
             dropped = conn.execute("UPDATE events SET state = 'dropped', key = NULL, reason = ? WHERE state = 'pending'",
                                    (('removed:' + code)[:40],)).rowcount
             conn.execute("DELETE FROM meta WHERE name IN ('retry', 'inflight')")
+            registrations = 0
+            if closed_at is not None:
+                registrations = conn.execute('DELETE FROM registrations').rowcount
+                conn.execute('DELETE FROM events')
+                conn.execute('DELETE FROM meta')
         state['removed'] = {'at': iso(self.clock()), 'code': code, 'status': status, 'droppedEvents': dropped}
-        if isinstance(state.get('unknownOrg'), dict):
-            state['removed']['firstSeen'] = state.pop('unknownOrg').get('since')
+        if closed_at is not None:
+            state['removed'].update(closedAt=closed_at, droppedRegistrations=registrations)
+            for held in ('collectionStart', 'policyRootKey', 'keySet', 'serverPolicy', 'purposeHolds',
+                         'acknowledgedNoticeVersion', 'noticeVersion'):
+                state.pop(held, None)
+        state.pop('unknownOrg', None)                      # the provisional rule's record, before DEC-0103
         state['reEnroll'] = True
         state.pop('pendingRotation', None)
         self._save(state)
-        self.journal('removed-from-organization', code=code, status=status, droppedEvents=dropped)
+        self.journal('removed-from-organization', code=code, status=status, droppedEvents=dropped,
+                     **({'closedAt': closed_at, 'droppedRegistrations': registrations} if closed_at else {}))
 
     def _removed_error(self, state: dict) -> 'OrgError':
         said = notice(self.org_id, state, self.clock())
@@ -858,6 +899,10 @@ class Enrollment:
                 if code in STORAGE_REFUSALS or 'storage' in code or _key_schema_refusal(status, code, answer):
                     raise OrgError('key-storage-refused', "the server's policy refuses this machine's %s-held device "
                                    'key: %s (HTTP %s)' % (getattr(self.keys, 'storage', 'file'), code, status))
+                if code == UNKNOWN_ORG:                  # the server's own enrollment code, not the contract's
+                    raise OrgError('enroll-refused', 'the server does not know organization %s (%s, HTTP %s): check '
+                                   'the organization id and the server with its administrator'
+                                   % (self.org_id, code, status))
                 raise OrgError('enroll-refused', 'the server refused the enrollment: %s (HTTP %s)' % (code, status))
             self._accept(origin, answer, previous, over)
             self._register_quietly()
@@ -891,9 +936,13 @@ class Enrollment:
         if over:
             doc['previousRemoval'] = previous['removed']
         if renewed is not None and previous is not None:
-            # The same enrollment, renewed: when it began and the server's clock as last measured stay.
-            doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=iso(self.clock()),
-                       skewSeconds=previous.get('skewSeconds') or 0)
+            # The same enrollment, renewed: when it began stays. DEC-0102 item 6: a renewal is judged on the server's
+            # clock, which the new certificate's `notBefore` reads, never this machine's: it is when the renewal took
+            # effect, and the server's clock is measured again from it (kept as last measured when it is a day off).
+            issued = strict_time(cert['notBefore']) / 1000
+            skew = round(issued - self.clock())
+            doc.update(enrolledAt=previous.get('enrolledAt') or doc['enrolledAt'], renewedAt=cert['notBefore'],
+                       skewSeconds=skew if abs(skew) <= 86400 else previous.get('skewSeconds') or 0)
         doc.update(_summary_carried(previous, self.org_id, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
@@ -1047,7 +1096,7 @@ class Enrollment:
         healthy = not retrying and not dropped
         health = {'state': 'healthy'} if healthy else \
             {'state': 'degraded', 'detail': 'activity outbox retrying' if retrying else 'activity events dropped'}
-        doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'check-in', 'protocols': [DEVICE_PROTOCOL],
+        doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'check-in', 'protocols': list(NODE_READS),
                'device': {'id': self.keys.device_id}, 'sequenceNum': state['sequenceNum'] + 1, 'at': iso(self.clock()),
                'agent': {'version': VERSION, 'buildChannel': 'official'},
                'health': health, 'logging': {'enabled': True},
@@ -1082,6 +1131,17 @@ class Enrollment:
             pending = self._summary_due(state, inputs)
             if pending is not None:                        # DEC-0101: a check-in record, inside the signed request
                 doc['records'] = {'nodeSummary': pending['summary']}
+                # DEC-0114: the summary is read with the check-in and judged against this enrollment's certificate (its
+                # device and `org:<org.id>`, as written) before it leaves; one that would be refused stays here.
+                findings = node_summary.check_in_summary_findings(doc) + node_summary.check_in_attribution_findings(
+                    doc, {'org': {'id': self.org_id}, 'device': {'id': state.get('device')}})
+                if findings:
+                    del doc['records']
+                    state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': 'attribution',
+                                                'detail': '; '.join(sorted({f['instancePath'] for f in findings}))}
+                    self.journal('node-summary-not-built', code='attribution')
+                    pending = None
+            if pending is not None:
                 state['summarySequence'] = pending['summary']['sequence']   # spent once sent, as sequenceNum
             self._save(state)
             def resend(sent: dict):
@@ -1093,7 +1153,8 @@ class Enrollment:
                                              'notAfter': current['certificate']['notAfter']})
                 return again
             status, answer = self._signed(state, self.paths['check-in'], doc, resend(doc))
-            if pending is not None and _summary_suspect(status, answer):
+            removed = isinstance(state.get('removed'), dict)   # DEC-0103 or OBS-204: nothing is sent again
+            if pending is not None and not removed and _summary_suspect(status, answer):
                 code, first_status = _error_code(answer) or 'http-%d' % status, status
                 state['sequenceNum'] += 1                  # the same check-in, without the summary, signed afresh
                 bare = dict({k: v for k, v in doc.items() if k != 'records'}, sequenceNum=state['sequenceNum'])
@@ -1116,7 +1177,8 @@ class Enrollment:
                 state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
                 state['nextCheckInAt'] = 0 if code == 'signature-stale' else \
                     int(self.clock()) + min(state['checkInSeconds'], 300)
-                if _ends(status, code):
+                ended = _ends(status, code) or isinstance(state.get('removed'), dict)
+                if ended:
                     state['reEnroll'], state['reEnrollReason'] = True, code
                 if pending is not None:
                     state['nodeSummaryNote'] = {'at': iso(self.clock()), 'reason': 'check-in-failed', 'code': code}
@@ -1125,7 +1187,7 @@ class Enrollment:
                 out = {'ok': False, 'code': code, 'status': status}
                 if renewed:
                     out['renewed'] = renewed
-                if _ends(status, code):                   # never a silent refusal: what happened and the step
+                if ended:                                 # never a silent refusal: what happened and the step
                     said = notice(self.org_id, state, self.clock())
                     out.update({k: said[k] for k in ('removed', 'nextStep', 'command') if k in said})
                 return out
@@ -1136,6 +1198,17 @@ class Enrollment:
             state['nextCheckInAt'] = int(self.clock()) + state['checkInSeconds']
             if strict_time(answer.get('collectionStart')) is not None:
                 state['collectionStart'] = answer['collectionStart']
+            # DEC-0102: the notice moved when a response names another acknowledged version (absent is no signal) or the
+            # applied policy another `noticeVersion` (OE-06 applies one; until then `notice_version` is None).
+            acknowledged, version = answer.get('acknowledgedNoticeVersion'), self.notice_version()
+            notice_moved = False
+            if isinstance(acknowledged, str) and NOTICE_VERSION.fullmatch(acknowledged) \
+                    and acknowledged != state.get('acknowledgedNoticeVersion'):
+                state['acknowledgedNoticeVersion'], notice_moved = acknowledged, True
+            if version is not None and version != state.get('noticeVersion'):
+                state['noticeVersion'], notice_moved = version, True
+            if notice_moved:
+                self._release_purpose_holds(state)
             protocols = _protocols(answer)                 # DEC-0094: the held list is replaced from wherever it comes
             listed_before = self.accepts_shares(state)
             if protocols is not None:
@@ -1145,6 +1218,7 @@ class Enrollment:
             state['rotate'] = state.get('rotate') or action == 'rotate'
             state['reEnroll'] = action == 're-enroll'
             state.pop('reEnrollReason', None)
+            state.pop('unknownOrg', None)                  # the provisional rule's record, before DEC-0103
             server_at = strict_time(answer.get('at'))
             skew = None if server_at is None else round(server_at / 1000 - self.clock())
             if skew is not None and abs(skew) <= 86400:
@@ -1162,8 +1236,11 @@ class Enrollment:
             self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
                          **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}))
             newly_listed = self.accepts_shares(state) and not listed_before
-        if newly_listed:                                   # the server began to take registrations: send them now
-            self._register_quietly()
+            if notice_moved:                               # DEC-0102: a notice refusal is sent again on a new notice
+                with self._db() as conn:
+                    conn.execute("UPDATE registrations SET sent_at = NULL, next_at = 0 WHERE gate = 'hold-notice'")
+        if newly_listed or notice_moved:                   # the server began to take registrations, or the notice
+            self._register_quietly()                       # moved: send them now
         out = {'ok': True, 'nextCheckInSeconds': state['checkInSeconds'], 'action': action}
         if renewed:
             out['renewed'] = renewed
@@ -1171,9 +1248,13 @@ class Enrollment:
     # -- the outbox --------------------------------------------------------------------------------------------
     def enqueue(self, kind: str, data: dict, *, occurred: str, key: Optional[str] = None, source: str = 'meter',
                 monotonic: str = '0') -> Optional[dict]:
-        """Persists one event of this enrollment's stream once (`key` dedupes), with its id and the next seq."""
+        """Persists one event of this enrollment's stream once (`key` dedupes), with its id and the next seq. An event
+        of a kind the server rejected for its purpose is not collected while that hold stands (DEC-0100): None, as for
+        a duplicate."""
         with self._locked():
             state = self._require()
+            if kind in self.purpose_holds(state):
+                return None
             with self._db() as conn:
                 conn.execute('BEGIN IMMEDIATE')
                 try:
@@ -1287,6 +1368,9 @@ class Enrollment:
         with self._locked():
             state = self._require()
             sent = {'batches': 0, 'accepted': 0, 'duplicates': 0, 'rejected': 0}
+            if self._release_purpose_holds(state):
+                self._save(state)
+            held_kinds = self.purpose_holds(state)
             with self._db() as conn:
                 retry = self._meta(conn, 'retry', {'attempts': 0, 'nextAt': 0})
                 if retry['nextAt'] > self.clock():
@@ -1299,11 +1383,13 @@ class Enrollment:
                     epoch, run = self._slice(conn, limit)
                     if not run:
                         break
-                    cut = next((i for i, r in enumerate(run) if r['kind'] == 'grant.usage'
-                                and gates.get(json.loads(r['body'])['data'].get('grantId')) != 'send'), None)
+                    cut = next((i for i, r in enumerate(run) if r['kind'] in held_kinds or (
+                        r['kind'] == 'grant.usage'
+                        and gates.get(json.loads(r['body'])['data'].get('grantId')) != 'send')), None)
                     if cut == 0:
                         self._drop(conn, epoch, run[:1])
-                        self.journal('grant-usage-withheld', seq=run[0]['seq'])
+                        self.journal('purpose-withheld' if run[0]['kind'] in held_kinds else 'grant-usage-withheld',
+                                     seq=run[0]['seq'])
                         continue
                     run = run[:cut] if cut else run
                     inflight = self._meta(conn, 'inflight')
@@ -1318,8 +1404,9 @@ class Enrollment:
                     code = None if status == 200 and isinstance(ack, dict) else \
                         _error_code(ack) or ('unreachable' if status == 0 else 'http-%d' % status)
                     # A refusal that names the organization or the certificate is not about the batch's content: it
-                    # is held and retried, never rejected, whatever its status (a 401 removal returned above).
-                    about_us = code in REMOVED_CODES or code == UNKNOWN_ORG
+                    # is held and retried, never rejected, whatever its status (a 401 removal and DEC-0103's 410,
+                    # the enrollment's end and not a rejection of its events, returned above).
+                    about_us = code in REMOVED_CODES or code in (UNKNOWN_ORG, ORGANIZATION_CLOSED)
                     if status == 413 and len(run) > 1 and not about_us:
                         self._set_meta(conn, 'batchLimit', max(1, len(run) // 2))
                         self._set_meta(conn, 'inflight', None)
@@ -1337,6 +1424,9 @@ class Enrollment:
                         continue
                     if code is None:
                         counts = self._consume(conn, epoch, run, ack)
+                        purpose = counts.pop('purposeKinds')
+                        if purpose:                        # DEC-0100: that kind waits for the notice to move
+                            held_kinds = self._hold_purpose(state, purpose)
                         left = conn.execute("SELECT COUNT(*) AS n FROM events WHERE epoch = ? AND seq BETWEEN ? AND ? "
                                             "AND state = 'pending'", (epoch, span[1], span[2])).fetchone()['n']
                         if left == len(run):
@@ -1360,12 +1450,19 @@ class Enrollment:
                         sent[name] += counts[name]
             return sent
     def _consume(self, conn, epoch: int, run: List[sqlite3.Row], ack: dict) -> dict:
-        """Applies an ack: rejected events are consumed with their reason; every seq up to the stream's ack, and in
-        its `held` ranges, is consumed. What the ack does not name stays pending and goes in a later batch."""
+        """Applies an ack: rejected events are consumed with their reason, whatever it is (a reason this node does not
+        know included, DEC-0100); every seq up to the stream's ack, and in its `held` ranges, is consumed. What the ack
+        does not name stays pending and goes in a later batch. The kinds of this run's events rejected for their
+        purpose come back in `purposeKinds` (`before-purpose` holds nothing, DEC-0102)."""
         rejected = [r for r in ack.get('rejected', []) if isinstance(r, dict)] if isinstance(ack.get('rejected'), list) else []
+        kinds = {r['event_id']: r['kind'] for r in run}
+        purpose_kinds: List[str] = []
         for item in rejected:
             conn.execute("UPDATE events SET state = 'rejected', reason = ? WHERE event_id = ? AND state = 'pending'",
                          (str(item.get('reason'))[:40], item.get('eventId')))
+            kind = kinds.get(item.get('eventId')) if isinstance(item.get('eventId'), str) else None
+            if item.get('reason') == PURPOSE and kind is not None and kind not in purpose_kinds:
+                purpose_kinds.append(kind)
         for entry in ack.get('acks', []) if isinstance(ack.get('acks'), list) else []:
             collector = entry.get('collector') if isinstance(entry, dict) else None
             if not isinstance(collector, dict) or collector.get('id') != COLLECTOR_ID:
@@ -1380,7 +1477,62 @@ class Enrollment:
                     conn.execute("UPDATE events SET state = 'acked' WHERE epoch = ? AND seq BETWEEN ? AND ? AND "
                                  "state = 'pending'", (stream, held['fromSeq'], held['toSeq']))
         num = lambda name: ack.get(name) if isinstance(ack.get(name), int) else 0
-        return {'accepted': num('accepted'), 'duplicates': num('duplicates'), 'rejected': len(rejected)}
+        return {'accepted': num('accepted'), 'duplicates': num('duplicates'), 'rejected': len(rejected),
+                'purposeKinds': purpose_kinds}
+
+    # -- a purpose rejection (DEC-0100, DEC-0102) --------------------------------------------------------------
+    def notice_version(self) -> Optional[str]:
+        """The `noticeVersion` of the signed policy this machine applied for this organization (its `mdm` or `server`
+        layer, in that precedence), or None. None until the step that verifies and applies the server's signed policy
+        lands (OE-06, `policy_layers`)."""
+        for source in ('mdm', 'server'):
+            for layer in self.policy_layers():
+                version = layer.get('noticeVersion') if isinstance(layer, dict) and layer.get('source') == source \
+                    else None
+                if isinstance(version, str) and NOTICE_VERSION.fullmatch(version):
+                    return version
+        return None
+
+    @staticmethod
+    def purpose_holds(state: dict) -> Dict[str, dict]:
+        """The event kinds held after a `purpose` rejection: `{kind: {at, noticeVersion, acknowledged}}`, the two
+        versions as they stood at the rejection (None: absent)."""
+        holds = state.get('purposeHolds')
+        return {k: v for k, v in holds.items() if isinstance(v, dict)} if isinstance(holds, dict) else {}
+
+    def _hold_purpose(self, state: dict, kinds: List[str]) -> Dict[str, dict]:
+        """Records a hold per kind the receiver rejected for its purpose, with the notice versions held now, and saves
+        the state; a kind already held keeps the versions of its first rejection."""
+        holds = self.purpose_holds(state)
+        for kind in kinds:
+            if kind not in holds:
+                holds[kind] = {'at': iso(self.clock()), 'noticeVersion': self.notice_version(),
+                               'acknowledged': state.get('acknowledgedNoticeVersion')}
+                self.journal('purpose-held', kind=kind)
+        state['purposeHolds'] = holds
+        self._save(state)
+        return holds
+
+    def _release_purpose_holds(self, state: dict) -> List[str]:
+        """DEC-0102: a held kind is sent again only when the applied policy names another `noticeVersion` than at the
+        rejection, or a check-in response named an `acknowledgedNoticeVersion` other than the one held at the
+        rejection (absence at the rejection included: a first acknowledgement is a change). A value that becomes
+        absent is no signal, and nothing is released on a timer. Returns the kinds released; the caller saves."""
+        holds = self.purpose_holds(state)
+        if not holds:
+            return []
+        version, acknowledged = self.notice_version(), state.get('acknowledgedNoticeVersion')
+        released = [kind for kind, hold in holds.items()
+                    if (version is not None and version != hold.get('noticeVersion'))
+                    or (acknowledged is not None and acknowledged != hold.get('acknowledged'))]
+        for kind in released:
+            del holds[kind]
+            self.journal('purpose-released', kind=kind)
+        if holds:
+            state['purposeHolds'] = holds
+        else:
+            state.pop('purposeHolds', None)
+        return released
     # -- share registrations and grant usage -------------------------------------------------------------------
     def accepts_shares(self, state: dict) -> bool:
         return SHARE_PROTOCOL in (state.get('protocols') or [])
@@ -1549,6 +1701,11 @@ class Enrollment:
                         if row['gate'] == 'hold' and row['next_at'] > now:
                             continue
                     status, answer = self._signed(state, self.paths['share-registration'], registration)
+                    if isinstance(state.get('removed'), dict):  # DEC-0103 `stop`: the organization ended
+                        out.update(held='removed', removed=state['removed'])
+                        self.journal('share-registration', grantState=registration['state'], status=status,
+                                     gate='stop', code=_error_code(answer))
+                        return out
                     if status == 200 and isinstance(answer, dict):
                         shaped = {'status': 200, 'receipt': answer}
                     elif status == 401:
@@ -1661,8 +1818,6 @@ class Enrollment:
             state = self.state()
             if state is None:
                 return {'org': self.org_id, 'result': 'not-enrolled'}
-            state['tickSeq'] = (state.get('tickSeq') or 0) + 1   # what a later tick means (`_unknown_org`)
-            self._save(state)
             said = notice(self.org_id, state, self.clock())
             step = {k: said[k] for k in ('removed', 'nextStep', 'command') if k in said}
             if said['state'] == 'removed':                 # recorded once, when it happened; nothing is retried
@@ -1722,8 +1877,8 @@ class Enrollment:
                and (self.expired(state) or bool(state.get('reEnroll'))),
                'rotationPending': isinstance(state.get('pendingRotation'), dict),
                'key': self._key_declaration(), 'nodeSummary': said['summary']}
-        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'unknownOrg', 'warning', 'renewUntil',
-                                         'renewalRefused') if k in said})
+        out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'renewUntil', 'renewalRefused')
+                    if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
         out['registrations'] = {}
         path = self.folder / 'outbox.sqlite'
@@ -1748,8 +1903,6 @@ class Enrollment:
             degraded.append('org:removed')
         elif out['needsEnrollment']:
             degraded.append('org:needs-enrollment')
-        if 'unknownOrg' in out:
-            degraded.append('org:unknown-org')
         if cert_state == 'expired' and 'removed' not in out:
             degraded.append('org:certificate-expired')
         elif cert_state == 'expiring':

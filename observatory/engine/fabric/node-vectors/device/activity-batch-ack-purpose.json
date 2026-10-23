@@ -1,0 +1,32 @@
+{
+  "protocol": "fabric-activity/0.1",
+  "device": {
+    "id": "dev-01j9a"
+  },
+  "batchId": "01K6Z3Y4P5Q6R7S8T9V0W1X2YZ",
+  "received": "2026-10-07T09:32:01Z",
+  "accepted": 5,
+  "duplicates": 0,
+  "rejected": [
+    {
+      "eventId": "01J9A0000000000000000000ZZ",
+      "reason": "purpose"
+    }
+  ],
+  "acks": [
+    {
+      "collector": {
+        "id": "cc-otel",
+        "epoch": 2
+      },
+      "seq": 44
+    },
+    {
+      "collector": {
+        "id": "switchboard",
+        "epoch": 2
+      },
+      "seq": 7
+    }
+  ]
+}

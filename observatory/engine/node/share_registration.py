@@ -36,6 +36,8 @@ DEGRADED_AFTER = {'revision-conflict': 409, 'agent-mismatch': 409, 'wrong-organi
 #: the node keeps the sums and sends the registration again at the seven-day resend (or when its policy names a later
 #: `noticeVersion`).
 NOTICE_AFTER = {'purpose-not-collected': 403}
+#: DEC-0103: the final transport refusal of an organization that ended, answered 410 with `closedAt`.
+ORGANIZATION_CLOSED = 'organization-closed'
 
 
 def _str(value: Any) -> bool:
@@ -194,14 +196,19 @@ def derive(record: Any, applied_entries: Any, org_id: Any, previously_registered
 
 
 def gate(answer: Any) -> str:
-    """`gateGrantUsage`: `send`, `hold-degraded`, `hold-notice` (DEC-0100) or `hold` for a grant's usage toward one
-    enrollment, given that enrollment's latest answer to the grant's registration (None before any)."""
+    """`gateGrantUsage`: `send`, `hold-degraded`, `hold-notice` (DEC-0100), `stop` (DEC-0103) or `hold` for a grant's
+    usage toward one enrollment, given that enrollment's latest answer to the grant's registration (None before any).
+    `stop` is a 410 `organization-closed`, in the reference's shape (`{status, code}`) and the wire's nested body
+    (`{status, body: {error: {code}}}`) alike: the organization ended, the node keeps nothing for it and sends it
+    nothing again."""
     def own(value: Any, key: str) -> Any:
         return value.get(key) if isinstance(value, dict) else None
     status = own(answer, 'status')
     status = status if isinstance(status, int) and not isinstance(status, bool) else None
     if status == 200 and own(own(answer, 'receipt'), 'type') == RECEIPT_TYPE:
         return 'send'
+    if status == 410 and ORGANIZATION_CLOSED in (own(answer, 'code'), own(own(own(answer, 'body'), 'error'), 'code')):
+        return 'stop'
     code = own(own(own(answer, 'body'), 'error'), 'code')
     if not _str(code):
         return 'hold'

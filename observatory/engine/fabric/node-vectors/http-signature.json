@@ -1,5 +1,5 @@
 {
-  "$comment": "The device transport binding's vectors (DEC-0056, devices.md#transport): HTTP message signatures (RFC 9421 subset) with Content-Digest (RFC 9530). Each case is a FAC-SEM-077 rule input without `answer`: merge the top-level publicBaseUrl, certificates and at into it; `seen` is the receiver's nonce store before the request; `clientCertificateSerial`, when present, is the serial of a mutual-TLS session's client certificate (DEC-0056 item 1); `expect` is accepted or the 401 code. Every case carries one fault (`fault`). Keys are fresh, generated for these vectors; only their public halves are here, and ECDSA signatures are not reproducible, so a signer port is tested by verifying its own output. `rfc9421` and `rfc9530` are the RFCs' own examples, run by test/http-signature.test.ts.",
+  "$comment": "The device transport binding's vectors (DEC-0056, devices.md#transport): HTTP message signatures (RFC 9421 subset) with Content-Digest (RFC 9530). Each case is a FAC-SEM-077 rule input without `answer`: merge the top-level publicBaseUrl, certificates and at into it; `seen` is the receiver's nonce store before the request; `clientCertificateSerial`, when present, is the serial of a mutual-TLS session's client certificate (DEC-0056 item 1); `expect` is accepted or the 401 code, or `organization-closed` (410, DEC-0103) for a closed organization's certificate, whose cases also carry `expectStatus` 410 and `expectClosedAt`. Every case carries one fault (`fault`); the `organization` cases' certificate is also revoked on purpose, to pin step 4 before step 5 (DEC-0103). Keys are fresh, generated for these vectors; only their public halves are here, and ECDSA signatures are not reproducible, so a signer port is tested by verifying its own output. `rfc9421` and `rfc9530` are the RFCs' own examples, run by test/http-signature.test.ts.",
   "rfc9421": {
     "section": "RFC 9421 Appendix B.2.6, the key test-key-ed25519 (Appendix B.1.4), public half only",
     "publicKey": "JrQLj5P/89iXES9+vFgrIy29clF9CC/oPPsw3c5D0bs=",
@@ -96,6 +96,17 @@
         "alg": "es256",
         "publicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfY="
       }
+    },
+    {
+      "serial": "4a4b4c4d4e4f5051",
+      "notBefore": "2026-10-07T08:30:05Z",
+      "notAfter": "2026-10-14T08:30:05Z",
+      "key": {
+        "alg": "es256",
+        "publicKey": "BFN/l26gtx7w3cwR0aWrow2T6cfuliHGYuhqIwbHDDrY/rIRzvKhtr+2AO9+8oXLHOMBnCsLgt0rBRS5+LFzXo8="
+      },
+      "revoked": true,
+      "organizationClosedAt": "2026-10-10T00:00:00Z"
     }
   ],
   "cases": [
@@ -983,6 +994,41 @@
         "body": "{\"protocol\":\"fabric-device/0.1\",\"kind\":\"check-in\",\"device\":{\"id\":\"dev-01j9a\"},\"sequenceNum\":289}"
       },
       "expect": "signature-invalid"
+    },
+    {
+      "name": "organization closed (DEC-0103): answered before the revocation, with closedAt",
+      "fault": "organization",
+      "request": {
+        "method": "POST",
+        "target": "/v1/devices/check-in",
+        "headers": {
+          "content-type": "application/json",
+          "content-digest": "sha-256=:bcQgchKmtFToGclM0KEWux+drDCNmKqVlOFEJcn9I4Q=:",
+          "signature-input": "fabric-device=(\"@method\" \"@target-uri\" \"content-digest\");created=1791795598;nonce=\"Qm9hcmQtcnVuLXdhdmUtNC1QNA\";keyid=\"4a4b4c4d4e4f5051\";alg=\"ecdsa-p256-sha256\"",
+          "signature": "fabric-device=:ONOMGcHq4lkRaknRq855FRpERS0y7tDnBhO2sy0Faqg4nw1leZJbF+nrfNUa1XZP7NvmdX5IQo3VHUV3QGGYJw==:"
+        },
+        "body": "{\"protocol\":\"fabric-device/0.1\",\"kind\":\"check-in\",\"device\":{\"id\":\"dev-01j9a\"},\"sequenceNum\":289}"
+      },
+      "expect": "organization-closed",
+      "expectStatus": 410,
+      "expectClosedAt": "2026-10-10T00:00:00Z"
+    },
+    {
+      "name": "mutual TLS and an unsigned request of a closed organization (DEC-0103)",
+      "fault": "organization",
+      "request": {
+        "method": "POST",
+        "target": "/v1/devices/check-in",
+        "headers": {
+          "content-type": "application/json",
+          "content-digest": "sha-256=:bcQgchKmtFToGclM0KEWux+drDCNmKqVlOFEJcn9I4Q=:"
+        },
+        "body": "{\"protocol\":\"fabric-device/0.1\",\"kind\":\"check-in\",\"device\":{\"id\":\"dev-01j9a\"},\"sequenceNum\":289}"
+      },
+      "clientCertificateSerial": "4a4b4c4d4e4f5051",
+      "expect": "organization-closed",
+      "expectStatus": 410,
+      "expectClosedAt": "2026-10-10T00:00:00Z"
     }
   ]
 }

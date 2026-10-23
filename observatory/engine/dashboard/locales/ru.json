@@ -2228,7 +2228,7 @@
  "certificate expires on {date}; renew it now while the server answers": "сертификат истекает {date}; обновите его сейчас, пока сервер отвечает",
  "certificate valid until {date}": "сертификат действует до {date}",
  "enrollment could not be read: {reason}": "не удалось прочитать подключение к организации: {reason}",
- "the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later": "сервер организации не знает эту организацию с {date}; запросы повторяются, и если через час он её так и не узнает, машина считается исключённой",
+ "the organization closed on {date}; nothing more is sent to it, and what this machine held for it was dropped": "организация закрыта {date}; ей больше ничего не отправляется, а всё, что машина хранила для неё, удалено",
  "the organization server does not read harness summaries (node-summary/1); none is sent": "сервер организации не принимает сводку окружения агентов (node-summary/1); она не отправляется",
  "harness summary not sent: {detail}": "сводка окружения агентов не отправлена: {detail}",
  "harness summary taken on {date}: {agents} coding agents, {servers} MCP servers, {skills} skills, {plugins} plugins, {hooks} hooks": "сводка окружения агентов принята {date}: агентов для кода {agents}, MCP-серверов {servers}, навыков {skills}, плагинов {plugins}, хуков {hooks}",

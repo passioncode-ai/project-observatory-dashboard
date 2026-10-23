@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "organization-closed",
+    "message": "This organization closed on 2026-11-30; this machine no longer reports to it.",
+    "retryAfter": 60
+  },
+  "closedAt": "2026-11-30T00:00:00Z"
+}

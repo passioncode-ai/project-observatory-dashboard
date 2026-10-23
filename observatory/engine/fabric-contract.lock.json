@@ -2,6 +2,6 @@
   "contract": "fabric-agent-contract",
   "version": "0.1.0",
   "repository": "https://github.com/passioncode-ai/fabric-agent-contract",
-  "commit": "f33f4d8ad3a15e3f4ea06e51cff00c64f4af4f6e",
+  "commit": "588748ab7d1c7958c6a83497e3db2cada26e35d8",
   "profile": "mcp"
 }

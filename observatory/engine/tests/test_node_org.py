@@ -94,19 +94,44 @@ class TransportVectors(unittest.TestCase):
         self.data = vectors('http-signature')
         self.certs = {c['serial']: c for c in self.data['certificates']}
 
-    def verdict(self, case):
+    def result(self, case, certificates=None):
         held = {(s['serial'], s['nonce']) for s in case.get('seen', [])}
-        result = hs.verify_request(case['request'], public_base_url=self.data['publicBaseUrl'],
-                                   certificate=self.certs.get, at_ms=strict_time(self.data['at']),
-                                   seen=lambda serial, nonce: (serial, nonce) in held,
-                                   client_certificate_serial=case.get('clientCertificateSerial'))
+        return hs.verify_request(case['request'], public_base_url=self.data['publicBaseUrl'],
+                                 certificate=(certificates or self.certs).get, at_ms=strict_time(self.data['at']),
+                                 seen=lambda serial, nonce: (serial, nonce) in held,
+                                 client_certificate_serial=case.get('clientCertificateSerial'))
+
+    def verdict(self, case):
+        result = self.result(case)
         return 'accepted' if result['ok'] else result['code']
 
     def test_every_case_answers_as_the_contract(self):
-        self.assertEqual(len(self.data['cases']), 54)
+        # A lower bound (DEC-0103's Compatibility): the contract adds cases, and every one it adds must still answer.
+        self.assertGreaterEqual(len(self.data['cases']), 56)
         for case in self.data['cases']:
             with self.subTest(case['name']):
-                self.assertEqual(self.verdict(case), case['expect'])
+                result = self.result(case)
+                self.assertEqual('accepted' if result['ok'] else result['code'], case['expect'])
+                if 'expectStatus' in case:
+                    self.assertEqual(result.get('status'), case['expectStatus'])
+                if 'expectClosedAt' in case:
+                    self.assertEqual(result.get('closedAt'), case['expectClosedAt'])
+
+    def test_a_closed_organization_is_read_before_revocation(self):
+        """DEC-0103 step 4: both vector cases carry a revoked certificate on purpose; an unreadable or null closing
+        time is the receiver's own fault, never an open organization."""
+        cases = [c for c in self.data['cases'] if c.get('fault') == 'organization']
+        self.assertEqual(len(cases), 2)
+        for case in cases:
+            serial = case.get('clientCertificateSerial') or hs._parsed(case['request']['headers'])['keyid']
+            self.assertTrue(self.certs[serial]['revoked'])
+            for bad in (None, 'yesterday', '2026-10-10', 7):
+                broken = dict(self.certs, **{serial: dict(self.certs[serial], organizationClosedAt=bad)})
+                with self.subTest(case['name'], closedAt=bad):
+                    self.assertEqual(self.result(case, broken), {'ok': False, 'code': 'context-invalid'})
+            reopened = dict(self.certs, **{serial: {k: v for k, v in self.certs[serial].items()
+                                                    if k != 'organizationClosedAt'}})
+            self.assertEqual(self.result(case, reopened)['code'], 'certificate-revoked')
 
     def test_the_signature_base_is_the_vectors_byte_for_byte(self):
         built = 0
@@ -215,7 +240,10 @@ class FakeServer:
         self.refuse_storage, self.skew, self.org, self.strict_schema = (), 0, ORG, False
         self.checkin_protocols, self.batch_answer, self.lose_rotation, self.rotations = None, None, False, {}
         self.pause = None                                  # (path, started Event, release Event): hold one request
-        self.closed = False                                # the organization was deleted: every request is unknown-org
+        self.closed = False                                # a server's own `unknown-org` on every request
+        self.closed_at = None                              # DEC-0103: the organization ended at this time
+        self.closed_body = None                            # a 410 body of the server's choosing instead
+        self.acknowledged = None                           # DEC-0102: the notice version the person acknowledged
         self.refuse = None                                 # (status, code): every signed request answers that
         # DEC-0100: a server at or after it renews a device on record by its key; one pinned before refuses the
         # request at its schema. `devices` is its record per device id, `renew_answer` a refusal of its own policy.
@@ -229,8 +257,13 @@ class FakeServer:
         handler = {'/v1/devices/enroll': self.enroll, '/v1/devices/check-in': self.check_in,
                    '/v1/devices/rotate': self.rotate, '/v1/activity/batches': self.batch,
                    '/v1/devices/share-registrations': self.share}[path]
-        if self.closed:                                    # a deleted organization's answer (OBS-204, provisional)
+        if self.closed:                                    # the first organization server's own code
             return 404, json.dumps({'error': {'code': 'unknown-org'}}).encode()
+        if (self.closed_at or self.closed_body) and path != '/v1/devices/enroll':   # DEC-0103: an enrollment as today
+            return 410, json.dumps(self.closed_body or {
+                'error': {'code': 'organization-closed', 'message': 'This organization closed; this machine no '
+                                                                    'longer reports to it.'},
+                'closedAt': self.closed_at}).encode()
         if self.refuse and path != '/v1/devices/enroll':
             return self.refuse[0], json.dumps({'error': {'code': self.refuse[1]}}).encode()
         if self.pause and self.pause[0] == path:
@@ -351,6 +384,8 @@ class FakeServer:
                'nextCheckInSeconds': 300, 'flags': []}
         if self.checkin_protocols is not None:
             out['protocols'] = self.checkin_protocols
+        if self.acknowledged is not None:
+            out['acknowledgedNoticeVersion'] = self.acknowledged
         if self.clock() >= strict_time(cert['notBefore']) / 1000 + 7 * 86400 * 2 / 3:
             out['certificate'] = {'action': 'rotate'}
         return 200, out
@@ -740,40 +775,178 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(result['command'], 'project-observatory full org leave --org ' + ORG)
         self.assert_removed('certificate-revoked')
 
-    def test_a_deleted_organization_ends_the_outbox_only_when_seen_again_an_hour_later(self):
-        # `unknown-org` is not in the contract yet: provisional, terminal only on a second sighting an hour on.
+    def test_unknown_org_on_a_device_request_is_retried_and_never_ends_the_enrollment(self):
+        # DEC-0103: `unknown-org` is a server's own enrollment refusal, not a contract code; the provisional rule that
+        # ended an enrollment on a second sighting an hour on is retired. On a signed request it is any failure.
         self.enroll()
         self._three_events()
         self.server.closed = True
         self.assertEqual(self.make().flush()['held'], 'unknown-org')            # retried as usual, nothing dropped
-        self.assertEqual(self._pending(), 3)
-        status = self.make().describe()
-        self.assertNotIn('removed', status)
-        self.assertIn('org:unknown-org', status['degraded'])
-        self.assertIn('does not know this organization', status['warning'])
-        self.assertEqual(status['unknownOrg']['since'], self.make().state()['unknownOrg']['since'])
-        self.now[0] += 1800
-        self.assertEqual(self.make().tick()['checkIn']['code'], 'unknown-org')  # half an hour on: still not removed
-        self.assertNotIn('removed', self.make().state())
-        self.now[0] += 1801
-        self.assertEqual(self.make().tick()['checkIn']['code'], 'unknown-org')  # a later tick, an hour on
-        self.assert_removed('unknown-org')
-
-    def test_a_success_between_two_unknown_org_answers_starts_the_hour_again(self):
-        self.enroll()
-        self.server.closed = True
-        self.make().check_in()
-        self.assertIn('unknownOrg', self.make().state())
-        self.server.closed = False
-        self.now[0] += 1800
-        self.assertTrue(self.make().check_in()['ok'])
-        self.assertNotIn('unknownOrg', self.make().state())
-        self.server.closed = True
-        self.now[0] += 3600
-        self.make().check_in()
+        for _ in range(3):
+            self.now[0] += 3601
+            self.assertEqual(self.make().tick()['checkIn']['code'], 'unknown-org')
         state = self.make().state()
         self.assertNotIn('removed', state)
-        self.assertEqual(state['unknownOrg']['since'], org_iso(self.now[0]))
+        self.assertNotIn('unknownOrg', state)
+        self.assertNotIn('tickSeq', state)
+        self.assertEqual(self._pending(), 3)
+        status = self.make().describe()
+        self.assertNotIn('org:unknown-org', status['degraded'])
+        self.assertNotIn('unknownOrg', status)
+        self.server.closed = False
+        self.now[0] += 3601
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().flush()['accepted'], 3)
+
+    def test_an_enrollment_the_server_refuses_unknown_org_names_the_organization(self):
+        from node.org import OrgError
+        self.server.closed = True
+        with self.assertRaises(OrgError) as raised:
+            self.enroll()
+        self.assertEqual(raised.exception.code, 'enroll-refused')
+        self.assertIn('does not know organization ' + ORG, str(raised.exception))
+        self.assertIsNone(self.make().state())
+
+    def test_a_state_from_the_provisional_rule_is_dropped_by_the_next_check_in(self):
+        self.enroll()
+        state = self.make().state()
+        state.update(unknownOrg={'since': org_iso(self.now[0]), 'at': int(self.now[0]), 'status': 404, 'tick': 1},
+                     tickSeq=4)
+        self.make()._save(state)
+        self.assertNotIn('warning', self.make().describe())
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotIn('unknownOrg', self.make().state())
+
+    # -- DEC-0103: an organization that ended -----------------------------------------------------------------------
+    CLOSED_AT = '2026-10-18T00:00:00Z'
+
+    def assert_closed(self, events=3):
+        """The enrollment ended on `organization-closed`: what it buffered, its registrations, policy root, collection
+        start and stream are gone; every step is refused before the network; status says so with the date."""
+        from node.org import OrgError
+        state = self.make().state()
+        self.assertEqual({k: state['removed'][k] for k in ('code', 'status', 'closedAt', 'droppedEvents')},
+                         {'code': 'organization-closed', 'status': 410, 'closedAt': self.CLOSED_AT,
+                          'droppedEvents': events})
+        for gone in ('collectionStart', 'policyRootKey'):
+            self.assertNotIn(gone, state)
+        with self.make()._db() as conn:
+            for table in ('events', 'registrations', 'meta'):
+                self.assertEqual(conn.execute('SELECT COUNT(*) AS n FROM %s' % table).fetchone()['n'], 0, table)
+        status = self.make().describe()
+        self.assertEqual((status['state'], status['removed']['code']), ('removed', 'organization-closed'))
+        self.assertIn('org:removed', status['degraded'])
+        self.assertIn('closed on 2026-10-18', status['nextStep'])
+        self.assertEqual(status['command'], 'project-observatory full org leave --org ' + ORG)
+        sent = len(self.server.log)
+        for step in ('check_in', 'rotate', 'flush', 'register_shares', 'collect_grant_usage'):
+            with self.subTest(step), self.assertRaises(OrgError) as raised:
+                getattr(self.make(), step)()
+            self.assertEqual(raised.exception.code, 'removed-from-organization')
+        self.now[0] += 86400
+        self.assertEqual(self.make().tick()['result'], 'removed')
+        self.assertEqual(len(self.server.log), sent)                            # one answer was final: no retry
+
+    def test_a_closed_organization_ends_the_enrollment_on_one_check_in(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'send'})
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        result = self.make().check_in()
+        self.assertEqual((result['ok'], result['code'], result['status']), (False, 'organization-closed', 410))
+        self.assertEqual(result['removed']['closedAt'], self.CLOSED_AT)
+        self.assertEqual(self.make().state()['removed']['droppedRegistrations'], 1)
+        self.assert_closed()
+
+    def test_a_batch_answered_410_is_the_enrollments_end_not_a_rejection(self):
+        self.enroll()
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        result = self.make().flush()
+        self.assertEqual((result['held'], result['rejected'], result['batches']), ('removed', 0, 0))
+        self.assertEqual(result['removed']['code'], 'organization-closed')
+        self.assert_closed()
+
+    def test_a_share_registration_answered_410_stops_for_that_organization(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        result = self.make().register_shares()
+        self.assertEqual(result['held'], 'removed')
+        self.assertEqual(result['removed']['code'], 'organization-closed')
+        self.assert_closed()
+
+    def test_a_rotation_answered_410_ends_it_too(self):
+        from node.org import OrgError
+        self.enroll()
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        try:
+            self.make().rotate()
+        except OrgError:
+            pass
+        self.assert_closed()
+
+    def test_a_410_that_is_not_the_contracts_body_is_retried(self):
+        # Ending an enrollment cannot be undone, so only `device-organization-closed` ends it: a 410 without a
+        # readable closedAt, with another code, a flat body or a path in its message is any failure.
+        self.enroll()
+        self._three_events()
+        bodies = [json.loads((VECTORS / 'device' / ('device-organization-closed-%s.json' % name)).read_text())
+                  for name in ('bad-time', 'error-extra', 'extra', 'flat', 'no-time', 'other-code')]
+        path = json.loads((VECTORS / 'device' / 'device-organization-closed.json').read_text())
+        path['error']['message'] = 'Closed; see %s for your data.' % '/'.join(('', 'Users', 'example', 'org-export'))
+        for body in bodies + [path]:                    # the contract's `-path`, rebuilt: the gate refuses the file
+            with self.subTest(body=body):
+                self.server.closed_body = body
+                self.assertEqual(self.make().check_in()['status'], 410)
+                self.make().flush()
+                self.assertNotIn('removed', self.make().state())
+                self.assertEqual(self._pending(), 3)
+                self.now[0] += 3601
+        self.server.closed_body = None
+        self.assertTrue(self.make().check_in()['ok'])
+
+    def test_the_closed_body_is_read_as_the_contracts_schema(self):
+        from node.org import organization_closed_at
+        positive = json.loads((VECTORS / 'device' / 'device-organization-closed.json').read_text())
+        self.assertEqual(organization_closed_at(410, positive), positive['closedAt'])
+        for status in (400, 401, 404, 409, 503):
+            self.assertIsNone(organization_closed_at(status, positive))
+        negatives = sorted((VECTORS / 'device').glob('device-organization-closed-*.json'))
+        self.assertEqual(len(negatives), 6)
+        for file in negatives:
+            with self.subTest(file.name):
+                self.assertIsNone(organization_closed_at(410, json.loads(file.read_text())))
+
+    def test_a_closed_organization_leaves_the_machines_other_enrollments_alone(self):
+        from node.org import Enrollment
+        other_server = FakeServer(self.clock)
+        other = lambda: Enrollment(self.node, 'org_other', transport=other_server, clock=self.clock)   # noqa: E731
+        other().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        other().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.enroll()
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        self.make().check_in()
+        self.assert_closed()
+        self.assertNotIn('removed', other().state())
+        self.assertTrue(other().check_in()['ok'])
+        self.assertEqual(other().flush()['accepted'], 1)
+
+    def test_a_closed_organization_left_and_joined_again_with_a_new_token_starts_over(self):
+        self.enroll()
+        self._three_events()
+        self.server.closed_at = self.CLOSED_AT
+        self.make().check_in()
+        self.server.closed_at, self.server.epoch = None, 0                       # the organization is created again
+        again = self.enroll('et_2.' + 'T' * 32)
+        self.assertEqual((again['epoch'], again['state']), (1, 'enrolled'))
+        self.assertTrue(self.make().check_in()['ok'])
 
     def test_a_refused_batch_that_names_the_org_or_the_certificate_is_held_not_rejected(self):
         # A 400 or 404 `unknown-org` and a 400 `certificate-unknown` are not refusals of the batch's content: the
@@ -792,19 +965,6 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.refuse = None
         self.now[0] += 3601
         self.assertEqual(self.make().flush()['accepted'], 3)
-
-    def test_unknown_org_twice_within_one_tick_never_removes_the_machine(self):
-        # A wall clock that jumps an hour between two requests of one tick is not two sightings in two ticks.
-        self.enroll()
-        self._three_events()
-        self.server.closed = True
-        self.assertEqual(self.make().check_in()['code'], 'unknown-org')         # the first sighting, no tick yet
-        self.now[0] += 7200
-        self.assertEqual(self.make().check_in()['code'], 'unknown-org')         # two hours on, the same tick
-        self.assertNotIn('removed', self.make().state())
-        self.assertEqual(self._pending(), 3)
-        self.make().tick()                                                      # a later tick: removed
-        self.assert_removed('unknown-org')
 
     def test_the_fallback_judges_the_previous_certificate_on_the_servers_clock(self):
         self.server.skew = -250                                                 # this clock runs ahead
@@ -865,12 +1025,10 @@ class EnrollmentEndToEnd(unittest.TestCase):
     def test_a_removed_machine_leaves_and_a_new_token_starts_over(self):
         self.enroll()
         self._three_events()
-        self.server.closed = True
+        self.server.certs[self.make().state()['certificate']['serial']]['revoked'] = True
         self.make().check_in()
-        self.now[0] += 3601
-        self.make().tick()
-        self.assertEqual(self.make().state()['removed']['code'], 'unknown-org')
-        self.server.closed, self.server.epoch = False, 0                       # the organization is created again
+        self.assertEqual(self.make().state()['removed']['code'], 'certificate-revoked')
+        self.server.epoch = 0                                                   # the organization is created again
         again = self.enroll('et_2.' + 'T' * 32)
         self.assertEqual((again['epoch'], again['state']), (1, 'enrolled'))
         self.assertNotIn('removed', again)
@@ -953,6 +1111,7 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertNotEqual(state['certificate']['serial'], old['certificate']['serial'])
         self.assertFalse(state['reEnroll'])
         self.assertEqual(state['enrolledAt'], enrolled_at)
+        self.assertEqual(state['renewedAt'], state['certificate']['notBefore'])  # the server's clock (DEC-0102)
         self.assertEqual(state['renewedAt'], org_iso(self.now[0]))
         status = self.make().describe()
         self.assertEqual((status['state'], status['certificate']['state']), ('enrolled', 'valid'))
@@ -960,6 +1119,17 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(self.server.used, {'et_1'})                            # no second token was spent
         journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
         self.assertIn('"event": "renewed"', journal)
+
+    def test_a_renewal_is_dated_and_measured_on_the_servers_clock(self):
+        # DEC-0102 item 6: the server's clock is the new certificate's notBefore, never this machine's.
+        self.server.renewal = True
+        old = self.enroll()
+        self.server.skew = -1800                                                 # this clock runs half an hour ahead
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 5 * 86400
+        self.assertTrue(self.make().check_in()['ok'])
+        state = self.make().state()
+        self.assertEqual(state['renewedAt'], org_iso(self.now[0] - 1800))
+        self.assertEqual(state['skewSeconds'], -1800)
 
     def test_the_terminal_check_in_renews_and_succeeds(self):
         import contextlib
@@ -1209,6 +1379,152 @@ class EnrollmentEndToEnd(unittest.TestCase):
         with self.make()._db() as conn:                                         # a week after it was sent
             conn.execute('UPDATE registrations SET sent_at = sent_at - ?', (7 * 86400 + 1,))
         self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'send'})
+
+    # -- DEC-0100, DEC-0102: a purpose rejection ---------------------------------------------------------------------
+    def reject_first(self, reason):
+        """The server rejects the batch's first event with `reason` and acknowledges only that seq, so what follows
+        stays pending; later batches are taken as usual."""
+        def answer(doc):
+            if self.server.batch_answer is None:
+                return None
+            self.server.batch_answer = None
+            first = doc['events'][0]
+            return 200, {'protocol': 'fabric-activity/0.1', 'device': doc['device'], 'batchId': doc['batchId'],
+                         'received': '2026-10-19T00:00:00Z', 'accepted': 0, 'duplicates': 0,
+                         'rejected': [{'eventId': first['eventId'], 'reason': reason}],
+                         'acks': [{'collector': first['collector'], 'seq': first['seq']}]}
+        self.server.batch_answer = answer
+
+    def held(self):
+        return set((self.make().state().get('purposeHolds') or {}))
+
+    def test_a_purpose_rejection_holds_that_kind_until_the_person_acknowledges_a_notice(self):
+        self.enroll()
+        for kind in ('meter.call', 'meter.call', 'meter.other'):
+            self.make().enqueue(kind, {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        self.reject_first('purpose')
+        self.assertEqual(self.make().flush()['rejected'], 1)
+        self.assertEqual(self.held(), {'meter.call'})
+        self.assertIsNone(self.make().state()['purposeHolds']['meter.call']['acknowledged'])   # absent: held as such
+        self.assertIsNone(self.make().enqueue('meter.call', {'n': 2}, occurred='2026-10-18T00:00:00Z'))
+        self.assertIsNotNone(self.make().enqueue('meter.other', {'n': 2}, occurred='2026-10-18T00:00:00Z'))
+        self.make().flush()                             # the pending meter.call is named dropped, never sent
+        kinds = [k for _, _, ks in self.server.batches[1:] for k in ks]
+        self.assertNotIn('meter.call', kinds)
+        self.assertIn('buffer.overflow', kinds)
+        self.assertEqual(kinds.count('meter.other'), 2)
+        for _ in range(3):                              # never on a timer, nor on a response without the member
+            self.now[0] += 86400
+            self.make().tick()
+        self.assertEqual(self.held(), {'meter.call'})
+        self.server.acknowledged = '2026-11'
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.held(), set())
+        self.assertIsNotNone(self.make().enqueue('meter.call', {'n': 3}, occurred='2026-10-18T00:00:00Z'))
+        self.make().flush()
+        self.assertEqual(self.server.batches[-1][2], ['meter.call'])
+
+    def test_only_another_acknowledged_version_than_at_the_rejection_resumes(self):
+        self.enroll()
+        self.server.acknowledged = 'v1'
+        self.make().check_in()
+        self._three_events()
+        self.reject_first('purpose')
+        self.make().flush()
+        self.assertEqual(self.make().state()['purposeHolds']['meter.call']['acknowledged'], 'v1')
+        for said in ('v1', None):                       # the same version, then a value that becomes absent
+            self.server.acknowledged = said
+            self.now[0] += 301
+            self.assertTrue(self.make().check_in()['ok'])
+            self.assertEqual(self.held(), {'meter.call'}, said)
+        self.server.acknowledged = 'v2'
+        self.now[0] += 301
+        self.make().check_in()
+        self.assertEqual(self.held(), set())
+
+    def test_a_later_notice_version_in_the_applied_policy_resumes(self):
+        from unittest import mock
+        from node.org import Enrollment
+        self.enroll()
+        self._three_events()
+        self.reject_first('purpose')
+        self.make().flush()
+        self.assertEqual(self.held(), {'meter.call'})
+        self.assertIsNone(self.make().state()['purposeHolds']['meter.call']['noticeVersion'])
+        with mock.patch.object(Enrollment, 'policy_layers',
+                               lambda _self: [{'source': 'server', 'revision': 9, 'noticeVersion': '2026-12'}]):
+            self.make().flush()
+        self.assertEqual(self.held(), set())
+
+    def test_a_notice_refusal_is_sent_again_when_the_applied_policy_names_another_notice(self):
+        from unittest import mock
+        from node.org import Enrollment
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self.server.share_answer = (403, {'error': {'code': 'purpose-not-collected', 'message': 'notice'}})
+        self.make().register_shares()
+        self.server.share_answer = None
+        with mock.patch.object(Enrollment, 'policy_layers',
+                               lambda _self: [{'source': 'mdm', 'revision': 2, 'noticeVersion': '2026-12'}]):
+            self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.make().state()['noticeVersion'], '2026-12')
+        with self.make()._db() as conn:
+            self.assertEqual(conn.execute('SELECT gate FROM registrations').fetchone()['gate'], 'send')
+
+    def test_before_purpose_and_a_reason_this_node_does_not_know_are_consumed_and_hold_nothing(self):
+        fixture = json.loads((VECTORS / 'device' / 'activity-batch-ack-before-purpose.json').read_text())
+        self.assertEqual(fixture['rejected'][0]['reason'], 'before-purpose')
+        self.enroll()
+        for reason in ('before-purpose', 'not-yet-defined', None, 7):
+            with self.subTest(reason=reason):
+                self.make().enqueue('meter.call', {'r': repr(reason)}, occurred='2026-10-18T00:00:00Z')
+                self.reject_first(reason)
+                self.assertEqual(self.make().flush()['rejected'], 1)
+                self.assertEqual(self.held(), set())
+        with self.make()._db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) AS n FROM events WHERE state = 'rejected'").fetchone()['n'],
+                             4)
+
+    def test_the_purpose_fixture_is_consumed_as_the_contract_sends_it(self):
+        fixture = json.loads((VECTORS / 'device' / 'activity-batch-ack-purpose.json').read_text())
+        self.assertEqual(fixture['rejected'], [{'eventId': fixture['rejected'][0]['eventId'], 'reason': 'purpose'}])
+        self.enroll()
+        event = self.make().enqueue('meter.call', {'n': 1}, occurred='2026-10-18T00:00:00Z')
+        ack = dict(fixture, rejected=[dict(fixture['rejected'][0], eventId=event['eventId'])],
+                   acks=[{'collector': event['collector'], 'seq': event['seq']}])
+        self.server.batch_answer = lambda doc: (200, dict(ack, batchId=doc['batchId']))
+        self.assertEqual(self.make().flush()['rejected'], 1)
+        self.assertEqual(self.held(), {'meter.call'})
+
+    def test_the_acknowledged_version_is_read_as_the_contracts_schema(self):
+        good = json.loads((VECTORS / 'device' / 'device-check-in-response-acknowledged.json').read_text())
+        bad = json.loads((VECTORS / 'device' / 'device-check-in-response-acknowledged-bad.json').read_text())
+        self.enroll()
+        self.server.acknowledged = bad['acknowledgedNoticeVersion']
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertNotIn('acknowledgedNoticeVersion', self.make().state())
+        self.server.acknowledged = good['acknowledgedNoticeVersion']
+        self.now[0] += 301
+        self.make().check_in()
+        self.assertEqual(self.make().state()['acknowledgedNoticeVersion'], good['acknowledgedNoticeVersion'])
+
+    def test_a_notice_refusal_is_sent_again_when_the_acknowledged_notice_moves(self):
+        self.server.protocols.append('share-registration/1')
+        self.enroll()
+        self.apply(share_record())
+        self.server.share_answer = (403, {'error': {'code': 'purpose-not-collected', 'message': 'notice'}})
+        self.assertEqual(self.make().register_shares()['answers'], {GRANT: 'hold-notice'})
+        self.server.share_answer = None
+        self.make().check_in()                          # no acknowledgement: nothing is sent again
+        self.assertEqual(self.make().register_shares()['sent'], 0)
+        self.server.acknowledged = '2026-11'
+        sent = len([p for p in self.server.log if p == '/v1/devices/share-registrations'])
+        self.now[0] += 301
+        self.assertTrue(self.make().check_in()['ok'])   # sent again at once, not at the weekly resend
+        self.assertEqual(len([p for p in self.server.log if p == '/v1/devices/share-registrations']), sent + 1)
+        with self.make()._db() as conn:
+            self.assertEqual(conn.execute('SELECT gate FROM registrations').fetchone()['gate'], 'send')
 
     # -- OBS-201: the device key and the enrollment are owner-only on every system -----------------------------
     def test_the_device_keys_and_the_enrollment_are_owner_only_on_this_system(self):

@@ -2345,7 +2345,10 @@ if (Array.isArray(H.organizations)) {
     const enroll = fullCommand("org enroll --server", shellArg(O.server || "https://ORG-SERVER"), "--org", shellArg(O.org),
       "--token-slot PROJECT/ENV/NAME");
     const label = T("organization {org}", {org: O.org || "?"});
-    if (O.state === "removed")
+    if (O.state === "removed" && (O.removed || {}).code === "organization-closed")   // DEC-0103
+      hb.push([label, T("the organization closed on {date}; nothing more is sent to it, and what this machine held for it was dropped",
+        {date: ((O.removed || {}).closedAt || "?").slice(0, 10)}), fullCommand("org leave --org", shellArg(O.org))]);
+    else if (O.state === "removed")
       hb.push([label, T("removed from the organization on {date} (the server answered {code}); nothing more is sent to it",
         {date: ((O.removed || {}).at || "?").slice(0, 10), code: (O.removed || {}).code || "?"}),
         fullCommand("org leave --org", shellArg(O.org))]);
@@ -2396,10 +2399,6 @@ if (Array.isArray(H.organizations)) {
       } else
         hb.push([label, T("harness summary not sent yet; the next check-in sends it"), show]);
     }
-    // `unknown-org` is provisional (not in the contract yet): said beside the state, retried as usual.
-    if (O.unknownOrg && O.state !== "removed")
-      hb.push([label, T("the organization server does not know this organization since {date}; retried, and taken as removed if it still does not an hour later",
-        {date: (O.unknownOrg.since || "?").slice(0, 10)}), orgStatus]);
   }
 }
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);

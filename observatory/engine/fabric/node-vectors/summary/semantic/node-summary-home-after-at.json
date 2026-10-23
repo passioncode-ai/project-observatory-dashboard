@@ -1,0 +1,119 @@
+{
+  "description": "A plugin name that hides a dash-encoded home directory after an at sign (DEC-0105): FAC-SEM-128.",
+  "kind": "node-summary",
+  "expect": [
+    "FAC-SEM-128"
+  ],
+  "input": {
+    "summary": {
+      "type": "node-summary/1",
+      "device": {
+        "id": "dev-01j9a"
+      },
+      "context": "org:org-7f3a",
+      "sequence": 12,
+      "at": "2026-10-22T09:00:00Z",
+      "harness": {
+        "codingAgents": [
+          {
+            "id": "claude-code",
+            "version": "2.1.296"
+          },
+          {
+            "id": "codex",
+            "version": "0.48.0"
+          }
+        ],
+        "mcpServers": [
+          {
+            "name": "fabric",
+            "source": "user",
+            "transport": "stdio",
+            "health": "ok"
+          },
+          {
+            "name": "plugin:switchboard:switchboard",
+            "source": "plugin",
+            "transport": "stdio",
+            "health": "degraded"
+          }
+        ],
+        "skills": [
+          {
+            "name": "task-pipeline",
+            "source": "plugin",
+            "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+          }
+        ],
+        "plugins": [
+          {
+            "name": "switchboard@passioncode",
+            "source": "marketplace",
+            "version": "0.6.61"
+          },
+          {
+            "name": "p@-Users-example-x",
+            "source": "marketplace",
+            "version": "0.6.61"
+          }
+        ],
+        "hooks": {
+          "count": 4
+        }
+      },
+      "services": [
+        {
+          "key": "observatory-node.default",
+          "state": "ok",
+          "protocols": [
+            "fabric-service/0.1"
+          ]
+        }
+      ],
+      "drift": {
+        "policyRevision": 7,
+        "items": [
+          {
+            "kind": "plugin",
+            "name": "switchboard@passioncode",
+            "state": "outdated"
+          },
+          {
+            "kind": "service",
+            "name": "inbox-agent.default",
+            "state": "missing"
+          }
+        ]
+      }
+    },
+    "baseline": {
+      "revision": 7,
+      "items": [
+        {
+          "kind": "coding-agent",
+          "name": "claude-code",
+          "minVersion": "2.1"
+        },
+        {
+          "kind": "plugin",
+          "name": "switchboard@passioncode",
+          "minVersion": "0.6.62"
+        },
+        {
+          "kind": "service",
+          "name": "observatory-node.default"
+        },
+        {
+          "kind": "service",
+          "name": "inbox-agent.default"
+        },
+        {
+          "kind": "skill",
+          "name": "task-pipeline",
+          "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        }
+      ]
+    },
+    "org": "org-7f3a"
+  }
+}

@@ -1,0 +1,399 @@
+{
+  "description": "A check-in's node summary of another device than the client certificate's (FAC-SEM-045, DEC-0114).",
+  "kind": "device-attribution",
+  "expect": [
+    "FAC-SEM-045"
+  ],
+  "input": {
+    "binding": {
+      "org": {
+        "id": "org-7f3a"
+      },
+      "user": {
+        "id": "m-4821"
+      },
+      "device": {
+        "id": "dev-01j9a"
+      }
+    },
+    "epochs": [
+      {
+        "epoch": 2,
+        "binding": {
+          "org": {
+            "id": "org-7f3a"
+          },
+          "user": {
+            "id": "m-4821"
+          },
+          "device": {
+            "id": "dev-01j9a"
+          }
+        }
+      }
+    ],
+    "batch": {
+      "protocol": "fabric-activity/0.1",
+      "device": {
+        "id": "dev-01j9a"
+      },
+      "batchId": "01K6Z3Y4P5Q6R7S8T9V0W1X2YZ",
+      "sent": "2026-10-07T09:32:00Z",
+      "events": [
+        {
+          "protocol": "fabric-activity/0.1",
+          "eventId": "01K6Z3V8Q4M2N7P5R9T1W3X5Y7",
+          "kind": "session.interval",
+          "source": "claude_code.otel",
+          "collector": {
+            "id": "cc-otel",
+            "epoch": 2
+          },
+          "seq": 41,
+          "occurred": "2026-10-07T09:14:05Z",
+          "bootId": "boot-7c41e2",
+          "monotonicNs": "183772004511230",
+          "user": {
+            "id": "m-4821"
+          },
+          "session": {
+            "id": "cc-sess-5d1e"
+          },
+          "project": {
+            "id": "example-project"
+          },
+          "runtime": {
+            "name": "claude_code",
+            "version": "2.1.287"
+          },
+          "skill": "code-review",
+          "launch": {
+            "via": "terminal"
+          },
+          "git": {
+            "branch": "feature/retry-budget"
+          },
+          "task": {
+            "ref": {
+              "system": "linear",
+              "key": "EX-142"
+            }
+          },
+          "data": {
+            "start": "2026-10-07T09:02:11Z",
+            "end": "2026-10-07T09:14:05Z",
+            "state": "agent_working",
+            "method": "otel",
+            "idleThresholdSeconds": 300,
+            "attended": true
+          }
+        },
+        {
+          "protocol": "fabric-activity/0.1",
+          "eventId": "sha256:143ffca5ff867511f008058ab8dd756d46acecede30385b604841ad2e5a4959e",
+          "kind": "usage.line",
+          "source": "claude_code.otel",
+          "sourceKey": "req_011CTexampleRequest0001",
+          "collector": {
+            "id": "cc-otel",
+            "epoch": 2
+          },
+          "seq": 42,
+          "occurred": "2026-10-07T09:14:06Z",
+          "bootId": "boot-7c41e2",
+          "monotonicNs": "183773120004417",
+          "user": {
+            "id": "m-4821"
+          },
+          "session": {
+            "id": "cc-sess-5d1e"
+          },
+          "project": {
+            "id": "example-project"
+          },
+          "runtime": {
+            "name": "claude_code",
+            "version": "2.1.287"
+          },
+          "skill": "code-review",
+          "run": {
+            "task": "run-77.node-3"
+          },
+          "data": {
+            "model": "claude-sonnet-5",
+            "tokens": {
+              "input": 18200,
+              "output": 2140,
+              "cacheRead": 120000,
+              "cacheWrite": 0
+            },
+            "cost": {
+              "usd": 0.1284,
+              "basis": "client-estimate"
+            },
+            "dedupeKey": "req_011CTexampleRequest0001"
+          }
+        },
+        {
+          "protocol": "fabric-activity/0.1",
+          "eventId": "01K6Z3W9M8N7P6Q5R4S3T2V1WX",
+          "kind": "session.interval",
+          "source": "claude_code.otel",
+          "collector": {
+            "id": "cc-otel",
+            "epoch": 2
+          },
+          "seq": 43,
+          "occurred": "2026-10-07T09:31:40Z",
+          "bootId": "boot-7c41e2",
+          "monotonicNs": "184823500000000",
+          "user": {
+            "id": "m-4821"
+          },
+          "session": {
+            "id": "cc-sess-77aa",
+            "parent": "cc-sess-5d1e"
+          },
+          "project": {
+            "id": "example-project"
+          },
+          "runtime": {
+            "name": "claude_code",
+            "version": "2.1.287"
+          },
+          "launch": {
+            "via": "agent"
+          },
+          "data": {
+            "start": "2026-10-07T09:20:02Z",
+            "end": "2026-10-07T09:31:40Z",
+            "state": "awaiting_input",
+            "method": "otel",
+            "idleThresholdSeconds": 300,
+            "outcome": "completed"
+          }
+        },
+        {
+          "protocol": "fabric-activity/0.1",
+          "eventId": "01K6Z3W1A2B3C4D5E6F7G8H9JK",
+          "kind": "buffer.overflow",
+          "source": "claude_code.otel",
+          "collector": {
+            "id": "cc-otel",
+            "epoch": 2
+          },
+          "seq": 44,
+          "occurred": "2026-10-07T09:31:41Z",
+          "bootId": "boot-7c41e2",
+          "monotonicNs": "184824500000000",
+          "data": {
+            "dropped": {
+              "events": 3,
+              "ranges": [
+                {
+                  "fromSeq": 38,
+                  "toSeq": 40
+                }
+              ],
+              "byKind": [
+                {
+                  "kind": "session.interval",
+                  "count": 2
+                },
+                {
+                  "kind": "x-example.review_marker",
+                  "count": 1
+                }
+              ]
+            }
+          }
+        },
+        {
+          "protocol": "fabric-activity/0.1",
+          "eventId": "01K6Z3X0C1D2E3F4G5H6J7K8MN",
+          "kind": "x-example.window_focus",
+          "source": "switchboard",
+          "collector": {
+            "id": "switchboard",
+            "epoch": 2
+          },
+          "seq": 7,
+          "occurred": "2026-10-07T09:15:00Z",
+          "bootId": "boot-7c41e2",
+          "monotonicNs": "183826000000000",
+          "user": {
+            "id": "m-4821"
+          },
+          "session": {
+            "id": "cc-sess-5d1e"
+          },
+          "data": {
+            "focused": true,
+            "surface": "terminal"
+          }
+        }
+      ]
+    },
+    "checkIn": {
+      "protocol": "fabric-device/0.1",
+      "kind": "check-in",
+      "device": {
+        "id": "dev-01j9a"
+      },
+      "sequenceNum": 288,
+      "at": "2026-10-07T09:32:05Z",
+      "agent": {
+        "version": "0.4.0",
+        "buildChannel": "official"
+      },
+      "health": {
+        "state": "healthy",
+        "since": "2026-10-07T08:30:10Z"
+      },
+      "logging": {
+        "enabled": true
+      },
+      "collectors": [
+        {
+          "collector": {
+            "id": "cc-otel",
+            "epoch": 2
+          },
+          "source": "claude_code.otel",
+          "lastSeq": 44,
+          "bufferedFrom": 45,
+          "dropped": [],
+          "healthy": true
+        },
+        {
+          "collector": {
+            "id": "switchboard",
+            "epoch": 2
+          },
+          "source": "switchboard",
+          "lastSeq": 7,
+          "bufferedFrom": 8,
+          "dropped": [],
+          "healthy": true
+        }
+      ],
+      "policy": {
+        "layers": [
+          {
+            "source": "mdm",
+            "revision": 3,
+            "status": "applied"
+          },
+          {
+            "source": "server",
+            "revision": 12,
+            "status": "applied"
+          }
+        ]
+      },
+      "certificate": {
+        "serial": "7b6578616d706c65",
+        "notAfter": "2026-10-14T08:30:05Z"
+      },
+      "records": {
+        "nodeSummary": {
+          "type": "node-summary/1",
+          "device": {
+            "id": "dev-other"
+          },
+          "context": "org:org-7f3a",
+          "sequence": 12,
+          "at": "2026-10-22T09:00:00Z",
+          "harness": {
+            "codingAgents": [
+              {
+                "id": "claude-code",
+                "version": "2.1.296"
+              },
+              {
+                "id": "codex",
+                "version": "0.48.0"
+              }
+            ],
+            "mcpServers": [
+              {
+                "name": "fabric",
+                "source": "user",
+                "transport": "stdio",
+                "health": "ok"
+              },
+              {
+                "name": "plugin:switchboard:switchboard",
+                "source": "plugin",
+                "transport": "stdio",
+                "health": "degraded"
+              }
+            ],
+            "skills": [
+              {
+                "name": "task-pipeline",
+                "source": "plugin",
+                "digest": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+              }
+            ],
+            "plugins": [
+              {
+                "name": "switchboard@passioncode",
+                "source": "marketplace",
+                "version": "0.6.61"
+              }
+            ],
+            "hooks": {
+              "count": 4
+            }
+          },
+          "services": [
+            {
+              "key": "observatory-node.default",
+              "state": "ok",
+              "protocols": [
+                "fabric-service/0.1"
+              ]
+            }
+          ]
+        },
+        "credentialRequests": [
+          {
+            "type": "credential-request/1",
+            "requestId": "5b1f0c4e-8a2d-4f3b-9c6e-1d7a2b3c4d5e",
+            "agentRef": "urn:fabric:agent:passioncode:dns-agent",
+            "context": "org:org-7f3a",
+            "provider": "cloudflare",
+            "preset": "zone-dns-edit",
+            "scope": {
+              "zone": "example.com"
+            },
+            "expiresAt": "2026-10-30T09:59:00Z",
+            "reason": "update the DNS records of example.com",
+            "requestedAt": "2026-10-23T09:00:00Z"
+          }
+        ],
+        "callRecords": [
+          {
+            "type": "call-record/1",
+            "callId": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+            "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+            "caller": "urn:fabric:agent:passioncode:observatory",
+            "callee": "urn:fabric:agent:passioncode:dns-agent",
+            "context": "org:org-7f3a",
+            "capability": "dns.records.update",
+            "transport": "relay",
+            "startedAt": "2026-10-23T09:00:00Z",
+            "endedAt": "2026-10-23T09:00:02Z",
+            "outcome": "completed",
+            "cost": {
+              "usd": "0.0021",
+              "route": "key"
+            },
+            "recordedBy": "callee"
+          }
+        ]
+      }
+    }
+  }
+}

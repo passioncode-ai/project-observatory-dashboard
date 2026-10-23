@@ -23,7 +23,7 @@
     },
     "sourceKey": {
       "type": "string",
-      "pattern": "^(hmac-sha256:[a-f0-9]{64}|(?![\\s\\S]*[-:]-(?:[Uu]sers|home)-[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._:~#-]{0,255})$",
+      "pattern": "^(hmac-sha256:[a-f0-9]{64}|(?![\\s\\S]*[._:~#-]-(?:[Uu]sers|home)-[A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9._:~#-]{0,255})$",
       "description": "The source's own id of a record (a request id, a line uuid), or hmac-sha256: of a path-derived key under the device's telemetry key. Never a path: no slash, no percent-encoding, and no dash-encoded home directory such as -Users-<name> (FAC-SEM-037)."
     },
     "seq": {

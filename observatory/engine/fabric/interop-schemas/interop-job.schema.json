@@ -46,7 +46,25 @@
           "$ref": "interop-result.schema.json"
         },
         "error": {
-          "$ref": "interop-common.schema.json#/$defs/error"
+          "allOf": [
+            {
+              "$ref": "interop-common.schema.json#/$defs/error"
+            },
+            {
+              "not": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "const": "queue-full"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              },
+              "description": "DEC-0104: queue-full is a refusal at start (interop-tool-error.schema.json) and never ends a job."
+            }
+          ]
         }
       },
       "allOf": [

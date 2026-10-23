@@ -1410,12 +1410,18 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   yet, or its policy), the machine needs a new enrollment token: `org check-in` then refuses with
   `certificate-expired`, the date, the step and the `org enroll` command, and exits 1.
 - A machine its organization removed (the server answers `certificate-revoked` or `certificate-unknown` with HTTP
-  401, as it does when an administrator removes the machine or the organization is closed) is shown as `removed`,
-  with the date and the code. A server that answers `unknown-org` (the organization was deleted; provisional until
-  the contract defines it) is shown as `org:unknown-org` with the date and retried; the machine is taken as removed
-  only if the answer is the same an hour later, in a later run of `org tick`. Nothing more is sent to that organization, and the events it still held
-  are dropped (they can be accepted nowhere) with one count kept. `org leave --org <id>` removes its local state;
-  `org enroll` with a new token starts over.
+  401, as it does when an administrator removes the machine) is shown as `removed`, with the date and the code.
+  Nothing more is sent to that organization, and the events it still held are dropped (they can be accepted nowhere)
+  with one count kept. `org leave --org <id>` removes its local state; `org enroll` with a new token starts over.
+- An organization that closed (the server answers HTTP 410 `organization-closed` with the date its closing began,
+  contract DEC-0103) ends that enrollment on the first answer: `org status`, doctor and Health say the organization
+  closed on that date, and nothing more is sent to it. Everything this machine held for it is dropped: the events
+  waiting to be sent, the share registrations, and the organization's policy, keys and collection start. Your other
+  organizations are not touched. `org leave --org <id>` removes what is left locally. A server that answers
+  `unknown-org` to `org enroll` does not know the organization id: check it with the organization's administrator.
+- When the organization says it does not collect a kind of event for you under the notice you acknowledged (a
+  `purpose` refusal), this machine stops collecting and sending that kind for that organization until you acknowledge
+  a newer notice; it does not try again on a timer.
 - `org check-in`, `org rotate` and `org flush` do one step now; `org tick` does everything due.
 - `org leave --org <id>` removes this machine's local state for that organization, its own device keys with it. The
   organization keeps its records until an administrator retires the device.

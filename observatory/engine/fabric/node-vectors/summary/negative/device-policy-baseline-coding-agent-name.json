@@ -1,0 +1,47 @@
+{
+  "protocol": "fabric-device/0.1",
+  "kind": "policy",
+  "org": {
+    "id": "org-7f3a"
+  },
+  "source": "server",
+  "revision": 12,
+  "issuedAt": "2026-10-07T08:00:00Z",
+  "keys": {
+    "logging.required": {
+      "value": true,
+      "locked": true
+    },
+    "build_channel.allowed": {
+      "value": "official",
+      "locked": true
+    },
+    "telemetry.endpoint": {
+      "value": "https://telemetry.example.org/v1/activity"
+    },
+    "telemetry.git_branch": {
+      "value": "plain"
+    },
+    "retention.raw_days": {
+      "value": 30
+    },
+    "x-example.banner": {
+      "value": "pilot"
+    },
+    "harness.baseline": {
+      "value": {
+        "items": [
+          {
+            "kind": "coding-agent",
+            "name": "Claude-Code"
+          }
+        ]
+      }
+    }
+  },
+  "signature": {
+    "alg": "ed25519",
+    "keyId": "org-7f3a.policy-2026",
+    "value": "GJo5WdOsi8UwG0vysB+GiGNvIXHNr8LwAQvRzFj6zaEcqRi4I2vlSXfxyV0/wN8f3EZUdJRXe4Z1bFa4xajAAw=="
+  }
+}

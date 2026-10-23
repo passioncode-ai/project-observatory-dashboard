@@ -29,8 +29,11 @@ MAX_SKEW_SECONDS = 300
 ALGORITHMS = {'es256': 'ecdsa-p256-sha256', 'ed25519': 'ed25519'}
 NONCE = re.compile(r'[A-Za-z0-9_-]{22,64}\Z')
 SERIAL = re.compile(r'[0-9a-f]{2,40}\Z')
-REFUSALS = ('signature-missing', 'digest-mismatch', 'signature-stale', 'certificate-unknown', 'certificate-revoked',
-            'certificate-expired', 'signature-invalid', 'signature-replayed')
+#: The refusals of steps 1 to 8, in the contract's order: 401 and the code, but `organization-closed` (DEC-0103), which
+#: is 410 with `closedAt` and is checked at step 4, after the certificate is found and before its revocation.
+REFUSALS = ('signature-missing', 'digest-mismatch', 'signature-stale', 'certificate-unknown', 'organization-closed',
+            'certificate-revoked', 'certificate-expired', 'signature-invalid', 'signature-replayed')
+ORGANIZATION_CLOSED = 'organization-closed'
 
 
 def content_digest(body: bytes) -> str:
@@ -344,9 +347,12 @@ def verify_request(request: Mapping[str, Any], *, public_base_url: str, certific
                    at_ms: int, seen: Callable[[str, str], bool] = lambda serial, nonce: False,
                    client_certificate_serial: Optional[str] = None) -> dict:
     """The receiver's check (devices.md, steps 1 to 8). `request` is `{method, target, headers, body}` with `body` the
-    bytes (or UTF-8 text) received; `certificate(serial)` answers `{serial, notBefore, notAfter, revoked?, key: {alg,
-    publicKey}}` or None; `seen(serial, nonce)` says whether the pair is held. Answers `{'ok': True, 'serial', 'nonce',
-    'keepUntil'}` or `{'ok': False, 'code'}`; it records nothing (the caller records the pair after an accept)."""
+    bytes (or UTF-8 text) received; `certificate(serial)` answers `{serial, notBefore, notAfter, revoked?,
+    organizationClosedAt?, key: {alg, publicKey}}` or None; `seen(serial, nonce)` says whether the pair is held. Answers
+    `{'ok': True, 'serial', 'nonce', 'keepUntil'}`, `{'ok': False, 'code': 'organization-closed', 'status': 410,
+    'closedAt'}` for a certificate of an organization that closed (DEC-0103, read before revocation; an unreadable
+    `organizationClosedAt` is the receiver's own `context-invalid`), or `{'ok': False, 'code'}`; it records nothing (the
+    caller records the pair after an accept)."""
     def refuse(code: str) -> dict:
         return {'ok': False, 'code': code}
 
@@ -361,6 +367,13 @@ def verify_request(request: Mapping[str, Any], *, public_base_url: str, certific
         record = certificate(serial)
         if not isinstance(record, dict) or record.get('serial') != serial:
             return refuse('certificate-unknown')
+        # Step 4 (DEC-0103): a closed organization answers before revocation, so the device learns the end, not one
+        # machine's revocation. `null` is not absence: only an absent member means an open organization.
+        if 'organizationClosedAt' in record:
+            closed_at = record['organizationClosedAt']
+            if not isinstance(closed_at, str) or _ms(closed_at) is None:
+                return refuse('context-invalid')
+            return {'ok': False, 'code': ORGANIZATION_CLOSED, 'status': 410, 'closedAt': closed_at}
         if record.get('revoked') not in (None, False):
             return refuse('certificate-revoked')
         start, end = _ms(record.get('notBefore')), _ms(record.get('notAfter'))

@@ -40,7 +40,8 @@ DRIFT_STATES = ('missing', 'stopped', 'changed', 'outdated')
 #: The schema's name pattern (`node-summary.schema.json`): no slash, backslash, tilde or space, at most one `@` suffix
 #: without a dot. A name outside it is left out of the summary, never rewritten.
 NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}(?:@[A-Za-z0-9_:+-]{1,64})?\Z')
-SLUG = re.compile(r'[a-z0-9][a-z0-9-]*\Z')
+#: `common.schema.json#/$defs/slug`: a coding agent's id in a summary and its name in a baseline (DEC-0102).
+SLUG = re.compile(r'[a-z][a-z0-9-]{1,62}\Z')
 VERSION = re.compile(r'[0-9A-Za-z][0-9A-Za-z.+-]{0,63}\Z')
 SERVICE_KEY = re.compile(r'[a-z][a-z0-9-]{1,62}\.[a-z0-9][a-z0-9-]{0,62}\Z')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
@@ -200,14 +201,55 @@ def harness_baseline(layers: Any) -> Optional[dict]:
     return {'revision': layer.get('revision'), 'items': value.get('items') if isinstance(value, dict) else None}
 
 
+
+#: What a baseline item may carry, by kind (`device-policy.schema.json`, `harness.baseline`, DEC-0102): a version only
+#: for a coding agent or a plugin, a digest only for a skill or a plugin, the kinds whose summary rows carry them.
+BASELINE_MIN_VERSION = ('coding-agent', 'plugin')
+BASELINE_DIGEST = ('skill', 'plugin')
+BASELINE_VERSION = re.compile(r'[0-9]+(?:\.[0-9]+){0,3}\Z')
+BASELINE_MAX_ITEMS = 1024
+
+
+def baseline_problems(value: Any) -> List[str]:
+    """What `device-policy.schema.json` refuses in a `harness.baseline` value (`{items: [...]}`), one line each; empty
+    when it is one. DEC-0102 narrowed it: an item's name takes a summary's name shape (a coding agent's an agent id, a
+    slug; a service's its `id.instance` key), `minVersion` only for a coding agent or a plugin, `digest` only for a
+    skill or a plugin. A policy whose baseline has a problem is refused whole, and the node keeps the revision it
+    holds: the step that verifies and applies a signed policy (OE-06) runs this before it takes one."""
+    if not isinstance(value, dict) or set(value) != {'items'} or not isinstance(value.get('items'), list):
+        return ['a baseline is {items: [...]} and nothing else']
+    items = value['items']
+    problems = ['a baseline lists at most %d items' % BASELINE_MAX_ITEMS] if len(items) > BASELINE_MAX_ITEMS else []
+    for index, item in enumerate(items):
+        at = '/items/%d' % index
+        if not isinstance(item, dict) or not {'kind', 'name'} <= set(item) \
+                or not set(item) <= {'kind', 'name', 'minVersion', 'digest'}:
+            problems.append(at + ': an item is {kind, name, minVersion?, digest?}')
+            continue
+        kind, name = item['kind'], item['name']
+        if kind not in KINDS:
+            problems.append(at + '/kind: one of ' + ', '.join(KINDS))
+            continue
+        shape = SLUG if kind == 'coding-agent' else SERVICE_KEY if kind == 'service' else NAME
+        if not isinstance(name, str) or not NAME.fullmatch(name) or not shape.fullmatch(name):
+            problems.append(at + '/name: a %s name takes the summary\'s shape' % kind)
+        if 'minVersion' in item and (kind not in BASELINE_MIN_VERSION or not isinstance(item['minVersion'], str)
+                                     or not BASELINE_VERSION.fullmatch(item['minVersion'])):
+            problems.append(at + '/minVersion: dotted numbers, only for a coding agent or a plugin')
+        if 'digest' in item and (kind not in BASELINE_DIGEST or not isinstance(item['digest'], str)
+                                 or not DIGEST.fullmatch(item['digest'])):
+            problems.append(at + '/digest: sha256:<64 hex>, only for a skill or a plugin')
+    return problems
+
 # -- FAC-SEM-128 ---------------------------------------------------------------------------------------------------
 
 EMAIL = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}')
 _SLASH = r'(?:[/\\]|%(?:25)?2[fF])'
 #: The contract's home-path shapes (`HOME_PATH`, `src/activity-rules.ts`): a `Users` or `home` segment followed by a
-#: name, the dashed form a transcript folder takes, and the tilde forms.
+#: name, the dashed form a transcript folder takes after any character that is not an ASCII letter or digit, or at the
+#: start (DEC-0105: `x.-Users-<name>`, `p@-Users-<name>`), and the tilde forms.
 HOME_PATH = (re.compile(r'(?:^|[^A-Za-z0-9]|%(?:25)?2[fF])(?:[Uu]sers|home)' + _SLASH + r'[A-Za-z0-9_]'),
-             re.compile(r'(?:^|[/\\:-])-(?:[Uu]sers|home)-[A-Za-z0-9]'),
+             re.compile(r'(?:^|[^A-Za-z0-9])-(?:[Uu]sers|home)-[A-Za-z0-9]'),
              re.compile(r'''(?:^|[\s"'=/\\])~(?:[A-Za-z_][A-Za-z0-9_.-]*)?(?:[/\\]|\Z)'''))
 
 
@@ -295,6 +337,68 @@ def summary_findings(value: Any) -> List[dict]:
     return findings
 
 
+
+def check_in_summary_findings(check_in: Any) -> List[dict]:
+    """`checkInSummaryFindings` (DEC-0114 item 1, kind `device-check-in`): a check-in's `records.nodeSummary` read with
+    the check-in, FAC-SEM-128's clauses that need no policy under the member's path, and the summary's `device.id`
+    the checking-in device's."""
+    doc = check_in if isinstance(check_in, dict) else {}
+    records = doc.get('records') if isinstance(doc.get('records'), dict) else {}
+    summary = records.get('nodeSummary')
+    if not isinstance(summary, dict):
+        return []
+    findings = document_findings(summary, '/records/nodeSummary')
+    own = doc['device'].get('id') if isinstance(doc.get('device'), dict) else None
+    named = summary['device'].get('id') if isinstance(summary.get('device'), dict) else None
+    if not isinstance(named, str) or named != own:
+        findings.append({'code': 'FAC-SEM-128', 'instancePath': '/records/nodeSummary/device/id',
+                         'message': "a check-in's node summary is the checking-in device's"})
+    return findings
+
+
+def check_in_attribution_findings(check_in: Any, binding: Any) -> List[dict]:
+    """FAC-SEM-045's clauses on a check-in's records (DEC-0114 item 2, kind `device-attribution`), judged against the
+    client certificate's binding (`{org: {id}, device: {id}}`) as written: the node summary's `device.id` is the
+    certificate's device and its `context` is `org:` and the certificate's `org.id`, and every `credentialRequests`
+    and `callRecords` entry names that same context."""
+    findings: List[dict] = []
+    flag = lambda at, message: findings.append({'code': 'FAC-SEM-045', 'instancePath': at,      # noqa: E731
+                                                'message': message})
+    binding = binding if isinstance(binding, dict) else {}
+    device = binding['device'].get('id', _UNDEFINED) if isinstance(binding.get('device'), dict) else _UNDEFINED
+    org = binding['org'].get('id') if isinstance(binding.get('org'), dict) else None
+    own_context = 'org:' + org if isinstance(org, str) else None
+    doc = check_in if isinstance(check_in, dict) else {}
+    records = doc.get('records') if isinstance(doc.get('records'), dict) else {}
+    summary = records.get('nodeSummary')
+    if isinstance(summary, dict):
+        if not isinstance(summary.get('device'), dict) or not _same(summary['device'].get('id', _UNDEFINED), device):
+            flag('/checkIn/records/nodeSummary/device/id', "a node summary is the client certificate's device's, "
+                                                           'never another\'s')
+        if own_context is None or summary.get('context') != own_context:
+            flag('/checkIn/records/nodeSummary/context', "a node summary names the client certificate's "
+                                                         'organization, org: and its org.id as written')
+    for member in ('credentialRequests', 'callRecords'):
+        entries = records.get(member) if isinstance(records.get(member), list) else []
+        for index, entry in enumerate(entries):
+            if isinstance(entry, dict) and (own_context is None or entry.get('context') != own_context):
+                flag('/checkIn/records/%s/%d/context' % (member, index), "a check-in's credential requests and call "
+                                                                          "records name the client certificate's "
+                                                                          'organization')
+    return findings
+
+
+def _same(a: Any, b: Any) -> bool:
+    """JavaScript's `===` over parsed JSON scalars: a boolean is never a number, an object never equal, and an absent
+    member (`_UNDEFINED`) equal only to another absent one."""
+    if a is _UNDEFINED or b is _UNDEFINED:
+        return a is b
+    if isinstance(a, (dict, list)) or isinstance(b, (dict, list)):
+        return False
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    return a == b
+
 # -- building the summary from this machine's scans ----------------------------------------------------------------
 
 #: The MCP scan's verdicts as a summary's health: heard answering, heard needing sign-in, heard failing; anything the
@@ -320,19 +424,23 @@ def _mcp_source(scope: Any) -> str:
     return 'other'
 
 
-#: A name a dashed home folder could hide in: the contract's home-path shapes miss one after a dot or an `@`
-#: (`notes.-Users-alice-x`, `x@-home-alice`), so the node refuses it itself, beside FAC-SEM-128, and leaves the name
-#: out. Two shapes: `-Users-`/`-home-` right after a separator (start, `.`, `@`, `_`, `+`, `:`), or one followed by two
-#: more dash segments, the way a flattened path continues (`a-Users-alice-projects-x`). `smart-home-mcp` and
-#: `end-users-guide` are names, not folders, and pass.
-DASHED_HOME = re.compile(r'(?:^|[.@_+:])-(?:[Uu]sers|home)-[A-Za-z0-9]'
-                         r'|-(?:[Uu]sers|home)-[A-Za-z0-9_.+]+-[A-Za-z0-9_.+]+-[A-Za-z0-9]')
+#: A dashed home folder the contract's home-path shapes do not catch, which the node also keeps out of a name: since
+#: DEC-0105 the contract catches `-Users-`/`-home-` after any character that is not a letter or digit (`notes.-Users-x`,
+#: `x@-home-alice`), so the node's own check keeps only the shape the contract leaves to a reader: one glued to a letter
+#: or digit and followed by two more dash segments, the way a flattened path continues (`a-Users-alice-projects-x`).
+#: `smart-home-mcp`, `end-users-guide`, `my-home-page` and `Users-guide` are names, not folders, and pass both.
+DASHED_HOME = re.compile(r'-(?:[Uu]sers|home)-[A-Za-z0-9_.+]+-[A-Za-z0-9_.+]+-[A-Za-z0-9]')
+
+
+def hides_home(name: str) -> bool:
+    """Whether a harness name may hide a home folder: the contract's shapes (`has_home_path`) or the node's own."""
+    return has_home_path(name) or DASHED_HOME.search(name) is not None
 #: The most drift items a summary carries (the schema's `drift.items` bound).
 MAX_DRIFT = 1024
 
 
 class _Gate:
-    """Which names may leave: the schema's shape, no dashed home folder, and none the person excluded
+    """Which names may leave: the schema's shape, no home folder (`hides_home`), and none the person excluded
     (`exclude`, shell-style globs matched against the whole name). A name refused for its shape is counted in
     `omitted`, one the person excluded in `excluded`; both stay on this machine."""
 
@@ -344,13 +452,13 @@ class _Gate:
 
     def admit(self, name: Any, member: str, pattern: 're.Pattern' = NAME) -> bool:
         """Whether `name` may leave; a refused name is counted once per list however often the scans repeat it."""
-        if isinstance(name, str) and pattern.fullmatch(name) and not DASHED_HOME.search(name) \
+        if isinstance(name, str) and pattern.fullmatch(name) and not hides_home(name) \
                 and not any(fnmatch.fnmatchcase(name, glob) for glob in self.exclude):
             return True
         key = (member, name if isinstance(name, str) else repr(name))
         if key not in self._refused:
             self._refused.add(key)
-            shaped = isinstance(name, str) and pattern.fullmatch(name) and not DASHED_HOME.search(name)
+            shaped = isinstance(name, str) and pattern.fullmatch(name) and not hides_home(name)
             counts = self.excluded if shaped else self.omitted
             counts[member] = counts.get(member, 0) + 1
         return False

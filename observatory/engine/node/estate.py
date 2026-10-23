@@ -225,8 +225,9 @@ def verify_estate_record(record: Any, *, at_ms: Optional[int], parent: Any = _MI
         return _fail('not-yet-valid')
     if at_ms > until:
         return _fail('expired')
-    # With a parent, what the revision drops it revokes (FAC-SEM-114, DEC-0084).
-    dropped = dropped_findings(parent, record) if isinstance(parent, dict) else []
+    # With a parent, what the revision drops it revokes (FAC-SEM-114, DEC-0084), and its delta anchor never moves
+    # back (FAC-SEM-137, DEC-0107).
+    dropped = dropped_findings(parent, record) + anchor_findings(parent, record) if isinstance(parent, dict) else []
     codes = list(dict.fromkeys(finding['code'] for finding in record_findings(record) + dropped))
     if codes:
         return _fail('rule-violation', codes=codes)
@@ -352,16 +353,91 @@ def dropped_findings(parent: dict, nxt: dict) -> list:
     return findings
 
 
+#: DEC-0106: what a machine of the estate may be. Absent is `full`, and a writer omits `full`.
+MACHINE_PROFILES = ('full', 'member', 'view')
+_ANCHOR_SHA = re.compile(r'^[a-f0-9]{64}$')
+
+
+def machine_profile(record: Any, machine_id: Any) -> Optional[str]:
+    """The contract's `machineProfile` (DEC-0106): `full` when the machine is listed once with no `profile`, its value
+    when that is one of the three, None otherwise (not listed, listed twice, an unreadable record or id, an unknown
+    value). It never raises."""
+    if not isinstance(record, dict) or not isinstance(machine_id, str):
+        return None
+    found = [m for m in _list(record.get('machines')) if m.get('id') == machine_id]
+    if len(found) != 1:
+        return None
+    if 'profile' not in found[0]:
+        return 'full'
+    profile = found[0]['profile']
+    return profile if isinstance(profile, str) and profile in MACHINE_PROFILES else None
+
+
+def _machine_profiles(value: dict, flag) -> None:
+    """FAC-SEM-134 (DEC-0106): a profile, when present, is `full`, `member` or `view`; only a `full` machine carries a
+    `hubKey`; a `view` machine has no placement and no secret placement, and no secret placement names it as `from`."""
+    views: list = []
+    for machine, m in _indexed(value.get('machines')):
+        if 'profile' not in machine:
+            continue
+        profile = machine['profile']
+        if not (isinstance(profile, str) and profile in MACHINE_PROFILES):
+            flag(f'/machines/{m}/profile', f'profile {_show(profile)} is none of full, member, view')
+            continue
+        if profile != 'full' and 'hubKey' in machine:
+            flag(f'/machines/{m}/hubKey', f"a {profile} machine is never the hub's: only a full machine carries a hub key")
+        if profile == 'view':
+            views.append(machine.get('id'))
+            if _list(machine.get('packages')):
+                flag(f'/machines/{m}/packages', 'a view machine runs no agent: it has no placement')
+            if _list(machine.get('secrets')):
+                flag(f'/machines/{m}/secrets', "a view machine holds none of the estate's secrets")
+    for machine, m in _indexed(value.get('machines')):
+        for secret, s in _indexed(machine.get('secrets')):
+            if any(_same_value(view, secret.get('from')) for view in views):
+                flag(f'/machines/{m}/secrets/{s}/from',
+                     f"machine {_show(secret.get('from'))} is a view machine: it is the source of no secret")
+
+
+def delta_anchor_of(record: Any) -> Optional[dict]:
+    """The contract's `deltaAnchorOf` (DEC-0107): the anchor a record vouches for, or None when it names none or its
+    shape is not the schema's."""
+    if not isinstance(record, dict) or not isinstance(record.get('deltaAnchor'), dict):
+        return None
+    sequence, sha = record['deltaAnchor'].get('sequence'), record['deltaAnchor'].get('sha256')
+    if _safe_integer(sequence) and sequence >= 1 and isinstance(sha, str) and _ANCHOR_SHA.match(sha):
+        return {'sequence': int(sequence), 'sha256': sha}
+    return None
+
+
+def anchor_findings(parent: dict, nxt: dict) -> list:
+    """FAC-SEM-137 across two revisions (DEC-0107): the delta anchor never moves back. A revision whose parent anchors
+    the delta anchors it too, at the parent's sequence or later, with the parent's hash at the same sequence."""
+    findings: list = []
+    flag = _flagger(findings, 'FAC-SEM-137')
+    before = delta_anchor_of(parent)
+    if before is None:
+        return findings
+    after = delta_anchor_of(nxt)
+    if after is None:
+        flag('/next/deltaAnchor', f"the parent anchors the delta at {before['sequence']}: a revision keeps an anchor once one is set")
+    elif after['sequence'] < before['sequence']:
+        flag('/next/deltaAnchor/sequence', f"the anchor moves back from {before['sequence']} to {after['sequence']}")
+    elif after['sequence'] == before['sequence'] and after['sha256'] != before['sha256']:
+        flag('/next/deltaAnchor/sha256', f"another hash at sequence {after['sequence']}: two delta histories")
+    return findings
+
+
 def estate_record_rules(kind: str, value: Any) -> Optional[list]:
     """The contract's `estateRecordRules`: `estate-record` (one revision), `estate-record-revision` (`{parent, next}`,
-    FAC-SEM-072 and FAC-SEM-114) and `estate-placement` (what a machine checks before it installs a package)."""
+    FAC-SEM-072, FAC-SEM-114 and FAC-SEM-137) and `estate-placement` (what a machine checks before it installs a package)."""
     value = value if isinstance(value, dict) else {}
     if kind == 'estate-record':
         return record_findings(value)
     if kind == 'estate-record-revision':
         parent = value.get('parent') if isinstance(value.get('parent'), dict) else {}
         nxt = value.get('next') if isinstance(value.get('next'), dict) else {}
-        return revision_chain(value) + dropped_findings(parent, nxt)
+        return revision_chain(value) + dropped_findings(parent, nxt) + anchor_findings(parent, nxt)
     if kind == 'estate-placement':
         return installation_findings(value)
     return None
@@ -643,7 +719,8 @@ def _grants_and_revocations(value: dict, flag) -> None:
 
 def record_findings(value: dict) -> list:
     """FAC-SEM-072…076 over one record, FAC-SEM-092 on each passkey, FAC-SEM-110 on each share grant, FAC-SEM-111 on
-    each placement and FAC-SEM-122 on each partner's publisher key (DEC-0090), in the reference's order."""
+    each placement, FAC-SEM-122 on each partner's publisher key (DEC-0090) and FAC-SEM-134 on each machine's profile
+    (DEC-0106), in the reference's order."""
     findings: list = []
     _revision_whole(value, _flagger(findings, 'FAC-SEM-072'))
     _keys(value, _flagger(findings, 'FAC-SEM-073'))
@@ -660,6 +737,7 @@ def record_findings(value: dict) -> list:
         for placement, p in _indexed(machine.get('packages')):
             for suffix, message in _placement_grant_problems(value, placement):
                 flag111(f'/machines/{m}/packages/{p}{suffix}', message)
+    _machine_profiles(value, _flagger(findings, 'FAC-SEM-134'))
     for authority, index in _indexed(value.get('authorities')):
         findings.extend(webauthn.signing_credential_findings(authority, f'/authorities/{index}'))
     return findings

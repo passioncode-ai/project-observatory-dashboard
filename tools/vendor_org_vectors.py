@@ -72,7 +72,35 @@ FILES = {**{name: "fixtures/vectors/" + name for name in (
             for name in ("dotted-suffix", "drift-dotted-suffix", "endpoint-query", "mcp-dotted-suffix",
                          "personal-context", "server-arguments", "skill-two-at")},
          **{"summary/semantic/node-summary-%s.json" % name: "fixtures/semantic/node-summary-%s.json" % name
-            for name in ("drift-hidden", "drift-without-baseline", "duplicate", "ok", "other-org", "person")}}
+            for name in ("drift-hidden", "drift-without-baseline", "duplicate", "home-after-at", "home-after-dot",
+                         "ok", "other-org", "person")},
+         # A baseline the policy schema refuses (DEC-0102): a version or digest a kind does not carry, a name in
+         # another shape than a summary's (`node_summary.baseline_problems`).
+         **{"summary/negative/device-policy-baseline-%s.json" % name:
+            "fixtures/negative/device-policy-baseline-%s.json" % name
+            for name in ("coding-agent-digest", "coding-agent-name", "dotted-suffix", "mcp-server-digest",
+                         "mcp-server-min-version", "service-digest", "service-min-version", "service-name",
+                         "skill-min-version")},
+         # A check-in's summary read with the check-in and judged against the client certificate (DEC-0114).
+         **{"summary/semantic/%s.json" % name: "fixtures/semantic/%s.json" % name
+            for name in ("credential-check-in-summary-ok", "credential-check-in-summary-other-device",
+                         "credential-check-in-summary-duplicate", "device-attribution-records-ok",
+                         "device-attribution-records-other-org", "device-attribution-summary-other-device",
+                         "device-attribution-summary-other-org")},
+         # An organization that ended (DEC-0103): the 410 body and every negative fixture but `-path`, which names a
+         # home folder the public-release gate refuses; tests/test_node_org.py rebuilds it from the positive.
+         "device-organization-closed.schema.json": "schemas/device-organization-closed.schema.json",
+         "device/device-organization-closed.json": "fixtures/positive/device-organization-closed.json",
+         **{"device/device-organization-closed-%s.json" % name: "fixtures/negative/device-organization-closed-%s.json"
+            % name for name in ("bad-time", "error-extra", "extra", "flat", "no-time", "other-code")},
+         # A purpose rejection, a reason that holds nothing, and the acknowledged notice a held collector resumes on
+         # (DEC-0100, DEC-0102).
+         "device/activity-batch-ack-purpose.json": "fixtures/positive/activity-batch-ack-purpose.json",
+         "device/activity-batch-ack-before-purpose.json": "fixtures/positive/activity-batch-ack-before-purpose.json",
+         "device/device-check-in-response-acknowledged.json":
+             "fixtures/positive/device-check-in-response-acknowledged.json",
+         "device/device-check-in-response-acknowledged-bad.json":
+             "fixtures/negative/device-check-in-response-acknowledged-bad.json"}
 #: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
 SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
 #: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;

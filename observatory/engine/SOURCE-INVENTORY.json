@@ -578,8 +578,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "c4a9908d7a1aa1169586c20ccef9759579b69fb844466c6e35dd41bb44747a98",
-      "bytes": 277892,
+      "export_sha256": "a8f45a781eccb1956494a2b4e463c05352d77e3cbf75b7b99f6c75ee6949acff",
+      "bytes": 277863,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -610,8 +610,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "66726287bfa35d8f62bb9af6bc3f58150042a20d15cb8c601cbd0584f06dba88",
-      "bytes": 180381
+      "export_sha256": "cfea43113a6f4e5d5dad5253841d2fb992c77a8239f7a983b80cc0c4af8d50cc",
+      "bytes": 180283
     },
     {
       "path": "dashboard/machine_page.py",
@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "00fa403f2f437c537ba87b778c38b5b48ab1381a3f3412bb9fc51d4322ba8087",
-      "bytes": 165647,
+      "export_sha256": "062b1226f6ba2dbe461279ea1b537eb7c8cee3f81424f7d74f1b3bd0d82918f8",
+      "bytes": 166299,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "e85b032ce276d35e7f41ea40cdfaebe40bdfb3494f6b92db553ba42e120ce8fd",
-      "bytes": 138921,
+      "export_sha256": "42a9950e390e047bae2ec38cf549fbd56f33a675c8c0e1ee4019ec79ef6a3b4e",
+      "bytes": 140201,
       "upstream_modified": true
     },
     {
@@ -944,14 +944,14 @@
       "path": "fabric-contract.lock.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e648c10b538a263407e1944d88b58928ca4ec60eefe178a40f690c447e62e1e5",
+      "export_sha256": "bf474afd845f08b51afb9467f6705db9af33ef732650c77109a73f055a8d5fd3",
       "bytes": 215
     },
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "bcf2812ee9709421a0a5a2d6c001d330f4add697ca2013bed1761918f0a4f062",
-      "bytes": 14866,
+      "export_sha256": "eafa73c0c2da52e50e8c284e759eda1a969ac6e4f03887d46a2159456d44bf33",
+      "bytes": 15817,
       "upstream_modified": true
     },
     {
@@ -1134,7 +1134,7 @@
       "path": "fabric/interop-schemas/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7aeed43813c596f2ae75d7def19c0deebae1647276cb16fad4723fbbfee70cab",
+      "export_sha256": "28119db513a61755bcddfe41604fa31668b61e886f716e9d61c5d826fc8b6ee6",
       "bytes": 2035
     },
     {
@@ -1148,8 +1148,8 @@
       "path": "fabric/interop-schemas/interop-common.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6ad2272474108d353625b702d63ffdc54710d7525d81eaa1960bbf338b17758a",
-      "bytes": 6678
+      "export_sha256": "8e70664fcdc0c4da610a53bfd27dc072a72e0cfd92095be39d41a373c73bf9f7",
+      "bytes": 7828
     },
     {
       "path": "fabric/interop-schemas/interop-job-handle.schema.json",
@@ -1176,8 +1176,8 @@
       "path": "fabric/interop-schemas/interop-job.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f45a612687544237e70c786f5363c711723314c592cd163535350cdc5cf5daa5",
-      "bytes": 3079
+      "export_sha256": "ec8233058a83924abc5c876a6cd23b17460d27a66bf5ba83a5a2e3ad76790052",
+      "bytes": 3590
     },
     {
       "path": "fabric/interop-schemas/interop-request-meta.schema.json",
@@ -1232,8 +1232,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bb05989460b5371138a50e26b3ffb2bd49e7137338687015acdbbf2453a89fc0",
-      "bytes": 8009
+      "export_sha256": "61bb89b16a9507412635ad00522feda75f5c421bf62ab1778d24fa8441da71b4",
+      "bytes": 12991
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1248,6 +1248,41 @@
       "upstream_modified": true,
       "export_sha256": "db895afa14641d93d2f677b2a02b0ac762ba3f10f57a14de5171018ac05893a5",
       "bytes": 13384
+    },
+    {
+      "path": "fabric/node-vectors/device-organization-closed.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "cefd215be5c2d06ac6120cbad6c6a764e9b139b88933d221eb6043a72aa88f1d",
+      "bytes": 1845
+    },
+    {
+      "path": "fabric/node-vectors/device/activity-batch-ack-before-purpose.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0791d78443303a890db6dd8bcabfceb0069bba4b95998d66756dc97a6505057d",
+      "bytes": 536
+    },
+    {
+      "path": "fabric/node-vectors/device/activity-batch-ack-purpose.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7405cdaa9fd10ebb0bf206e8f1b7dad7d12f1d8144d592a318198c1c4fb7c482",
+      "bytes": 529
+    },
+    {
+      "path": "fabric/node-vectors/device/device-check-in-response-acknowledged-bad.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f17998c87e9a41fa5bc8cd47914bc343620f035e9794d60b9a9ab95c2b567bb5",
+      "bytes": 1986
+    },
+    {
+      "path": "fabric/node-vectors/device/device-check-in-response-acknowledged.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4aef11b8c8ff31c001f44e492553d79c083180170874abd3311b212a40fca1f1",
+      "bytes": 1981
     },
     {
       "path": "fabric/node-vectors/device/device-check-in-response-protocols.json",
@@ -1299,6 +1334,55 @@
       "bytes": 544
     },
     {
+      "path": "fabric/node-vectors/device/device-organization-closed-bad-time.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a038af0de0de08f6071fd08fda56b941bb9c077b7794d8fca3ef5a39b4f225b0",
+      "bytes": 178
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed-error-extra.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9f57943f6c2817bad4e7064bb6c01095fbe98355c04461bf5ddbf0fbd1692522",
+      "bytes": 211
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed-extra.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f0aa3b6956ef5798c2b872032a988f8203bc64c3fb530706b71a882af586c32a",
+      "bytes": 211
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed-flat.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "104e1c985fda3f0e37133dec59bc37b458284b909d2d696390880b1d378e12d3",
+      "bytes": 114
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed-no-time.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f021f764a0194e943b07426501ea7afb13961b78cd565a85783332a13654f750",
+      "bytes": 151
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed-other-code.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d70de17d7011c4150323aa043433df39f7d3ded28bd6b1444c819dcfb1ca1f40",
+      "bytes": 189
+    },
+    {
+      "path": "fabric/node-vectors/device/device-organization-closed.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b68feedba79415d0c0868554f933add150a44726fc9322e422f31b99627b2cc6",
+      "bytes": 189
+    },
+    {
       "path": "fabric/node-vectors/enroll-token.json",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1316,8 +1400,8 @@
       "path": "fabric/node-vectors/http-signature.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "baaedfde6b6edcc9155fe7cf739f3173ccbbd1404aa96064688f36be34d393f5",
-      "bytes": 52364
+      "export_sha256": "d749bc6e6251beb764ddead064b8a1bc8b54518908fe9adf81e4e542adc7cfb7",
+      "bytes": 54651
     },
     {
       "path": "fabric/node-vectors/identifiers.json",
@@ -1670,6 +1754,41 @@
       "bytes": 10631
     },
     {
+      "path": "fabric/node-vectors/semantic/estate-profile-member-hub.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "04b5b9db4b96d3bceea6f7aaa9925e476854e7853b26229a513a4cfbcaa81e8c",
+      "bytes": 9898
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-profile-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "60861451611693ff63dc6b1fca92be7df920366cacaa52ba2c61f068c328b319",
+      "bytes": 9876
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-profile-secret-from-view.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "51a3bbc082871316725313d296460b5e55704172bcc066787c2ba3adbce430cf",
+      "bytes": 9414
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-profile-unknown.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1ad9c0fffbbdb537043f3160e84e26d76a0ceec3125451bc9439768bed7e7c89",
+      "bytes": 9875
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-profile-view-runs.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "83f2b993b9a805bd22187f415c04d023ea935b3c4a80588e41642875953e13f8",
+      "bytes": 9923
+    },
+    {
       "path": "fabric/node-vectors/semantic/estate-publisher-kid-twice.json",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1703,6 +1822,34 @@
       "upstream_modified": true,
       "export_sha256": "0c1e6ce3122a089a08788ff55c95f8a9d07f201d02b5996e1d512ebc2c6a11f0",
       "bytes": 5692
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-anchor-dropped.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "34918003232953ceff15cbe62731a3756d0f041c3d569255cd46373863d4438f",
+      "bytes": 12605
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-anchor-kept.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "70366a2e4d69f5901036bdafebdecb306d235dc24db8864e3914534e000dfa62",
+      "bytes": 12720
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-anchor-moved-back.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2d69ef0059287d1382cb4c26b3938bf629fad75e0cdc727b56e62f59fce0030a",
+      "bytes": 12734
+    },
+    {
+      "path": "fabric/node-vectors/semantic/estate-revision-anchor-other-hash.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "da11e1cf19f2ca5f2362b7d10b8a2bfa374dfcf9db6184ceb723c605cc21adf5",
+      "bytes": 12766
     },
     {
       "path": "fabric/node-vectors/semantic/estate-revision-drops-revocation.json",
@@ -1883,15 +2030,15 @@
       "path": "fabric/node-vectors/share-registration.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3e55a402cafc606e91aeb427ffca0e4d1241528c3a634aa4d0e580961126faa9",
-      "bytes": 190359
+      "export_sha256": "50b21647253d8e440a404165365e459ae01e52cf658d2f57986101921b1c8f16",
+      "bytes": 196680
     },
     {
       "path": "fabric/node-vectors/summary/activity-common.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "990418510b2f83b0560c31c739f347d64752d611812abb89e7d2ce7079b11017",
-      "bytes": 11324
+      "export_sha256": "f1870a093e69fa8ada024c5c1b9fb82e302000d2ca4217c593654a9a2c61b0fc",
+      "bytes": 11328
     },
     {
       "path": "fabric/node-vectors/summary/coding-agents.json",
@@ -1913,6 +2060,69 @@
       "upstream_modified": true,
       "export_sha256": "21c73ba6abe991ea52d65fd6fa8d1ba4fcb2a76425cfacb554b5a448b784206a",
       "bytes": 1640
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-coding-agent-digest.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "11b378ae3ab3925732f30655f63c2d7e002a18535bad2a169abd79409fd22523",
+      "bytes": 1076
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-coding-agent-name.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b6b2046347339ca361dc138df3b431aad8ccecf36e1403d1f67854d3018930f8",
+      "bytes": 979
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-dotted-suffix.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2220d7b8bb4d830a006974948a94c5e3ae56de42dc8211f558c26a72e22de0a4",
+      "bytes": 1198
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-mcp-server-digest.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "61314d13fd71c83afc7e3c9902bc089f71ee9c4854ff5a8fedafec7eaa6eb9cd",
+      "bytes": 1069
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-mcp-server-min-version.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e6632cd052b8504727ad63f0621321d4e0ffd0eb93068525f09306e4642a0a60",
+      "bytes": 1003
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-service-digest.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d7285fd83aa2aef6c2deabdb554de555bb52ee62ac792d7c694503587e420037",
+      "bytes": 1079
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-service-min-version.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "95bd2830ab912ff244745ba09135e93daf42c431d5ef353cb32eefd8c1465c4b",
+      "bytes": 1013
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-service-name.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "29067abbbcf33a3e66b1d6e9876d0d9ae54f9311da1fcc4bcc4c3f883739212d",
+      "bytes": 980
+    },
+    {
+      "path": "fabric/node-vectors/summary/negative/device-policy-baseline-skill-min-version.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5dc08179e89e9c45ef42e8634edfdb35a79f0001b97a0721aaf1e04626e27afc",
+      "bytes": 1236
     },
     {
       "path": "fabric/node-vectors/summary/negative/node-summary-dotted-suffix.json",
@@ -1978,6 +2188,55 @@
       "bytes": 1458
     },
     {
+      "path": "fabric/node-vectors/summary/semantic/credential-check-in-summary-duplicate.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fe0a30a7aa3a8fff371125c9544a06a5bd2fa97def6e35213e2501cf2c77c2b0",
+      "bytes": 4413
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/credential-check-in-summary-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0cd618e17ccce7a4aa5e1c5bf7721a2150a58b9b010f47f0fac161307983cbf5",
+      "bytes": 4269
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/credential-check-in-summary-other-device.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1e9c175c6cfbd1398b4a7589de465c7528c1eff3d92df05b14b4216e4fea880d",
+      "bytes": 4248
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/device-attribution-records-ok.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "288144709d989bc1d468ec4e34a794ebf387934945a18dd11268d0aaa41b8b0a",
+      "bytes": 10647
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/device-attribution-records-other-org.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e80afb2e46b9f9f050b0ba0a486becead709409b1519eee55e047ab874f7396e",
+      "bytes": 10659
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/device-attribution-summary-other-device.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7a081d108fd5a6f8c1fd64964aa41d67e663ea59dc243c7708ae2d020ee80977",
+      "bytes": 10623
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/device-attribution-summary-other-org.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7c38d553c88b189f132683d99150d596c7a2bb1a908a839b424f9885fbf8502e",
+      "bytes": 10633
+    },
+    {
       "path": "fabric/node-vectors/summary/semantic/node-summary-drift-hidden.json",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1997,6 +2256,20 @@
       "upstream_modified": true,
       "export_sha256": "eff3a8f484cebc7ba0bb56afc9a71acecb876cd471ecd0582016c9ca867284e5",
       "bytes": 2730
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/node-summary-home-after-at.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b4caead312a22d107e25a6ee7cbed9f28d121a43926ddd38e6b1c3de97b112c0",
+      "bytes": 2810
+    },
+    {
+      "path": "fabric/node-vectors/summary/semantic/node-summary-home-after-dot.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "eaa8226991ea6f9bb7ef84f4405dab25c4cfab01e10fbdadd03d84f3ca6f8c75",
+      "bytes": 2873
     },
     {
       "path": "fabric/node-vectors/summary/semantic/node-summary-ok.json",
@@ -2392,15 +2665,15 @@
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "18767ae96f79d1fe67508f830bb464d3c05167bf244e6f27f7ffed3e4eade428",
-      "bytes": 36928
+      "export_sha256": "40b2a677f71f00bfd0be7abd4f258eee34c8146bcfbf1f343c991fca8ecfe9c4",
+      "bytes": 41282
     },
     {
       "path": "node/http_signature.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "46e0182d10e71dc426d658212ce72c7d6182281912fd9f3c1958ba1ecd63a0e7",
-      "bytes": 17015
+      "export_sha256": "cb654c47abd67f99898674edd423b7ec0b67fc76be7068bbf4e64c1e94a8875c",
+      "bytes": 18128
     },
     {
       "path": "node/identifiers.py",
@@ -2455,15 +2728,15 @@
       "path": "node/node_summary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d4feb369538408f784e9c90c43276a63c684a3c86b0bf6914e5ec87e8b12d903",
-      "bytes": 28395
+      "export_sha256": "fa3c1e605ac137accecd240041c02531dade625358d345434a7c4e1b3b55cce2",
+      "bytes": 35595
     },
     {
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "511dc02b4e737adae984aabbbbd9db4de99aedd469023852d3b024d826bcf8d6",
-      "bytes": 117456
+      "export_sha256": "c4f11338ec63dcb92b37b5dc103f20716d26bb471aba483b4f921defd64cd3a7",
+      "bytes": 128913
     },
     {
       "path": "node/p256.py",
@@ -2504,8 +2777,8 @@
       "path": "node/share_registration.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "90afbccc363c827e412d15f197b2cfd20bd32dd3abe13107866502bd68c90aff",
-      "bytes": 9684
+      "export_sha256": "10a7706a518ba0d6d4b0d6a9d331f1d5c99acf2095a32cc60ba2ebadc6b87198",
+      "bytes": 10237
     },
     {
       "path": "node/webauthn.py",
@@ -4503,8 +4776,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1db3015816dbfcca69c050b3daab39b01dbe02dcbccd08e5761504dd7fb5e507",
-      "bytes": 92231
+      "export_sha256": "8a5e81432a5120f6439e4d6543c508c84923321b72a55013c8c59269c768d3ad",
+      "bytes": 110996
     },
     {
       "path": "tests/test_node_pairing.py",
@@ -4531,8 +4804,8 @@
       "path": "tests/test_node_summary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f11d1a8901392d5e582457e83394e0239a0c6734d26e5149d7a6d03ae7e53113",
-      "bytes": 42036
+      "export_sha256": "c6b743d6f1fefa810a41c91ae351e8e3e126cf1aaf5b3b735804a5854f7247f3",
+      "bytes": 50520
     },
     {
       "path": "tests/test_notification.py",
@@ -6328,7 +6601,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 840,
+  "file_count": 879,
   "excluded": [
     "git-history",
     "operator-registries",

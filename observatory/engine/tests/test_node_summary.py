@@ -53,8 +53,8 @@ class Vectors(unittest.TestCase):
 
     def test_every_semantic_fixture_answers_as_the_contract(self):
         files = sorted((SUMMARY / 'semantic').glob('node-summary-*.json'))
-        self.assertEqual(len(files), 6)
-        self.assertEqual(sum(1 for f in files if json.loads(f.read_text())['expect']), 4)
+        self.assertEqual(len(files), 8)                 # DEC-0105 added home-after-dot and home-after-at
+        self.assertEqual(sum(1 for f in files if json.loads(f.read_text())['expect']), 6)
         for file in files:
             fixture = json.loads(file.read_text(encoding='utf-8'))
             with self.subTest(file.name):
@@ -83,6 +83,86 @@ class Vectors(unittest.TestCase):
         path_in_name = load('positive/node-summary.json')
         path_in_name['harness']['mcpServers'][0]['name'] = '/' + '/'.join(('Users', 'example', 'servers', 'x'))
         self.assertTrue(list(check.iter_errors(path_in_name)))
+
+
+    def test_the_home_path_is_the_contracts_after_any_separator(self):
+        """DEC-0105: the dashed form after any character that is not an ASCII letter or digit, or at the start; the
+        contract's own boundary cases (`test/activity-rules.test.ts`)."""
+        dashed = lambda root: '-'.join(('', root, 'example'))               # noqa: E731
+        for before in ('', '.', '@', '_', '~', '#', ':', '-', '/', ' ', '+', '\u00e9'):
+            for root in ('Users', 'users', 'home'):
+                with self.subTest(before=before, root=root):
+                    self.assertTrue(ns.has_home_path('x' + before + dashed(root) if before else dashed(root)))
+        for name in ('my-users-list', 'Users-guide', 'smart-home-mcp', 'end-users-guide', 'my-home-page',
+                     'homework', 'a-Users-guide'):
+            self.assertFalse(ns.has_home_path(name), name)
+        self.assertTrue(ns.has_home_path('x.-users-list'), 'a lower-case root after a separator errs on the safe side')
+
+    def test_check_in_summaries_answer_as_the_contract(self):
+        """DEC-0114 over the contract's fixtures: the summary read with the check-in (kind `device-check-in`) and the
+        check-in's records judged against the client certificate (kind `device-attribution`, FAC-SEM-045)."""
+        checked = 0
+        for file in sorted((SUMMARY / 'semantic').glob('credential-check-in-summary-*.json')):
+            fixture = json.loads(file.read_text(encoding='utf-8'))
+            with self.subTest(file.name):
+                self.assertEqual(fixture['kind'], 'device-check-in')
+                found = list(dict.fromkeys(f['code'] for f in ns.check_in_summary_findings(fixture['input'])))
+                self.assertEqual(found, fixture['expect'])
+                checked += 1
+        for file in sorted((SUMMARY / 'semantic').glob('device-attribution-*.json')):
+            fixture = json.loads(file.read_text(encoding='utf-8'))
+            with self.subTest(file.name):
+                self.assertEqual(fixture['kind'], 'device-attribution')
+                found = list(dict.fromkeys(f['code'] for f in ns.check_in_attribution_findings(
+                    fixture['input']['checkIn'], fixture['input']['binding'])))
+                self.assertEqual(found, fixture['expect'])
+                checked += 1
+        self.assertEqual(checked, 7)
+
+    def test_the_attribution_is_compared_as_written(self):
+        fixture = json.loads((SUMMARY / 'semantic' / 'device-attribution-records-ok.json').read_text())
+        check_in, binding = fixture['input']['checkIn'], fixture['input']['binding']
+        self.assertEqual(ns.check_in_attribution_findings(check_in, binding), [])
+        upper = copy.deepcopy(check_in)
+        upper['records']['nodeSummary']['context'] = upper['records']['nodeSummary']['context'].upper()
+        self.assertEqual([f['instancePath'] for f in ns.check_in_attribution_findings(upper, binding)],
+                         ['/checkIn/records/nodeSummary/context'])
+        self.assertEqual(len(ns.check_in_attribution_findings(check_in, {})), 2 + sum(
+            len(check_in['records'].get(m, [])) for m in ('credentialRequests', 'callRecords')))
+
+
+class Baseline(unittest.TestCase):
+    """DEC-0102 item 4: what a `harness.baseline` may carry, over the contract's policy fixtures."""
+
+    def test_the_contracts_baseline_has_no_problem(self):
+        policy = load('device-policy-harness-baseline.json')
+        self.assertEqual(ns.baseline_problems(policy['keys']['harness.baseline']['value']), [])
+
+    def test_every_negative_baseline_is_refused(self):
+        files = sorted((SUMMARY / 'negative').glob('device-policy-baseline-*.json'))
+        self.assertEqual(len(files), 9)
+        for file in files:
+            with self.subTest(file.name):
+                policy = json.loads(file.read_text(encoding='utf-8'))
+                self.assertTrue(ns.baseline_problems(policy['keys']['harness.baseline']['value']))
+
+    def test_each_kind_carries_only_its_own_members(self):
+        ok = [{'kind': 'coding-agent', 'name': 'claude-code', 'minVersion': '2.1'},
+              {'kind': 'plugin', 'name': 'switchboard@passioncode', 'minVersion': '0.6', 'digest': DIGEST_A},
+              {'kind': 'skill', 'name': 'task-pipeline', 'digest': DIGEST_A},
+              {'kind': 'mcp-server', 'name': 'plugin:switchboard:switchboard'},
+              {'kind': 'service', 'name': 'inbox-agent.default'}]
+        self.assertEqual(ns.baseline_problems({'items': ok}), [])
+        for bad in ({'kind': 'coding-agent', 'name': 'Claude Code'}, {'kind': 'coding-agent', 'name': 'c'},
+                    {'kind': 'service', 'name': 'inbox-agent'}, {'kind': 'skill', 'name': 'a@b.c'},
+                    {'kind': 'skill', 'name': 's', 'minVersion': '1'}, {'kind': 'service', 'name': 'a.b',
+                                                                         'digest': DIGEST_A},
+                    {'kind': 'plugin', 'name': 'p', 'minVersion': '1.x'}, {'kind': 'widget', 'name': 'x'},
+                    {'kind': 'skill', 'name': 's', 'extra': 1}, 'not an item'):
+            with self.subTest(bad=bad):
+                self.assertTrue(ns.baseline_problems({'items': [bad]}))
+        self.assertTrue(ns.baseline_problems({'items': [], 'extra': 1}))
+        self.assertTrue(ns.baseline_problems({'items': [{'kind': 'skill', 'name': 's'}] * 1025}))
 
 
 class Drift(unittest.TestCase):
@@ -344,16 +424,23 @@ class Build(unittest.TestCase):
         dashed = '-'.join(('', 'Users', 'alice', 'x'))
         harness['skills'].append({'name': 'notes.' + dashed, 'source': 'plain'})
         harness['plugins'].append({'name': 'tool@' + '-'.join(('', 'home', 'alice')), 'source': 'other'})
-        self.assertEqual(ns.document_findings({'harness': {'skills': [{'name': 'notes.' + dashed}]}}), [],
-                         'the contract does not catch it after a dot: the node does')
+        self.assertEqual(ns.document_findings({'harness': {'skills': [{'name': 'notes.' + dashed}]}})[0]['code'],
+                         'FAC-SEM-128', 'since DEC-0105 the contract catches it after a dot too')
         summary, omitted, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
                                        harness_scan=harness, mcp_scan=mcp)
         self.assertNotIn('alice', json.dumps(summary))
         self.assertEqual((omitted['skills'], omitted['plugins']), (2, 1))
         for name in ('smart-home-mcp', 'end-users-guide', 'my-home-page', 'Users-guide'):   # names, not folders
-            self.assertIsNone(ns.DASHED_HOME.search(name), name)
+            self.assertFalse(ns.hides_home(name), name)
         for name in ('notes.-Users-alice-x', 'x@-home-alice', 'a-Users-alice-projects-x', 'p:-home-bob'):
-            self.assertIsNotNone(ns.DASHED_HOME.search(name), name)
+            self.assertTrue(ns.hides_home(name), name)
+        # The node's own check keeps only what the contract does not catch: a dashed home glued to a letter or digit
+        # and continued by two more dash segments (DEC-0105 covers every other case above).
+        self.assertFalse(ns.has_home_path('a-Users-alice-projects-x'))
+        self.assertIsNotNone(ns.DASHED_HOME.search('a-Users-alice-projects-x'))
+        for name in ('notes.-Users-alice-x', 'x@-home-alice', 'p:-home-bob'):
+            self.assertIsNone(ns.DASHED_HOME.search(name), name)
+            self.assertTrue(ns.has_home_path(name), name)
 
     def test_the_drift_is_capped_at_the_schemas_bound(self):
         baseline = {'revision': 3, 'items': [{'kind': 'skill', 'name': 's%d' % i} for i in range(1100)]}
@@ -441,6 +528,45 @@ class CheckIn(_Enrolled):
         self.assertTrue(self.make().check_in()['ok'])
         self.assertEqual([s['sequence'] for s in self.sent()], [1, 2])
         self.assertNotIn('note', self.make().describe()['nodeSummary'])
+
+    def test_the_check_in_lists_only_what_the_node_reads(self):
+        # DEC-0116, DEC-0117: a server sends repairs, credential members and `callRecordsAccepted` only to a node whose
+        # own check-in lists their revisions; this node reads none of them yet (OBS-191, OBS-193, OBS-194).
+        self.server.checkin_protocols = ['fabric-device/0.1', 'fabric-activity/0.1', ns.TYPE, 'repair-result/1',
+                                         'credential-request/1', 'call-record/1']
+        self.make().check_in()
+        self.make().check_in()
+        for path, body in self.server.requests:
+            if path == '/v1/devices/check-in':
+                self.assertEqual(body['protocols'], ['fabric-device/0.1'])
+                for revision in ('repair-request/1', 'credential-decision/1', 'fabric-credential-envelope/1',
+                                 'credential-revocation/1', 'call-record/1'):
+                    self.assertNotIn(revision, body['protocols'])
+                # DEC-0111's members are gated off whatever the server lists (DEC-0116).
+                self.assertFalse({'credentialRequests', 'callRecords', 'repairResults'}
+                                 & set(body.get('records', {})))
+
+    def test_a_summary_another_device_or_organization_would_name_stays_here(self):
+        # DEC-0114: judged against this enrollment's certificate before it leaves.
+        from unittest import mock
+        real = ns.build
+        for field, value in (('device', {'id': 'dev-other'}), ('context', 'org:org-other')):
+            with self.subTest(field=field):
+                def build(**kwargs):
+                    summary, omitted, excluded = real(**kwargs)
+                    return dict(summary, **{field: value}), omitted, excluded
+                self.now[0] += 86401
+                before = len(self.sent())
+                with mock.patch.object(ns, 'build', build), mock.patch.object(ns, 'summary_findings',
+                                                                              lambda value: []):
+                    self.assertTrue(self.make().check_in()['ok'])
+                self.assertEqual(self.sent()[before:], [None])
+                note = self.make().state()['nodeSummaryNote']
+                self.assertEqual(note['reason'], 'attribution')
+        self.now[0] += 86401
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertIsNotNone(self.sent()[-1])
+        self.assertNotIn('nodeSummaryNote', self.make().state())
 
     def test_nothing_to_a_server_that_does_not_list_it(self):
         self.server.checkin_protocols = ['fabric-device/0.1', 'fabric-activity/0.1']

@@ -3158,6 +3158,182 @@
       }
     },
     {
+      "name": "SR-1: a closed organization (DEC-0103): 410 with its closedAt",
+      "held": [
+        {
+          "user": "m-4821",
+          "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+          "state": "active",
+          "grantRevision": 3,
+          "agentRef": "urn:fabric:agent:example:inbox-digest",
+          "startsAt": "2026-10-12T08:00:00Z",
+          "expiresAt": "2026-10-26T08:00:00Z",
+          "digest": "sha256:d431ae1fff886e40b43f7a5e15a00cb2e931fa8fd1544a0f7b38324076c1ff0b"
+        }
+      ],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": false,
+          "code": "organization-closed",
+          "closedAt": "2026-11-30T00:00:00Z"
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        }
+      },
+      "expected": {
+        "status": 410,
+        "code": "organization-closed",
+        "closedAt": "2026-11-30T00:00:00Z"
+      }
+    },
+    {
+      "name": "SR-1: a closed organization without its time is the receiver's fault",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": false,
+          "code": "organization-closed"
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        }
+      },
+      "expected": {
+        "fault": "context-invalid"
+      }
+    },
+    {
+      "name": "SR-1: a closed organization with an unreadable time is the receiver's fault",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": false,
+          "code": "organization-closed",
+          "closedAt": "2026-11-30"
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        }
+      },
+      "expected": {
+        "fault": "context-invalid"
+      }
+    },
+    {
+      "name": "SR-0 before SR-1: an unusable held list with a closed organization's verdict",
+      "held": "not a list",
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "ok": false,
+          "code": "organization-closed",
+          "closedAt": "2026-11-30T00:00:00Z"
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        }
+      },
+      "expected": {
+        "fault": "context-invalid"
+      }
+    },
+    {
+      "name": "SR-0: a closed organization's code without ok false",
+      "held": [],
+      "registration": {
+        "type": "share-registration/1",
+        "grantId": "urn:fabric:share:3f9c2a7e5b1d4c608e2f71a9d0b6c4e8",
+        "context": "org:org_7kq2m4xw",
+        "state": "active",
+        "grantRevision": 3,
+        "agentRef": "urn:fabric:agent:example:inbox-digest",
+        "startsAt": "2026-10-12T08:00:00Z",
+        "expiresAt": "2026-10-26T08:00:00Z"
+      },
+      "binding": {
+        "transport": {
+          "code": "organization-closed",
+          "closedAt": "2026-11-30T00:00:00Z"
+        },
+        "org": {
+          "id": "org_7kq2m4xw"
+        },
+        "device": {
+          "id": "dev-01j9a"
+        },
+        "user": {
+          "id": "m-4821"
+        }
+      },
+      "expected": {
+        "fault": "context-invalid"
+      }
+    },
+    {
       "name": "SR-2: a revision this receiver does not read",
       "held": [],
       "registration": {
@@ -6441,6 +6617,59 @@
       "answer": {
         "status": 401,
         "code": "signature-replayed"
+      },
+      "expected": "hold"
+    },
+    {
+      "name": "organization-closed (DEC-0103): the node stops for that organization",
+      "answer": {
+        "status": 410,
+        "code": "organization-closed",
+        "closedAt": "2026-11-30T00:00:00Z"
+      },
+      "expected": "stop"
+    },
+    {
+      "name": "organization-closed under a status that is not its own",
+      "answer": {
+        "status": 401,
+        "code": "organization-closed"
+      },
+      "expected": "hold"
+    },
+    {
+      "name": "a 410 that is not organization-closed",
+      "answer": {
+        "status": 410,
+        "code": "certificate-revoked"
+      },
+      "expected": "hold"
+    },
+    {
+      "name": "organization-closed as the wire's nested body",
+      "answer": {
+        "status": 410,
+        "body": {
+          "error": {
+            "code": "organization-closed",
+            "message": "This organization closed."
+          },
+          "closedAt": "2026-11-30T00:00:00Z"
+        }
+      },
+      "expected": "stop"
+    },
+    {
+      "name": "the wire's nested organization-closed under 401",
+      "answer": {
+        "status": 401,
+        "body": {
+          "error": {
+            "code": "organization-closed",
+            "message": "This organization closed."
+          },
+          "closedAt": "2026-11-30T00:00:00Z"
+        }
       },
       "expected": "hold"
     },

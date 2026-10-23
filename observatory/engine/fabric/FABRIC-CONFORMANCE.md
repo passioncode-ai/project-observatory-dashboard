@@ -26,6 +26,18 @@ which still reads the profile lock under its old name for one release when no
 The probe receipt's `contractCommit` comes from the pin, its `localProfile` and
 `schemaRelease` from the profile lock.
 
+**What the node owes at the pin (OBS-217, contract `588748ab`).** The organization node
+ports and tests, over the contract's own vectors: `organization-closed` (DEC-0103: 410 at
+transport step 4, final on one answer, the share-registration gate's `stop`), the
+`purpose` hold and its resume on a new notice or acknowledgement (DEC-0100, DEC-0102),
+the summary's corrections (DEC-0102: context, name shape, baseline, the renewal on the
+server's clock) and its check-in and attribution judgement (DEC-0114), the home path
+after any separator (DEC-0105), and the estate's machine profiles and delta anchor
+(FAC-SEM-134, FAC-SEM-137). Its check-in lists only `fabric-device/0.1` among what it
+reads, so a server gates repairs and credential members off (DEC-0116, DEC-0117); it
+sends none of DEC-0111's members. The credential exchange (DEC-0111 to DEC-0113) and the
+repair runner are not conformance claims of this release: OBS-191, OBS-193 and OBS-194.
+
 **Three schema releases, one pin per file.** The lock's `releases` lists, for every
 bundled schema and fixture, the one release tag that published it: the first eight
 schemas and six fixtures at `v0.2.0`, under the repository's address at the time
