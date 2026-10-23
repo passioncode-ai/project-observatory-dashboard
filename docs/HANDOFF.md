@@ -17,6 +17,14 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-23: release 0.29.0](runs/2026-10-23-release-0.29.0/README.md): engine 0.29.0 (`observatory-log` stays
+0.28.0, unchanged since), carrying `node.lifecycle` steps L1 to L3 (OBS-79: the broker #342, the macOS adapter #344,
+six MCP tools behind access bindings, inert until a target is enrolled, #347), the organization node's expiry
+warning, removal and CI on every system (OBS-199, OBS-201, OBS-204, #339), renewal by the key on record (#341), the
+harness summary `node-summary/1`, off until consent (OBS-192 step 1, #345), partner publisher scopes (OBS-171, #346),
+live state kept under cache roots (OBS-203, #338) and the contract pin (OBS-196, #337; OBS-205, #348).
+Next: merge, tag `v0.29.0`, verify, install, run `full probes` once, then record the receipts.
+
 [2026-10-21: release 0.28.0](runs/2026-10-21-release-0.28.0/README.md): engine and `observatory-log` 0.28.0,
 carrying the five-minute release check on the static feed (OBS-176) and the apps' lifecycle defaults (OBS-177, #329),
 every collector a turn in the tick (OBS-52, #328), the update's free-space preflight and a bounded portable suite

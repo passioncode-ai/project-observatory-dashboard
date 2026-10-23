@@ -545,6 +545,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   google [--force]             GA4 and Search Console analytics, cached twelve hours; --force re-fetches
   plugins [--only ID] [--force]  run the metric plugins (each past its age gate with --force)
   plugins-check                validate the installed metric plugins' manifests; runs none
+  probes                       run the Fabric conformance probes against the local server and rewrite
+                               their receipts; probes-check (a step of check) compares those receipts with the
+                               contract pin and exits 1 when they name another commit
   review                       the queue of proposed ledger records (tools/review.py decides them)
   node --init | --show         this machine's agent-network device keys: --init creates them if absent,
                                --show prints the device id and the two public keys; no private key is printed

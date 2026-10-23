@@ -3,6 +3,120 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.29.0 (2026-10-23)
+
+The node gains `node.lifecycle`: a broker that wakes, stops and restarts enrolled Mac apps and LaunchAgents for
+agents, its macOS adapter, and six MCP tools on the engine's local server behind access bindings. It stays inert
+until a target is enrolled. An organization enrollment now names its certificate's expiry, renews by itself within
+30 days of it with the key on record, ends cleanly when the machine is removed, and can send the organization a
+harness summary (`node-summary/1`), off until consent is given per organization. A partner's publisher key is trusted
+only within its scope, the disk guard never removes live state under a cache root, and the contract pin has its own
+file with every contract mention held to it. After the update, the first `full check` reports `probes-check` with exit
+1 once (the stored probe receipts carry no contract commit): run `project-observatory full probes` once and it passes
+again.
+
+### Added
+
+- **`node.lifecycle`, the broker** (OBS-79 step L1, #342): `node/lifecycle/broker.py` keeps a closed registry of
+  targets (apps by bundle id and signing team, background jobs by label and hashes; unknown fields, dependency cycles
+  or relative paths refuse the whole document), authorizes callers by the SHA-256 of their credential with per-tool
+  and per-target scopes, and runs every effect as a durable, idempotent operation in its own owner-only store
+  `<state>/node-lifecycle/lifecycle.db`. A start is written to an effect journal before it happens, so a crash in
+  between reads `delivery_unknown`, never a second launch. Crash circuits (two starts in 60 s pause the target five
+  minutes) and a restart budget (three failed supervisor starts in 30 minutes) stop relaunch loops;
+  `in_use_by_person` and `held_off` keep the broker away from an app the person is using or the operator switched
+  off. One broker per state folder (`broker.lock`).
+- **The macOS adapter and its Swift helper** (OBS-79 step L2, #344): `node/lifecycle/macos.py` identifies an app by
+  its code-signing designated requirement and refuses ad hoc, unsigned, mismatched or changing bundles at enrollment;
+  installed places are trusted only when nobody else may write them; LaunchAgents are pinned by label, plist hash and
+  the hashes of what they run. Every tool runs with the system PATH in its own process group, killed on timeout.
+  Deep signature checks run once per bundle state and are cached (256 entries) in an owner-only file. Readiness
+  probes cover `process`, `fabric-service`, `fabric-hub` and `switchboard-runtime`. The NSWorkspace helper
+  (`native_app.swift`: status, open, quit, watch) is compiled for a source install by `full lifecycle build-helper`;
+  off macOS every call answers `unsupported_platform`.
+- **Six MCP tools on the local server** (OBS-79 step L3, #347): `POST /mcp` on `tools/serverd.py` (127.0.0.1:47311 by
+  default) serves `lifecycle.list`, `lifecycle.status`, `lifecycle.ensure_running`, `lifecycle.stop`,
+  `lifecycle.restart` and `lifecycle.operation.get`. A caller proves itself with an access binding of this workspace
+  (`full access-binding issue`), and a grant in the owner-only `config/node-lifecycle.json` (`full lifecycle allow
+  PRINCIPAL --binding ID`) names that one binding and the tools and targets it may use; no binding is 401, a binding
+  without its grant 403. Both are checked again at admission and before every effect, so a revocation stops the
+  next call. No grant can name an owner: enrolling, holding a target off and forced stops stay at a terminal
+  (`full lifecycle status | enroll | allow | policy | hold | revoke | build-helper`). Without
+  `config/node-lifecycle.json` the server builds nothing, creates no state and refuses every caller; a broker that
+  fails to start is a `lifecycle: unavailable` degraded row and a 503 on `/mcp`, never a crash of the server. The
+  well-known document gains `surfaces.mcp` (`auth: own`) and a `node.lifecycle` extension entry with its state
+  (`inert`, `serving`, `failed`). The supervisor (idle stops, always_on restarts) is not in this release.
+- **A certificate's expiry is named before it bites** (OBS-199, #339): `org status`, `full doctor` (`organizations`)
+  and the Health page read each enrollment's expiry date and state from saved state, without the network: `valid`,
+  `expiring` in the last three days (`org:certificate-expiring`, with `full org rotate --org ID`), `expired`,
+  `needs-enrollment` or `removed`, judged on the server's clock as the last check-in measured it. A check-in,
+  rotation or flush on an expired certificate is refused before the network as `certificate-expired`, naming the
+  date and the `full org enroll` command, and `full org` exits 1 when every organization asked failed.
+- **Renewal after expiry by the key on record** (OBS-199, contract DEC-0100, #341): a node offline past its
+  certificate's lifetime renews by itself within 30 days of the end (server clock, end included): `org check-in` and
+  `org tick` send the enroll request with `auth: {method: "key-on-record"}`, a CSR from the enrollment's own key and
+  no token. The answer is checked like any re-enrollment, and a certificate binding another user or role is refused
+  (`binding-changed`). No answer, 408, 425, 429 or 5xx backs off (`renewal-pending`); any other refusal is recorded
+  for that certificate and never asked again. Outside the window, after a refusal, or when the server asked
+  `re-enroll`, the step is a new enrollment token. Status shows `renewUntil` and the command.
+- **A machine removed from its organization stops cleanly** (OBS-204, #339): `certificate-revoked`, or
+  `certificate-unknown` after the CT-65 fallback to a previous certificate is refused too, ends the enrollment only
+  with HTTP 401; any other status and every 5xx are retried. `unknown-org` is provisional until the contract defines
+  it: recorded and shown as `org:unknown-org` with its date, and it ends the enrollment only when answered again at
+  least an hour later and in a later tick with no success between. An ended enrollment drops its pending events
+  (one count kept), refuses check-in, rotation, registrations, grant usage, enqueue and flush as
+  `removed-from-organization` before the network, and shows `org:removed` with the date and code. A batch refused
+  with any of these codes is held and retried, never rejected as content. `org leave` cleans up, and `org enroll`
+  with a new token starts a new stream.
+- **The harness summary for an organization** (OBS-192 step 1, contracts DEC-0101 and DEC-0102, #345): the node
+  builds `node-summary/1` (enabled plugins, coding agents of the contract's catalogue with versions read from where
+  their launcher resolves, never by running anything, and MCP servers) from an allow-list of fields checked by
+  FAC-SEM-128; never a path, command, argument, environment value, URL, prompt or file content. Sending is off for
+  each organization until `full org summary --org ID --consent on` (recorded with its time), only toward a server that
+  lists `node-summary/1`, when the content changed and at least daily; `full org summary --org ID` prints the next
+  summary without sending it. The owner-only `config/node-summary.json` holds an exclusion list of name globs. Scans
+  that are off, older than 48 hours or older than this release send nothing, and a check-in refused because of the
+  summary is resent at once without it, so heartbeats, rotation and renewal never stop. `org status`, doctor and
+  Health show its state (`org:node-summary-not-listed`, `org:node-summary-unavailable`). Drift is computed but carries
+  nothing until the node applies the signed policy.
+- **A partner's publisher key is trusted only within its scope** (OBS-171, contract DEC-0090, #346):
+  `node/estate.py` reads an estate record's `publisherScopes`, hands a scoped key only to a placement in one of its
+  contexts (any other placement gets no publisher key and its package is refused `unknown-key`), and applies
+  FAC-SEM-122 to records and installations, so a revision that places outside a key's scope, scopes a key twice or
+  scopes a key it does not pin is refused whole. A record without `publisherScopes` reads as before. A partner grant
+  token is still refused (`malformed-chain`) until the partner actor is ported.
+
+### Changed
+
+- **The profile lock has its own name and the contract pin its file** (OBS-196, #337): the engine's local-profile
+  lock moves to `observatory/engine/observatory-profile.lock.json`, and `observatory/engine/fabric-contract.lock.json`
+  is now the Fabric Agent Contract pin (commit, version, profile `mcp`), read through `contract_lock.py`; the old name
+  is read as a profile lock for one release only while it still has that shape. A probe receipt's `contractCommit`
+  now comes from the pin (it was always `null`), which is why `probes-check` exits 1 once after this update.
+- **Every contract mention equals the pin** (OBS-205, #348): `fabric/interop-schemas/` is re-vendored at the pin
+  (what the server sends is unchanged), the contract's `pin:check` exits 0 on the engine (with
+  `fabric/service-schemas` excluded and its reason recorded), and a new check holds every commit a `fabric/*/README.md`
+  names to the pin or to a listed exception. `tools/vendor_org_vectors.py` and the new
+  `tools/vendor_contract_schemas.py` read and validate the pin first and every source file before writing anything,
+  write through a temporary file and a rename, and move the pin last. With #345 and #346 the whole
+  `fabric/node-vectors/` folder sits at one commit, the pin.
+- **Documentation**: the 0.28.0 receipts (#333), the `node.lifecycle` port plan file by file (#336,
+  `docs/design/LIFECYCLE.md`), and backlog rows for review findings and dated asks (#334, #335, #340, #343).
+
+### Fixed
+
+- **Live state under a cache root is never removed** (OBS-203, #338): the disk guard keeps any folder under a cache
+  or temporary root that holds an `.observatory-keep` marker (a marker deeper in the tree keeps the whole tree, for
+  the build-output walk too) or that is, holds or lies inside a local Fabric service descriptor's `paths.data`,
+  `paths.config` or `paths.logs`; `paths.cache` stays removable. Both are checked again right before each removal.
+  `disk-guard.json` lists what was kept (`kept`, at most 200), MCP `observatory_machine(section="guard")` returns it,
+  and the Machine page shows a "Kept by the guard" table. An unreadable descriptor is named in `degraded`.
+- **The organization suite runs on every system** (OBS-201, #339): `tests/test_node_org.py` was never listed in
+  `run_portable.py`, so `full check` ran it nowhere. It is listed now, a test refuses an engine test file no runner
+  names, the Windows job runs it as an enforced step (and a Windows child keeps `SYSTEMROOT`, without which key
+  generation failed), and a new case checks that device keys, enrollment, outbox and journal are owner-only on each
+  system.
+
 ## 0.28.0 (2026-10-21)
 
 A new release is found within five minutes from the release's static `SHA256SUMS`, without the GitHub API, and the
