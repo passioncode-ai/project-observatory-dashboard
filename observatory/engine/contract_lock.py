@@ -130,9 +130,14 @@ PIN_CHECK_SKIPPED = (".git", "node_modules")
 DATED_RECORDS = ("docs/handoffs", "docs/evidence", ".task-pipeline")
 DATED_FILE = re.compile(r"^CHANGELOG")
 
-#: Paths this engine would pass to `pin:check` as `--exclude`, each with the reason it names another commit.
-#: Empty since OBS-205: every mention `pin:check` reads equals the pin.
-PIN_CHECK_EXCLUDES: dict[str, str] = {}
+#: Paths this engine passes to `pin:check` as `--exclude`, each with the reason it names another commit (OBS-205):
+#:     pnpm --dir <contract checkout> pin:check observatory/engine --exclude fabric/service-schemas
+#: Every other mention `pin:check` reads equals the pin.
+PIN_CHECK_EXCLUDES: dict[str, str] = {
+    "fabric/service-schemas": "vendored at `7931c1d`: at the pin `service-descriptor.schema.json` names a word the "
+                              "maintainer's private identifier list holds, so the public-release privacy gate refuses "
+                              "the copy until that word is reviewed (OBS-212)",
+}
 
 
 def find_pin_drift(files: list[tuple[str, str]], commit: str) -> list[tuple[str, int, str]]:
@@ -214,6 +219,7 @@ def pin_drift(root: Path = ROOT, excluded: tuple[str, ...] = tuple(PIN_CHECK_EXC
 #: Folders whose README names a contract commit other than the pin, each commit with why it stays (OBS-205). Moving
 #: one is a re-vendor with its own review, row OBS-212; a commit missing from here, or listed and gone, fails the test.
 VENDORED_AT_OTHER_COMMITS: dict[str, dict[str, str]] = {
+    "fabric/service-schemas": {"7931c1d": PIN_CHECK_EXCLUDES["fabric/service-schemas"]},
     "fabric/delegation-schemas": {
         "7931c1d": "at the pin `delegation-token.schema.json` admits a partner actor and a fifth actor level, and "
                    "`common`, `delegation-jwks` and `governance` changed; `delegation.py` and the meter validate "

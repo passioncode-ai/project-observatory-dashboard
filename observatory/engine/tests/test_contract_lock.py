@@ -274,7 +274,7 @@ class PinChecksWalk(unittest.TestCase):
 
 class TheEngineNamesOneContractRevision(unittest.TestCase):
     """G-11 on this folder, as `pnpm --dir <contract checkout> pin:check observatory/engine`
-    runs it: zero drift, with no path excluded (OBS-205)."""
+    runs it with the engine's excludes: zero drift (OBS-205)."""
 
     def test_pin_check_finds_no_drift_in_the_engine(self) -> None:
         drift = contract_lock.pin_drift(ROOT)
@@ -297,7 +297,7 @@ class TheEngineNamesOneContractRevision(unittest.TestCase):
 
     def test_the_schemas_vendored_at_the_pin_name_it_on_the_contracts_line(self) -> None:
         commit = contract_lock.contract_pin(ROOT)["commit"]
-        for folder in ("fabric/interop-schemas", "fabric/service-schemas"):
+        for folder in ("fabric/interop-schemas",):
             readme = (ROOT / folder / "README.md").read_text(encoding="utf-8")
             named = re.search(r"`passioncode-ai/fabric-agent-contract` at commit `([0-9a-f]{40})`", readme)
             self.assertIsNotNone(named, folder)

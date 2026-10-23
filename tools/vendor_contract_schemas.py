@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendors the contract schemas the engine holds its service and interop answers to, at the contract pin (OBS-205).
+"""Vendors the contract schemas the engine holds its interop answers to, at the contract pin (OBS-205).
 
     python3 tools/vendor_contract_schemas.py --contract <fabric-agent-contract checkout>
 
@@ -7,8 +7,7 @@ The commit is the engine's one pin of the contract, read through `observatory/en
 below the tool copies, byte for byte from that commit (read with `git show`, so the checkout's working tree and branch
 do not matter), every schema the folder holds and the `$ref` closure of them in the contract's `schemas/`: a schema may
 start to refer to another at any commit, and a copy without it does not resolve. Then it rewrites, in the folder's
-README, the commit on the line that names the contract and the digest table, which `tests/test_interop.py` and
-`tests/test_fabric_service.py` check.
+README, the commit on the line that names the contract and the digest table, which `tests/test_interop.py` checks.
 
 Everything is read and checked before anything is written: a missing or invalid pin, a commit the checkout does not
 hold, a file that cannot be read or a README without its commit line exits 1 and changes nothing.
@@ -26,8 +25,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / "observatory" / "engine"
-#: The folders vendored at the pin, relative to the engine.
-FOLDERS = ("fabric/interop-schemas", "fabric/service-schemas")
+#: The folders vendored at the pin, relative to the engine. `fabric/service-schemas` joins them once the word its
+#: descriptor schema names at the pin is reviewed for the privacy gate (`contract_lock.PIN_CHECK_EXCLUDES`, OBS-212).
+FOLDERS = ("fabric/interop-schemas",)
 #: The README line that names the vendored commit: on the same line as the contract's name, so `pin:check` reads it.
 COMMIT_LINE = re.compile(r"(`passioncode-ai/fabric-agent-contract` at commit `)([0-9a-f]{40})(`)")
 DIGEST_ROW = re.compile(r"^\| `[^`]+` \| `[0-9a-f]{64}` \|\n", re.M)

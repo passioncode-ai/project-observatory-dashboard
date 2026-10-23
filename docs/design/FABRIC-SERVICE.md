@@ -148,7 +148,7 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 |---|---|
 | `observatory/engine/fabric_service.py` | `passioncode-ai/fabric-agent-adapter` `f31c2b2792f7` (v0.5.0), `building-fabric-services/scripts/fabric_service.py` |
 | `observatory/engine/tests/check_service.py`, `observatory/engine/tests/fabric_interop.py` | the same commit, `scripts/check_service.py` and `scripts/fabric_interop.py` (the probe imports it) |
-| `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` at the engine's contract pin, `schemas/` with the `$ref` closure (`tools/vendor_contract_schemas.py`; the folder's README names the commit and the digests, OBS-205) |
+| `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `7931c1d`, `schemas/`; not at the contract pin until OBS-212 (the folder's README says why and records the digests) |
 
 Never edit them here: update upstream, copy again, and the digest test says whether the copy is
 whole.

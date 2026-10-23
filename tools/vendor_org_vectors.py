@@ -8,7 +8,7 @@ matter), `fixtures/vectors/http-signature.json`, `fixtures/vectors/share-registr
 `schemas/device-enrollment.schema.json` into `observatory/engine/fabric/node-vectors/`, and the device request and
 check-in fixtures CT-65 added and the key-on-record renewal fixtures of DEC-0100 into its `device/` folder, then
 rewrites the commit and those files' digest rows in that folder's README, and the commit of the engine's contract
-pin (OBS-196), and re-vendors the schemas `tools/vendor_contract_schemas.py` keeps at the pin (OBS-205): the contract
+pin (OBS-196), and re-vendors the interop schemas `tools/vendor_contract_schemas.py` keeps at the pin (OBS-205): the contract
 asks a consumer to pin it once and to move the pin with what it vendors, in one change.
 `tests/test_node_foundation.py` checks the digests, `tests/test_node_org.py` runs the files and
 `tests/test_contract_lock.py` holds the pin equal to the READMEs' commits, so a re-vendored commit is checked by the next

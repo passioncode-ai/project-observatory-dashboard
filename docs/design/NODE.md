@@ -385,7 +385,7 @@ and the CT-65 device fixtures (`fabric/node-vectors/device/`: the file-key reque
 answer with `protocols`) are vendored at that commit and run by `test_node_org.py`. A server still on an older
 contract answers a 422 schema refusal pointing at `/key/storage` or `/key/exportable`, which the node reports as
 `key-storage-refused`. `python3 tools/vendor_org_vectors.py --contract <checkout> --commit <sha>` re-pins every
-OBS-161 file at another commit in one step, with the service and interop schemas kept at the pin; it reads and checks
+OBS-161 file at another commit in one step, with the interop schemas kept at the pin; it reads and checks
 the pin and every file before it writes any (OBS-205). The rotation-replay fixtures are the receiver's rule (FAC-SEM-125); the
 node's half, the same request sent again after a lost answer, is `test_a_rotation_lost_on_the_way_back_is_sent_again_unchanged`.
 

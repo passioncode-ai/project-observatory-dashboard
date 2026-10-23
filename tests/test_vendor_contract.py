@@ -2,8 +2,8 @@
 """The two tools that vendor contract files and move the pin (OBS-205).
 
 `tools/vendor_org_vectors.py` moves the engine's one pin of the contract with the
-files it vendors; `tools/vendor_contract_schemas.py` keeps the service and interop
-schemas at that pin, with the `$ref` closure of them. Both read the pin through
+files it vendors; `tools/vendor_contract_schemas.py` keeps the interop schemas at
+that pin, with the `$ref` closure of them. Both read the pin through
 `contract_lock` and check it, and read every file, before they write anything: a
 missing or invalid pin, or a README they do not recognise, leaves the tree as it was.
 These cases run both against a contract checkout made here, from the engine's own
@@ -123,7 +123,7 @@ class VendoringMovesThePinWithTheFiles(unittest.TestCase):
         self.refused("pin-invalid")
 
     def test_a_schema_readme_it_does_not_recognise_writes_nothing(self) -> None:
-        readme = self.engine / "fabric" / "service-schemas" / "README.md"
+        readme = self.engine / "fabric" / "interop-schemas" / "README.md"
         readme.write_text(readme.read_text(encoding="utf-8").replace("at commit `", "at `"), encoding="utf-8")
         self.refused("readme-unrecognised")
 
@@ -133,17 +133,17 @@ class VendoringMovesThePinWithTheFiles(unittest.TestCase):
 
     def test_the_schemas_take_a_new_ref_with_them(self) -> None:
         """The `$ref` closure: a schema that starts to refer to another brings it along."""
-        usage = self.contract / "schemas" / "service-usage.schema.json"
+        usage = self.contract / "schemas" / "interop-job.schema.json"
         doc = json.loads(usage.read_text(encoding="utf-8"))
         doc.setdefault("$defs", {})["added"] = {"$ref": "added.schema.json"}
         usage.write_text(json.dumps(doc), encoding="utf-8")
         (self.contract / "schemas" / "added.schema.json").write_text('{"type": "string"}', encoding="utf-8")
         commit = self.commit_contract("a new reference")
         files = self.schemas.plan(self.contract, commit, self.engine)
-        added = self.engine / "fabric" / "service-schemas" / "added.schema.json"
+        added = self.engine / "fabric" / "interop-schemas" / "added.schema.json"
         self.assertIn(added, files)
         self.schemas.write(files, self.engine)
-        readme = (self.engine / "fabric" / "service-schemas" / "README.md").read_text(encoding="utf-8")
+        readme = (self.engine / "fabric" / "interop-schemas" / "README.md").read_text(encoding="utf-8")
         self.assertIn("| `added.schema.json` | `%s` |" % hashlib.sha256(added.read_bytes()).hexdigest(), readme)
 
     def test_the_schema_tool_reads_the_pin_through_the_module_and_refuses_a_bad_one(self) -> None:
