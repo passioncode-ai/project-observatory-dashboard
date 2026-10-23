@@ -81,7 +81,7 @@ helper and 203 tests in four files.
 |---|---|---|
 | L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
 | L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app is its own pull request before L3's tools are served | 0.29.0 |
-| L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #L3PR | 0.29.0, by 2026-10-31 |
+| L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
 | L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
 
