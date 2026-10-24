@@ -3,7 +3,7 @@ import json
 import os
 import unittest
 from unittest.mock import patch
-from test_machine import Base, git, commit
+from test_machine import Base, git, commit, patient_children
 
 
 class CheckoutState(Base):
@@ -321,7 +321,7 @@ class GraphPhase(Base):
             self.assertEqual(row['local_state']['state'],'clean-observed')
             self.assertEqual(published['upstream_cursor']['last_attempted'],str(path))
             seen.append(str(path));raise TimeoutError('PRIVATE DETAIL')
-        with patch.object(checkout_graph,'observe',side_effect=failure):
+        with patient_children(), patch.object(checkout_graph,'observe',side_effect=failure):
             result=checkout_inventory.scan(out,[root],seconds=8,root_seconds=6)
         self.assertEqual(len(seen),2)
         self.assertTrue(all(r['local_state']['state']=='clean-observed' for r in result['candidates']))
@@ -334,7 +334,8 @@ class GraphPhase(Base):
         path=self.data/'positive';path.mkdir();git(path,'init','-qb','main');commit(path,'tracked')
         git(path,'branch','peer');git(path,'branch','--set-upstream-to=peer','main')
         out=self.home/'store/raw/checkout-candidates.json'
-        result=checkout_inventory.scan(out,[path],seconds=8,root_seconds=4)
+        with patient_children():                    # the graph child is waited for: a loaded runner is slow (OBS-219)
+            result=checkout_inventory.scan(out,[path],seconds=8,root_seconds=4)
         row=result['candidates'][0]
         self.assertEqual(row['local_state']['state'],'clean-observed')
         self.assertTrue(row['upstream']['complete'],row['upstream'])

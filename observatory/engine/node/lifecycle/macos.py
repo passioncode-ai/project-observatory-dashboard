@@ -113,9 +113,9 @@ SWITCHBOARD_PROXY = re.compile(r'127\.0\.0\.1:[0-9]{1,5}')
 #: The compiled helper's file name, and where a source install keeps it.
 HELPER_NAME = 'lifecycle-native'
 HELPER_SOURCE = Path(__file__).with_name('native_app.swift')
-#: The fields of a helper answer the broker reads; anything else it says is dropped.
 #: The signal that ends a process group at once; on Windows `osproc` stops the tree whatever the signal.
 _KILL = getattr(signal, 'SIGKILL', signal.SIGTERM)
+#: The fields of a helper answer the broker reads; anything else it says is dropped.
 HELPER_FIELDS = ('pid', 'bundleId', 'windows', 'active', 'hidden', 'inputIdleSeconds')
 WATCH_EVENTS = ('launched', 'terminated', 'activated')
 
@@ -467,7 +467,8 @@ def read_fabric_hub(path) -> Optional[dict]:
     if data is None:
         return None
     doc = json.loads(data)
-    port = FABRIC_HUB_ORIGIN.fullmatch(doc.get('origin', '')) if isinstance(doc, dict) else None
+    origin = doc.get('origin') if isinstance(doc, dict) else None
+    port = FABRIC_HUB_ORIGIN.fullmatch(origin) if isinstance(origin, str) else None
     if (
         not port
         or not 1024 <= int(port.group(1)) <= 65535
@@ -478,6 +479,11 @@ def read_fabric_hub(path) -> Optional[dict]:
     ):
         raise ValueError('not a fabric hub')
     return doc
+
+
+def _object(value) -> dict:
+    """A JSON object read from a document, or an empty one for anything else (a string, a list, null)."""
+    return value if isinstance(value, dict) else {}
 
 
 def observation(state: str, **extra) -> dict:
@@ -665,9 +671,15 @@ class MacAdapter:
     def _helper_ready(self) -> bool:
         """The helper is run only when it is a regular file of this account that no one else may change: whoever
         could replace it would act with every grant the broker holds."""
+        folder = self.helper.parent
         try:
             return (
-                self.helper.is_file()
+                # The folder first: whoever may write it may swap the file between this check and the exec.
+                folder.is_dir()
+                and not folder.is_symlink()
+                and osprivacy.owned_by_me(folder)
+                and not osprivacy.others_may_write(folder)
+                and self.helper.is_file()
                 and not self.helper.is_symlink()
                 and osprivacy.owned_by_me(self.helper)
                 and not osprivacy.others_may_write(self.helper)
@@ -691,8 +703,14 @@ class MacAdapter:
         if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
             return observation('login_required')
         disabled = self.run([LAUNCHCTL, 'print-disabled', self.domain])
+        if disabled.returncode:
+            disabled = self.run([LAUNCHCTL, 'print-disabled', self.domain])     # once more: it may be transient
+        if disabled.returncode:
+            # Unreadable is not a hold: `held_off` would tell the caller the operator switched it off. An unknown
+            # disable state starts nothing and is answered as a failure the caller may retry.
+            return observation('failed', reason='launchd_disabled_state_unknown')
         label = target['identity']['label']
-        if disabled.returncode or re.search(r'"' + re.escape(label) + r'"\s*=>\s*(true|disabled)', disabled.stdout):
+        if re.search(r'"' + re.escape(label) + r'"\s*=>\s*(true|disabled)', disabled.stdout):
             return observation('held_off')              # a disable is the operator's durable hold
         result = self.run([LAUNCHCTL, 'print', self.domain + '/' + label])
         if result.returncode:
@@ -803,8 +821,8 @@ class MacAdapter:
             return seen | {'state': 'remote_unreachable'}
         if not isinstance(doc, dict):
             return seen | {'state': 'identity_mismatch'}
-        service, process = doc.get('service') or {}, doc.get('process') or {}
-        build = (service.get('build') or {}).get('digest') or (service.get('build') or {}).get('commit')
+        service, process = _object(doc.get('service')), _object(doc.get('process'))
+        build = _object(service.get('build')).get('digest') or _object(service.get('build')).get('commit')
         if (
             service.get('id') != readiness['serviceId']
             or service.get('instance') != readiness['instance']
@@ -813,7 +831,9 @@ class MacAdapter:
         ):
             return seen | {'state': 'identity_mismatch'}
         capability = readiness.get('capability')
-        capabilities = ((doc.get('surfaces') or {}).get('mcp') or {}).get('capabilities') or []
+        capabilities = _object(_object(doc.get('surfaces')).get('mcp')).get('capabilities')
+        if not isinstance(capabilities, list):
+            capabilities = []                           # a string would answer `in` by substring
         # A capability in the descriptor is transport evidence, not an authenticated call to it.
         if capability and capability not in capabilities:
             return seen | {'state': 'capability_missing', 'transportReady': True}
@@ -906,6 +926,11 @@ class MacAdapter:
                 response = self._helper_answer(['quit', target['path'], str(pid)])
                 if response.get('state') == 'quit_requested':
                     return 'quit_requested'
+                if response.get('state') == 'identity_mismatch':
+                    # The pid no longer belongs to the enrolled bundle: it is someone else's process now.
+                    raise LifecycleError('identity_mismatch')
+                if response.get('state') != 'quit_refused':
+                    raise LifecycleError('failed')
                 # A refused quit falls through to SIGTERM rather than reporting a stop it never asked for.
             try:
                 os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)

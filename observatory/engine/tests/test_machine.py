@@ -42,6 +42,38 @@ def commit(repo, name, text="x"):
     git(repo, "commit", "-qm", name)
 
 
+@contextlib.contextmanager
+def patient_children(timeout=120):
+    """A checkout scan whose budget follows the runner: each git child (`classify`, the graph's `observe`) is waited
+    for up to `timeout` seconds instead of the 2 s and 2.5 s production caps, and the time spent waiting for it is
+    taken off the scan's own clock, so a child slowed by a loaded runner neither times out nor eats the walk's budget.
+    The production budgets are unchanged; a test that asserts them (or a child's timeout) does not use this."""
+    import types
+    import checkout_graph
+    import checkout_inventory
+    real = time.monotonic
+    paused = [0.0]
+    original = {'classify': checkout_inventory.classify, 'observe': checkout_graph.observe}
+
+    def patient(fn):
+        def run(path, seconds):
+            if seconds <= 0:
+                return fn(path, seconds)             # a spent budget still answers as it does in production
+            started = real()
+            try:
+                return fn(path, max(seconds, timeout))
+            finally:
+                paused[0] += real() - started
+        return run
+
+    clock = types.SimpleNamespace(**{name: getattr(time, name) for name in dir(time) if not name.startswith('_')})
+    clock.monotonic = lambda: real() - paused[0]
+    with patch.object(checkout_inventory, 'time', clock), \
+            patch.object(checkout_inventory, 'classify', patient(original['classify'])), \
+            patch.object(checkout_graph, 'observe', patient(original['observe'])):
+        yield
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -2665,8 +2665,8 @@
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "93b6815faada86041b2d3e44bc3d966056f2a62d301e33e3be43e39235445163",
-      "bytes": 41286
+      "export_sha256": "b79f077fdc96b64257fe6d5fbdee049edbdac45c8ede0c552d1fab87180713d3",
+      "bytes": 42094
     },
     {
       "path": "node/http_signature.py",
@@ -2700,15 +2700,15 @@
       "path": "node/lifecycle/broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "87eb1ffa93c0ffeebfc9996adf9e2c112a98b4a980d104c6157ea5d1bdc37c3f",
-      "bytes": 82787
+      "export_sha256": "c66feaf28ad76e56ba5c9e262e41fcbee4278088e47885f0494a0d46f7a331ac",
+      "bytes": 85589
     },
     {
       "path": "node/lifecycle/macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2ddb22be3aebfe580f5bcf480080ed61ccc8067520af2315bc3fdf45e65ea195",
-      "bytes": 54268
+      "export_sha256": "f4b6674ca72f19e9ca3a8fb4f02990acbdf3f077a2e14df26f7640a40dc6f65e",
+      "bytes": 55779
     },
     {
       "path": "node/lifecycle/native_app.swift",
@@ -2721,8 +2721,8 @@
       "path": "node/lifecycle/service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bdc10324949685e7c96637cb57dec21543acf8d0ac37b4e500c251b80bc95fde",
-      "bytes": 33850
+      "export_sha256": "8fb8041ebd6146a413ba9c0d21f808f99e83fec391a468f929be44f4c151d741",
+      "bytes": 34283
     },
     {
       "path": "node/node_summary.py",
@@ -3794,15 +3794,15 @@
       "path": "tests/test_checkout_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9685e9d9e957b48c6db59c9cd47abb4c89564d787148be080cf44ddf41cf3765",
-      "bytes": 11185
+      "export_sha256": "73bf9325b2b37df2608e01c9c7bbc8d7d81917108e9ef19b6498153a29bca5f9",
+      "bytes": 11363
     },
     {
       "path": "tests/test_checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "280be5fd61fc68a203fac20e0367a62fa681811cd0278d13ded5956fd3663a43",
-      "bytes": 23313
+      "export_sha256": "71bbe29e6317eaacb2898a5cea2394222d02c8a1e68168cb3c59e275fb2e15c2",
+      "bytes": 23474
     },
     {
       "path": "tests/test_checkout_subject.py",
@@ -4560,8 +4560,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1bdb5f0ea99b53d6c1c468979e49cb3e6348ec8292c70a21cbf06ee93e6f23b7",
-      "bytes": 62090
+      "export_sha256": "1e8fa957d1503ad54407e2d3f40ae1f760c0baac408e83420833cfc82c107472",
+      "bytes": 63619
     },
     {
       "path": "tests/test_machine_backup.py",
@@ -4741,8 +4741,8 @@
       "path": "tests/test_node_estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "87cb6d59315c1b4c2f87eda9b1a5c39aabad9b93b2911e6d0e172e64aed020ee",
-      "bytes": 11202
+      "export_sha256": "ecb64228829c1a208fadd2fe67348ff22f0a6c69c5790f48051a6dad22b2ecf2",
+      "bytes": 13247
     },
     {
       "path": "tests/test_node_foundation.py",
@@ -4755,22 +4755,22 @@
       "path": "tests/test_node_lifecycle_broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "83f663ca6589d655228ed7bd58f6b449fa1cdc6162b12c65c8fbeee9d887d3a8",
-      "bytes": 74041
+      "export_sha256": "8d8834e6d20a6dcb80d6f1286f64c1198f065f084e42a3884ac0bc5ffe6d6192",
+      "bytes": 79804
     },
     {
       "path": "tests/test_node_lifecycle_macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "476a3dac06863a096bf163d4445be8b1ffaecbb5612ce0c9e48bdafdc9f45daf",
-      "bytes": 60142
+      "export_sha256": "af51436a40d996b1d60443e1b2fa9eb03d97f3bc217c4c5578d5486c65457461",
+      "bytes": 64786
     },
     {
       "path": "tests/test_node_lifecycle_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "faa7f73523cc33c5e15d9e9c38235f5c63832b766b39152b3ad84a2361192af6",
-      "bytes": 48618
+      "export_sha256": "afad8a8aa6e4f8d1f6d9fe4b1b92a0fbc3aee82fbb89acfa9a51f82469f45a3d",
+      "bytes": 50520
     },
     {
       "path": "tests/test_node_org.py",
@@ -5267,8 +5267,8 @@
       "path": "tests/test_session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d8b7377de9c9195911b96314b847b8d69acf0c3dd57d5066ae108d8c612f0321",
-      "bytes": 24103
+      "export_sha256": "c9546ae058749db2e8f5b21e1877194fd99d7429b73bbfab0f82eebdc1bbb214",
+      "bytes": 24526
     },
     {
       "path": "tests/test_session_start.py",
@@ -6097,8 +6097,8 @@
       "path": "tools/lifecycle_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "976148935b92b1aa88c307e7a03df05b204a5bb5180c28ee967c60e6809bf319",
-      "bytes": 23365
+      "export_sha256": "0b085d084754577a3e8af8cf9a437316efc48e53aa5a47136442684e2d8d2aae",
+      "bytes": 23611
     },
     {
       "path": "tools/lifecycle_findings.py",

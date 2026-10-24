@@ -568,6 +568,10 @@ class Host:
             return
         if exists:
             self.service()
+        else:
+            with self._lock:
+                if self._service is None:
+                    self._problem = None                # nothing enrolled any more: no fault to report
 
     def service(self) -> Optional[Service]:
         with self._lock:
@@ -575,6 +579,9 @@ class Host:
                 return self._service
             try:
                 if not self._config().exists():
+                    # The operator removed the document after a failed start: nothing is enrolled, so `/mcp` says
+                    # that (403), not a stale 503 for a store nobody asked for any more.
+                    self._problem = None
                     return None
                 self._service = self.factory()
                 self._problem = None

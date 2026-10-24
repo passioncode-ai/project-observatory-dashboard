@@ -618,6 +618,53 @@ class EffectTests(Folder, unittest.TestCase):
         with mock.patch('os.kill', side_effect=ProcessLookupError):
             self.assertEqual(self.adapter.stop(app, 42, mode='term'), 'already_exited')
 
+    def test_a_quit_answered_identity_mismatch_signals_nothing(self):
+        app = {'kind': 'app', 'path': '/Applications/X.app'}
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'})
+        with mock.patch('os.kill') as kill:
+            with self.assertRaisesRegex(broker.LifecycleError, 'identity_mismatch'):
+                self.adapter.stop(app, 42)
+            kill.assert_not_called()
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'not_installed'})
+        with mock.patch('os.kill') as kill:
+            with self.assertRaisesRegex(broker.LifecycleError, 'failed'):
+                self.adapter.stop(app, 42)             # only `quit_refused` falls through to SIGTERM
+            kill.assert_not_called()
+
+    @unittest.skipUnless(POSIX, 'POSIX modes and links')
+    def test_the_helpers_folder_is_checked_before_it_runs(self):
+        app = {'kind': 'app', 'path': '/Applications/X.app', 'readiness': {'kind': 'process'}}
+        self.helper_says({'state': 'ready', 'pid': 9})
+        self.assertEqual(self.adapter.probe(app)['state'], 'ready')
+        os.chmod(self.root, 0o777)                  # someone else could swap the helper between check and exec
+        try:
+            self.helper_says({'state': 'ready', 'pid': 9})
+            self.assertEqual(self.adapter.probe(app)['state'], 'setup_required')
+            with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+                self.adapter.start(app)
+        finally:
+            os.chmod(self.root, 0o700)
+        linked = self.root / 'linked'
+        linked.symlink_to(self.root, target_is_directory=True)
+        through_link = adapter(self.root, run=self.mac, helper=linked / 'helper')
+        through_link.identity_matches = lambda target, *, deadline=None: True
+        self.assertEqual(through_link.probe(app)['state'], 'setup_required')
+
+    def test_an_unreadable_disabled_list_is_not_an_operator_hold(self):
+        job = {'kind': 'launchd', 'path': '/var/empty/Library/LaunchAgents/com.example.job.plist',
+               'identity': {'label': 'com.example.job'}, 'readiness': {'kind': 'process'}}
+        self.adapter.identity_matches = lambda target, *, deadline=None: True
+        self.mac.answers[(macos.LAUNCHCTL, 'print-disabled')] = [done('', 5), done('', 5)]
+        seen = self.adapter.probe(job)
+        self.assertEqual((seen['state'], seen['reason']), ('failed', 'launchd_disabled_state_unknown'))
+        self.mac.answers[(macos.LAUNCHCTL, 'print-disabled')] = [done('', 5), done('', 5)]
+        with self.assertRaisesRegex(broker.LifecycleError, 'failed'):
+            self.adapter.start(job)
+        self.assertFalse(any(c[0][1] in ('kickstart', 'bootstrap', 'enable') for c in self.mac.calls))
+        self.mac.answers[(macos.LAUNCHCTL, 'print', 'gui/501/com.example.job')] = done('state = waiting\n')
+        self.mac.answers[(macos.LAUNCHCTL, 'print-disabled')] = [done('', 5), done('{}\n')]
+        self.assertEqual(self.adapter.probe(job)['state'], 'stopped', 'a transient failure is read once more')
+
     def test_a_launchd_stop_is_a_bootout_and_force_is_sigkill(self):
         self.adapter._launchd_state = lambda target: {'state': 'ready', 'pid': 7}
         job = {'kind': 'launchd', 'path': '/x.plist', 'identity': {'label': 'com.example.job'}}
@@ -852,7 +899,8 @@ class FabricHubProbeTests(Folder, unittest.TestCase):
         port = self.serve()
         for override in ({'protocol': 'fabric-hub/9'}, {'origin': f'http://localhost:{port}'},
                          {'origin': f'http://10.0.0.1:{port}'}, {'origin': f'http://127.0.0.1:{port}/x'},
-                         {'pid': '4242'}, {'mcp': '/other'}):
+                         {'pid': '4242'}, {'mcp': '/other'}, {'origin': 4242}, {'origin': None},
+                         {'origin': ['http://127.0.0.1:1']}):
             self.publish(port=port, **override)
             result = self.probe()
             self.assertEqual((result['state'], result.get('reason')), ('capability_missing', 'hub_invalid'), override)
@@ -921,6 +969,26 @@ class FabricServiceProbeTests(Folder, unittest.TestCase):
         doc['status'] = 'starting'
         readiness['origin'] = self.serve(doc)
         self.assertEqual(a._service_probe(readiness, macos.observation('ready', pid=9))['state'], 'starting')
+
+    def test_a_document_of_the_wrong_shape_is_a_mismatch_not_a_crash(self):
+        readiness = {'kind': 'fabric-service', 'serviceId': 'alpha-service', 'instance': 'default',
+                     'buildDigest': 'sha256:' + '0' * 64}
+        a = adapter(self.root)
+        good = {'id': 'alpha-service', 'instance': 'default', 'build': {'digest': readiness['buildDigest']}}
+        for doc in ({'status': 'ready', 'service': 'alpha-service', 'process': {'pid': 9}},
+                    {'status': 'ready', 'service': good, 'process': 'pid 9'},
+                    {'status': 'ready', 'service': good | {'build': 'sha256:x'}, 'process': {'pid': 9}}):
+            readiness['origin'] = self.serve(doc)
+            self.assertEqual(a._service_probe(readiness, macos.observation('ready', pid=9))['state'],
+                             'identity_mismatch', doc)
+        doc = {'status': 'ready', 'service': good, 'process': {'pid': 9},
+               'surfaces': {'mcp': {'capabilities': 'alpha.capability.read'}}}
+        readiness['origin'] = self.serve(doc)
+        seen = a._service_probe(readiness | {'capability': 'alpha.capability'}, macos.observation('ready', pid=9))
+        self.assertEqual(seen['state'], 'capability_missing', 'a string of capabilities is not a list of them')
+        doc['surfaces'] = 'mcp'
+        readiness['origin'] = self.serve(doc)
+        self.assertEqual(a._service_probe(readiness, macos.observation('ready', pid=9))['state'], 'ready')
 
 
 # -- the registry's product profiles ---------------------------------------------------------------------------------

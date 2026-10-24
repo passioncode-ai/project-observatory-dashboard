@@ -121,6 +121,10 @@ EARLY_EXIT_SECONDS = 5 * 60
 #: An idempotency receipt answers a retry for a day; terminal operations are kept a week.
 REQUEST_TTL_SECONDS = 24 * 3600
 OPERATION_RETENTION_SECONDS = 7 * 24 * 3600
+#: An operation recovered after its deadline gets the target's own budget again only when the deadline passed less
+#: than this long ago (a crash and a restart of the server). Later than that (a machine that slept for hours) the
+#: caller has long given up: the operation ends with what is known, and never launches or stops anything.
+RECOVERY_WINDOW_SECONDS = 600
 #: How long `close` waits for running workers before leaving them to recovery.
 CLOSE_GRACE_SECONDS = 8
 #: Operations running at once, across every target; one more is `busy`.
@@ -633,10 +637,19 @@ class Broker:
             self.prune()
         except BaseException:
             # Recovery or pruning failed on a store that opened (a corrupt page is found only when read): end what
-            # was submitted, close the store and let go of the lock, so a later attempt can start cleanly.
+            # was submitted, close the store and let go of the lock, so a later attempt can start cleanly. A worker
+            # already running may be inside an adapter call: the lock is released only once it has returned, or the
+            # next broker would recover the same operation while this one still acts on it.
             self.closed = True
             self.executor.shutdown(wait=False, cancel_futures=True)
-            with contextlib.suppress(Exception):
+            close = getattr(self.adapter, 'close', None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()                                 # ends a running child at once, as `close` does
+            with self.db_lock:
+                pending = list(self.futures)
+            concurrent.futures.wait(pending)
+            with self.db_lock, contextlib.suppress(Exception):
                 self.db.close()
             self._release_instance_lock()
             raise
@@ -989,13 +1002,19 @@ class Broker:
         principal, args, policy = (json.loads(row[k]) for k in ('principal', 'arguments', 'policy'))
         kind = args.get('_kind', 'ensure')
         deadline = args['deadlineAt'] / 1000
+        late = None
         if generation > 1 and deadline <= self.clock():
-            # Recovered after its deadline: the journal and the restart's phase say what already happened, so the
-            # rest still gets the target's own budget instead of ending `timeout` before it looks.
-            own = (policy.get('targets', {}).get(args['targetId']) or {}).get('timeoutSeconds', 1)
-            deadline = self.clock() + own * (2 if kind == 'restart' else 1)
+            if self.clock() - deadline > RECOVERY_WINDOW_SECONDS:
+                late = self._recovered_too_late(args['targetId'], operation_id)
+            else:
+                # Recovered shortly after its deadline: the journal and the restart's phase say what already
+                # happened, so the rest still gets the target's own budget instead of ending `timeout` before it looks.
+                own = (policy.get('targets', {}).get(args['targetId']) or {}).get('timeoutSeconds', 1)
+                deadline = self.clock() + own * (2 if kind == 'restart' else 1)
         try:
-            if kind == 'ensure':
+            if late is not None:
+                result = late
+            elif kind == 'ensure':
                 result = self._drive(principal, args['targetId'], deadline, policy, operation_id, generation)
             elif kind == 'stop':
                 result = self._drive_stop(
@@ -1027,6 +1046,20 @@ class Broker:
                 })
             except Exception:  # noqa: BLE001 - a journal failure never changes a finished operation
                 pass
+
+    def _recovered_too_late(self, target_id: str, operation_id: str) -> dict:
+        """The answer of an operation recovered past RECOVERY_WINDOW_SECONDS: no effect, only what is known.
+
+        A start this operation dispatched before the crash may or may not have landed: `delivery_unknown`, and the
+        journal entry stays for `_resolve_dispatch` to settle by observation. Otherwise nothing was done for it:
+        `timeout`."""
+        with self.db_lock:
+            effect = self.db.execute(
+                "SELECT 1 FROM effects WHERE target=? AND operation=? AND state='dispatching'", (target_id, operation_id)
+            ).fetchone()
+        if effect is not None:
+            return self._observation('delivery_unknown', action='reconcile_only', reason='recovered_too_late')
+        return self._observation('timeout', action='none', reason='recovered_too_late')
 
     def _fence(self, principal: dict, target_id: str, policy: dict, op: str, generation: int,
                tool: str = 'lifecycle.ensure_running', allow_held: bool = False) -> dict:
@@ -1301,7 +1334,12 @@ class Broker:
             if action == 'quit_requested':
                 # The app's own quit gets a few seconds; then the signal every app must honour.
                 stopped = self._wait_stopped(target, min(graceful_end, self.clock() + QUIT_GRACE_SECONDS))
+                if not stopped and self.closed:
+                    # A wait cut short by shutdown is not a quit that was ignored: no signal now. The operation stays
+                    # `running`; the next process recovers it, probes again and gives the quit its grace.
+                    raise _Interrupted()
                 if not stopped:
+                    self._fence(principal, target_id, policy, op, generation, tool, allow_held=True)
                     try:
                         action = self.adapter.stop(target, pid, force=False, mode='term')
                     except LifecycleError as exc:
@@ -1309,12 +1347,17 @@ class Broker:
                             return self._observation(exc.code)
                         action = 'quit_requested'           # it exited between the probe and the signal
             stopped = self._wait_stopped(target, graceful_end)
+            if not stopped and self.closed:
+                raise _Interrupted()
             if not stopped and force:
+                self._fence(principal, target_id, policy, op, generation, tool, allow_held=True)
                 try:
                     action = self.adapter.stop(target, pid, force=True)
                 except LifecycleError as exc:
                     return self._observation(exc.code)
                 stopped = self._wait_stopped(target, deadline)
+                if not stopped and self.closed:
+                    raise _Interrupted()
             if stopped:
                 self._forget_launch(target_id)
                 return self._observation('stopped', action=action)

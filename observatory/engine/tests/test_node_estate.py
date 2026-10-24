@@ -205,5 +205,41 @@ class RecordRules(unittest.TestCase):
                                                  'org:acme'))
 
 
+class PublisherKeyPick(unittest.TestCase):
+    """OBS-216: the key a placement is verified under is picked as the reference's `===` picks it, like the scope
+    check beside it: `True` is not `1`, and a missing `kid` (`undefined`) is not `kid: null`."""
+
+    AGENT = 'urn:fabric:agent:example:inbox-digest'
+
+    def record(self, keys, publisher_kid=estate._MISSING):
+        placement = {'agentRef': self.AGENT}
+        if publisher_kid is not estate._MISSING:
+            placement['publisherKid'] = publisher_kid
+        return {'publisherKeys': keys, 'machines': [{'id': 'm-1', 'packages': [placement]}]}
+
+    def pick(self, keys, publisher_kid=estate._MISSING):
+        return estate.placement_trust(self.record(keys, publisher_kid), 'm-1', self.AGENT)['publisher']
+
+    def test_a_boolean_kid_is_not_a_number(self):
+        one, true = {'kid': 1, 'x': 'number'}, {'kid': True, 'x': 'boolean'}
+        self.assertEqual(self.pick([one, true], True), [true])
+        self.assertEqual(self.pick([one, true], 1), [one])
+        self.assertEqual(self.pick([{'kid': 1.0}], 1), [{'kid': 1.0}], 'one number, two spellings')
+
+    def test_a_missing_kid_is_not_a_null_one(self):
+        bare, null = {'x': 'no kid'}, {'kid': None, 'x': 'null kid'}
+        self.assertEqual(self.pick([bare, null], None), [null])
+        self.assertEqual(self.pick([bare, null]), [bare])
+
+    def test_the_record_rules_compare_the_same_way(self):
+        record = self.record([{'kid': 1}], True)
+        codes = [f['instancePath'] for f in estate.estate_record_rules('estate-record', record)
+                 if f['instancePath'].endswith('/publisherKid')]
+        self.assertIn('/machines/0/packages/0/publisherKid', codes, 'a boolean kid is not pinned by a number')
+        twice = [f['instancePath'] for f in estate.estate_record_rules(
+            'estate-record', self.record([{'x': 1}, {'kid': None}], None)) if f['instancePath'].startswith('/publisherKeys')]
+        self.assertNotIn('/publisherKeys/1/kid', twice, 'a null kid and a missing one are two kids')
+
+
 if __name__ == '__main__':
     unittest.main()
