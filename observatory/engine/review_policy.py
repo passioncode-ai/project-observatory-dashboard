@@ -879,7 +879,7 @@ def _recommend_registry(w: Waiting, p: dict, ctx: Context) -> tuple[str, str, st
     if w.rule:
         if w.rule == "registry.exact-duplicate":
             return "reject", f"{w.reason}: superseded by the older one", f"rule:{w.rule}"
-        return "accept", f"the rule {w.rule} accepts it ({w.reason}); the policy is not in force", f"rule:{w.rule}"
+        return "accept", f"the rule {w.rule} accepts it ({w.reason}); that rule is not in force here", f"rule:{w.rule}"
     if w.reason.startswith("cannot be applied") or w.reason.endswith("is not in the registry") \
             or w.reason.startswith("the patch is not"):
         return "reject", w.reason, "heuristic:not-appliable"
