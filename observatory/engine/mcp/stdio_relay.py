@@ -10,8 +10,13 @@ relay owns the wire instead:
 - stdin is read with `select` and `os.read` into the relay's own buffer under a lock,
   so at any moment it knows every byte it has taken off the pipe;
 - each line is classified before the SDK sees it: a request (method and id) is counted
-  in flight until its answer is written; the client's `initialize` parameters and its
-  `notifications/initialized` are remembered;
+  in flight until its answer is written or the SDK settles it unanswered (a request the
+  client cancelled, by whatever spelling of its id); the client's `initialize` parameters
+  and its `notifications/initialized` are remembered;
+- a `subscriptions/listen` request (2026-07-28) is a stream, not a unit of work: the
+  client keeps it open for the whole session and nothing answers it until the server
+  ends it. It is kept apart (`listens`) and never holds a swap back (OBS-228: counted
+  as running, it refused every swap of every modern session on a live machine);
 - every answer the SDK writes goes through the relay, which removes it from the
   in-flight set and swallows the answer to the replayed handshake (SYNTHETIC_ID).
 
@@ -20,10 +25,14 @@ that request and every later one, lets the in-flight ones answer, runs the insta
 release's preflight (`session_reload.preflight`), then points 0/1 back at the wire and
 `execv`s the same server path with the state file inherited. The held requests and the
 unread bytes go into that file; the new process replays the handshake to its SDK and
-serves them, so the triggering request is answered once, by the new release. A refused
-or failed swap puts 0/1 back on the null device and stderr, routes the held requests to
-this process's SDK in order (they answer `stale-server` with the reason) and retries at
-a later request only when the reason can clear.
+serves them, so the triggering request is answered once, by the new release. Just
+before `execv` the relay ends each open listen stream the spec's graceful way, with its
+result stamped with the subscription id, as the last frame the old process writes; the
+client opens a new stream, which the new release acknowledges. A refused or failed swap
+puts 0/1 back on the null device and stderr, routes the held requests to this process's
+SDK in order (they answer `stale-server` with the reason) and retries only when the
+reason can clear: at a later request, and, when requests still running were the reason,
+the moment the last of them answers (the first idle moment), with no request needed.
 
 Notifications the client sends while a swap is pending are forwarded at once, except a
 `notifications/cancelled` for a held request, which drops that request (the client
@@ -45,7 +54,8 @@ import anyio
 import mcp_types as types
 from mcp.server.lowlevel.server import NotificationOptions
 from mcp.shared._context_streams import create_context_streams
-from mcp.shared.message import SessionMessage
+from mcp.shared.message import ServerMessageMetadata, SessionMessage
+from mcp.shared.subscriptions import SUBSCRIPTION_ID_META_KEY
 
 import code_freshness
 import configuration
@@ -61,6 +71,10 @@ TESTED_MCP = "2.3.0"
 RETRY_SECONDS = float(os.environ.get("OBSERVATORY_RELOAD_RETRY_SECONDS", "15"))
 #: A test-only fault: `fail` makes `execv` raise, so the failed-exec branch runs for real.
 TEST_EXEC_ENV = "OBSERVATORY_TEST_RELOAD_EXEC"
+#: The long-lived request a 2026-07-28 client keeps open for change notifications.
+LISTEN = "subscriptions/listen"
+#: The refusal that clears by itself once the requests running answer (`_drained`).
+BUSY = "requests were still running after {seconds} s"
 
 
 class Relay:
@@ -81,6 +95,8 @@ class Relay:
         self.paused = False
         self.eof = False
         self.inflight: dict = {}               # validated request id -> when it was handed on
+        self.listens: dict = {}                # open subscriptions/listen streams: key -> the id as sent
+        self.retry_when_idle = False           # a swap refused for running requests: retry once they answer
         self.held: list[bytes] = []
         self.swapping = False
         self.blocked: tuple | None = None      # marker identity a permanent refusal was made at
@@ -184,16 +200,44 @@ class Relay:
             message: Any = SessionMessage(valid)
         except Exception as exc:  # noqa: BLE001: the SDK answers a malformed frame itself
             valid, message = None, exc
-        if request and valid is not None and getattr(valid, "method", None) is not None \
-                and getattr(valid, "id", None) is not None:
+        counted = request and valid is not None and getattr(valid, "method", None) is not None \
+            and getattr(valid, "id", None) is not None
+        if counted:
             if valid.method == "initialize" and isinstance(getattr(valid, "params", None), dict):
                 self.init_params, self.init_id = valid.params, valid.id
-            self.inflight[_key(valid.id)] = time.monotonic()
+            key = _key(valid.id)
+            if valid.method == LISTEN:
+                self.listens[key] = valid.id
+            else:
+                self.inflight[key] = time.monotonic()
+            # The SDK runs this when it settles the request without an answer (the client
+            # cancelled it): it correlates a cancel by its own rules ("7" names request 7),
+            # so the relay learns it from the SDK rather than matching ids itself.
+            message.metadata = ServerMessageMetadata(on_request_unanswered=self._settled(key))
         try:
             await self.to_sdk.send(message)
         except (anyio.ClosedResourceError, anyio.BrokenResourceError):
-            if request and valid is not None:
-                self.inflight.pop(_key(getattr(valid, "id", None)), None)
+            if counted:
+                self._forget(_key(valid.id))
+
+    def _settled(self, key: tuple):
+        async def unanswered() -> None:
+            self._forget(key)
+        return unanswered
+
+    def _forget(self, key: tuple) -> None:
+        """A request that will get no further answer: no longer running or listening."""
+        self.inflight.pop(key, None)
+        self.listens.pop(key, None)
+        self._idle_retry()
+
+    def _idle_retry(self) -> None:
+        """The first idle moment after a swap was refused for running requests: try again now."""
+        if self.retry_when_idle and not self.inflight and not self.swapping and not self.eof \
+                and self.tg is not None and self._should_swap(idle=True):
+            self.retry_when_idle = False
+            self.swapping = True
+            self.tg.start_soon(self._swap)
 
     async def _route(self, line: bytes, from_held: bool = False) -> None:
         if not line.strip():
@@ -226,7 +270,7 @@ class Relay:
                 if len(kept) != len(self.held):
                     self.held = kept
                     return
-                self.inflight.pop(target, None)
+                self._forget(target)
         await self._deliver(line)
 
     # --- outbound --------------------------------------------------------------------
@@ -252,27 +296,29 @@ class Relay:
                 if answer:
                     # Only once it is on the wire: a swap waits for an empty set, and an
                     # answer pulled but not yet written would die with the old process.
-                    self.inflight.pop(_key(mid), None)
+                    self._forget(_key(mid))
 
     # --- the swap --------------------------------------------------------------------
 
     def _identity(self):
         return code_freshness._identity(self.freshness.marker)
 
-    def _should_swap(self) -> bool:
+    def _should_swap(self, idle: bool = False) -> bool:
         if self.freshness.check() is None:
             return False
         if self.blocked is not None and self.blocked == self._identity():
             return False
-        return time.monotonic() >= self.retry_at
+        return idle or time.monotonic() >= self.retry_at
 
     async def _drained(self) -> bool:
         """Whether every request handed on was answered within DRAIN_SECONDS.
 
-        Only validated requests are counted (`_deliver`), so every id here gets an answer.
-        A request still running at the bound keeps the swap deferred, refused as transient
-        and tried again at a later request: dropping its id would let the next attempt exec
-        while it runs and lose its answer. Stops at once when the client left."""
+        Only validated requests are counted (`_deliver`), and each leaves the set when its
+        answer is written or the SDK settles it unanswered; open listen streams are not
+        counted (they never end by themselves). A request still running at the bound keeps
+        the swap deferred, refused as transient and tried again the moment the set empties
+        or at a later request: dropping its id would let the next attempt exec while it runs
+        and lose its answer. Stops at once when the client left."""
         deadline = time.monotonic() + session_reload.DRAIN_SECONDS
         while self.inflight and not self.eof:
             if time.monotonic() > deadline:
@@ -295,6 +341,7 @@ class Relay:
             session_reload.REFUSAL = reason
             if transient:
                 self.retry_at = time.monotonic() + RETRY_SECONDS
+                self.retry_when_idle = reason == BUSY.format(seconds=int(session_reload.DRAIN_SECONDS))
             else:
                 self.blocked = self._identity()
             stale = self.freshness.check() or {}
@@ -306,6 +353,8 @@ class Relay:
         while self.held:
             await self._route(self.held.pop(0), from_held=True)
         self.swapping = False
+        # The requests that refused this attempt may all have answered while it was refused.
+        self._idle_retry()
 
     async def _attempt(self) -> tuple[str, bool] | None:
         """None when no swap is needed after all; (reason, transient) when it was refused.
@@ -318,7 +367,7 @@ class Relay:
         if session_reload.update_lock_held(self.home):
             return "an update of this workspace is in progress", True
         if not await self._drained():
-            return f"requests were still running after {int(session_reload.DRAIN_SECONDS)} s", True
+            return BUSY.format(seconds=int(session_reload.DRAIN_SECONDS)), True
         if self.eof:
             return "the client closed the session", True
         before = self._identity()
@@ -338,9 +387,32 @@ class Relay:
         state = {"reload": session_reload.RELOAD_PROTOCOL, "from": configuration.VERSION,
                  "to": answer["version"], "initialize": self.init_params, "initialized": self.initialized,
                  "negotiated": self.negotiated, "tools_changed": tools != sorted(answer["tools"])}
-        return self._exec(state)
+        ended: list = []
+        outcome = self._exec(state, ended)
+        # Still here: the exec failed after the streams were ended on the wire. The client
+        # opens new ones, so the handlers serving the ended ones stop writing on them.
+        for sid in ended:
+            self.listens.pop(_key(sid), None)
+            await self._deliver(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                            "params": {"requestId": sid}}).encode())
+        return outcome
 
-    def _exec(self, state: dict) -> tuple[str, bool]:
+    def _end_listens(self, ended: list) -> None:
+        """End every open listen stream gracefully (SubscriptionsListenResult, spec 2026-07-28).
+
+        Called under the write lock just before `execv`, so it is the last frame the old
+        process writes for each stream: the SDK's writes wait on the lock and die with it."""
+        for sid in list(self.listens.values()):
+            result = types.SubscriptionsListenResult(_meta={SUBSCRIPTION_ID_META_KEY: sid})
+            frame = {"jsonrpc": "2.0", "id": sid,
+                     "result": result.model_dump(by_alias=True, mode="json", exclude_none=True)}
+            data = (json.dumps(frame) + "\n").encode("utf-8")
+            view = memoryview(data)
+            while view:
+                view = view[os.write(self.wire_out, view):]
+            ended.append(sid)
+
+    def _exec(self, state: dict, ended: list) -> tuple[str, bool]:
         with self.read_lock:
             self.paused = True
             try:
@@ -352,6 +424,7 @@ class Relay:
                     except OSError as exc:
                         return f"the session state could not be handed over ({exc.strerror or type(exc).__name__})", False
                     try:
+                        self._end_listens(ended)
                         self._restore_wire()
                         os.environ[session_reload.STATE_ENV] = str(fd)
                         if os.environ.get(TEST_EXEC_ENV) == "fail":
