@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from unittest.mock import patch
-from test_machine import Base, ROOT, git, commit
+from test_machine import Base, ROOT, git, commit, patient_children
 sys.path.insert(0, str(ROOT))
 
 
@@ -17,7 +17,8 @@ class Candidates(Base):
         repo = root / 'clone'; repo.mkdir(); git(repo, 'init', '-q'); commit(repo, 'file')
         linked = root / 'linked'; git(repo, 'worktree', 'add', '-qb', 'side', str(linked))
         bare = root / 'bare'; git(root, 'init', '--bare', '-q', str(bare))
-        result = inventory.scan(self.output(), [root], seconds=10, entries=100, root_seconds=8)
+        with patient_children():                       # each git child is waited for on a loaded runner (OBS-219)
+            result = inventory.scan(self.output(), [root], seconds=10, entries=100, root_seconds=8)
         rows = result['candidates']
         self.assertEqual({r['classification'] for r in rows}, {'clone', 'linked-worktree', 'bare-repository'})
         self.assertTrue(all(r['reclaimable_bytes'] is None and r['allocated_bytes'] is None for r in rows))
@@ -163,7 +164,8 @@ class Candidates(Base):
         (fake / 'HEAD').write_text('not a repository')
         (fake / 'objects').mkdir(); (fake / 'refs').mkdir()
         for root in (repo / '.git', fake):
-            result = inventory.scan(self.output(), [root], seconds=5, root_seconds=4)
+            with patient_children():
+                result = inventory.scan(self.output(), [root], seconds=5, root_seconds=4)
             self.assertEqual(result['candidates'][0]['classification'], 'unknown')
             self.assertEqual(result['candidates'][0]['reason'], 'git-root-mismatch')
             self.assertFalse(result['roots'][0]['complete'])

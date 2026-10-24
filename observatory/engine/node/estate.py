@@ -36,10 +36,18 @@ def _indexed(value: Any) -> List[tuple]:
     return [(item, index) for index, item in enumerate(value) if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+def _member(entry: Any, name: str) -> Any:
+    """`entry[name]` as the reference reads it: `_MISSING` (JavaScript's `undefined`) when the member is absent, which
+    is not `None` (`null`): a key without a `kid` and a key whose `kid` is null are different keys."""
+    return entry.get(name, _MISSING) if isinstance(entry, dict) else _MISSING
+
+
 def _show(value: Any) -> str:
     """A value as JavaScript's `String()` writes it, for messages and keys."""
     if isinstance(value, str):
         return value
+    if value is _MISSING:
+        return 'undefined'
     if value is None:
         return 'null'
     if value is True or value is False:
@@ -245,15 +253,17 @@ def placement_trust(record: dict, machine_id: str, agent_ref: str, context: str 
                       if p.get('agentRef') == agent_ref and _context_of(p) == context), None)
     if placement is None:
         return None
-    if not _scope_admits(record, placement.get('publisherKid'), context):
+    kid = _member(placement, 'publisherKid')
+    if not _scope_admits(record, kid, context):
         return {'publisher': []}
-    return {'publisher': [k for k in _list(record.get('publisherKeys')) if k.get('kid') == placement.get('publisherKid')]}
+    # Compared as the reference's `===`, like the scope check: `True` is not `1`, and a missing kid is not `null`.
+    return {'publisher': [k for k in _list(record.get('publisherKeys')) if _same_value(_member(k, 'kid'), kid)]}
 
 
 def _scopes_of(record: dict, kid: Any) -> List[dict]:
     """The `publisherScopes[]` entries naming `kid` (DEC-0090): a partner's publisher key and the contexts it is
     trusted in. Compared as the reference's `===`: by value, a boolean never equal to a number."""
-    return [scope for scope in _list(record.get('publisherScopes')) if _same_value(scope.get('kid'), kid)]
+    return [scope for scope in _list(record.get('publisherScopes')) if _same_value(_member(scope, 'kid'), kid)]
 
 
 def _scope_admits(record: dict, kid: Any, context: Any) -> bool:
@@ -451,7 +461,10 @@ def package_digest(pkg: dict) -> str:
 
 def _same_value(a: Any, b: Any) -> bool:
     """JavaScript's SameValueZero over parsed JSON: strings, numbers, booleans and null by value (a boolean is never a
-    number), an object or array never equal to anything (each is a distinct value)."""
+    number), an object or array never equal to anything (each is a distinct value), and a missing member (`undefined`,
+    `_MISSING`) equal only to another missing one, never to `null`."""
+    if a is _MISSING or b is _MISSING:
+        return a is b
     if isinstance(a, (dict, list)) or isinstance(b, (dict, list)):
         return False
     if isinstance(a, bool) or isinstance(b, bool):
@@ -499,10 +512,10 @@ def installation_findings(value: dict) -> list:
             flag075(f'/record/machines/{machine_index}/secrets/{index}/slot',
                     f"the package declares no slot {_show(secret.get('slot'))}: a secret goes only where a placed "
                     'package declares it')
-    if placement is not None and not _scope_admits(record, placement.get('publisherKid'), context):
+    if placement is not None and not _scope_admits(record, _member(placement, 'publisherKid'), context):
         _flagger(findings, 'FAC-SEM-122')(
             f'/record/machines/{machine_index}/packages/{placement_index}/publisherKid',
-            f"publisher key {_show(placement.get('publisherKid'))} is a partner's, not trusted in {_show(context)}")
+            f"publisher key {_show(_member(placement, 'publisherKid'))} is a partner's, not trusted in {_show(context)}")
     if placement is not None:
         flag111 = _flagger(findings, 'FAC-SEM-111')
         for suffix, message in _placement_grant_problems(record, placement):
@@ -573,11 +586,12 @@ def _keys(value: dict, flag) -> None:
 
 def _placements(value: dict, flag) -> None:
     """FAC-SEM-074: an agent placed once per machine and context, under a publisher key the record pins once."""
-    kids = []
+    kids: list = []
     for key, index in _indexed(value.get('publisherKeys')):
-        if key.get('kid') in kids:
+        kid = _member(key, 'kid')
+        if any(_same_value(kid, seen) for seen in kids):
             flag(f'/publisherKeys/{index}/kid', 'a publisher key is pinned twice')
-        kids.append(key.get('kid'))
+        kids.append(kid)
     for machine, m in _indexed(value.get('machines')):
         agents = set()
         for placement, p in _indexed(machine.get('packages')):
@@ -586,7 +600,7 @@ def _placements(value: dict, flag) -> None:
             if key in agents:
                 flag(f'{at}/agentRef', 'placed twice on one machine in one context')
             agents.add(key)
-            if placement.get('publisherKid') not in kids:
+            if not any(_same_value(_member(placement, 'publisherKid'), kid) for kid in kids):
                 flag(f'{at}/publisherKid', 'the publisher key is not in publisherKeys')
 
 
@@ -599,10 +613,10 @@ _LONG_RUN = re.compile(r'[A-Za-z0-9+/=_-]{40,}')
 def _partner_scopes(value: dict, flag) -> None:
     """FAC-SEM-122 on one record (DEC-0090): a partner's publisher key is scoped once, to a key the record pins, and a
     placement under it is in one of the organization contexts its scope names, never `personal` or another."""
-    pinned = [key.get('kid') for key in _list(value.get('publisherKeys'))]
+    pinned = [_member(key, 'kid') for key in _list(value.get('publisherKeys'))]
     scoped: list = []
     for scope, index in _indexed(value.get('publisherScopes')):
-        kid = scope.get('kid')
+        kid = _member(scope, 'kid')
         if any(_same_value(kid, seen) for seen in scoped):
             flag(f'/publisherScopes/{index}/kid', f'publisher key {_show(kid)} is scoped twice')
         scoped.append(kid)
@@ -611,9 +625,9 @@ def _partner_scopes(value: dict, flag) -> None:
                  f'publisher key {_show(kid)} is not in publisherKeys, so the scope limits no key')
     for machine, m in _indexed(value.get('machines')):
         for placement, p in _indexed(machine.get('packages')):
-            if not _scope_admits(value, placement.get('publisherKid'), _context_of(placement)):
+            if not _scope_admits(value, _member(placement, 'publisherKid'), _context_of(placement)):
                 flag(f'/machines/{m}/packages/{p}/publisherKid',
-                     f"publisher key {_show(placement.get('publisherKid'))} is a partner's, trusted only in the "
+                     f"publisher key {_show(_member(placement, 'publisherKid'))} is a partner's, trusted only in the "
                      f'contexts its scope names, not in {_show(_context_of(placement))}')
 
 

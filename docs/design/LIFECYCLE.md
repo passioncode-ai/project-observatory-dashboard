@@ -111,7 +111,10 @@ agents never lose the tools between steps.
   (no `lifecycle.operation.get` grant is needed to see it), and `get` reads it later by id. A process that dies
   leaves them `running`, the next one takes them over under a new generation, and an old generation's worker
   cannot finish them; one recovered past its deadline gets the target's own budget again instead of ending
-  `timeout` before it looks, and a start recovered after its effect is still recorded as the broker's.
+  `timeout` before it looks, but only within `RECOVERY_WINDOW_SECONDS` (600 s) of that deadline: one recovered later
+  (a machine that slept for hours) launches and stops nothing and ends with what is known, `delivery_unknown` when it
+  had dispatched a start (the journal entry stays for observation to settle) and `timeout` otherwise, both with
+  `reason: recovered_too_late`. A start recovered after its effect is still recorded as the broker's.
   **Idempotency receipts** answer a retry for 24 hours, before the policy and grant revisions are compared; the
   same request id with another meaning is `idempotency_conflict`. Admission reads and writes its receipt in one
   `BEGIN IMMEDIATE` transaction.
@@ -126,7 +129,14 @@ agents never lose the tools between steps.
   (`note_activation` after a 20 s grace) and is not in front of (frontmost with input in the last minute):
   otherwise `in_use_by_person`. `held_off` never starts; killing and holding an always_on target off are the
   owner's (or a caller the owner marked `operatorProxy`). An idle stop reads the lease again under the target's
-  lock.
+  lock. A stop is fenced again before SIGTERM and before a forced kill, and a broker that starts closing while it
+  waits for a quit or a signal to take effect sends nothing further: the operation stays `running`, and the next
+  process recovers it, probes again and gives the quit its grace.
+- **`requiredCapability`** is checked at admission, not waited on separately: a start or restart accepts only a
+  capability the target's own readiness proves (none, the enrolled `readiness.capability`, `process`, or its
+  profile's `fabric-hub` or `runtime-online`), and a target is answered `ready` only when the adapter reports that
+  readiness, so the capability asked for is ready when the operation is. Any other value is `capability_missing`
+  before anything is admitted.
 - **The adapter** (`Adapter`, a protocol): `identity_matches(target, *, deadline)`, `probe`, `start`,
   `stop(target, pid, *, force, mode)` and an optional `close`. The tests drive two fakes, a durable file seam
   and a process seam; no installed application is touched.
@@ -184,7 +194,16 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   the capability a profile proves (`fabric-hub`, `runtime-online`).
 - **The helper** (`native_app.swift`): `status`, `open [--background]` (no activation; `--background` only for a
   target enrolled with `backgroundLaunch`), `quit <app> <pid>` (the app's own quit path) and `watch` (launch, terminate
-  and activate events until stdin closes). The adapter keeps only the fields it knows from an answer.
+  and activate events until stdin closes). The adapter keeps only the fields it knows from an answer. It runs the
+  helper only while the helper's folder and the file are this account's, not links, and writable by nobody else.
+  After a `quit`, only `quit_refused` falls through to SIGTERM; `identity_mismatch` (the pid is no longer the
+  enrolled bundle's) signals nothing and is answered as such, and any other answer is `failed`.
+- **Shapes it does not expect**: a `hub.json` whose `origin` is not a string is `hub_invalid`; a well-known document
+  whose `service`, `process`, `build`, `surfaces` or `mcp` is not an object is read as empty (so it is
+  `identity_mismatch`), and a `capabilities` that is not a list names none. None of them raises.
+- **A disabled list it cannot read**: `launchctl print-disabled` is read once more when it fails; a second failure
+  is `failed` with `reason: launchd_disabled_state_unknown`, never `held_off`, which would say the operator switched
+  the job off.
 - **Other systems**: `platform_adapter` returns `UnsupportedAdapter` off macOS; every call answers
   `unsupported_platform`, and a broker over it reports that, never a start.
 
@@ -252,7 +271,10 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   `degraded` and a 503 on `/mcp`, never a crash of the server or of its heartbeat thread: `Host.service`, the server's
   start and every heartbeat catch it. The broker releases its instance lock when its construction fails at any point
   (the store's open, recovery or pruning), so the next attempt starts once the store is repaired instead of answering
-  `already_running` forever. Off macOS the adapter answers `unsupported_platform` to everything.
+  `already_running` forever; when recovery or pruning fails it first ends the adapter's children and waits for any
+  recovery worker already running, then closes the store under its lock, so the next broker never recovers an
+  operation this one is still acting on. Deleting `config/node-lifecycle.json` after a failed start clears the fault:
+  `/mcp` answers 403 `nothing is enrolled` again, not a stale 503. Off macOS the adapter answers `unsupported_platform` to everything.
 - **The MCP surface**: `initialize` (with the `instructions` text: how to wake an app, renew the lease every 10 minutes,
   what `in_use_by_person`, `held_off`, `denied` and `unsupported_platform` mean; neutral, at most 1,800 characters),
   `ping`, `tools/list` (only the tools the caller's grant names; stop and restart carry `destructiveHint`) and
@@ -276,7 +298,8 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   helper, the last events), `enroll` (an absolute path the operator names, `adapter.fingerprint(kind, path)`, which
   verifies an app's signature; the operator's `--startup-effect` sentences; a new `policyRevision` past the old one),
   `allow` (creates or changes a grant; `--remove`; `--operator-proxy on|off`; never the wildcard; an unenrolled target
-  is refused), `policy` (`--desired`, `--idle-minutes`, `--background-launch`, `--readiness`), `hold [--release]`,
+  is refused, and so is a `--binding` that is revoked, expired, another principal's or another workspace's, which the
+  runtime would refuse), `policy` (`--desired`, `--idle-minutes`, `--background-launch`, `--readiness`), `hold [--release]`,
   `revoke`, and `build-helper` (`macos.main`). Every verb that changes the document needs a terminal, like
   `full access-binding`, and edits under a lock (`<state>/node-lifecycle/config.lock`). The terminal check is the
   engine's existing convention (`sys.stdin.isatty()`): it keeps an agent's ordinary tool calls out, not a process that

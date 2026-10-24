@@ -284,16 +284,19 @@ class SwapOverPipes(unittest.TestCase):
         self.assert_once(c.close(), *ids, 2000)
 
     def test_a_malformed_frame_or_a_float_id_does_not_stall_a_later_swap(self):
-        c = self.start()
+        # A stall is measured by what it does, not by wall time (OBS-208): a request counted in flight that the SDK
+        # never answers holds the swap to the drain bound and then refuses it, so the probe would be answered
+        # `stale-server` and the log would carry a `refused` record. A slow runner changes neither.
+        c = self.start(OBSERVATORY_RELOAD_DRAIN_SECONDS="3")
         c.send({"jsonrpc": "2.0", "id": 7.0, "method": "ping"})    # the SDK drops it unanswered
         c.send({"id": 8, "method": "ping"})                      # no "jsonrpc": the SDK drops it
         c.send_raw(b"\xff\xfe not json\n")                      # invalid UTF-8, decoded with U+FFFD
         c.send({"jsonrpc": "2.0", "id": 9, "method": "ping"})
         c.answers([9])
         self.install.install_b("9.1.0")
-        started = time.monotonic()
-        self.assertEqual(body(c.call(10, "observatory_reload_probe"))["version"], "9.1.0")
-        self.assertLess(time.monotonic() - started, 9, "no request counted in flight that the SDK never answers")
+        answer = body(c.call(10, "observatory_reload_probe"))
+        self.assertEqual(answer.get("version"), "9.1.0", f"no request counted in flight the SDK never answers: {answer}")
+        self.assertEqual([r for r in self.log() if r.get("event") == "refused"], [], "the swap was never held back")
         c.close()
 
     def test_a_request_running_past_the_drain_bound_is_answered_once_before_any_swap(self):

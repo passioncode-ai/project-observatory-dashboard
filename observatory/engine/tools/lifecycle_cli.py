@@ -284,8 +284,10 @@ def binding_state(binding_id: str) -> str:
 
 
 def _bound(principal: str, binding_id: str) -> str:
-    """The binding a grant may name: one of this workspace, of this principal, not revoked. A binding's scopes and
-    ceilings are memory's; the lifecycle grant is a separate decision, tied to this one binding only."""
+    """The binding a grant may name: one of this workspace, of this principal, not revoked and not expired (the
+    runtime refuses an expired one, so a grant naming it would open nothing). A binding's scopes and ceilings are
+    memory's; the lifecycle grant is a separate decision, tied to this one binding only."""
+    from datetime import datetime, timezone
     if not AB.BINDING_ID.match(binding_id):
         raise LifecycleError("invalid_argument")
     try:
@@ -293,7 +295,13 @@ def _bound(principal: str, binding_id: str) -> str:
     except AB.BindingError:
         raise LifecycleError("invalid_argument") from None
     b = next((b for b in registry.bindings if b.binding_id == binding_id), None)
-    if b is None or b.principal != principal or b.audience != audience or b.revoked_at is not None:
+    if (
+        b is None
+        or b.principal != principal
+        or b.audience != audience
+        or b.revoked_at is not None
+        or AB._when(b.expires_at) <= datetime.now(timezone.utc)
+    ):
         print(f"lifecycle: {binding_id} is not a binding of {principal} in force for this workspace "
               "(`project-observatory full access-binding show`)", file=sys.stderr)
         raise LifecycleError("invalid_argument")

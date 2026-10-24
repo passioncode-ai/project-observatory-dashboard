@@ -416,6 +416,16 @@ class HostTests(Workspace, unittest.TestCase):
         finally:
             host.close()
 
+    def test_deleting_the_document_after_a_failed_start_clears_the_fault(self):
+        host = S.Host(factory=lambda: (_ for _ in ()).throw(sqlite3.DatabaseError('malformed')), config=self.config)
+        host.start()
+        self.assertEqual(host.entry()['state'], 'failed')
+        self.config.unlink()                            # the operator un-enrolls everything
+        self.assertIsNone(host.service())
+        self.assertEqual((host.degraded(), host.entry()['state']), ([], 'inert'))
+        host.start()                                    # the heartbeat after the deletion says the same
+        self.assertEqual(host.degraded(), [])
+
     def test_a_store_that_fails_during_recovery_releases_the_lock(self):
         with mock.patch.object(broker.Broker, 'prune', side_effect=sqlite3.DatabaseError('database disk image is '
                                                                                             'malformed')):
@@ -550,6 +560,16 @@ class HTTPTests(Workspace, unittest.TestCase):
         self.assertEqual((status, refused['error']), (503, 'unavailable'))
         self.assertEqual(self.request('/health')[0], 200)
         self.serverd.LIFECYCLE.close()
+
+    def test_a_fault_cleared_by_deleting_the_document_is_403_not_503(self):
+        self.serverd.LIFECYCLE = S.Host(factory=lambda: (_ for _ in ()).throw(sqlite3.DatabaseError('malformed')),
+                                        config=self.config)
+        self.serverd.LIFECYCLE.start()
+        self.assertEqual(self.mcp(self.LIST)[0], 503)
+        self.config.unlink()
+        status, refused = self.mcp(self.LIST)
+        self.assertEqual((status, refused['error']), (403, 'denied'))
+        self.assertIn('nothing is enrolled', refused['detail'])
 
     def test_post_elsewhere_is_still_405_and_nothing_enrolled_is_refused(self):
         self.assertEqual(self.request('/health', {})[0], 405)
@@ -703,6 +723,15 @@ class CliTests(Workspace, unittest.TestCase):
                          'a new caller gets a grant tied to its binding')
         g = self.now()['callers'][BETA]
         self.assertEqual((g['revision'], g['bindingId']), (1, 'bnd_fixture0002'))
+
+    def test_allow_refuses_an_expired_binding(self):
+        now = datetime.now(timezone.utc)
+        self.bindings.append(binding(BETA, 3, token=bearer(BETA) + '-third') | {'issuedAt': stamp(now - timedelta(days=3)),
+                                                 'expiresAt': stamp(now - timedelta(hours=1))})
+        self.assertEqual(self.cli('allow', BETA, '--binding', 'bnd_fixture0003', '--tool', 'lifecycle.list'), 1,
+                         'the runtime refuses an expired binding, so a grant naming it would open nothing')
+        self.assertNotIn(BETA, self.now()['callers'])
+        self.assertEqual(self.cli('allow', BETA, '--binding', 'bnd_fixture0002', '--tool', 'lifecycle.list'), 0)
 
     def test_allow_target_adds_an_enrolled_target_and_bumps_the_revision(self):
         self.assertEqual(self.cli('allow', ALPHA, '--target', 'alpha.app'), 0)
