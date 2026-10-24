@@ -124,6 +124,8 @@ ORGANIZATION_CLOSED = 'organization-closed'
 #: enrollment it refuses so names the organization id the server does not know. On a signed device request it means
 #: nothing more than any other failure, and is retried as one.
 UNKNOWN_ORG = 'unknown-org'
+#: `activity-common.schema.json#/$defs/opaqueId`: a certificate's `binding.user.id` (no spaces, no @).
+OPAQUE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}')
 #: `device-common.schema.json#/$defs/detail`: one line of at most 200 characters with no path in it.
 DETAIL = re.compile(r"""(?![\s\S]*(?:(?:^|[\s"'`=(\[{<,;:])[/\\~]|[A-Za-z]:[/\\]|%(?:25)?2[fF]"""
                     r"""|(?:^|[^A-Za-z0-9])(?:[Uu]sers|home)[/\\]|-(?:[Uu]sers|home)-[A-Za-z0-9]))[^\r\n]{1,200}\Z""")
@@ -637,18 +639,23 @@ def _upgraded(doc: dict) -> Tuple[dict, Optional[dict]]:
     out = {k: v for k, v in doc.items() if k not in ('tickSeq', 'unknownOrg')}
     if undone is not None:
         out.pop('removed', None)
-        out.update(reEnroll=False, nextCheckInAt=0)
+        # The removal set `reEnroll` without a reason; one recorded before it (the server asked to re-enroll, or
+        # superseded the epoch) still stands, with its reason.
+        out.update(reEnroll=isinstance(out.get('reEnrollReason'), str), nextCheckInAt=0)
     return out, undone
 
 
 def _same_binding(held: dict, cert: dict) -> bool:
-    """Whether a renewed certificate binds what the one on record binds (DEC-0100, FAC-SEM-044): a person or none, the
-    same person by the binding's user id, and the same role. A certificate on record from 0.29.0 holds no user id; it
-    is compared when both sides carry one, and the renewal records it (OBS-221)."""
+    """Whether a renewed certificate binds what the one on record binds (DEC-0100, FAC-SEM-044, the contract's
+    `device-rules.ts` renewal check): a person or none, the same person by the binding's user id, and the same role.
+    A record with a user id needs the same id in the renewal; none, or another, is a changed binding. Only a record
+    saved by 0.29.0, which kept whether a person was bound but not who, is compared by that alone, and the renewal
+    records the id (OBS-221). `_certificate` refuses a person-bound certificate without an id."""
     if bool(cert.get('user')) != bool(held.get('user')) or ('role' in held and cert.get('role') != held.get('role')):
         return False
-    known = held.get('userId'), cert.get('userId')
-    return None in known or known[0] == known[1]
+    if 'userId' in held:
+        return cert.get('userId') == held['userId']
+    return True
 
 
 class Enrollment:
@@ -706,11 +713,8 @@ class Enrollment:
         ended with `removed: {code: "unknown-org"}`, and its `tickSeq` counter) reads as DEC-0103 has it: active,
         because `unknown-org` on a device request is any failure (`_upgraded`). The read itself changes nothing on
         disk; under the enrollment's lock (every writer reads there) the upgrade is saved once, with a journal line."""
-        try:
-            doc = json.loads(private_io.read(self.folder / 'enrollment.json'))
-        except FileNotFoundError:
-            return None
-        if not isinstance(doc, dict) or doc.get('schema') != 'org-enrollment/1':
+        doc = self._stored()
+        if doc is None:
             return None
         upgraded, undone = _upgraded(doc)
         if upgraded is not doc and getattr(self._held, 'depth', 0):
@@ -719,6 +723,14 @@ class Enrollment:
                 self.journal('removal-undone', code=UNKNOWN_ORG, removedAt=undone.get('at'),
                              droppedEvents=undone.get('droppedEvents'))
         return upgraded
+
+    def _stored(self) -> Optional[dict]:
+        """The state file as written, without `state()`'s upgrade."""
+        try:
+            doc = json.loads(private_io.read(self.folder / 'enrollment.json'))
+        except FileNotFoundError:
+            return None
+        return doc if isinstance(doc, dict) and doc.get('schema') == 'org-enrollment/1' else None
 
     def _save(self, doc: dict) -> None:
         private_io.write(self.folder / 'enrollment.json', json.dumps(doc, indent=1, sort_keys=True) + '\n')
@@ -907,12 +919,17 @@ class Enrollment:
             raise OrgError('response-malformed', 'the certificate is not DER') from error
         if spki != self.keys.sig_spki():
             raise OrgError('key-mismatch', "the certificate does not certify this machine's #sig key")
-        user = binding.get('user') if isinstance(binding.get('user'), dict) else None
+        # The person the certificate binds, as the contract's binding carries it (`activity-common` `user`: an
+        # object whose `id` is an opaque membership id, required): a renewal compares it, so a certificate re-issued
+        # to another person is `binding-changed` (OBS-221). A `user` without such an id is refused whole: kept, it
+        # would drop the id from the record and let the next renewal bind anyone.
+        user = binding.get('user')
+        if user is not None and not (isinstance(user, dict) and isinstance(user.get('id'), str)
+                                     and OPAQUE_ID.fullmatch(user['id'])):
+            raise OrgError('response-malformed', 'the certificate binds a user without an opaque id')
         out = {'serial': serial, 'notBefore': cert['notBefore'], 'notAfter': cert['notAfter'],
                'issuer': cert.get('issuer'), 'user': user is not None}
-        if user is not None and isinstance(user.get('id'), str):
-            # The person the certificate binds, as the contract's binding carries it (an opaque membership id): a
-            # renewal compares it, so a certificate re-issued to another person is `binding-changed` (OBS-221).
+        if user is not None:
             out['userId'] = user['id']
         if isinstance(binding.get('role'), str):           # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100)
             out['role'] = binding['role']
@@ -941,7 +958,10 @@ class Enrollment:
         if not match:
             raise OrgError('token-malformed', 'an enrollment token is <tokenId>.<secret>')
         with self._locked():
-            previous = self.state()
+            # The stored state as written, not upgraded: an enrollment 0.29.0 ended on `unknown-org` is still a
+            # removal for a new token (OBS-221), as 0.29.0 treated it, so an organization recreated under the same
+            # id, whose epochs start again, is accepted.
+            previous = self._stored()
             # A machine removed from its organization starts over with a new token (OBS-204): the organization it
             # joins may be a new one whose epochs start again, and nothing of the old stream is carried.
             over = previous is not None and isinstance(previous.get('removed'), dict)

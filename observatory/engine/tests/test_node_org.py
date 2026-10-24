@@ -859,6 +859,28 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.make().enqueue('meter.call', {'n': 9}, occurred='2026-10-18T00:00:00Z')
         self.assertEqual(self.make().flush()['accepted'], 1)
 
+    def test_an_undone_removal_keeps_a_re_enrollment_the_server_asked_for_before_it(self):
+        # OBS-221 cycle 1: `reEnroll` with its own reason (here the epoch the server superseded) predates the
+        # unknown-org removal; undoing the removal does not clear it.
+        self._ended_by_0_29()
+        state = json.loads((self.node / 'orgs' / ORG / 'enrollment.json').read_text())
+        state['reEnrollReason'] = 'epoch-superseded'
+        self.make()._save(state)
+        read = self.make().state()
+        self.assertNotIn('removed', read)
+        self.assertEqual((read['reEnroll'], read['reEnrollReason']), (True, 'epoch-superseded'))
+
+    def test_a_new_token_after_a_0_29_unknown_org_removal_starts_over(self):
+        # OBS-221 cycle 1: for a new token's enrollment the 0.29.0 removal still counts as one, so an organization
+        # recreated under the same id, whose epochs start again, is accepted as 0.29.0 accepted it.
+        self._ended_by_0_29()
+        self.server.epoch = 0                            # the recreated organization's first epoch
+        doc = self.enroll('et_2.' + 'T' * 32)
+        self.assertEqual(doc['epoch'], 1)
+        state = self.make().state()
+        self.assertEqual(state['previousRemoval']['code'], 'unknown-org')
+        self.assertNotIn('removed', state)
+
     def test_a_removal_for_another_reason_is_not_undone(self):
         self.enroll()
         state = self.make().state()
@@ -1433,12 +1455,57 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertIn('renewedAt', renewed)
         self.assertEqual(renewed['certificate']['userId'], 'm-4821')
 
+    def _renewal_binds(self, user_binding):
+        """Enrolled bound to m-4821, then a renewal whose certificate carries `binding.user = user_binding`."""
+        self.server.renewal, self.server.user = True, 'm-4821'
+        old = self.enroll()
+        issue = self.server._issue
+
+        def bound(csr, device):
+            cert = issue(csr, device)
+            cert['binding']['user'] = user_binding
+            return cert
+        self.server._issue = bound
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 86400
+        return self.make().state()
+
+    def test_a_certificate_whose_user_has_no_string_id_is_refused_and_nothing_saved(self):
+        # OBS-221 cycle 1: the contract's `user` requires an opaque string `id`; a renewal answer without one would
+        # drop the id from the record and let the next renewal bind another person.
+        from node.org import OrgError
+        for user in ({}, {'id': 5}, {'id': ''}, {'id': 'has space'}):
+            with self.subTest(user=user):
+                self.setUp()
+                held = self._renewal_binds(user)
+                with self.assertRaises(OrgError) as raised:
+                    self.make().check_in()
+                self.assertIn('response-malformed', str(raised.exception))
+                state = self.make().state()
+                self.assertEqual(state['certificate'], held['certificate'])
+                self.assertEqual(state['certificate']['userId'], 'm-4821')
+
+    def test_a_first_enrollment_whose_user_has_no_id_is_refused(self):
+        from node.org import OrgError
+        issue = self.server._issue
+
+        def bound(csr, device):
+            cert = issue(csr, device)
+            cert['binding']['user'] = {}
+            return cert
+        self.server._issue = bound
+        with self.assertRaises(OrgError) as raised:
+            self.enroll()
+        self.assertEqual(raised.exception.code, 'response-malformed')
+        self.assertIsNone(self.make().state())
+
     def test_the_binding_comparison(self):
         from node.org import _same_binding
         a, b = {'user': True, 'userId': 'm-1'}, {'user': True, 'userId': 'm-2'}
         self.assertTrue(_same_binding(a, dict(a)))
         self.assertFalse(_same_binding(a, b))
-        self.assertTrue(_same_binding({'user': True}, b), 'a 0.29.0 certificate holds no id: compared when known')
+        self.assertTrue(_same_binding({'user': True}, b), 'a 0.29.0 certificate holds no id: it records one')
+        self.assertFalse(_same_binding(a, {'user': True}), 'an id on record and none in the renewal: changed')
+        self.assertFalse(_same_binding(a, {'user': False}))
         self.assertFalse(_same_binding({'user': False}, b))
         self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False}))
 

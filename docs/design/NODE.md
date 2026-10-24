@@ -483,8 +483,10 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   again from it (kept as before when it is a day or more off); a purpose hold and the notice versions it waits on
   are kept too (the same person under the same notice); a certificate that binds another user or role
   than the one on record is refused (`binding-changed`, FAC-SEM-044). The person is compared by the binding's user
-  id, which the certificate on record keeps (`certificate.userId`); a certificate saved by 0.29.0 holds no id, so its
-  first renewal compares a person or none and records the id (OBS-221). Inside the window `notice` keeps the state
+  id, which the certificate on record keeps (`certificate.userId`): a renewal without that id, or with another, is
+  `binding-changed`, and a certificate whose `binding.user` carries no opaque string id (the contract requires one) is
+  refused as `response-malformed`, nothing saved. Only a certificate saved by 0.29.0, which holds no id, has its first
+  renewal compared by a person or none, and that renewal records the id (OBS-221). Inside the window `notice` keeps the state
   `expired` and adds `renewUntil`, the step in words and `full org check-in --org ID`; `needsEnrollment` stays false.
   An unanswered renewal (no answer, 408, 425, 429, 5xx) backs off (`renewal`: attempts, next time, last answer; the
   tick answers `renewal-pending`, a person's `org check-in` asks now); `certificate-revoked` or `certificate-unknown`

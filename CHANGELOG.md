@@ -10,8 +10,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **A renewal re-issued to another person is refused** (OBS-221). The certificate on record kept only whether it
   bound a person, so a renewal by the key on record bound to someone else passed the `binding-changed` check that
   0.29.0 describes, and that enrollment's purpose holds, notice versions and summary consent carried to them. The
-  certificate on record now keeps the binding's user id and a renewal compares it; a certificate saved by 0.29.0 has no
-  id, so its first renewal compares a person or none, as before, and records the id.
+  certificate on record now keeps the binding's user id and a renewal must carry the same one; a certificate whose
+  `binding.user` has no opaque string id, which the contract requires, is refused (`response-malformed`). A
+  certificate saved by 0.29.0 has no id, so its first renewal compares a person or none, as before, and records it.
 - **The harness summary's consent ends with the enrollment** (OBS-221). A removal (`certificate-revoked`,
   `certificate-unknown`) or a closed organization (`organization-closed`) clears it, and a new token's `org enroll`
   never carries it, also under the same organization id: only a renewal by the key on record keeps it. 0.29.0 carried
@@ -22,8 +23,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   more than 48 hours before the summary, or with no time, is sent as `unknown`.
 - **An enrollment 0.29.0 ended on `unknown-org` is active again** (OBS-221). DEC-0103 retired that provisional rule;
   a state it ended (`removed.code: unknown-org`) reads as active on its first read, is saved so under the enrollment's
-  lock with one journal line (`removal-undone`) and checks in at once; its leftover `tickSeq` is dropped. The events
-  that rule dropped stay dropped.
+  lock with one journal line (`removal-undone`) and checks in at once, unless the server had asked it to re-enroll
+  before (that request and its reason stay); its leftover `tickSeq` is dropped. The events that rule dropped stay
+  dropped. A new token's `org enroll` still treats that removal as one, so an organization recreated under the same
+  id, with its epochs starting again, is accepted as 0.29.0 accepted it.
 - **The disk guard lists a marked browser clone in `kept`** (OBS-221): a code-sign clone that carries the keep marker
   or a declared state path is reported with its reason, like every other class, instead of being skipped silently.
 - **An app that quits on its own during a stop is `already_exited`, not `identity_mismatch`** (OBS-221, from the
