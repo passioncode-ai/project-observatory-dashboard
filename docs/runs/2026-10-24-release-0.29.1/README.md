@@ -67,3 +67,13 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python3`:
 Merge this pull request, tag `v0.29.1` on the merge commit, verify the release (sums, attestation, GPG), install it
 with `project-observatory full update --apply`, run `project-observatory full probes` once so `probes-check` passes,
 and record the receipts here in a follow-up pull request.
+
+## Correction (2026-10-24)
+
+The `full probes` step above, and the one-time `probes-check` exit this record and the CHANGELOG summary describe,
+do not apply to an installed copy (OBS-224, measured on an installed 0.29.1). Its `project-observatory full check`
+runs the portable suite and never runs `probes-check`, so nothing is needed after installing. `full probes` could not
+run there either: the probes run only in an explicitly synthetic workspace with `features.probe_fixture` on
+(`observatory/engine/fabric/FABRIC-CONFORMANCE.md`), the step launched the runner without one, and it ended in
+argparse's `the following arguments are required: --fixture-home` (exit 2). The runner now explains that, and
+`full probes --fixture-home PATH` forwards a maintainer's workspace. The text above is kept as it was written.

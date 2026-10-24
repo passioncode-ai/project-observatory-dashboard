@@ -26,7 +26,7 @@
     ledger-current  non-zero if that export is behind the store
     review     the operator's queue; writes need a terminal (tools/review.py --help)
     scan-events  read commits out of every local checkout into the store
-    probes     run the declared Fabric probes against the live MCP server
+    probes     run the declared Fabric probes in a synthetic fixture workspace (--fixture-home)
     test       planted trap fixtures
     test-ledger  the write path's invariants — owner guard, CAS, lifecycle, tombstones
     test-skill   the companion plugin, including the SessionStart hook it must NOT ship
@@ -545,9 +545,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   google [--force]             GA4 and Search Console analytics, cached twelve hours; --force re-fetches
   plugins [--only ID] [--force]  run the metric plugins (each past its age gate with --force)
   plugins-check                validate the installed metric plugins' manifests; runs none
-  probes                       run the Fabric conformance probes against the local server and rewrite
-                               their receipts; probes-check (a step of check) compares those receipts with the
-                               contract pin and exits 1 when they name another commit
+  probes --fixture-home PATH   maintainers only: run the Fabric conformance probes in a synthetic workspace
+                               (features.probe_fixture on; fabric/FABRIC-CONFORMANCE.md) and rewrite its
+                               receipts. Never a working installation: an installed copy needs no probe step
+                               after an upgrade, and `full check` does not run them
+  probes-check --fixture-home PATH  the same probes without rewriting; exits 1 when the receipts name
+                               another contract commit
   review                       the queue of proposed ledger records (tools/review.py decides them)
   node --init | --show         this machine's agent-network device keys: --init creates them if absent,
                                --show prints the device id and the two public keys; no private key is printed
@@ -623,6 +626,11 @@ TOKEN_JTI = re.compile(r"[A-Za-z0-9._~-]{16,128}")
 GRANT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~/@+-]{0,250}#\d{1,9}")
 RECEIPT = re.compile(r"rcpt_[A-Za-z0-9_-]{8,64}")
 PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
+#: The one path an option forwards: the probe runner's synthetic workspace. Absolute
+#: only, because the step runs from the engine directory and a relative path would
+#: silently name a folder there; the runner itself refuses anything that is not an
+#: initialized workspace with `features.probe_fixture` on (tools/run_probes.py).
+FIXTURE_HOME = re.compile(r"(?:/|[A-Za-z]:[\\/])[^\x00-\x1f]{0,4095}")
 
 #: OPTIONS A SINGLE STEP FORWARDS TO ITS TOOL: an allowlist, not a pass-through.
 #: A step's command is fixed and its positional arguments are already this
@@ -638,6 +646,12 @@ PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
 #: `refusal`, so a remedy that needs another option fails the gate, not the reader.
 STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = {
     "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
+    # A maintainer's synthetic workspace (fabric/FABRIC-CONFORMANCE.md). The steps
+    # ran the runner without it, so `full probes` could only fail (OBS-224).
+    "probes": {"--fixture-home": ("PATH", FIXTURE_HOME,
+                                  "absolute path of a synthetic workspace with features.probe_fixture on")},
+    "probes-check": {"--fixture-home": ("PATH", FIXTURE_HOME,
+                                        "absolute path of a synthetic workspace with features.probe_fixture on")},
     "plugins": {"--only": ("ID", OPTION_NAME, "run one plugin, by its manifest id"),
                 "--force": (None, None, "ignore each plugin's age gate")},
     "harness": {"--accept": ("KEY", HARNESS_KEY, "record a changed skill's current digest as reviewed"),

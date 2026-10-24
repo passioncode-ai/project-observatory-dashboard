@@ -260,6 +260,66 @@ def test_the_runner_refuses_a_workspace_that_is_not_a_probe_fixture() -> None:
     check("before any probe runs", "assertions evaluated" not in p.stdout, p.stdout[-200:])
 
 
+#: What a person reads when the runner has no fixture home (OBS-224). The 0.29.0 and
+#: 0.29.1 notes told every user to run `full probes` after updating; on an installed
+#: copy that answered argparse's "the following arguments are required" and nothing else.
+GUIDANCE = ("fabric/FABRIC-CONFORMANCE.md", "needs no probe step", "--fixture-home PATH",
+            "features.probe_fixture")
+
+
+def dispatch(*args: str, home: pathlib.Path) -> subprocess.CompletedProcess:
+    """`project-observatory full ARGS` as the launcher runs it: the dispatcher over `home`."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("OBSERVATORY_")}
+    env.update(OBSERVATORY_HOME=str(home), OBSERVATORY_ROOT=str(ROOT))
+    return subprocess.run([PY, "observatory.py", *args], cwd=ROOT, env=env,
+                          capture_output=True, text=True, timeout=300)
+
+
+def test_no_fixture_home_explains_instead_of_a_usage_error() -> None:
+    """Without `--fixture-home` the runner says where probes run and that an installed
+    copy needs nothing after an upgrade, and still exits 2."""
+    for args in ((), ("--check",)):
+        p = subprocess.run([PY, "tools/run_probes.py", *args], cwd=ROOT,
+                           capture_output=True, text=True, timeout=120)
+        label = "run_probes.py " + " ".join(args) if args else "run_probes.py"
+        check(f"{label} without a fixture home exits 2", p.returncode == 2, str(p.returncode))
+        check(f"{label}: no bare argparse error", "arguments are required" not in p.stderr, p.stderr[-200:])
+        missing = [w for w in GUIDANCE if w not in p.stderr]
+        check(f"{label}: the message names the document, the installed case and the flag", not missing,
+              f"missing {missing}: {p.stderr[-300:]}")
+        check(f"{label}: and no probe ran", "assertions evaluated" not in p.stdout, p.stdout[-200:])
+    other = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-probe-installed-")).resolve() / "ws"
+    import workspace
+    workspace.initialize(other)
+    for step in ("probes", "probes-check"):
+        p = dispatch(step, home=other)
+        check(f"`full {step}` on an ordinary workspace exits 2 with the same message",
+              p.returncode == 2 and not [w for w in GUIDANCE if w not in p.stdout + p.stderr],
+              f"exit {p.returncode}: {(p.stdout + p.stderr)[-300:]}")
+
+
+def test_full_probes_forwards_the_fixture_home() -> None:
+    """`full probes --fixture-home PATH` reaches the runner: the dispatcher refused every
+    argument to `probes`, so the documented maintainer command could not be typed."""
+    import observatory as dispatcher
+    for step in ("probes", "probes-check"):
+        check(f"`full {step} --fixture-home` with an absolute path is accepted",
+              dispatcher.refusal([step, "--fixture-home", str(HOME)]) == "",
+              dispatcher.refusal([step, "--fixture-home", str(HOME)]))
+        check(f"`full {step} --fixture-home` with a relative path is refused",
+              dispatcher.refusal([step, "--fixture-home", "ws"]) != "")
+        check(f"`full {step} --help` names the option",
+              "--fixture-home PATH" in dispatcher.step_help(step, True))
+    other = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-probe-forward-")).resolve() / "ws"
+    import workspace
+    workspace.initialize(other)
+    p = dispatch("probes-check", "--fixture-home", str(other), home=other)
+    check("the dispatcher forwards it, and the runner judges the workspace",
+          p.returncode == 2 and "synthetic fixture home is required" in p.stdout + p.stderr
+          and "not accepted" not in p.stdout + p.stderr,
+          f"exit {p.returncode}: {(p.stdout + p.stderr)[-300:]}")
+
+
 def test_synthetic_probe_guards() -> None:
     import asyncio
     import importlib
@@ -400,6 +460,8 @@ if __name__ == "__main__":
                test_a_drifted_receipt_still_shows_the_run,
                test_check_writes_nothing,
                test_the_runner_refuses_a_workspace_that_is_not_a_probe_fixture,
+               test_no_fixture_home_explains_instead_of_a_usage_error,
+               test_full_probes_forwards_the_fixture_home,
                test_synthetic_probe_guards,
                test_the_ownerless_refusal_is_asserted_precisely,
                test_the_declared_wording_is_used_verbatim,

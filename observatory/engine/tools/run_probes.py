@@ -760,11 +760,30 @@ def select_fixture_home(base: pathlib.Path) -> None:
     importlib.reload(paths)
 
 
+#: What a person reads when no fixture home is given (OBS-224). argparse's own
+#: "the following arguments are required: --fixture-home" was the whole answer, and
+#: the 0.29.0 and 0.29.1 notes sent every user to `full probes` after updating: on an
+#: installed copy there is nothing to point it at, by design, and nothing to do.
+NO_FIXTURE_HOME = (
+    "Observatory: the Fabric conformance probes run only in an explicitly synthetic fixture workspace, "
+    "never against a working installation (fabric/FABRIC-CONFORMANCE.md). An installed copy needs no probe "
+    "step after an upgrade: its `project-observatory full check` does not run them.\n"
+    "Maintainers: pass --fixture-home PATH, the absolute path of an initialized workspace whose settings "
+    "enable features.probe_fixture and configure no integrations or external sources. "
+    "`project-observatory full probes --fixture-home PATH` writes its receipts; "
+    "`project-observatory full probes-check --fixture-home PATH` repeats the probes and compares them "
+    "without rewriting.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run bounded MCP probes in an explicitly synthetic workspace")
-    parser.add_argument("--fixture-home", type=pathlib.Path, required=True)
+    parser.add_argument("--fixture-home", type=pathlib.Path, metavar="PATH",
+                        help="absolute path of an initialized workspace with features.probe_fixture on")
     parser.add_argument("--check", action="store_true")
     options = parser.parse_args()
+    if options.fixture_home is None:
+        print(NO_FIXTURE_HOME, file=sys.stderr)
+        raise SystemExit(2)
     try:
         select_fixture_home(options.fixture_home)
     except (RuntimeError, OSError):

@@ -3,6 +3,21 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224). Both release
+  summaries, and `docs/COMPATIBILITY.md`, said the first `full check` after updating exits 1 once and to run
+  `project-observatory full probes` once. On an installed copy neither holds: `full check` runs the portable suite and
+  never runs `probes-check`, so nothing is needed after an upgrade, and `full probes` could not run at all, because the
+  probes run only in an explicitly synthetic fixture workspace (`fabric/FABRIC-CONFORMANCE.md`) and the step was
+  launched without one, so it ended in argparse's `the following arguments are required: --fixture-home`. Without
+  `--fixture-home` the runner now says that, names the document and how a maintainer passes the workspace, and still
+  exits 2. `full probes --fixture-home PATH` and `full probes-check --fixture-home PATH` forward an absolute path to
+  the runner, which still refuses any workspace without `features.probe_fixture`; the dispatcher refused every
+  argument to these steps before. `full --help` describes the step as a maintainer's.
+
 ## 0.29.1 (2026-10-24)
 
 A patch release. The engine moves its contract pin to fabric-agent-contract `588748ab` and does what the organization
