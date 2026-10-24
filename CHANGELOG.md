@@ -26,6 +26,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   that rule dropped stay dropped.
 - **The disk guard lists a marked browser clone in `kept`** (OBS-221): a code-sign clone that carries the keep marker
   or a declared state path is reported with its reason, like every other class, instead of being skipped silently.
+- **An app that quits on its own during a stop is `already_exited`, not `identity_mismatch`** (OBS-221, from the
+  review of #351). When the helper's `quit` finds the pid gone because the app exited between `status` and `quit`, the
+  adapter probes again: a target that is down answers `already_exited` and the stop ends `stopped`; a pid that is
+  someone else's now is still `identity_mismatch`. Nothing is signalled in either case.
 - **Corrections to the 0.29.0 notes.** `node.lifecycle` steps L1 to L3 are all merged and released in 0.29.0. The
   macOS helper is served with the source-install build (`full lifecycle build-helper`); its release build inside the
   signed app was not in 0.29.0 and is planned for 0.30.0 (step L2r of `docs/design/LIFECYCLE.md`). A server's

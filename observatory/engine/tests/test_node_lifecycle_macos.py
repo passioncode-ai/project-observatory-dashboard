@@ -620,11 +620,35 @@ class EffectTests(Folder, unittest.TestCase):
 
     def test_a_quit_answered_identity_mismatch_signals_nothing(self):
         app = {'kind': 'app', 'path': '/Applications/X.app'}
-        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'})
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'}, {'state': 'ready', 'pid': 43})
         with mock.patch('os.kill') as kill:
             with self.assertRaisesRegex(broker.LifecycleError, 'identity_mismatch'):
                 self.adapter.stop(app, 42)
             kill.assert_not_called()
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'}, {'state': 'ready', 'pid': 42})
+        with mock.patch('os.kill') as kill:
+            with self.assertRaisesRegex(broker.LifecycleError, 'identity_mismatch'):
+                self.adapter.stop(app, 42)
+            kill.assert_not_called()
+
+    def test_an_app_that_exited_between_status_and_quit_is_already_exited(self):
+        # The app quit on its own after `status` read its pid: the helper's `quit` finds no such process and
+        # answers `identity_mismatch`; a second probe sees it down, so the stop is done and nothing is signalled.
+        app = {'kind': 'app', 'path': '/Applications/X.app'}
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'}, {'state': 'stopped'})
+        with mock.patch('os.kill') as kill:
+            self.assertEqual(self.adapter.stop(app, 42), 'already_exited')
+            kill.assert_not_called()
+        self.assertEqual([c[0][1] for c in self.mac.calls[-3:]], ['status', 'quit', 'status'])
+        self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'identity_mismatch'})
+        self.mac.answers[self.helper].append(done('not json'))       # the second probe fails: still no signal
+        with mock.patch('os.kill') as kill:
+            with self.assertRaisesRegex(broker.LifecycleError, 'identity_mismatch'):
+                self.adapter.stop(app, 42)
+            kill.assert_not_called()
+
+    def test_a_quit_answered_otherwise_is_failed(self):
+        app = {'kind': 'app', 'path': '/Applications/X.app'}
         self.helper_says({'state': 'ready', 'pid': 42}, {'state': 'not_installed'})
         with mock.patch('os.kill') as kill:
             with self.assertRaisesRegex(broker.LifecycleError, 'failed'):

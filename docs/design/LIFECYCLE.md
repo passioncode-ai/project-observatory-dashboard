@@ -115,7 +115,7 @@ agents never lose the tools between steps.
   `timeout` before it looks, but only within `RECOVERY_WINDOW_SECONDS` (600 s) of that deadline: one recovered later
   (a machine that slept for hours) launches and stops nothing and ends with what is known, `delivery_unknown` when it
   had dispatched a start (the journal entry stays for observation to settle) and `timeout` otherwise, both with
-  `reason: recovered_too_late`. A start recovered after its effect is still recorded as the broker's.
+  `reason: recovered_too_late`. A start recovered after its effect is still recorded as the broker's within the recovery window; a start recovered too late ends `delivery_unknown` and the app counts as the person's: observation settles the dispatch without recording a launch, so the node never idle-stops it (`_recovered_too_late`, `_resolve_dispatch`).
   **Idempotency receipts** answer a retry for 24 hours, before the policy and grant revisions are compared; the
   same request id with another meaning is `idempotency_conflict`. Admission reads and writes its receipt in one
   `BEGIN IMMEDIATE` transaction.

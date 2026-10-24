@@ -927,7 +927,15 @@ class MacAdapter:
                 if response.get('state') == 'quit_requested':
                     return 'quit_requested'
                 if response.get('state') == 'identity_mismatch':
-                    # The pid no longer belongs to the enrolled bundle: it is someone else's process now.
+                    # The pid no longer belongs to the enrolled bundle. Either the app exited on its own between
+                    # `status` and `quit` (the pid is gone: the stop is done, `already_exited`), or the pid is someone
+                    # else's process now. Probe again to tell them apart; nothing is signalled in either case.
+                    try:
+                        again = self._helper_status(target)
+                    except LifecycleError:
+                        raise LifecycleError('identity_mismatch') from None
+                    if again.get('state') == 'stopped':
+                        return 'already_exited'
                     raise LifecycleError('identity_mismatch')
                 if response.get('state') != 'quit_refused':
                     raise LifecycleError('failed')
