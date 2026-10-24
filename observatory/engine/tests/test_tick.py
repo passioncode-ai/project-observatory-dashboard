@@ -208,6 +208,21 @@ def test_it_commits_only_the_registry() -> None:
           all(f.startswith("registry/") for f in files.split()), files)
 
 
+def test_a_temporary_file_a_stopped_writer_left_is_not_committed() -> None:
+    """OBS-220, review of #352: an emit stopped between its temporary file and the rename leaves
+    `.NAME.XXXX.tmp` in the registry, and `git add registry` would have committed it."""
+    repo = fake_repo()
+    edit_registry(repo, 9)
+    stray = repo / "registry" / ".projects.json.k3j9x2ab.tmp"
+    stray.write_text("half a write\n")
+    p = run_commit(repo)
+    _, files = git("show", "--name-only", "--format=", "HEAD", cwd=repo)
+    check("the registry change is committed", FIXTURE_FILE in files.split(), files + p.stdout + p.stderr)
+    check("the temporary file is not", ".projects.json.k3j9x2ab.tmp" not in files, files)
+    check("and it is gone from the tree", not stray.exists())
+    check("and the run says so", "temporary file" in p.stdout, p.stdout[-200:])
+
+
 def test_it_refuses_over_a_staged_change() -> None:
     """`git commit` captures the whole index, so a staged file would be swept up."""
     repo = fake_repo()
@@ -297,6 +312,7 @@ if __name__ == "__main__":
                test_the_commit_runs_after_every_registry_writer,
                test_it_commits_only_the_registry,
                test_it_refuses_over_a_staged_change,
+               test_a_temporary_file_a_stopped_writer_left_is_not_committed,
                test_it_refuses_mid_merge,
                test_dry_run_writes_nothing,
                test_a_clean_registry_is_not_an_empty_commit,

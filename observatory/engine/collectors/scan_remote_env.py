@@ -207,6 +207,10 @@ def scan_heroku_apps(pepper: str, done: list[dict] | None = None) -> tuple[list[
             return rows, degraded, False
         got = hk.get(f"{hk.API}/apps/{app['id']}/config-vars", tok,
                      timeout=max(1.0, min(float(REQUEST_TIMEOUT), step_budget.remaining() - MARGIN_SECONDS)))
+        if (not isinstance(got, dict) or "__error__" in got) and step_budget.remaining() < MARGIN_SECONDS + 1:
+            # CUT SHORT BY THE DEADLINE, not refused by Heroku: asked again on the next run rather
+            # than recorded as an application that would not answer (review of #352).
+            return rows, degraded, False
         if not isinstance(got, dict) or "__error__" in got:
             reason = (got or {}).get("__error__", "unreadable") if isinstance(got, dict) else "unreadable"
             rows.append({"app": app["name"], "vars": [], "error": str(reason)[:120]})
@@ -229,6 +233,17 @@ def scan_heroku_apps(pepper: str, done: list[dict] | None = None) -> tuple[list[
                          "reason": f"{len(bad)} application(s) would not answer",
                          "effect": "their production configuration is unknown, not empty"})
     return rows, degraded, True
+
+
+def resumable(saved, label: str) -> dict | None:
+    """The saved fetch to resume, or None: same schema and salt, and begun less than MAX_AGE_HOURS
+    ago. An older one is begun again (review of #352): its first applications would otherwise be
+    compared as production long after they were read."""
+    if not (isinstance(saved, dict) and saved.get("schema") == STATE_SCHEMA
+            and saved.get("fingerprint_namespace") == label and isinstance(saved.get("rows"), list)):
+        return None
+    age = hours_since(str(saved.get("started_at") or ""))
+    return saved if age is not None and age < MAX_AGE_HOURS else None
 
 
 def main(argv: list[str]) -> int:
@@ -297,8 +312,7 @@ def main(argv: list[str]) -> int:
     except (OSError, ValueError):
         saved = None
     label = env.namespace(pepper)
-    resumed = (saved if isinstance(saved, dict) and saved.get("schema") == STATE_SCHEMA
-               and saved.get("fingerprint_namespace") == label and isinstance(saved.get("rows"), list) else None)
+    resumed = resumable(saved, label)
     rows, degraded, complete = scan_heroku_apps(pepper, (resumed or {}).get("rows"))
     ticks = int((resumed or {}).get("ticks") or 0) + 1
     if not complete:

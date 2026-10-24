@@ -226,6 +226,17 @@ TICK_SKIPS_BEFORE_WARNING = 2
 #: missed cycle says nothing, short enough that a stalled tick shows up here as
 #: well as in `tick.standing_down`.
 INTEGRITY_STALE_HOURS = 12.0
+#: How often the full integrity check is due (tools/check_store.py FULL_EVERY_HOURS).
+INTEGRITY_FULL_EVERY_HOURS = 24.0
+
+
+def integrity_stale_hours(age_h, receipt: dict):
+    """How stale an `ok` integrity receipt is, in hours, or None when it is not: its own age, or how far
+    the last full pass is past its daily due time, whichever is older (OBS-220, review of #352)."""
+    full_h = hours_since(receipt.get("full_checked_at") or "") if receipt.get("full_checked_at") else None
+    overdue = full_h - INTEGRITY_FULL_EVERY_HOURS if full_h is not None else None
+    worst = max((h for h in (age_h, overdue) if h is not None), default=None)
+    return worst if worst is not None and worst >= INTEGRITY_STALE_HOURS else None
 
 
 #: What can be freed, as opposed to what a project costs. `host.disk_low` asks
@@ -4104,7 +4115,10 @@ def collect() -> list[dict]:
                 "detail": clipped(
                     f"{said}: {iv.get('detail') or 'no detail recorded'}. "
                     f"Checked with {checked} over "
-                    f"{int(iv.get('bytes') or 0) / 1024 ** 2:.1f} MiB.", 700),
+                    f"{int(iv.get('bytes') or 0) / 1024 ** 2:.1f} MiB."
+                    + (f" A later check ({(iv.get('attempt') or {}).get('ran_at')}) did not finish, so "
+                       f"nothing has cleared it; the full check runs again on the next tick."
+                       if isinstance(iv.get("attempt"), dict) else ""), 700),
                 "action": ("stop the tick before it writes more, then rebuild "
                            "from `registry/ledger.jsonl` — the only copy of the "
                            "ledger outside this file — and the newest "
@@ -4127,20 +4141,24 @@ def collect() -> list[dict]:
                            f"whole file; the next tick tries again."),
                 "action": "`project-observatory full integrity` when the machine is quieter",
                 "evidence": ["store/raw/integrity.json", "tools/check_store.py"]})
-        elif verdict == "ok" and age_h is not None and age_h >= INTEGRITY_STALE_HOURS:
+        elif verdict == "ok" and (stale_h := integrity_stale_hours(age_h, iv)) is not None:
             # A VERDICT IS ABOUT WHEN IT WAS TAKEN. `ok` from three days ago says
             # the store was sound three days ago, and presenting it as current
-            # would assert an old reading as a fresh one.
+            # would assert an old reading as a fresh one. The light check between the
+            # daily full ones says `ok` on every tick, so its age is measured from the
+            # last full pass too (review of #352, M2): a day past it is a day overdue.
+            full_said = (f" The last full check passed at {iv.get('full_checked_at')}, and a full "
+                         f"pass is due once a day." if iv.get("full_checked_at") else "")
             out.append({
                 "type": "store.integrity_stale", "subject": "store:observatory.db",
                 "severity": "info",
-                **titled("the store's last integrity check was {hours}h ago", hours=int(age_h)),
+                **titled("the store's last integrity check was {hours}h ago", hours=int(stale_h)),
                 "detail": (f"It said `ok`, and that is a statement about "
                            f"{iv.get('ran_at')} rather than about now. The check "
                            f"runs early in the tick, so a verdict this old means "
                            f"the tick has not completed since — which "
                            f"`tick.standing_down` and `scan.stale` measure from "
-                           f"their own angles."),
+                           f"their own angles.{full_said}"),
                 "action": "`project-observatory full integrity` takes a fresh one in "
                           "about a fifth of a second",
                 "evidence": ["store/raw/integrity.json"]})

@@ -157,6 +157,24 @@ def private_workspace(root: pathlib.Path) -> tuple[bool, str]:
     return True, "explicit private registry history; this tool never pushes"
 
 
+#: What `atomic.py` names its temporary file: `.NAME.` + mkstemp's random part + `.tmp`.
+TEMP_NAME = re.compile(r"^\..+\.[A-Za-z0-9_]{6,}\.tmp$")
+
+
+def stray_temp_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Untracked `atomic.py` temporary files under the registry, none of which is ever registry data."""
+    base = root / REGISTRY
+    if not base.is_dir():
+        return []
+    code, out = git("ls-files", "--", REGISTRY, cwd=root)
+    tracked = set(out.splitlines()) if code == 0 else None
+    if tracked is None:
+        return []                      # unknown: remove nothing
+    return [f for f in sorted(base.rglob(".*.tmp"))
+            if f.is_file() and not f.is_symlink() and TEMP_NAME.match(f.name)
+            and str(f.relative_to(root)) not in tracked]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -176,6 +194,14 @@ def main() -> int:
         print("not a git repository — nothing to commit")
         return 0
 
+    stray = stray_temp_files(root)
+    if stray and not a.dry_run:
+        # A WRITER STOPPED BETWEEN ITS TEMP FILE AND THE RENAME (`atomic.py`) leaves `.NAME.XXXX.tmp`
+        # beside the file it was replacing: the emit stopped for time does exactly that (OBS-220,
+        # review of #352). `git add` of the directory would commit it, so it goes first.
+        for f in stray:
+            f.unlink(missing_ok=True)
+        print(f"removed {len(stray)} temporary file(s) a stopped writer left in {REGISTRY}/")
     code, out = git("status", "--porcelain", "--", REGISTRY, cwd=root)
     if code != 0:
         print(f"git status failed: {out}", file=sys.stderr)

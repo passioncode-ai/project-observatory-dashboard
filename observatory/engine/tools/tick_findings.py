@@ -13,8 +13,17 @@ CORE_TAIL = {'merge', 'emit', 'validate'}
 #: A merge or an emit that ran out of time no longer stops the tick (OBS-220, tools/tick.py
 #: `previous_registry`): the findings and the page are built over the registry as it stood.
 WENT_ON = ('This core step ran out of time; the findings and the dashboard were built over the registry '
-           'as it stood, and the steps that read a fresh registry (events, the indexes, the commit and the '
-           'wiki projection) wait for the next tick.')
+           'as it stood (not validated this tick when the validator was the one stopped), and the steps that '
+           'read a fresh registry (events, the commit and the wiki projection) wait for the next tick.')
+
+def _went_on(tick):
+    """The core steps the tick went on past (`registry_went_on`: a list since review of #352, a single
+    name before); () for anything else."""
+    value = tick.get('registry_went_on')
+    if isinstance(value, str):
+        return (value,)
+    return tuple(v for v in value if isinstance(v, str)) if isinstance(value, list) else ()
+
 
 def number(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -98,7 +107,7 @@ def findings(tick, rotation, *, now=None, config=None, severe=None, runs=None):
                  titled('the scheduled tick stopped `{step}` at its time limit', step=name)
                  if outcome == 'stopped' else
                  titled("the scheduled tick's `{step}` step exited {code}", step=name, code=row.get('exit'))),
-                    'detail': (grave or (WENT_ON if name in CORE_TAIL and tick.get('registry_went_on') == name else
+                    'detail': (grave or (WENT_ON if name in CORE_TAIL and name in _went_on(tick) else
                                          'This core step did not complete; the tick stopped before replacing further outputs.' if name in CORE_TAIL else 'The tick does not abort on a degradation; this step did not complete and its previous output may still be in use.'))
                               + ' Last tick finished ' + str(tick.get('finished_at', 'unknown')) + '.',
                     'action': 'read store/logs/tick.log; resolve the reported limit or step failure before rerunning the affected step',

@@ -369,8 +369,9 @@ class Tick:
         #: the findings and the page then read a registry this tick did not refresh.
         self.registry_refreshed = True
         self.registry_note = ""
-        #: The step that ran out of time when the tick went on over the registry as it stood.
-        self.registry_went_on = ""
+        #: The steps that ran out of time when the tick went on over the registry as it stood.
+        self.registry_went_on: list[str] = []
+        self._went_on_said: list[str] = []
         from tick_progress import Progress
         self.progress = Progress(scratch, log)
 
@@ -452,9 +453,9 @@ class Tick:
         self.failed.append((name, rc))
         self.outcomes[name] = outcome_of(rc, first)
         self.registry_refreshed = False
-        self.registry_went_on = name
-        self.registry_note = (f"`{name}` {self.outcomes[name].replace('_', ' ')} for want of time; {what}, and "
-                              f"the findings and the dashboard were built over it")
+        self.registry_went_on.append(name)
+        self._went_on_said.append(f"`{name}` {self.outcomes[name].replace('_', ' ')} for want of time; {what}")
+        self.registry_note = "; ".join(self._went_on_said) + ", and the findings and the dashboard were built over it"
         log(f"{name}: out of time; {what}; the findings and the dashboard are built over it, and the steps "
             f"that read a fresh registry wait for the next tick")
 
@@ -487,7 +488,7 @@ class Tick:
         self.failed.append((name, rc))
         self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
         self.registry_refreshed = False
-        self.registry_went_on = ""
+        self.registry_went_on = []
         self.registry_note = f"the tick stopped at `{name}`: {message}"
         self.write_report()
         log(f"tick stopped at {name}")
@@ -600,7 +601,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # as the machine stayed loaded. Now the tick goes on to them over the registry as it stands (the
     # previous one when the merge ran out, the one the emit left when the emit did, and only once the
     # validator has read it) and skips the steps that read a fresh registry. The report says so
-    # (`registry_refreshed: false`), and the supervisor records the run as `partial`.
+    # (`registry_refreshed: false`), and the supervisor records the run as `partial`. A validator
+    # stopped for time is not a red one (review of #352, M1): the findings and the dashboard are
+    # built over the registry as it stands, which nothing has validated this tick, and the report
+    # names it; a validator that answered red still stops the tick.
     rc, out = bounded("merge", PY, "collectors/merge.py", SCRATCH)
     if rc != 0:
         if not t.out_of_time(rc):
@@ -615,7 +619,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
             t.previous_registry("emit", rc, out, "the registry is as the stopped emit left it, once validated")
     rc, out = bounded("validate", PY, "tools/validate_registry.py")
     if rc != 0:
-        t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called", first=out)
+        if not t.out_of_time(rc):
+            t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called",
+                   first=out)
+        t.previous_registry("validate", rc, out, "the registry was not validated this tick")
     diff = ""
     if t.registry_refreshed:
         if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
@@ -633,16 +640,21 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # Which Fabric project each project is (OBS-160): asked of Fabric's hub, recorded here.
     # After `validate`, because it reads the registry this tick wrote; a hub that is down is
     # named in its own output, never a failed step.
+    # The index, the ledger and the rollup read the store, not the registry: they run whether or not
+    # this tick refreshed it (review of #352, LOW 4), each with the minimum a step that must finish has.
     if t.registry_refreshed:
         step("fabric-attribution", PY, "collectors/scan_fabric_attribution.py", SCRATCH / "fabric-attribution.json")
-        step("index", PY, "store/indexer.py", "index")
+    step("index", PY, "store/indexer.py", "index")
+    if t.registry_refreshed:
         step("retention", PY, "store/retention.py", "apply")
         step("sweep", PY, "tools/sweep_fixtures.py")
         step("corroborate", PY, "tools/corroborate.py")
-        step("ledger", PY, "tools/export_ledger.py")
+    step("ledger", PY, "tools/export_ledger.py")
+    if t.registry_refreshed:
         step("lost", PY, "tools/record_lost_projects.py")
         step("plugins", PY, "collectors/run_plugins.py")
-        step("rollup", PY, "store/rollup.py", "refresh")
+    step("rollup", PY, "store/rollup.py", "refresh")
+    if t.registry_refreshed:
         if re.search(r"nothing moved|nothing to compare", diff):
             log("quiet tick — no model called, 0 tokens")
         else:

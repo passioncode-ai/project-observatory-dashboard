@@ -149,6 +149,12 @@ NEED_MIN_SAMPLES = 3
 NEED_QUANTILE = 0.9
 #: Headroom over a measured need: the 90th percentile is not the worst run.
 NEED_MARGIN = 1.25
+#: The least a step that must finish is given, whatever its history says: a step that takes a second
+#: on a quiet machine takes several under load, process start included, and a few seconds short of
+#: that stops it (review of #352: `validate` measured 3 to 4 s under load and was handed under 2 s
+#: after a 270 s emit). A step not named here gets MUST_FINISH_MIN_DEFAULT.
+MUST_FINISH_MIN: dict[str, float] = {"validate": 10.0, "findings": 30.0, "dashboard": 20.0}
+MUST_FINISH_MIN_DEFAULT = 5.0
 #: The most of the ceiling the collectors leave the tail, so a slow history cannot starve them.
 RESERVE_CAP = 0.4
 
@@ -186,22 +192,30 @@ def needs(runs, *, defaults: bool = True) -> dict[str, float]:
     return out
 
 
+def given(name: str, need: dict[str, float]) -> float:
+    """Seconds step `name` is reserved and, if it must finish, always given: its need times
+    NEED_MARGIN, and for a MUST_FINISH step at least its minimum (MUST_FINISH_MIN)."""
+    seconds = NEED_MARGIN * need.get(name, DEFAULT_NEED.get(name, 5))
+    if name in MUST_FINISH:
+        seconds = max(seconds, MUST_FINISH_MIN.get(name, MUST_FINISH_MIN_DEFAULT))
+    return seconds
+
+
 def collector_reserve(measured_need: dict[str, float], ceiling: float, floor: float) -> float:
-    """Seconds before the ceiling the collectors leave the tail: the RESERVED steps that have a history
-    (`needs(runs, defaults=False)`) times NEED_MARGIN, at least `floor` (the old flat reserve, which
-    covers a step not measured yet) and at most RESERVE_CAP of the ceiling."""
-    measured = NEED_MARGIN * sum(measured_need.get(name, 0.0) for name in RESERVED)
+    """Seconds before the ceiling the collectors leave the tail: what the RESERVED steps that have a
+    history (`needs(runs, defaults=False)`) are given (`given`), at least `floor` (the old flat reserve,
+    which covers a step not measured yet) and at most RESERVE_CAP of the ceiling."""
+    measured = sum(given(name, measured_need) for name in RESERVED if name in measured_need)
     return min(max(float(floor), measured), max(float(floor), RESERVE_CAP * float(ceiling)))
 
 
 def reserve_after(name: str, need: dict[str, float]) -> float:
-    """Seconds tail step `name` leaves the MUST_FINISH steps that run after it, times NEED_MARGIN."""
+    """Seconds tail step `name` leaves the MUST_FINISH steps that run after it (`given`)."""
     try:
         at = TAIL_ORDER.index(name)
     except ValueError:
         return 0.0
-    return NEED_MARGIN * sum(need.get(later, DEFAULT_NEED.get(later, 5))
-                             for later in TAIL_ORDER[at + 1:] if later in MUST_FINISH)
+    return sum(given(later, need) for later in TAIL_ORDER[at + 1:] if later in MUST_FINISH)
 
 
 def tail_limit(name: str, left: float, need: dict[str, float], floor: float = 0.0) -> float:
@@ -210,10 +224,10 @@ def tail_limit(name: str, left: float, need: dict[str, float], floor: float = 0.
     Any tail step leaves the MUST_FINISH steps after it their measured time, and at least `floor`
     (the optional steps' old flat reserve for the core). A MUST_FINISH step may still take its own
     measured time out of what is left, so it is never stopped at a few seconds it has never been
-    enough: the reserve before it was meant for it."""
+    enough: the reserve before it was meant for it, and it is never less than the step's minimum
+    (MUST_FINISH_MIN) while that much is left."""
     limit = left - max(reserve_after(name, need), float(floor))
     if name in MUST_FINISH:
-        own = NEED_MARGIN * need.get(name, DEFAULT_NEED.get(name, 5))
-        limit = max(limit, min(left, own))
+        limit = max(limit, min(left, given(name, need)))
     return limit
 # endregion tail

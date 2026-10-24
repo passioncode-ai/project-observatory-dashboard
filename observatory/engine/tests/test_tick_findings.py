@@ -14,7 +14,7 @@ class TickFindings(unittest.TestCase):
         # OBS-220: the findings and the page are built over the registry as it stood.
         import tick_findings as F
         row = {'step': 'emit', 'exit': 124, 'outcome': 'stopped'}
-        went_on = F.findings({'failed_steps': [row], 'registry_refreshed': False, 'registry_went_on': 'emit'}, None)
+        went_on = F.findings({'failed_steps': [row], 'registry_refreshed': False, 'registry_went_on': ['emit']}, None)
         self.assertEqual(went_on[0]['severity'], 'warning')
         self.assertIn('built over the registry as it stood', went_on[0]['detail'])
         stopped = F.findings({'failed_steps': [row], 'registry_refreshed': False}, None)

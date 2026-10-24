@@ -995,17 +995,24 @@ The `.env` inventory and the production configuration fetch stop at their step's
 resume on the next tick; `store/raw/env.json` and `remote-env.json` are replaced only by a complete
 pass, which says how many ticks it took (`pass`). Inside the tail every step leaves the steps that
 must finish after it (the merge, the emit, the validator, the indexes, the ledger, the rollup, the
-findings, the dashboard and the notice) their measured time, so a slow `events` stops early rather
-than leave `findings` a few seconds, and a step that must finish always gets its own measured time.
-When the merge or the emit runs out of time, the tick no longer stops there: the findings and the
-dashboard are built over the registry as it stands (validated first) and the steps that read a fresh
-registry wait for the next tick; `tick.json` says `registry_refreshed: false` and the run is `partial`.
+findings, the dashboard and the notice) their measured time, and never less than a minimum (10 s for
+the validator, 30 s for the findings, 20 s for the dashboard, 5 s for the others), so a slow `events`
+stops early rather than leave `findings` a few seconds, and a step that must finish always gets its
+own time. When the merge, the emit or the validator runs out of time, the tick no longer stops there:
+the findings and the dashboard are built over the registry as it stands (validated first when the
+validator had the time; a validator that answered red still stops the tick), the index, the ledger
+and the rollup run as usual, and the steps that read a fresh registry, its commit among them, wait
+for the next tick; `tick.json` says `registry_refreshed: false` and the run is `partial`. A temporary
+file a stopped writer left in `registry/` is removed before the registry is committed.
 
 The store's integrity is checked first in every tick, but the full `integrity_check` runs once a
-day, and at once after a verdict of `damaged` or `unopenable`. In between, the light check reads the
-file's header, its schema and one row of every table (the full-text index among them), a few pages
-rather than the whole file; `store/raw/integrity.json` names which ran (`pragma`). A full check that
-ran out of time is tried again six hours later (`full_tried_at`), not on every tick.
+day. In between, while a full check has passed within the day, the light check reads the file's
+header, its schema and one row of every table (the full-text index among them), a few pages rather
+than the whole file; `store/raw/integrity.json` names which ran (`pragma`). After `damaged` or
+`unopenable`, with no full pass on record, or once the last one is a day old, the full check runs on
+every tick until one passes, and a check that did not finish keeps the verdict it found (`attempt`
+names it), so a light `ok` never stands in for a full pass. An `ok` is reported as stale from the
+last full pass as well as from its own time.
 
 For stage diagnosis, `store/raw/tick.json` adds `progress`: a run ID and bounded
 stage rows with start, end, wall duration, exit and outcome. It includes silent

@@ -186,8 +186,9 @@ Collectors take at most their share of the ceiling (`tick_budget.py`: 40 %, leak
 30 %, env 20 %); one not started for 3 ticks runs first, a disabled one last. The
 collectors leave the steps from `merge` on their measured need (90th percentile of the
 last 20 runs plus 25 %, at least 300 s, at most 40 % of the ceiling), and each of those
-leaves the steps that must finish after it theirs. A merge or emit out of time still
-yields findings and a dashboard over the registry as it stands: `tick.json`
+leaves the steps that must finish after it theirs, never less than a minimum (validate
+10 s, findings 30 s, dashboard 20 s, the others 5 s). A merge, emit or validator out of
+time still yields findings and a dashboard over the registry as it stands: `tick.json`
 `registry_refreshed: false`, the run `partial` in `tick-runs.jsonl`.
 `tick.step_over_share` names a step that used 95 % of its share in 3 of the
 last 5 ticks (resumable steps excepted); `collector.degraded_persistent` a collector whose same

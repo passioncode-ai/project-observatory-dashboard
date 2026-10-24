@@ -232,25 +232,78 @@ def test_the_full_check_runs_once_a_day_and_the_light_one_in_between() -> None:
     check("or unopenable", receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
 
 
-def test_a_full_check_out_of_time_is_retried_hours_later_not_every_tick() -> None:
+def test_a_check_that_did_not_finish_clears_nothing() -> None:
+    """Review of #352 (M2): after a full check said `damaged`, an `unmeasured` re-check let the light
+    check run for hours and write a fresh `ok` over the damage. A light `ok` now runs only while a
+    full check passed within the day, and an unfinished check keeps the verdict it found."""
+    import time
     d, env = migrated()
-    import check_store
-    tried = stamp(0.5)
-    write_receipt(d, {"ran_at": tried, "pragma": "integrity_check", "verdict": "unmeasured",
-                      "full_checked_at": stamp(30), "full_tried_at": tried})
+    write_receipt(d, {"ran_at": stamp(1), "pragma": "integrity_check", "verdict": "damaged",
+                      "detail": "Page 42: btreeInitPage() returns error", "took_ms": 90, "bytes": 1})
+    p = run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() - 1:.3f}"))
+    r = receipt(d)
+    check("after damaged, the next check is the full one", r.get("pragma") == "integrity_check" or
+          (r.get("attempt") or {}).get("pragma") == "integrity_check", json.dumps(r)[:240])
+    check("an unfinished check keeps the verdict it found", r.get("verdict") == "damaged", json.dumps(r)[:240])
+    check("and names itself beside it", (r.get("attempt") or {}).get("verdict") == "unmeasured",
+          json.dumps(r)[:240])
+    check("and the step still says the store is damaged", p.returncode == 1, (p.stdout + p.stderr)[-200:])
+    run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() - 1:.3f}"))
+    check("however many ticks run out of time", receipt(d).get("verdict") == "damaged",
+          json.dumps(receipt(d))[:240])
     run_check(env)
     r = receipt(d)
-    check("the next tick runs the light check", r.get("pragma") == "light", json.dumps(r)[:200])
-    check("and keeps when the full one was tried", r.get("full_tried_at") == tried, json.dumps(r)[:200])
-    write_receipt(d, {**r, "full_tried_at": stamp(check_store.FULL_RETRY_HOURS + 0.5)})
+    check("a full check that finishes clears it", r.get("verdict") == "ok" and r.get("pragma") == "integrity_check",
+          json.dumps(r)[:240])
+    check("and drops the old attempt", "attempt" not in r, json.dumps(r)[:240])
+    for name, doc in (("no full pass on record", {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok"}),
+                      ("a full pass a day old", {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok",
+                                                 "full_checked_at": stamp(25)}),
+                      ("a full check out of time", {"ran_at": stamp(0.5), "pragma": "integrity_check",
+                                                    "verdict": "unmeasured", "full_checked_at": stamp(30)})):
+        write_receipt(d, doc)
+        run_check(env)
+        check(f"with {name}, the full check runs on the next tick",
+              receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
+    write_receipt(d, {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok", "full_checked_at": stamp(2)})
     run_check(env)
-    check("the full check is tried again after the retry interval",
-          receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
-    write_receipt(d, {"ran_at": stamp(0.5), "pragma": "light", "verdict": "unmeasured",
-                      "full_checked_at": stamp(2)})
+    check("within the day of a full pass, the light one", receipt(d).get("pragma") == "light",
+          json.dumps(receipt(d))[:200])
+
+
+def test_a_damaged_middle_page_is_never_cleared_by_the_light_check() -> None:
+    """The reviewer's store: one corrupted page in the middle of the file. The light check reads the
+    first row of each table and says `ok`; the full check does not. Once the full check has found it,
+    every later check is the full one until the file is sound."""
+    d, env = workspace()
+    db = d / "observatory.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE t(a INTEGER, b TEXT)")
+    con.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 60000) "
+                "INSERT INTO t SELECT i, hex(randomblob(32)) FROM n")
+    con.commit()
+    con.close()
+    raw = bytearray(db.read_bytes())
+    page = 4096
+    middle = (len(raw) // page // 2) * page
+    raw[middle:middle + page] = b"\x5a" * page
+    db.write_bytes(bytes(raw))
+    import check_store
+    importlib.reload(check_store)
+    light = check_store.inspect(db, check_store.LIGHT)
+    full = check_store.inspect(db, check_store.PRAGMA)
+    check("the light check does not read that page", light.get("verdict") == "ok", json.dumps(light)[:200])
+    check("the full check does", full.get("verdict") in ("damaged", "unopenable"), json.dumps(full)[:200])
     run_check(env)
-    check("a light check out of time does not bring the full one forward",
-          receipt(d).get("pragma") == "light", json.dumps(receipt(d))[:200])
+    first = receipt(d)
+    check("with no full pass on record, the first check is the full one",
+          first.get("pragma") == "integrity_check" and first.get("verdict") in ("damaged", "unopenable"),
+          json.dumps(first)[:200])
+    for _ in range(3):
+        run_check(env)
+        r = receipt(d)
+        check("and every later one is the full one, never a light ok",
+              r.get("pragma") == "integrity_check" and r.get("verdict") != "ok", json.dumps(r)[:200])
 
 
 def test_the_light_check_reads_pages_not_the_file() -> None:
@@ -398,6 +451,19 @@ def test_a_stale_verdict_is_reported_as_stale() -> None:
               f"{f['title']} / {f['detail'][:160]}")
 
 
+def test_a_light_ok_long_after_the_last_full_pass_is_stale() -> None:
+    """Review of #352 (M2): the light check writes a fresh `ok` every tick; its staleness is measured
+    from the last full pass as well, which is due once a day."""
+    got = findings_for(rec("ok", pragma="light", ran_at=stamp(0.2), full_checked_at=stamp(40)))
+    f = got[0] if len(got) == 1 else None
+    check("a full pass 16 hours overdue is stale", f is not None and f["type"] == "store.integrity_stale",
+          str(got)[:200])
+    if f:
+        check("and says when the full check last passed", stamp(40)[:13] in f["detail"], f["detail"][:240])
+    check("a light ok within the day of a full pass is silent",
+          findings_for(rec("ok", pragma="light", ran_at=stamp(0.2), full_checked_at=stamp(20))) == [])
+
+
 def test_an_absent_receipt_raises_nothing() -> None:
     check("no receipt, no finding", findings_for(None) == [],
           "the check has not run since it was added; that is not a verdict")
@@ -465,7 +531,8 @@ if __name__ == "__main__":
                test_an_unopenable_store_is_a_third_answer,
                test_an_absent_store_is_not_a_fault,
                test_the_full_check_runs_once_a_day_and_the_light_one_in_between,
-               test_a_full_check_out_of_time_is_retried_hours_later_not_every_tick,
+               test_a_check_that_did_not_finish_clears_nothing,
+               test_a_damaged_middle_page_is_never_cleared_by_the_light_check,
                test_the_light_check_reads_pages_not_the_file,
                test_the_check_stops_at_its_deadline_and_says_it_did_not_measure,
                test_the_step_has_a_limit_of_its_own,
@@ -474,6 +541,7 @@ if __name__ == "__main__":
                test_a_sound_store_is_silent,
                test_an_absent_store_is_silent,
                test_a_stale_verdict_is_reported_as_stale,
+               test_a_light_ok_long_after_the_last_full_pass_is_stale,
                test_an_absent_receipt_raises_nothing,
                test_an_unmeasured_check_is_information_naming_the_last_full_one,
                test_the_check_runs_early_in_the_tick,

@@ -241,9 +241,10 @@ def run_tail(durations, limit_of, budget):
         if limit <= 0:
             out[name] = ("not_started", 0.0)
             continue
-        spent = min(durations[name], limit)
+        took = durations[name](limit) if callable(durations[name]) else durations[name]
+        spent = min(took, limit)
         left -= spent
-        out[name] = ("ran" if durations[name] <= limit else "stopped", limit)
+        out[name] = ("ran" if took <= limit else "stopped", limit)
     return out
 
 
@@ -289,7 +290,8 @@ class TailBudget(unittest.TestCase):
 
     def test_the_collectors_leave_the_measured_tail_within_a_cap(self):
         reserve = tick_budget.collector_reserve(MEASURED_P90, CEILING, TAIL_RESERVE)
-        self.assertAlmostEqual(reserve, tick_budget.NEED_MARGIN * sum(MEASURED_P90.values()))
+        self.assertAlmostEqual(reserve, sum(tick_budget.given(name, MEASURED_P90) for name in MEASURED_P90))
+        self.assertGreaterEqual(reserve, tick_budget.NEED_MARGIN * sum(MEASURED_P90.values()))
         self.assertGreater(reserve, TAIL_RESERVE)
         slow = {name: 500.0 for name in tick_budget.RESERVED}
         self.assertEqual(tick_budget.collector_reserve(slow, CEILING, TAIL_RESERVE),
@@ -328,6 +330,37 @@ class TailBudget(unittest.TestCase):
                                                       tick_budget.NEED_MARGIN * need[name]), name)
         self.assertEqual(tail["merge"][0], "ran")
         self.assertGreaterEqual(tail["findings"][1], tick_budget.NEED_MARGIN * need["findings"])
+
+    def test_a_validator_after_a_long_emit_still_gets_its_minimum(self):
+        # Review of #352 (M1), replayed on one machine's receipts: after a 270 s emit, `validate`,
+        # whose 90th percentile is about a second and a half on a quiet run but which measures 3 to
+        # 4 s under load, was handed 1.6 to 4.2 s, stopped, and read as a red validator.
+        for validate_p90, validate_now in ((1.29, 3.1), (1.5, 3.9), (3.39, 4.24)):
+            hist = {**MEASURED_P90, "validate": validate_p90}
+            need = tick_budget.needs(self.history(hist))
+            budget = tick_budget.collector_reserve(tick_budget.needs(self.history(hist), defaults=False),
+                                                   CEILING, TAIL_RESERVE)
+            # The emit takes all it is given and finishes on its limit: the 270 s of the review.
+            night = {**NIGHT, "merge": 30.0, "emit": lambda limit: limit, "validate": validate_now}
+            tail = run_tail(night, lambda name, left: tick_budget.tail_limit(
+                name, left, need, SOFT_FLOOR if name not in tick_budget.RESERVED else 0.0), budget - LATE)
+            self.assertEqual(tail["emit"][0], "ran", tail["emit"])
+            self.assertEqual(tail["validate"][0], "ran", (validate_p90, tail["validate"]))
+            self.assertGreaterEqual(tail["validate"][1], tick_budget.MUST_FINISH_MIN["validate"])
+            for name in ("findings", "dashboard", "notify"):
+                self.assertEqual(tail[name][0], "ran", (validate_p90, name, tail[name]))
+
+    def test_every_step_that_must_finish_has_a_minimum(self):
+        need = {name: 0.1 for name in tick_budget.RESERVED}
+        for name in tick_budget.MUST_FINISH:
+            self.assertGreaterEqual(tick_budget.given(name, need), tick_budget.MUST_FINISH_MIN_DEFAULT, name)
+            self.assertEqual(tick_budget.tail_limit(name, 1000.0 if name == "logs" else 0.5, need) > 0, True, name)
+        self.assertGreaterEqual(tick_budget.given("findings", need), 30.0)
+        # The minimums are reserved by every step before them, the optional ones included.
+        self.assertGreaterEqual(tick_budget.reserve_after("events", need),
+                                sum(tick_budget.MUST_FINISH_MIN.get(n, tick_budget.MUST_FINISH_MIN_DEFAULT)
+                                    for n in tick_budget.TAIL_ORDER[tick_budget.TAIL_ORDER.index("events") + 1:]
+                                    if n in tick_budget.MUST_FINISH))
 
     def test_a_step_that_must_finish_takes_its_own_time_out_of_what_is_left(self):
         need = {**tick_budget.DEFAULT_NEED, "findings": 40.0, "dashboard": 20.0}

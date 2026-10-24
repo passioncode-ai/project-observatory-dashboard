@@ -61,10 +61,12 @@ another, every tick, while the full check ran once a day as designed. So between
 checks the step now runs the LIGHT check (`LIGHT`): the file's SQLite header, the schema, and one
 row of every table, the full-text index among them, whose constructor is where the recorded damage
 (`vtable constructor failed: search_notes`) surfaced. It reads a few pages, not the file. The full
-`integrity_check` runs once a day, and at once after a verdict of `damaged` or `unopenable`. A full
-check that ran out of time (`unmeasured`) is tried again `FULL_RETRY_HOURS` later rather than on
-every tick, where it would take the whole step each time under the same load; until then the light
-check runs, and `full_tried_at` says when the full one was last attempted.
+`integrity_check` runs once a day, and the light one only while a full check has passed within the
+day: after `damaged` or `unopenable`, with no full pass on record, or once the last pass is a day
+old, the full check runs on every tick until one passes. A check that did not finish clears nothing:
+after `damaged` or `unopenable`, an `unmeasured` attempt keeps that verdict and names itself beside it
+(`attempt`), so a light `ok` can never stand in for a full pass the store has not had (review of
+#352).
 
 FIVE verdicts, because four of them are not `ok` for different reasons and a
 reader acting on them does different things:
@@ -104,8 +106,6 @@ PRAGMA = "integrity_check"
 LIGHT = "light"
 #: Hours between full checks while every verdict is `ok`.
 FULL_EVERY_HOURS = 24
-#: Hours before a full check that ran out of time is tried again; the light one runs meanwhile.
-FULL_RETRY_HOURS = 6
 #: The first sixteen bytes of every SQLite database file.
 HEADER = b"SQLite format 3\x00"
 #: Seconds kept before the step's deadline to write the receipt.
@@ -128,17 +128,15 @@ def _when(value) -> datetime | None:
 
 
 def choose(previous: dict) -> str:
-    """The full check once a day, and at once after `damaged` or `unopenable`; the light one in between.
+    """The light check only while a full check passed within the day; the full one otherwise.
 
-    A full check that ran out of time is tried again FULL_RETRY_HOURS after its attempt
-    (`full_tried_at`), not on the next tick."""
+    So the full check runs on every tick while the last verdict is `damaged` or `unopenable`, while no
+    full check has passed, and once the last pass is a day old, until one passes (review of #352, M2:
+    a light `ok` must never stand in for a full pass the store has not had)."""
     if previous.get("verdict") in ("damaged", "unopenable"):
         return PRAGMA
-    now = datetime.now(timezone.utc)
-    passed, tried = _when(previous.get("full_checked_at")), _when(previous.get("full_tried_at"))
-    if passed and now - passed < timedelta(hours=FULL_EVERY_HOURS):
-        return LIGHT
-    if tried and (passed is None or tried > passed) and now - tried < timedelta(hours=FULL_RETRY_HOURS):
+    passed = _when(previous.get("full_checked_at"))
+    if passed and datetime.now(timezone.utc) - passed < timedelta(hours=FULL_EVERY_HOURS):
         return LIGHT
     return PRAGMA
 
@@ -269,11 +267,15 @@ def main(argv: list[str]) -> int:
     ran_at = now()
     full_at = (ran_at if result["verdict"] == "ok" and pragma == PRAGMA
                else previous.get("full_checked_at") if result["verdict"] in ("ok", "unmeasured") else None)
-    # When the full check was last ATTEMPTED, so one that ran out of time waits FULL_RETRY_HOURS.
-    tried_at = ran_at if pragma == PRAGMA else previous.get("full_tried_at")
     doc = {"ran_at": ran_at, "pragma": pragma, **result,
-           **({"full_checked_at": full_at} if full_at else {}),
-           **({"full_tried_at": tried_at} if tried_at else {})}
+           **({"full_checked_at": full_at} if full_at else {})}
+    if result["verdict"] == "unmeasured" and previous.get("verdict") in ("damaged", "unopenable"):
+        # A CHECK THAT DID NOT FINISH CLEARS NOTHING: the store stays as the last finished check found
+        # it, with this attempt named beside that verdict, and the full check runs again next tick.
+        doc = {**{k: v for k, v in previous.items() if k != "attempt"},
+               "attempt": {"ran_at": ran_at, "pragma": pragma, "verdict": "unmeasured",
+                           "detail": result.get("detail", ""), "took_ms": result.get("took_ms")}}
+        result = {**result, "verdict": previous["verdict"], "detail": str(previous.get("detail") or "")}
     try:
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "integrity.json", doc)

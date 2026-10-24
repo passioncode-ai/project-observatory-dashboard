@@ -566,11 +566,12 @@ class OutOfTimeGoesOn(unittest.TestCase):
         self.assertFalse(bailed)
         self.assertEqual(report["failed_steps"], [{"step": "merge", "exit": 124, "outcome": "stopped"}])
         self.assertIs(report["registry_refreshed"], False)
-        self.assertEqual(report["registry_went_on"], "merge")
-        for name in ("validate", "findings", "dashboard", "notify", "logs"):
+        self.assertEqual(report["registry_went_on"], ["merge"])
+        # The index, the ledger and the rollup read the store, not the registry (review of #352, LOW 4).
+        for name in ("validate", "index", "ledger", "rollup", "findings", "dashboard", "notify", "logs"):
             self.assertIn(name, ran)
-        for name in ("emit", "events", "snapshot", "diff", "index", "ledger", "rollup", "agent", "registry",
-                     "project-into-vault", "projection", "links"):
+        for name in ("emit", "events", "snapshot", "diff", "fabric-attribution", "retention", "corroborate",
+                     "plugins", "agent", "registry", "project-into-vault", "projection", "links"):
             self.assertNotIn(name, ran, "a step that reads a fresh registry ran over the previous one")
         self.assertLess(ran.index("validate"), ran.index("findings"))
 
@@ -582,10 +583,29 @@ class OutOfTimeGoesOn(unittest.TestCase):
     def test_an_emit_out_of_time_is_validated_before_the_findings_read_it(self):
         ran, report, bailed = self.run_tail({"emit": (124, "half an emit\n")})
         self.assertFalse(bailed)
-        self.assertEqual(report["registry_went_on"], "emit")
+        self.assertEqual(report["registry_went_on"], ["emit"])
         self.assertLess(ran.index("emit"), ran.index("validate"))
         self.assertLess(ran.index("validate"), ran.index("findings"))
         self.assertIn("dashboard", ran)
+
+    def test_a_validator_out_of_time_is_not_a_red_one(self):
+        # Review of #352 (M1): a validate stopped for time read as "VALIDATOR RED" and bailed, so the
+        # findings and the dashboard did not run.
+        ran, report, bailed = self.run_tail({"validate": (124, "exceeded its 2 s limit\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["failed_steps"], [{"step": "validate", "exit": 124, "outcome": "stopped"}])
+        self.assertEqual(report["registry_went_on"], ["validate"])
+        self.assertIn("not validated", report["registry_note"])
+        for name in ("findings", "dashboard", "notify"):
+            self.assertIn(name, ran)
+        self.assertNotIn("registry", ran, "an unvalidated registry was committed")
+
+    def test_an_emit_and_a_validator_both_out_of_time_are_both_named(self):
+        _, report, bailed = self.run_tail({"emit": (124, "half\n"), "validate": (124, "not started — x\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["registry_went_on"], ["emit", "validate"])
+        self.assertIn("`emit`", report["registry_note"])
+        self.assertIn("`validate`", report["registry_note"])
 
     def test_a_red_validator_after_an_emit_out_of_time_still_stops(self):
         ran, report, bailed = self.run_tail({"emit": (124, "half an emit\n"), "validate": (1, "red\n")})

@@ -596,6 +596,22 @@ def test_a_fetch_cut_by_its_deadline_resumes_after_the_applications_it_read():
         check("asking only the applications it had not read", asked == ["id0", "id1", "id2", "id3", "id4"],
               str(asked))
         check("and holds every application once", sorted(r["app"] for r in rows) == [a["name"] for a in apps])
+        # A request the deadline cut short is asked again, never recorded as an application that
+        # would not answer (review of #352).
+        asked.clear()
+        FakeHeroku.get = staticmethod(lambda url, tok, timeout=None: (
+            asked.append(url.split("/")[-2]), {"__error__": "transport"})[1])
+        m.step_budget.remaining = lambda: 1000.0 if not asked else 0.0
+        rows, _deg, complete = m.scan_heroku_apps("pepper")
+        check("a request cut short by the deadline leaves the fetch incomplete", complete is False)
+        check("and records no error row for it", rows == [], str(rows))
+        label = "fp1:0000000000000000"
+        fresh = {"schema": m.STATE_SCHEMA, "fingerprint_namespace": label, "rows": [],
+                 "started_at": m.now()}
+        check("a saved fetch of today is resumed", m.resumable(fresh, label) is fresh)
+        check("one under another salt is not", m.resumable(fresh, "fp1:1111111111111111") is None)
+        check("nor one begun more than a day ago",
+              m.resumable({**fresh, "started_at": "2026-01-01T00:00:00Z"}, label) is None)
     finally:
         m.step_budget.remaining = real_remaining
         m._load = real
