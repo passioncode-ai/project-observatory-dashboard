@@ -639,8 +639,9 @@ def _upgraded(doc: dict) -> Tuple[dict, Optional[dict]]:
     out = {k: v for k, v in doc.items() if k not in ('tickSeq', 'unknownOrg')}
     if undone is not None:
         out.pop('removed', None)
-        # The removal set `reEnroll` without a reason; one recorded before it (the server asked to re-enroll, or
-        # superseded the epoch) still stands, with its reason.
+        # The removal set `reEnroll` without a reason. A reason recorded before it still stands, with `reEnroll`:
+        # only `epoch-superseded` or `certificate-expired` (`_ends`, from a rotation or flush refusal) can be one, since
+        # a check-in's `certificate.action: re-enroll` sets `reEnroll` and drops any reason.
         out.update(reEnroll=isinstance(out.get('reEnrollReason'), str), nextCheckInAt=0)
     return out, undone
 

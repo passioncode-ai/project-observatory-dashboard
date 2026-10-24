@@ -23,8 +23,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   more than 48 hours before the summary, or with no time, is sent as `unknown`.
 - **An enrollment 0.29.0 ended on `unknown-org` is active again** (OBS-221). DEC-0103 retired that provisional rule;
   a state it ended (`removed.code: unknown-org`) reads as active on its first read, is saved so under the enrollment's
-  lock with one journal line (`removal-undone`) and checks in at once, unless the server had asked it to re-enroll
-  before (that request and its reason stay); its leftover `tickSeq` is dropped. The events that rule dropped stay
+  lock with one journal line (`removal-undone`) and checks in at once, unless a re-enrollment with the reason
+  `epoch-superseded` or `certificate-expired` was recorded before the removal (it stays, with its reason); its leftover `tickSeq` is dropped. The events that rule dropped stay
   dropped. A new token's `org enroll` still treats that removal as one, so an organization recreated under the same
   id, with its epochs starting again, is accepted as 0.29.0 accepted it.
 - **The disk guard lists a marked browser clone in `kept`** (OBS-221): a code-sign clone that carries the keep marker
