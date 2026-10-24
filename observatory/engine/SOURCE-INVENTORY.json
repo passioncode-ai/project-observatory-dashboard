@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "47b5781310304a8422a232e3ac5442e4dfd2b618146606ddcaef2a86a516616e",
-      "bytes": 169276,
+      "export_sha256": "e6cf553ab684bd9eca14d5c16b14643936675cbde8ebbcb55ca4db7e1561ad75",
+      "bytes": 170489,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "740915cfd09da20724faa1210031c3f05bed02e93dfb68f6e43aa62e513171d5",
-      "bytes": 141817,
+      "export_sha256": "4d7aa54f3e641e087d2c3813539242cddf3324e520c3023ceab0308863c87726",
+      "bytes": 142079,
       "upstream_modified": true
     },
     {
@@ -920,8 +920,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f5e0311cd16e7ac3605af71f0e048bba028decda3b2fd13346997d06f622caef",
-      "bytes": 92161
+      "export_sha256": "041cb9fd067966a8db10dcb655748210a7f277953f842b4f7c8eadb83de102bc",
+      "bytes": 93565
     },
     {
       "path": "estate.py",
@@ -2581,8 +2581,8 @@
       "path": "mcp/stdio_relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1467fa35684831518fbb7d03a65cb28589001206ae3e6fd1eacee5bcfdf61063",
-      "bytes": 19601
+      "export_sha256": "924f775ab36a57ee97e48b6f507592f04987b3dc5e9278b834fe22e6d1132ab7",
+      "bytes": 23975
     },
     {
       "path": "mcp_inventory.py",
@@ -3118,8 +3118,8 @@
       "path": "session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "67ce7d6d62d432d35cdf3890b9bb822bd50290ae590ef2a0f72fbdfd98322085",
-      "bytes": 13271
+      "export_sha256": "7ae0d3419fa17af092fd1a8bf73e1532edf3af13673a59946e10082c6992d760",
+      "bytes": 13658
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -4100,8 +4100,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d05b60e853d730f5caaa553093b2be60c7648a477fb4fda252e64523cb7adfcf",
-      "bytes": 73738
+      "export_sha256": "fbdbbf8da6259ace15839646b4056b8517837b2d1d7f6892f3e03f5c784a0dc3",
+      "bytes": 75832
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -5267,8 +5267,8 @@
       "path": "tests/test_session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c9546ae058749db2e8f5b21e1877194fd99d7429b73bbfab0f82eebdc1bbb214",
-      "bytes": 24526
+      "export_sha256": "50c3d715bf5be4c0ab8d7663685783a9cc780ec756ed4abd0f4382d62dfb0b6d",
+      "bytes": 31393
     },
     {
       "path": "tests/test_session_start.py",
