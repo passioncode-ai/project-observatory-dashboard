@@ -75,7 +75,7 @@ folded.
 
 Structural and unclassified conclusions count as waiting for a person. Before OBS-227 the Health
 page said of all agents' records that nothing needs the person (OSS-50); that sentence still stands
-for routine records and lessons, and whether it should change for structural ones is open (OBS-227
+for routine records and lessons, and whether it should change for structural ones is open (OBS-230
 in `docs/backlog.md`).
 
 ## Applied without a coding agent: the tick step
@@ -126,7 +126,7 @@ and named, never applied to something nobody read.
 - **`full doctor`** carries `review`: the policy's state and hash, the last run and what waits.
 - **Health** shows the row "review queue" with the same, and `full review policy show` as its command.
 
-## Open
+## Open (OBS-230)
 
 - Whether Health's "Nothing here needs you" (OSS-50) should change for structural conclusions now
   that they count as waiting for a person. Safe default shipped: they count, the sentence is unchanged.

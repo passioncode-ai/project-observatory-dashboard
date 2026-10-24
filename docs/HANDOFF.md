@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-24: a standing review policy](runs/2026-10-24-review-policy/README.md) (OBS-227, #357): a person enables a
+closed set of safe rules once at a terminal (`full review policy enable`), the tick's optional step `review-policy`
+applies them as `policy:RULE@HASH`, never as the operator, journaled and reversible (`full review undo-policy`), and
+what is left for a person is resolved in one launch (`full review batch prepare`, then `batch apply FILE` at a
+terminal); `review.queue_waiting`, doctor and Health say what waits. Next: merge #357 when its checks are green; the
+operator's open decision is OBS-230.
+
 [2026-10-24: release 0.29.1](runs/2026-10-24-release-0.29.1/README.md): engine 0.29.1 (`observatory-log` stays
 0.28.0, unchanged since), carrying the contract re-pin at `588748ab` with the organization node's duties there
 (OBS-217, #350: `410 organization-closed` ends an enrollment, purpose holds only where a release signal can arrive),
