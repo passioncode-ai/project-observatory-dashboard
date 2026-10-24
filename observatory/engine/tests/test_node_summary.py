@@ -296,9 +296,9 @@ class Findings(unittest.TestCase):
         self.assertEqual(ns.document_findings(dict(self.summary, harness=harness)), [])
 
 
-def scans():
+def scans(probed='2026-10-21T12:00:00Z'):
     """A harness scan and an MCP scan as the collectors write them, with everything that must never leave planted in
-    fields the summary does not copy."""
+    fields the summary does not copy. `probed` is the time of the probe each verdict came from (`liveness_at`)."""
     harness = {
         'skills': [{'name': 'task-pipeline', 'source': 'plugin:task-pipeline@family', 'digest': 'a1' * 32,
                     'key': 'plugin:task-pipeline@family/task-pipeline', 'files': 3},
@@ -315,13 +315,14 @@ def scans():
     }
     mcp = {'servers': [
         {'name': 'fabric', 'agent': 'claude', 'scope': 'user', 'wire': 'stdio', 'liveness': 'connected',
-         'declared_in': '~/.claude.json', 'command': 'deno-launch', 'target': None, 'args_count': 2},
+         'liveness_at': probed, 'declared_in': '~/.claude.json', 'command': 'deno-launch', 'target': None, 'args_count': 2},
         {'name': 'fabric', 'agent': 'codex', 'scope': 'user', 'wire': 'stdio', 'liveness': 'failed',
-         'declared_in': '~/.codex/config.toml'},
+         'liveness_at': probed, 'declared_in': '~/.codex/config.toml'},
         {'name': 'plugin:switchboard:switchboard', 'agent': 'claude', 'scope': 'plugin:switchboard',
-         'wire': 'streamable-http', 'liveness': 'needs-auth', 'target': 'https://h.example/mcp'},
+         'wire': 'streamable-http', 'liveness': 'needs-auth', 'liveness_at': probed, 'target': 'https://h.example/mcp'},
         {'name': 'alpha-local', 'agent': 'claude', 'scope': 'project:~/projects/alpha-web', 'wire': 'sse'},
-        {'name': 'claude.ai Example Mail', 'agent': 'claude', 'scope': 'claude.ai', 'liveness': 'connected'},
+        {'name': 'claude.ai Example Mail', 'agent': 'claude', 'scope': 'claude.ai', 'liveness': 'connected',
+         'liveness_at': probed},
         {'name': 'switched-off', 'agent': 'claude', 'scope': 'user', 'wire': 'stdio', 'disabled': True},
         {'name': None, 'agent': 'cursor', 'error': 'JSONDecodeError'}]}
     return harness, mcp
@@ -355,6 +356,20 @@ class Build(unittest.TestCase):
         self.assertEqual(summary['services'], [])
         self.assertNotIn('drift', summary)
         self.assertEqual(omitted, {'mcpServers': 1, 'skills': 1})
+
+    def test_a_verdict_older_than_48_hours_is_unknown_health(self):
+        # OBS-221: the tick's declarations-only MCP scan carries the last probe's verdicts for days under a fresh
+        # `scanned_at`; each verdict is judged by its own probe time.
+        def health(probed, at='2026-10-22T09:00:00Z'):
+            harness, mcp = scans(probed)
+            summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at=at,
+                                     harness_scan=harness, mcp_scan=mcp)
+            return {r['name']: r['health'] for r in summary['harness']['mcpServers']}
+        self.assertEqual(health('2026-10-20T09:00:00Z')['fabric'], 'ok', '48 hours exactly is still current')
+        stale = health('2026-10-20T08:59:59Z')
+        self.assertEqual((stale['fabric'], stale['plugin:switchboard:switchboard']), ('unknown', 'unknown'))
+        self.assertEqual(health(None)['fabric'], 'unknown', 'a verdict with no probe time is not current')
+        self.assertEqual(health('not a time')['fabric'], 'unknown')
 
     def test_it_matches_the_schema_and_carries_nothing_it_never_carries(self):
         summary, _, _ = self.build()
@@ -737,6 +752,9 @@ class Lifetime(_Enrolled):
         before = self.make().state()
         self.server.renewal = True
         self.now[0] = strict_time(before['certificate']['notAfter']) / 1000 + 3600
+        for row in self.inputs[1]['servers']:            # a probe as current as the day the renewal happens
+            if 'liveness_at' in row:
+                row['liveness_at'] = __import__('node.org', fromlist=['iso']).iso(self.clock())
         result = self.make().check_in()
         self.assertTrue(result['ok'], result)
         self.assertEqual(result['renewed']['by'], 'key-on-record')
@@ -745,24 +763,57 @@ class Lifetime(_Enrolled):
         self.assertEqual(after['nodeSummary']['digest'], before['nodeSummary']['digest'])
         self.assertEqual(self.sent()[-1]['sequence'], 2, 'the day passed: sent again, the sequence still rising')
 
-    def test_a_re_enrollment_keeps_the_sequence_rising_and_the_consent_of_the_same_organization(self):
+    def test_a_new_token_enrollment_keeps_the_sequence_rising_and_asks_consent_again(self):
+        # OBS-221: a new token may enroll another person; only a renewal by the key on record carries the consent.
         self.make().check_in()
         self.make().check_in()
         self.inputs[0]['hooks'] = []
         self.make().check_in()                                # sequences 1 and 2 sent
         self.make().enroll('https://org.example', 'et_2.' + 'T' * 32)
         state = self.make().state()
-        self.assertEqual((state['summarySequence'], state['summaryConsent']['on']), (2, True))
+        self.assertEqual(state['summarySequence'], 2)
+        self.assertNotIn('summaryConsent', state)
         self.assertNotIn('nodeSummary', state, 'a new enrollment sends the summary again')
+        sent = len([s for s in self.sent() if s])
+        self.make().check_in()
+        self.assertEqual(len([s for s in self.sent() if s]), sent, 'nothing is shared before consent is given again')
+        self.make().set_summary_consent(True)
+        self.now[0] += 301
         self.make().check_in()
         self.assertEqual(self.sent()[-1]['sequence'], 3)
 
-    def test_consent_is_not_carried_from_another_organization(self):
+    def _closed_then_enrolled_again(self, close):
+        self.make().check_in()
+        self.assertTrue(self.make().state()['summaryConsent']['on'])
+        close()
+        self.now[0] += 301
+        self.make().check_in()
+        self.assertNotIn('summaryConsent', self.make().state(), 'the removal ends the consent')
+        self.server.closed_at = self.server.closed_body = None
+        self.make().enroll('https://org.example', 'et_2.' + 'T' * 32)   # the same organization id, a new token
+        state = self.make().state()
+        self.assertNotIn('summaryConsent', state)
+        self.assertEqual(self.make().describe()['nodeSummary']['state'], 'consent-off')
+        sent = len([s for s in self.sent() if s])
+        self.now[0] += 301
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(len([s for s in self.sent() if s]), sent, 'no summary without a fresh consent')
+
+    def test_an_organization_closed_clears_the_consent_before_a_new_enrollment(self):
+        self._closed_then_enrolled_again(lambda: setattr(self.server, 'closed_at', '2026-10-18T00:00:00Z'))
+
+    def test_a_removed_machine_clears_the_consent_before_a_new_enrollment(self):
+        def revoke():
+            self.server.certs[self.make().state()['certificate']['serial']]['revoked'] = True
+        self._closed_then_enrolled_again(revoke)
+
+    def test_what_a_renewal_and_a_re_enrollment_carry(self):
         from node.org import _summary_carried
-        previous = {'org': 'org_other', 'summarySequence': 4, 'summaryConsent': {'on': True, 'at': 'x'},
+        previous = {'org': self.org, 'summarySequence': 4, 'summaryConsent': {'on': True, 'at': 'x'},
                     'nodeSummary': {'digest': 'sha256:x'}}
-        self.assertEqual(_summary_carried(previous, self.org, renewal=False), {'summarySequence': 4})
-        self.assertEqual(_summary_carried(None, self.org, renewal=True), {})
+        self.assertEqual(_summary_carried(previous, renewal=False), {'summarySequence': 4})
+        self.assertEqual(_summary_carried(previous, renewal=True), {k: previous[k] for k in previous if k != 'org'})
+        self.assertEqual(_summary_carried(None, renewal=True), {})
 
     def test_a_tick_reads_the_scans_only_when_a_check_in_is_due(self):
         reads = []

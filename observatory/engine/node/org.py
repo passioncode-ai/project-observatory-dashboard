@@ -364,22 +364,23 @@ def read_exclusions(path: Optional[Path] = None) -> Tuple[List[str], Optional[st
     return list(globs), None
 
 
-def _summary_carried(previous: Optional[dict], org_id: str, renewal: bool) -> dict:
+def _summary_carried(previous: Optional[dict], renewal: bool) -> dict:
     """What of the harness summary outlives a renewal or a re-enrollment, which write the state afresh (OBS-192):
     the sequence always (DEC-0101: it rises with every summary of this device and context, and a server may refuse one
-    that goes back); the person's consent only into the same organization (another starts with it off); and, across a
-    renewal of the same enrollment, the last summary the server took with its digest and a refusal still waited out,
-    so a renewal changes nothing the person sees. A re-enrollment sends the summary again at its first check-in."""
+    that goes back). Only a renewal by the key on record (the same enrollment, the same person, `binding-changed`
+    refused) keeps the person's consent, the last summary the server took with its digest and a refusal still waited
+    out, so a renewal changes nothing the person sees; a rotation does not write the state afresh and keeps them too.
+    A new token's enrollment never carries the consent (OBS-221): the token may enroll another person, and a machine
+    removed or an organization closed cleared it already. It sends the summary only after consent is given again.
+    `previous` is always this organization's: the state lives in the organization's own folder."""
     if not isinstance(previous, dict):
         return {}
     out: Dict[str, Any] = {}
     sequence = previous.get('summarySequence')
     if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
         out['summarySequence'] = sequence
-    if previous.get('org') == org_id and isinstance(previous.get('summaryConsent'), dict):
-        out['summaryConsent'] = previous['summaryConsent']
-    if renewal and previous.get('org') == org_id:
-        for key in ('nodeSummary', 'summaryRefused', 'summaryBackoffUntil'):
+    if renewal:
+        for key in ('summaryConsent', 'nodeSummary', 'summaryRefused', 'summaryBackoffUntil'):
             if key in previous:
                 out[key] = previous[key]
     return out
@@ -624,6 +625,32 @@ def apply_delta_page(node: Path, page: Any, at_ms: int) -> dict:
 
 # ---- One enrollment ---------------------------------------------------------------------------------------------
 
+def _upgraded(doc: dict) -> Tuple[dict, Optional[dict]]:
+    """A state from 0.29.0's retired provisional rule, upgraded (OBS-221): an enrollment that rule ended
+    (`removed.code` `unknown-org`) is active again and checks in at once, and the rule's `tickSeq` and `unknownOrg`
+    records go. Answers the same object when there is nothing to upgrade, else a copy and the removal it undid. The
+    events that rule dropped stay dropped: their keys are gone and the server never took them."""
+    removed = doc.get('removed')
+    undone = removed if isinstance(removed, dict) and removed.get('code') == UNKNOWN_ORG else None
+    if undone is None and 'tickSeq' not in doc and 'unknownOrg' not in doc:
+        return doc, None
+    out = {k: v for k, v in doc.items() if k not in ('tickSeq', 'unknownOrg')}
+    if undone is not None:
+        out.pop('removed', None)
+        out.update(reEnroll=False, nextCheckInAt=0)
+    return out, undone
+
+
+def _same_binding(held: dict, cert: dict) -> bool:
+    """Whether a renewed certificate binds what the one on record binds (DEC-0100, FAC-SEM-044): a person or none, the
+    same person by the binding's user id, and the same role. A certificate on record from 0.29.0 holds no user id; it
+    is compared when both sides carry one, and the renewal records it (OBS-221)."""
+    if bool(cert.get('user')) != bool(held.get('user')) or ('role' in held and cert.get('role') != held.get('role')):
+        return False
+    known = held.get('userId'), cert.get('userId')
+    return None in known or known[0] == known[1]
+
+
 class Enrollment:
     """One organization enrollment of this machine: its state, outbox, requests and schedule."""
 
@@ -675,11 +702,23 @@ class Enrollment:
         return self._keys
 
     def state(self) -> Optional[dict]:
+        """The saved state. One written by 0.29.0 under the retired provisional `unknown-org` rule (an enrollment it
+        ended with `removed: {code: "unknown-org"}`, and its `tickSeq` counter) reads as DEC-0103 has it: active,
+        because `unknown-org` on a device request is any failure (`_upgraded`). The read itself changes nothing on
+        disk; under the enrollment's lock (every writer reads there) the upgrade is saved once, with a journal line."""
         try:
             doc = json.loads(private_io.read(self.folder / 'enrollment.json'))
         except FileNotFoundError:
             return None
-        return doc if isinstance(doc, dict) and doc.get('schema') == 'org-enrollment/1' else None
+        if not isinstance(doc, dict) or doc.get('schema') != 'org-enrollment/1':
+            return None
+        upgraded, undone = _upgraded(doc)
+        if upgraded is not doc and getattr(self._held, 'depth', 0):
+            self._save(upgraded)
+            if undone is not None:
+                self.journal('removal-undone', code=UNKNOWN_ORG, removedAt=undone.get('at'),
+                             droppedEvents=undone.get('droppedEvents'))
+        return upgraded
 
     def _save(self, doc: dict) -> None:
         private_io.write(self.folder / 'enrollment.json', json.dumps(doc, indent=1, sort_keys=True) + '\n')
@@ -827,6 +866,10 @@ class Enrollment:
                          'purposeRefused', 'acknowledgedNoticeVersion', 'noticeVersion'):
                 state.pop(held, None)
         state.pop('unknownOrg', None)                      # the provisional rule's record, before DEC-0103
+        state.pop('tickSeq', None)
+        # The person's consent to the harness summary ends with the enrollment (OBS-221): a machine removed or an
+        # organization closed sends nothing, and an enrollment that follows asks the person again.
+        state.pop('summaryConsent', None)
         state['reEnroll'] = True
         state.pop('pendingRotation', None)
         self._save(state)
@@ -864,8 +907,13 @@ class Enrollment:
             raise OrgError('response-malformed', 'the certificate is not DER') from error
         if spki != self.keys.sig_spki():
             raise OrgError('key-mismatch', "the certificate does not certify this machine's #sig key")
+        user = binding.get('user') if isinstance(binding.get('user'), dict) else None
         out = {'serial': serial, 'notBefore': cert['notBefore'], 'notAfter': cert['notAfter'],
-               'issuer': cert.get('issuer'), 'user': bool(binding.get('user'))}
+               'issuer': cert.get('issuer'), 'user': user is not None}
+        if user is not None and isinstance(user.get('id'), str):
+            # The person the certificate binds, as the contract's binding carries it (an opaque membership id): a
+            # renewal compares it, so a certificate re-issued to another person is `binding-changed` (OBS-221).
+            out['userId'] = user['id']
         if isinstance(binding.get('role'), str):           # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100)
             out['role'] = binding['role']
         return out
@@ -922,8 +970,7 @@ class Enrollment:
         if renewed is not None and previous is not None:
             # DEC-0100 (FAC-SEM-044): a renewal keeps the binding on record, the same user (or none) and role.
             held = previous['certificate']
-            if bool(cert.get('user')) != bool(held.get('user')) or \
-                    ('role' in held and cert.get('role') != held.get('role')):
+            if not _same_binding(held, cert):
                 raise OrgError('binding-changed', 'the renewed certificate binds another user or role than the one '
                                'on record')
         epoch = answer.get('streamEpoch')
@@ -952,7 +999,7 @@ class Enrollment:
             # The same person under the same notice: a purpose hold and the notice versions it waits on stay (DEC-0100).
             doc.update({k: previous[k] for k in ('purposeHolds', 'acknowledgedNoticeVersion', 'noticeVersion')
                         if k in previous})
-        doc.update(_summary_carried(previous, self.org_id, renewal=renewed is not None))
+        doc.update(_summary_carried(previous, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
         with self._db() as conn:                       # a new enrollment: registrations are sent again

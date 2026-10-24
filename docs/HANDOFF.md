@@ -23,7 +23,8 @@ six MCP tools behind access bindings, inert until a target is enrolled, #347), t
 warning, removal and CI on every system (OBS-199, OBS-201, OBS-204, #339), renewal by the key on record (#341), the
 harness summary `node-summary/1`, off until consent (OBS-192 step 1, #345), partner publisher scopes (OBS-171, #346),
 live state kept under cache roots (OBS-203, #338) and the contract pin (OBS-196, #337; OBS-205, #348).
-Next: merge, tag `v0.29.0`, verify, install, run `full probes` once, then record the receipts.
+Released: tag `v0.29.0` on `e72bc394`, verified and installed (receipts in the record). Next: 0.30.0
+(`node.lifecycle` L2r, L4 and L5 by 2026-11-07, OBS-79; the audit fixes OBS-221).
 
 [2026-10-21: release 0.28.0](runs/2026-10-21-release-0.28.0/README.md): engine and `observatory-log` 0.28.0,
 carrying the five-minute release check on the static feed (OBS-176) and the apps' lifecycle defaults (OBS-177, #329),

@@ -10,8 +10,9 @@
         enrolled organizations: server, the certificate's expiry date and state (a warning in its last three days),
         whether rotation is due, last check-in, outbox depth, the last batch's result, share registrations, anything
         degraded, and, when a person has something to do, the step (`nextStep`) and its `command`. A machine its
-        organization removed (a revoked certificate, an unknown one, an unknown organization) reads `removed`, with
-        the date and the server's code, and sends nothing more. An expired certificate still inside its renewal
+        organization removed (a revoked certificate, an unknown one) or whose organization closed reads `removed`,
+        with the date and the server's code, and sends nothing more; a server's `unknown-org` on a device request is
+        retried as any other failure and never ends an enrollment (DEC-0103). An expired certificate still inside its renewal
         window says until when (`renewUntil`); one the server refused to renew says why (`renewalRefused`)
     project-observatory full org check-in [--org ID]
         one signed check-in now. A certificate that expired at most 30 days ago (on the server's clock) is first
@@ -30,7 +31,8 @@
         exclusion list `config/node-summary.json`); nothing is saved, sent or spent, and it works before consent
     project-observatory full org summary --org ID --consent on|off
         share this machine's harness summary with organization ID, or stop; off until a person turns it on, recorded
-        with its time. Once on, a server that lists `node-summary/1` gets one in a check-in when it changed and at
+        with its time. A renewal by the key on record keeps it; a new token's enrollment, a removal and a closed
+        organization end it, so it is asked again. Once on, a server that lists `node-summary/1` gets one in a check-in when it changed and at
         least once a day; `org status` says when the last one was taken (`nodeSummary`), `not shared (consent off)`,
         why none could be built, or that the server refused one (check-ins go on without it; it is tried a day later)
     project-observatory full org leave --org ID

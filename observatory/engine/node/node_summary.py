@@ -33,6 +33,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .estate import _show, secret_value
+from .relay import strict_time
 
 TYPE = 'node-summary/1'
 KINDS = ('coding-agent', 'mcp-server', 'skill', 'plugin', 'service')
@@ -404,6 +405,11 @@ def _same(a: Any, b: Any) -> bool:
 #: The MCP scan's verdicts as a summary's health: heard answering, heard needing sign-in, heard failing; anything the
 #: scan did not hear (`not-probed`, `not-listed`, no verdict) is `unknown`, never `down`.
 MCP_HEALTH = {'connected': 'ok', 'needs-auth': 'degraded', 'failed': 'down'}
+#: How old a verdict may be and still be a server's health (OBS-221): the same 48 hours a scan is built from. The MCP
+#: scan's declarations-only run (the tick's) carries the last on-demand probe's verdicts for days under a fresh
+#: `scanned_at`, so each verdict is judged by its own probe time (`liveness_at`); an older one, or one with no time,
+#: is `unknown`, never yesterday's `ok` or `down` presented as current.
+LIVENESS_MAX_AGE_SECONDS = 48 * 3600
 MCP_HEALTH_ORDER = ('ok', 'degraded', 'down', 'unknown')
 MCP_TRANSPORT = {'stdio': 'stdio', 'streamable-http': 'http', 'http': 'http', 'sse': 'sse'}
 SKILL_SOURCES = {'plain': 'user'}
@@ -464,9 +470,21 @@ class _Gate:
         return False
 
 
-def _mcp_servers(scan: dict, gate: _Gate) -> List[dict]:
+def _fresh_health(row: dict, at_ms: Optional[int]) -> str:
+    """A declaration's verdict as a summary's health, `unknown` unless its probe (`liveness_at`) is at most
+    `LIVENESS_MAX_AGE_SECONDS` before the summary's own time (`at_ms`; none: the verdict is not judged by age)."""
+    health = MCP_HEALTH.get(row.get('liveness'), 'unknown')
+    if health == 'unknown' or at_ms is None:
+        return health
+    probed = strict_time(row.get('liveness_at'))
+    if probed is None or at_ms - probed > LIVENESS_MAX_AGE_SECONDS * 1000:
+        return 'unknown'
+    return health
+
+
+def _mcp_servers(scan: dict, gate: _Gate, at_ms: Optional[int] = None) -> List[dict]:
     """One row per server name the coding agents load: a declaration switched off is not loaded and not listed; the
-    strongest verdict of its declarations is its health."""
+    strongest current verdict of its declarations is its health (`_fresh_health`)."""
     rows: Dict[str, dict] = {}
     for row in _list(scan.get('servers')):
         name = row.get('name')
@@ -474,7 +492,7 @@ def _mcp_servers(scan: dict, gate: _Gate) -> List[dict]:
             continue
         if name not in rows and not gate.admit(name, 'mcpServers'):
             continue
-        health = MCP_HEALTH.get(row.get('liveness'), 'unknown')
+        health = _fresh_health(row, at_ms)
         transport = MCP_TRANSPORT.get(row.get('wire') or row.get('transport'), 'other')
         held = rows.get(name)
         if held is None:
@@ -557,14 +575,16 @@ def _bounded(rows: List[dict], member: str, omitted: Dict[str, int]) -> List[dic
     return rows[:limit]
 
 
-def harness_of(harness_scan: Any, mcp_scan: Any, gate: Optional[_Gate] = None) -> Tuple[dict, Dict[str, int]]:
-    """The `harness` member from the two scans, and what was left out of each list for its shape (counts only)."""
+def harness_of(harness_scan: Any, mcp_scan: Any, gate: Optional[_Gate] = None,
+               at: Optional[str] = None) -> Tuple[dict, Dict[str, int]]:
+    """The `harness` member from the two scans, and what was left out of each list for its shape (counts only).
+    `at` is the summary's time: an MCP verdict probed more than 48 hours before it reads `unknown`."""
     gate = gate or _Gate()
     harness_scan = harness_scan if isinstance(harness_scan, dict) else {}
     mcp_scan = mcp_scan if isinstance(mcp_scan, dict) else {}
     omitted = gate.omitted
     harness = {'codingAgents': _bounded(_coding_agents(harness_scan, gate), 'codingAgents', omitted),
-               'mcpServers': _bounded(_mcp_servers(mcp_scan, gate), 'mcpServers', omitted),
+               'mcpServers': _bounded(_mcp_servers(mcp_scan, gate, strict_time(at)), 'mcpServers', omitted),
                'skills': _bounded(_skills(harness_scan, gate), 'skills', omitted),
                'plugins': _bounded(_plugins(harness_scan, gate), 'plugins', omitted),
                'hooks': {'count': min(len(_list(harness_scan.get('hooks'))), 100000)}}
@@ -597,7 +617,7 @@ def build(*, device_id: str, org_id: str, sequence: int, at: str, harness_scan: 
     `harness_baseline(layers)` over the policy layers this machine verified and applied, or None, when the summary
     carries no drift. Raises SummaryRefused rather than hand over a summary FAC-SEM-128 would flag."""
     gate = _Gate(exclude)
-    harness, omitted = harness_of(harness_scan, mcp_scan, gate)
+    harness, omitted = harness_of(harness_scan, mcp_scan, gate, at)
     summary = {'type': TYPE, 'device': {'id': device_id}, 'context': 'org:' + org_id, 'sequence': int(sequence),
                'at': at, 'harness': harness, 'services': _bounded(_services(services, gate), 'services', omitted)}
     if baseline is not None:

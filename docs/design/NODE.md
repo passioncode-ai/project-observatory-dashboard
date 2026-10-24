@@ -482,7 +482,9 @@ each organization enrollment of a machine gets keys of its own), so no two organ
   clock, which the new certificate's `notBefore` reads, so `renewedAt` is that `notBefore` and the skew is measured
   again from it (kept as before when it is a day or more off); a purpose hold and the notice versions it waits on
   are kept too (the same person under the same notice); a certificate that binds another user or role
-  than the one on record is refused (`binding-changed`, FAC-SEM-044). Inside the window `notice` keeps the state
+  than the one on record is refused (`binding-changed`, FAC-SEM-044). The person is compared by the binding's user
+  id, which the certificate on record keeps (`certificate.userId`); a certificate saved by 0.29.0 holds no id, so its
+  first renewal compares a person or none and records the id (OBS-221). Inside the window `notice` keeps the state
   `expired` and adds `renewUntil`, the step in words and `full org check-in --org ID`; `needsEnrollment` stays false.
   An unanswered renewal (no answer, 408, 425, 429, 5xx) backs off (`renewal`: attempts, next time, last answer; the
   tick answers `renewal-pending`, a person's `org check-in` asks now); `certificate-revoked` or `certificate-unknown`
@@ -643,15 +645,20 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   check-in's `sequenceNum`; a failed check-in leaves the summary due. The scans are read before the enrollment's lock is
   taken (they can be large; at most 32 MB each), and a tick reads them only when a check-in is due.
 - **Across a renewal or a re-enrollment** (both write the enrollment's state afresh): the sequence keeps rising
-  (DEC-0101: per device and context; a server may refuse one that goes back); the consent is carried into the same
-  organization only; a renewal by the key on record also keeps the last summary taken (its digest) and a refusal still
-  waited out, so it changes nothing the person sees, while a re-enrollment sends the summary again at its first
-  check-in (`_summary_carried`).
+  (DEC-0101: per device and context; a server may refuse one that goes back); a renewal by the key on record keeps
+  the consent, the last summary taken (its digest) and a refusal still waited out, so it changes nothing the person
+  sees. A new token's enrollment never carries the consent (the token may enroll another person), and a removal or an
+  organization closed clears it, so the summary is sent again only after the person consents again (OBS-221,
+  `_summary_carried`).
 - **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
   sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
   (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
   `org:node-summary-unavailable`. A summary built from a missing, stale or partial scan would tell the organization the
-  machine runs nothing of that kind, or what it ran days ago.
+  machine runs nothing of that kind, or what it ran days ago. A fresh MCP scan is not fresh health: the tick's scan
+  reads declarations only and carries the last on-demand probe's verdicts for up to seven days under a new
+  `scanned_at`, so each server's health is judged by its own probe time (`liveness_at`), and a verdict probed more
+  than 48 hours before the summary's `at`, or with no probe time, is sent as `unknown`, never as an old `ok` or `down`
+  (OBS-221, `node_summary._fresh_health`).
 - **A server that refuses it never stops check-ins.** A check-in carrying a summary that the server refuses in a way
   the summary may cause (400, 413 or 422 whatever it says, or another client error whose code, pointer or message names
   the summary or the records; never a signature, certificate or rate refusal) is sent again at once without it. When
@@ -676,11 +683,14 @@ are not listed yet.
 ## Lifecycle (OBS-79)
 
 The node wakes, stops and restarts enrolled desktop apps and background services for agents. Its plan, file by file
-and step by step, is [LIFECYCLE.md](LIFECYCLE.md). Step L1 is built: `observatory/engine/node/lifecycle/broker.py`, the
-platform-neutral broker (the closed registry, the authority, durable operations and receipts, the effect journal,
-circuits, the restart budget, the idle and takeover rules), tested against fake adapters by
-`tests/test_node_lifecycle_broker.py`. The macOS adapter (L2), the six `lifecycle.*` tools (L3) and the supervisor
-thread (L4) follow.
+and step by step, is [LIFECYCLE.md](LIFECYCLE.md). Steps L1 to L3 are merged and released in 0.29.0: L1,
+`observatory/engine/node/lifecycle/broker.py`, the platform-neutral broker (the closed registry, the authority, durable
+operations and receipts, the effect journal, circuits, the restart budget, the idle and takeover rules), tested against
+fake adapters by `tests/test_node_lifecycle_broker.py` (#342); L2, the macOS adapter `node/lifecycle/macos.py` and its
+Swift helper compiled for a source install (`full lifecycle build-helper`, #344); L3, the six `lifecycle.*` tools on
+the local server behind access bindings, the well-known `node.lifecycle` entry and `full lifecycle` (#347). The
+helper's release build inside the signed app, the supervisor thread (L4) and the operator's import (L5) follow in
+0.30.0.
 
 ## What comes next
 

@@ -941,6 +941,21 @@ class Clones(Base):
         plan = self.g.plan_clones(self.cfg(), self.free(live / "App.bundle" / "binary"), time.time())
         self.assertEqual([Path(a["target"]).name for a in plan], ["code_sign_clone.old"])
 
+    def test_a_marked_clone_is_kept_with_its_reason(self):
+        # OBS-221: like every other class, a clone marked as live state is listed in `kept`, never planned.
+        holder = self.clones / "com.example.Browser.code_sign_clone"
+        marked, old = holder / "code_sign_clone.marked", holder / "code_sign_clone.old"
+        for d in (marked, old):
+            (d / "App.bundle").mkdir(parents=True)
+        (marked / self.g.KEEP_MARKER).write_text("")
+        for d in (marked, old):
+            age(d, 1)
+        kept: list = []
+        plan = self.g.plan_clones(self.cfg(), self.free(), time.time(), kept)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["code_sign_clone.old"])
+        self.assertEqual([(k["class"], Path(k["target"]).name, k["reason"]) for k in kept],
+                         [("browser-clone", "code_sign_clone.marked", self.g.KEEP_REASON)])
+
     def test_no_clone_root_means_no_clone_is_planned(self):
         with patch.object(self.g, "clone_root", return_value=None):
             self.assertEqual(self.g.plan_clones(self.cfg(), self.free(), time.time()), [])

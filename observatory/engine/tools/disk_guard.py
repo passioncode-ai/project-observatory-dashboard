@@ -734,9 +734,12 @@ def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: 
     return out
 
 
-def plan_clones(cfg: dict, holders: Holders, at: float) -> list[dict]:
+def plan_clones(cfg: dict, holders: Holders, at: float, kept: list | None = None,
+                state: dict | None = None) -> list[dict]:
     """Code-sign clones a Chromium browser left behind (macOS): one per launch, removed by
-    the browser only on a clean exit. A clone a running browser uses is held open."""
+    the browser only on a clean exit. A clone a running browser uses is held open. One a
+    service marks or declares as live state goes to `kept` with its reason, as in every
+    other class (`act` refuses it again at action time)."""
     base = clone_root()
     if base is None:
         return []
@@ -752,6 +755,10 @@ def plan_clones(cfg: dict, holders: Holders, at: float) -> list[dict]:
             except OSError:
                 continue
             if e.name.startswith("code_sign_clone.") and mtime < cutoff and not holders.busy(e.path):
+                why = keep_reason(e.path, state)
+                if why:
+                    _note_kept(kept, "browser-clone", e.path, why)
+                    continue
                 r = inspect(e.path, cutoff, time.monotonic() + 2)
                 if r["complete"]:
                     out.append({"class": "browser-clone", "target": e.path, "bytes": r["size"],
@@ -1372,7 +1379,7 @@ def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list,
         ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b, degraded, kept, state))),
         ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded, kept, state))),
         ("trash", lambda b: big(plan_trash(cfg, level, at, degraded, kept, state))),
-        ("browser-clone", lambda b: plan_clones(cfg, holders, at)),
+        ("browser-clone", lambda b: plan_clones(cfg, holders, at, kept, state)),
         ("cache-command", lambda b: plan_commands(cfg, level, last_commands, at)),
     ]
 

@@ -3,6 +3,34 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **A renewal re-issued to another person is refused** (OBS-221). The certificate on record kept only whether it
+  bound a person, so a renewal by the key on record bound to someone else passed the `binding-changed` check that
+  0.29.0 describes, and that enrollment's purpose holds, notice versions and summary consent carried to them. The
+  certificate on record now keeps the binding's user id and a renewal compares it; a certificate saved by 0.29.0 has no
+  id, so its first renewal compares a person or none, as before, and records the id.
+- **The harness summary's consent ends with the enrollment** (OBS-221). A removal (`certificate-revoked`,
+  `certificate-unknown`) or a closed organization (`organization-closed`) clears it, and a new token's `org enroll`
+  never carries it, also under the same organization id: only a renewal by the key on record keeps it. 0.29.0 carried
+  it into any later enrollment of that organization id, so a new enrollment sent the summary without a fresh consent.
+- **Stale MCP health is no longer sent as current** (OBS-221). The tick's MCP scan reads declarations only and
+  carries the last on-demand probe's verdicts for up to seven days under a new `scanned_at`, which passed the
+  summary's 48-hour check. Each server's health is now judged by its own probe time (`liveness_at`): a verdict probed
+  more than 48 hours before the summary, or with no time, is sent as `unknown`.
+- **An enrollment 0.29.0 ended on `unknown-org` is active again** (OBS-221). DEC-0103 retired that provisional rule;
+  a state it ended (`removed.code: unknown-org`) reads as active on its first read, is saved so under the enrollment's
+  lock with one journal line (`removal-undone`) and checks in at once; its leftover `tickSeq` is dropped. The events
+  that rule dropped stay dropped.
+- **The disk guard lists a marked browser clone in `kept`** (OBS-221): a code-sign clone that carries the keep marker
+  or a declared state path is reported with its reason, like every other class, instead of being skipped silently.
+- **Corrections to the 0.29.0 notes.** `node.lifecycle` steps L1 to L3 are all merged and released in 0.29.0. The
+  macOS helper is served with the source-install build (`full lifecycle build-helper`); its release build inside the
+  signed app was not in 0.29.0 and is planned for 0.30.0 (step L2r of `docs/design/LIFECYCLE.md`). A server's
+  `unknown-org` on a device request is retried as any other failure and never ends an enrollment (DEC-0103).
+
 ## 0.29.0 (2026-10-23)
 
 The node gains `node.lifecycle`: a broker that wakes, stops and restarts enrolled Mac apps and LaunchAgents for

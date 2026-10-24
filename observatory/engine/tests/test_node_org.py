@@ -821,6 +821,54 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertTrue(self.make().check_in()['ok'])
         self.assertNotIn('unknownOrg', self.make().state())
 
+    def _ended_by_0_29(self):
+        """An enrollment 0.29.0's retired provisional rule ended: its saved shape, with the events it dropped."""
+        self.enroll()
+        self._three_events()
+        state = self.make().state()
+        state.update(removed={'at': org_iso(self.now[0]), 'code': 'unknown-org', 'status': 404, 'droppedEvents': 3,
+                              'firstSeen': org_iso(self.now[0] - 3700)}, reEnroll=True, tickSeq=7)
+        self.make()._save(state)
+        with self.make()._db() as conn:
+            conn.execute("UPDATE events SET state = 'dropped', key = NULL, reason = 'removed:unknown-org'")
+        return state
+
+    def test_an_enrollment_0_29_ended_on_unknown_org_is_active_again_on_first_read(self):
+        # OBS-221: DEC-0103 retired the provisional rule; what it ended is active again, with one journal line.
+        self._ended_by_0_29()
+        view = self.make().state()                      # an unlocked read changes nothing on disk
+        self.assertNotIn('removed', view)
+        self.assertNotIn('tickSeq', view)
+        self.assertFalse(view['reEnroll'])
+        on_disk = json.loads((self.node / 'orgs' / ORG / 'enrollment.json').read_text())
+        self.assertEqual(on_disk['removed']['code'], 'unknown-org')
+        self.assertEqual(self.make().describe()['state'], 'enrolled')
+        self.assertNotIn('org:removed', self.make().describe()['degraded'])
+        self.assertTrue(self.make().check_in()['ok'])   # the first locked read saves the upgrade
+        on_disk = json.loads((self.node / 'orgs' / ORG / 'enrollment.json').read_text())
+        self.assertNotIn('removed', on_disk)
+        self.assertNotIn('tickSeq', on_disk)
+        journal = [json.loads(line) for line in
+                   (self.node / 'orgs' / ORG / 'journal.jsonl').read_text().splitlines()]
+        undone = [line for line in journal if line['event'] == 'removal-undone']
+        self.assertEqual(len(undone), 1)
+        self.assertEqual((undone[0]['code'], undone[0]['droppedEvents']), ('unknown-org', 3))
+        self.make().check_in()
+        journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text()
+        self.assertEqual(journal.count('removal-undone'), 1, 'saved once')
+        self.make().enqueue('meter.call', {'n': 9}, occurred='2026-10-18T00:00:00Z')
+        self.assertEqual(self.make().flush()['accepted'], 1)
+
+    def test_a_removal_for_another_reason_is_not_undone(self):
+        self.enroll()
+        state = self.make().state()
+        state.update(removed={'at': org_iso(self.now[0]), 'code': 'certificate-revoked', 'status': 401,
+                              'droppedEvents': 0}, reEnroll=True, tickSeq=2)
+        self.make()._save(state)
+        read = self.make().state()
+        self.assertEqual(read['removed']['code'], 'certificate-revoked')
+        self.assertNotIn('tickSeq', read)
+
     # -- DEC-0103: an organization that ended -----------------------------------------------------------------------
     CLOSED_AT = '2026-10-18T00:00:00Z'
 
@@ -1351,6 +1399,48 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(raised.exception.code, 'certificate-expired')
         self.assertIn('binding-changed', str(raised.exception))
         self.assertEqual(self.make().state()['certificate'], old['certificate'])
+
+    def test_a_renewal_that_binds_another_person_is_refused_and_carries_nothing_to_them(self):
+        # OBS-221: the certificate on record keeps the person's id; a renewal re-issued to person B is
+        # `binding-changed`, so A's purpose holds, notice versions and summary consent never reach B.
+        from node.org import OrgError
+        self.server.renewal, self.server.user = True, 'm-4821'
+        old = self.enroll()
+        self.assertEqual(self.make().state()['certificate']['userId'], 'm-4821')
+        self.server.acknowledged = 'v1'
+        self.assertTrue(self.make().check_in()['ok'])
+        self.make().set_summary_consent(True)
+        held = self.make().state()
+        self.server.user = 'm-9001'
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 86400
+        with self.assertRaises(OrgError) as raised:
+            self.make().check_in()
+        self.assertIn('binding-changed', str(raised.exception))
+        state = self.make().state()
+        self.assertEqual(state['certificate'], held['certificate'])
+        self.assertEqual(state['certificate']['userId'], 'm-4821')
+        self.assertNotIn('renewedAt', state)
+
+    def test_a_renewal_of_the_same_person_passes_and_a_0_29_state_records_the_id_on_first_renewal(self):
+        self.server.renewal, self.server.user = True, 'm-4821'
+        old = self.enroll()
+        state = self.make().state()
+        state['certificate'].pop('userId')                 # the shape 0.29.0 saved: `user: true`, no id
+        self.make()._save(state)
+        self.now[0] = strict_time(old['certificate']['notAfter']) / 1000 + 86400
+        self.assertTrue(self.make().check_in()['ok'])
+        renewed = self.make().state()
+        self.assertIn('renewedAt', renewed)
+        self.assertEqual(renewed['certificate']['userId'], 'm-4821')
+
+    def test_the_binding_comparison(self):
+        from node.org import _same_binding
+        a, b = {'user': True, 'userId': 'm-1'}, {'user': True, 'userId': 'm-2'}
+        self.assertTrue(_same_binding(a, dict(a)))
+        self.assertFalse(_same_binding(a, b))
+        self.assertTrue(_same_binding({'user': True}, b), 'a 0.29.0 certificate holds no id: compared when known')
+        self.assertFalse(_same_binding({'user': False}, b))
+        self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False}))
 
     def test_the_renewal_holds_the_enrollments_lock(self):
         import threading

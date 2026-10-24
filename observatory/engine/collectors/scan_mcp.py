@@ -464,7 +464,13 @@ def scan(home: pathlib.Path | None = None, probe=None, *, declarations_only: boo
     `probe` is the liveness source, `claude_probe` unless a caller hands in its
     own (the tests do, so no suite ever runs the real CLI). With
     `declarations_only` nothing is started: the verdicts come from `previous`,
-    the last document this collector wrote, and keep that probe's time."""
+    the last document this collector wrote, and keep that probe's time.
+
+    `scanned_at` is when the declarations were read, never when a verdict was
+    heard: a carried verdict can be up to CARRY_DAYS old under a fresh
+    `scanned_at`. Each row's `liveness_at` is its own probe time, and a reader
+    that needs current health judges that (the node summary sends a verdict
+    probed more than 48 hours before it as `unknown`, OBS-221)."""
     home = HOME if home is None else home
     rows, sources = read_sources(home)
     note = None

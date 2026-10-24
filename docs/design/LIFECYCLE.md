@@ -80,7 +80,8 @@ helper and 203 tests in four files.
 | Step | What | Release |
 |---|---|---|
 | L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
-| L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app is its own pull request before L3's tools are served | 0.29.0 |
+| L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app was planned before L3's tools were served; it was not built, and 0.29.0 serves the tools with the source-install helper (`full lifecycle build-helper`); the release build is step L2r | 0.29.0 |
+| L2r | the helper's release build inside the signed app (below, "Release"), and the adapter preferring the app's helper when the installed app satisfies its signing requirement | 0.30.0, by 2026-11-07 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
 | L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
@@ -199,7 +200,7 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   probe answers `setup_required` (`helper_not_built`) and a start is refused with `setup_required`; launchd targets
   need no helper. Refusals: `swiftc_missing`, `helper_build_failed` (the compiler's last lines on `detail`),
   `unsupported_platform`.
-- **Release (next, its own pull request before L3's tools are served).** `macos/scripts/build-app.sh` compiles the
+- **Release (step L2r, 0.30.0 by 2026-11-07; L3's tools are served meanwhile with the source-install helper).** `macos/scripts/build-app.sh` compiles the
   same source for both architectures (`swiftc -target arm64-apple-macos14` and `x86_64-apple-macos14`, joined with
   `lipo`), places it at `Project Observatory.app/Contents/Helpers/lifecycle-native`, and signs it with the release
   identity and the hardened runtime before it signs the app (nested code first), so `.github/workflows/release.yml`
@@ -209,8 +210,8 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   app's signature before it runs a helper from inside it.
 
 Notes for L3: the tools construct the broker over `macos.platform_adapter(cache_path=macos.default_cache())`;
-`full lifecycle enroll` calls `adapter.fingerprint(kind, path)` and writes what it returns; `full lifecycle helper
-build` wraps `macos.main`. Notes for L4: the supervisor feeds `MacAdapter.watch` events to `note_activation` and calls
+`full lifecycle enroll` calls `adapter.fingerprint(kind, path)` and writes what it returns; `full lifecycle
+build-helper` wraps `macos.main`. Notes for L4: the supervisor feeds `MacAdapter.watch` events to `note_activation` and calls
 `stop_watch` and `close` when it stops.
 
 The source's 203 tests, by where they land now: 85 in L1; 50 here; 36 with the tools and verbs in L3; 4 with the
