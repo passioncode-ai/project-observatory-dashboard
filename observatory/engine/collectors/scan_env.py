@@ -490,6 +490,14 @@ def _git(p: dict, root: pathlib.Path) -> bool:
     return True
 
 
+def git_states(files: list[pathlib.Path], root: pathlib.Path) -> tuple[dict, list]:
+    """`tracked` / `ignored` / `loose` / `no-repo` per file and the degradations, in one call (`_git`
+    over a pass of these files). Outside a tick there is no deadline and every repository is read."""
+    p = {"found": [str(f) for f in files], "states": {}, "repos_done": [], "degraded": []}
+    _git(p, root)
+    return p["states"], p["degraded"]
+
+
 def _records(p: dict, root: pathlib.Path, pepper: str) -> bool:
     """Classify every found file that is not classified yet; False when the deadline came first."""
     recorded = set(p["recorded"])

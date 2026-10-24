@@ -344,17 +344,17 @@ class TailWatchdog(unittest.TestCase):
 
     def handed(self, name: str, left: float, history: list[dict]) -> float | None:
         with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp).resolve() / "home"
-            raw = home / "store" / "raw"
-            raw.mkdir(parents=True)
-            (raw / "tick-runs.jsonl").write_text(
+            # The history goes where the watchdog reads it, the workspace's scratch, named outright.
+            scratch = Path(tmp).resolve() / "scratch"
+            scratch.mkdir()
+            (scratch / "tick-runs.jsonl").write_text(
                 "".join(json.dumps({"outcome": "finished", "stage_progress": run}) + "\n" for run in history),
                 encoding="utf-8")
-            env = {**os.environ, "OBSERVATORY_HOME": str(home),
+            env = {**os.environ, "OBSERVATORY_HOME": str(Path(tmp).resolve() / "home"),
+                   "OBSERVATORY_SCRATCH": str(scratch),
                    "OBSERVATORY_TICK_CEILING_SECONDS": str(int(CEILING)),
                    "OBSERVATORY_TICK_DEADLINE": f"{time.time() + left:.3f}"}
-            for k in ("OBSERVATORY_STATE", "OBSERVATORY_SCRATCH"):
-                env.pop(k, None)
+            env.pop("OBSERVATORY_STATE", None)
             before = time.time()
             p = subprocess.run([sys.executable, "tools/tick_lease.py", "step", "--ungated", name, "--",
                                 sys.executable, "-c",

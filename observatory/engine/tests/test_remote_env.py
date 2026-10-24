@@ -581,12 +581,10 @@ def test_a_fetch_cut_by_its_deadline_resumes_after_the_applications_it_read():
             return {"PORT": "3000"}
     real = m._load
     m._load = lambda rel, name: FakeHeroku if "scan_heroku" in rel else real(rel, name)
-    clock = [0]
     real_remaining = m.step_budget.remaining
 
     def remaining():
-        clock[0] += 1
-        return 1000.0 if clock[0] <= 2 else 0.0          # time for two applications, then none
+        return 1000.0 if len(asked) < 2 else 0.0          # time for two applications, then none
     try:
         m.step_budget.remaining = remaining
         rows, _deg, complete = m.scan_heroku_apps("pepper")

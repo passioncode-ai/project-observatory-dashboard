@@ -323,8 +323,8 @@
     {
       "path": "collectors/scan_env.py",
       "source_sha256": "dc68044a2a51db2551236e66d92156ece2f9362b328feedf7dfee684c5618c9b",
-      "export_sha256": "139c54f041c9afa879ef9496c45d3e51f3c78c91b3978f7526ef337bcaf7a53c",
-      "bytes": 29603,
+      "export_sha256": "82b8de6cd62bd4bc9d02a8364fd3e8f96702449ba8cf33fc6ba2e84801bc36f4",
+      "bytes": 30040,
       "python_comments_removed": 67,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -4107,7 +4107,7 @@
       "path": "tests/test_env_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0ff05882cd83a8d618ed58ca293e7d48c6e793b80e64252e37240ce4340006d0",
+      "export_sha256": "0a7ce58552209fd745f863736edeacdcd312a5c7f4946e0c4c3ad9463ed38b96",
       "bytes": 36576
     },
     {
@@ -5118,8 +5118,8 @@
       "path": "tests/test_remote_env.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "202e0ee4924ed44574e82db14ba9758b2ea6e2fa420d5d491ff5cdfb05be109a",
-      "bytes": 35457
+      "export_sha256": "6f70e6eed3d846ad964154aa935e3a3c230956b7ba8cd8f2c294eba31bcaeebf",
+      "bytes": 35420
     },
     {
       "path": "tests/test_render_surface.py",
@@ -5407,8 +5407,8 @@
       "path": "tests/test_tick_budget.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "05706a5c58cb478daeaa13eb303ee501d52d42bec5057c42776a830958b1a815",
-      "bytes": 20878
+      "export_sha256": "b97b85bb5ab8f7f21902043991ecee1d5742da12176a2bc9b1522c6571203640",
+      "bytes": 20967
     },
     {
       "path": "tests/test_tick_failures.py",

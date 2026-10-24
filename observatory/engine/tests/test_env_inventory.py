@@ -420,7 +420,7 @@ def test_a_pass_cut_by_its_deadline_resumes_to_the_same_inventory():
     from unittest.mock import patch
     d = _estate()
     whole = _salted(lambda m: m.scan(d))
-    for every in (1, 2, 5):
+    for every in (2, 3, 7):
         calls = [0]
 
         def out_of_time():
