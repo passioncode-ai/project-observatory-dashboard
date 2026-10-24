@@ -204,7 +204,8 @@ def migrated() -> tuple[pathlib.Path, dict]:
     return d, env
 
 
-def test_the_full_check_runs_once_a_day_and_the_quick_one_in_between() -> None:
+def test_the_full_check_runs_once_a_day_and_the_light_one_in_between() -> None:
+    # OBS-220: `quick_check` between the full checks took 30-139 s over a 100 MB store under load.
     d, env = migrated()
     run_check(env)
     first = receipt(d)
@@ -213,17 +214,69 @@ def test_the_full_check_runs_once_a_day_and_the_quick_one_in_between() -> None:
           json.dumps(first)[:200])
     run_check(env)
     second = receipt(d)
-    check("within the day the next one is quick", second.get("pragma") == "quick_check", json.dumps(second)[:200])
+    check("within the day the next one is light", second.get("pragma") == "light", json.dumps(second)[:200])
+    check("and it says ok", second.get("verdict") == "ok", json.dumps(second)[:200])
     check("and keeps the full check's time", second.get("full_checked_at") == first.get("full_checked_at"),
           json.dumps(second)[:200])
-    write_receipt(d, {**second, "full_checked_at": stamp(25)})
+    day_ago = stamp(25)
+    write_receipt(d, {**second, "full_checked_at": day_ago, "full_tried_at": day_ago})
     run_check(env)
     check("a day later the full check runs again", receipt(d).get("pragma") == "integrity_check",
           json.dumps(receipt(d))[:200])
     write_receipt(d, {**receipt(d), "verdict": "damaged"})
     run_check(env)
-    check("and after any verdict that is not ok", receipt(d).get("pragma") == "integrity_check",
+    check("and at once after a verdict of damaged", receipt(d).get("pragma") == "integrity_check",
           json.dumps(receipt(d))[:200])
+    write_receipt(d, {**receipt(d), "verdict": "unopenable"})
+    run_check(env)
+    check("or unopenable", receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
+
+
+def test_a_full_check_out_of_time_is_retried_hours_later_not_every_tick() -> None:
+    d, env = migrated()
+    import check_store
+    tried = stamp(0.5)
+    write_receipt(d, {"ran_at": tried, "pragma": "integrity_check", "verdict": "unmeasured",
+                      "full_checked_at": stamp(30), "full_tried_at": tried})
+    run_check(env)
+    r = receipt(d)
+    check("the next tick runs the light check", r.get("pragma") == "light", json.dumps(r)[:200])
+    check("and keeps when the full one was tried", r.get("full_tried_at") == tried, json.dumps(r)[:200])
+    write_receipt(d, {**r, "full_tried_at": stamp(check_store.FULL_RETRY_HOURS + 0.5)})
+    run_check(env)
+    check("the full check is tried again after the retry interval",
+          receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
+    write_receipt(d, {"ran_at": stamp(0.5), "pragma": "light", "verdict": "unmeasured",
+                      "full_checked_at": stamp(2)})
+    run_check(env)
+    check("a light check out of time does not bring the full one forward",
+          receipt(d).get("pragma") == "light", json.dumps(receipt(d))[:200])
+
+
+def test_the_light_check_reads_pages_not_the_file() -> None:
+    d, env = migrated()
+    import check_store
+    importlib.reload(check_store)
+    db = d / "observatory.db"
+    r = check_store.inspect(db, check_store.LIGHT)
+    check("a sound store is ok under the light check", r.get("verdict") == "ok", json.dumps(r)[:200])
+    con = sqlite3.connect(db)
+    have = [x[0] for x in con.execute("SELECT name FROM sqlite_master WHERE name = 'search_notes_data'")]
+    if have:
+        con.execute("DROP TABLE search_notes_data")
+        con.commit()
+    con.close()
+    if have:
+        r = check_store.inspect(db, check_store.LIGHT)
+        check("the recorded damage, a broken full-text index, is named by the light check too",
+              r.get("verdict") == "damaged" and "search_notes" in str(r.get("detail")), json.dumps(r)[:240])
+    else:
+        print("  NOTE  this store has no FTS5 index to damage [uncoverable here]")
+    (d / "other.db").write_bytes(b"not a database at all, and long enough to have a header")
+    r = check_store.inspect(d / "other.db", check_store.LIGHT)
+    check("a file with no SQLite header is unopenable", r.get("verdict") == "unopenable", json.dumps(r)[:200])
+    r = check_store.inspect(db, check_store.LIGHT, 0)
+    check("with no time left it is not started", r.get("verdict") == "unmeasured", json.dumps(r)[:200])
 
 
 def test_the_check_stops_at_its_deadline_and_says_it_did_not_measure() -> None:
@@ -411,7 +464,9 @@ if __name__ == "__main__":
                test_a_malformed_search_index_is_named_rather_than_missed,
                test_an_unopenable_store_is_a_third_answer,
                test_an_absent_store_is_not_a_fault,
-               test_the_full_check_runs_once_a_day_and_the_quick_one_in_between,
+               test_the_full_check_runs_once_a_day_and_the_light_one_in_between,
+               test_a_full_check_out_of_time_is_retried_hours_later_not_every_tick,
+               test_the_light_check_reads_pages_not_the_file,
                test_the_check_stops_at_its_deadline_and_says_it_did_not_measure,
                test_the_step_has_a_limit_of_its_own,
                test_a_failed_check_is_critical,

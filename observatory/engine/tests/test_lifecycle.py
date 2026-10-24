@@ -320,6 +320,10 @@ class EveryStepHasAWatchdog(Workspace):
         for soft in ("agent", "plugins", "index"):
             self.assertIn(soft, self.tl.SOFT_TAIL_STEPS)
         self.assertLess(self.tl.core_reserve_seconds(), self.tl.tail_reserve_seconds())
+        # OBS-220: the measured budget reads the tail in the same order and with the same steps.
+        import tick_budget
+        self.assertEqual(set(tick_budget.TAIL_ORDER), set(self.tl.TAIL_STEPS))
+        self.assertLessEqual(tick_budget.MUST_FINISH, set(self.tl.CORE_TAIL_STEPS) | {"index", "ledger", "rollup"})
 
     def test_a_slow_optional_step_leaves_findings_and_the_dashboard_their_time(self):
         core = self.tl.core_reserve_seconds()
@@ -369,6 +373,27 @@ class EveryStepHasAWatchdog(Workspace):
     def test_a_finished_tick_records_its_outcome(self):
         rc = self.tl.supervised(["/bin/bash", "-c", "exit 0"])
         self.assertEqual(rc, 0)
+        run = json.loads((self.paths.SCRATCH / "tick-run.json").read_text())
+        self.assertEqual(run["outcome"], "finished")
+
+    # OBS-220: a merge or an emit out of time no longer stops the tick, which exits 0 after building
+    # the findings and the page over the registry as it stood; its own report says the registry was
+    # not refreshed, and the run is recorded as `partial`, so Health counts it.
+    WRITE_REPORT = ("import json, os, pathlib; p = pathlib.Path(os.environ['OBSERVATORY_HOME']) / 'store/raw/tick.json'; "
+                    "p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps({{'registry_refreshed': False, "
+                    "'registry_note': 'merge stopped', 'progress': {{'schema': 1, 'run_id': {run}, 'stages': [], "
+                    "'write_failures': 0}}}}))")
+
+    def test_a_tick_that_did_not_refresh_the_registry_is_recorded_as_partial(self):
+        script = self.WRITE_REPORT.format(run="os.environ['OBSERVATORY_TICK_RUN_ID']")
+        self.assertEqual(self.tl.supervised([sys.executable, "-c", script]), 0)
+        run = json.loads((self.paths.SCRATCH / "tick-run.json").read_text())
+        self.assertEqual(run["outcome"], "partial")
+        self.assertEqual(run["reason"], "merge stopped")
+
+    def test_another_runs_report_does_not_make_a_finished_tick_partial(self):
+        script = self.WRITE_REPORT.format(run="'0' * 32")
+        self.assertEqual(self.tl.supervised([sys.executable, "-c", script]), 0)
         run = json.loads((self.paths.SCRATCH / "tick-run.json").read_text())
         self.assertEqual(run["outcome"], "finished")
 

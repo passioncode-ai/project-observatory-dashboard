@@ -49,11 +49,22 @@ reversed benchmark.
 average near 400 — the same 81 MiB store checks in 4–38 s on this machine — and was
 killed with nothing written, after which `scan-fs` never started. So the full
 `integrity_check` runs once a day, and after any verdict that was not `ok`;
-`quick_check`, which catches the FTS5 damage this store has actually had, runs in
-between. The step stops itself before its deadline (`OBSERVATORY_STEP_DEADLINE`,
+`quick_check`, which catches the FTS5 damage this store has actually had, ran in
+between until OBS-220 replaced it with the light check (below). The step stops itself before its deadline (`OBSERVATORY_STEP_DEADLINE`,
 `step_budget`) with `sqlite3.Connection.interrupt()` and records `unmeasured`
 instead of being killed silent; `full_checked_at` carries the last full pass from
 receipt to receipt, so the board can say how old it is.
+
+**And the in-between check is light (OBS-220, 2026-10-24).** `quick_check` still reads every
+page: over a 100 MB store under a load average above 70 it took 139 s of one tick and 30 s of
+another, every tick, while the full check ran once a day as designed. So between the daily full
+checks the step now runs the LIGHT check (`LIGHT`): the file's SQLite header, the schema, and one
+row of every table, the full-text index among them, whose constructor is where the recorded damage
+(`vtable constructor failed: search_notes`) surfaced. It reads a few pages, not the file. The full
+`integrity_check` runs once a day, and at once after a verdict of `damaged` or `unopenable`. A full
+check that ran out of time (`unmeasured`) is tried again `FULL_RETRY_HOURS` later rather than on
+every tick, where it would take the whole step each time under the same load; until then the light
+check runs, and `full_tried_at` says when the full one was last attempted.
 
 FIVE verdicts, because four of them are not `ok` for different reasons and a
 reader acting on them does different things:
@@ -86,11 +97,17 @@ import step_budget                                                  # noqa: E402
 #: catch. Measured at 97 ms against 129 ms on 21.7 MiB, so the cheaper pragma is
 #: not even cheaper in practice.
 PRAGMA = "integrity_check"
-#: The cheap pragma for the runs in between: it skips only the ordinary-index content
-#: check, and it names the FTS5 damage this store has actually had (measured above).
-QUICK = "quick_check"
+#: `quick_check` ran between the full checks until OBS-220; it still reads every page, and the
+#: light check (`LIGHT`) replaced it.
+#: The check between the daily full ones (OBS-220): the header, the schema and one row of every
+#: table. Recorded as the receipt's `pragma` so every reader names what ran.
+LIGHT = "light"
 #: Hours between full checks while every verdict is `ok`.
 FULL_EVERY_HOURS = 24
+#: Hours before a full check that ran out of time is tried again; the light one runs meanwhile.
+FULL_RETRY_HOURS = 6
+#: The first sixteen bytes of every SQLite database file.
+HEADER = b"SQLite format 3\x00"
 #: Seconds kept before the step's deadline to write the receipt.
 MARGIN_SECONDS = 5
 
@@ -103,17 +120,51 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def choose(previous: dict) -> str:
-    """The full check once a day and after any verdict that was not `ok`; the quick one
-    in between."""
-    full_at = str(previous.get("full_checked_at") or "")
-    if previous.get("verdict") != "ok" or not full_at:
-        return PRAGMA
+def _when(value) -> datetime | None:
     try:
-        when = datetime.strptime(full_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return datetime.strptime(str(value or ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except ValueError:
+        return None
+
+
+def choose(previous: dict) -> str:
+    """The full check once a day, and at once after `damaged` or `unopenable`; the light one in between.
+
+    A full check that ran out of time is tried again FULL_RETRY_HOURS after its attempt
+    (`full_tried_at`), not on the next tick."""
+    if previous.get("verdict") in ("damaged", "unopenable"):
         return PRAGMA
-    return PRAGMA if datetime.now(timezone.utc) - when >= timedelta(hours=FULL_EVERY_HOURS) else QUICK
+    now = datetime.now(timezone.utc)
+    passed, tried = _when(previous.get("full_checked_at")), _when(previous.get("full_tried_at"))
+    if passed and now - passed < timedelta(hours=FULL_EVERY_HOURS):
+        return LIGHT
+    if tried and (passed is None or tried > passed) and now - tried < timedelta(hours=FULL_RETRY_HOURS):
+        return LIGHT
+    return PRAGMA
+
+
+def _light(conn: sqlite3.Connection) -> list[str]:
+    """The light check's statements: the schema, then one row of every table. Problems, as SQLite
+    words them; [] when every table answered. A virtual table whose module this process does not
+    load (`vec0`) is not a problem of the file."""
+    problems = []
+    names = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").fetchall()]
+    conn.execute("PRAGMA page_count").fetchall()
+    for name in names:
+        quoted = '"' + name.replace('"', '""') + '"'
+        try:
+            conn.execute(f"SELECT 1 FROM {quoted} LIMIT 1").fetchall()
+        except sqlite3.OperationalError as exc:
+            text = str(exc)
+            if "no such module" in text:
+                continue
+            if "interrupted" in text or not any(w in text for w in ("malformed", "corrupt", "constructor")):
+                raise
+            problems.append(f"{name}: {text}")
+        except sqlite3.DatabaseError as exc:
+            problems.append(f"{name}: {exc}")
+    return problems
 
 
 def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")) -> dict:
@@ -128,6 +179,17 @@ def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")
         return {"verdict": "unmeasured", "took_ms": 0, "bytes": size,
                 "detail": "not started: the step's deadline left no time for it"}
     started = time.perf_counter()
+    if pragma == LIGHT:
+        # The header first: a file that is not a database has nothing a statement could read.
+        try:
+            with open(db, "rb") as handle:
+                head = handle.read(len(HEADER))
+        except OSError as exc:
+            return {"verdict": "unopenable", "detail": f"{type(exc).__name__}: {exc}",
+                    "took_ms": round((time.perf_counter() - started) * 1000, 1), "bytes": size}
+        if head != HEADER:
+            return {"verdict": "unopenable", "detail": "file is not a database: no SQLite header",
+                    "took_ms": round((time.perf_counter() - started) * 1000, 1), "bytes": size}
     try:
         # READ-ONLY, and that matters twice: a check must not be the thing that
         # writes to a store it suspects, and opening read-write would run any
@@ -152,8 +214,13 @@ def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")
         timer = threading.Thread(target=watchdog, daemon=True)
         timer.start()
     try:
-        rows = [r[0] for r in conn.execute(f"PRAGMA {pragma}").fetchall()]
+        rows = (_light(conn) or ["ok"]) if pragma == LIGHT else [r[0] for r in conn.execute(f"PRAGMA {pragma}").fetchall()]
     except sqlite3.OperationalError as exc:
+        if pragma == LIGHT and "interrupted" not in str(exc):
+            # A locked or busy file under a light read is not knowledge either way.
+            took = round((time.perf_counter() - started) * 1000, 1)
+            return {"verdict": "unmeasured", "took_ms": took, "bytes": size,
+                    "detail": f"the light check could not read the file: {type(exc).__name__}: {exc}"}
         if "interrupted" not in str(exc):
             return {"verdict": "unopenable", "detail": f"{type(exc).__name__}: {exc}",
                     "took_ms": round((time.perf_counter() - started) * 1000, 1),
@@ -161,7 +228,8 @@ def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")
         took = round((time.perf_counter() - started) * 1000, 1)
         return {"verdict": "unmeasured", "took_ms": took, "bytes": size,
                 "detail": f"stopped at the step's deadline after {took / 1000:.0f} s, before "
-                          f"PRAGMA {pragma} finished; nothing is known either way"}
+                          f"{'the light check' if pragma == LIGHT else 'PRAGMA ' + pragma} finished; "
+                          f"nothing is known either way"}
     except sqlite3.DatabaseError as exc:
         # `file is not a database` arrives HERE, not at connect: SQLite opens
         # lazily, so the header is read on the first statement.
@@ -201,8 +269,11 @@ def main(argv: list[str]) -> int:
     ran_at = now()
     full_at = (ran_at if result["verdict"] == "ok" and pragma == PRAGMA
                else previous.get("full_checked_at") if result["verdict"] in ("ok", "unmeasured") else None)
+    # When the full check was last ATTEMPTED, so one that ran out of time waits FULL_RETRY_HOURS.
+    tried_at = ran_at if pragma == PRAGMA else previous.get("full_tried_at")
     doc = {"ran_at": ran_at, "pragma": pragma, **result,
-           **({"full_checked_at": full_at} if full_at else {})}
+           **({"full_checked_at": full_at} if full_at else {}),
+           **({"full_tried_at": tried_at} if tried_at else {})}
     try:
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "integrity.json", doc)
@@ -215,7 +286,7 @@ def main(argv: list[str]) -> int:
 
     if result["verdict"] == "ok":
         if args.show:
-            print(f"store ok — {pragma} in {result['took_ms']:.0f} ms over "
+            print(f"store ok — {pragma} check in {result['took_ms']:.0f} ms over "
                   f"{result['bytes'] / 1024 ** 2:.1f} MiB")
         return 0
     if result["verdict"] == "unmeasured":

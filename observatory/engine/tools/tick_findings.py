@@ -10,6 +10,11 @@ from finding_types import titled
 import tick_budget
 
 CORE_TAIL = {'merge', 'emit', 'validate'}
+#: A merge or an emit that ran out of time no longer stops the tick (OBS-220, tools/tick.py
+#: `previous_registry`): the findings and the page are built over the registry as it stood.
+WENT_ON = ('This core step ran out of time; the findings and the dashboard were built over the registry '
+           'as it stood, and the steps that read a fresh registry (events, the indexes, the commit and the '
+           'wiki projection) wait for the next tick.')
 
 def number(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -93,7 +98,8 @@ def findings(tick, rotation, *, now=None, config=None, severe=None, runs=None):
                  titled('the scheduled tick stopped `{step}` at its time limit', step=name)
                  if outcome == 'stopped' else
                  titled("the scheduled tick's `{step}` step exited {code}", step=name, code=row.get('exit'))),
-                    'detail': (grave or ('This core step did not complete; the tick stopped before replacing further outputs.' if name in CORE_TAIL else 'The tick does not abort on a degradation; this step did not complete and its previous output may still be in use.'))
+                    'detail': (grave or (WENT_ON if name in CORE_TAIL and tick.get('registry_went_on') == name else
+                                         'This core step did not complete; the tick stopped before replacing further outputs.' if name in CORE_TAIL else 'The tick does not abort on a degradation; this step did not complete and its previous output may still be in use.'))
                               + ' Last tick finished ' + str(tick.get('finished_at', 'unknown')) + '.',
                     'action': 'read store/logs/tick.log; resolve the reported limit or step failure before rerunning the affected step',
                     'evidence': ['store:raw/tick.json', 'store:logs/tick.log']})

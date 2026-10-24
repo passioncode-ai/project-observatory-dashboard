@@ -112,7 +112,7 @@ def _headers(tok: str, accept: str) -> dict:
 
 
 def get(url: str, tok: str, *, accept: str = "application/vnd.heroku+json; version=3",
-        extra: dict | None = None):
+        extra: dict | None = None, timeout: float | None = None):
     """One request. Returns the decoded body, or a dict naming the failure.
 
     A failure is a VALUE here rather than an exception because a suspended
@@ -124,7 +124,7 @@ def get(url: str, tok: str, *, accept: str = "application/vnd.heroku+json; versi
         head.update(extra)
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers=head),
-                                    timeout=TIMEOUT) as r:
+                                    timeout=TIMEOUT if timeout is None else timeout) as r:
             return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:400]

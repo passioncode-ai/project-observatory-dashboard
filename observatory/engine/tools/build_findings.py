@@ -4087,6 +4087,9 @@ def collect() -> list[dict]:
             iv = {}
         verdict = str(iv.get("verdict") or "")
         age_h = hours_since(iv.get("ran_at") or "")
+        # The light check between the daily full ones is not a pragma (OBS-220, tools/check_store.py).
+        checked = ("the light check (the header, the schema and one row of every table)"
+                   if iv.get("pragma") == "light" else f"PRAGMA {iv.get('pragma') or '?'}")
         if verdict in ("damaged", "unopenable"):
             # CRITICAL, and the only finding in this file that says so about the
             # store: `registry/ledger.jsonl` is "the only copy outside the
@@ -4100,7 +4103,7 @@ def collect() -> list[dict]:
                 **titled("the store failed its integrity check ({verdict})", verdict=verdict),
                 "detail": clipped(
                     f"{said}: {iv.get('detail') or 'no detail recorded'}. "
-                    f"Checked with PRAGMA {iv.get('pragma') or '?'} over "
+                    f"Checked with {checked} over "
                     f"{int(iv.get('bytes') or 0) / 1024 ** 2:.1f} MiB.", 700),
                 "action": ("stop the tick before it writes more, then rebuild "
                            "from `registry/ledger.jsonl` — the only copy of the "
@@ -4119,7 +4122,7 @@ def collect() -> list[dict]:
                 "severity": "info",
                 **titled("the store's integrity check ran out of time — {last}", last=last),
                 "detail": (f"{iv.get('detail') or 'the check stopped before it finished'}. "
-                           f"Checked at {iv.get('ran_at')} with PRAGMA {iv.get('pragma') or '?'}; "
+                           f"Checked at {iv.get('ran_at')} with {checked}; "
                            f"{last}. A busy machine stops the check before it reads the "
                            f"whole file; the next tick tries again."),
                 "action": "`project-observatory full integrity` when the machine is quieter",
