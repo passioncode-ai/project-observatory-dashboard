@@ -949,7 +949,11 @@ class EngineTests(BrokerFixture, unittest.TestCase):
         with self.broker.db_lock:
             return self.broker.db.execute('SELECT target,state FROM effects').fetchall()
 
-    def operation(self, op_id):
+    def operation(self, op_id, fresh=False):
+        if fresh:                                           # the broker is closed: read its store directly
+            with contextlib.closing(sqlite3.connect(self.data / 'state' / broker.STORE_FILE)) as db:
+                db.row_factory = sqlite3.Row
+                return db.execute('SELECT * FROM operations WHERE id=?', (op_id,)).fetchone()
         with self.broker.db_lock:
             return self.broker.db.execute('SELECT * FROM operations WHERE id=?', (op_id,)).fetchone()
 
@@ -1211,6 +1215,113 @@ class EngineTests(BrokerFixture, unittest.TestCase):
         self.assertEqual((got['state'], got['stopState']), ('ready', 'stopped'), got)
         self.assertEqual(adapter.effects.count(('start', 'alpha.app')), 2)
         self.assertEqual(len([e for e in adapter.effects if e[0] in ('quit', 'term', 'kill')]), 1)
+
+    # -- OBS-210: recovery long after a crash, and shutdown during a quit
+
+    def test_a_start_recovered_hours_after_its_deadline_launches_nothing(self):
+        lock = self.broker._lock('alpha.app')
+        lock.acquire()
+        receipt = self.broker.ensure(self.agent, self.args('s-1'))
+        self.broker.closed = True                           # queued, never dispatched: then the machine slept
+        lock.release()
+        self.broker.close()
+        self.clock.now += 3 * 3600
+        self.broker = self.make_broker()
+        got = self.wait(receipt, self.agent)
+        self.assertEqual((got['state'], got['reason']), ('timeout', 'recovered_too_late'), got)
+        self.assertEqual(self.adapter.effects, [], 'nobody is waiting for this start any more')
+
+    def test_a_dispatch_recovered_hours_later_is_delivery_unknown_not_a_second_start(self):
+        adapter = SlowReadyAdapter(self.data, warmup=0)
+        self.use_adapter(adapter)
+        adapter.crash_on_start = True
+        receipt = self.broker.ensure(self.agent, self.args('s-1'))
+        end = time.monotonic() + 5
+        while ('start', 'alpha.app') not in adapter.effects and time.monotonic() < end:
+            time.sleep(0.01)
+        time.sleep(0.2)
+        self.die()
+        adapter.crash_on_start = False
+        adapter.crash('alpha.app')                          # whatever was launched is gone by morning
+        self.clock.now += 3 * 3600
+        self.broker = self.make_broker(adapter)
+        got = self.wait(receipt, self.agent)
+        self.assertEqual((got['state'], got['reason']), ('delivery_unknown', 'recovered_too_late'), got)
+        self.assertEqual(adapter.effects.count(('start', 'alpha.app')), 1)
+
+    def test_a_recovery_within_the_window_still_gets_the_targets_budget(self):
+        self.assertGreaterEqual(broker.RECOVERY_WINDOW_SECONDS, 300)
+        lock = self.broker._lock('alpha.app')
+        lock.acquire()
+        receipt = self.broker.ensure(self.agent, self.args('s-1'))
+        self.broker.closed = True
+        lock.release()
+        self.broker.close()
+        self.clock.now += broker.RECOVERY_WINDOW_SECONDS / 2
+        self.broker = self.make_broker()
+        self.assertEqual(self.wait(receipt, self.agent)['state'], 'ready')
+
+    def test_closing_during_the_quit_grace_sends_no_signal(self):
+        self.wait(self.broker.ensure(self.agent, self.args('s-1')), self.agent)
+        (self.data / 'alpha.app.ignores_quit').write_text('')
+        with mock.patch.object(broker, 'QUIT_GRACE_SECONDS', 30):
+            receipt = self.broker.stop(self.agent, self.args('x-1'))
+            end = time.monotonic() + 5
+            while ('quit', 'alpha.app') not in self.adapter.effects and time.monotonic() < end:
+                time.sleep(0.01)
+            time.sleep(0.1)
+            self.broker.close(grace=5)
+        self.assertEqual(self.adapter.effects, [('start', 'alpha.app'), ('quit', 'alpha.app')],
+                         'a shutdown is not an ignored quit: no SIGTERM')
+        self.assertEqual(self.operation(receipt['operationId'], fresh=True)['state'], 'running', 'left for recovery')
+        with mock.patch.object(broker, 'QUIT_GRACE_SECONDS', 0.2):
+            self.broker = self.make_broker()
+            got = self.wait(receipt, self.agent)
+        self.assertEqual((got['state'], got['action']), ('stopped', 'sigterm'), got)
+        self.assertEqual(self.adapter.effects[-2:], [('quit', 'alpha.app'), ('term', 'alpha.app')],
+                         'recovery asks again and gives the quit its grace')
+
+    def test_a_failed_recovery_waits_for_a_worker_inside_the_adapter_before_letting_go(self):
+        lock = self.broker._lock('alpha.app')
+        lock.acquire()
+        receipt = self.broker.ensure(self.agent, self.args('s-1'))
+        self.broker.closed = True
+        lock.release()
+        self.broker.close()
+        entered, release = threading.Event(), threading.Event()
+        adapter = self.adapter
+
+        class Blocking(ProcessAdapter):
+            def probe(self, target):
+                entered.set()
+                release.wait(10)                            # a slow adapter call the recovered worker is inside
+                return adapter.probe(target)
+
+        def failing_prune(_self):
+            entered.wait(5)
+            raise sqlite3.DatabaseError('database disk image is malformed')
+
+        outcome = {}
+
+        def build():
+            try:
+                broker.Broker(self.data / 'registry.json', self.data / 'state', self.authority, Blocking(self.data),
+                              clock=self.clock)
+            except BaseException as exc:  # noqa: BLE001
+                outcome['error'] = exc
+
+        with mock.patch.object(broker.Broker, 'prune', failing_prune):
+            thread = threading.Thread(target=build)
+            thread.start()
+            self.assertTrue(entered.wait(5))
+            time.sleep(0.3)
+            self.assertTrue(thread.is_alive(), 'the failed broker is still waiting for its worker')
+            release.set()
+            thread.join(10)
+        self.assertIsInstance(outcome.get('error'), sqlite3.DatabaseError)
+        self.assertEqual(self.adapter.effects, [], 'the closing worker dispatched nothing')
+        self.broker = self.make_broker()                    # the lock was let go once the worker returned
+        self.assertEqual(self.wait(receipt, self.agent)['state'], 'ready')
 
     # -- idempotency
 
