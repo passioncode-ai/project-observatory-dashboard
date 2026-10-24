@@ -376,6 +376,122 @@ def test_the_git_state_tells_ignored_from_merely_untracked():
           state.get(".env.loose") == "loose", str(state))
 
 
+def _estate() -> pathlib.Path:
+    """Folders several levels deep, a git repository, and env files of each git state."""
+    import subprocess
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-env-pass-")).resolve()
+    for n in range(6):
+        deep = d / f"proj{n}" / "a" / "b"
+        deep.mkdir(parents=True)
+        (d / f"proj{n}" / ".env").write_text(f"PORT={3000 + n}\nAPI_KEY={LIVE_VALUES[n % 4][1]}\n",
+                                              encoding="utf-8")
+        (deep / ".env.local").write_text("DEBUG=true\n", encoding="utf-8")
+    repo = d / "repo"
+    repo.mkdir()
+    env = git_env(global_config=str(d / "gitconfig"))
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (repo / ".env").write_text("A=1\n", encoding="utf-8")
+    (repo / ".env.example").write_text("A=\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-f", ".env.example", ".gitignore"], check=True, env=env)
+    return d
+
+
+def _salted(fn):
+    import tempfile
+    from unittest.mock import patch
+    import scan_env
+    with tempfile.TemporaryDirectory() as directory:
+        path = pathlib.Path(directory) / '.env-fingerprint-salt'
+        path.write_text('a' * 64 + '\n')
+        path.chmod(0o600)
+        with patch.object(scan_env, 'SALT_FILE', path):
+            return fn(scan_env)
+
+
+def _same(doc: dict) -> dict:
+    return {k: v for k, v in doc.items() if k not in ("scanned_at", "pass")}
+
+
+def test_a_pass_cut_by_its_deadline_resumes_to_the_same_inventory():
+    """OBS-220: the walk took 599 s of one tick under load; it now stops at the step's deadline,
+    saves where it was, and the next tick resumes it. Cut after every few checks of the clock, the
+    resumed passes must add up to exactly the inventory one uninterrupted pass reads."""
+    from unittest.mock import patch
+    d = _estate()
+    whole = _salted(lambda m: m.scan(d))
+    for every in (2, 3, 7):
+        calls = [0]
+
+        def out_of_time():
+            calls[0] += 1
+            return calls[0] % every == 0
+
+        def resumed(m):
+            saved, ticks = None, 0
+            with patch.object(m, "_out_of_time", out_of_time):
+                while True:
+                    ticks += 1
+                    doc, progress = m.scan_pass(d, json.loads(json.dumps(saved)) if saved else None)
+                    if doc is not None:
+                        return doc, ticks
+                    saved = progress
+                    if ticks > 500:
+                        raise AssertionError("the pass never completed")
+        doc, ticks = _salted(resumed)
+        check(f"cut every {every} check(s), the pass took several ticks", ticks > 1, str(ticks))
+        check(f"and its inventory equals one whole pass (every {every})", _same(doc) == _same(whole),
+              json.dumps(_same(doc))[:300])
+        check("the document says how many ticks the pass took", doc["pass"]["ticks"] == ticks,
+              json.dumps(doc["pass"]))
+
+
+def test_a_saved_pass_under_another_salt_is_not_mixed_in():
+    d = _estate()
+    stale = {"schema": 1, "root": str(d), "fingerprint_namespace": "fp1:0000000000000000", "ticks": 3,
+             "started_at": "2026-01-01T00:00:00Z", "stack": [], "found": [str(d / "x" / ".env")],
+             "walk_done": True, "git_done": True, "states": {}, "repos_done": [], "records": [{"path": "x/.env"}],
+             "recorded": [str(d / "x" / ".env")], "degraded": []}
+    doc, _ = _salted(lambda m: m.scan_pass(d, stale))
+    check("a pass under another salt starts again", doc["pass"]["ticks"] == 1, json.dumps(doc["pass"]))
+    check("and nothing of it is kept", all(f["path"] != "x/.env" for f in doc["files"]))
+
+
+def test_the_step_writes_env_json_only_from_a_complete_pass():
+    import os
+    import time
+    from unittest.mock import patch
+    d = _estate()
+    out = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-env-out-")).resolve() / "env.json"
+
+    def run(m, deadline):
+        saved = os.environ.get("OBSERVATORY_STEP_DEADLINE")
+        if deadline is None:
+            os.environ.pop("OBSERVATORY_STEP_DEADLINE", None)
+        else:
+            os.environ["OBSERVATORY_STEP_DEADLINE"] = str(deadline)
+        try:
+            with patch.object(m.paths, "DATA", d):
+                return m.main(["scan_env.py", str(out)])
+        finally:
+            if saved is None:
+                os.environ.pop("OBSERVATORY_STEP_DEADLINE", None)
+            else:
+                os.environ["OBSERVATORY_STEP_DEADLINE"] = saved
+    code = _salted(lambda m: run(m, time.time() - 1))
+    state = out.with_name("env-scan-state.json")
+    check("out of time, the step still exits 0", code == 0, str(code))
+    check("and writes no inventory from a part of a pass", not out.exists())
+    check("but saves the pass to resume", state.is_file())
+    saved = state.read_text(encoding="utf-8")
+    check("a saved pass holds no value", not any(v in saved for _n, v in LIVE_VALUES))
+    code = _salted(lambda m: run(m, None))
+    check("with time, the pass completes", code == 0 and out.is_file(), str(code))
+    check("and the saved pass is gone", not state.exists())
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    check("the inventory says the pass took two ticks", doc.get("pass", {}).get("ticks") == 2, json.dumps(doc.get("pass")))
+
+
 # ── the finding rules ──────────────────────────────────────────────────────
 
 def _doc(files: list[dict], shared: list[dict] | None = None) -> dict:
@@ -607,6 +723,9 @@ if __name__ == "__main__":
                test_the_document_carries_no_fingerprint,
                test_a_template_offers_nothing_to_fill_from,
                test_the_git_state_tells_ignored_from_merely_untracked,
+               test_a_pass_cut_by_its_deadline_resumes_to_the_same_inventory,
+               test_a_saved_pass_under_another_salt_is_not_mixed_in,
+               test_the_step_writes_env_json_only_from_a_complete_pass,
                test_a_committed_template_is_not_an_incident,
                test_a_tracked_file_with_no_credential_is_a_warning_not_an_incident,
                test_the_mode_rule_ignores_a_file_with_nothing_to_protect,

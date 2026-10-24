@@ -132,6 +132,17 @@ class TickHealth(unittest.TestCase):
         self.runs(*(["finished"] * 10))
         self.assertNotIn("history_warning", T.health(self.state, self.raw, now=NOW))
 
+    def test_a_tick_that_did_not_refresh_the_registry_is_counted_and_named(self):
+        # OBS-220: a merge or an emit out of time no longer stops the tick; the run reaches its end
+        # over the registry as it stood and the supervisor records it as `partial`, never `finished`.
+        self.receipts(NOW - timedelta(minutes=40), NOW - timedelta(minutes=10))
+        self.runs(*(["partial"] * 2 + ["timeout"] + ["finished"] * 7))
+        h = T.health(self.state, self.raw, now=NOW)
+        self.assertEqual(h["recent"]["incomplete"], 3)
+        self.assertEqual(h["verdict"], "ok")
+        self.assertIn("did not finish or did not refresh the registry", h["history_warning"])
+        self.assertIn("partial: 2", h["history_warning"])
+
     def test_the_history_keeps_the_last_fifty_runs(self):
         self.runs(*(["finished"] * 60))
         lines = (self.raw / T.RUNS_FILE).read_text().splitlines()

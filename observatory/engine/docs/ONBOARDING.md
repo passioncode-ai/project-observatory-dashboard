@@ -151,7 +151,9 @@ ended — stopped at its ceiling (from the supervisor's record) or killed by a r
 signal. When no tick has finished for six hours the verdict is `stale`, and when one has held the
 lock for longer than that it is `running-long`. `tick.recent` counts how the last 10 runs ended
 (`store/raw/tick-runs.jsonl` keeps 50); when 3 or more did not finish, `tick.history_warning` says
-so even if the last one did.
+so even if the last one did. A run that reached its end without refreshing the registry (it stopped
+at a step, or its merge or emit ran out of time and the findings and the dashboard were built over
+the registry as it stood) is recorded as `partial` and counted with them.
 The dashboard server's `/health`, the service card and every MCP answer's `degraded` list say the
 same (`tick` and `tick-history` rows). Its findings cannot: they are built by the tick itself, so a
 dead tick leaves the last report looking current.
@@ -979,11 +981,38 @@ both installers above again.
 
 The tick is bounded: every step runs in its own process group under a wall-clock
 limit (15 minutes, 20 for the leak scan), and a collector also takes at most its share
-of the ceiling (40 %, the leak scan 30 %, which resumes where it stopped; `tick_budget.py`),
-so no one collector uses the time the others were due. The whole tick stops at a 25-minute
-ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
-run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
-stopped step is a failed step in the log and on the board, never a hung tick.
+of the ceiling (40 %; the leak scan 30 % and the `.env` inventory 20 %, both of which resume
+where they stopped; `tick_budget.py`), so no one collector uses the time the others were due.
+The whole tick stops at a 25-minute ceiling below its 30-minute interval, and
+`store/raw/tick-run.json` records each run's start, end, outcome and reason
+(`store/raw/tick-runs.jsonl` the last 50). A stopped step is a failed step in the log and on
+the board, never a hung tick.
+
+The time after the collectors is measured, not fixed. The collectors leave the tail what its
+steps have needed: the 90th percentile of each one's last 20 runs, plus a quarter, never less than
+the 5 minutes it used to keep (a fifth of a shorter ceiling) and never more than 40 % of the ceiling.
+The `.env` inventory and the production configuration fetch stop at their step's deadline and
+resume on the next tick; `store/raw/env.json` and `remote-env.json` are replaced only by a complete
+pass, which says how many ticks it took (`pass`). Inside the tail every step leaves the steps that
+must finish after it (the merge, the emit, the validator, the indexes, the ledger, the rollup, the
+findings, the dashboard and the notice) their measured time, and never less than a minimum (10 s for
+the validator, 30 s for the findings, 20 s for the dashboard, 5 s for the others), so a slow `events`
+stops early rather than leave `findings` a few seconds, and a step that must finish always gets its
+own time. When the merge, the emit or the validator runs out of time, the tick no longer stops there:
+the findings and the dashboard are built over the registry as it stands (validated first when the
+validator had the time; a validator that answered red still stops the tick), the index, the ledger
+and the rollup run as usual, and the steps that read a fresh registry, its commit among them, wait
+for the next tick; `tick.json` says `registry_refreshed: false` and the run is `partial`. A temporary
+file a stopped writer left in `registry/` is removed before the registry is committed.
+
+The store's integrity is checked first in every tick, but the full `integrity_check` runs once a
+day. In between, while a full check has passed within the day, the light check reads the file's
+header, its schema and one row of every table (the full-text index among them), a few pages rather
+than the whole file; `store/raw/integrity.json` names which ran (`pragma`). After `damaged` or
+`unopenable`, with no full pass on record, or once the last one is a day old, the full check runs on
+every tick until one passes, and a check that did not finish keeps the verdict it found (`attempt`
+names it), so a light `ok` never stands in for a full pass. An `ok` is reported as stale from the
+last full pass as well as from its own time.
 
 For stage diagnosis, `store/raw/tick.json` adds `progress`: a run ID and bounded
 stage rows with start, end, wall duration, exit and outcome. It includes silent
@@ -2159,7 +2188,7 @@ Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
 `ran`; a yes/no probe such as `backup-due` records its "no" (exit 3) as `not_due`,
 never as a failed step. Disabled steps preserve the last successful measurement time; they do not
 raise starvation. A step that used 95 % of its share of the ceiling in 3 of the last
-5 ticks (the leak scan, which resumes by design, excepted) is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
+5 ticks (the leak scan, the `.env` inventory and the production configuration fetch, which resume by design, excepted) is reported as `tick.step_over_share` (the ceiling is the one `tick.json`
 `progress.ceiling_seconds` names), and a collector whose same degraded reason stays in
 its receipt for more than 24 hours as `collector.degraded_persistent`, unless the reason
 is structural (`degradations.STRUCTURAL`, or `structural: true` on the row); its first

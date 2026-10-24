@@ -167,8 +167,12 @@ def stage_history(scratch: Path, last: int) -> list[dict]:
 
 
 def history_sentence(r: dict) -> str:
+    """`partial` (OBS-220) is a run that reached its end over a registry it did not refresh: counted
+    with the runs that did not finish, and named as what it is."""
     how = ", ".join(f"{k}: {v}" for k, v in sorted(r["outcomes"].items()) if k != "finished")
-    return (f"{r['incomplete']} of the last {r['runs']} ticks did not finish ({how}); the registry, "
+    what = ("did not finish or did not refresh the registry" if r["outcomes"].get("partial")
+            else "did not finish")
+    return (f"{r['incomplete']} of the last {r['runs']} ticks {what} ({how}); the registry, "
             f"findings and dashboard may lag behind the estate — `store/logs/tick.log` names the slow steps")
 
 

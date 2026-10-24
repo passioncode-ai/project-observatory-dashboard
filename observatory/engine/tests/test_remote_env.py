@@ -540,7 +540,7 @@ def test_a_failed_heroku_scan_is_not_an_empty_production() -> None:
     real = m._load
     m._load = lambda rel, name: FakeHeroku if "scan_heroku" in rel else real(rel, name)
     try:
-        rows, degraded = m.scan_heroku_apps("pepper")
+        rows, degraded, _complete = m.scan_heroku_apps("pepper")
     finally:
         m._load = real
         if before is None:
@@ -554,10 +554,78 @@ def test_a_failed_heroku_scan_is_not_an_empty_production() -> None:
           str(degraded))
 
 
+
+def test_a_fetch_cut_by_its_deadline_resumes_after_the_applications_it_read():
+    """OBS-220: on 2026-10-24 the fetch was stopped at the 28 s the tick had left it and wrote nothing,
+    so the next tick began again from the first application. It now stops between applications when
+    the step's time is short and resumes after the ones it read."""
+    m = load("collectors/scan_remote_env.py", "scan_remote_env_obs220")
+    import paths
+    raw = pathlib.Path(paths.SCRATCH) / "heroku.json"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    before = raw.read_text(encoding="utf-8") if raw.exists() else None
+    apps = [{"id": f"id{n}", "name": f"app{n}"} for n in range(5)]
+    raw.write_text(json.dumps({"apps": apps}), encoding="utf-8")
+    asked = []
+
+    class FakeHeroku:
+        API = "https://api.heroku.invalid"
+
+        @staticmethod
+        def token():
+            return "synthetic", None
+
+        @staticmethod
+        def get(url, tok, timeout=None):
+            asked.append(url.split("/")[-2])
+            return {"PORT": "3000"}
+    real = m._load
+    m._load = lambda rel, name: FakeHeroku if "scan_heroku" in rel else real(rel, name)
+    real_remaining = m.step_budget.remaining
+
+    def remaining():
+        return 1000.0 if len(asked) < 2 else 0.0          # time for two applications, then none
+    try:
+        m.step_budget.remaining = remaining
+        rows, _deg, complete = m.scan_heroku_apps("pepper")
+        check("out of time, the fetch says it is not complete", complete is False)
+        check("and keeps what it read", [r["app"] for r in rows] == ["app0", "app1"], str(rows))
+        m.step_budget.remaining = lambda: 1000.0
+        rows, _deg, complete = m.scan_heroku_apps("pepper", rows)
+        check("resumed, it completes", complete is True)
+        check("asking only the applications it had not read", asked == ["id0", "id1", "id2", "id3", "id4"],
+              str(asked))
+        check("and holds every application once", sorted(r["app"] for r in rows) == [a["name"] for a in apps])
+        # A request the deadline cut short is asked again, never recorded as an application that
+        # would not answer (review of #352).
+        asked.clear()
+        FakeHeroku.get = staticmethod(lambda url, tok, timeout=None: (
+            asked.append(url.split("/")[-2]), {"__error__": "transport"})[1])
+        m.step_budget.remaining = lambda: 1000.0 if not asked else 0.0
+        rows, _deg, complete = m.scan_heroku_apps("pepper")
+        check("a request cut short by the deadline leaves the fetch incomplete", complete is False)
+        check("and records no error row for it", rows == [], str(rows))
+        label = "fp1:0000000000000000"
+        fresh = {"schema": m.STATE_SCHEMA, "fingerprint_namespace": label, "rows": [],
+                 "started_at": m.now()}
+        check("a saved fetch of today is resumed", m.resumable(fresh, label) is fresh)
+        check("one under another salt is not", m.resumable(fresh, "fp1:1111111111111111") is None)
+        check("nor one begun more than a day ago",
+              m.resumable({**fresh, "started_at": "2026-01-01T00:00:00Z"}, label) is None)
+    finally:
+        m.step_budget.remaining = real_remaining
+        m._load = real
+        if before is None:
+            raw.unlink()
+        else:
+            raw.write_text(before, encoding="utf-8")
+
+
 if __name__ == "__main__":
     enable_remote_env_in_sandbox()
     print("what production holds — the comparison, and what never leaves it\n")
-    for fn in (test_the_two_inventories_fingerprint_the_same_way,
+    for fn in (test_a_fetch_cut_by_its_deadline_resumes_after_the_applications_it_read,
+               test_the_two_inventories_fingerprint_the_same_way,
                test_the_verdicts_are_the_four_the_scenario_asks_for,
                test_a_retired_value_still_deployed_is_found_and_is_critical,
                test_differing_is_not_a_finding_and_sharing_is_one,

@@ -365,6 +365,13 @@ class Tick:
         self.outcomes: dict[str, str] = {}
         self.order: list[str] = []
         self.not_started: list[str] = []
+        #: False once the merge or the emit ran out of time (`previous_registry`) or the tick bailed:
+        #: the findings and the page then read a registry this tick did not refresh.
+        self.registry_refreshed = True
+        self.registry_note = ""
+        #: The steps that ran out of time when the tick went on over the registry as it stood.
+        self.registry_went_on: list[str] = []
+        self._went_on_said: list[str] = []
         from tick_progress import Progress
         self.progress = Progress(scratch, log)
 
@@ -435,6 +442,23 @@ class Tick:
         self.outcomes[name] = outcome
         return None
 
+    @staticmethod
+    def out_of_time(rc: int) -> bool:
+        """The watchdog's exit: a step stopped at its limit or not started for want of time."""
+        return rc == TIMED_OUT
+
+    def previous_registry(self, name: str, rc: int, out: str, what: str) -> None:
+        """Record that `name` ran out of time, and go on to the findings and the page (OBS-220)."""
+        first = out.splitlines()[0] if out else None
+        self.failed.append((name, rc))
+        self.outcomes[name] = outcome_of(rc, first)
+        self.registry_refreshed = False
+        self.registry_went_on.append(name)
+        self._went_on_said.append(f"`{name}` {self.outcomes[name].replace('_', ' ')} for want of time; {what}")
+        self.registry_note = "; ".join(self._went_on_said) + ", and the findings and the dashboard were built over it"
+        log(f"{name}: out of time; {what}; the findings and the dashboard are built over it, and the steps "
+            f"that read a fresh registry wait for the next tick")
+
     def write_report(self) -> None:
         try:
             import atomic
@@ -446,6 +470,11 @@ class Tick:
                                  for s, rc in self.failed],
                 "collector_order": self.order,
                 "not_started": self.not_started,
+                # False when this tick's findings and page were built over a registry it did not
+                # refresh (OBS-220); the supervisor then records the run as `partial`.
+                "registry_refreshed": self.registry_refreshed,
+                **({"registry_note": self.registry_note} if self.registry_note else {}),
+                **({"registry_went_on": self.registry_went_on} if self.registry_went_on else {}),
                 "progress": self.progress.document(),
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
@@ -458,6 +487,9 @@ class Tick:
         log(message)
         self.failed.append((name, rc))
         self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
+        self.registry_refreshed = False
+        self.registry_went_on = []
+        self.registry_note = f"the tick stopped at `{name}`: {message}"
         self.write_report()
         log(f"tick stopped at {name}")
         raise SystemExit(0)
@@ -563,22 +595,42 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # THE TAIL. Every step from here on is in tick_lease.TAIL_STEPS, so it keeps its reserve.
     # Each bails with its OWN exit and first line, so a stopped or never-started merge is not
     # reported as a failure (verification round 2: a literal 1 read every bail as `failed`).
+    #
+    # OUT OF TIME IS NOT A FAILURE (OBS-220). A merge or an emit the watchdog stopped, or did not start,
+    # used to stop the tick here, so the findings and the dashboard kept the tick before's for as long
+    # as the machine stayed loaded. Now the tick goes on to them over the registry as it stands (the
+    # previous one when the merge ran out, the one the emit left when the emit did, and only once the
+    # validator has read it) and skips the steps that read a fresh registry. The report says so
+    # (`registry_refreshed: false`), and the supervisor records the run as `partial`. A validator
+    # stopped for time is not a red one (review of #352, M1): the findings and the dashboard are
+    # built over the registry as it stands, which nothing has validated this tick, and the report
+    # names it; a validator that answered red still stops the tick.
     rc, out = bounded("merge", PY, "collectors/merge.py", SCRATCH)
     if rc != 0:
-        t.bail("merge", rc, "merge failed — stopping, the registry is not rewritten", first=out)
-    rc, out = bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)
-    if rc != 0:
-        t.bail("emit", rc, "emit failed or REFUSED a wholesale change — the registry keeps the last good version",
-               first=out)
+        if not t.out_of_time(rc):
+            t.bail("merge", rc, "merge failed — stopping, the registry is not rewritten", first=out)
+        t.previous_registry("merge", rc, out, "the registry is the previous tick's")
+    if t.registry_refreshed:
+        rc, out = bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)
+        if rc != 0:
+            if not t.out_of_time(rc):
+                t.bail("emit", rc, "emit failed or REFUSED a wholesale change — the registry keeps the last good version",
+                       first=out)
+            t.previous_registry("emit", rc, out, "the registry is as the stopped emit left it, once validated")
     rc, out = bounded("validate", PY, "tools/validate_registry.py")
     if rc != 0:
-        t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called", first=out)
-    if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
-        log("events degraded")
-    if bounded("snapshot", PY, "collectors/compute_deltas.py", "snapshot")[0] != 0:
-        log("snapshot degraded")
-    _, diff = bounded("diff", PY, "collectors/compute_deltas.py", "diff")
-    log(diff.splitlines()[0] if diff.strip() else "")
+        if not t.out_of_time(rc):
+            t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called",
+                   first=out)
+        t.previous_registry("validate", rc, out, "the registry was not validated this tick")
+    diff = ""
+    if t.registry_refreshed:
+        if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
+            log("events degraded")
+        if bounded("snapshot", PY, "collectors/compute_deltas.py", "snapshot")[0] != 0:
+            log("snapshot degraded")
+        _, diff = bounded("diff", PY, "collectors/compute_deltas.py", "diff")
+        log(diff.splitlines()[0] if diff.strip() else "")
 
     # THE OPTIONAL STEPS, cheap ones first. Measured 2026-10-09/10: `plugins` (92–497 s)
     # and `agent` (135–244 s) ran first and used the window every tick, so the steps that
@@ -588,19 +640,25 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # Which Fabric project each project is (OBS-160): asked of Fabric's hub, recorded here.
     # After `validate`, because it reads the registry this tick wrote; a hub that is down is
     # named in its own output, never a failed step.
-    step("fabric-attribution", PY, "collectors/scan_fabric_attribution.py", SCRATCH / "fabric-attribution.json")
+    # The index, the ledger and the rollup read the store, not the registry: they run whether or not
+    # this tick refreshed it (review of #352, LOW 4), each with the minimum a step that must finish has.
+    if t.registry_refreshed:
+        step("fabric-attribution", PY, "collectors/scan_fabric_attribution.py", SCRATCH / "fabric-attribution.json")
     step("index", PY, "store/indexer.py", "index")
-    step("retention", PY, "store/retention.py", "apply")
-    step("sweep", PY, "tools/sweep_fixtures.py")
-    step("corroborate", PY, "tools/corroborate.py")
+    if t.registry_refreshed:
+        step("retention", PY, "store/retention.py", "apply")
+        step("sweep", PY, "tools/sweep_fixtures.py")
+        step("corroborate", PY, "tools/corroborate.py")
     step("ledger", PY, "tools/export_ledger.py")
-    step("lost", PY, "tools/record_lost_projects.py")
-    step("plugins", PY, "collectors/run_plugins.py")
+    if t.registry_refreshed:
+        step("lost", PY, "tools/record_lost_projects.py")
+        step("plugins", PY, "collectors/run_plugins.py")
     step("rollup", PY, "store/rollup.py", "refresh")
-    if re.search(r"nothing moved|nothing to compare", diff):
-        log("quiet tick — no model called, 0 tokens")
-    else:
-        step("agent", PY, "agent/observe.py")
+    if t.registry_refreshed:
+        if re.search(r"nothing moved|nothing to compare", diff):
+            log("quiet tick — no model called, 0 tokens")
+        else:
+            step("agent", PY, "agent/observe.py")
 
     step("findings", PY, "tools/build_findings.py")
     step("dashboard", PY, "dashboard/build_dashboard.py")
@@ -617,10 +675,11 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         log("smoke: node is absent, so whether the page renders was not measured")
     step("notify", PY, "tools/notify_findings.py")
 
-    step("registry", PY, "tools/commit_registry.py")
-    step("project-into-vault", PY, "tools/project_into_vault.py")
-    step("projection", PY, "tools/commit_projection.py")
-    step("links", PY, "tools/audit_vault_links.py", "--quiet")
+    if t.registry_refreshed:
+        step("registry", PY, "tools/commit_registry.py")
+        step("project-into-vault", PY, "tools/project_into_vault.py")
+        step("projection", PY, "tools/commit_projection.py")
+        step("links", PY, "tools/audit_vault_links.py", "--quiet")
     # One rotation policy for every log this engine writes (log_policy.py, LC-12).
     step("logs", PY, "tools/rotate_logs.py")
 

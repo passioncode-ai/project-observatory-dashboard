@@ -523,18 +523,108 @@ class TailBail(unittest.TestCase):
                 tick.steps(t, base, base / "page.html")
             return json.loads((base / "tick.json").read_text(encoding="utf-8"))["failed_steps"]
 
-    def test_a_merge_past_its_limit_is_stopped(self):
-        self.assertEqual(self.bail_row("merge", 124, "half a merge\n"),
-                         [{"step": "merge", "exit": 124, "outcome": "stopped"}])
-
-    def test_a_merge_not_started_says_so(self):
-        self.assertEqual(self.bail_row("merge", 124, "not started — the tick's ceiling has been reached\n"),
-                         [{"step": "merge", "exit": 124, "outcome": "not_started"}])
-
     def test_emit_and_validate_keep_their_exit(self):
         self.assertEqual(self.bail_row("emit", 3, "REFUSED\n"), [{"step": "emit", "exit": 3, "outcome": "failed"}])
         self.assertEqual(self.bail_row("validate", 137, ""),
                          [{"step": "validate", "exit": 137, "outcome": "stopped"}])
+
+
+class OutOfTimeGoesOn(unittest.TestCase):
+    """OBS-220: a merge or an emit the watchdog stopped, or did not start, stopped the tick, so the
+    findings and the dashboard kept the tick before's for as long as the machine stayed loaded. They
+    are built over the registry as it stands now, and the report and the run say so."""
+
+    def run_tail(self, results):
+        tick = load_tick()
+        import paths
+        ran = []
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            t = tick.Tick(base)
+
+            def step(name, *argv):
+                ran.append(name)
+                return "ran"
+
+            def bounded(name, *argv):
+                ran.append(name)
+                return results.get(name, (0, "nothing moved\n" if name == "diff" else ""))
+            t.step, t.bounded = step, bounded
+            t.probe = lambda *a, **k: False
+            with mock.patch.object(paths, "STATE", base):
+                try:
+                    tick.steps(t, base, base / "page.html")
+                    t.write_report()
+                    bailed = False
+                except SystemExit:
+                    bailed = True
+            report = json.loads((base / "tick.json").read_text(encoding="utf-8"))
+        return ran, report, bailed
+
+    def test_a_merge_past_its_limit_does_not_stop_the_findings_or_the_page(self):
+        ran, report, bailed = self.run_tail({"merge": (124, "half a merge\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["failed_steps"], [{"step": "merge", "exit": 124, "outcome": "stopped"}])
+        self.assertIs(report["registry_refreshed"], False)
+        self.assertEqual(report["registry_went_on"], ["merge"])
+        # The index, the ledger and the rollup read the store, not the registry (review of #352, LOW 4).
+        for name in ("validate", "index", "ledger", "rollup", "findings", "dashboard", "notify", "logs"):
+            self.assertIn(name, ran)
+        for name in ("emit", "events", "snapshot", "diff", "fabric-attribution", "retention", "corroborate",
+                     "plugins", "agent", "registry", "project-into-vault", "projection", "links"):
+            self.assertNotIn(name, ran, "a step that reads a fresh registry ran over the previous one")
+        self.assertLess(ran.index("validate"), ran.index("findings"))
+
+    def test_a_merge_not_started_says_so_and_goes_on(self):
+        _, report, bailed = self.run_tail({"merge": (124, "not started — the tick's ceiling has been reached\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["failed_steps"], [{"step": "merge", "exit": 124, "outcome": "not_started"}])
+
+    def test_an_emit_out_of_time_is_validated_before_the_findings_read_it(self):
+        ran, report, bailed = self.run_tail({"emit": (124, "half an emit\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["registry_went_on"], ["emit"])
+        self.assertLess(ran.index("emit"), ran.index("validate"))
+        self.assertLess(ran.index("validate"), ran.index("findings"))
+        self.assertIn("dashboard", ran)
+
+    def test_a_validator_out_of_time_is_not_a_red_one(self):
+        # Review of #352 (M1): a validate stopped for time read as "VALIDATOR RED" and bailed, so the
+        # findings and the dashboard did not run.
+        ran, report, bailed = self.run_tail({"validate": (124, "exceeded its 2 s limit\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["failed_steps"], [{"step": "validate", "exit": 124, "outcome": "stopped"}])
+        self.assertEqual(report["registry_went_on"], ["validate"])
+        self.assertIn("not validated", report["registry_note"])
+        for name in ("findings", "dashboard", "notify"):
+            self.assertIn(name, ran)
+        self.assertNotIn("registry", ran, "an unvalidated registry was committed")
+
+    def test_an_emit_and_a_validator_both_out_of_time_are_both_named(self):
+        _, report, bailed = self.run_tail({"emit": (124, "half\n"), "validate": (124, "not started — x\n")})
+        self.assertFalse(bailed)
+        self.assertEqual(report["registry_went_on"], ["emit", "validate"])
+        self.assertIn("`emit`", report["registry_note"])
+        self.assertIn("`validate`", report["registry_note"])
+
+    def test_a_red_validator_after_an_emit_out_of_time_still_stops(self):
+        ran, report, bailed = self.run_tail({"emit": (124, "half an emit\n"), "validate": (1, "red\n")})
+        self.assertTrue(bailed)
+        self.assertNotIn("findings", ran)
+        self.assertIs(report["registry_refreshed"], False)
+        self.assertNotIn("registry_went_on", report)
+
+    def test_a_refused_emit_still_stops_the_tick(self):
+        ran, report, bailed = self.run_tail({"emit": (3, "REFUSED\n")})
+        self.assertTrue(bailed)
+        self.assertNotIn("findings", ran)
+
+    def test_a_full_tick_says_the_registry_was_refreshed(self):
+        ran, report, bailed = self.run_tail({})
+        self.assertFalse(bailed)
+        self.assertIs(report["registry_refreshed"], True)
+        for name in ("index", "ledger", "rollup", "findings", "dashboard", "registry"):
+            self.assertIn(name, ran)
 
 
 class TailOrder(unittest.TestCase):

@@ -204,7 +204,8 @@ def migrated() -> tuple[pathlib.Path, dict]:
     return d, env
 
 
-def test_the_full_check_runs_once_a_day_and_the_quick_one_in_between() -> None:
+def test_the_full_check_runs_once_a_day_and_the_light_one_in_between() -> None:
+    # OBS-220: `quick_check` between the full checks took 30-139 s over a 100 MB store under load.
     d, env = migrated()
     run_check(env)
     first = receipt(d)
@@ -213,17 +214,122 @@ def test_the_full_check_runs_once_a_day_and_the_quick_one_in_between() -> None:
           json.dumps(first)[:200])
     run_check(env)
     second = receipt(d)
-    check("within the day the next one is quick", second.get("pragma") == "quick_check", json.dumps(second)[:200])
+    check("within the day the next one is light", second.get("pragma") == "light", json.dumps(second)[:200])
+    check("and it says ok", second.get("verdict") == "ok", json.dumps(second)[:200])
     check("and keeps the full check's time", second.get("full_checked_at") == first.get("full_checked_at"),
           json.dumps(second)[:200])
-    write_receipt(d, {**second, "full_checked_at": stamp(25)})
+    day_ago = stamp(25)
+    write_receipt(d, {**second, "full_checked_at": day_ago, "full_tried_at": day_ago})
     run_check(env)
     check("a day later the full check runs again", receipt(d).get("pragma") == "integrity_check",
           json.dumps(receipt(d))[:200])
     write_receipt(d, {**receipt(d), "verdict": "damaged"})
     run_check(env)
-    check("and after any verdict that is not ok", receipt(d).get("pragma") == "integrity_check",
+    check("and at once after a verdict of damaged", receipt(d).get("pragma") == "integrity_check",
           json.dumps(receipt(d))[:200])
+    write_receipt(d, {**receipt(d), "verdict": "unopenable"})
+    run_check(env)
+    check("or unopenable", receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
+
+
+def test_a_check_that_did_not_finish_clears_nothing() -> None:
+    """Review of #352 (M2): after a full check said `damaged`, an `unmeasured` re-check let the light
+    check run for hours and write a fresh `ok` over the damage. A light `ok` now runs only while a
+    full check passed within the day, and an unfinished check keeps the verdict it found."""
+    import time
+    d, env = migrated()
+    write_receipt(d, {"ran_at": stamp(1), "pragma": "integrity_check", "verdict": "damaged",
+                      "detail": "Page 42: btreeInitPage() returns error", "took_ms": 90, "bytes": 1})
+    p = run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() - 1:.3f}"))
+    r = receipt(d)
+    check("after damaged, the next check is the full one", r.get("pragma") == "integrity_check" or
+          (r.get("attempt") or {}).get("pragma") == "integrity_check", json.dumps(r)[:240])
+    check("an unfinished check keeps the verdict it found", r.get("verdict") == "damaged", json.dumps(r)[:240])
+    check("and names itself beside it", (r.get("attempt") or {}).get("verdict") == "unmeasured",
+          json.dumps(r)[:240])
+    check("and the step still says the store is damaged", p.returncode == 1, (p.stdout + p.stderr)[-200:])
+    run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() - 1:.3f}"))
+    check("however many ticks run out of time", receipt(d).get("verdict") == "damaged",
+          json.dumps(receipt(d))[:240])
+    run_check(env)
+    r = receipt(d)
+    check("a full check that finishes clears it", r.get("verdict") == "ok" and r.get("pragma") == "integrity_check",
+          json.dumps(r)[:240])
+    check("and drops the old attempt", "attempt" not in r, json.dumps(r)[:240])
+    for name, doc in (("no full pass on record", {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok"}),
+                      ("a full pass a day old", {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok",
+                                                 "full_checked_at": stamp(25)}),
+                      ("a full check out of time", {"ran_at": stamp(0.5), "pragma": "integrity_check",
+                                                    "verdict": "unmeasured", "full_checked_at": stamp(30)})):
+        write_receipt(d, doc)
+        run_check(env)
+        check(f"with {name}, the full check runs on the next tick",
+              receipt(d).get("pragma") == "integrity_check", json.dumps(receipt(d))[:200])
+    write_receipt(d, {"ran_at": stamp(0.5), "pragma": "light", "verdict": "ok", "full_checked_at": stamp(2)})
+    run_check(env)
+    check("within the day of a full pass, the light one", receipt(d).get("pragma") == "light",
+          json.dumps(receipt(d))[:200])
+
+
+def test_a_damaged_middle_page_is_never_cleared_by_the_light_check() -> None:
+    """The reviewer's store: one corrupted page in the middle of the file. The light check reads the
+    first row of each table and says `ok`; the full check does not. Once the full check has found it,
+    every later check is the full one until the file is sound."""
+    d, env = workspace()
+    db = d / "observatory.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE t(a INTEGER, b TEXT)")
+    con.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 60000) "
+                "INSERT INTO t SELECT i, hex(randomblob(32)) FROM n")
+    con.commit()
+    con.close()
+    raw = bytearray(db.read_bytes())
+    page = 4096
+    middle = (len(raw) // page // 2) * page
+    raw[middle:middle + page] = b"\x5a" * page
+    db.write_bytes(bytes(raw))
+    import check_store
+    importlib.reload(check_store)
+    light = check_store.inspect(db, check_store.LIGHT)
+    full = check_store.inspect(db, check_store.PRAGMA)
+    check("the light check does not read that page", light.get("verdict") == "ok", json.dumps(light)[:200])
+    check("the full check does", full.get("verdict") in ("damaged", "unopenable"), json.dumps(full)[:200])
+    run_check(env)
+    first = receipt(d)
+    check("with no full pass on record, the first check is the full one",
+          first.get("pragma") == "integrity_check" and first.get("verdict") in ("damaged", "unopenable"),
+          json.dumps(first)[:200])
+    for _ in range(3):
+        run_check(env)
+        r = receipt(d)
+        check("and every later one is the full one, never a light ok",
+              r.get("pragma") == "integrity_check" and r.get("verdict") != "ok", json.dumps(r)[:200])
+
+
+def test_the_light_check_reads_pages_not_the_file() -> None:
+    d, env = migrated()
+    import check_store
+    importlib.reload(check_store)
+    db = d / "observatory.db"
+    r = check_store.inspect(db, check_store.LIGHT)
+    check("a sound store is ok under the light check", r.get("verdict") == "ok", json.dumps(r)[:200])
+    con = sqlite3.connect(db)
+    have = [x[0] for x in con.execute("SELECT name FROM sqlite_master WHERE name = 'search_notes_data'")]
+    if have:
+        con.execute("DROP TABLE search_notes_data")
+        con.commit()
+    con.close()
+    if have:
+        r = check_store.inspect(db, check_store.LIGHT)
+        check("the recorded damage, a broken full-text index, is named by the light check too",
+              r.get("verdict") == "damaged" and "search_notes" in str(r.get("detail")), json.dumps(r)[:240])
+    else:
+        print("  NOTE  this store has no FTS5 index to damage [uncoverable here]")
+    (d / "other.db").write_bytes(b"not a database at all, and long enough to have a header")
+    r = check_store.inspect(d / "other.db", check_store.LIGHT)
+    check("a file with no SQLite header is unopenable", r.get("verdict") == "unopenable", json.dumps(r)[:200])
+    r = check_store.inspect(db, check_store.LIGHT, 0)
+    check("with no time left it is not started", r.get("verdict") == "unmeasured", json.dumps(r)[:200])
 
 
 def test_the_check_stops_at_its_deadline_and_says_it_did_not_measure() -> None:
@@ -345,6 +451,19 @@ def test_a_stale_verdict_is_reported_as_stale() -> None:
               f"{f['title']} / {f['detail'][:160]}")
 
 
+def test_a_light_ok_long_after_the_last_full_pass_is_stale() -> None:
+    """Review of #352 (M2): the light check writes a fresh `ok` every tick; its staleness is measured
+    from the last full pass as well, which is due once a day."""
+    got = findings_for(rec("ok", pragma="light", ran_at=stamp(0.2), full_checked_at=stamp(40)))
+    f = got[0] if len(got) == 1 else None
+    check("a full pass 16 hours overdue is stale", f is not None and f["type"] == "store.integrity_stale",
+          str(got)[:200])
+    if f:
+        check("and says when the full check last passed", stamp(40)[:13] in f["detail"], f["detail"][:240])
+    check("a light ok within the day of a full pass is silent",
+          findings_for(rec("ok", pragma="light", ran_at=stamp(0.2), full_checked_at=stamp(20))) == [])
+
+
 def test_an_absent_receipt_raises_nothing() -> None:
     check("no receipt, no finding", findings_for(None) == [],
           "the check has not run since it was added; that is not a verdict")
@@ -411,7 +530,10 @@ if __name__ == "__main__":
                test_a_malformed_search_index_is_named_rather_than_missed,
                test_an_unopenable_store_is_a_third_answer,
                test_an_absent_store_is_not_a_fault,
-               test_the_full_check_runs_once_a_day_and_the_quick_one_in_between,
+               test_the_full_check_runs_once_a_day_and_the_light_one_in_between,
+               test_a_check_that_did_not_finish_clears_nothing,
+               test_a_damaged_middle_page_is_never_cleared_by_the_light_check,
+               test_the_light_check_reads_pages_not_the_file,
                test_the_check_stops_at_its_deadline_and_says_it_did_not_measure,
                test_the_step_has_a_limit_of_its_own,
                test_a_failed_check_is_critical,
@@ -419,6 +541,7 @@ if __name__ == "__main__":
                test_a_sound_store_is_silent,
                test_an_absent_store_is_silent,
                test_a_stale_verdict_is_reported_as_stale,
+               test_a_light_ok_long_after_the_last_full_pass_is_stale,
                test_an_absent_receipt_raises_nothing,
                test_an_unmeasured_check_is_information_naming_the_last_full_one,
                test_the_check_runs_early_in_the_tick,

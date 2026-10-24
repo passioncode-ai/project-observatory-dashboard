@@ -10,6 +10,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
 
 class TickFindings(unittest.TestCase):
+    def test_a_core_step_out_of_time_says_the_tick_went_on(self):
+        # OBS-220: the findings and the page are built over the registry as it stood.
+        import tick_findings as F
+        row = {'step': 'emit', 'exit': 124, 'outcome': 'stopped'}
+        went_on = F.findings({'failed_steps': [row], 'registry_refreshed': False, 'registry_went_on': ['emit']}, None)
+        self.assertEqual(went_on[0]['severity'], 'warning')
+        self.assertIn('built over the registry as it stood', went_on[0]['detail'])
+        stopped = F.findings({'failed_steps': [row], 'registry_refreshed': False}, None)
+        self.assertIn('the tick stopped before replacing further outputs', stopped[0]['detail'])
+
     def test_planned_starvation_excludes_disabled_and_unplanned(self):
         import tick_findings as F
         rows = {name: {'not_started_streak': 3, 'last_ran_at': 1, 'outcome': outcome}

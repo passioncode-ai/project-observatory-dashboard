@@ -428,6 +428,9 @@ CORE_TAIL_STEPS = frozenset({
 SOFT_TAIL_STEPS = TAIL_STEPS - CORE_TAIL_STEPS
 #: The tail took 106 s on a quiet machine (2026-10-07, `rollup` to `tick done`);
 #: 300 s leaves it room under load. A fifth of the ceiling for a short interval.
+#: Since OBS-220 it is the FLOOR: the collectors leave the tail what its recent runs
+#: measured when that is more (`tail_reserve_seconds`), as it was on 2026-10-24, when
+#: `events` alone took 211 s of the 300 s and `findings` was stopped at 17 s.
 TAIL_RESERVE_SECONDS = 300
 #: From `findings` to `tick done`: 20 s on a quiet machine (2026-10-07); 120 s under load.
 CORE_RESERVE_SECONDS = 120
@@ -437,9 +440,23 @@ def ceiling_seconds() -> float:
     return tick_budget.ceiling_seconds()
 
 
-def tail_reserve_seconds() -> float:
-    """Seconds before the tick's ceiling that collectors leave to the tail."""
-    return min(float(TAIL_RESERVE_SECONDS), ceiling_seconds() / 5)
+def tail_history() -> list[dict]:
+    """The recent runs' stage receipts the tail's measured needs are read from (OBS-220); [] when
+    there is no history yet, which leaves every reserve at its old flat floor."""
+    try:
+        import tick_health
+        return tick_health.stage_history(paths.SCRATCH, tick_budget.NEED_RUNS)
+    except Exception:  # noqa: BLE001  (a damaged history is an empty one, never a stopped step)
+        return []
+
+
+def tail_reserve_seconds(history: list[dict] | None = None) -> float:
+    """Seconds before the tick's ceiling that collectors leave to the tail: what the tail has
+    measured (`tick_budget.collector_reserve`), never less than the old flat reserve:
+    TAIL_RESERVE_SECONDS, a fifth of the ceiling for a short interval."""
+    floor = min(float(TAIL_RESERVE_SECONDS), ceiling_seconds() / 5)
+    history = tail_history() if history is None else history
+    return tick_budget.collector_reserve(tick_budget.needs(history, defaults=False), ceiling_seconds(), floor)
 
 
 def core_reserve_seconds() -> float:
@@ -472,18 +489,32 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     A collector — any step not in TAIL_STEPS — also leaves the tail its reserve and
     takes at most its share of the ceiling (`tick_budget.share_limit`, OBS-52), so no
     one collector can use the time every other collector was due; every step is told
-    the moment its watchdog fires (`STEP_DEADLINE_ENV`)."""
+    the moment its watchdog fires (`STEP_DEADLINE_ENV`). The tail's reserve, and what a
+    tail step leaves the steps that must finish after it, are measured from the recent
+    runs (`tick_budget.tail_limit`, OBS-220)."""
     limit = float(STEP_SECONDS.get(name, DEFAULT_STEP_SECONDS) if limit is None else limit)
     if name not in TAIL_STEPS:
         limit = min(limit, tick_budget.share_limit(name, ceiling_seconds()))
-    reserve = (0.0 if name in CORE_TAIL_STEPS else core_reserve_seconds() if name in SOFT_TAIL_STEPS
-               else tail_reserve_seconds())
+    reserve = 0.0
     deadline = os.environ.get(DEADLINE_ENV, "").strip()
     if deadline:
         try:
-            limit = min(limit, float(deadline) - reserve - time.time())
+            left = float(deadline) - time.time()
         except ValueError:
-            pass
+            left = None
+        if left is not None:
+            # THE TAIL'S TIME IS MEASURED (OBS-220): a collector leaves the tail what it has needed,
+            # and a tail step leaves the steps that must finish after it theirs (tick_budget.py).
+            history = tail_history()
+            if name in TAIL_STEPS:
+                need = tick_budget.needs(history)
+                floor = core_reserve_seconds() if name in SOFT_TAIL_STEPS else 0.0
+                step_limit = tick_budget.tail_limit(name, left, need, floor)
+                reserve = max(left - step_limit, 0.0)
+            else:
+                reserve = tail_reserve_seconds(history)
+                step_limit = left - reserve
+            limit = min(limit, step_limit)
     if limit <= 0:
         print(f"{NOT_STARTED} — the tick's ceiling has been reached" if not reserve else
               f"{NOT_STARTED} — the last {reserve:.0f} s before the tick's ceiling are kept for "
@@ -524,6 +555,27 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
                 marker.unlink()
         except OSError:
             pass
+
+
+def registry_outcome(run_id: str, outcome: str, reason: str) -> tuple[str, str]:
+    """`partial` for a tick that reached its end without refreshing the registry (OBS-220).
+
+    The tick script exits 0 when it stops at a step (`bail`) and when the merge or the emit ran out
+    of time and the findings and the page were built over the registry as it stood, so its exit
+    alone made such a run read as `finished`. Its own report says otherwise (`registry_refreshed`),
+    and is read only when it is this run's (`progress.run_id`). Anything unreadable leaves the
+    outcome as it was."""
+    try:
+        import tick_progress
+        doc = tick_progress.read(paths.SCRATCH / "tick.json")
+        progress = doc.get("progress") if isinstance(doc.get("progress"), dict) else {}
+        if progress.get("run_id") == run_id and doc.get("registry_refreshed") is False:
+            note = doc.get("registry_note")
+            return "partial", (str(note)[:300] if isinstance(note, str) and note else
+                               "the tick did not refresh the registry")
+    except Exception:  # noqa: BLE001  (optional evidence never changes the run's own outcome)
+        pass
+    return outcome, reason
 
 
 def record_run(started: str, outcome: str, code: int | None, reason: str,
@@ -605,6 +657,8 @@ def supervised(command: list[str]) -> int:
             code = child.wait(timeout=ceiling)
             outcome = "finished" if code == 0 else "failed"
             reason = "" if code == 0 else f"the tick script exited {code}"
+            if code == 0:
+                outcome, reason = registry_outcome(run_id, outcome, reason)
             return code
         except subprocess.TimeoutExpired:
             outcome, code = "timeout", TIMED_OUT

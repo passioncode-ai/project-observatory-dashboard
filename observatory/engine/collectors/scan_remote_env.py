@@ -36,6 +36,15 @@ comparable without either side revealing the salt. A cached scan made under a
 different salt is never compared against, however fresh it is; it is left in
 place and reported, and `--force` re-reads production under the current one.
 
+ONE FETCH MAY TAKE SEVERAL TICKS (OBS-220). Each application is one request, and on 2026-10-24
+the fetch was stopped at the 28 s the tick had left for it, with nothing written; the next tick
+began again from the first application. The scan now reads the step's deadline (`step_budget`):
+before each application it checks the time, and when it is short it saves the applications read
+so far beside the output (`remote-env-scan-state.json`: names, classes and salted fingerprints,
+the same as the output, never a value) and stops. The next run resumes after them. The output is
+replaced only by a complete fetch, so the comparison keeps the last complete one meanwhile; a
+saved fetch under another salt is discarded.
+
 THE RETIRED VALUES ARE FINGERPRINTED HERE TOO, from the vault's own
 `.retired-<stamp>` archives, and for one reason: "production is still running
 the key we rotated away" is the single most expensive thing this inventory can
@@ -56,6 +65,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                       # noqa: E402
 import paths                                                        # noqa: E402
+import step_budget                                                  # noqa: E402
 
 #: Re-fetching sooner than this learns nothing and re-exposes everything.
 MAX_AGE_HOURS = 24
@@ -63,6 +73,13 @@ MAX_AGE_HOURS = 24
 #: measured on, and a run that would walk a thousand is a configuration
 #: accident rather than a scan.
 MAX_APPS = 400
+#: Seconds kept before the step's deadline to save the applications read so far (OBS-220).
+MARGIN_SECONDS = 5
+#: The longest one application's request may take, as `scan_heroku` allows; less near the deadline.
+REQUEST_TIMEOUT = 60
+#: Where an unfinished fetch is kept, beside the output, and its shape.
+STATE_FILE = "remote-env-scan-state.json"
+STATE_SCHEMA = 1
 
 
 def _load(rel: str, name: str):
@@ -150,14 +167,18 @@ def current_values(pepper: str, store: pathlib.Path) -> list[dict]:
     return out
 
 
-def scan_heroku_apps(pepper: str) -> tuple[list[dict], list[dict]]:
-    """(one record per application, degradations). Values never leave this."""
+def scan_heroku_apps(pepper: str, done: list[dict] | None = None) -> tuple[list[dict], list[dict], bool]:
+    """(one record per application, degradations, complete). Values never leave this.
+
+    `done` are the records of an unfinished fetch (OBS-220): their applications are not asked
+    again. When the step's deadline is near the fetch stops between applications and answers
+    complete False, with what it read so far."""
     hk = _load("collectors/scan_heroku.py", "scan_heroku")
     env = _load("collectors/scan_env.py", "scan_env")
     tok, why = hk.token()
     if not tok:
         return [], [{"source": "heroku", "reason": why or "no token",
-                     "effect": "production configuration is unknown, not empty"}]
+                     "effect": "production configuration is unknown, not empty"}], True
     raw = paths.SCRATCH / "heroku.json"
     try:
         listing = json.loads(raw.read_text(encoding="utf-8"))
@@ -165,21 +186,31 @@ def scan_heroku_apps(pepper: str) -> tuple[list[dict], list[dict]]:
     except (OSError, ValueError) as exc:
         return [], [{"source": "heroku", "reason": f"{type(exc).__name__} reading {raw.name}",
                      "effect": "no application list, so nothing to ask about; "
-                               "run `project-observatory full heroku` first"}]
+                               "run `project-observatory full heroku` first"}], True
     if not apps and listing.get("degraded"):
         # THE LIST IS EMPTY BECAUSE THE HEROKU SCAN FAILED, not because nothing runs
         # (audit A26): comparing against it would report "0 apps" with no reason.
         first = listing["degraded"][0] or {}
         return [], [{"source": "heroku", "reason": str(first.get("reason") or "the Heroku scan read nothing")[:200],
                      "effect": "production configuration is unknown, not empty; "
-                               "run `project-observatory full heroku`, then `full env`"}]
+                               "run `project-observatory full heroku`, then `full env`"}], True
     if len(apps) > MAX_APPS:
         return [], [{"source": "heroku", "reason": f"{len(apps)} applications is past "
                                                    f"the {MAX_APPS} this scan will walk",
-                     "effect": "refused rather than run for an hour"}]
-    rows, degraded = [], []
+                     "effect": "refused rather than run for an hour"}], True
+    rows, degraded = list(done or []), []
+    asked = {r.get("app") for r in rows if isinstance(r, dict)}
     for app in apps:
-        got = hk.get(f"{hk.API}/apps/{app['id']}/config-vars", tok)
+        if app["name"] in asked:
+            continue
+        if step_budget.remaining() < MARGIN_SECONDS + 1:
+            return rows, degraded, False
+        got = hk.get(f"{hk.API}/apps/{app['id']}/config-vars", tok,
+                     timeout=max(1.0, min(float(REQUEST_TIMEOUT), step_budget.remaining() - MARGIN_SECONDS)))
+        if (not isinstance(got, dict) or "__error__" in got) and step_budget.remaining() < MARGIN_SECONDS + 1:
+            # CUT SHORT BY THE DEADLINE, not refused by Heroku: asked again on the next run rather
+            # than recorded as an application that would not answer (review of #352).
+            return rows, degraded, False
         if not isinstance(got, dict) or "__error__" in got:
             reason = (got or {}).get("__error__", "unreadable") if isinstance(got, dict) else "unreadable"
             rows.append({"app": app["name"], "vars": [], "error": str(reason)[:120]})
@@ -201,7 +232,18 @@ def scan_heroku_apps(pepper: str) -> tuple[list[dict], list[dict]]:
         degraded.append({"source": "heroku config-vars",
                          "reason": f"{len(bad)} application(s) would not answer",
                          "effect": "their production configuration is unknown, not empty"})
-    return rows, degraded
+    return rows, degraded, True
+
+
+def resumable(saved, label: str) -> dict | None:
+    """The saved fetch to resume, or None: same schema and salt, and begun less than MAX_AGE_HOURS
+    ago. An older one is begun again (review of #352): its first applications would otherwise be
+    compared as production long after they were read."""
+    if not (isinstance(saved, dict) and saved.get("schema") == STATE_SCHEMA
+            and saved.get("fingerprint_namespace") == label and isinstance(saved.get("rows"), list)):
+        return None
+    age = hours_since(str(saved.get("started_at") or ""))
+    return saved if age is not None and age < MAX_AGE_HOURS else None
 
 
 def main(argv: list[str]) -> int:
@@ -264,7 +306,23 @@ def main(argv: list[str]) -> int:
         print(f"remote-env: the fingerprint salt is unusable — {identity_error}",
               file=sys.stderr)
         return 1
-    rows, degraded = scan_heroku_apps(pepper)
+    state = out.with_name(STATE_FILE)
+    try:
+        saved = json.loads(state.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = None
+    label = env.namespace(pepper)
+    resumed = resumable(saved, label)
+    rows, degraded, complete = scan_heroku_apps(pepper, (resumed or {}).get("rows"))
+    ticks = int((resumed or {}).get("ticks") or 0) + 1
+    if not complete:
+        # THE DEADLINE CAME FIRST: what was read is kept beside the output, never in it.
+        atomic.write_json(state, {"schema": STATE_SCHEMA, "fingerprint_namespace": label,
+                                  "started_at": (resumed or {}).get("started_at") or now(),
+                                  "ticks": ticks, "rows": rows})
+        print(f"remote-env: the step's time ran out after {len(rows)} application(s); the fetch resumes "
+              f"on the next run and the last complete scan stands until it finishes")
+        return 0
     vault = _load("tools/vault.py", "vault_mod")
     retired = retired_values(pepper, vault.STORE)
     current = current_values(pepper, vault.STORE)
@@ -279,7 +337,10 @@ def main(argv: list[str]) -> int:
            "note": "names, classes and salted fingerprints; never a value. "
                    "This file is gitignored; registry/remote-env.json carries "
                    "only the verdicts derived from it."}
+    if ticks > 1:
+        doc["pass"] = {"started_at": resumed.get("started_at"), "ticks": ticks}
     atomic.write_json(out, doc)
+    state.unlink(missing_ok=True)
     secrets = sum(1 for r in rows for v in r["vars"] if v["class"] == "secret")
     print(f"remote-env: {len(rows)} application(s), "
           f"{sum(len(r['vars']) for r in rows)} variable(s), {secrets} read as secret, "

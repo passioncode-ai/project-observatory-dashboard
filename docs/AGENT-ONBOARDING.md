@@ -183,7 +183,13 @@ Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
 `ran`; a probe's "no" (`backup-due`, exit 3) is `not_due`, not a failure. Disabled steps
 preserve the last successful measurement time; they do not raise starvation.
 Collectors take at most their share of the ceiling (`tick_budget.py`: 40 %, leaks
-30 %); one not started for 3 ticks runs first, a disabled one last.
+30 %, env 20 %); one not started for 3 ticks runs first, a disabled one last. The
+collectors leave the steps from `merge` on their measured need (90th percentile of the
+last 20 runs plus 25 %, at least 300 s, at most 40 % of the ceiling), and each of those
+leaves the steps that must finish after it theirs, never less than a minimum (validate
+10 s, findings 30 s, dashboard 20 s, the others 5 s). A merge, emit or validator out of
+time still yields findings and a dashboard over the registry as it stands: `tick.json`
+`registry_refreshed: false`, the run `partial` in `tick-runs.jsonl`.
 `tick.step_over_share` names a step that used 95 % of its share in 3 of the
 last 5 ticks (resumable steps excepted); `collector.degraded_persistent` a collector whose same
 non-structural degraded reason lasted over 24 hours (a reason another system

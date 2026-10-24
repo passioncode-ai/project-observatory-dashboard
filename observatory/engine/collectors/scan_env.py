@@ -28,9 +28,19 @@ it stays in `store/raw/env.json`, which git ignores. The REGISTRY receives only
 the conclusion: this variable is also in that project.
 
     scan_env.py store/raw/env.json
+
+ONE PASS MAY TAKE SEVERAL TICKS (OBS-220). The walk has no depth limit, so it reads every folder
+under the estate root, linked worktrees included: 38 s on a quiet machine, 599 s on one under a load
+average above 70 (2026-10-24), which was the whole 40 % of the tick any collector may take. The scan
+now reads the step's deadline (`step_budget`): when it comes, the pass stops where it is (the
+folders still to walk, the repositories whose git state is read, the files already classified) and
+saves that beside the output (`env-scan-state.json`, the same private folder and the same salted
+fingerprints, never a value). The next tick resumes it. `env.json` is replaced only by a complete
+pass, so every reader keeps the last complete inventory meanwhile; the pass says how many ticks it
+took (`pass`). A saved pass under another salt or another root is discarded, never mixed in.
 """
 from __future__ import annotations
-import hashlib, math, os, pathlib, re, stat, subprocess, sys
+import hashlib, json, math, os, pathlib, re, stat, subprocess, sys
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -41,6 +51,7 @@ import paths
 import safe_git  # noqa: E402  — the engine's one git door
 import credential_shape  # noqa: E402  — the one list of issuer prefixes
 from runtime_identity import IdentityError, load as load_identity
+import step_budget  # noqa: E402  (the time this step has left, OBS-220)
 
 #: NO DEPTH LIMIT. A fixed depth looks sufficient and silently misses files a
 #: level or two deeper than expected, which is the one failure this repository
@@ -364,29 +375,6 @@ def parse(text: str) -> tuple[list[tuple[str, str]], int]:
     return out, unparsed
 
 
-def env_files(root: pathlib.Path) -> list[pathlib.Path]:
-    """Every candidate under the estate, breadth-limited and exclusion-pruned."""
-    found: list[pathlib.Path] = []
-    stack = [(root, 0)]
-    while stack:
-        d, depth = stack.pop()
-        try:
-            entries = list(os.scandir(d))
-        except (PermissionError, OSError):
-            continue
-        for e in entries:
-            try:
-                if e.is_dir(follow_symlinks=False):
-                    if (MAX_DEPTH is None or depth < MAX_DEPTH) \
-                            and e.name not in SKIP_DIRS:
-                        stack.append((pathlib.Path(e.path), depth + 1))
-                elif e.is_file(follow_symlinks=False) and ENV_NAME.match(e.name):
-                    found.append(pathlib.Path(e.path))
-            except OSError:
-                continue
-    return sorted(found)
-
-
 def repo_of(path: pathlib.Path, root: pathlib.Path) -> pathlib.Path | None:
     """The git work tree a file sits in, or None. Walks up, stops at the estate."""
     d = path.parent
@@ -398,93 +386,197 @@ def repo_of(path: pathlib.Path, root: pathlib.Path) -> pathlib.Path | None:
         d = d.parent
 
 
-def git_states(files: list[pathlib.Path], root: pathlib.Path) -> tuple[dict, list]:
-    """`tracked` / `ignored` / `loose` / `no-repo` per file, batched per repository.
+#: Seconds kept before the step's deadline to save where the pass stopped (OBS-220).
+MARGIN_SECONDS = 10
+#: The shape of a saved pass, and the file beside the output it is saved in.
+STATE_SCHEMA = 1
+STATE_FILE = "env-scan-state.json"
+#: The longest a single git read may take, as before; less when the deadline is nearer.
+GIT_TIMEOUT = 60
+
+
+def _out_of_time() -> bool:
+    return step_budget.remaining() < MARGIN_SECONDS
+
+
+def fresh_pass(root: pathlib.Path, label: str) -> dict:
+    """A pass that has not started: the root to walk and nothing found yet."""
+    return {"schema": STATE_SCHEMA, "root": str(root), "fingerprint_namespace": label,
+            "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "ticks": 0,
+            "stack": [[str(root), 0]], "found": [], "walk_done": False,
+            "states": {}, "repos_done": [], "records": [], "recorded": [], "degraded": []}
+
+
+def usable(saved, root: pathlib.Path, label: str) -> bool:
+    """A saved pass is resumed only under the same schema, root and salt."""
+    return (isinstance(saved, dict) and saved.get("schema") == STATE_SCHEMA
+            and saved.get("root") == str(root) and saved.get("fingerprint_namespace") == label
+            and isinstance(saved.get("stack"), list) and isinstance(saved.get("found"), list)
+            and isinstance(saved.get("states"), dict) and isinstance(saved.get("repos_done"), list)
+            and isinstance(saved.get("records"), list) and isinstance(saved.get("recorded"), list)
+            and isinstance(saved.get("degraded"), list))
+
+
+def _walk(p: dict) -> bool:
+    """Continue the walk of `p` over every candidate under the estate, exclusion-pruned (SKIP_DIRS);
+    False, with the folders still to walk saved in `p`, when the deadline came first."""
+    stack = [(pathlib.Path(d), int(depth)) for d, depth in p["stack"]]
+    found = list(p["found"])
+    while stack:
+        if _out_of_time():
+            p["stack"] = [[str(d), depth] for d, depth in stack]
+            p["found"] = found
+            return False
+        d, depth = stack.pop()
+        try:
+            entries = list(os.scandir(d))
+        except (PermissionError, OSError):
+            continue
+        for e in entries:
+            try:
+                if e.is_dir(follow_symlinks=False):
+                    if (MAX_DEPTH is None or depth < MAX_DEPTH) and e.name not in SKIP_DIRS:
+                        stack.append((pathlib.Path(e.path), depth + 1))
+                elif e.is_file(follow_symlinks=False) and ENV_NAME.match(e.name):
+                    found.append(e.path)
+            except OSError:
+                continue
+    p["stack"], p["found"], p["walk_done"] = [], sorted(set(found)), True
+    return True
+
+
+def _git(p: dict, root: pathlib.Path) -> bool:
+    """`tracked` / `ignored` / `loose` / `no-repo` per found file, batched per repository and read one
+    repository at a time, so a pass resumes between them; False when the deadline came first.
 
     `loose` is the one worth naming: untracked AND unignored is one `git add -A`
     away from a committed secret, and it looks identical to `ignored` in every
-    listing that does not ask.
-    """
+    listing that does not ask."""
     by_repo: dict[pathlib.Path, list[pathlib.Path]] = {}
-    state: dict[str, str] = {}
-    degraded: list[dict] = []
-    for f in files:
+    for name in p["found"]:
+        f = pathlib.Path(name)
         repo = repo_of(f, root)
         if repo is None:
-            state[str(f)] = "no-repo"
+            p["states"][name] = "no-repo"
         else:
             by_repo.setdefault(repo, []).append(f)
-
-    for repo, group in by_repo.items():
+    done = set(p["repos_done"])
+    for repo in sorted(by_repo):
+        if str(repo) in done:
+            continue
+        if _out_of_time():
+            return False
+        group = by_repo[repo]
         rel = [str(f.relative_to(repo)) for f in group]
         tracked: set[str] = set()
         ignored: set[str] = set()
+        timeout = max(1.0, min(float(GIT_TIMEOUT), step_budget.remaining() - MARGIN_SECONDS))
         try:
             # Through `safe_git`: `ls-files` here ran the fsmonitor named in the
             # operator's configuration, once per repository per tick.
-            p = safe_git.run(["ls-files", "--", *rel], repo=repo, timeout=60)
-            tracked = {ln for ln in p.stdout.splitlines() if ln}
-            q = safe_git.run(["check-ignore", "--", *rel], repo=repo, timeout=60)
+            q = safe_git.run(["ls-files", "--", *rel], repo=repo, timeout=timeout)
+            tracked = {ln for ln in q.stdout.splitlines() if ln}
+            q = safe_git.run(["check-ignore", "--", *rel], repo=repo, timeout=timeout)
             ignored = {ln for ln in q.stdout.splitlines() if ln}
         except (OSError, subprocess.SubprocessError) as exc:
-            degraded.append({"repo": str(repo), "reason": f"{type(exc).__name__}: {exc}",
-                             "effect": f"{len(group)} file(s) carry no git state"})
+            if _out_of_time():
+                return False            # the deadline, not the repository: read it again next tick
+            p["degraded"].append({"repo": str(repo), "reason": f"{type(exc).__name__}: {exc}",
+                                  "effect": f"{len(group)} file(s) carry no git state"})
         for f, r in zip(group, rel):
-            state[str(f)] = ("tracked" if r in tracked else
-                             "ignored" if r in ignored else "loose")
-    return state, degraded
+            p["states"][str(f)] = ("tracked" if r in tracked else "ignored" if r in ignored else "loose")
+        p["repos_done"].append(str(repo))
+    p["git_done"] = True
+    return True
 
 
-def scan(root: pathlib.Path) -> dict:
-    pepper = salt()
-    files = env_files(root)
-    states, degraded = git_states(files, root)
-    records = []
-    for f in files:
-        try:
-            st = f.stat()
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            degraded.append({"file": str(f), "reason": f"{type(exc).__name__}: {exc}",
-                             "effect": "not read, so its variables are unknown"})
+def git_states(files: list[pathlib.Path], root: pathlib.Path) -> tuple[dict, list]:
+    """`tracked` / `ignored` / `loose` / `no-repo` per file and the degradations, in one call (`_git`
+    over a pass of these files). Outside a tick there is no deadline and every repository is read."""
+    p = {"found": [str(f) for f in files], "states": {}, "repos_done": [], "degraded": []}
+    _git(p, root)
+    return p["states"], p["degraded"]
+
+
+def _records(p: dict, root: pathlib.Path, pepper: str) -> bool:
+    """Classify every found file that is not classified yet; False when the deadline came first."""
+    recorded = set(p["recorded"])
+    for name in p["found"]:
+        if name in recorded:
             continue
-        pairs, unparsed = parse(text)
-        rel = f.relative_to(root)
-        variables = []
-        for name, value in pairs:
-            cls = classify(name, value)
-            shown = name if not SECRET_SHAPED.search(name) else "<redacted: the NAME is secret-shaped>"
-            row = {"name": shown, "class": cls}
-            if cls == "secret":
-                # SECRETS ONLY. The first version fingerprinted `config` too, and
-                # the result was a "shared value" list whose widest row was forty
-                # projects agreeing that `APP_ENV` is `production`. Two projects
-                # holding the same configuration is a coincidence of vocabulary;
-                # two holding the same credential is a rotation that breaks both.
-                row["fingerprint"] = hashlib.sha256(
-                    (pepper + value).encode("utf-8")).hexdigest()[:16]
-            variables.append(row)
-        records.append({
-            "path": str(rel),
-            "project": rel.parts[0] if rel.parts else "",
-            "kind": "template" if f.name.endswith(TEMPLATE_SUFFIXES) else "env",
-            "git": states.get(str(f), "no-repo"),
-            "mode": oct(stat.S_IMODE(st.st_mode))[2:].rjust(4, "0"),
-            "modified_on": datetime.fromtimestamp(st.st_mtime, timezone.utc)
-                                   .strftime("%Y-%m-%d"),
-            "unparsed_lines": unparsed,
-            "variables": variables,
-        })
+        if _out_of_time():
+            return False
+        p["recorded"].append(name)
+        record = _record(pathlib.Path(name), root, pepper, p["states"], p["degraded"])
+        if record is not None:
+            p["records"].append(record)
+    return True
+
+
+def scan_pass(root: pathlib.Path, saved: dict | None = None) -> tuple[dict | None, dict]:
+    """(the document, the pass): the document when the pass is complete, else None and the pass to
+    save, resumed by the next call. Outside a tick there is no deadline and one call completes it."""
+    pepper = salt()
+    label = namespace(pepper)
+    p = saved if usable(saved, root, label) else fresh_pass(root, label)
+    p["ticks"] = int(p.get("ticks") or 0) + 1
+    if not (p["walk_done"] or _walk(p)) or not _git(p, root) or not _records(p, root, pepper):
+        return None, p
     return {
         "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "root": str(root),
         "max_depth": MAX_DEPTH,
         # Which salt the fingerprints below were made under, as a public label.
         # A consumer comparing this scan with another checks it first.
-        "fingerprint_namespace": namespace(pepper),
-        "files": records,
-        "degraded": degraded,
+        "fingerprint_namespace": label,
+        "files": sorted(p["records"], key=lambda r: r["path"]),
+        "degraded": p["degraded"],
+        # How the pass went: when it began and how many ticks it took (OBS-220).
+        "pass": {"started_at": p["started_at"], "ticks": p["ticks"]},
+    }, p
+
+
+def _record(f: pathlib.Path, root: pathlib.Path, pepper: str, states: dict, degraded: list) -> dict | None:
+    """One file's record: names, classes and, for a secret, a salted fingerprint; never a value."""
+    try:
+        st = f.stat()
+        text = f.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        degraded.append({"file": str(f), "reason": f"{type(exc).__name__}: {exc}",
+                         "effect": "not read, so its variables are unknown"})
+        return None
+    pairs, unparsed = parse(text)
+    rel = f.relative_to(root)
+    variables = []
+    for name, value in pairs:
+        cls = classify(name, value)
+        shown = name if not SECRET_SHAPED.search(name) else "<redacted: the NAME is secret-shaped>"
+        row = {"name": shown, "class": cls}
+        if cls == "secret":
+            # SECRETS ONLY. The first version fingerprinted `config` too, and
+            # the result was a "shared value" list whose widest row was forty
+            # projects agreeing that `APP_ENV` is `production`. Two projects
+            # holding the same configuration is a coincidence of vocabulary;
+            # two holding the same credential is a rotation that breaks both.
+            row["fingerprint"] = hashlib.sha256(
+                (pepper + value).encode("utf-8")).hexdigest()[:16]
+        variables.append(row)
+    return {
+        "path": str(rel),
+        "project": rel.parts[0] if rel.parts else "",
+        "kind": "template" if f.name.endswith(TEMPLATE_SUFFIXES) else "env",
+        "git": states.get(str(f), "no-repo"),
+        "mode": oct(stat.S_IMODE(st.st_mode))[2:].rjust(4, "0"),
+        "modified_on": datetime.fromtimestamp(st.st_mtime, timezone.utc)
+                               .strftime("%Y-%m-%d"),
+        "unparsed_lines": unparsed,
+        "variables": variables,
     }
+
+
+def scan(root: pathlib.Path) -> dict | None:
+    """One whole pass; None only when a step deadline stops it (`scan_pass` saves and resumes)."""
+    return scan_pass(root)[0]
 
 
 def main(argv: list[str]) -> int:
@@ -498,19 +590,36 @@ def main(argv: list[str]) -> int:
                                     "as none existing"}]})
         print(f"env: {paths.DATA} does not exist — nothing scanned")
         return 0
+    state = out.with_name(STATE_FILE)
     try:
-        doc = scan(paths.DATA)
+        saved = json.loads(state.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = None
+    try:
+        doc, progress = scan_pass(paths.DATA, saved)
     except IdentityError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    if doc is None:
+        # THE DEADLINE CAME FIRST: the pass is saved and the next tick resumes it. `env.json` stays
+        # the last complete pass; a reader is never handed half an inventory.
+        atomic.write_json(state, progress)
+        left = ("the walk" if not progress["walk_done"] else
+                "the git state of the files found" if not progress.get("git_done") else "the files found")
+        print(f"env: the step's time ran out during {left} (tick {progress['ticks']} of this pass, "
+              f"{len(progress['found'])} file(s) found so far); the pass resumes on the next tick and "
+              f"env.json stays the last complete one")
+        return 0
     atomic.write_json(out, doc)
+    state.unlink(missing_ok=True)
     n_vars = sum(len(f["variables"]) for f in doc["files"])
     n_secret = sum(1 for f in doc["files"] for v in f["variables"]
                    if v["class"] == "secret")
     loose = sum(1 for f in doc["files"] if f["git"] == "loose")
     tracked = sum(1 for f in doc["files"] if f["git"] == "tracked")
+    over = f", over {doc['pass']['ticks']} ticks" if doc["pass"]["ticks"] > 1 else ""
     print(f"env: {len(doc['files'])} file(s), {n_vars} variable(s), "
-          f"{n_secret} secret-class, {loose} unignored, {tracked} TRACKED IN GIT")
+          f"{n_secret} secret-class, {loose} unignored, {tracked} TRACKED IN GIT{over}")
     for d in doc["degraded"][:5]:
         print(f"  degraded: {d.get('reason')}")
     return 0
