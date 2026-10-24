@@ -870,8 +870,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "57fddc6ff2c19d5b99496f8f10b74c13a67e91754158c6565a4588bae1e51bb8",
-      "bytes": 24701,
+      "export_sha256": "a4408434db1a972fe1cbe907b3a88bf990004d472f68c6c5f3bcf14962df5c73",
+      "bytes": 25120,
       "upstream_modified": true
     },
     {
