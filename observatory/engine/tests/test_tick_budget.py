@@ -241,7 +241,9 @@ def run_tail(durations, limit_of, budget):
         if limit <= 0:
             out[name] = ("not_started", 0.0)
             continue
-        took = durations[name](limit) if callable(durations[name]) else durations[name]
+        # A step the tick gained after the night measured (`review-policy`, OBS-227) took nothing on it.
+        took = durations.get(name, 0.0)
+        took = took(limit) if callable(took) else took
         spent = min(took, limit)
         left -= spent
         out[name] = ("ran" if took <= limit else "stopped", limit)

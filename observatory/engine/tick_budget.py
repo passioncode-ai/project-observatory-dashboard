@@ -121,7 +121,7 @@ def priority(row: dict | None) -> int:
 #: step calls and fails when the two disagree.
 TAIL_ORDER: tuple[str, ...] = (
     "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "index",
-    "retention", "sweep", "corroborate", "ledger", "lost", "plugins", "rollup", "agent", "findings",
+    "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "plugins", "rollup", "agent", "findings",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault", "projection",
     "links", "logs",
 )

@@ -1345,7 +1345,10 @@ def observatory_propose(
 
     The registry is written by collectors and by the operator. This queues a row
     awaiting a decision, because a writer that could edit the fact base directly
-    would poison it one plausible sentence at a time.
+    would poison it one plausible sentence at a time. When the operator has enabled
+    the standing review policy, a resources-only or aliases-only patch with no
+    conflict is accepted on the next tick as `policy:<rule>@<hash>`, never as the
+    operator; everything else waits for a person (`full review policy show`).
     """
     bad = _owner_error(owner)
     if bad:

@@ -307,7 +307,7 @@ def test_accept_re_checks_appliability_at_the_decision() -> None:
           "trusting the wire's verdict at decision time is trusting a check that "
           "ran against a different file")
     check("and it writes provenance rather than accepting it from the caller",
-          'merged["proposed_by"]' in src and 'merged["why"] = args.why' in src,
+          'merged["proposed_by"]' in src and 'merged["why"] = why' in src,
           "an override with no argument behind it cannot be maintained")
     check("through `atomic.write_json`, so a failed write keeps the old file",
           "atomic.write_json(f, doc)" in src)

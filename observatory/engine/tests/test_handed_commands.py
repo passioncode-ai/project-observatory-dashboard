@@ -90,6 +90,8 @@ SAMPLES = {
     "PROJECT/ENV/NAME": "my-org/prod/ENROLLMENT_TOKEN",
     # node.lifecycle's verbs (OBS-79 L3): a target id and one of its six tools.
     "TARGET_ID": "alpha.app", "TARGET": "alpha.app", "TOOL": "lifecycle.list",
+    # The review batch file `review.py batch prepare` names (OBS-227).
+    "{out}": "/srv/example-ws/store/review/batch.json",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

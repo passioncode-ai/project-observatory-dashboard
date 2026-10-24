@@ -15,6 +15,16 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 
 Fabric owns the canonical project id. Observatory pulls it from Fabric's hub and records `fabric:<uuid>` against each `project:<slug>` in its own store; it never creates a Fabric project and writes nothing to Fabric but one access request (`fabric.access.request`, capability `project.resolve`, allowed at once on the operator's own machine). `observatory_resolve` answers a `fabric:<uuid>` (via `alias`, owner `fabric`) and an absolute folder (also via `alias`, by the fabric-agent-contract's DEC-0089 rules). The SessionStart hook asks Fabric which project a session's folder is, and applies those rules itself only while Fabric is not running. A refusal names its reason in `degraded`; run `project-observatory full fabric-attribution` to ask again now.
 
+## The review queue
+
+What you propose waits for a decision. When I enabled the standing review policy
+(`project-observatory full review policy show` says whether), a `resources`-only or `aliases`-only
+proposal with no conflict is accepted on the next tick as `policy:<rule>@<hash>`, never as me; the
+rest waits for me. You may run `full review batch prepare`, read the file it writes and edit each
+`decision` and `reason` with your recommendation; `full review batch apply FILE`, `policy enable`,
+`policy disable` and `undo-policy` are mine, at my terminal. Never try to apply a batch or enable
+the policy for me.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

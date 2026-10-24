@@ -388,7 +388,10 @@ DEFAULT_STEP_SECONDS = 900
 #: `integrity` is a guard over an ~80 MiB store that checks in 4–38 s; 2026-10-10 it
 #: spent 785 s under a load near 400 and left `scan-fs` no time. It stops itself before
 #: its limit and records `unmeasured` (tools/check_store.py).
-STEP_SECONDS = {"leaks": 1200, "integrity": 240}
+STEP_SECONDS = {"leaks": 1200, "integrity": 240,
+                #: The standing review policy (OBS-227) decides at most 500 rows a run; a queue past that
+                #: is decided over several ticks, so it never needs more than this.
+                "review-policy": 120}
 #: The whole tick's ceiling and each collector's share of it live in tick_budget.py
 #: (OBS-52), read there by the watchdog, the stage receipt and the findings alike.
 import tick_budget  # noqa: E402
@@ -410,7 +413,7 @@ STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
 #: set from `tools/tick.py` and fails when the two disagree.
 TAIL_STEPS = frozenset({
     "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "plugins", "rollup",
-    "agent", "index", "retention", "sweep", "corroborate", "ledger", "lost", "findings",
+    "agent", "index", "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "findings",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",
 })

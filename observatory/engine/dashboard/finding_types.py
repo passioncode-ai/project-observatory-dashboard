@@ -111,6 +111,7 @@ LABELS: dict[str, str] = {
     "interpretation.unreasoned": "Interpretation without reasons",
     "ledger.review_backlog": "Decisions waiting for a person",
     "ledger.review_expiring": "Proposals about to expire",
+    "review.queue_waiting": "Proposals waiting for a person",
     "lifecycle.log_readable": "Logs readable by other accounts",
     "lifecycle.logs_over_cap": "Logs past their cap",
     "lifecycle.orphans": "Orphaned product processes",

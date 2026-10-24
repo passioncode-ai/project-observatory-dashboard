@@ -1765,6 +1765,11 @@ def collect() -> list[dict]:
     # GitHub (tools/ssh_key_findings.py). Silent until `full ssh-keys list` saved an inventory.
     import ssh_key_findings
     out.extend(ssh_key_findings.from_file(paths.SCRATCH / "ssh-keys.json"))
+    # THE REVIEW QUEUE, both halves (OBS-227, tools/review_findings.py): what waits for a person after
+    # the standing review policy took what it may. The registry proposals had no finding before.
+    import review_findings
+    import review_policy
+    out.extend(review_findings.findings(review_policy.status()))
     import organizations
     _pj = paths.REGISTRY / "projects.json"
     out.extend(google_findings.organization_findings(

@@ -140,6 +140,8 @@ BOUNDARY += ('delegation_sealed',)
 BOUNDARY += ('tick_progress', 'tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
 # OBS-52: every collector a turn, none past its share of the ceiling.
 BOUNDARY += ('tick_budget', 'degraded_persistence')
+# The standing review policy (OBS-227): decided once by a person, applied by the tick, never as them.
+BOUNDARY += ('review_policy',)
 # ENG-003: the agent's deadline reaches providers.complete().
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -295,6 +297,8 @@ ROOT_FILES = (
     'machine_backup.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
+    # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.
+    'review_policy.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).

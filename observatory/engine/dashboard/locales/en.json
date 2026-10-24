@@ -353,6 +353,10 @@
   "one": "{n} ledger record awaits review",
   "other": "{n} ledger records await review"
  },
+ "{n} proposals wait for a person": {
+  "one": "{n} proposal waits for a person",
+  "other": "{n} proposals wait for a person"
+ },
  "{n} linked": {
   "one": "{n} linked",
   "other": "{n} linked"

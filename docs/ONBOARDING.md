@@ -714,6 +714,45 @@ resolvable here". If a promoted lesson later cites a different commit, or its ev
 stops resolving in two known projects, the observed record is archived and a new
 proposed one replaces it (`outcome: replaced`), so it must be corroborated again.
 `supported` is yours, through `review.py`.
+
+### The review queue and its standing policy
+
+Two queues wait for a decision: registry proposals (`observatory_propose`) and proposed ledger
+conclusions. `project-observatory full review` lists them, `full digest` groups the conclusions,
+and every decision you take there needs your terminal (there is no `--yes`). Since OBS-227 you may
+delegate a closed set of safe decisions once, so the queue is reviewed every tick without an agent
+running ([docs/design/REVIEW-POLICY.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/REVIEW-POLICY.md)):
+
+```sh
+project-observatory full review policy show       # the rules and what each would decide now; writes nothing
+project-observatory full review policy enable     # at your terminal: enable exactly what show listed
+project-observatory full review policy disable    # at your terminal
+```
+
+The rules: an exact duplicate of a pending proposal is superseded; a `resources`-only proposal from
+an agent for a project in the registry is accepted, appending only the resources not yet recorded;
+an `aliases`-only proposal is accepted when no name conflicts with a curated or a measured one; the
+superseded readings of one project's day are folded out of your count (the ledger is not touched).
+A `description`, an `organization`, `local_folders` and every conflict wait for you. The tick's
+`review-policy` step applies an enabled policy, at most 500 decisions a run, each recorded as
+`policy:<rule>@<hash>`, never as you, and journaled in `store/review-policy/decisions.jsonl`; with
+the policy off it only counts what it would decide (`store/raw/review-policy.json`). Changing a rule
+in `config/review-policy.json` makes the policy `changed`, and it decides nothing until you enable
+it again. `full review undo-policy ID` or `--since TIME`, at your terminal, takes decisions back
+and removes from the curation files exactly what they added.
+
+What is left accumulates and is resolved in one launch:
+
+```sh
+project-observatory full review batch prepare     # store/review/batch.json: every item, a recommendation, a reason
+project-observatory full review batch apply FILE  # at your terminal: totals and a sample, one question, then all of it
+```
+
+An agent may read the batch file and edit each `decision` (`accept`, `reject`, `keep`) and
+`reason`; applying it is yours. An item that changed after the file was prepared is skipped and
+named. The finding `review.queue_waiting` appears when 20 items wait for you or the oldest is 14
+days old (`remind` in `config/review-policy.json`), and `full doctor` and the Health page's row
+"review queue" show the policy's state, its last run and what waits.
 Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
 an observed one is never erased by age. An agent finds lessons with
 `observatory_search` and `kinds: ["lesson"]`, without a project. task-pipeline
