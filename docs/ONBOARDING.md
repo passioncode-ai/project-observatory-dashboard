@@ -1929,6 +1929,16 @@ How the job gets scheduled:
 - The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
   without a systemd user manager, the hook runs the pass itself.
 
+`OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
+systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,
+`maintain ensure` refuses, and `full update --apply` installs the release but schedules
+nothing, reporting `"maintenance": "not-scheduled-here"` with `maintenance_detail` naming the
+command that schedules the job. Releases up to 0.29.1 replaced the `0` with `1`, and an update
+is run by the release it replaces, so the first update that keeps the `0` is the one after the
+release carrying this change. Use it for
+a second or test workspace. `OBSERVATORY_SYSTEM_SETUP=1` allows them where no person is at a
+terminal; the job and the plugin hook set it.
+
 Only one `full update --apply` runs at a time per workspace. A second one, from the job, the
 plugin or a person, is refused before it changes anything; the job then tries again the next
 hour. The job runs the update in a process of its own and never stops it: a pass that is
@@ -1968,12 +1978,18 @@ requests already running answer, starts the installed release once to check it
 (`--reload-check`), then replaces itself in place with `os.execv`. The process id, the pipes
 and the session stay; the new release takes over the handshake the client already made, so
 the client sends no second `initialize`, and it answers the held request exactly once. When
-the tool list changed, the client receives `notifications/tools/list_changed`.
+the tool list changed, the client receives `notifications/tools/list_changed`. A client on
+the 2026-07-28 protocol (Claude Code is one) keeps a `subscriptions/listen` stream open for
+the whole session to hear about such changes; that stream is not a request still running.
+Just before it moves, the server ends each open stream the protocol's graceful way (its
+result, stamped with the subscription id), and the client opens a new one, which the new
+release answers (OBS-228).
 
 Where it cannot move, it answers `stale-server` and names why, and the session gets the new
 release when it restarts or reconnects the server: on Windows (`os.execv` starts a new
 process there), while a `full update --apply` holds the workspace or the requests already
-running take longer than a minute to answer (it tries again at a later request), when the installed release fails its check, speaks another MCP revision or no
+running take longer than a minute to answer (it tries again the moment the last of them has
+answered, with no further request needed, and at a later request), when the installed release fails its check, speaks another MCP revision or no
 longer exists, or when the replacement itself fails. Each move and each refusal is one line
 in `store/logs/mcp-reload.jsonl` (from, to, pid, and the reason for a refusal) and on the
 server's stderr; `full doctor` lists them under `session_servers`. `full update` lists the
