@@ -3,39 +3,113 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.29.1 (2026-10-24)
+
+A patch release. The engine moves its contract pin to fabric-agent-contract `588748ab` and does what the organization
+node owes there: an organization that closed ends its enrollments and drops what was buffered for it, and a `purpose`
+rejection holds a kind only where a signal to release it can arrive, every hold shown. The tick keeps its tail under
+load: the steps that must finish get their measured time, a merge, emit or validation stopped for time no longer stops
+findings and the dashboard, and such a run is recorded `partial`. `node.lifecycle` signals and launches less after a
+mismatch, a crash or a close, and an independent audit's findings on the organization node, MCP health and the disk
+guard are fixed, including restoring enrollments that 0.29.0's provisional `unknown-org` rule ended. The contract pin
+moved, so the first `full check` after the update reports `probes-check` with exit 1 once: run `project-observatory
+full probes` once and it passes again.
+
+### Added
+
+- **An organization that closed ends its enrollments** (contract DEC-0103, OBS-217, #350): an answer `410
+  organization-closed` with the contract's exact body (`closedAt`) is final on one answer, for every request. The
+  enrollment ends; its stream, registrations and answers, `collectionStart`, policy root key and any key set or server
+  layer are dropped, and the organization's buffered data with them; other enrollments are untouched. A batch answered
+  410 is the end, not a rejection, and registration sharing stops. A 410 with any other body is retried. The engine's
+  request verification answers 410 with `closedAt` before it checks revocation.
+- **A `purpose` rejection holds its kind until a release signal can arrive** (contract DEC-0100 and DEC-0102, #350):
+  the kind collects nothing new and a pending event is named dropped in `buffer.overflow`, until a check-in names
+  another `acknowledgedNoticeVersion` than at the rejection or the applied policy another `noticeVersion`; never on a
+  timer. It holds only on an enrollment bound to a person who has received an `acknowledgedNoticeVersion` at least
+  once; elsewhere (an `org-cloud` machine, an unassigned device, no acknowledgement yet) the rejection is consumed
+  like `before-purpose` and logged once per kind per day. `buffer.overflow` is never held. `org status`
+  (`purposeHolds`, `org:purpose-held`), doctor and Health name every held kind and the version it waits on.
+- **Check-in summary and attribution findings** (contract DEC-0114 and DEC-0116, #350): a harness summary that fails
+  them stays home with the note `attribution`.
+- **Machine profiles and the delta anchor in estate records** (FAC-SEM-134, DEC-0106; FAC-SEM-137, DEC-0107; #350),
+  ported in `node/estate.py` with the re-vendored `estate-*` fixtures.
+
+### Changed
+
+- **The contract pin is `588748ab`** (OBS-217, #350), moved by `tools/vendor_org_vectors.py`: node vectors, README
+  digests and interop schemas (DEC-0104's `queue-full`, which the engine never emits). The check-in lists only
+  `fabric-device/0.1` and sends no DEC-0111 member whatever the server lists. `unknown-org` is named only at `org
+  enroll`; the provisional two-sighting rule, `unknownOrg` and `tickSeq` are retired. A renewal by the key on record
+  keeps a purpose hold and its notice versions, and is dated, its clock skew measured, on the new certificate's
+  `notBefore`. Coding-agent ids are slugs (`[a-z][a-z0-9-]{1,62}`), and the harness baseline check is the contract's
+  narrowed one. The home-path check (DEC-0105) catches a home folder written with dashes after any non-alphanumeric
+  character, while names such as `smart-home-mcp` and `end-users-guide` pass.
+- **The tick's tail gets its measured time** (OBS-220, #352): each step's need is the 90th percentile of its last 20
+  runs (`store/raw/tick-runs.jsonl`); collectors leave the tail a measured reserve (at least 300 s, at most 40 % of
+  the ceiling), every tail step leaves the steps that must finish after it their time, and each of those has a minimum
+  (validate 10 s, findings 30 s, dashboard 20 s, the others 5 s). A merge, emit or validation stopped or not started
+  for want of time no longer stops the tick: findings, the dashboard, smoke, notify and logs run over the registry as
+  it stands, which is then not committed, and the run is recorded `partial`, which Health and the tick findings count
+  as incomplete. A refused emit or a validator that answered red still stops the tick. `env` gets a 20 % share.
+- **The store's integrity check runs light between daily full checks** (OBS-220, #352): the full `integrity_check`
+  runs once a day; a light check (header, schema, one row of every table, the full-text index included) runs between
+  only while a full check passed within the day, otherwise the full one runs every tick until it passes. An `ok` is
+  stale from the last full pass, and an unfinished check never clears `damaged` or `unopenable`.
+- **The environment scans resume across ticks** (OBS-220, #352): `env` resumes its walk, git reads and file
+  classification from `env-scan-state.json` (salted fingerprints, never a value) and replaces `env.json` only from a
+  complete pass; `remote-env` resumes after the applications it read, asks again a request the deadline cut short and
+  begins again a saved fetch older than a day.
 
 ### Fixed
 
-- **A renewal re-issued to another person is refused** (OBS-221). The certificate on record kept only whether it
+- **`node.lifecycle` launches and signals nothing it should not** (OBS-210, OBS-211, OBS-213, #351): an operation
+  recovered more than 600 s past its deadline launches and stops nothing (`delivery_unknown` when a start was
+  dispatched, `timeout` otherwise, `reason: recovered_too_late`); `close()` during a quit or signal wait sends no
+  SIGTERM or kill, and recovery gives the quit its grace again; a helper `quit` answered `identity_mismatch` signals
+  nothing; an unreadable `launchctl print-disabled` is read once more and then `failed`, never `held_off`; a malformed
+  hub `origin` or a well-known document of the wrong shape is a refusal, not an exception; the helper's folder is
+  checked before it runs; a failed recovery waits for running workers before it closes the store; deleting
+  `config/node-lifecycle.json` after a failed start clears the fault (403, not 503); and `full lifecycle allow`
+  refuses an expired binding.
+- **A partner publisher key is picked by strict equality** (OBS-216, #351): placement trust, the pin and scope rules
+  and the installation rule compare with the reference's `===`, and a missing `kid` no longer reads as `kid: null`.
+- **Two timing flakes are deterministic** (OBS-208, OBS-219, #351): the checkout scan tests that run real git children
+  wait for them outside the scan's clock (production budgets unchanged), and the session reload test measures a stall
+  by what it causes, not by wall time.
+- **Registry commits leave out temporary files** (#352): `commit_registry.py` removes the temporary files a stopped
+  writer left under `registry/` before staging.
+- **A renewal re-issued to another person is refused** (OBS-221, #353). The certificate on record kept only whether it
   bound a person, so a renewal by the key on record bound to someone else passed the `binding-changed` check that
   0.29.0 describes, and that enrollment's purpose holds, notice versions and summary consent carried to them. The
   certificate on record now keeps the binding's user id and a renewal must carry the same one; a certificate whose
   `binding.user` has no opaque string id, which the contract requires, is refused (`response-malformed`). A
   certificate saved by 0.29.0 has no id, so its first renewal compares a person or none, as before, and records it.
-- **The harness summary's consent ends with the enrollment** (OBS-221). A removal (`certificate-revoked`,
+- **The harness summary's consent ends with the enrollment** (OBS-221, #353). A removal (`certificate-revoked`,
   `certificate-unknown`) or a closed organization (`organization-closed`) clears it, and a new token's `org enroll`
   never carries it, also under the same organization id: only a renewal by the key on record keeps it. 0.29.0 carried
   it into any later enrollment of that organization id, so a new enrollment sent the summary without a fresh consent.
-- **Stale MCP health is no longer sent as current** (OBS-221). The tick's MCP scan reads declarations only and
+- **Stale MCP health is no longer sent as current** (OBS-221, #353). The tick's MCP scan reads declarations only and
   carries the last on-demand probe's verdicts for up to seven days under a new `scanned_at`, which passed the
   summary's 48-hour check. Each server's health is now judged by its own probe time (`liveness_at`): a verdict probed
   more than 48 hours before the summary, or with no time, is sent as `unknown`.
-- **An enrollment 0.29.0 ended on `unknown-org` is active again** (OBS-221). DEC-0103 retired that provisional rule;
-  a state it ended (`removed.code: unknown-org`) reads as active on its first read, is saved so under the enrollment's
-  lock with one journal line (`removal-undone`) and checks in at once, unless a re-enrollment with the reason
-  `epoch-superseded` or `certificate-expired` was recorded before the removal (it stays, with its reason); its leftover `tickSeq` is dropped. The events that rule dropped stay
-  dropped. A new token's `org enroll` still treats that removal as one, so an organization recreated under the same
-  id, with its epochs starting again, is accepted as 0.29.0 accepted it.
-- **The disk guard lists a marked browser clone in `kept`** (OBS-221): a code-sign clone that carries the keep marker
-  or a declared state path is reported with its reason, like every other class, instead of being skipped silently.
-- **An app that quits on its own during a stop is `already_exited`, not `identity_mismatch`** (OBS-221, from the
+- **An enrollment 0.29.0 ended on `unknown-org` is active again** (OBS-221, #353). DEC-0103 retired that provisional
+  rule; a state it ended (`removed.code: unknown-org`) reads as active on its first read, is saved so under the
+  enrollment's lock with one journal line (`removal-undone`) and checks in at once, unless a re-enrollment with the
+  reason `epoch-superseded` or `certificate-expired` was recorded before the removal (it stays, with its reason); its
+  leftover `tickSeq` is dropped. The events that rule dropped stay dropped. A new token's `org enroll` still treats
+  that removal as one, so an organization recreated under the same id, with its epochs starting again, is accepted as
+  0.29.0 accepted it.
+- **The disk guard lists a marked browser clone in `kept`** (OBS-221, #353): a code-sign clone that carries the keep
+  marker or a declared state path is reported with its reason, like every other class, instead of being skipped
+  silently.
+- **An app that quits on its own during a stop is `already_exited`, not `identity_mismatch`** (OBS-221, #353, from the
   review of #351). When the helper's `quit` finds the pid gone because the app exited between `status` and `quit`, the
   adapter probes again: a target that is down answers `already_exited` and the stop ends `stopped`; a pid that is
   someone else's now is still `identity_mismatch`. Nothing is signalled in either case.
-- **Corrections to the 0.29.0 notes.** `node.lifecycle` steps L1 to L3 are all merged and released in 0.29.0. The
-  macOS helper is served with the source-install build (`full lifecycle build-helper`); its release build inside the
-  signed app was not in 0.29.0 and is planned for 0.30.0 (step L2r of `docs/design/LIFECYCLE.md`). A server's
+- **Corrections to the 0.29.0 notes** (#353). `node.lifecycle` steps L1 to L3 are all merged and released in 0.29.0.
+  The macOS helper is served with the source-install build (`full lifecycle build-helper`); its release build inside
+  the signed app was not in 0.29.0 and is planned for 0.30.0 (step L2r of `docs/design/LIFECYCLE.md`). A server's
   `unknown-org` on a device request is retried as any other failure and never ends an enrollment (DEC-0103).
 
 ## 0.29.0 (2026-10-23)

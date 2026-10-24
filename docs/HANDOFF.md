@@ -17,6 +17,14 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-24: release 0.29.1](runs/2026-10-24-release-0.29.1/README.md): engine 0.29.1 (`observatory-log` stays
+0.28.0, unchanged since), carrying the contract re-pin at `588748ab` with the organization node's duties there
+(OBS-217, #350: `410 organization-closed` ends an enrollment, purpose holds only where a release signal can arrive),
+the `node.lifecycle`, estate and flaky-test review fixes (OBS-208, OBS-210, OBS-216, OBS-219, #351), the tick's tail
+under load, light integrity checks and resumable env scans (OBS-220, #352) and the audit fixes on the organization
+node, MCP health and the disk guard (OBS-221, #353). Next: merge, tag `v0.29.1`, verify, install, run `full probes`
+once, then record the receipts.
+
 [2026-10-23: release 0.29.0](runs/2026-10-23-release-0.29.0/README.md): engine 0.29.0 (`observatory-log` stays
 0.28.0, unchanged since), carrying `node.lifecycle` steps L1 to L3 (OBS-79: the broker #342, the macOS adapter #344,
 six MCP tools behind access bindings, inert until a target is enrolled, #347), the organization node's expiry
