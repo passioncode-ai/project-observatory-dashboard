@@ -527,6 +527,9 @@ def doctor(base: Path) -> dict:
             # OBS-159: which session MCP servers moved onto an installed release by
             # themselves, and which were refused (they answer `stale-server` with the reason).
             "session_servers": __import__("session_reload").summary(base),
+            # OBS-227: the standing review policy (off, on, changed, invalid), its last run and what
+            # waits for a person in both queues; read-only, the summary Health and the finding read.
+            "review": __import__("review_policy").status(),
             "credentials": "values are never returned", "network_calls": 0,
             # PB-137 N-003: whether any memory text may leave for a remote embedding
             # model, and for which projects — read-only, names and dates only.

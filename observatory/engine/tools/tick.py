@@ -649,6 +649,11 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         step("retention", PY, "store/retention.py", "apply")
         step("sweep", PY, "tools/sweep_fixtures.py")
         step("corroborate", PY, "tools/corroborate.py")
+        # THE STANDING REVIEW POLICY (OBS-227): what a person enabled once is applied here, never as
+        # them, and an off policy only counts. After `corroborate`, which promotes what a second
+        # witness confirms, and before the findings, which read its receipt. It reads the registry's
+        # measured names, so it waits for a tick that refreshed the registry.
+        step("review-policy", PY, "tools/review.py", "policy", "run")
     step("ledger", PY, "tools/export_ledger.py")
     if t.registry_refreshed:
         step("lost", PY, "tools/record_lost_projects.py")

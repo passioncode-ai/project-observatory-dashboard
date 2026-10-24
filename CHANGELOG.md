@@ -5,6 +5,22 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **A standing review policy: the queue of proposals is reviewed every tick, and what needs a person is resolved in
+  one launch** (OBS-227, `docs/design/REVIEW-POLICY.md`). `project-observatory full review policy show` lists a closed
+  set of versioned rules and what each would decide on the queue now; `full review policy enable`, at your terminal,
+  enables exactly those rules and records their hash. From then the tick's new optional step `review-policy` supersedes
+  exact duplicate proposals, appends `resources`-only proposals from an agent without replacing a recorded resource,
+  accepts `aliases`-only proposals that conflict with no curated or measured name, and folds the superseded readings
+  of a day out of your count (the ledger is not touched). Each decision is `policy:RULE@HASH`, never yours, journaled
+  in `store/review-policy/decisions.jsonl`, and `full review undo-policy` takes it back. A rule changed after enabling
+  stops the policy until you enable it again; with the policy off the step only counts. `full review batch prepare`
+  writes everything left for you with a recommendation an agent may edit, and `full review batch apply FILE` asks
+  once at your terminal and applies it all, skipping any item that changed since. The finding `review.queue_waiting`,
+  `review` in `full doctor` and the Health row "review queue" say what waits. `full review` now takes these
+  subcommands itself; with nothing after it, it lists the queue as before.
+
 ### Fixed
 
 - **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224). Both release

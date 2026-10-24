@@ -261,6 +261,14 @@
  "Projects, their state, resources and latest changes.": "Проекты, их состояние, ресурсы и последние изменения.",
  "Property": "Ресурс",
  "Proposals about to expire": "Предложения скоро истекут",
+ "Proposals waiting for a person": "Предложения ждут человека",
+ "review queue": "очередь решений",
+ "waiting for a person: {total} ({registry} registry, {ledger} ledger); {policy}": "ждут человека: {total} (реестр {registry}, память {ledger}); {policy}",
+ "the review policy decides what it may": "политика проверки решает то, что ей доверено",
+ "the review policy is off": "политика проверки выключена",
+ "the review policy changed and decides nothing until it is enabled again": "правила политики проверки изменились; она ничего не решает, пока её не включат снова",
+ "the review policy file is refused": "файл политики проверки отклонён",
+ "last run {date}": "последний запуск {date}",
  "Provider health not measured": "Состояние провайдера не измерено",
  "Provider health unreadable": "Состояние провайдера не читается",
  "Recorded work contradicted by git": "Записи о работе расходятся с git",
@@ -1402,6 +1410,12 @@
   "few": "{n} записи памяти ждут проверки",
   "many": "{n} записей памяти ждут проверки",
   "other": "{n} записи памяти ждут проверки"
+ },
+ "{n} proposals wait for a person": {
+  "one": "{n} предложение ждёт решения человека",
+  "few": "{n} предложения ждут решения человека",
+  "many": "{n} предложений ждут решения человека",
+  "other": "{n} предложения ждут решения человека"
  },
  "{n} linked": {
   "one": "{n} привязан",

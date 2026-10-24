@@ -27,9 +27,24 @@ Reading is unrestricted: `list` and `show` change nothing.
                                                  registry/*.json, which is
                                                  rewritten whole every tick
     review.py reject-proposal <id> --why …       the row stays with the reason
+
+THE STANDING POLICY (OBS-227, docs/design/REVIEW-POLICY.md). A person may delegate a closed set
+of safe decisions once; the tick applies them, never as the operator:
+
+    review.py policy show [--json]               the rules and what each would decide now; writes nothing
+    review.py policy enable [--only RULE …]      at a terminal: enable exactly the rules shown
+    review.py policy disable                     at a terminal
+    review.py policy run [--dry-run]             what the tick runs: applies an ENABLED policy only;
+                                                 every decision is `policy:<rule>@<hash>`, journaled
+    review.py undo-policy <decision-id …> | --since TIME    at a terminal: take decisions back
+    review.py batch prepare [--out FILE] [--include-routine]
+                                                 what waits for a person, with recommendations an
+                                                 agent may edit; writes only FILE
+    review.py batch apply FILE                   at a terminal: shows the totals, asks ONCE, applies
+                                                 every accept and reject as the operator
 """
 from __future__ import annotations
-import argparse, json, pathlib, sqlite3, sys
+import argparse, json, os, pathlib, sqlite3, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -39,6 +54,7 @@ import proposals
 from store import db as store_db                                                  
 from store import ledger as L                                                     
 from store import retention as _retention                              
+import review_policy as RP
 
 NEXT = {"proposed": "observed", "observed": "supported"}
 
@@ -455,6 +471,10 @@ def _proposal(conn, pid: str) -> dict:
     return dict(row)
 
 
+class Refused(Exception):
+    """A decision this queue cannot apply, with the reason a person reads."""
+
+
 def cmd_proposal_accept(conn, args) -> int:
     """Land an accepted proposal in the CURATION file, not in the registry.
 
@@ -472,6 +492,22 @@ def cmd_proposal_accept(conn, args) -> int:
     """
     require_terminal("accept a registry proposal")
     row = _proposal(conn, args.id)
+    try:
+        # THE REVIEW LOCK, shared with the standing policy's run (OBS-227): both read and rewrite
+        # the same curation files, and two read-modify-writes in flight lose one of them.
+        with RP.lock(wait=True):
+            for line in accept_proposal(conn, row, args.why):
+                print(line)
+    except Refused as exc:
+        sys.exit(f"review: {exc}")
+    return 0
+
+
+def accept_proposal(conn, row: dict, why: str) -> list[str]:
+    """Apply an accepted registry proposal as the OPERATOR; the lines that say what was written.
+
+    Called only behind `require_terminal`: from `accept-proposal` and from `batch apply`. Raises
+    Refused when it cannot be applied as it stands."""
     patch = json.loads(row["patch_json"] or "{}")
     # UNWRAPPED. `proposals_add` stores `{"owner": …, "evidence": [...]}` — the
     # owner is provenance the ledger adds — and the curation file wants the
@@ -479,15 +515,15 @@ def cmd_proposal_accept(conn, args) -> int:
     # beside the proposal's id and date.
     stored = json.loads(row["evidence_json"] or "[]")
     evidence = (stored.get("evidence") if isinstance(stored, dict) else stored) or []
-    why = proposals.refusal(row["target_id"], patch, evidence)
-    if why:
+    refused = proposals.refusal(row["target_id"], patch, evidence)
+    if refused:
         # Re-checked at the decision, not trusted from the wire. A proposal
         # queued before a curation file changed shape may no longer be
         # appliable, and applying it anyway would write a field the emitter
         # ignores — a decision with no effect, which is worse than a refusal.
-        sys.exit(f"review: this proposal cannot be applied — {why}")
+        raise Refused(f"this proposal cannot be applied — {refused}")
     prefix = next(p for p in proposals.LANDS_IN if row["target_id"].startswith(p))
-    provenance = {"why": args.why, "proposed_by": f"{row['id']} ({row['created_at']})", "evidence": evidence}
+    provenance = {"why": why, "proposed_by": f"{row['id']} ({row['created_at']})", "evidence": evidence}
     written = []
     if "aliases" in patch:
         # OTHER NAMES land in the table of names, not in the target's own row:
@@ -501,18 +537,15 @@ def cmd_proposal_accept(conn, args) -> int:
             table = identifiers.merge_accepted(current, patch["aliases"], target=row["target_id"],
                                                on=L._now()[:10], provenance=provenance)
         except identifiers.AliasConflict as exc:
-            sys.exit(f"review: this proposal cannot be applied — {exc}")
+            raise Refused(f"this proposal cannot be applied — {exc}") from None
         except ValueError as exc:
-            sys.exit(f"review: {fi} could not be read: {exc}")
+            raise Refused(f"{fi} could not be read: {exc}") from None
         atomic.write_json(fi, table)
         written.append(f"{fi} ({len(patch['aliases'])} alias(es))")
         patch = {k: v for k, v in patch.items() if k != "aliases"}
     if not patch:
-        _mark_accepted(conn, row, args.why)
-        print(f"accepted {row['id']}: aliases -> {', '.join(written)}")
-        print("The registry changes on the next emit, not now — `project-observatory full "
-              "emit` applies it, and the diff is what you commit.")
-        return 0
+        _mark_accepted(conn, row, why)
+        return [f"accepted {row['id']}: aliases -> {', '.join(written)}", EMIT_NOTE]
     name, key = proposals.LANDS_IN[prefix]
     f = paths.config_file(name)
     doc = json.loads(f.read_text(encoding="utf-8"))
@@ -528,20 +561,21 @@ def cmd_proposal_accept(conn, args) -> int:
     # The next reader of this file needs to know who suggested it, on what, and
     # when a person agreed — otherwise an override is a value with no argument
     # behind it, which is how a curated file becomes unmaintainable.
-    merged["why"] = args.why
+    merged["why"] = why
     merged["proposed_by"] = provenance["proposed_by"]
     merged["evidence"] = evidence
     doc[key][row["target_id"]] = merged
     atomic.write_json(f, doc)
-    _mark_accepted(conn, row, args.why)
+    _mark_accepted(conn, row, why)
     # The file actually written, not a checkout-relative name: curation lives in
     # the selected workspace, and a receipt naming another file sends the
     # operator to diff the wrong one.
-    print(f"accepted {row['id']}: {', '.join(sorted(patch))} -> "
-          f"{f}#{row['target_id']}" + (f"; aliases -> {', '.join(written)}" if written else ""))
-    print("The registry changes on the next emit, not now — `project-observatory full "
-          "emit` applies it, and the diff is what you commit.")
-    return 0
+    return [f"accepted {row['id']}: {', '.join(sorted(patch))} -> "
+            f"{f}#{row['target_id']}" + (f"; aliases -> {', '.join(written)}" if written else ""), EMIT_NOTE]
+
+
+EMIT_NOTE = ("The registry changes on the next emit, not now — `project-observatory full "
+             "emit` applies it, and the diff is what you commit.")
 
 
 def _mark_accepted(conn, row: dict, why: str) -> None:
@@ -554,17 +588,257 @@ def _mark_accepted(conn, row: dict, why: str) -> None:
 def cmd_proposal_reject(conn, args) -> int:
     require_terminal("reject a registry proposal")
     row = _proposal(conn, args.id)
-    with conn:
-        conn.execute("UPDATE proposals SET status='rejected', decided_by=?,"
-                     " decided_note=?, decided_at=? WHERE id=?",
-                     (L.OPERATOR, args.why, L._now(), row["id"]))
+    reject_proposal(conn, row, args.why)
     print(f"rejected {row['id']} against {row['target_id']}. The row stays with "
           f"the reason, so the same patch arriving again can be recognised.")
     return 0
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
+def reject_proposal(conn, row: dict, why: str) -> None:
+    """Reject a registry proposal as the OPERATOR; behind `require_terminal` only."""
+    with conn:
+        conn.execute("UPDATE proposals SET status='rejected', decided_by=?,"
+                     " decided_note=?, decided_at=? WHERE id=? AND status='proposed'",
+                     (L.OPERATOR, why, L._now(), row["id"]))
+
+
+# region the standing policy (OBS-227)
+
+def _confirm(question: str) -> bool:
+    """One question at the terminal; anything but yes is no."""
+    try:
+        answer = input(f"{question} [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _login() -> str:
+    import getpass
+    try:
+        return getpass.getuser()
+    except Exception:                                                              # noqa: BLE001
+        return "unknown"
+
+
+def _examples(items, n: int = 3) -> list[str]:
+    return [f"      {getattr(it, 'item')}  {getattr(it, 'reason')[:110]}" for it in items[:n]]
+
+
+def _describe_policy(conn, policy, heading: str = "") -> list[str]:
+    """The rules and what each would decide on the queue as it stands. Reads only."""
+    plan = RP.evaluate(conn, policy.rules_on(), limit=10**9)
+    lines = [heading or (f"review policy: {policy.state}" + (f": {policy.problem}" if policy.problem else "")),
+             f"  hash {policy.hash or '-'}" + (f", enabled {policy.enabled['at']} by {policy.enabled.get('by')}"
+                                              if policy.enabled else "")]
+    lines += [f"  note: {n}" for n in policy.notes]
+    lines.append("")
+    for rid, spec in RP.RULES.items():
+        rule = policy.rules.get(rid) or {}
+        decided = [d for d in plan.decisions if d.rule == rid]
+        undecided = [w for w in plan.undecided if w.rule == rid]
+        mark = "on " if rule.get("on") else "off"
+        lines.append(f"  [{mark}] {rid} v{spec['version']}: {spec['decides']}")
+        if decided:
+            lines.append(f"      would decide {len(decided)} now:")
+            lines += _examples(decided)
+        elif undecided:
+            lines.append(f"      would decide {len(undecided)} if it were on:")
+            lines += _examples(undecided)
+        else:
+            lines.append("      nothing to decide now")
+    person = RP.for_person(plan, policy)
+    w = RP.waiting_summary(person)
+    lines += ["", f"waiting for a person: {w['total']} ({w['registry']} registry proposal(s), "
+                  f"{w['ledger']} ledger conclusion(s)" + (f", the oldest since {w['oldest'][:10]}" if w["oldest"] else "")
+                  + ")",
+              f"  left to retention (routine conclusions): {plan.retention}; to corroboration (lessons): "
+              f"{plan.corroboration}; already folded: {plan.folded}"]
+    lines += [f"  degraded: {d}" for d in plan.degraded]
+    if w["total"]:
+        lines += _examples(person)
+        lines.append("  resolve them in one launch: `project-observatory full review batch prepare`, then, "
+                     "at a terminal, `project-observatory full review batch apply FILE`")
+    return lines
+
+
+def cmd_policy(conn, args) -> int:
+    policy = RP.load()
+    if args.action == "show":
+        if args.json:
+            print(json.dumps({"policy": {"state": policy.state, "hash": policy.hash or None,
+                                         "problem": policy.problem, "notes": policy.notes,
+                                         "rules": policy.rules, "enabled": policy.enabled},
+                              "summary": RP.summary(conn)}, indent=1, ensure_ascii=False))
+            return 0
+        print("\n".join(_describe_policy(conn, policy)))
+        return 0
+    if args.action == "run":
+        receipt = RP.run(conn, apply=not args.dry_run)
+        if receipt.get("skipped"):
+            print(f"review-policy: skipped: {receipt['skipped']}")
+            return 0
+        done = receipt["applied"] or {}
+        print(f"review-policy: {receipt['state']}; "
+              + (f"decided {sum(done.values())} ({', '.join(f'{k} {v}' for k, v in done.items())})" if done else
+                 f"would decide {sum(receipt['would'].values())}" if receipt["would"] else "nothing to decide")
+              + f"; waiting for a person {receipt['waiting']['total']}"
+              + (f"; deferred to the next run {receipt['deferred']}" if receipt["deferred"] else ""))
+        for d in receipt["degraded"]:
+            print(f"review-policy: degraded: {d}")
+        return 0
+    require_terminal(f"{args.action} the review policy")
+    try:
+        doc = RP.read_document()
+    except RP.PolicyError as exc:
+        sys.exit(f"review: {exc}. Repair or remove {RP.policy_path()} first.")
+    at, user = L._now(), _login()
+    if args.action == "disable":
+        atomic.write_json(RP.policy_path(), RP.disable_document(doc, at=at, user=user))
+        print(f"review policy disabled ({RP.policy_path()}); nothing is decided automatically. Its decisions "
+              f"stand: `review.py undo-policy --since TIME` takes them back.")
+        return 0
+    only = set(args.only) if args.only else None
+    unknown = sorted((only or set()) - set(RP.RULES))
+    if unknown:
+        sys.exit(f"review: unknown rule(s) {', '.join(unknown)}; the rules are {', '.join(RP.RULES)}")
+    new = RP.enable_document(doc, only=only, at=at, user=user)
+    preview = RP.parse({**new, "enabled": None})
+    print("\n".join(_describe_policy(conn, preview, heading="the review policy you are about to enable:")))
+    print(f"\nEnabling makes the tick apply the rules marked on, every run, as "
+          f"`policy:<rule>@{new['enabled']['hash'].split(':', 1)[-1][:12]}`, never as you. "
+          f"`review.py undo-policy` takes any decision back.")
+    if not _confirm("Enable this policy?"):
+        sys.exit("review: not enabled; nothing was written")
+    atomic.write_json(RP.policy_path(), new)
+    print(f"review policy enabled: {new['enabled']['hash']} ({RP.policy_path()})")
+    return 0
+
+
+def cmd_undo_policy(conn, args) -> int:
+    require_terminal("take back the review policy's decisions")
+    entries = RP.active_decisions()
+    chosen = RP.select(entries, ids=set(args.ids) if args.ids else None, since=args.since)
+    missing = sorted(set(args.ids or ()) - {d["id"] for d in chosen})
+    for m in missing:
+        print(f"review: {m} is not a decision in force (unknown, or undone already)")
+    if not chosen:
+        print("review: no policy decision matches; nothing changed")
+        return 1 if missing else 0
+    try:
+        with RP.lock(wait=True):
+            results = RP.undo(conn, chosen)
+    except RP.Busy as exc:
+        sys.exit(f"review: {exc}")
+    for r in results:
+        print(f"{r['id']}  {r['rule']}  {r['item']}: {r['result']}")
+    print(f"{sum(r['result'].startswith('reverted') for r in results)} of {len(results)} decision(s) taken back. "
+          f"While the policy stays enabled, the next run decides the same items again: "
+          f"`review.py policy disable`, or turn the rule off and enable again, to keep them for a person.")
+    return 0
+
+
+def cmd_batch(conn, args) -> int:
+    if args.action == "prepare":
+        doc = RP.prepare_batch(conn, include_routine=args.include_routine)
+        out = pathlib.Path(args.out) if args.out else paths.STATE / "review" / "batch.json"
+        out.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic.write_json(out, doc)
+        os.chmod(out, 0o600)
+        c = doc["counts"]
+        print(f"{len(doc['items'])} item(s) wait for a person: recommended accept {c['accept']}, "
+              f"reject {c['reject']}, keep {c['keep']} -> {out}")
+        if doc["not_included"].get("retention"):
+            print(f"  not included: {doc['not_included']['retention']} routine conclusion(s) retention retires "
+                  f"(--include-routine lists them)")
+        print("Read or edit `decision` and `reason`, then at a terminal: "
+              f"`project-observatory full review batch apply {out}`")
+        return 0
+    return _batch_apply(conn, pathlib.Path(args.file))
+
+
+def _batch_apply(conn, file: pathlib.Path) -> int:
+    require_terminal("apply a review batch")
+    try:
+        raw = file.read_bytes()
+        doc = json.loads(raw)
+    except (OSError, ValueError) as exc:
+        sys.exit(f"review: {file} cannot be read: {type(exc).__name__}")
+    problems = RP.check_batch(doc)
+    if problems:
+        sys.exit("review: the batch is refused whole:\n  " + "\n  ".join(problems[:20]))
+    import hashlib
+    tag = hashlib.sha256(raw).hexdigest()[:12]
+
+    def partition():
+        act, keep, changed = [], [], []
+        for it in doc["items"]:
+            if RP.item_hash(it["queue"], RP.current_row(conn, it["queue"], it["id"])) != it["hash"]:
+                changed.append(it)
+            elif it["decision"] == "keep":
+                keep.append(it)
+            else:
+                act.append(it)
+        return act, keep, changed
+
+    act, keep, changed = partition()
+    totals: dict[str, int] = {}
+    for it in act:
+        totals[f"{it['decision']} {it['queue']}"] = totals.get(f"{it['decision']} {it['queue']}", 0) + 1
+    print(f"batch {file} ({tag}): {len(act)} decision(s) to apply as the operator, {len(keep)} kept for later, "
+          f"{len(changed)} changed since it was prepared and will be skipped")
+    for k, v in sorted(totals.items()):
+        print(f"  {k}: {v}")
+    for it in act[:8]:
+        print(f"    {it['decision']:<6} {it['id']}  {it['reason'][:100]}")
+    if not act:
+        print("nothing to apply")
+        return 0
+    if not _confirm(f"Apply these {len(act)} decision(s) as the operator?"):
+        sys.exit("review: not applied; nothing was written")
+    applied, failed = [], []
+    try:
+        with RP.lock(wait=True):
+            act, keep, changed = partition()   # again, under the lock: what was shown may have moved
+            for it in act:
+                why = f"batch {tag}: {it['reason']}"
+                try:
+                    _apply_item(conn, it, why)
+                    applied.append(it)
+                except (Refused, L.LedgerError) as exc:
+                    failed.append((it, str(exc)))
+    except RP.Busy as exc:
+        sys.exit(f"review: {exc}")
+    print(f"applied {len(applied)} decision(s) as the operator.")
+    for it in changed:
+        print(f"  skipped {it['id']}: changed since the batch was prepared; prepare it again")
+    for it, why in failed:
+        print(f"  refused {it['id']}: {why}")
+    if any(it["queue"] == "registry" and it["decision"] == "accept" for it in applied):
+        print(EMIT_NOTE)
+    return 0
+
+
+def _apply_item(conn, it: dict, why: str) -> None:
+    if it["queue"] == "registry":
+        row = dict(conn.execute("SELECT id, target_id, patch_json, evidence_json, status, created_at"
+                                " FROM proposals WHERE id = ?", (it["id"],)).fetchone())
+        if it["decision"] == "accept":
+            accept_proposal(conn, row, why)
+        else:
+            reject_proposal(conn, row, why)
+        return
+    cur = L.current(conn, it["id"])
+    to = "observed" if it["decision"] == "accept" else "rejected"
+    L.transition(conn, it["id"], to_state=to, owner=L.OPERATOR, expected_revision=cur["revision"], why=why)
+
+# endregion
+
+
+def parser() -> argparse.ArgumentParser:
+    """The parser `main` and `observatory.refusal` share, so a handed-over command is checked
+    against exactly what runs."""
+    ap = argparse.ArgumentParser(prog="project-observatory full review", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("list"); p.add_argument("--state", default="proposed")
@@ -599,7 +873,37 @@ def main() -> int:
                        help="not optional: an override with no argument behind it "
                             "is a value the next reader cannot maintain")
         p.set_defaults(fn=fn)
-    args = ap.parse_args()
+    # THE STANDING POLICY (OBS-227). `policy run` is what the tick runs; enable, disable, undo and
+    # batch apply need a terminal like every other write here.
+    p = sub.add_parser("policy", help="the standing review policy: show, enable, disable, run")
+    p.add_argument("action", choices=("show", "enable", "disable", "run"))
+    p.add_argument("--only", nargs="+", metavar="RULE", help="enable: only these rules are on")
+    p.add_argument("--json", action="store_true", help="show: the policy and the counts as JSON")
+    p.add_argument("--dry-run", action="store_true", help="run: count, decide nothing")
+    p.set_defaults(fn=cmd_policy)
+    p = sub.add_parser("undo-policy", help="take back decisions the standing policy made (a terminal)")
+    p.add_argument("ids", nargs="*", metavar="DECISION")
+    p.add_argument("--since", help="every decision at or after this UTC time, e.g. 2026-10-24T00:00:00Z")
+    p.set_defaults(fn=cmd_undo_policy)
+    p = sub.add_parser("batch", help="what waits for a person, in one file; applied in one act")
+    bsub = p.add_subparsers(dest="action", required=True)
+    bp = bsub.add_parser("prepare", help="write the batch file; decides nothing")
+    bp.add_argument("--out", help="the file to write (default store/review/batch.json)")
+    bp.add_argument("--include-routine", action="store_true",
+                    help="also list routine conclusions retention would retire")
+    bp.set_defaults(fn=cmd_batch)
+    ba = bsub.add_parser("apply", help="at a terminal: show the totals, ask once, apply as the operator")
+    ba.add_argument("file")
+    ba.set_defaults(fn=cmd_batch)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = parser()
+    # `full review` with nothing after it lists, as it always did.
+    args = ap.parse_args((list(argv) if argv is not None else sys.argv[1:]) or ["list"])
+    if args.cmd == "undo-policy" and not args.ids and not args.since:
+        ap.error("undo-policy needs decision ids or --since")
     conn = store_db.connect()
     conn.row_factory = sqlite3.Row
     try:

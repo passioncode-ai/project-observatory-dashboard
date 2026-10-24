@@ -92,6 +92,9 @@ PATH_PREFIX_ALLOWLIST = {
     "docs/dashboard/": "the dashboard pages a tick builds into the workspace's docs/",
     "store/node-lifecycle/": "node.lifecycle's state, events and logs, written into the workspace by the local "
                              "server once a target is enrolled (OBS-79)",
+    "store/review-policy/": "the standing review policy's journal and lock, written into the workspace by "
+                            "`review.py policy run` (OBS-227)",
+    "store/review/": "the review batch file `review.py batch prepare` writes into the workspace (OBS-227)",
 }
 
 PATH_ALLOWLIST = {

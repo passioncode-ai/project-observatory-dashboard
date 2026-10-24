@@ -468,6 +468,15 @@ def from_store() -> dict:
             out["health"]["organizations"] = node_org.notices(node_org.node_folder(Path(paths.HOME)))
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["organizations"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
+        # THE REVIEW QUEUE (OBS-227): what waits for a person in both queues after the standing
+        # review policy, whether the policy is on, and its last run: the answer `full doctor` gives.
+        try:
+            import review_policy
+            rv = review_policy.summary(conn)
+            out["health"]["review"] = {"policy": {"state": rv["policy"]["state"]}, "waiting": rv["waiting"],
+                                       "last_run": {"ran_at": (rv.get("last_run") or {}).get("ran_at")}}
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["review"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
         # memory over HTTP, read-only and by name — the answer `full doctor` gives.
         try:
@@ -2223,6 +2232,19 @@ const SERVERD_FIX = {
 if (H.leaks_open > 0) hb.push([T("secret leaks"), T("{n} not rotated — vault.py leaks", {n: H.leaks_open})]);
 if (H.proposed != null) hb.push([T("agents' records not yet confirmed"), NUM(H.proposed)]);
 if (H.registry_proposals) hb.push([T("registry edits proposed"), H.registry_proposals]);
+// The standing review policy (OBS-227): what waits for a person in both queues, whether the policy
+// decides the rest, and its last run, with the command that resolves the queue in one launch.
+if (H.review && H.review.waiting) {
+  const RV = H.review, W = RV.waiting, ST = (RV.policy || {}).state || "off";
+  const POLICY = {on: T("the review policy decides what it may"), off: T("the review policy is off"),
+    changed: T("the review policy changed and decides nothing until it is enabled again"),
+    invalid: T("the review policy file is refused")};
+  const ran = (RV.last_run || {}).ran_at;
+  hb.push([T("review queue"), T("waiting for a person: {total} ({registry} registry, {ledger} ledger); {policy}",
+      {total: NUM(W.total), registry: NUM(W.registry), ledger: NUM(W.ledger), policy: POLICY[ST] || ST}) +
+    (ran ? "; " + T("last run {date}", {date: ran.slice(0, 16).replace("T", " ")}) : ""),
+    W.total ? fullCommand("review batch prepare") : fullCommand("review policy show")]);
+}
 // Whether memory text may leave this machine (OBS-33): the state in words and the
 // command that shows the consents, ready to copy.
 if (H.embedding_policy) {

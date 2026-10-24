@@ -24,7 +24,8 @@
     corroborate  promote a proposal whose claim a machine can independently re-check
     export-ledger  write registry/ledger.jsonl — the only copy outside the store
     ledger-current  non-zero if that export is behind the store
-    review     the operator's queue; writes need a terminal (tools/review.py --help)
+    review     the operator's queue and its standing policy (policy, batch, undo-policy); writes need a
+               terminal (tools/review.py --help)
     scan-events  read commits out of every local checkout into the store
     probes     run the declared Fabric probes in a synthetic fixture workspace (--fixture-home)
     test       planted trap fixtures
@@ -467,7 +468,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "memory-http", "forget",
-                       "ssh-keys", "org", "lifecycle")
+                       "ssh-keys", "org", "lifecycle", "review")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -551,7 +552,17 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                after an upgrade, and `full check` does not run them
   probes-check --fixture-home PATH  the same probes without rewriting; exits 1 when the receipts name
                                another contract commit
-  review                       the queue of proposed ledger records (tools/review.py decides them)
+  review [list|digest|show|promote|reject|reject-group|accept-proposal|reject-proposal]
+                               the queues of proposals: proposed ledger records and registry edits;
+                               every decision needs a terminal (tools/review.py)
+  review policy show|enable|disable|run   the standing review policy (OBS-227): a person enables a
+                               closed set of safe rules once (enable and disable need a terminal), the
+                               tick applies them as policy:<rule>@<hash>, never as you; off, it only counts
+  review batch prepare [--out FILE] | apply FILE   what waits for a person in one file with
+                               recommendations an agent may edit; apply asks once at a terminal
+  review undo-policy ID... | --since TIME   take the policy's decisions back (a terminal)
+  digest                       the proposed ledger conclusions grouped by project, structural first,
+                               with what retention erases and when; writes nothing
   node --init | --show         this machine's agent-network device keys: --init creates them if absent,
                                --show prints the device id and the two public keys; no private key is printed
   scan-spend                   this month's provider spend across every account the doors hold, for the
@@ -832,6 +843,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
+    if name == "review":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import review
+        return argparse_refusal(lambda: review.parser().parse_args(rest or ["list"]))
     if name == "lifecycle":
         sys.path.insert(0, str(ROOT / "tools"))
         import lifecycle_cli
@@ -1228,6 +1243,12 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return ssh_keys.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "review":
+        # Its own parser since OBS-227 (policy, batch, undo-policy); with nothing after it, it lists
+        # the queue as the `review` step always did.
+        sys.path.insert(0, str(ROOT / "tools"))
+        import review
+        return review.main(argv[2:])
     if len(argv) > 1 and argv[1] == "org":
         sys.path.insert(0, str(ROOT / "tools"))
         import org as org_cli
