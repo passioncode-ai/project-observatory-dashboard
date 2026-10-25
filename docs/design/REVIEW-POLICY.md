@@ -107,15 +107,27 @@ when the tick refreshed the registry (the alias rule reads the registry's measur
    decisions of an unfinished run it reverted.
 
 **A crash between the steps.** A decision is in force only once its intent is closed `done`
-(`active_decisions`); until then it is pending (`pending_decisions`). The next review writer (the
-tick's run, `undo-policy`, `batch apply`, each under the lock) calls `recover` first: every pending
-decision is reverted, never completed, because whether its file write happened is not recorded. The
-revert removes a resource or alias only when it is exactly what the decision would have added, and a
-status only when it is the policy's own; a proposal a person decided meanwhile keeps that decision
-and what it wrote. The intent is closed `reverted`, and the next run decides the items again from the
-files as they stand. Before this order (the journal written after the files), a crash after the file
-write left resources no journal line named, which no undo could take back. A dry run
-(`policy run --dry-run`) never recovers; it names a pending intent in `degraded`.
+(`active_decisions`); until then it is pending (`pending_decisions`). Every review writer (the
+tick's run, `undo-policy`, `batch apply`, `accept-proposal` and `reject-proposal`, each under the
+lock) calls `recover` first: every pending decision is reverted, never completed, because whether its
+file write happened is not recorded. Decisions are reverted in the reverse of the order they were
+applied (the journal's line order; each decision also carries `seq`), so the decision that created a
+project row is taken back after the ones that appended to it, and no row is left behind with only its
+provenance. The revert removes a resource or alias only when it is exactly what the decision would have
+added, and a status only when it is the policy's own. A proposal decided since by anyone else keeps
+that decision: when it was a rejection, what the run wrote for it is removed all the same; when it was
+an acceptance, it is kept as that acceptance's. Each decision's outcome is journaled (`recovered`),
+and the intent closes `reverted` when every decision was reverted, `settled` when one was left as a
+person decided it. A curation file that cannot be read (broken by hand after the crash) keeps the
+intent open: the run names it in `degraded`, applies nothing that tick, and tries again on the next,
+never raising. The receipt's `recovery` counts what was reverted, left and kept open. Before this order
+(the journal written after the files), a crash after the file write left resources no journal line
+named, which no undo could take back. A dry run (`policy run --dry-run`) never recovers; it names a
+pending intent in `degraded`.
+
+**A reason quotes no credential.** A reason left for a person can quote the patch (a refusal names
+an unknown field, the credential check names a field's path); every such reason, the kind column and
+the batch file's patch summary pass through `credential_shape.redact`.
 
 ## The remainder: one launch
 

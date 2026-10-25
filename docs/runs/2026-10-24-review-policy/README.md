@@ -80,6 +80,15 @@ with a failing test first (`observatory/engine/tests/test_review_policy.py`):
 
 The review's low findings that remain are OBS-242.
 
+A confirming review at `d6b26a91` found that `reject-proposal` took no lock and ran no recovery, so a
+resource a crashed run had written stayed in force after the operator rejected its proposal, with no
+decision naming it. Fixed with tests (`CrashThenAPerson`, `RevertOrder`, `ReasonsEchoNoCredential`):
+both single commands recover under the lock first; recovery removes the run's writes for a proposal a
+person rejected since and keeps them for one accepted since, journals each outcome and closes an
+intent `reverted` only when every decision was; it reverts in the reverse of the order of application;
+an unreadable curation file keeps the intent open and degrades the tick instead of raising; and no
+reason quotes a credential-shaped key.
+
 ## Open
 
 - OBS-230: whether Health's "Nothing here needs you" changes for structural conclusions; per-rule

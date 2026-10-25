@@ -491,11 +491,14 @@ def cmd_proposal_accept(conn, args) -> int:
     was answered "proposed" for a row that could only ever be listed.
     """
     require_terminal("accept a registry proposal")
-    row = _proposal(conn, args.id)
     try:
         # THE REVIEW LOCK, shared with the standing policy's run (OBS-227): both read and rewrite
         # the same curation files, and two read-modify-writes in flight lose one of them.
         with RP.lock(wait=True):
+            # An unfinished policy run is settled first, so the person decides the proposal as it
+            # stands after it, not over files a crashed run left behind.
+            _recover(conn)
+            row = _proposal(conn, args.id)
             for line in accept_proposal(conn, row, args.why):
                 print(line)
     except Refused as exc:
@@ -588,6 +591,16 @@ def _status(conn, pid: str) -> str | None:
     return found[0] if found else None
 
 
+def _recover(conn) -> None:
+    """`RP.recover` for a person's command, under the lock the caller holds, saying what it did."""
+    rec = RP.recover(conn)
+    if rec["reverted"] or rec["left"]:
+        print(f"review: settled a policy run that did not finish: {rec['reverted']} decision(s) reverted, "
+              f"{rec['left']} left as a person decided them")
+    for line in rec["degraded"]:
+        print(f"review: degraded: {line}")
+
+
 def _mark_accepted(conn, row: dict, why: str) -> None:
     # CONDITIONAL, like the rejection: a status that moved under this write is reported, never
     # overwritten.
@@ -602,10 +615,16 @@ def _mark_accepted(conn, row: dict, why: str) -> None:
 
 def cmd_proposal_reject(conn, args) -> int:
     require_terminal("reject a registry proposal")
-    row = _proposal(conn, args.id)
     try:
-        reject_proposal(conn, row, args.why)
+        # THE REVIEW LOCK and recovery, as for an acceptance: rejecting a proposal a crashed run
+        # wrote into a curation file must not leave that write in force with no decision naming it.
+        with RP.lock(wait=True):
+            _recover(conn)
+            row = _proposal(conn, args.id)
+            reject_proposal(conn, row, args.why)
     except Refused as exc:
+        sys.exit(f"review: {exc}")
+    except RP.Busy as exc:
         sys.exit(f"review: {exc}")
     print(f"rejected {row['id']} against {row['target_id']}. The row stays with "
           f"the reason, so the same patch arriving again can be recognised.")
@@ -743,9 +762,7 @@ def cmd_undo_policy(conn, args) -> int:
         with RP.lock(wait=True):
             # A run that died between its steps is settled first: its decisions were never in force,
             # and what it wrote is reverted before anything is chosen.
-            recovered = RP.recover(conn)
-            if recovered:
-                print(f"review: reverted {recovered} decision(s) of a policy run that did not finish")
+            _recover(conn)
             entries = RP.active_decisions()
             chosen = RP.select(entries, ids=set(args.ids) if args.ids else None, since=args.since)
             missing = sorted(set(args.ids or ()) - {d["id"] for d in chosen})
@@ -871,7 +888,7 @@ def _batch_apply(conn, file: pathlib.Path) -> int:
     applied, failed, skipped = [], [], []
     try:
         with RP.lock(wait=True):
-            RP.recover(conn)
+            _recover(conn)
             # Again, under the lock: what was shown may have moved, and only what was shown is applied.
             engine = engine_view()
             parts = partition(engine)

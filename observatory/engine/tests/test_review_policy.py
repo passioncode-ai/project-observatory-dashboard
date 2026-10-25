@@ -805,5 +805,155 @@ class Crash(Case):
         self.assertEqual(proposal(pid)["status"], "accepted")
 
 
+
+class CrashThenAPerson(Case):
+    """Round-2 finding: a person's decision after a crash, and the recovery that follows it."""
+
+    def setUp(self):
+        super().setUp()
+        enable()
+
+    crash_on_write_of = Crash.crash_on_write_of
+
+    def crashed(self, identifier: str, target: str = APP) -> str:
+        pid = propose({"resources": [{"kind": "server", "identifier": identifier}]}, target=target)
+        with self.crash_on_write_of("project_overrides.json"), self.assertRaises(RuntimeError):
+            run_policy()
+        self.assertEqual(len(RP.pending_decisions()), 1)
+        return pid
+
+    def identifiers(self, target: str = APP) -> list[str]:
+        row = read("config/project_overrides.json")["projects"].get(target) or {}
+        return [r["identifier"] for r in row.get("resources") or []]
+
+    def test_reject_proposal_after_a_crash_removes_what_the_run_wrote(self):
+        pid = self.crashed("r.example.invalid")
+        code, out = cli("reject-proposal", pid, "--why", "not ours", terminal=True)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(RP.pending_decisions(), [], "the person's command settles the intent first")
+        self.assertEqual(proposal(pid)["status"], "rejected")
+        self.assertNotIn("r.example.invalid", self.identifiers())
+        run_policy()
+        self.assertNotIn("r.example.invalid", self.identifiers())
+        self.assertEqual(proposal(pid)["status"], "rejected")
+
+    def test_accept_proposal_after_a_crash_keeps_the_resource_once_as_the_persons(self):
+        pid = self.crashed("s.example.invalid")
+        code, out = cli("accept-proposal", pid, "--why", "ours", terminal=True)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(RP.pending_decisions(), [])
+        self.assertEqual((proposal(pid)["status"], proposal(pid)["decided_by"]), ("accepted", "operator"))
+        self.assertEqual(self.identifiers().count("s.example.invalid"), 1)
+        run_policy()
+        self.assertEqual(self.identifiers().count("s.example.invalid"), 1)
+
+    def settle_after(self, status: str, identifier: str) -> tuple[str, dict]:
+        pid = self.crashed(identifier)
+        # A writer that does not recover (an older engine, a hand edit of the store) decides it.
+        conn = connect()
+        with conn:
+            conn.execute("UPDATE proposals SET status = ?, decided_by = 'operator' WHERE id = ?", (status, pid))
+        conn.close()
+        receipt = run_policy()
+        return pid, receipt
+
+    def test_recovery_after_a_persons_rejection_reverts_the_files_and_says_so(self):
+        pid, receipt = self.settle_after("rejected", "t.example.invalid")
+        self.assertNotIn("t.example.invalid", self.identifiers())
+        self.assertEqual(proposal(pid)["status"], "rejected")
+        self.assertEqual(receipt["recovery"]["reverted"], 1)
+        self.assertEqual(RP.pending_decisions(), [])
+        rows = [json.loads(line) for line in RP.journal_path().read_text().splitlines()]
+        self.assertTrue(any(r.get("recovered") and "rejected" in r.get("result", "") for r in rows))
+
+    def test_recovery_after_a_persons_acceptance_keeps_the_files_and_leaves_the_intent_settled(self):
+        pid, receipt = self.settle_after("accepted", "u.example.invalid")
+        self.assertIn("u.example.invalid", self.identifiers())
+        self.assertEqual(receipt["recovery"], {"reverted": 0, "left": 1, "open": 0, "degraded": []})
+        rows = [json.loads(line) for line in RP.journal_path().read_text().splitlines()]
+        closed = [r for r in rows if r.get("intent_closed")]
+        self.assertEqual(closed[-1]["result"], "settled", "not every decision was reverted")
+        self.assertTrue(any(r.get("recovered") and "accepted" in r.get("result", "") for r in rows))
+
+    def test_a_curation_file_broken_after_a_crash_degrades_the_run_and_keeps_the_intent(self):
+        pid = self.crashed("v.example.invalid")
+        good = (HOME / "config/project_overrides.json").read_text()
+        (HOME / "config/project_overrides.json").write_text("{ broken by hand")
+        receipt = run_policy()
+        self.assertTrue(any("could not be reverted" in d for d in receipt["degraded"]), receipt["degraded"])
+        self.assertEqual(receipt["applied"], {})
+        self.assertEqual(len(RP.pending_decisions()), 1)
+        (HOME / "config/project_overrides.json").write_text(good)
+        receipt = run_policy()
+        self.assertEqual(receipt["recovery"]["reverted"], 1)
+        self.assertEqual(proposal(pid)["status"], "accepted")
+        self.assertEqual(self.identifiers().count("v.example.invalid"), 1)
+
+
+class RevertOrder(Case):
+    """Round-2 low 1: decisions are taken back in reverse order of application."""
+
+    def setUp(self):
+        super().setUp()
+        enable()
+
+    def test_two_decisions_on_one_new_row_leave_no_orphan_row_on_undo(self):
+        for n in range(4):
+            reset()
+            enable()
+            propose({"resources": [{"kind": "server", "identifier": "w1.example.invalid"}]}, target=TOOL,
+                    created=stamp(2))
+            propose({"resources": [{"kind": "server", "identifier": "w2.example.invalid"}]}, target=TOOL,
+                    created=stamp(1))
+            run_policy()
+            conn = connect()
+            try:
+                with RP.lock(wait=True):
+                    RP.undo(conn, RP.active_decisions())
+            finally:
+                conn.close()
+            self.assertNotIn(TOOL, read("config/project_overrides.json")["projects"], f"round {n}")
+
+    def test_two_decisions_on_one_new_row_leave_no_orphan_row_on_recovery(self):
+        for n in range(4):
+            reset()
+            enable()
+            propose({"resources": [{"kind": "server", "identifier": "x1.example.invalid"}]}, target=TOOL,
+                    created=stamp(2))
+            propose({"resources": [{"kind": "server", "identifier": "x2.example.invalid"}]}, target=TOOL,
+                    created=stamp(1))
+            with Crash.crash_on_write_of(self, "project_overrides.json"), self.assertRaises(RuntimeError):
+                run_policy()
+            conn = connect()
+            try:
+                with RP.lock(wait=True):
+                    self.assertEqual(RP.recover(conn)["reverted"], 2)
+            finally:
+                conn.close()
+            self.assertNotIn(TOOL, read("config/project_overrides.json")["projects"], f"round {n}")
+
+
+class ReasonsEchoNoCredential(unittest.TestCase):
+    """Round-2 low 4: a credential-shaped key is not quoted back in a reason."""
+
+    def test_the_path_of_a_shaped_key_is_redacted(self):
+        reason = RP._credential_problem({"resources": [{"kind": "server", _token(): "x"}]})
+        self.assertIn("credential", reason)
+        self.assertNotIn(_token(), reason)
+
+    def test_no_reason_left_for_a_person_quotes_a_shaped_key(self):
+        reset()
+        pid = propose({"resources": [{"kind": "server", "identifier": "y.example.invalid", _token(): "x"}]})
+        conn = connect()
+        try:
+            plan = RP.evaluate(conn, set())
+            doc = RP.prepare_batch(conn)
+        finally:
+            conn.close()
+        self.assertNotIn(_token(), json.dumps([w.reason for w in plan.waiting]))
+        self.assertNotIn(_token(), json.dumps(doc))
+        self.assertIn(pid, {it["id"] for it in doc["items"]})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,8 +21,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   the batch again and lists every decision and reason that departs from the engine's own recommendation, and it
   never applies an item the engine did not prepare or one that is no longer pending. A resource whose `added_by` is
   not the agent that proposed it, and any proposal with a credential-shaped field, wait for you. A run journals what
-  it will change before it writes a file, so a run killed halfway is reverted by the next one and undo can always
-  find what it added. The finding `review.queue_waiting`,
+  it will change before it writes a file, so a run killed halfway is reverted by the next review write (the tick, an
+  undo, a batch, or your `accept-proposal` or `reject-proposal`) and undo can always find what it added; if you
+  rejected one of its proposals in between, what it wrote for it is removed, and if you accepted it, it stays. The finding `review.queue_waiting`,
   `review` in `full doctor` and the Health row "review queue" say what waits. `full review` now takes these
   subcommands itself; with nothing after it, it lists the queue as before.
 

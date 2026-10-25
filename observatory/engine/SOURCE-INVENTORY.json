@@ -3076,8 +3076,8 @@
       "path": "review_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a8e584b7cfa6389b275e50268e1b2dd239c8eafcf48210a65db37195f5538de0",
-      "bytes": 53864
+      "export_sha256": "5dfcc799c0151532ffa6c8929a62a9ada5cd391eb18f6335399fde05ec40c10a",
+      "bytes": 57520
     },
     {
       "path": "runtime_identity.py",
@@ -5163,8 +5163,8 @@
       "path": "tests/test_review_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fe526872f0a02e7257116ffddce0a1afbcfe4c3d47f7f987ec61820e73e23023",
-      "bytes": 39690
+      "export_sha256": "970ceea4559d494b8927e27b14de546b84c7f1a65d944a4c3bbc7931427e326a",
+      "bytes": 47015
     },
     {
       "path": "tests/test_review_queue.py",
@@ -6273,8 +6273,8 @@
     {
       "path": "tools/review.py",
       "source_sha256": "5d32f65f9168d9b21929f2184bb4e54fa59f040af0226a115fadbe4cea4aeafb",
-      "export_sha256": "e04a4b1ed328c5b7ed0cb9c961f556f34663993931c3cc9e60750b0bdc2294c5",
-      "bytes": 51293,
+      "export_sha256": "08f9cbc1bc3185829ecca9476d75292b596a17d88ece5346d7b7a29a4fdb86ee",
+      "bytes": 52127,
       "python_comments_removed": 55,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,

@@ -274,7 +274,7 @@ def _read_journal() -> tuple[list[dict], set[str], dict[str, str]]:
         text = journal_path().read_text(encoding="utf-8")
     except FileNotFoundError:
         return [], set(), {}
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines()):
         try:
             row = json.loads(line)
         except ValueError:
@@ -286,8 +286,19 @@ def _read_journal() -> tuple[list[dict], set[str], dict[str, str]]:
         elif row.get("intent_closed"):
             closed[str(row["intent_closed"])] = str(row.get("result") or "")
         elif row.get("id"):
-            decisions.append(row)
+            # `_line` is the order of application: a run journals its decisions in the order it
+            # applies them, and runs append in the order they ran. Undo and recovery revert in the
+            # reverse of it (`_applied_last_first`).
+            decisions.append({**row, "_line": number})
     return decisions, undone, closed
+
+
+def _applied_last_first(entries: list[dict]) -> list[dict]:
+    """Decisions in the reverse of the order they were applied. A random order once took back the
+    decision that created a project row before the one that appended to it, which left the row
+    behind with nothing but its provenance."""
+    return sorted(entries, key=lambda e: (e.get("_line", -1), str(e.get("at") or ""), int(e.get("seq") or 0)),
+                  reverse=True)
 
 
 def read_journal() -> tuple[list[dict], set[str]]:
@@ -513,8 +524,11 @@ def evaluate(conn, rules_on: set[str], ctx: Context | None = None, *, limit: int
                                        p["created_at"], p["target_id"]))
 
     def leave(p: dict, reason: str, rule: str | None = None) -> None:
-        row = Waiting("registry", p["id"], reason, p["created_at"], p["target_id"],
-                      ",".join(sorted(p["patch"] or {})) or "?", rule)
+        # A reason quotes the patch (a refusal names an unknown field, a conflict names an alias), and
+        # what it quotes may be credential-shaped: it reaches the batch file, the CLI and Health.
+        import credential_shape
+        row = Waiting("registry", p["id"], credential_shape.redact(reason), p["created_at"], p["target_id"],
+                      credential_shape.redact(",".join(sorted(p["patch"] or {}))) or "?", rule)
         (plan.undecided if rule else plan.waiting).append(row)
 
     for p in pending_proposals(conn):
@@ -576,6 +590,8 @@ def _credential_problem(patch: dict) -> str:
     for where, text in _strings(patch):
         kind = credential_shape.find(text)
         if kind:
+            # The path itself can carry the shape (a key of the patch), so it is redacted too.
+            where = credential_shape.redact(where)
             return (f"`{where}` carries a credential shape ({credential_shape.describe(kind)}); a person "
                     "reads it before it reaches a curation file")
     return ""
@@ -756,19 +772,24 @@ def run(conn, *, apply: bool = True, limit: int = RUN_LIMIT, at: str | None = No
     receipt = {"schema": RUN_SCHEMA, "ran_at": at, "state": policy.state, "hash": policy.hash or None,
                "problem": policy.problem, "notes": policy.notes, "applied": {}, "would": {}, "deferred": 0,
                "waiting": waiting_summary([]), "retention": 0, "corroboration": 0, "folded": 0,
-               "remind": policy.remind, "recovered": 0, "degraded": []}
+               "remind": policy.remind, "recovered": 0,
+               "recovery": {"reverted": 0, "left": 0, "open": 0, "degraded": []}, "degraded": []}
     try:
         with lock():
             # A run that died between its steps is settled before anything is evaluated, so the
             # evaluation reads the files as they stand after the revert.
             if apply:
-                receipt["recovered"] = recover(conn, at=at)
+                receipt["recovery"] = recover(conn, at=at)
+                receipt["recovered"] = receipt["recovery"]["reverted"]
+                receipt["degraded"] += receipt["recovery"]["degraded"]
             elif pending_decisions():
                 receipt["degraded"].append("a run died between its steps; the next run that applies "
                                            "reverts it first, so this count may change")
             plan = evaluate(conn, policy.rules_on(), limit=limit, on=at)
             receipt["degraded"] = receipt["degraded"] + plan.degraded
-            if apply and policy.active and plan.decisions:
+            # An unfinished run still open (its curation file unreadable) blocks this run's writes: they
+            # would land on the same items before the first run is settled.
+            if apply and policy.active and plan.decisions and not receipt["recovery"]["open"]:
                 done = apply_plan(conn, plan, policy, at=at)
                 receipt["applied"] = _counts(done, "rule")
                 plan.folded += sum(d.action == "fold" for d in done)
@@ -814,11 +835,11 @@ def apply_plan(conn, plan: Plan, policy: Policy, *, at: str) -> list[Decision]:
     those items again from the state as it stands. The caller holds `lock()`."""
     import atomic
     intent = f"rpi:{uuid.uuid4().hex[:16]}"
-    rows = [{"id": f"rpd:{uuid.uuid4().hex[:16]}", "intent": intent, "at": at, "rule": d.rule,
+    rows = [{"id": f"rpd:{uuid.uuid4().hex[:16]}", "intent": intent, "seq": n, "at": at, "rule": d.rule,
              "policy": policy.hash, "decided_by": policy.decided_by(d.rule), "queue": d.queue, "item": d.item,
              "target": d.target, "action": d.action, "reason": d.reason, "evidence": d.evidence,
              "effect": d.effect}
-            for d in plan.decisions]
+            for n, d in enumerate(plan.decisions)]
     append_journal(rows)
     registry_accepts = [d for d in plan.decisions if d.queue == "registry" and d.action == "accept"]
     if any(d.effect.get("file") == "project_overrides.json" and (d.effect.get("added") or d.effect.get("row_created"))
@@ -837,26 +858,45 @@ def apply_plan(conn, plan: Plan, policy: Policy, *, at: str) -> list[Decision]:
     return plan.decisions
 
 
-def recover(conn, *, at: str | None = None) -> int:
-    """Settle every intent a run journaled and never closed; the number of decisions reverted.
+def recover(conn, *, at: str | None = None) -> dict:
+    """Settle every intent a run journaled and never closed. Every review writer calls it first, under
+    `lock()`: the tick's run, `undo-policy`, `batch apply`, `accept-proposal` and `reject-proposal`.
 
     A pending decision is reverted, never completed: whether its file write happened is not recorded,
     and completing one whose write did not happen would mark a proposal accepted with nothing added.
-    Reverting is idempotent: a resource or alias is removed only when it is exactly what the decision
-    would have added, and a status only when it is the policy's own; a proposal a person decided since
-    keeps that decision and what it wrote. The items are decided again by the next run. The caller
-    holds `lock()`."""
+    Reverting is idempotent (a resource or alias is removed only when it is exactly what the decision
+    would have added) and runs in the reverse of the order of application. A proposal a person decided
+    after the crash keeps that decision: when it was a rejection, what the run wrote for it is removed
+    all the same, since a person rejected it; when it was an acceptance, it is kept, since a person
+    accepted it. Each decision's outcome is journaled (`recovered`), and the intent closes `reverted`
+    only when every decision in it was reverted, `settled` otherwise.
+
+    A curation file that cannot be read (broken by hand after the crash) keeps the intent open and is
+    named in `degraded`; this never raises for it. Answers {reverted, left, open, degraded}."""
     import atomic
     at = at or now()
-    pending = pending_decisions()
+    out = {"reverted": 0, "left": 0, "open": 0, "degraded": []}
     by_intent: dict[str, list[dict]] = {}
-    for d in pending:
+    for d in pending_decisions():
         by_intent.setdefault(d["intent"], []).append(d)
     for intent, decisions in by_intent.items():
-        for d in sorted(decisions, key=lambda e: e["id"], reverse=True):
-            _revert_one(conn, d, atomic, pending=True)
-        _close_intent(intent, "reverted", at)
-    return len(pending)
+        records, reverted, left = [], 0, 0
+        try:
+            for d in _applied_last_first(decisions):
+                outcome, text = _revert_one(conn, d, atomic, pending=True)
+                records.append({"recovered": d["id"], "intent": intent, "at": at, "outcome": outcome, "result": text})
+                reverted += outcome == "reverted"
+                left += outcome == "left"
+        except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
+            out["open"] += 1
+            out["degraded"].append(f"an unfinished policy run ({intent}) could not be reverted: {type(exc).__name__} "
+                                   f"reading a curation file; it stays open and the next run tries again")
+            continue
+        append_journal(records)
+        _close_intent(intent, "reverted" if not left else "settled", at)
+        out["reverted"] += reverted
+        out["left"] += left
+    return out
 
 
 def select(entries: list[dict], *, ids: set[str] | None = None, since: str | None = None) -> list[dict]:
@@ -872,9 +912,9 @@ def undo(conn, entries: list[dict], *, at: str | None = None) -> list[dict]:
     at = at or now()
     recover(conn, at=at)
     results, journal = [], []
-    for d in sorted(entries, key=lambda e: (str(e.get("at") or ""), e["id"]), reverse=True):
+    for d in _applied_last_first(entries):
         result = {"id": d["id"], "item": d["item"], "rule": d["rule"], "action": d["action"]}
-        result["result"] = _revert_one(conn, d, atomic)
+        result["result"] = _revert_one(conn, d, atomic)[1]
         results.append(result)
         if not result["result"].startswith("left"):
             journal.append({"undone": d["id"], "at": at, "result": result["result"]})
@@ -882,19 +922,25 @@ def undo(conn, entries: list[dict], *, at: str | None = None) -> list[dict]:
     return results
 
 
-def _revert_one(conn, d: dict, atomic, *, pending: bool = False) -> str:
-    """Take back one decision; what happened, in words.
+def _revert_one(conn, d: dict, atomic, *, pending: bool = False) -> tuple[str, str]:
+    """Take back one decision: (`reverted` or `left`, what happened in words).
 
     `pending`: the decision belongs to an intent that never closed, so its status may never have been
-    written; a proposal still `proposed` then has its file effects reverted all the same."""
+    written. A proposal still `proposed` then has its file effects reverted all the same; one a person
+    (or anyone but this decision) decided since keeps that decision, and its file effects are reverted
+    when that decision was not an acceptance and kept when it was."""
     if d["action"] not in ("accept", "supersede"):
-        return "reverted"
+        return "reverted", "reverted"
     row = conn.execute("SELECT status, decided_by FROM proposals WHERE id = ?", (d["item"],)).fetchone()
     want = {"accept": "accepted", "supersede": "superseded"}[d["action"]]
     ours = row is not None and row[0] == want and row[1] == d.get("decided_by")
     unwritten = pending and row is not None and row[0] == "proposed"
+    since = None if (ours or unwritten or row is None) else f"{row[0]} since by {row[1]}"
     if not (ours or unwritten):
-        return "left: decided again since"
+        if not pending:
+            return "left", "left: decided again since"
+        if row is not None and row[0] == "accepted":
+            return "left", f"left: {since}; what the run wrote is kept as that acceptance's"
     kept: list[str] = []
     effect = d.get("effect") or {}
     if d["action"] == "accept" and effect.get("file") == "project_overrides.json" and \
@@ -907,7 +953,9 @@ def _revert_one(conn, d: dict, atomic, *, pending: bool = False) -> str:
             conn.execute("UPDATE proposals SET status = 'proposed', decided_by = NULL, decided_note = NULL,"
                          " decided_at = NULL WHERE id = ? AND status = ? AND decided_by = ?",
                          (d["item"], want, d.get("decided_by")))
-    return "reverted" + (f"; kept, changed since: {', '.join(kept)}" if kept else "")
+    text = "reverted" if not (pending and not ours and not unwritten) else \
+        f"reverted what the run wrote; {since or 'the proposal is gone'}, which stands"
+    return "reverted", text + (f"; kept, changed since: {', '.join(kept)}" if kept else "")
 
 
 def _revert_resources(effect: dict, atomic) -> list[str]:
@@ -1027,7 +1075,8 @@ def prepare_batch(conn, *, include_routine: bool = False, at: str | None = None)
             if p is None:
                 continue
             decision, reason, basis = _recommend_registry(w, p, ctx)
-            summary = _canon(p["patch"])[:300]
+            import credential_shape
+            summary = credential_shape.redact(_canon(p["patch"]))[:300]
             evidence = p["evidence"]
         else:
             if w.rule == "ledger.fold-same-day":
