@@ -17,7 +17,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   in `store/review-policy/decisions.jsonl`, and `full review undo-policy` takes it back. A rule changed after enabling
   stops the policy until you enable it again; with the policy off the step only counts. `full review batch prepare`
   writes everything left for you with a recommendation an agent may edit, and `full review batch apply FILE` asks
-  once at your terminal and applies it all, skipping any item that changed since. The finding `review.queue_waiting`,
+  once at your terminal and applies it all, skipping any item that changed since. Before that question it prepares
+  the batch again and lists every decision and reason that departs from the engine's own recommendation, and it
+  never applies an item the engine did not prepare or one that is no longer pending. A resource whose `added_by` is
+  not the agent that proposed it, and any proposal with a credential-shaped field, wait for you. A run journals what
+  it will change before it writes a file, so a run killed halfway is reverted by the next one and undo can always
+  find what it added. The finding `review.queue_waiting`,
   `review` in `full doctor` and the Health row "review queue" say what waits. `full review` now takes these
   subcommands itself; with nothing after it, it lists the queue as before.
 

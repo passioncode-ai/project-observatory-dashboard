@@ -60,6 +60,26 @@ On this branch, with a virtual environment from `requirements-full.lock` (Python
   `.claude/settings.local.json`; the pre-push hook's history check passed.
 - `python3.11 -m compileall` on the new and changed modules.
 
+## Review fixes, 2026-10-25
+
+An adversarial review of the pull request at `cb2004db` found four defects, fixed on the same branch
+with a failing test first (`observatory/engine/tests/test_review_policy.py`):
+
+- `batch apply` could decide items that were not pending (a hash recomputed by hand passed). It now
+  prepares the batch again, applies only items that fresh preparation lists and that are still
+  `proposed`, updates statuses `WHERE status = 'proposed'` and reports a change of nothing as refused;
+  a file listing one item twice is refused whole (`BatchOnlyDecidesPending`, `Batch`).
+- The person approved edits they never saw: only totals and eight items were shown, and
+  `recommended` was in the editable file. Every departure from the engine's fresh recommendation and
+  every item it will not apply is listed before the question (`BatchShowsWhatChanged`).
+- Resource fields were copied unchecked: `added_by: operator` from an agent was accepted, and no
+  field was checked for a credential shape. Such proposals now wait for a person
+  (`ResourceFieldsAreChecked`).
+- A crash between the file write and the journal left changes no undo could find. A run now journals
+  a pending intent first and closes it last; the next review writer reverts an open one (`Crash`).
+
+The review's low findings that remain are OBS-242.
+
 ## Open
 
 - OBS-230: whether Health's "Nothing here needs you" changes for structural conclusions; per-rule

@@ -507,7 +507,12 @@ def accept_proposal(conn, row: dict, why: str) -> list[str]:
     """Apply an accepted registry proposal as the OPERATOR; the lines that say what was written.
 
     Called only behind `require_terminal`: from `accept-proposal` and from `batch apply`. Raises
-    Refused when it cannot be applied as it stands."""
+    Refused when it cannot be applied as it stands, and first of all when the proposal is no longer
+    pending: the status is read again here, not trusted from the caller's row, because a batch file
+    is written by an agent and a decided proposal must not be decided a second time."""
+    status = _status(conn, row["id"])
+    if status != "proposed":
+        raise Refused(f"{row['id']} is not pending (it is {status or 'gone'}); nothing was written")
     patch = json.loads(row["patch_json"] or "{}")
     # UNWRAPPED. `proposals_add` stores `{"owner": …, "evidence": [...]}` — the
     # owner is provenance the ledger adds — and the curation file wants the
@@ -578,28 +583,45 @@ EMIT_NOTE = ("The registry changes on the next emit, not now — `project-observ
              "emit` applies it, and the diff is what you commit.")
 
 
+def _status(conn, pid: str) -> str | None:
+    found = conn.execute("SELECT status FROM proposals WHERE id = ?", (pid,)).fetchone()
+    return found[0] if found else None
+
+
 def _mark_accepted(conn, row: dict, why: str) -> None:
+    # CONDITIONAL, like the rejection: a status that moved under this write is reported, never
+    # overwritten.
     with conn:
-        conn.execute("UPDATE proposals SET status='accepted', decided_by=?,"
-                     " decided_note=?, decided_at=? WHERE id=?",
-                     (L.OPERATOR, why, L._now(), row["id"]))
+        cur = conn.execute("UPDATE proposals SET status='accepted', decided_by=?,"
+                           " decided_note=?, decided_at=? WHERE id=? AND status='proposed'",
+                           (L.OPERATOR, why, L._now(), row["id"]))
+    if cur.rowcount != 1:
+        raise Refused(f"{row['id']} stopped being pending while it was accepted "
+                      f"(it is {_status(conn, row['id']) or 'gone'}); its status was not changed")
 
 
 def cmd_proposal_reject(conn, args) -> int:
     require_terminal("reject a registry proposal")
     row = _proposal(conn, args.id)
-    reject_proposal(conn, row, args.why)
+    try:
+        reject_proposal(conn, row, args.why)
+    except Refused as exc:
+        sys.exit(f"review: {exc}")
     print(f"rejected {row['id']} against {row['target_id']}. The row stays with "
           f"the reason, so the same patch arriving again can be recognised.")
     return 0
 
 
 def reject_proposal(conn, row: dict, why: str) -> None:
-    """Reject a registry proposal as the OPERATOR; behind `require_terminal` only."""
+    """Reject a registry proposal as the OPERATOR; behind `require_terminal` only. Refused when the
+    proposal is not pending: the update changed nothing, and saying "rejected" would be false."""
     with conn:
-        conn.execute("UPDATE proposals SET status='rejected', decided_by=?,"
-                     " decided_note=?, decided_at=? WHERE id=? AND status='proposed'",
-                     (L.OPERATOR, why, L._now(), row["id"]))
+        cur = conn.execute("UPDATE proposals SET status='rejected', decided_by=?,"
+                           " decided_note=?, decided_at=? WHERE id=? AND status='proposed'",
+                           (L.OPERATOR, why, L._now(), row["id"]))
+    if cur.rowcount != 1:
+        raise Refused(f"{row['id']} is not pending (it is {_status(conn, row['id']) or 'gone'}); "
+                      f"nothing was written")
 
 
 # region the standing policy (OBS-227)
@@ -717,16 +739,21 @@ def cmd_policy(conn, args) -> int:
 
 def cmd_undo_policy(conn, args) -> int:
     require_terminal("take back the review policy's decisions")
-    entries = RP.active_decisions()
-    chosen = RP.select(entries, ids=set(args.ids) if args.ids else None, since=args.since)
-    missing = sorted(set(args.ids or ()) - {d["id"] for d in chosen})
-    for m in missing:
-        print(f"review: {m} is not a decision in force (unknown, or undone already)")
-    if not chosen:
-        print("review: no policy decision matches; nothing changed")
-        return 1 if missing else 0
     try:
         with RP.lock(wait=True):
+            # A run that died between its steps is settled first: its decisions were never in force,
+            # and what it wrote is reverted before anything is chosen.
+            recovered = RP.recover(conn)
+            if recovered:
+                print(f"review: reverted {recovered} decision(s) of a policy run that did not finish")
+            entries = RP.active_decisions()
+            chosen = RP.select(entries, ids=set(args.ids) if args.ids else None, since=args.since)
+            missing = sorted(set(args.ids or ()) - {d["id"] for d in chosen})
+            for m in missing:
+                print(f"review: {m} is not a decision in force (unknown, or undone already)")
+            if not chosen:
+                print("review: no policy decision matches; nothing else changed")
+                return 1 if missing else 0
             results = RP.undo(conn, chosen)
     except RP.Busy as exc:
         sys.exit(f"review: {exc}")
@@ -758,6 +785,16 @@ def cmd_batch(conn, args) -> int:
 
 
 def _batch_apply(conn, file: pathlib.Path) -> int:
+    """Apply a batch file as the operator, after showing the person everything the file departs from.
+
+    The file is written by an agent and every field of it, `recommended` included, can be edited, so
+    nothing in it is trusted as the engine's view. The engine prepares the batch again from the queue
+    as it stands (`engine_view`), and only an item that is still pending and that this fresh
+    preparation lists is applied. Before the one question the person sees, in full, every item whose
+    decision differs from the engine's recommendation, every reason that is not the engine's, and
+    every item the engine did not prepare or that is no longer pending (those are never applied).
+    Under the lock the view is taken again; an item whose engine view moved since it was shown is
+    skipped, not applied on a recommendation the person never saw."""
     require_terminal("apply a review batch")
     try:
         raw = file.read_bytes()
@@ -770,37 +807,79 @@ def _batch_apply(conn, file: pathlib.Path) -> int:
     import hashlib
     tag = hashlib.sha256(raw).hexdigest()[:12]
 
-    def partition():
-        act, keep, changed = [], [], []
-        for it in doc["items"]:
-            if RP.item_hash(it["queue"], RP.current_row(conn, it["queue"], it["id"])) != it["hash"]:
-                changed.append(it)
-            elif it["decision"] == "keep":
-                keep.append(it)
-            else:
-                act.append(it)
-        return act, keep, changed
+    def engine_view() -> dict:
+        fresh = RP.prepare_batch(conn, include_routine=True)
+        return {(it["queue"], it["id"]): it for it in fresh["items"]}
 
-    act, keep, changed = partition()
+    def partition(engine: dict):
+        out = {"act": [], "keep": [], "changed": [], "unprepared": [], "not_pending": []}
+        for it in doc["items"]:
+            row = RP.current_row(conn, it["queue"], it["id"])
+            state = None if row is None else row["status" if it["queue"] == "registry" else "state"]
+            if state != "proposed":
+                out["not_pending"].append((it, state or "gone"))
+            elif (it["queue"], it["id"]) not in engine:
+                out["unprepared"].append(it)
+            elif RP.item_hash(it["queue"], row) != it["hash"]:
+                out["changed"].append(it)
+            elif it["decision"] == "keep":
+                out["keep"].append(it)
+            else:
+                out["act"].append(it)
+        return out
+
+    def departures(items, engine: dict) -> list[str]:
+        lines = []
+        for it in items:
+            mine = engine[(it["queue"], it["id"])]
+            if it["decision"] != mine["recommended"]:
+                lines.append(f"    {it['id']}: {it['decision']} differs from the engine's recommendation "
+                             f"{mine['recommended']} ({mine['reason'][:160]})")
+            if it["reason"] != mine["reason"]:
+                lines.append(f"    {it['id']}: reason changed from the engine's {mine['reason'][:160]!r} "
+                             f"to {it['reason'][:160]!r}")
+        return lines
+
+    engine = engine_view()
+    parts = partition(engine)
+    act = parts["act"]
     totals: dict[str, int] = {}
     for it in act:
         totals[f"{it['decision']} {it['queue']}"] = totals.get(f"{it['decision']} {it['queue']}", 0) + 1
-    print(f"batch {file} ({tag}): {len(act)} decision(s) to apply as the operator, {len(keep)} kept for later, "
-          f"{len(changed)} changed since it was prepared and will be skipped")
+    print(f"batch {file} ({tag}): {len(act)} decision(s) to apply as the operator, {len(parts['keep'])} kept "
+          f"for later, {len(parts['changed'])} changed since it was prepared and will be skipped")
     for k, v in sorted(totals.items()):
         print(f"  {k}: {v}")
     for it in act[:8]:
         print(f"    {it['decision']:<6} {it['id']}  {it['reason'][:100]}")
+    moved = departures(act, engine)
+    if moved:
+        print(f"  where this file departs from the engine ({len(moved)}), every one:")
+        print("\n".join(moved))
+    for it in parts["unprepared"]:
+        print(f"  will not be applied: {it['id']} was not prepared by the engine for this queue")
+    for it, state in parts["not_pending"]:
+        print(f"  will not be applied: {it['id']} is not pending (it is {state})")
     if not act:
         print("nothing to apply")
         return 0
+    shown = {(it["queue"], it["id"]): (engine[(it["queue"], it["id"])]["recommended"],
+                                      engine[(it["queue"], it["id"])]["reason"], it["decision"])
+             for it in act}
     if not _confirm(f"Apply these {len(act)} decision(s) as the operator?"):
         sys.exit("review: not applied; nothing was written")
-    applied, failed = [], []
+    applied, failed, skipped = [], [], []
     try:
         with RP.lock(wait=True):
-            act, keep, changed = partition()   # again, under the lock: what was shown may have moved
-            for it in act:
+            RP.recover(conn)
+            # Again, under the lock: what was shown may have moved, and only what was shown is applied.
+            engine = engine_view()
+            parts = partition(engine)
+            for it in parts["act"]:
+                key = (it["queue"], it["id"])
+                if shown.get(key) != (engine[key]["recommended"], engine[key]["reason"], it["decision"]):
+                    skipped.append((it, "the queue moved after it was shown"))
+                    continue
                 why = f"batch {tag}: {it['reason']}"
                 try:
                     _apply_item(conn, it, why)
@@ -810,8 +889,14 @@ def _batch_apply(conn, file: pathlib.Path) -> int:
     except RP.Busy as exc:
         sys.exit(f"review: {exc}")
     print(f"applied {len(applied)} decision(s) as the operator.")
-    for it in changed:
+    for it in parts["changed"]:
         print(f"  skipped {it['id']}: changed since the batch was prepared; prepare it again")
+    for it in parts["unprepared"]:
+        print(f"  not applied {it['id']}: not prepared by the engine for this queue")
+    for it, state in parts["not_pending"]:
+        print(f"  not applied {it['id']}: not pending (it is {state})")
+    for it, why in skipped:
+        print(f"  skipped {it['id']}: {why}; prepare it again")
     for it, why in failed:
         print(f"  refused {it['id']}: {why}")
     if any(it["queue"] == "registry" and it["decision"] == "accept" for it in applied):
@@ -829,6 +914,8 @@ def _apply_item(conn, it: dict, why: str) -> None:
             reject_proposal(conn, row, why)
         return
     cur = L.current(conn, it["id"])
+    if cur is None or cur["state"] != "proposed":
+        raise Refused(f"{it['id']} is not pending (it is {cur['state'] if cur else 'gone'})")
     to = "observed" if it["decision"] == "accept" else "rejected"
     L.transition(conn, it["id"], to_state=to, owner=L.OPERATOR, expected_revision=cur["revision"], why=why)
 

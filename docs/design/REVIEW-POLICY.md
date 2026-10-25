@@ -48,12 +48,25 @@ Every write `review.py` makes as `operator` still needs a terminal and has no `-
 | Rule | Decides | Why it is safe | Leaves for a person |
 |---|---|---|---|
 | `registry.exact-duplicate` | a pending proposal with the same target and the same patch as an older pending one becomes `superseded`, naming the older | the older one stays pending with the same content; nothing is lost or applied | the older proposal itself |
-| `registry.resources-append` | a `resources`-only patch for a `project:` in the registry, from an `agent:` or `service:` owner, every resource with a kind and an identifier (`proposals.refusal` is empty): `accepted`, appending to `config/project_overrides.json` only the resources not already recorded | resources are append-only (`organizations.merge_resources`): accepting one never replaces what is recorded. A resource already recorded with the same fields is skipped (the measured queue held about nine such duplicates) | a resource whose kind and identifier are recorded with OTHER fields (accepting it would change a record), a target not in the registry, an owner that is not an agent identity |
-| `registry.aliases-clean` | an `aliases`-only patch for a target in the registry: `accepted` into `config/identifiers.json` | the same two checks the resolver applies: a name already curated for another target (`identifiers.merge_accepted`) and a name the registry has measured on another project (`identifiers.derived_names`) are conflicts, and a conflict is never accepted | every conflict, an unreadable curated table |
+| `registry.resources-append` | a `resources`-only patch for a `project:` in the registry, from an `agent:` or `service:` owner, every resource with a kind and an identifier (`proposals.refusal` is empty): `accepted`, appending to `config/project_overrides.json` only the resources not already recorded | resources are append-only (`organizations.merge_resources`): accepting one never replaces what is recorded. A resource already recorded with the same fields is skipped (the measured queue held about nine such duplicates) | a resource whose kind and identifier are recorded with OTHER fields (accepting it would change a record), a target not in the registry, an owner that is not an agent identity, a resource whose `added_by` names anyone but the proposal's owner, a field with a credential shape |
+| `registry.aliases-clean` | an `aliases`-only patch for a target in the registry: `accepted` into `config/identifiers.json` | the same two checks the resolver applies: a name already curated for another target (`identifiers.merge_accepted`) and a name the registry has measured on another project (`identifiers.derived_names`) are conflicts, and a conflict is never accepted | every conflict, an unreadable curated table, a field with a credential shape |
 | `ledger.fold-same-day` | the superseded readings of one (project, kind, owner, day) group, as `review.py reject-group` computes them (`estate.fold_groups`), are folded: taken out of the person's count, left `proposed` for retention | it writes nothing to the ledger (see below); `undo-policy` brings them back | the latest reading of each group |
 
 A patch that touches anything else (`description`, `organization`, `local_folders`, or a mix of
 fields) is left for a person, with the reason.
+
+**Every string of a patch is checked for a credential shape** before any rule reads it
+(`review_policy._credential_problem`, over `credential_shape.find`, the shape check agent memory and
+the wire's refusals use, UUIDs included). A hit is left for a person with the field's path and the
+kind of shape, never the text: a policy writes into curation files that are committed, and a key
+there costs a rotation. Evidence is not checked this way (a full commit id is a 40-character hex run);
+it reaches the curation file only as the provenance of a row the policy creates.
+
+**`added_by` is the proposer's or nobody's.** A resource's `added_by` is free text from the patch.
+A policy writes what the proposal says, so a resource whose `added_by` differs from the proposal's
+owner is left for a person: the alternative, overwriting it, would still have the policy choose a
+name for a record nobody read. A policy-accepted resource therefore names no one but the agent that
+proposed it, and never the operator.
 
 ### Why the ledger fold writes nothing to the ledger
 
@@ -85,13 +98,24 @@ when the tick refreshed the registry (the alias rule reads the registry's measur
 
 1. takes `store/review-policy/lock` (a run that finds it held skips and says so);
 2. evaluates both queues against the live curation files and registry;
-3. with the policy `on`, applies at most 500 decisions: curation files first (atomically), then the
-   journal line, then the proposal's status in one transaction;
+3. with the policy `on`, first settles any intent an earlier run journaled and never closed (below),
+   then applies at most 500 decisions as one intent: the journal lines first (each decision with what
+   it will add and its `intent` id), then the curation files (atomically), then the proposals'
+   statuses in one transaction, then a line that closes the intent as `done`;
 4. always writes its receipt `store/raw/review-policy.json`: the policy's state and hash, what it
-   decided, what it would decide if it were on, and what waits for a person.
+   decided, what it would decide if it were on, what waits for a person, and `recovered`, the
+   decisions of an unfinished run it reverted.
 
-A crash between the curation write and the status leaves the proposal pending; the next run decides
-it again and finds every resource already recorded, so it adds nothing twice.
+**A crash between the steps.** A decision is in force only once its intent is closed `done`
+(`active_decisions`); until then it is pending (`pending_decisions`). The next review writer (the
+tick's run, `undo-policy`, `batch apply`, each under the lock) calls `recover` first: every pending
+decision is reverted, never completed, because whether its file write happened is not recorded. The
+revert removes a resource or alias only when it is exactly what the decision would have added, and a
+status only when it is the policy's own; a proposal a person decided meanwhile keeps that decision
+and what it wrote. The intent is closed `reverted`, and the next run decides the items again from the
+files as they stand. Before this order (the journal written after the files), a crash after the file
+write left resources no journal line named, which no undo could take back. A dry run
+(`policy run --dry-run`) never recovers; it names a pending intent in `degraded`.
 
 ## The remainder: one launch
 
@@ -113,10 +137,18 @@ with `recommended` and `decision` (`accept`, `reject` or `keep`), a one-line `re
 | a structural or unclassified conclusion | `keep`: the engine cannot judge it |
 
 A coding agent may read the items and edit `decision` and `reason`. Then a person runs
-`full review batch apply FILE` at a terminal: it shows the totals and a sample, asks once, and applies
-every `accept` and `reject` as the operator (`accept` on a conclusion promotes it to `observed`), each
-with `why = "batch <file hash>: <reason>"`. An item whose hash changed since preparation is skipped
-and named, never applied to something nobody read.
+`full review batch apply FILE` at a terminal. Nothing in the file is trusted as the engine's view,
+`recommended` included, since every field of it can be edited: the engine prepares the batch again
+from the queue as it stands, and before the one question it shows the totals, a sample and, in full,
+every item whose `decision` differs from the engine's recommendation, every `reason` that is not the
+engine's, and every item that will not be applied: one the engine did not prepare for this queue
+(an id the policy decides on its own, or one that is not in the queue), and one that is no longer
+pending. It asks once, then, under the review lock, prepares the batch again and applies every
+`accept` and `reject` as the operator (`accept` on a conclusion promotes it to `observed`), each with
+`why = "batch <file hash>: <reason>"`. An item whose hash changed since preparation, whose engine view
+moved after it was shown, or that is not pending is skipped and named, never applied to something
+nobody read. The status updates are conditional (`WHERE status = 'proposed'`), and an accept or reject
+that changes nothing is reported as refused. A file that lists one item twice is refused whole.
 
 ## Never forgotten
 

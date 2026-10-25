@@ -21,6 +21,7 @@ import sqlite3
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -514,6 +515,17 @@ class Batch(Case):
         self.assertNotEqual(code, 0)
         self.assertIn("decision", out)
 
+    def test_an_item_listed_twice_refuses_the_batch_whole(self):
+        pid = propose({"description": "The tool"}, target=TOOL)
+        f = _batch_file("twice.json")
+        doc = json.loads(f.read_text())
+        doc["items"].append(dict(doc["items"][0]))
+        f.write_text(json.dumps(doc))
+        code, out = cli("batch", "apply", str(f), terminal=True, answer="y\n")
+        self.assertNotEqual(code, 0)
+        self.assertIn("twice", out)
+        self.assertEqual(proposal(pid)["status"], "proposed")
+
     def test_folded_readings_reach_the_batch_as_rejections(self):
         enable()
         conclusion("mem:d1", created=stamp(1, hour=8))
@@ -584,6 +596,213 @@ class TheTick(unittest.TestCase):
         self.assertNotIn("review-policy", tick_lease.CORE_TAIL_STEPS)
         self.assertNotIn("review-policy", tick_budget.MUST_FINISH)
         self.assertLessEqual(tick_lease.STEP_SECONDS["review-policy"], 120)
+
+
+
+def _token() -> str:
+    """A credential-shaped string built at run time, so no literal token sits in the source."""
+    return "gh" + "p_" + "aB3dE5gH7jK9mN1pQ3sT5vX7z"
+
+
+def _url_with_password() -> str:
+    return "https" + "://" + "someone" + ":" + "hunter2x" + "@" + "db.example.invalid/x"
+
+
+def _batch_file(name: str) -> pathlib.Path:
+    out_file = BASE / name
+    code, out = cli("batch", "prepare", "--out", str(out_file))
+    assert code == 0, out
+    return out_file
+
+
+class BatchOnlyDecidesPending(Case):
+    """Review finding 1: `batch apply` decided items that were not pending."""
+
+    def forged(self, queue: str, item: str, decision: str) -> dict:
+        conn = connect()
+        try:
+            row = RP.current_row(conn, queue, item)
+        finally:
+            conn.close()
+        return {"id": item, "queue": queue, "kind": "", "target": "", "created_at": "", "summary": "",
+                "recommended": decision, "decision": decision, "reason": "forged by an agent",
+                "basis": "heuristic:a-person-reads", "evidence": [], "hash": RP.item_hash(queue, row)}
+
+    def test_an_item_already_decided_is_not_decided_again(self):
+        pid = propose({"description": "The tool"}, target=TOOL)
+        conn = connect()
+        with conn:
+            conn.execute("UPDATE proposals SET status='accepted', decided_by='operator' WHERE id=?", (pid,))
+        conn.close()
+        conclusion("mem:seen")
+        conn = connect()
+        L.transition(conn, "mem:seen", to_state="observed", owner=L.OPERATOR, expected_revision=1, why="seen")
+        conn.close()
+        f = BASE / "forged.json"
+        f.write_text(json.dumps({"schema": "review-batch/1", "items": [
+            self.forged("registry", pid, "reject"), self.forged("ledger", "mem:seen", "reject")]}))
+        code, out = cli("batch", "apply", str(f), terminal=True, answer="y\n")
+        self.assertEqual(proposal(pid)["status"], "accepted", out)
+        conn = connect()
+        self.assertEqual(L.current(conn, "mem:seen")["state"], "observed", out)
+        conn.close()
+        self.assertIn("not pending", out)
+
+    def test_an_item_the_engine_did_not_prepare_is_refused(self):
+        enable()
+        pid = propose({"resources": [{"kind": "server", "identifier": "f.example.invalid"}]})
+        f = BASE / "unprepared.json"
+        f.write_text(json.dumps({"schema": "review-batch/1",
+                                 "items": [self.forged("registry", pid, "reject")]}))
+        code, out = cli("batch", "apply", str(f), terminal=True, answer="y\n")
+        self.assertEqual(proposal(pid)["status"], "proposed", out)
+        self.assertEqual(proposal(pid)["decided_by"], None)
+        self.assertIn("not prepared", out)
+        self.assertIn(pid, out)
+
+    def test_accepting_or_rejecting_a_decided_row_is_refused_and_writes_nothing(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import review
+        pid = propose({"resources": [{"kind": "server", "identifier": "g.example.invalid"}]})
+        conn = connect()
+        with conn:
+            conn.execute("UPDATE proposals SET status='rejected', decided_by='operator' WHERE id=?", (pid,))
+        row = dict(conn.execute("SELECT * FROM proposals WHERE id=?", (pid,)).fetchone())
+        row["status"] = "proposed"            # what a stale caller believes
+        before = (HOME / "config/project_overrides.json").read_bytes()
+        with self.assertRaises(review.Refused):
+            review.accept_proposal(conn, row, "stale")
+        with self.assertRaises(review.Refused):
+            review.reject_proposal(conn, row, "stale")
+        conn.close()
+        self.assertEqual((HOME / "config/project_overrides.json").read_bytes(), before)
+        self.assertEqual(proposal(pid)["status"], "rejected")
+
+
+class BatchShowsWhatChanged(Case):
+    """Review finding 2: the person approves edits the launch never showed."""
+
+    def test_every_departure_from_the_engine_is_listed_before_the_question(self):
+        ids = [propose({"organization": "external"}, target=TOOL, created=stamp(20 - n)) for n in range(10)]
+        f = _batch_file("edited.json")
+        doc = json.loads(f.read_text())
+        by = {it["id"]: it for it in doc["items"]}
+        last = ids[-1]
+        # The edit hides itself: `recommended` is changed with `decision`.
+        by[last]["decision"] = by[last]["recommended"] = "accept"
+        by[ids[1]]["reason"] = "an agent rewrote this reason"
+        doc["items"].append({**by[ids[1]], "id": "prop:not-in-the-queue"})
+        f.write_text(json.dumps(doc))
+        code, out = cli("batch", "apply", str(f), terminal=True, answer="n\n")
+        self.assertNotEqual(code, 0)
+        prompt = out.index("Apply these")
+        self.assertIn(last, out[:prompt])
+        self.assertIn("differs from the engine", out[:prompt])
+        self.assertIn(f"{ids[1]}: reason changed", out[:prompt])
+        self.assertIn("prop:not-in-the-queue", out[:prompt])
+        self.assertEqual([proposal(i)["status"] for i in ids], ["proposed"] * 10)
+
+
+class ResourceFieldsAreChecked(Case):
+    """Review finding 3: fields of a resource reached the curation file unchecked."""
+
+    def setUp(self):
+        super().setUp()
+        enable()
+
+    def test_added_by_another_name_than_the_proposer_waits_for_a_person(self):
+        forged = propose({"resources": [{"kind": "server", "identifier": "h.example.invalid",
+                                         "added_by": "operator"}]})
+        own = propose({"resources": [{"kind": "server", "identifier": "i.example.invalid",
+                                      "added_by": AGENT}]})
+        receipt = run_policy()
+        self.assertEqual(proposal(forged)["status"], "proposed")
+        self.assertEqual(proposal(own)["status"], "accepted")
+        res = read("config/project_overrides.json")["projects"][APP]["resources"]
+        self.assertNotIn("operator", json.dumps(res))
+        conn = connect()
+        try:
+            plan = RP.evaluate(conn, RP.load().rules_on())
+        finally:
+            conn.close()
+        self.assertIn("added_by", " ".join(w.reason for w in plan.waiting if w.item == forged))
+        self.assertEqual(receipt["applied"], {"registry.resources-append": 1})
+
+    def test_a_credential_shape_in_any_field_waits_for_a_person(self):
+        shaped = [propose({"resources": [{"kind": "server", "identifier": "j.example.invalid", "note": _token()}]}),
+                  propose({"resources": [{"kind": "database", "identifier": "db-1", "url": _url_with_password()}]}),
+                  propose({"resources": [{"kind": "cloud-account", "identifier": "acct-1", "account": _token()}]}),
+                  propose({"aliases": [{"id": "store:example-7", "owner": "agent:store", "source": _token()}]})]
+        clean = propose({"resources": [{"kind": "server", "identifier": "k.example.invalid", "note": "a web host"}]})
+        run_policy()
+        self.assertEqual([proposal(i)["status"] for i in shaped], ["proposed"] * 4)
+        self.assertEqual(proposal(clean)["status"], "accepted")
+        text = (HOME / "config/project_overrides.json").read_text() + (HOME / "config/identifiers.json").read_text()
+        self.assertNotIn(_token(), text)
+        self.assertNotIn("hunter2x", text)
+        conn = connect()
+        try:
+            plan = RP.evaluate(conn, RP.load().rules_on())
+        finally:
+            conn.close()
+        reasons = {w.item: w.reason for w in plan.waiting}
+        for i in shaped:
+            self.assertIn("credential", reasons[i])
+            self.assertNotIn(_token(), reasons[i])
+
+
+class Crash(Case):
+    """Review finding 4: a crash between the steps left changes no undo could find."""
+
+    def setUp(self):
+        super().setUp()
+        enable()
+
+    def crash_on_write_of(self, name: str):
+        import atomic
+        real = atomic.write_json
+
+        def write_then_die(path, doc, *a, **kw):
+            real(path, doc, *a, **kw)
+            if pathlib.Path(path).name == name:
+                raise RuntimeError("killed after the file write")
+        return unittest.mock.patch.object(atomic, "write_json", write_then_die)
+
+    def test_a_kill_after_the_file_write_is_reverted_and_decided_again(self):
+        pid = propose({"resources": [{"kind": "server", "identifier": "m.example.invalid"}]})
+        with self.crash_on_write_of("project_overrides.json"), self.assertRaises(RuntimeError):
+            run_policy()
+        self.assertEqual(proposal(pid)["status"], "proposed")
+        self.assertEqual(RP.active_decisions(), [], "a pending intent is not a decision in force")
+        self.assertEqual(len(RP.pending_decisions()), 1)
+        receipt = run_policy()
+        self.assertEqual(receipt["recovered"], 1)
+        self.assertEqual(RP.pending_decisions(), [])
+        self.assertEqual(proposal(pid)["status"], "accepted")
+        res = read("config/project_overrides.json")["projects"][APP]["resources"]
+        self.assertEqual([r["identifier"] for r in res].count("m.example.invalid"), 1)
+        self.assertEqual(len(RP.active_decisions()), 1)
+        code, out = cli("undo-policy", RP.active_decisions()[0]["id"], terminal=True)
+        self.assertEqual(code, 0, out)
+        res = read("config/project_overrides.json")["projects"][APP]["resources"]
+        self.assertNotIn("m.example.invalid", [r["identifier"] for r in res])
+        self.assertEqual(proposal(pid)["status"], "proposed")
+
+    def test_a_kill_after_the_statuses_is_reverted_by_the_next_writer(self):
+        pid = propose({"resources": [{"kind": "server", "identifier": "o.example.invalid"}]}, target=TOOL)
+        with unittest.mock.patch.object(RP, "_close_intent", side_effect=RuntimeError("killed")), \
+                self.assertRaises(RuntimeError):
+            run_policy()
+        self.assertEqual(proposal(pid)["status"], "accepted")
+        self.assertEqual(RP.active_decisions(), [])
+        # The next writer is a person's undo: it settles the intent first, and nothing is left behind.
+        code, out = cli("undo-policy", "--since", "2000-01-01T00:00:00Z", terminal=True)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(proposal(pid)["status"], "proposed")
+        self.assertNotIn(TOOL, read("config/project_overrides.json")["projects"])
+        self.assertEqual(RP.pending_decisions(), [])
+        self.assertEqual(run_policy()["applied"], {"registry.resources-append": 1})
+        self.assertEqual(proposal(pid)["status"], "accepted")
 
 
 if __name__ == "__main__":

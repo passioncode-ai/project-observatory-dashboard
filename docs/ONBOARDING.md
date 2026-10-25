@@ -745,12 +745,16 @@ What is left accumulates and is resolved in one launch:
 
 ```sh
 project-observatory full review batch prepare     # store/review/batch.json: every item, a recommendation, a reason
-project-observatory full review batch apply FILE  # at your terminal: totals and a sample, one question, then all of it
+project-observatory full review batch apply FILE  # at your terminal: what departs from the engine, one question, then all of it
 ```
 
 An agent may read the batch file and edit each `decision` (`accept`, `reject`, `keep`) and
-`reason`; applying it is yours. An item that changed after the file was prepared is skipped and
-named. The finding `review.queue_waiting` appears when 20 items wait for you or the oldest is 14
+`reason`; applying it is yours. Before the question you see every item whose decision or reason
+differs from what the engine recommends now, and every item that will not be applied because the
+engine did not prepare it or it is no longer pending. An item that changed after the file was
+prepared is skipped and named. A resource whose `added_by` names someone other than the agent that
+proposed it, and any proposal with a credential-shaped field, wait for you instead of being decided
+by the policy. The finding `review.queue_waiting` appears when 20 items wait for you or the oldest is 14
 days old (`remind` in `config/review-policy.json`), and `full doctor` and the Health page's row
 "review queue" show the policy's state, its last run and what waits.
 Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
