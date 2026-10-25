@@ -191,6 +191,14 @@ class FakeHeroku:
             hit = next((a for v in self.apps.values() for a in v if a["name"] == name), None)
             if not hit:
                 raise self.m.HerokuError(404, "heroku answered HTTP 404")
+            if len(path.split("/")) >= 4 and path.split("/")[3] in ("releases", "builds", "slugs"):
+                if held and "read-protected" not in held["scope"]:
+                    raise self.m.HerokuError(403, "heroku answered HTTP 403")
+                if path.endswith("/releases"):
+                    return [{"slug": {"id": "12345678-1234-1234-1234-123456789abc"}}], None
+                if path.endswith("/slugs"):
+                    raise self.m.HerokuError(404, "heroku answered HTTP 404")
+                return [], None
             return hit, None
         raise AssertionError(f"unexpected call {method} {path}")
 
@@ -689,6 +697,85 @@ def test_delivery_goes_through_the_vault_on_stdin() -> None:
         check("and the refusal withholds the child's output", "ECHOED" not in str(exc) and "HRKU" not in str(exc), str(exc))
 
 
+def test_release_deploy_proves_protected_endpoints() -> None:
+    m, fake, delivered = setup()
+    check("release-deploy is a separate explicit preset", "release-deploy" in m.PRESETS)
+    check("legacy deploy retains its original scopes", m.PRESETS["deploy"]["scopes"] == ("read", "write"))
+    if "release-deploy" not in m.PRESETS:
+        return
+    m._release_read = lambda path, value, range_header=None: fake("GET", path, value, rng=range_header)[0]
+    check("release-deploy discloses protected configuration capability",
+          "config" in m.PRESETS["release-deploy"]["why"].lower())
+    rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, None, None, 7, wait=0)
+    check("release-deploy requires an app before minting", rc == 2 and not fake.auths and not delivered)
+    rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+    check("release-deploy issue succeeds after all reads", rc == 0, o + e)
+    new = delivered[-1][0] if delivered else None
+    paths = [path for method, path, token, payload in fake.calls if method == "GET" and token == new]
+    check("proof covers exact app and protected release resources",
+          paths == ["/apps/alpha-web", "/apps/alpha-web/builds", "/apps/alpha-web/releases", "/apps/alpha-web/slugs/12345678-1234-1234-1234-123456789abc"], str(paths))
+    check("proof never reads config vars or makes app writes",
+          all("config-vars" not in path and not (path.startswith("/apps/") and method != "GET")
+              for method, path, token, payload in fake.calls))
+    check("protected scopes are explicit, never global",
+          next(iter(fake.auths.values()))["scope"] == ["read-protected", "write-protected"])
+    check("successful issue does not print a value", no_value(o + e))
+    for endpoint in ("releases", "builds", "slugs"):
+        m, fake, delivered = setup()
+        m._release_read = lambda path, value, range_header=None: fake("GET", path, value, rng=range_header)[0]
+        fake.refuse["/apps/alpha-web/" + endpoint] = 403
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        check("failed " + endpoint + " proof prevents delivery and removes fresh authorization",
+              rc == 1 and not fake.auths and not delivered and not m.LEDGER.exists(), o + e)
+        check("failed " + endpoint + " proof emits no credential", no_value(o + e))
+
+
+def test_release_proof_rejects_missing_or_unsafe_slug() -> None:
+    for response in ([], [{"slug": None}], [{"slug": {"id": "../config-vars"}}], {},
+                     [{"slug": {"id": "x"}}] * 2):
+        m, fake, delivered = setup()
+        if "release-deploy" not in m.PRESETS:
+            check("closed release proof is implemented", False)
+            return
+        def read(path, value, range_header=None):
+            if path.endswith("/releases"):
+                return response
+            return fake("GET", path, value, rng=range_header)[0]
+        m._release_read = read
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        check("invalid or unavailable slug proof removes fresh credential",
+              rc == 1 and not delivered and not fake.auths and no_value(o + e))
+
+
+def test_protected_release_wire_is_bounded_and_refuses_redirects() -> None:
+    m = door()
+    if not hasattr(m, "_release_read") or not hasattr(m, "_NoReleaseRedirect"):
+        check("protected release read transport exists", False)
+        return
+    check("credential redirect is refused", m._NoReleaseRedirect().redirect_request(
+        None, None, 302, "", {}, "https://outside.example.invalid/") is None)
+    seen = []
+    class Reply:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, n):
+            seen.append(n)
+            return b"x" * n
+    class Opener:
+        def open(self, request, timeout):
+            check("protected request uses fixed origin and header credential",
+                  request.full_url == "https://api.heroku.com/apps/alpha-web/releases"
+                  and request.get_header("Authorization") == "Bearer " + ADMIN)
+            return Reply()
+    try:
+        with patched(m.urllib.request, "build_opener", lambda *args: Opener()):
+            m._release_read("/apps/alpha-web/releases", ADMIN)
+        check("oversized protected response is refused", False)
+    except m.HerokuError as exc:
+        check("oversized response is typed and value-free", no_value(str(exc)))
+    check("protected body read has a finite bound", seen == [1024 * 1024 + 1])
+
+
 def test_the_door_source_keeps_the_rules() -> None:
     src = (ROOT / "tools" / "heroku.py").read_text(encoding="utf-8")
     check("values arrive on stdin", "sys.stdin.read()" in src and '"--token"' not in src, "")
@@ -719,6 +806,9 @@ if __name__ == "__main__":
                test_a_dropped_connection_is_named_not_raised_raw,
                test_errors_carry_status_and_endpoint_only,
                test_delivery_goes_through_the_vault_on_stdin,
+               test_release_deploy_proves_protected_endpoints,
+               test_release_proof_rejects_missing_or_unsafe_slug,
+               test_protected_release_wire_is_bounded_and_refuses_redirects,
                test_the_door_source_keeps_the_rules):
         fn()
     print()

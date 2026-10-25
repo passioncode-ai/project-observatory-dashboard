@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-25T15:34:40.402476+00:00",
+  "status": "TEST_PREPARATION_NOT_RUN",
+  "test_path": "observatory/engine/tests/test_heroku_door.py",
+  "test_sha256": "16c15999afc2aead694322131bd12f7e7b6c6e0903431a2cdf683722d2a2e297",
+  "runtime_changed": false,
+  "checks": [
+    "AST_PASS",
+    "DIFF_WHITESPACE_PASS"
+  ],
+  "new_cases": [
+    "explicit_preset_and_exact_proof_paths",
+    "missing_or_unsafe_slug_refusal",
+    "protected_transport_limit_and_redirect_refusal"
+  ],
+  "next": "One watched focused RED before implementation; no provider invocation"
+}

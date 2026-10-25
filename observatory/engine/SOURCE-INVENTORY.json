@@ -4330,8 +4330,8 @@
       "path": "tests/test_heroku_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cf01b50669bd80ba542b38637e71072cad7a0834570aa92da1c59e36cee35405",
-      "bytes": 41978
+      "export_sha256": "16c15999afc2aead694322131bd12f7e7b6c6e0903431a2cdf683722d2a2e297",
+      "bytes": 47373
     },
     {
       "path": "tests/test_heroku_scoped.py",
