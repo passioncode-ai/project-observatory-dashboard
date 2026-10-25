@@ -1484,7 +1484,8 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `org:node-summary-not-listed` when the server does not read it. Its drift from the organization's baseline
   (`missing`, `stopped`, `changed`, `outdated`) is computed and shown once this machine applies the organization's
   signed policy (not built yet: the check-in reports policy revision 0, so no baseline applies and the summary carries
-  no drift, as the contract asks). No agent service is listed yet: nothing on this machine ties a service to an
+  no drift, as the contract asks; a signed policy the server sends is recorded and reported `failed` with its
+  revision, never as in force, OBS-231). No agent service is listed yet: nothing on this machine ties a service to an
   organization's context, and a person's other services are never listed.
 
 Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device

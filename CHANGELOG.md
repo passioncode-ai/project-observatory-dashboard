@@ -7,6 +7,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **A check-in no longer reports a policy the server sent as applied** (OBS-231). The node verifies and applies no
+  signed policy yet (OE-06), and every check-in said the server layer was `applied` at revision 0. That is the
+  contract's report when no policy ever arrived, but the node said it as well after a check-in response carried
+  one, so an organization server read a policy as in force on a machine that ignored it. A well-formed policy a
+  response carries is now recorded per source (`serverPolicy` in the enrollment, a newer revision only, journal
+  `policy-not-applied` once per revision), and every check-in after it reports that layer `failed` at revision 0
+  with an error naming the revision that arrived. A renewal keeps the record; a removal or a closed organization
+  drops it with the rest of the enrollment.
 - **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224). Both release
   summaries, and `docs/COMPATIBILITY.md`, said the first `full check` after updating exits 1 once and to run
   `project-observatory full probes` once. On an installed copy neither holds: `full check` runs the portable suite and
