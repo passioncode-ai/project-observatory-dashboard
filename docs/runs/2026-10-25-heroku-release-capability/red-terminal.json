@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-25T20:14:23.238372+00:00",
+  "status": "EXPECTED_RED_IMPLEMENTATION_NOT_STARTED",
+  "tested_commit": "c870b19f2d1ea0a79b7d40d97f40371b23dbd0f8",
+  "command": [
+    "python",
+    "observatory/engine/tests/test_heroku_door.py"
+  ],
+  "gate": "Shared machine gate admitted with4.6GiB; held through terminal",
+  "exit_code": 1,
+  "failed_controls": [
+    "release-deploy is a separate explicit preset",
+    "closed release proof is implemented",
+    "protected release read transport exists"
+  ],
+  "runtime_modified": false,
+  "live_provider_calls": 0,
+  "credential_operations": 0,
+  "source_sha256": {
+    "observatory/engine/tests/test_heroku_door.py": "16c15999afc2aead694322131bd12f7e7b6c6e0903431a2cdf683722d2a2e297",
+    "observatory/engine/tools/heroku.py": "56edc1b28b5c42eb4ab8e7c072c0034549244e2302913e1c1f80b8fba5c3aa31"
+  },
+  "next": "Extend synthetic regression coverage for rotation, exact latest-release Range, strict slug UUID, transport tripwire/typed failures and vault failure cleanup. Then implement the accepted separate preset and shared proof dispatch; no implicit credential change."
+}
