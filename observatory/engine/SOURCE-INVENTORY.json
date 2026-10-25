@@ -891,8 +891,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "e6cf553ab684bd9eca14d5c16b14643936675cbde8ebbcb55ca4db7e1561ad75",
-      "bytes": 170489,
+      "export_sha256": "8d879240c721901bf2c0f75a850ab37e13e28df808cacbe28806d860fd8ead05",
+      "bytes": 170980,
       "upstream_modified": true
     },
     {
@@ -920,8 +920,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "041cb9fd067966a8db10dcb655748210a7f277953f842b4f7c8eadb83de102bc",
-      "bytes": 93565
+      "export_sha256": "3e69112a0a5c71c925500c69c005aa1f77f30787b740b84d8899e88b7a1ef26f",
+      "bytes": 93606
     },
     {
       "path": "estate.py",
@@ -2581,8 +2581,8 @@
       "path": "mcp/stdio_relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "924f775ab36a57ee97e48b6f507592f04987b3dc5e9278b834fe22e6d1132ab7",
-      "bytes": 23975
+      "export_sha256": "aa5cf281c16e4a1f02a411c9eb117d02d1ca6b5a85e93af16bfd6b33c104e60a",
+      "bytes": 26483
     },
     {
       "path": "mcp_inventory.py",
@@ -3118,8 +3118,8 @@
       "path": "session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7ae0d3419fa17af092fd1a8bf73e1532edf3af13673a59946e10082c6992d760",
-      "bytes": 13658
+      "export_sha256": "ac9730b7924081d9323b1e432b87d38facde1ce4e87268a3c150893445fd31b8",
+      "bytes": 13867
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -4100,8 +4100,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fbdbbf8da6259ace15839646b4056b8517837b2d1d7f6892f3e03f5c784a0dc3",
-      "bytes": 75832
+      "export_sha256": "ef2abd5b90c1fdc9904f3cdc2f9cef681b0425ddccecfb8cb794ea2f9df32350",
+      "bytes": 76030
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -5267,8 +5267,8 @@
       "path": "tests/test_session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "50c3d715bf5be4c0ab8d7663685783a9cc780ec756ed4abd0f4382d62dfb0b6d",
-      "bytes": 31393
+      "export_sha256": "ac059a660e5e47f751ddd0de6c8edae0cb6c011409f3f8b5c4f2df72fe9f6115",
+      "bytes": 34932
     },
     {
       "path": "tests/test_session_start.py",

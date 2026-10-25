@@ -1982,8 +1982,13 @@ the tool list changed, the client receives `notifications/tools/list_changed`. A
 the 2026-07-28 protocol (Claude Code is one) keeps a `subscriptions/listen` stream open for
 the whole session to hear about such changes; that stream is not a request still running.
 Just before it moves, the server ends each open stream the protocol's graceful way (its
-result, stamped with the subscription id), and the client opens a new one, which the new
-release answers (OBS-228).
+result, stamped with the subscription id); when the tool list changed, the stream first
+carries that change, stamped the same way, so such a client hears it on the stream it holds
+(OBS-228). Whether the client then opens a new stream is up to the client: the MCP Python
+SDK's own client does not re-listen by itself, and this guide has not observed what Claude
+Code does. A client that listens again is acknowledged by the new release and hears later
+changes; a client that does not hears of no further change until it listens again or
+reconnects, though its requests are still answered by the new release.
 
 Where it cannot move, it answers `stale-server` and names why, and the session gets the new
 release when it restarts or reconnects the server: on Windows (`os.execv` starts a new

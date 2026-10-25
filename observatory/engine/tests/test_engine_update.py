@@ -954,6 +954,8 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(calls, [], "the new release was never asked to schedule its job")
         self.assertIn("OBSERVATORY_SYSTEM_SETUP=0", doc["maintenance_detail"])
         self.assertIn("full maintain ensure", doc["maintenance_detail"])
+        # A shell that exports the 0 refuses `maintain ensure` too, so the advice names the setting it needs.
+        self.assertIn("OBSERVATORY_SYSTEM_SETUP unset or 1", doc["maintenance_detail"])
 
     def test_a_schedule_that_fails_does_not_undo_an_update(self):
         self.engine.ensure_maintenance = lambda: (3, "no systemd user manager")

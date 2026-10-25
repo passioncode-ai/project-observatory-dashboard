@@ -27,8 +27,15 @@ release's preflight (`session_reload.preflight`), then points 0/1 back at the wi
 unread bytes go into that file; the new process replays the handshake to its SDK and
 serves them, so the triggering request is answered once, by the new release. Just
 before `execv` the relay ends each open listen stream the spec's graceful way, with its
-result stamped with the subscription id, as the last frame the old process writes; the
-client opens a new stream, which the new release acknowledges. A refused or failed swap
+result stamped with the subscription id, as the last frame the old process writes. When
+the tool set changes, each stream that asked for tool-list changes first carries a
+`notifications/tools/list_changed` stamped with its subscription id: at 2026-07-28 that
+is the only way a change reaches a modern client, which has no stream left once the swap
+is done. Whether the client then listens again is the client's choice (the pinned SDK's
+own client does not re-listen by itself): a client that listens again is acknowledged by
+the new release and hears later changes; one that does not hears none until it does. A
+client on an earlier revision (it sent `initialize`) gets the bare notification from the
+new process instead (`_resume`). A refused or failed swap
 puts 0/1 back on the null device and stderr, routes the held requests to this process's
 SDK in order (they answer `stale-server` with the reason) and retries only when the
 reason can clear: at a later request, and, when requests still running were the reason,
@@ -56,6 +63,7 @@ from mcp.server.lowlevel.server import NotificationOptions
 from mcp.shared._context_streams import create_context_streams
 from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from mcp.shared.subscriptions import SUBSCRIPTION_ID_META_KEY
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
 import code_freshness
 import configuration
@@ -96,6 +104,7 @@ class Relay:
         self.eof = False
         self.inflight: dict = {}               # validated request id -> when it was handed on
         self.listens: dict = {}                # open subscriptions/listen streams: key -> the id as sent
+        self.listen_tools: set = set()         # keys of the listen streams that asked for tool-list changes
         self.retry_when_idle = False           # a swap refused for running requests: retry once they answer
         self.held: list[bytes] = []
         self.swapping = False
@@ -208,6 +217,8 @@ class Relay:
             key = _key(valid.id)
             if valid.method == LISTEN:
                 self.listens[key] = valid.id
+                if _wants_tools(getattr(valid, "params", None)):
+                    self.listen_tools.add(key)
             else:
                 self.inflight[key] = time.monotonic()
             # The SDK runs this when it settles the request without an answer (the client
@@ -229,6 +240,7 @@ class Relay:
         """A request that will get no further answer: no longer running or listening."""
         self.inflight.pop(key, None)
         self.listens.pop(key, None)
+        self.listen_tools.discard(key)
         self._idle_retry()
 
     def _idle_retry(self) -> None:
@@ -389,24 +401,36 @@ class Relay:
                  "negotiated": self.negotiated, "tools_changed": tools != sorted(answer["tools"])}
         ended: list = []
         outcome = self._exec(state, ended)
-        # Still here: the exec failed after the streams were ended on the wire. The client
-        # opens new ones, so the handlers serving the ended ones stop writing on them.
+        # Still here: the exec failed after the streams were ended on the wire. Those streams
+        # are over for the client, so the handlers serving them are cancelled and write
+        # nothing more on them; a client that listens again gets a new stream here.
         for sid in ended:
             self.listens.pop(_key(sid), None)
+            self.listen_tools.discard(_key(sid))
             await self._deliver(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
                                             "params": {"requestId": sid}}).encode())
         return outcome
 
-    def _end_listens(self, ended: list) -> None:
+    def _end_listens(self, ended: list, tools_changed: bool = False) -> None:
         """End every open listen stream gracefully (SubscriptionsListenResult, spec 2026-07-28).
 
         Called under the write lock just before `execv`, so it is the last frame the old
-        process writes for each stream: the SDK's writes wait on the lock and die with it."""
-        for sid in list(self.listens.values()):
-            result = types.SubscriptionsListenResult(_meta={SUBSCRIPTION_ID_META_KEY: sid})
-            frame = {"jsonrpc": "2.0", "id": sid,
-                     "result": result.model_dump(by_alias=True, mode="json", exclude_none=True)}
-            data = (json.dumps(frame) + "\n").encode("utf-8")
+        process writes for each stream: the SDK's writes wait on the lock and die with it.
+        When the tool set changes, a stream that asked for tool-list changes first carries
+        `notifications/tools/list_changed` stamped with its subscription id: the stream is
+        the only channel a 2026-07-28 client hears changes on, and after the swap it holds
+        none, so this is where it learns the list changed. Should the exec then fail, the
+        event was early but harmless: the client refetches the list and finds it as it was."""
+        for key, sid in list(self.listens.items()):
+            meta = {SUBSCRIPTION_ID_META_KEY: sid}
+            frames = []
+            if tools_changed and key in self.listen_tools:
+                frames.append({"jsonrpc": "2.0", "method": "notifications/tools/list_changed",
+                               "params": {"_meta": meta}})
+            result = types.SubscriptionsListenResult(_meta=meta)
+            frames.append({"jsonrpc": "2.0", "id": sid,
+                           "result": result.model_dump(by_alias=True, mode="json", exclude_none=True)})
+            data = b"".join((json.dumps(frame) + "\n").encode("utf-8") for frame in frames)
             view = memoryview(data)
             while view:
                 view = view[os.write(self.wire_out, view):]
@@ -424,7 +448,7 @@ class Relay:
                     except OSError as exc:
                         return f"the session state could not be handed over ({exc.strerror or type(exc).__name__})", False
                     try:
-                        self._end_listens(ended)
+                        self._end_listens(ended, bool(state.get("tools_changed")))
                         self._restore_wire()
                         os.environ[session_reload.STATE_ENV] = str(fd)
                         if os.environ.get(TEST_EXEC_ENV) == "fail":
@@ -457,7 +481,11 @@ class Relay:
         with self.read_lock:
             self.buffer[:0] = session_reload.decode(state.get("pending"))
         session_reload.record(self.home, "swapped", **{"from": state.get("from"), "to": configuration.VERSION})
-        if state.get("tools_changed") and self.initialized:
+        # The bare notification is the pre-2026-07-28 form, for a client that made the
+        # `initialize` handshake. A modern client heard the change on its listen stream,
+        # stamped, just before the swap (`_end_listens`); unstamped it rides no stream.
+        if state.get("tools_changed") and self.initialized \
+                and self.negotiated not in MODERN_PROTOCOL_VERSIONS:
             await self._send_wire({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 
     # --- serving ---------------------------------------------------------------------
@@ -486,6 +514,14 @@ def _key(value: Any) -> tuple:
     if isinstance(value, float) and value.is_integer():
         value = int(value)
     return (type(value).__name__, value)
+
+
+def _wants_tools(params: Any) -> bool:
+    """Whether a listen request's filter asks for tool-list changes (`toolsListChanged`)."""
+    if not isinstance(params, dict):
+        return False
+    wanted = params.get("notifications")
+    return isinstance(wanted, dict) and wanted.get("toolsListChanged") is True
 
 
 def _id_of(line: bytes) -> Any:

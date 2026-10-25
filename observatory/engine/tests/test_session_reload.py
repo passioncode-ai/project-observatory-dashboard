@@ -368,7 +368,14 @@ class SwapOverPipes(unittest.TestCase):
         import mcp_types
         mcp_types.SubscriptionsListenResult.model_validate(ended["result"])
         self.assertLess(c.seen.index(ended), c.seen.index(c.answer(4)), "the stream ended before the swap answered")
-        # The client re-listens, and the new release acknowledges it.
+        # The tool set changed. At 2026-07-28 a change event travels only on a listen stream, stamped with its
+        # subscription id, so the client learns it on the stream it holds, before that stream's terminal result;
+        # a bare (unstamped) notification is the legacy form and is never sent to a modern client.
+        changed = [m for m in c.seen if m.get("method") == "notifications/tools/list_changed"]
+        self.assertEqual([m.get("params", {}).get("_meta", {}).get(SUBSCRIPTION_ID_FIELD) for m in changed], [2],
+                         f"one stamped change event on stream 2, no bare one: {changed}")
+        self.assertLess(c.seen.index(changed[0]), c.seen.index(ended), "the change event precedes the stream's end")
+        # A client that listens again is acknowledged by the new release.
         c.modern(5, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
         acks = c.notices("notifications/subscriptions/acknowledged", 2)
         self.assertEqual(acks[1]["params"]["_meta"][SUBSCRIPTION_ID_FIELD], 5)
@@ -379,6 +386,44 @@ class SwapOverPipes(unittest.TestCase):
         self.assertEqual([r for r in self.log() if r.get("event") == "refused"], [])
         self.assertEqual([(r["from"], r["to"]) for r in self.log() if r.get("event") == "swapped"],
                          [("9.0.0", "9.1.0")])
+
+    def test_a_failed_exec_with_a_listen_open_ends_the_stream_then_cancels_its_handler(self):
+        # The failed-exec branch with a 2026-07-28 listen stream open. The stream was ended on the wire just
+        # before `execv` (its change event, then its terminal result); when the exec fails this process keeps
+        # serving, so the relay cancels the SDK handler of the ended stream, which must then write nothing more
+        # for that id. The request that triggered the attempt answers `stale-server` once, and a client that
+        # listens again is acknowledged by this same process.
+        c = self.client = Client(self.install.server, {**self.env, "OBSERVATORY_RELOAD_DRAIN_SECONDS": "3",
+                                                       "OBSERVATORY_TEST_RELOAD_EXEC": "fail"},
+                                 self.base / "server.err")
+        self.assertIn("capabilities", c.answer(c.modern(1, "server/discover"))["result"])
+        c.modern(2, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        c.notices("notifications/subscriptions/acknowledged", 1)
+        pid = c.proc.pid
+        self.install.install_b("9.1.0")
+        refusal = body(c.answer(c.modern(3, "tools/call", {"name": "observatory_reload_probe", "arguments": {}})))
+        self.assertEqual(refusal["error"], "stale-server")
+        self.assertIn("could not replace this process", refusal["detail"])
+        ended = c.answer(2)
+        self.assertEqual(ended["result"]["_meta"][SUBSCRIPTION_ID_FIELD], 2)
+        self.assertLess(c.seen.index(ended), c.seen.index(c.answer(3)), "the stream ended before the refusal")
+        changed = [m for m in c.seen if m.get("method") == "notifications/tools/list_changed"]
+        self.assertEqual([m["params"]["_meta"][SUBSCRIPTION_ID_FIELD] for m in changed], [2])
+        self.assertLess(c.seen.index(changed[0]), c.seen.index(ended))
+        c.modern(4, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        acks = c.notices("notifications/subscriptions/acknowledged", 2)
+        self.assertEqual(acks[1]["params"]["_meta"][SUBSCRIPTION_ID_FIELD], 4)
+        c.send({"jsonrpc": "2.0", "id": 5, "method": "ping",
+                "params": {"_meta": dict(MODERN_META)}})
+        c.answer(5)
+        self.assertEqual(c.proc.pid, pid)
+        seen = c.close()
+        self.assert_once(seen, 1, 2, 3, 5)
+        after = seen[seen.index(ended) + 1:]
+        self.assertEqual([m for m in after if m.get("id") == 2
+                          or (m.get("params") or {}).get("_meta", {}).get(SUBSCRIPTION_ID_FIELD) == 2], [],
+                         "the cancelled handler writes nothing more on the ended stream")
+        self.assertEqual([(r["from"], r["to"]) for r in self.log() if r.get("event") == "swapped"], [])
 
     def test_a_cancel_naming_the_id_as_a_string_does_not_stall_a_later_swap(self):
         # The SDK correlates `notifications/cancelled` with requestId "60" to request 60 (it coerces a

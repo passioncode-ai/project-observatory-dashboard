@@ -13,7 +13,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   `stale-server` after each release until it was restarted. A client on the 2026-07-28 protocol, Claude Code among
   them, keeps a `subscriptions/listen` stream open for the whole session, and the server counted it as a request still
   running, so it never found itself idle. The server now never waits for a listen stream: just before it moves, it
-  ends each open stream the protocol's graceful way, and the client opens a new one on the new release. A request the
+  ends each open stream the protocol's graceful way, and when the tool list changed it first sends the change on that
+  stream, so a modern client learns it there. Opening a new stream is up to the client (the MCP Python SDK's own
+  client does not do it by itself): a client that listens again is acknowledged by the new release and hears later
+  changes; one that does not hears none until it listens again. A request the
   client cancelled stops counting whatever spelling its id had, and a move refused because requests were running is
   tried again the moment the last of them answers, without waiting for another request.
 - **`full update --apply` keeps `OBSERVATORY_SYSTEM_SETUP=0`** (OBS-229). It replaced an explicit `0` with `1` before

@@ -916,8 +916,8 @@ SYSTEM_SETUP_REFUSED = -1
 #: What the report says then (OBS-229): the word `full init` answers with, and how to schedule.
 SYSTEM_SETUP_REFUSED_DETAIL = (
     "OBSERVATORY_SYSTEM_SETUP=0 in this process: the update scheduled no job and wrote nothing to "
-    "the credential store; run `project-observatory full maintain ensure` from a terminal to "
-    "schedule updates and daily backups")
+    "the credential store; run `project-observatory full maintain ensure` from a terminal with "
+    "OBSERVATORY_SYSTEM_SETUP unset or 1 to schedule updates and daily backups")
 
 
 def system_setup_refused(env=None) -> bool:
