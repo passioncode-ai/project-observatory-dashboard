@@ -395,7 +395,12 @@ the Cloudflare door's twin on the Heroku Platform API. `heroku auth:token | pyth
 CLI session's token as the admin, read by the door alone. `issue --preset read|deploy|identity
 --vault PROJECT/ENV/NAME [--team TEAM] [--app APP]` mints a direct OAuth authorization with that
 scope only (`config-read` and `config-write` reach config vars and need `--app`), proves it with
-its own value, and delivers it on stdin; `rotate` regenerates it in place, `revoke` deletes it
+its own value, and delivers it on stdin. `deploy` keeps `read` and `write` and is proved by an app
+read only, so it establishes no access to builds, releases or slugs; `release-deploy` (with
+`--app APP`) asks for `read-protected` and `write-protected` (config vars included) and, on issue and on
+rotate, is proved with the new value by reading the app, its builds, its newest release and that
+release's slug before the vault gets it, never config vars and with no app write. An app whose
+newest release names no slug is refused. `rotate` regenerates it in place, `revoke` deletes it
 first at Heroku, `list` and `ping` name what exists. Heroku narrows an authorization by scope
 only, never to a team or an app: `--team` and `--app` are its stated purpose and what the proof
 reads. `teams`, `members --team` and `apps --team` read the teams with the slots issued for each;

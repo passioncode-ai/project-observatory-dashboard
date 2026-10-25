@@ -6,6 +6,7 @@
     python "$T/heroku.py" stash --from-cli              # the same, the pipe made inside this program
     python "$T/heroku.py" issue --preset read --vault PROJECT/ENV/NAME [--team TEAM] [--app APP]
     python "$T/heroku.py" issue --preset deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90]
+    python "$T/heroku.py" issue --preset release-deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90]
     python "$T/heroku.py" list
     python "$T/heroku.py" ping
     python "$T/heroku.py" rotate PROJECT/ENV/NAME        # or --leaked, for every open leak
@@ -39,6 +40,21 @@ the value is delivered. The preset table states this, and `list` repeats it.
 which is why the presets that grant them are named after config, not deploys.
 Heroku's own caveat holds: even `read` can see a credential a log drain's URL
 embeds.
+
+`deploy` IS NOT A RELEASE CREDENTIAL. It keeps `read` and `write` and its proof
+reads app inventory only, so it establishes nothing about builds, releases or
+slugs. `release-deploy` is the explicit preset for that: it needs `--app`, asks
+for `read-protected` and `write-protected` (which reach config vars, and say
+so), and its proof, made with the NEW value before the vault holds it on issue
+and on rotate alike (`prove_value`), reads the app, its builds, its newest
+release (one row, by the pinned descending Range) and that release's exact slug
+info. The slug id must be a string that is exactly a UUID before any slug path
+is built; an app whose newest release names none (no slug build yet, or an app
+generation without slugs) is refused before delivery. The proof reads no config
+vars and writes nothing to the app. Its protected reads go through their own
+transport (`_release_read`): fixed origin, an allowlist of three path shapes, no
+redirect followed, a one-MiB body bound, and typed value-free failures. These
+reads prove read access only, not that a deploy will succeed.
 
 EVERY ISSUED AUTHORIZATION HAS A LEDGER ROW in `heroku-issued.json` beside the
 stash: its id at Heroku, preset, scopes, slot, team, app, dates and rotation
@@ -136,8 +152,18 @@ PRESETS: dict[str, dict] = {
     },
     "deploy": {
         "scopes": ("read", "write"),
-        "why": "reads and changes apps and their resources (deploys, scaling, releases), without config vars",
+        "why": ("reads and changes apps and their unprotected resources, without config vars; "
+                "proved by an app read only, so it establishes no access to builds, releases or "
+                "slugs (use release-deploy)"),
         "probe": "apps",
+    },
+    "release-deploy": {
+        "scopes": ("read-protected", "write-protected"),
+        "why": ("reads and changes one app's protected resources, INCLUDING config vars; proved "
+                "by reading the app, its builds, its newest release and that release's slug, "
+                "never config vars, with no app write"),
+        "probe": "release",
+        "needs_app": True,
     },
     "config-read": {
         "scopes": ("read-protected",),
@@ -218,7 +244,8 @@ def _shape(path: str) -> str:
     """The endpoint without its identifiers: `/teams/<id>/members`."""
     parts = path.split("?")[0].split("/")
     keep = {"", "account", "apps", "teams", "members", "oauth", "authorizations",
-            "actions", "regenerate-tokens", "config-vars", "features", "invitations"}
+            "actions", "regenerate-tokens", "config-vars", "features", "invitations",
+            "builds", "releases", "slugs"}
     return "/".join(p if p in keep else "<id>" for p in parts)
 
 
@@ -243,6 +270,82 @@ def _list(path: str, token: str, accept: str = ACCEPT) -> list:
 
 def q(text: str) -> str:
     return urllib.parse.quote(text, safe="")
+
+
+# ─────────────────────────── the protected release wire ─────────────────────
+
+#: The newest release only: Platform API ranges are `field start..end; order, max`.
+RELEASE_RANGE = "version ..; order=desc, max=1"
+#: The most a protected release answer may be; one byte more is refused unread.
+RELEASE_BODY_LIMIT = 1024 * 1024
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+SLUG_ID = re.compile(_UUID)
+#: The three reads this wire makes; anything else (config vars included) is refused
+#: before a request exists.
+RELEASE_PATH = re.compile(r"/apps/[A-Za-z0-9][A-Za-z0-9._~%-]{0,255}/(?:builds|releases|slugs/" + _UUID + ")")
+
+
+class _NoReleaseRedirect(urllib.request.HTTPRedirectHandler):
+    """A protected read carries a credential that reaches config vars: a redirect
+    would hand it to whatever host the answer names, so none is followed and the
+    3xx surfaces as a typed failure."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _release_read(path: str, value: str, range_header: str | None = None) -> object:
+    """One protected GET for the release proof: decoded JSON, or a HerokuError
+    whose status is the HTTP code, `path`, `size`, `shape` or `transport` and
+    whose message names the endpoint shape only. Never the body, never a header."""
+    if not isinstance(path, str) or not RELEASE_PATH.fullmatch(path):
+        raise HerokuError("path", "the protected release read refuses a path outside an app's "
+                                  "builds, releases and slug info")
+    head = {"Accept": ACCEPT, "Authorization": f"Bearer {value}", "User-Agent": "project-observatory"}
+    if range_header:
+        head["Range"] = range_header
+    req = urllib.request.Request(f"{API}{path}", method="GET", headers=head)
+    opener = urllib.request.build_opener(_NoReleaseRedirect())
+    try:
+        with opener.open(req, timeout=30) as r:
+            raw = r.read(RELEASE_BODY_LIMIT + 1)
+    except urllib.error.HTTPError as e:
+        e.close()
+        raise HerokuError(e.code, f"heroku answered HTTP {e.code} on {_shape(path)}; "
+                                  "provider response withheld") from None
+    except (OSError, http.client.HTTPException) as e:
+        raise HerokuError("transport", f"heroku unreachable on {_shape(path)}: "
+                                       f"{type(e).__name__}") from None
+    if len(raw) > RELEASE_BODY_LIMIT:
+        raise HerokuError("size", f"heroku answered {_shape(path)} with more than "
+                                  f"{RELEASE_BODY_LIMIT} bytes; refused unread")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise HerokuError("shape", f"heroku answered {_shape(path)} with no JSON") from None
+
+
+def release_proof(value: str, app: str) -> list[str]:
+    """What a release-deploy value must read before delivery, in order: the app's
+    builds, its newest release, and that release's exact slug info. Returns what
+    a person reads as proved; raises HerokuError on the first gap."""
+    base = f"/apps/{q(app)}"
+    if not isinstance(_release_read(f"{base}/builds", value), list):
+        raise HerokuError("shape", "the builds read answered with no list")
+    releases = _release_read(f"{base}/releases", value, RELEASE_RANGE)
+    if not isinstance(releases, list) or len(releases) != 1 or not isinstance(releases[0], dict):
+        raise HerokuError("shape", "the newest-release read did not answer exactly one release")
+    slug = releases[0].get("slug")
+    slug_id = slug.get("id") if isinstance(slug, dict) else None
+    # A string of exactly 36 characters that is a UUID end to end: fullmatch, so a
+    # trailing newline is refused, and never an id built into a path otherwise.
+    if not (type(slug_id) is str and len(slug_id) == 36 and SLUG_ID.fullmatch(slug_id)):
+        raise HerokuError("shape", "the newest release names no slug id that is exactly a UUID; "
+                                   "an app without a slug build cannot take this preset")
+    info = _release_read(f"{base}/slugs/{slug_id}", value)
+    if not isinstance(info, dict) or info.get("id") != slug_id:
+        raise HerokuError("shape", "slug info did not answer for the newest release's slug")
+    return [f"app {app}'s builds", f"app {app}'s newest release", "that release's slug"]
 
 
 # ─────────────────────────── the admin stash ────────────────────────────────
@@ -532,6 +635,28 @@ def prove(value: str, path: str, wait: float) -> str | None:
     return reason
 
 
+def prove_value(preset_key: str | None, value: str, team: str | None, app: str | None,
+                wait: float, who: str) -> list[str]:
+    """The one proof dispatch issue and rotate share: what the preset's value must
+    read before the vault gets it. Returns what was proved; raises HerokuError
+    ("proof") naming what failed, never a value. An unknown preset proves as `read`."""
+    preset = PRESETS.get(preset_key or "", PRESETS["read"])
+    if preset["probe"] == "release" and not app:
+        raise HerokuError("proof", f"preset {preset_key!r} proves one app's releases and names no app")
+    proved = []
+    for path, what in probe_paths(preset, team, app):
+        why = prove(value, path, wait)
+        if why is not None:
+            raise HerokuError("proof", f"{who} cannot read {what} ({why})")
+        proved.append(what)
+    if preset["probe"] == "release":
+        try:
+            proved += release_proof(value, app)
+        except HerokuError as exc:
+            raise HerokuError("proof", f"{who} failed the release proof ({exc})") from None
+    return proved
+
+
 def _token_of(auth: dict) -> str:
     tok = ((auth or {}).get("access_token") or {}).get("token")
     if not isinstance(tok, str) or not tok:
@@ -608,12 +733,7 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
             fresh = (auth or {}).get("id")
         auth_id = (auth or {}).get("id") or (existing or {}).get("id")
         value = _token_of(auth)
-        proved = []
-        for path, what in probe_paths(preset, team, app):
-            why = prove(value, path, wait)
-            if why is not None:
-                raise HerokuError("proof", f"the issued authorization cannot read {what} ({why})")
-            proved.append(what)
+        proved = prove_value(preset_key, value, team, app, wait, "the issued authorization")
         deliver_to_vault(value, project, env, name)
     except (HerokuError, RuntimeError) as exc:
         tail = _delete_fresh(admin, fresh) if admin else ""
@@ -780,11 +900,8 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
             continue
         try:
             value = _token_of(auth)
-            for path, what in probe_paths(PRESETS.get(row.get("preset"), PRESETS["read"]),
-                                          row.get("team"), row.get("app")):
-                why = prove(value, path, wait)
-                if why is not None:
-                    raise HerokuError("proof", f"the regenerated value cannot read {what} ({why})")
+            prove_value(row.get("preset"), value, row.get("team"), row.get("app"), wait,
+                        "the regenerated value")
             project, env, name = slot.split("/")
             deliver_to_vault(value, project, env, name)
         except (HerokuError, RuntimeError, ValueError) as exc:

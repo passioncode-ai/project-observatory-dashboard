@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-25T23:29:24Z",
+  "status": "FOCUSED_AND_NEIGHBOURING_GREEN_SYNTHETIC_ONLY",
+  "base_commit": "d7f9c63916518999973eca9e5aa4c58b5271a2f5",
+  "gate": "Every run below was admitted by the shared machine gate and held it through its terminal state",
+  "runs": [
+    {
+      "what": "focused provider-door suite",
+      "command": ["python", "observatory/engine/tests/test_heroku_door.py"],
+      "exit_code": 0,
+      "pass_lines": 219,
+      "fail_lines": 0
+    },
+    {
+      "what": "neighbouring engine suites through the portable runner",
+      "command": ["python", "observatory/engine/tests/run_portable.py", "--suite", "heroku_door", "--suite", "heroku_scoped",
+                  "--suite", "heroku", "--suite", "credential_doors", "--suite", "handed_commands", "--suite", "vault",
+                  "--suite", "credentials", "--jobs", "2", "--timeout", "900"],
+      "exit_code": 0,
+      "status": "PASS",
+      "suites": {
+        "heroku_door": {"status": "PASS", "executed_checks": 219},
+        "heroku_scoped": {"status": "PASS", "executed_checks": 25},
+        "heroku": {"status": "PASS", "executed_checks": 61},
+        "credential_doors": {"status": "PASS", "executed_checks": 593},
+        "handed_commands": {"status": "PASS", "executed_checks": 9},
+        "vault": {"status": "PASS", "executed_checks": 115},
+        "credentials": {"status": "PASS", "executed_checks": 98}
+      },
+      "not_run": ["live-provider-acceptance", "external-mcp-host-admission", "live-secret-rotation-and-delivery"]
+    },
+    {
+      "what": "root documentation tests, first attempt",
+      "command": ["python", "-m", "unittest", "tests.test_docs_drift", "tests.test_engine_doc_copies"],
+      "exit_code": 1,
+      "tests": 18,
+      "failures": 1,
+      "failure": "DoorPresetsAreDocumented: ONBOARDING named the new preset only inside a longer code span, so the door-preset rule did not find it; the paragraph was corrected"
+    },
+    {
+      "what": "root documentation tests, after the correction",
+      "command": ["python", "-m", "unittest", "tests.test_docs_drift", "tests.test_engine_doc_copies"],
+      "exit_code": 0,
+      "tests": 18,
+      "failures": 0
+    }
+  ],
+  "static_checks": {
+    "tools/update_inventory.py --check": "passed",
+    "tools/sync_engine_docs.py --check": "stale: none",
+    "py_compile on Python 3.11": "passed for heroku.py and test_heroku_door.py"
+  },
+  "runtime_modified": true,
+  "live_provider_calls": 0,
+  "credential_operations": 0,
+  "source_sha256": {
+    "observatory/engine/tests/test_heroku_door.py": "82c0a4ed0b579e9ab9b27ead626f606d8400e746899eade21057bf4323412fbf",
+    "observatory/engine/tools/heroku.py": "c9f3e711591f4ebc181271aaafdf72ad295ea87bec3a248ea3ed9df21b97880d"
+  },
+  "next": "Independent review of the source delivery; full product release and any live protected authorization stay separate operations."
+}

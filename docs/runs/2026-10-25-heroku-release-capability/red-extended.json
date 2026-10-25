@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-25T23:17:20Z",
+  "status": "EXPECTED_RED_EXTENDED_CONTROLS_IMPLEMENTATION_NOT_STARTED",
+  "base_commit": "d7f9c63916518999973eca9e5aa4c58b5271a2f5",
+  "command": [
+    "python",
+    "observatory/engine/tests/test_heroku_door.py"
+  ],
+  "gate": "Shared machine gate admitted (FREE, 14.9 GB free) and held through the terminal state",
+  "exit_code": 1,
+  "pass_lines": 109,
+  "fail_lines": 9,
+  "failed_controls": [
+    "release-deploy is a separate explicit preset",
+    "closed release proof is implemented",
+    "protected release read transport exists",
+    "rotation of release-deploy runs the release proof",
+    "the release Range is pinned",
+    "an unsafe slug id is refused",
+    "protected release read transport exists (guards and typed failures)",
+    "a vault failure after proof cleans up",
+    "legacy deploy no longer claims releases it never proves"
+  ],
+  "earlier_attempt": "A first gated attempt was cancelled while the gate was still waiting, before the test command started, because the implementation had begun in the same tree; no test executed and its result is not counted (exit 143).",
+  "runtime_modified": false,
+  "live_provider_calls": 0,
+  "credential_operations": 0,
+  "source_sha256": {
+    "observatory/engine/tests/test_heroku_door.py": "82c0a4ed0b579e9ab9b27ead626f606d8400e746899eade21057bf4323412fbf",
+    "observatory/engine/tools/heroku.py": "56edc1b28b5c42eb4ab8e7c072c0034549244e2302913e1c1f80b8fba5c3aa31"
+  },
+  "next": "Implement the explicit release-deploy preset and the shared issue and rotate proof dispatch; rerun focused and neighbouring suites."
+}

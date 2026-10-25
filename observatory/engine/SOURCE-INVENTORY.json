@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "47b5781310304a8422a232e3ac5442e4dfd2b618146606ddcaef2a86a516616e",
-      "bytes": 169276,
+      "export_sha256": "173fb9a22041afe98d131dcc91beaf0c6a2ca8c4abfc2753c67cc9481e3452f2",
+      "bytes": 169764,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "740915cfd09da20724faa1210031c3f05bed02e93dfb68f6e43aa62e513171d5",
-      "bytes": 141817,
+      "export_sha256": "237114b2e58923509a050fda95c5f32b224f2688fa0147f10eedd83210cdd225",
+      "bytes": 142157,
       "upstream_modified": true
     },
     {
@@ -4330,8 +4330,8 @@
       "path": "tests/test_heroku_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "16c15999afc2aead694322131bd12f7e7b6c6e0903431a2cdf683722d2a2e297",
-      "bytes": 47373
+      "export_sha256": "82c0a4ed0b579e9ab9b27ead626f606d8400e746899eade21057bf4323412fbf",
+      "bytes": 63753
     },
     {
       "path": "tests/test_heroku_scoped.py",
@@ -6040,8 +6040,8 @@
       "path": "tools/heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56edc1b28b5c42eb4ab8e7c072c0034549244e2302913e1c1f80b8fba5c3aa31",
-      "bytes": 52569
+      "export_sha256": "c9f3e711591f4ebc181271aaafdf72ad295ea87bec3a248ea3ed9df21b97880d",
+      "bytes": 59501
     },
     {
       "path": "tools/heroku_findings.py",

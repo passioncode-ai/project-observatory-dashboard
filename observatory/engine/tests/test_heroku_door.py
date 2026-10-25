@@ -29,6 +29,10 @@ import tmp as tmpdir                                                # noqa: E402
 import private_io                                                   # noqa: E402
 
 FAILURES: list[str] = []
+#: The release proof's pinned Range: the newest release only (Platform API ranges).
+RELEASE_RANGE = "version ..; order=desc, max=1"
+SLUG_ID = "12345678-1234-1234-1234-123456789abc"
+OLD_SLUG_ID = "87654321-4321-4321-4321-cba987654321"
 ADMIN = "admin-session-" + "a" * 30
 SEEN_VALUES: list[str] = [ADMIN]
 
@@ -80,6 +84,7 @@ class FakeHeroku:
         self.can_list_auths = True
         self.ignore_member_writes = False
         self.slow = 0.0                         # seconds a mint takes, to force interleaving
+        self.ranges: list[tuple[str, str | None]] = []
         self.lock = __import__("threading").Lock()
 
     def mint_value(self) -> str:
@@ -195,9 +200,20 @@ class FakeHeroku:
                 if held and "read-protected" not in held["scope"]:
                     raise self.m.HerokuError(403, "heroku answered HTTP 403")
                 if path.endswith("/releases"):
-                    return [{"slug": {"id": "12345678-1234-1234-1234-123456789abc"}}], None
+                    # Heroku lists releases oldest first unless the Range asks for the
+                    # newest one; a reader that drops the pinned Range gets two rows.
+                    with self.lock:
+                        self.ranges.append((path, rng))
+                    newest = {"version": 7, "slug": {"id": SLUG_ID}}
+                    if rng == RELEASE_RANGE:
+                        return [newest], None
+                    return [{"version": 6, "slug": {"id": OLD_SLUG_ID}}, newest], None
                 if path.endswith("/slugs"):
                     raise self.m.HerokuError(404, "heroku answered HTTP 404")
+                if path.split("/")[3] == "slugs":
+                    if path.split("/")[4] not in (SLUG_ID, OLD_SLUG_ID):
+                        raise self.m.HerokuError(404, "heroku answered HTTP 404")
+                    return {"id": path.split("/")[4], "process_types": {"web": "synthetic"}}, None
                 return [], None
             return hit, None
         raise AssertionError(f"unexpected call {method} {path}")
@@ -776,6 +792,265 @@ def test_protected_release_wire_is_bounded_and_refuses_redirects() -> None:
     check("protected body read has a finite bound", seen == [1024 * 1024 + 1])
 
 
+@contextlib.contextmanager
+def no_network():
+    """A tripwire: every way out of this process to a socket raises and is recorded,
+    so a release proof that bypassed the fake would fail here, not reach Heroku."""
+    import http.client
+    import socket
+    tripped: list[str] = []
+
+    def trip(name):
+        def refuse(*_a, **_k):
+            tripped.append(name)
+            raise AssertionError(f"network reached through {name}")
+        return refuse
+    with contextlib.ExitStack() as stack:
+        for obj, name in ((socket.socket, "connect"), (socket.socket, "connect_ex"),
+                          (socket, "create_connection"), (http.client.HTTPConnection, "connect"),
+                          (http.client.HTTPSConnection, "connect"), (urllib.request, "urlopen")):
+            stack.enter_context(patched(obj, name, trip(f"{getattr(obj, '__name__', obj)}.{name}")))
+        yield tripped
+
+
+def release_setup(vault_ok=True):
+    """`setup` with the protected transport routed to the fake, recording the Range
+    each read carried and how many calls had been made when the vault was handed a value."""
+    m, fake, delivered = setup(vault_ok=vault_ok)
+    if hasattr(m, "_release_read"):
+        m._release_read = lambda path, value, range_header=None: fake("GET", path, value, rng=range_header)[0]
+    order: list[int] = []
+    inner = m.deliver_to_vault
+
+    def deliver(value, project, env, name):
+        order.append(len(fake.calls))
+        return inner(value, project, env, name)
+    m.deliver_to_vault = deliver
+    return m, fake, delivered, order
+
+
+PROOF_PATHS = ["/apps/alpha-web", "/apps/alpha-web/builds", "/apps/alpha-web/releases",
+               "/apps/alpha-web/slugs/" + SLUG_ID]
+
+
+def reads_by(fake, token, since=0):
+    return [path for method, path, tok, _p in fake.calls[since:] if method == "GET" and tok == token]
+
+
+def test_release_deploy_rotation_proves_with_the_regenerated_value() -> None:
+    with no_network() as tripped:
+        m, fake, delivered, order = release_setup()
+        if "release-deploy" not in m.PRESETS:
+            check("rotation of release-deploy runs the release proof", False, "no release-deploy preset")
+            return
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        first = delivered[-1][0] if delivered else None
+        since = len(fake.calls)
+        rc, o, e = run(m.cmd_rotate, "alpha/prod/K", False, wait=0)
+        new = next(iter(fake.auths.values()))["token"]
+        check("rotate of release-deploy delivers the regenerated value", rc == 0 and len(delivered) == 2
+              and delivered[-1][0] == new and new != first, o + e)
+        check("the regenerated value reads the app, builds, newest release and its exact slug",
+              reads_by(fake, new, since) == PROOF_PATHS, str(reads_by(fake, new, since)))
+        check("the old value is used for no proof read after rotation", not reads_by(fake, first, since), "")
+        proof_end = max(i for i, (meth, path, tok, _p) in enumerate(fake.calls) if tok == new)
+        check("every proof read happens before the vault is handed the value",
+              order and order[-1] > proof_end, f"{order} {proof_end}")
+        check("the rotation's release read carried the pinned Range",
+              fake.ranges and fake.ranges[-1] == ("/apps/alpha-web/releases", RELEASE_RANGE), str(fake.ranges))
+        row = json.loads(m.LEDGER.read_text())["issued"]["alpha/prod/K"]
+        check("and the ledger counts one rotation of the release-deploy row",
+              row["rotations"] == 1 and row["preset"] == "release-deploy", str(row))
+        check("rotation prints no value", no_value(o + e), o + e)
+
+        for refused in ("/apps/alpha-web/releases", "/apps/alpha-web/slugs"):
+            m, fake, delivered, order = release_setup()
+            run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+            fake.refuse[refused] = 403
+            rc, o, e = run(m.cmd_rotate, "alpha/prod/K", False, wait=0)
+            row = json.loads(m.LEDGER.read_text())["issued"]["alpha/prod/K"]
+            check(f"a protected 403 on {refused} after regenerate says the old value is dead",
+                  rc == 1 and "REGENERATED but not delivered" in e and "old value is dead" in e, e)
+            check(f"and delivers nothing and counts no rotation ({refused})",
+                  len(delivered) == 1 and row["rotations"] == 0, str(row))
+            check(f"and prints no value ({refused})", no_value(o + e), o + e)
+
+        m, fake, delivered, order = release_setup()
+        run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        since = len(fake.calls)
+
+        def refuse_vault(*_a):
+            raise RuntimeError("vault refused the slot alpha/prod/K (exit 3); child output withheld")
+        m.deliver_to_vault = refuse_vault
+        rc, o, e = run(m.cmd_rotate, "alpha/prod/K", False, wait=0)
+        new = next(iter(fake.auths.values()))["token"]
+        row = json.loads(m.LEDGER.read_text())["issued"]["alpha/prod/K"]
+        check("a vault failure after a full release proof says the old value is dead",
+              rc == 1 and reads_by(fake, new, since) == PROOF_PATHS and "old value is dead" in e
+              and row["rotations"] == 0 and no_value(o + e), o + e)
+    check("rotation tests reached no network", not tripped, str(tripped))
+
+
+def test_release_read_pins_the_newest_release_range() -> None:
+    with no_network() as tripped:
+        m, fake, delivered, order = release_setup()
+        if "release-deploy" not in m.PRESETS:
+            check("the release Range is pinned", False, "no release-deploy preset")
+            return
+        check("the door pins a descending one-release Range", getattr(m, "RELEASE_RANGE", None) == RELEASE_RANGE,
+              str(getattr(m, "RELEASE_RANGE", None)))
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        check("issue reads releases once, with exactly that Range",
+              rc == 0 and fake.ranges == [("/apps/alpha-web/releases", RELEASE_RANGE)], f"{fake.ranges} {o}{e}")
+        new = delivered[-1][0] if delivered else None
+        check("and proves the newest release's slug, never an older one",
+              reads_by(fake, new)[-1:] == ["/apps/alpha-web/slugs/" + SLUG_ID]
+              and not any(OLD_SLUG_ID in p for _m, p, _t, _x in fake.calls), str(reads_by(fake, new)))
+    check("range tests reached no network", not tripped, str(tripped))
+
+
+def test_release_proof_refuses_a_slug_id_that_is_not_exactly_a_uuid() -> None:
+    with no_network() as tripped:
+        for bad in (SLUG_ID + "\n", "\n" + SLUG_ID, 12345678, 1.5, True, [SLUG_ID], {"id": SLUG_ID},
+                    SLUG_ID + "0" * 4096, "a" * 100000, SLUG_ID.replace("-", ""), SLUG_ID[:-1] + "g"):
+            m, fake, delivered, order = release_setup()
+            if "release-deploy" not in m.PRESETS:
+                check("an unsafe slug id is refused", False, "no release-deploy preset")
+                return
+
+            def read(path, value, range_header=None, bad=bad, fake=fake):
+                if path.endswith("/releases"):
+                    fake("GET", path, value, rng=range_header)
+                    return [{"version": 7, "slug": {"id": bad}}]
+                return fake("GET", path, value, rng=range_header)[0]
+            m._release_read = read
+            rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+            check(f"slug id {type(bad).__name__} of length {len(str(bad))} is refused before any slug read",
+                  rc == 1 and not any("/slugs" in p for _m, p, _t, _x in fake.calls), o + e)
+            check(f"and before delivery, with the fresh authorization deleted ({type(bad).__name__})",
+                  not delivered and not fake.auths and not m.LEDGER.exists() and no_value(o + e), o + e)
+            check("and the refusal does not echo the offered id",
+                  not isinstance(bad, str) or len(bad) < 40 or bad.strip() not in o + e, "")
+    check("slug id tests reached no network", not tripped, str(tripped))
+
+
+def test_protected_release_wire_installs_its_guards_and_types_every_failure() -> None:
+    import http.client
+    m = door()
+    if not hasattr(m, "_release_read") or not hasattr(m, "_NoReleaseRedirect"):
+        check("protected release read transport exists", False)
+        return
+    secret_body = b'{"id":"forbidden","message":"echo HRKU-leaked-in-body"}'
+
+    class Reply:
+        def __init__(self, body=b"[]", fail=None):
+            self.body, self.fail = body, fail
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, n):
+            if self.fail:
+                raise self.fail
+            return self.body[:n]
+    handlers: list = []
+    requests: list = []
+    outcome: dict = {}
+
+    class Opener:
+        def open(self, request, timeout):
+            requests.append(request)
+            what = outcome["next"]
+            if isinstance(what, BaseException):
+                raise what
+            return what
+
+    def build(*args):
+        handlers.append(args)
+        return Opener()
+    cases = [
+        ("HTTP 403 with a body naming a value", urllib.error.HTTPError(
+            "https://api.heroku.com/apps/alpha-web/releases", 403, "Forbidden", {}, io.BytesIO(secret_body)), 403),
+        ("a redirect the handler refused surfaces as its status", urllib.error.HTTPError(
+            "https://api.heroku.com/apps/alpha-web/releases", 302, "Found",
+            {"Location": "https://outside.example.invalid/"}, io.BytesIO(b"")), 302),
+        ("malformed UTF-8", Reply(b"\xff\xfe\xfd"), "shape"),
+        ("malformed JSON", Reply(b'{"not json'), "shape"),
+        ("an empty body", Reply(b""), "shape"),
+        ("a connection dropped before the answer", http.client.RemoteDisconnected("closed"), "transport"),
+        ("a connection dropped mid-body", Reply(fail=http.client.IncompleteRead(b"[")), "transport"),
+        ("a reset connection", ConnectionResetError("reset"), "transport"),
+        ("a timeout", TimeoutError("timed out"), "transport"),
+    ]
+    with no_network() as tripped, patched(m.urllib.request, "build_opener", build):
+        for label, what, status in cases:
+            outcome["next"] = what
+            try:
+                m._release_read("/apps/alpha-web/releases", ADMIN, m.RELEASE_RANGE)
+                check(f"{label} raises", False, "no exception")
+            except m.HerokuError as exc:
+                check(f"{label} is a typed failure ({status})", exc.status == status, f"{exc.status} {exc}")
+                check(f"{label} is value-free", no_value(str(exc)) and "outside.example" not in str(exc)
+                      and "alpha-web" not in str(exc), str(exc))
+            except Exception as exc:                                  # an untyped escape is the failure
+                check(f"{label} is a typed failure ({status})", False, type(exc).__name__)
+        check("every protected open installs the no-redirect handler",
+              handlers and all(any(h is m._NoReleaseRedirect or isinstance(h, m._NoReleaseRedirect) for h in args)
+                               for args in handlers), str(handlers))
+        check("the handler refuses to follow a redirect", m._NoReleaseRedirect().redirect_request(
+            None, None, 302, "", {}, "https://outside.example.invalid/") is None)
+        check("each request goes to the fixed origin with the credential in a header and the pinned Range",
+              all(r.full_url == "https://api.heroku.com/apps/alpha-web/releases"
+                  and r.get_header("Authorization") == "Bearer " + ADMIN
+                  and r.get_header("Range") == m.RELEASE_RANGE for r in requests), "")
+        opened = len(requests)
+        for path in ("https://outside.example.invalid/apps/x", "//outside.example.invalid/apps",
+                     "/apps/alpha-web/config-vars", "/account"):
+            try:
+                m._release_read(path, ADMIN)
+                check(f"{path} is refused", False, "no exception")
+            except m.HerokuError as exc:
+                check(f"a path outside the release reads is refused before opening ({path})",
+                      len(requests) == opened and no_value(str(exc)), str(exc))
+    check("transport tests reached no network", not tripped, str(tripped))
+
+
+def test_release_vault_failure_after_proof_deletes_the_fresh_authorization() -> None:
+    with no_network() as tripped:
+        m, fake, delivered, order = release_setup(vault_ok=False)
+        if "release-deploy" not in m.PRESETS:
+            check("a vault failure after proof cleans up", False, "no release-deploy preset")
+            return
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        minted = [p for meth, p, _t, _x in fake.calls if meth == "POST" and p == "/oauth/authorizations"]
+        new_reads = [p for meth, p, tok, _x in fake.calls if meth == "GET" and tok not in (ADMIN,)]
+        check("the full proof ran before the vault refused", new_reads == PROOF_PATHS, str(new_reads))
+        check("the vault refusal fails the issue and deletes the fresh authorization",
+              rc == 1 and len(minted) == 1 and not fake.auths and "deleted again" in e, o + e)
+        check("and writes no ledger row", not m.LEDGER.exists(), "")
+        check("and prints no value", no_value(o + e), o + e)
+
+        m, fake, delivered, order = release_setup()
+        run(m.cmd_issue, "read", "alpha/prod/K", None, "alpha-web", None, None, wait=0)
+
+        def refuse_vault(*_a):
+            raise RuntimeError("vault refused the slot alpha/prod/K (exit 3); child output withheld")
+        m.deliver_to_vault = refuse_vault
+        rc, o, e = run(m.cmd_issue, "release-deploy", "alpha/prod/K", None, "alpha-web", None, 7, wait=0)
+        row = json.loads(m.LEDGER.read_text())["issued"]["alpha/prod/K"]
+        check("over an existing slot, the slot's previous authorization survives a failed delivery",
+              rc == 1 and list(fake.auths) == ["auth-0001-0000"] and row["authorization_id"] == "auth-0001-0000"
+              and row["preset"] == "read", f"{list(fake.auths)} {row}")
+        check("and the fresh one is deleted again", "auth-0002-0000" not in fake.auths and "deleted again" in e, e)
+    check("cleanup tests reached no network", not tripped, str(tripped))
+
+
+def test_legacy_deploy_claims_no_release_access() -> None:
+    m = door()
+    why = m.PRESETS["deploy"]["why"]
+    check("legacy deploy keeps read and write", m.PRESETS["deploy"]["scopes"] == ("read", "write"), "")
+    check("legacy deploy no longer claims releases it never proves",
+          "(deploys, scaling, releases)" not in why and "release-deploy" in why, why)
+
+
 def test_the_door_source_keeps_the_rules() -> None:
     src = (ROOT / "tools" / "heroku.py").read_text(encoding="utf-8")
     check("values arrive on stdin", "sys.stdin.read()" in src and '"--token"' not in src, "")
@@ -809,6 +1084,12 @@ if __name__ == "__main__":
                test_release_deploy_proves_protected_endpoints,
                test_release_proof_rejects_missing_or_unsafe_slug,
                test_protected_release_wire_is_bounded_and_refuses_redirects,
+               test_release_deploy_rotation_proves_with_the_regenerated_value,
+               test_release_read_pins_the_newest_release_range,
+               test_release_proof_refuses_a_slug_id_that_is_not_exactly_a_uuid,
+               test_protected_release_wire_installs_its_guards_and_types_every_failure,
+               test_release_vault_failure_after_proof_deletes_the_fresh_authorization,
+               test_legacy_deploy_claims_no_release_access,
                test_the_door_source_keeps_the_rules):
         fn()
     print()
