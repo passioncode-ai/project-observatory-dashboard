@@ -911,6 +911,20 @@ def put_launcher_back(aside: Path | None) -> None:
         os.replace(aside, original)
 
 
+#: `NewEngine.ensure_maintenance`'s code when the caller said OBSERVATORY_SYSTEM_SETUP=0.
+SYSTEM_SETUP_REFUSED = -1
+#: What the report says then (OBS-229): the word `full init` answers with, and how to schedule.
+SYSTEM_SETUP_REFUSED_DETAIL = (
+    "OBSERVATORY_SYSTEM_SETUP=0 in this process: the update scheduled no job and wrote nothing to "
+    "the credential store; run `project-observatory full maintain ensure` from a terminal with "
+    "OBSERVATORY_SYSTEM_SETUP unset or 1 to schedule updates and daily backups")
+
+
+def system_setup_refused(env=None) -> bool:
+    """Whether the caller explicitly forbade touching launchd, systemd and the credential store."""
+    return (os.environ if env is None else env).get("OBSERVATORY_SYSTEM_SETUP") == "0"
+
+
 class NewEngine:
     """The freshly installed release, always in a new process of its own.
 
@@ -967,7 +981,11 @@ class NewEngine:
 
         Run by the new code, so a release that changes the job's plist installs its own
         version. Allowed to touch launchd/systemd and the credential store because a
-        person or the maintenance job itself started this update."""
+        person or the maintenance job itself started this update, unless the caller said
+        OBSERVATORY_SYSTEM_SETUP=0: that refusal is kept, never overridden (OBS-229: an
+        update in a sandbox workspace loaded two launchd jobs and wrote a Keychain item)."""
+        if system_setup_refused(self.env):
+            return SYSTEM_SETUP_REFUSED, SYSTEM_SETUP_REFUSED_DETAIL
         saved = self.env
         self.env = {**saved, "OBSERVATORY_SYSTEM_SETUP": "1"}
         try:
@@ -1649,12 +1667,19 @@ class Transaction:
         failed = self.start_writers() if self.stopped else []
         if self.has_ws:
             engine = self.deps.engine(self.base)
-            if hasattr(engine, "ensure_maintenance"):
+            if system_setup_refused():
+                report["maintenance"] = "not-scheduled-here"
+                report["maintenance_detail"] = SYSTEM_SETUP_REFUSED_DETAIL
+            elif hasattr(engine, "ensure_maintenance"):
                 try:
                     code, detail = engine.ensure_maintenance()
                 except Exception as exc:  # noqa: BLE001 — the update is done; the plugin hook retries
                     code, detail = 125, type(exc).__name__
-                report["maintenance"] = "scheduled" if code == 0 else f"not scheduled: {detail or f'exit {code}'}"
+                if code == SYSTEM_SETUP_REFUSED:
+                    report["maintenance"] = "not-scheduled-here"
+                    report["maintenance_detail"] = detail
+                else:
+                    report["maintenance"] = "scheduled" if code == 0 else f"not scheduled: {detail or f'exit {code}'}"
         if failed:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]

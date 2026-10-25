@@ -16,7 +16,14 @@ client's `initialize` parameters, whether `notifications/initialized` came) and 
 bytes it had read but not served travel in an unlinked owner-only file whose
 descriptor is inherited (STATE_ENV names it). The new process replays the handshake
 to its own SDK without answering it on the wire, then serves the held request: the
-request that triggered the swap is answered exactly once, by the new release.
+request that triggered the swap is answered exactly once, by the new release. A
+`subscriptions/listen` stream a 2026-07-28 client keeps open is not waited for: it
+never ends by itself, and counted as running it refused every swap of every modern
+session (OBS-228). The relay ends it gracefully just before `execv`, first sending a
+stamped `notifications/tools/list_changed` on it when the tool set changed; a client
+that listens again gets a new stream from the new release (the SDK's own client does
+not re-listen by itself, so one that does not hears no later change). A swap refused because requests were still running is
+tried again the moment the last of them answers.
 
 WHEN IT CANNOT. Windows (`os.execv` starts a new process there and the host's pipe
 would belong to the old one), an update holding the workspace's update lock, a

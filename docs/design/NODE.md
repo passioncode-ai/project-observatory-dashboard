@@ -576,8 +576,10 @@ cannot pass by skipping. `test_the_device_keys_and_the_enrollment_are_owner_only
 `enrollment.json`, the outbox, the journal and their folders with the engine's own boundary (`osprivacy`): mode 0600
 and 0700 on POSIX, an access list that grants only this account, LocalSystem and Administrators on Windows.
 
-Not built here: verifying and applying the server's signed policy and key sets (OE-06; the check-in reports server
-revision 0), a check-in scheduler at the server's interval (the maintenance job runs hourly), and the per-context
+Not built here: verifying and applying the server's signed policy and key sets (OE-06). Until then the check-in
+reports the server layer at revision 0: `applied` while no response has carried a policy (the contract's word for
+none arrived), and `failed`, its error naming the revision that arrived, once one has (`policy_report`, OBS-231), so
+a server never reads a policy as in force on this machine; a check-in scheduler at the server's interval (the maintenance job runs hourly), and the per-context
 `kid` and `iss` (CX-CON-06 in the contract). A settlement the meter accepts after its reservation expired lands after
 its day was sent and is not counted (the meter does not refuse late settlements).
 

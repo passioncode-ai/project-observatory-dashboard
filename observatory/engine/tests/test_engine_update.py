@@ -930,17 +930,38 @@ class UpdateTest(unittest.TestCase):
     def test_the_new_release_schedules_its_own_maintenance_job(self):
         # docs/runs/2026-10-05-auto-update R3: after a successful apply the NEW code
         # schedules the hourly job, so a release that changes the job installs its version.
+        # Unset: a person's terminal (the maintenance job passes 1).
         calls = []
         self.engine.ensure_maintenance = lambda: (calls.append("ensure") or (0, ""))
         self.gh.publish(NEWER)
-        code, doc = self.run_cli("--apply")
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OBSERVATORY_SYSTEM_SETUP", None)
+            code, doc = self.run_cli("--apply")
         self.assertEqual((code, doc["status"], doc["maintenance"]), (0, "updated", "scheduled"))
         self.assertEqual(calls, ["ensure"])
+
+    def test_an_explicit_refusal_of_system_setup_schedules_nothing(self):
+        # OBS-229: OBSERVATORY_SYSTEM_SETUP=0 says this process must not touch launchd, systemd
+        # or the credential store. `full update --apply` overrode it with 1 and, in a sandbox
+        # workspace, loaded two launchd jobs and wrote a Keychain item. Now nothing is asked,
+        # the update itself still completes, and the report says how to schedule the job.
+        calls = []
+        self.engine.ensure_maintenance = lambda: (calls.append("ensure") or (0, ""))
+        self.gh.publish(NEWER)
+        with patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "0"}):
+            code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"], doc["maintenance"]), (0, "updated", "not-scheduled-here"))
+        self.assertEqual(calls, [], "the new release was never asked to schedule its job")
+        self.assertIn("OBSERVATORY_SYSTEM_SETUP=0", doc["maintenance_detail"])
+        self.assertIn("full maintain ensure", doc["maintenance_detail"])
+        # A shell that exports the 0 refuses `maintain ensure` too, so the advice names the setting it needs.
+        self.assertIn("OBSERVATORY_SYSTEM_SETUP unset or 1", doc["maintenance_detail"])
 
     def test_a_schedule_that_fails_does_not_undo_an_update(self):
         self.engine.ensure_maintenance = lambda: (3, "no systemd user manager")
         self.gh.publish(NEWER)
-        code, doc = self.run_cli("--apply")
+        with patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "1"}):
+            code, doc = self.run_cli("--apply")
         self.assertEqual((code, doc["status"]), (0, "updated"))
         self.assertEqual(doc["maintenance"], "not scheduled: no systemd user manager")
 
@@ -1280,13 +1301,25 @@ class RealSeams(unittest.TestCase):
         self.assertNotEqual(kw["cwd"], str(ROOT))
 
     def test_new_engine_schedules_maintenance_with_the_system_setup_flag_only_for_that_call(self):
-        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=self.runner())
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OBSERVATORY_SYSTEM_SETUP", None)
+            engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=self.runner())
         self.assertEqual(engine.ensure_maintenance()[0], 0)
         argv, kw = self.calls[0]
         self.assertEqual(argv[4:], ["--home", str(self.home), "full", "maintain", "ensure", "--if-wanted"])
         self.assertEqual(kw["env"].get("OBSERVATORY_SYSTEM_SETUP"), "1")
         engine.version()
         self.assertNotIn("OBSERVATORY_SYSTEM_SETUP", self.calls[1][1]["env"])
+
+    def test_new_engine_keeps_an_explicit_refusal_of_system_setup(self):
+        # OBS-229: the new release is never started with 1 over a caller's explicit 0.
+        with patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "0"}):
+            engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=self.runner())
+        code, detail = engine.ensure_maintenance()
+        self.assertEqual(code, self.mod.SYSTEM_SETUP_REFUSED)
+        self.assertIn("OBSERVATORY_SYSTEM_SETUP=0", detail)
+        self.assertEqual(self.calls, [], "no `maintain ensure` was started")
+        self.assertEqual(engine.env.get("OBSERVATORY_SYSTEM_SETUP"), "0")
 
     def test_launchd_helpers_name_only_this_workspace(self):
         from tools import install_launchd
