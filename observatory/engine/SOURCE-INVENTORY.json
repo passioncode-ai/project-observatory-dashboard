@@ -2735,8 +2735,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "39061607ee8cdb95c21855765cafe6d064dc3e131cab80152487b525b6e72023",
-      "bytes": 139983
+      "export_sha256": "12f2e599d271a20da1971af1a93ed103e4dd51db9ac2c2dfaffb4e58242d28c8",
+      "bytes": 140451
     },
     {
       "path": "node/p256.py",
@@ -4776,8 +4776,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d8b1ae95b088b1bc4d10fe810f5c4082cdc666a3c3c410a678bb3000d19b5bce",
-      "bytes": 128741
+      "export_sha256": "a94dcd48d2c29ce13d02881f2429860a66ead120c1129f6269a569caf7b74703",
+      "bytes": 129449
     },
     {
       "path": "tests/test_node_pairing.py",

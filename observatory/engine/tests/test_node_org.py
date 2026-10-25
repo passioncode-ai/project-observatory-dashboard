@@ -2170,7 +2170,8 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.policy = self.policy(5)
         self.make().check_in()
         for bad in (self.policy(4), self.policy(0), self.policy(True), self.policy('6'), self.policy(6, 'user'),
-                    dict(self.policy(6), kind='key-set'), self.policy(2 ** 53), 'policy', [self.policy(6)]):
+                    dict(self.policy(6), kind='key-set'), self.policy(2 ** 53), 'policy', [self.policy(6)],
+                    dict(self.policy(6), org={'id': 'another-org'}), dict(self.policy(6), org=None)):
             self.server.policy = bad
             self.assertTrue(self.make().check_in()['ok'])
             self.assertEqual(self.make().state()['serverPolicy'], {'server': {'revision': 5,
@@ -2199,6 +2200,14 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.closed_at = '2026-10-25T00:00:00Z'
         self.assertFalse(self.make().check_in()['ok'])
         self.assertNotIn('serverPolicy', self.make().state())
+
+    def test_a_damaged_held_revision_is_read_as_none(self):
+        from node import org
+        for held in (10 ** 250, 0, -5, True, '3', None, 2.0):
+            state = {'serverPolicy': {'server': {'revision': held}, 'mdm': {'revision': held}}}
+            self.assertEqual(org.policy_report(state), [{'source': 'server', 'revision': 0, 'status': 'applied'}], held)
+        for state in ({'serverPolicy': None}, {'serverPolicy': []}, {'serverPolicy': {'server': 'x', 'mdm': [1]}}):
+            self.assertEqual(org.policy_report(state), [{'source': 'server', 'revision': 0, 'status': 'applied'}], state)
 
     def test_a_renewal_keeps_the_arrived_policy(self):
         from node import org
