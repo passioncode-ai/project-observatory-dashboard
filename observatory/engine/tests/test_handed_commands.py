@@ -90,6 +90,10 @@ SAMPLES = {
     "PROJECT/ENV/NAME": "my-org/prod/ENROLLMENT_TOKEN",
     # node.lifecycle's verbs (OBS-79 L3): a target id and one of its six tools.
     "TARGET_ID": "alpha.app", "TARGET": "alpha.app", "TOOL": "lifecycle.list",
+    # node.lifecycle's import (OBS-79 L5): the other broker's state folder, and the commands its report hands a caller
+    # that needs a binding (the principal, and its tools and targets written `--tool=…` and `--target=…`).
+    "FOLDER": "/srv/example-ws/other-broker", "{item['principal']}": "agent:example-bot",
+    "{tools}": "--tool=lifecycle.list", "{targets}": "--target=alpha.app",
     # A repair an organization asked of this machine (OBS-193): its request id.
     "REPAIR_ID": "rep-0001",
     # The review batch file `review.py batch prepare` names (OBS-227).

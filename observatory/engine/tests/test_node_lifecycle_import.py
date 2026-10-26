@@ -297,8 +297,8 @@ class ImportTests(Folder, unittest.TestCase):
         self.assertNotIn('agent:caller-b', self.engine()['callers'])
         step = next(s for s in out['next'] if 'agent:caller-b' in s)
         self.assertIn('full access-binding issue agent:caller-b', step)
-        self.assertIn('full lifecycle allow agent:caller-b --binding BINDING_ID --tool lifecycle.list '
-                      '--tool lifecycle.status --target alpha.app', step)
+        self.assertIn('full lifecycle allow agent:caller-b --binding BINDING_ID --tool=lifecycle.list '
+                      '--tool=lifecycle.status --target=alpha.app', step)
 
     def test_a_binding_of_another_principal_audience_or_revoked_matches_nothing(self):
         for case in ({'principal': 'agent:caller-b'}, {'audience': 'observatory:other'}, {'revoked': True}):

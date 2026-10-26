@@ -2833,8 +2833,8 @@
       "path": "node/lifecycle/importer.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0f47bdc48b35186e259fa4123d0035c439d2f2c75802b2a350fb9b40774ccc13",
-      "bytes": 29043
+      "export_sha256": "743cce4b3860d0bcc755cdd3a6fca37ed21d3c8c3d0981b5d85fbd11ac75148d",
+      "bytes": 29111
     },
     {
       "path": "node/lifecycle/macos.py",
@@ -4456,8 +4456,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b5bf2045e53d4fb4fd33dd2ceaad8379a8748bcd663d857144a87eefc0cf1116",
-      "bytes": 23428
+      "export_sha256": "4996da387674672073a76d7e513ba83062c1ccaff0a81b3d984ead6d87d4d6a1",
+      "bytes": 23823
     },
     {
       "path": "tests/test_handoff.py",
@@ -4923,7 +4923,7 @@
       "path": "tests/test_node_lifecycle_import.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bf48192e79a89b3a0822ecfc3b8c58dc449284d550b21adc92889b39ccc4d482",
+      "export_sha256": "315f6e7215103a760e703ac4d23147f267e6cfe5de7ae276f0aca5bd667c3507",
       "bytes": 29192
     },
     {

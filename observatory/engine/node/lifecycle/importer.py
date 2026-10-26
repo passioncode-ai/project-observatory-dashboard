@@ -51,10 +51,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import quote
 
 import access_binding as AB
 import osprivacy
+import paths
 
 from node.lifecycle import broker
 from node.lifecycle import service as S
@@ -156,7 +156,7 @@ def read_store(folder: Path) -> tuple[Optional[dict], list]:
                                                         f'of at most {MAX_STORE_BYTES // 1048576} MB'}]
         try:
             # Read-only even on the copy: the count is a reading, never a repair of what it found.
-            db = sqlite3.connect(f'file:{quote(str(copy_path))}?mode=ro', uri=True)
+            db = sqlite3.connect(paths.sqlite_uri(copy_path), uri=True)
         except sqlite3.Error:
             return None, [{'source': 'store', 'reason': 'the store cannot be opened'}]
         try:
@@ -445,15 +445,16 @@ def next_steps(items: list, store: Optional[dict], dry_run: bool) -> list:
         steps.append('run the same command without --dry-run to write it')
     for item in items:
         if item['outcome'] == 'reissue_required':
-            tools = ' '.join(f'--tool {t}' for t in item.get('allowedTools', []))
-            targets = ' '.join(f'--target {t}' for t in item.get('allowedTargets', []))
+            tools = ' '.join(f'--tool={t}' for t in item.get('allowedTools', []))
+            targets = ' '.join(f'--target={t}' for t in item.get('allowedTargets', []))
             steps.append(f"issue {item['principal']} a binding and allow it: `project-observatory full access-binding "
                          f"issue {item['principal']} --project PROJECT --token-file PATH`, then `project-observatory "
                          f"full lifecycle allow {item['principal']} --binding BINDING_ID {tools} {targets}`".rstrip()
                          .replace('  ', ' '))
     if any(i['outcome'] == 'refused' and i.get('code') == 'reenroll_required' for i in items):
-        steps.append('enroll each reenroll_required target again with `project-observatory full lifecycle enroll`, or '
-                     'name its signing team with --trusted-team when you trust it')
+        steps.append('enroll each reenroll_required target again with `project-observatory full lifecycle enroll '
+                     'TARGET_ID --kind app --path PATH --caller PRINCIPAL --startup-effect TEXT`, or name its signing '
+                     'team with --trusted-team when you trust it')
     if store and (store.get('runningOperations') or store.get('startedProcesses')):
         steps.append('the other broker still has operations running or processes it started: once you switch it off, '
                      'the node treats those processes as yours and never idles them out')
