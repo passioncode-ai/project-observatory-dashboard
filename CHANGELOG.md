@@ -15,7 +15,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   second machine the same key); a manifest holds no value and no unkeyed hash. `mark` records a slot that differs
   on purpose, and a `vault.py rotate` makes the other machines' copies read as stale. Each vault row of
   `observatory_credentials` gains `machines`, read from the manifests alone. In this step a peer's manifest is a
-  file placed in `<state>/vault-digests/peers/`; carrying manifests and sealed copies between machines is step 2.
+  file placed in `<state>/vault-digests/peers/`, and the folder is trusted: manifests are not authenticated until
+  step 2, which also carries manifests and sealed copies between machines. A malformed peer file is refused into
+  `degraded` without hiding the other peers, and a lost estate key is never replaced silently.
 
 ## 0.29.2 (2026-10-26)
 

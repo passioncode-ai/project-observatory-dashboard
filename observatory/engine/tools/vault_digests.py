@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import math
 import hashlib
 import hmac
 import json
@@ -56,6 +57,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 import credential_shape  # noqa: E402
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import vault  # noqa: E402  (the store, its private-file helpers, its lock and its journal)
 
@@ -65,6 +67,13 @@ ALGORITHM = "HMAC-SHA-256"
 KEY_NAME = ".estate-digest-key"
 KEY_SHAPE = re.compile(r"[0-9a-f]{64}")
 DIGEST_SHAPE = re.compile(r"[0-9a-f]{64}")
+KEY_ID_SHAPE = re.compile(r"[0-9a-f]{16}")
+#: A peer file name shown in `degraded`; anything else is described, not echoed.
+FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,122}\.json")
+#: How long a "differs on purpose" reason may be; it is printed in the view.
+WHY_MAX = 200
+#: A peer's clock may run this far ahead of ours before its answer is refused as from the future.
+CLOCK_SKEW_SECONDS = 300
 MACHINE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 SLOT_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,127}")
 SLOT_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}/(local|stage|prod)/[A-Z_][A-Z0-9_]{0,127}")
@@ -98,6 +107,35 @@ def _parse_time(text: object) -> datetime.datetime | None:
 
 def digest_dir() -> pathlib.Path:
     return paths.STATE / "vault-digests"
+
+
+def _private_digest_dir() -> pathlib.Path:
+    """The digest folder, created owner-only and tightened to 0700 on every use."""
+    folder = digest_dir()
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    osprivacy.private_folder(folder)
+    return folder
+
+
+def why_problem(text: object) -> str | None:
+    """Why a "differs on purpose" reason cannot be kept or shown, or None when it can."""
+    if not isinstance(text, str) or not text.strip():
+        return "it is empty"
+    if len(text) > WHY_MAX:
+        return f"it is longer than {WHY_MAX} characters"
+    if any(ord(c) < 32 or 127 <= ord(c) < 160 or c in "\u2028\u2029\u200e\u200f\u202a\u202b\u202c\u202d\u202e"
+           for c in text):
+        return "it holds control characters"
+    if credential_shape.shaped(text):
+        return "it looks like it carries a credential"
+    return None
+
+
+def shown_file(name: str) -> str:
+    """A peer file's name as it may appear in `degraded`: echoed only when plain."""
+    if FILE_NAME.fullmatch(name) and not credential_shape.shaped(name):
+        return name
+    return "a file whose name is not plain (not shown)"
 
 
 def local_manifest_path() -> pathlib.Path:
@@ -188,10 +226,11 @@ def build_manifest(machine: str, key: str) -> dict:
     slots: dict[str, dict] = {}
     for name, slot in local_slots():
         meta = vault._read_meta(slot)
+        rotated = meta.get("rotated")
         row: dict = {"digest": digest(key, vault._read_private(slot).strip()),
-                     "rotated_at": meta.get("rotated") if isinstance(meta.get("rotated"), str) else None}
+                     "rotated_at": rotated if _parse_time(rotated) else None}
         mark = meta.get("differs_on_purpose")
-        if isinstance(mark, dict):
+        if isinstance(mark, dict) and why_problem(mark.get("why")) is None:
             row["on_purpose"] = {"why": str(mark.get("why") or ""), "at": str(mark.get("at") or "")}
         slots[name] = row
     return {"schema": SCHEMA, "machine": machine, "generated_at": now(), "algorithm": ALGORITHM,
@@ -200,7 +239,21 @@ def build_manifest(machine: str, key: str) -> dict:
 
 def write_manifest(machine: str | None = None) -> dict:
     """Compute this machine's manifest under the estate key (created on first use) and save it."""
-    manifest = build_manifest(machine_name(machine), _key(create=True) or "")
+    name = machine_name(machine)
+    _private_digest_dir()
+    if _read_key() is None and local_manifest_path().is_file():
+        # THE KEY WAS LOST, NOT NEVER MADE: a fresh one would silently make every digest this
+        # machine published disagree with every peer. Say so and name the way back.
+        try:
+            earlier = read_manifest(local_manifest_path()).get("key_id")
+        except Refused:
+            earlier = None
+        if earlier:
+            raise Refused(f"this machine's manifest was made under estate key {earlier}, and the vault "
+                          f"holds no estate key now; restore it with `{CMD} key import FILE` (from the "
+                          f"vault's backup or another machine's `key export`), or delete "
+                          f"{local_manifest_path()} to start a new estate key on purpose")
+    manifest = build_manifest(name, _key(create=True) or "")
     vault._atomic_write(local_manifest_path(), json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     return manifest
 
@@ -213,8 +266,9 @@ def read_manifest(path: pathlib.Path) -> dict:
     if path.stat().st_size > MAX_MANIFEST_BYTES:
         raise Refused("larger than a manifest can be")
     try:
-        doc = json.loads(vault._read_private(path, private=False))
-    except (ValueError, OSError):
+        doc = json.loads(vault._read_private(path, private=False)[:MAX_MANIFEST_BYTES + 1])
+    except (ValueError, OSError, RecursionError):
+        # RecursionError: deeply nested JSON exhausts the parser's stack (`[[[[...`).
         raise Refused("not readable JSON") from None
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         raise Refused(f"not a {SCHEMA} manifest")
@@ -222,12 +276,18 @@ def read_manifest(path: pathlib.Path) -> dict:
         raise Refused("its machine name is not one plain identifier")
     if _parse_time(doc.get("generated_at")) is None:
         raise Refused("its generated_at is not an ISO-8601 time")
-    if not isinstance(doc.get("key_id"), str) or not isinstance(doc.get("slots"), dict):
-        raise Refused("it has no key_id or no slots")
+    if not isinstance(doc.get("key_id"), str) or not KEY_ID_SHAPE.fullmatch(doc["key_id"]):
+        raise Refused("its key_id is not 16 lowercase hexadecimal characters")
+    if not isinstance(doc.get("slots"), dict):
+        raise Refused("it has no slots")
     for name, row in doc["slots"].items():
         if not SLOT_KEY.fullmatch(str(name)) or not isinstance(row, dict) \
-                or not DIGEST_SHAPE.fullmatch(str(row.get("digest") or "")):
+                or not isinstance(row.get("digest"), str) or not DIGEST_SHAPE.fullmatch(row["digest"]) \
+                or (row.get("rotated_at") is not None and _parse_time(row.get("rotated_at")) is None):
             raise Refused("a slot row is malformed")
+        if "on_purpose" in row and (not isinstance(row["on_purpose"], dict)
+                                    or why_problem(row["on_purpose"].get("why")) is not None):
+            raise Refused("a slot row is malformed: its on-purpose reason is not short plain text")
     return doc
 
 
@@ -241,7 +301,9 @@ def read_peers(folder: pathlib.Path) -> tuple[list[dict], list[dict]]:
         try:
             good.append(read_manifest(path))
         except Refused as exc:
-            bad.append({"file": path.name, "reason": str(exc)})
+            bad.append({"file": shown_file(path.name), "reason": str(exc)})
+        except vault.VaultBoundaryError:
+            bad.append({"file": shown_file(path.name), "reason": "a link or not a private regular file"})
     return good, bad
 
 
@@ -259,6 +321,10 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
     seen = {here}
     for peer in sorted(peers, key=lambda p: p["machine"]):
         name = peer["machine"]
+        if name == here:
+            degraded.append({"source": "peers", "code": "duplicate-machine",
+                             "reason": f"a peer manifest names this machine ({name}); it is ignored"})
+            continue
         if name in seen:
             degraded.append({"source": "peers", "code": "duplicate-machine",
                              "reason": f"two manifests name the machine {name}; the first is used"})
@@ -269,6 +335,10 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
         row = {"machine": name, "last_answer": peer["generated_at"]}
         if not hmac.compare_digest(str(peer.get("key_id")), str(local.get("key_id"))):
             row.update(state=UNREACHABLE, reason="its manifest was made under another estate key")
+        elif answered is not None and (answered - at).total_seconds() > CLOCK_SKEW_SECONDS:
+            row.update(state=UNREACHABLE,
+                       reason=f"its answer is dated in the future, more than {CLOCK_SKEW_SECONDS // 60} minutes "
+                              f"ahead of this machine's clock; check both clocks")
         elif answered is None or (at - answered).total_seconds() > max_age_hours * 3600:
             row.update(state=UNREACHABLE,
                        reason=f"its last answer is older than {max_age_hours:g} hours")
@@ -303,9 +373,12 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
                 for r in rows for c in r["machines"].values())
     all_match = bool(reachable) and not unreachable and not degraded and agree
     newest = max([local["generated_at"], *(p["generated_at"] for p in reachable)])
+    on_purpose = sum(1 for r in rows if any(c.get("on_purpose") for c in r["machines"].values()))
     if all_match:
         summary = (f"All {total} slot(s) match on {len(reachable) + 1} machines "
-                   f"({here} and {', '.join(sorted(p['machine'] for p in reachable))}; newest answer {newest}).")
+                   f"({here} and {', '.join(sorted(p['machine'] for p in reachable))}; "
+                   + (f"{on_purpose} differ on purpose; " if on_purpose else "")
+                   + f"newest answer {newest}).")
     elif not machines:
         summary = (f"{total} slot(s) here and no peer manifest to compare with: nothing is known "
                    f"about other machines.")
@@ -335,11 +408,14 @@ def _cell(mine: dict | None, theirs: dict | None) -> dict:
         cell["on_purpose"] = {"why": str(mark.get("why") or ""), "by": "here" if mine.get("on_purpose") else "peer"}
         return cell
     # A ROTATION MARKS THE OTHER COPIES STALE: the side rotated later holds the current value.
-    ours, other = mine.get("rotated_at") or "", theirs.get("rotated_at") or ""
+    # Times, not strings: `2026-10-20T10:00:00+02:00` is earlier than `2026-10-20T09:00:00Z`.
+    never = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    ours = _parse_time(mine.get("rotated_at")) or never
+    other = _parse_time(theirs.get("rotated_at")) or never
     if ours > other:
-        cell["stale"] = {"where": "peer", "rotated_here_at": ours}
+        cell["stale"] = {"where": "peer", "rotated_here_at": mine["rotated_at"]}
     elif other > ours:
-        cell["stale"] = {"where": "here", "rotated_there_at": other}
+        cell["stale"] = {"where": "here", "rotated_there_at": theirs["rotated_at"]}
     return cell
 
 
@@ -363,6 +439,8 @@ def holders_index(machine: str | None = None) -> tuple[dict[str, list[str]], lis
         local_key_id = local.get("key_id") if local else None
     except (Refused, OSError, vault.VaultBoundaryError):
         local = None
+        degraded.append({"source": "vault-digests", "code": "local-manifest-unreadable",
+                         "reason": f"this machine's digest manifest could not be read; run `{CMD} write`"})
     here = machine or (local or {}).get("machine") or "this-machine"
     view = compare({"machine": here, "generated_at": now(), "key_id": local_key_id or "", "slots": {}},
                    peers, unreadable=bad) if peers or bad else None
@@ -458,7 +536,10 @@ def cmd_mark(args) -> int:
     why = (args.why or "").strip()
     if len(why) < 8:
         raise Refused("--why must say why the copies differ on purpose (at least 8 characters)")
-    set_mark(args.project, args.env, args.name, vault._note("--why", why))
+    problem = why_problem(why)
+    if problem:
+        raise Refused(f"--why is refused: {problem}; describe the reason, never a value")
+    set_mark(args.project, args.env, args.name, why)
     print(f"marked {args.project}/{args.env}/{args.name} as different on purpose; "
           f"`{CMD} write` publishes the mark to the manifest")
     return 0
@@ -503,16 +584,32 @@ def cmd_key(args) -> int:
     # The folder is resolved (macOS's /tmp and /var are links); the file itself may not be a link.
     given = pathlib.Path(args.file).expanduser()
     target = given.parent.resolve() / given.name
-    vault._no_symlinks(target)
-    if target.exists():
-        raise Refused("FILE already exists; export never overwrites")
+    vault._no_symlinks(target.parent)
     found = _key(create=True) or ""
-    vault._atomic_write(target, found + "\n")
+    # Created here or refused: O_EXCL never replaces, O_NOFOLLOW never writes through a link.
+    try:
+        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+    except FileExistsError:
+        raise Refused("FILE already exists (or is a link); export never overwrites") from None
+    with os.fdopen(fd, "w", encoding="ascii") as stream:
+        stream.write(found + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     vault.journal("estate-key-export", "estate/digest-key", tool="vault_digests.py",
                   key_id=key_id(found), into=str(target))
     print(f"estate key {key_id(found)} written to {target} (600, value hidden); import it on the other "
           f"machine with `{CMD} key import FILE`, then delete the file")
     return 0
+
+
+def max_age(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("a number of hours") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("a finite number of hours above zero")
+    return value
 
 
 def parser() -> argparse.ArgumentParser:
@@ -525,7 +622,7 @@ def parser() -> argparse.ArgumentParser:
         s.add_argument("--machine", help="this machine's name in manifests (default: the host name)")
     v.add_argument("--json", action="store_true")
     v.add_argument("--peers", help="the folder of peer manifests (default: <state>/vault-digests/peers)")
-    v.add_argument("--max-age-hours", type=float, default=MAX_AGE_HOURS,
+    v.add_argument("--max-age-hours", type=max_age, default=MAX_AGE_HOURS,
                    help="a peer answer older than this is unreachable")
     m = sub.add_parser("mark", help="mark a slot as different on purpose on this machine")
     vault._slot_args(m)

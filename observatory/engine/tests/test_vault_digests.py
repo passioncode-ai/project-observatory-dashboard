@@ -59,7 +59,7 @@ class Machine:
         return self.state / "vault-digests/local.json"
 
 
-class VaultDigestsTests(unittest.TestCase):
+class TwoMachines(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="observatory-vault-digests-")
         base = Path(self.temp.name).resolve()
@@ -99,6 +99,8 @@ class VaultDigestsTests(unittest.TestCase):
         row = next(r for r in view["slots"] if r["slot"] == slot)
         return row["machines"][machine]
 
+
+class VaultDigestsTests(TwoMachines):
     def test_write_creates_the_key_in_the_vault_and_a_manifest_without_values(self):
         self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
         p = self.a.digests("write")
@@ -283,6 +285,148 @@ class VaultDigestsTests(unittest.TestCase):
         self.assertEqual(rows["API_TOKEN"]["machines"], ["machine-a", "machine-b"])
         self.assertEqual(rows["ONLY_A"]["machines"], ["machine-a"])
         self.assertFalse([d for d in out["degraded"] if d.get("source") == "vault-digests"])
+
+
+class ReviewFindings(TwoMachines):
+    """The independent review of PR #364: one test per finding."""
+
+    def peer_doc(self) -> dict:
+        self.share_key()
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.digests("write")
+        return json.loads(self.b.manifest.read_text())
+
+    def place(self, name: str, doc) -> None:
+        (self.peers_a / name).write_text(doc if isinstance(doc, str) else json.dumps(doc))
+
+    def good_peer_stays(self, view: dict) -> None:
+        """One bad peer file never blanks the others."""
+        self.assertEqual(self.cell(view, "alpha-web/prod/API_TOKEN")["state"], "same")
+
+    def bad_file(self, name: str, doc, good: dict | None = None) -> dict:
+        self.place("machine-b.json", good or self.peer_doc())
+        self.place(name, doc)
+        view = self.view_a(check=1)
+        self.good_peer_stays(view)
+        self.assertFalse(view["all_match"])
+        self.assertTrue(any(d["code"] == "unreadable-manifest" for d in view["degraded"]), view["degraded"])
+        return view
+
+    def test_m1_a_non_hex_key_id_is_refused_into_degraded(self):
+        good = self.peer_doc()
+        self.bad_file("machine-c.json", dict(good, machine="machine-c", key_id="clé-non-ascii-é"), good)
+        # The credentials answer keeps the good peer.
+        code = ("import json, survey; out = survey.credentials('alpha-web'); "
+                "print(json.dumps({'vault': out['vault'], 'degraded': out['degraded']}))")
+        p = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), text=True, capture_output=True,
+                           env=dict(self.a.env, PYTHONPATH=str(ROOT)), timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+        self.assertEqual(out["vault"][0]["machines"], ["machine-a", "machine-b"])
+        self.assertFalse([d for d in out["degraded"] if d.get("code") == "machines-unknown"])
+
+    def test_m2_rotated_at_and_on_purpose_are_validated(self):
+        for i, row_patch in enumerate(({"rotated_at": 5}, {"rotated_at": "not a time"},
+                                       {"on_purpose": {"why": "\x1b[31mred\x1b[0m text", "at": "x"}},
+                                       {"on_purpose": {"why": "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2", "at": "x"}},
+                                       {"on_purpose": {"why": "w" * 400, "at": "x"}},
+                                       {"on_purpose": "a string"})):
+            with self.subTest(row_patch=row_patch):
+                doc = json.loads(self.b.manifest.read_text()) if self.b.manifest.is_file() else self.peer_doc()
+                doc["machine"] = f"machine-x{i}"
+                doc["slots"]["alpha-web/prod/API_TOKEN"].update(row_patch)
+                self.place(f"machine-x{i}.json", doc)
+                p = self.a.digests("view", check=1)
+                self.assertNotIn("\x1b", p.stdout + p.stderr)
+                self.assertNotIn("Traceback", p.stderr)
+                self.assertIn("a slot row is malformed", p.stdout)
+                (self.peers_a / f"machine-x{i}.json").unlink()
+
+    def test_m2_rotation_compares_times_not_strings(self):
+        import vault_digests as vd
+        at = datetime.datetime(2026, 10, 26, tzinfo=datetime.timezone.utc)
+        local = {"machine": "here", "generated_at": "2026-10-26T00:00:00Z", "key_id": "0" * 16,
+                 "slots": {"p/prod/A": {"digest": "1" * 64, "rotated_at": "2026-10-20T10:00:00+02:00"}}}
+        peer = {"machine": "there", "generated_at": "2026-10-25T23:00:00Z", "key_id": "0" * 16,
+                "slots": {"p/prod/A": {"digest": "2" * 64, "rotated_at": "2026-10-20T09:00:00Z"}}}
+        # 10:00+02:00 is 08:00Z, earlier than 09:00Z: the peer rotated later, so here is stale.
+        cell = vd.compare(local, [peer], at=at)["slots"][0]["machines"]["there"]
+        self.assertEqual(cell["stale"]["where"], "here")
+
+    def test_m3_a_future_answer_is_unreachable_naming_the_clock(self):
+        doc = self.peer_doc()
+        doc["generated_at"] = (datetime.datetime.now(datetime.timezone.utc)
+                               + datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.place("machine-b.json", doc)
+        view = self.view_a(check=1)
+        self.assertEqual(self.cell(view, "alpha-web/prod/API_TOKEN")["state"], "unreachable")
+        self.assertIn("clock", view["machines"][0]["reason"])
+
+    def test_m4_deeply_nested_json_is_refused(self):
+        self.bad_file("deep.json", "[" * 100000 + "]" * 100000)
+
+    def test_l5_export_never_follows_or_replaces(self):
+        target = Path(self.temp.name) / "exported"
+        os.symlink(Path(self.temp.name) / "elsewhere", target)
+        self.a.digests("key", "export", str(target), check=2)
+        self.assertFalse((Path(self.temp.name) / "elsewhere").exists())
+        fresh = Path(self.temp.name) / "fresh"
+        self.a.digests("key", "export", str(fresh))
+        self.assertEqual(fresh.stat().st_mode & 0o777, 0o600)
+
+    def test_l7_a_lost_key_is_not_replaced_silently(self):
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.a.digests("write")
+        (self.a.vault / ".estate-digest-key").unlink()
+        p = self.a.digests("write", check=2)
+        self.assertIn("key import", p.stderr)
+        self.assertFalse((self.a.vault / ".estate-digest-key").exists())
+
+    def test_l8_the_all_match_line_counts_differences_on_purpose(self):
+        self.share_key()
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.put("alpha-web", "prod", "API_TOKEN", VALUE_B)
+        self.a.digests("mark", "alpha-web", "prod", "API_TOKEN", "--why", "each machine has its own token")
+        self.deliver_b()
+        line = self.a.digests("view", check=0).stdout.strip()
+        self.assertIn("1 differ on purpose", line)
+
+    def test_l9_peer_file_names_are_screened(self):
+        name = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2" + ".json"
+        view = self.bad_file(name, "{not json")
+        text = json.dumps(view)
+        self.assertNotIn("A1b2C3d4E5f6G7h8I9j0K1l2", text)
+        weird = "bad\x1bname.json"
+        (self.peers_a / weird).write_text("{")
+        p = self.a.digests("view", check=1)
+        self.assertNotIn("\x1b", p.stdout)
+
+    def test_l10_max_age_must_be_finite_and_positive(self):
+        for bad in ("nan", "inf", "0", "-5"):
+            with self.subTest(bad=bad):
+                p = self.a.digests("view", "--max-age-hours", bad, check=2)
+                self.assertNotIn("Traceback", p.stderr)
+
+    def test_l12_a_peer_claiming_this_machine_is_named_as_such(self):
+        doc = self.peer_doc()
+        doc["machine"] = "machine-a"
+        self.place("impostor.json", doc)
+        view = self.view_a(check=1)
+        self.assertTrue(any("names this machine" in d["reason"] for d in view["degraded"]), view["degraded"])
+
+    def test_l13_a_credential_shaped_why_exits_2(self):
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        p = self.a.digests("mark", "alpha-web", "prod", "API_TOKEN", "--why",
+                           "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2", check=2)
+        self.assertNotIn("A1b2C3d4E5f6G7h8I9j0K1l2", p.stdout + p.stderr)
+
+    def test_l14_the_digest_folder_is_owner_only(self):
+        folder = self.a.state / "vault-digests"
+        folder.mkdir(parents=True, mode=0o755)
+        folder.chmod(0o755)
+        self.a.digests("write")
+        self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
 
 
 class CompareIsPure(unittest.TestCase):
