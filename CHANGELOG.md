@@ -44,6 +44,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   the source the engine ships before it runs the helper. A helper built before this release, or from another source,
   makes apps answer `setup_required` (`helper_outdated`) until you run `project-observatory full lifecycle
   build-helper` again; `full lifecycle status` says so, and a stop now checks the helper as a start already did.
+  `status` asks no helper that is a link or that others may change (it reports `unsafe`), and names a missing
+  `native_app.swift` (`source_missing`, reason `helper_source_missing`) rather than calling the helper outdated.
   Launchd targets need no helper and are unaffected.
 
 - **Every credential a door mints now expires, and the expiry is recorded** (OBS-191, part 1).

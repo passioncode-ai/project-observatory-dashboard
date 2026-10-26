@@ -892,6 +892,7 @@ class CliTests(Workspace, unittest.TestCase):
     def test_status_names_a_helper_built_from_an_older_source(self):
         # OBS-222: the helper line says why apps answer setup_required, and names the command that repairs it.
         for state, line in (('outdated', 'built from an older native_app.swift'), ('not_built', 'is not built'),
+                            ('unsafe', 'others may change'), ('source_missing', 'native_app.swift is missing'),
                             ('current', None)):
             with mock.patch.object(macos, 'helper_state', return_value=state), \
                     mock.patch.object(lifecycle_cli.sys, 'platform', 'darwin'):
@@ -900,7 +901,7 @@ class CliTests(Workspace, unittest.TestCase):
                 with contextlib.redirect_stdout(out):
                     self.assertEqual(lifecycle_cli.main(['status', '--no-probe']), 0)
             self.assertEqual(doc['helper']['state'], state)
-            self.assertEqual(doc['helper']['built'], state != 'not_built')
+            self.assertEqual(doc['helper']['built'], state not in ('not_built', 'unsafe'))
             self.assertEqual(doc['helper']['expectedVersion'], macos.expected_helper_version())
             if line:
                 self.assertIn(line, out.getvalue())

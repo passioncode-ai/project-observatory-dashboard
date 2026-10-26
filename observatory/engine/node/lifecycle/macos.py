@@ -149,18 +149,41 @@ def declared_helper_version(text: str) -> Optional[str]:
     return found[0] if len(found) == 1 else None
 
 
-_expected_version: list = []
+_expected_version: dict = {}
 
 
 def expected_helper_version() -> Optional[str]:
-    """The version of the helper this engine ships (`native_app.swift` beside this module), read once. None when the
-    source cannot be read: then no helper is current, and the build names the fault."""
-    if not _expected_version:
+    """The version of the helper this engine ships (`native_app.swift` beside this module), read once per source
+    path. None when the source cannot be read: then no helper is run (`helper_source_missing`), and nothing is
+    remembered, so a restored source is read again."""
+    if HELPER_SOURCE not in _expected_version:
         try:
-            _expected_version.append(source_version(HELPER_SOURCE.read_text(encoding='utf-8')))
+            _expected_version[HELPER_SOURCE] = source_version(HELPER_SOURCE.read_text(encoding='utf-8'))
         except (OSError, UnicodeDecodeError):
             return None
-    return _expected_version[0]
+    return _expected_version[HELPER_SOURCE]
+
+
+def helper_safe(helper) -> bool:
+    """The helper may be run: a regular file of this account that no one else may change, in a folder of this
+    account that no one else may write, neither of them a link. Whoever could replace it would act with every grant
+    the broker holds, so nothing runs it before this check, `helper_state` included."""
+    helper = Path(helper)
+    folder = helper.parent
+    try:
+        return (
+            # The folder first: whoever may write it may swap the file between this check and the exec.
+            folder.is_dir()
+            and not folder.is_symlink()
+            and osprivacy.owned_by_me(folder)
+            and not osprivacy.others_may_write(folder)
+            and helper.is_file()
+            and not helper.is_symlink()
+            and osprivacy.owned_by_me(helper)
+            and not osprivacy.others_may_write(helper)
+        )
+    except OSError:
+        return False
 
 
 def helper_version(helper, *, run) -> Optional[str]:
@@ -188,14 +211,20 @@ def helper_current(helper, *, run) -> bool:
 
 
 def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> str:
-    """`current`, `outdated` (built from another `native_app.swift`, or one that predates `--version`), `not_built`,
-    or `unsupported_platform` off macOS: what `full lifecycle status` and `macos.py helper` report. The ownership
-    checks the adapter applies before it runs the helper are the adapter's; this only reads the version."""
+    """What `full lifecycle status` and `macos.py helper` report, decided before anything runs:
+
+    `unsupported_platform` off macOS; `not_built` (no file); `unsafe` (a link, or a file or folder others may change:
+    never run, as the adapter never runs it); `source_missing` (this engine's `native_app.swift` cannot be read, so no
+    version is known and nothing is run); then `current` or `outdated` from `helper --version`."""
     if (platform or sys.platform) != 'darwin':
         return 'unsupported_platform'
     helper = Path(helper) if helper else default_helper()
-    if not helper.is_file():
+    if not helper.is_file() and not helper.is_symlink():
         return 'not_built'
+    if not helper_safe(helper):
+        return 'unsafe'
+    if expected_helper_version() is None:
+        return 'source_missing'
     return 'current' if helper_current(helper, run=run or Runner()) else 'outdated'
 
 
@@ -744,14 +773,19 @@ class MacAdapter:
     # -- observation -------------------------------------------------------------------------------------------------
 
     def _helper_problem(self) -> Optional[str]:
-        """None when the helper may run, else why not: `helper_not_built` (absent, or not this account's alone) or
-        `helper_outdated` (built from another `native_app.swift` than this engine ships). Both are `setup_required`,
-        repaired by `full lifecycle build-helper`.
+        """None when the helper may run, else why not: `helper_not_built` (no file), `helper_unsafe` (a link, or a
+        file or folder others may change), `helper_source_missing` (this engine's `native_app.swift` cannot be read,
+        so no version is known) or `helper_outdated` (built from another `native_app.swift`). All are
+        `setup_required`; `full lifecycle build-helper` repairs the first, the third needs the engine reinstalled.
 
         A helper that answered the expected version is not asked again until its file changes (device, inode, size,
         modification and change times). A mismatch is never remembered: a rebuilt helper is current at once."""
-        if not self._helper_safe():
+        if not self.helper.is_file() and not self.helper.is_symlink():
             return 'helper_not_built'
+        if not helper_safe(self.helper):
+            return 'helper_unsafe'
+        if expected_helper_version() is None:
+            return 'helper_source_missing'
         try:
             info = self.helper.stat()
         except OSError:
@@ -766,25 +800,6 @@ class MacAdapter:
 
     def _helper_ready(self) -> bool:
         return self._helper_problem() is None
-
-    def _helper_safe(self) -> bool:
-        """The helper is run only when it is a regular file of this account that no one else may change: whoever
-        could replace it would act with every grant the broker holds."""
-        folder = self.helper.parent
-        try:
-            return (
-                # The folder first: whoever may write it may swap the file between this check and the exec.
-                folder.is_dir()
-                and not folder.is_symlink()
-                and osprivacy.owned_by_me(folder)
-                and not osprivacy.others_may_write(folder)
-                and self.helper.is_file()
-                and not self.helper.is_symlink()
-                and osprivacy.owned_by_me(self.helper)
-                and not osprivacy.others_may_write(self.helper)
-            )
-        except OSError:
-            return False
 
     def _helper_answer(self, args, timeout: float = 10) -> dict:
         try:

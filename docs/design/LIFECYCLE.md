@@ -215,7 +215,7 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   Command Line Tools: `xcode-select --install`), with the system PATH only, into
   `<state>/node-lifecycle/bin/lifecycle-native`: an owner-only folder, the file replaced whole, mode 0700. On Apple
   silicon the linker signs it ad hoc. A `--dest` folder that is not this account's alone is refused, never re-moded,
-  and the adapter runs the helper only while it is a regular file of this account that no one else may change. `macos.py helper` says where it is, whether it is built and its `state` (`current`, `outdated`, `not_built`). Without it an app
+  and the adapter runs the helper only while it is a regular file of this account that no one else may change. `macos.py helper` says where it is, whether it is built and its `state` (`current`, `outdated`, `not_built`, `unsafe` for a link or a file or folder others may change, `source_missing` when the engine's `native_app.swift` cannot be read), decided by the same ownership check the adapter applies (`macos.helper_safe`) before anything is run. Without it an app
   probe answers `setup_required` (`helper_not_built`) and a start or a stop is refused with `setup_required`; launchd
   targets need no helper.
 - **The helper's version (OBS-222).** A helper built from an older `native_app.swift` than the engine ships is not
@@ -224,7 +224,11 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   ...}`) at once and touches nothing. Before it runs the helper the adapter asks it, with a 5 s timeout, and compares
   the answer with the version of the source beside it (`macos.expected_helper_version`). Another value, an
   `invalid_argument` from a build that predates the flag, a timeout or an answer of another shape is
-  `setup_required` (`helper_outdated`), repaired by `full lifecycle build-helper`. A helper that answered the expected
+  `setup_required` (`helper_outdated`), repaired by `full lifecycle build-helper`. A helper that fails the ownership
+  check is `helper_unsafe` and is not asked; when the engine's own `native_app.swift` cannot be read no version is
+  known, so no helper is asked and the reason is `helper_source_missing` (reinstall the engine). Known gaps are row
+  OBS-249: a stop is gated like a start, a hanging helper costs its timeout on every call, and `watch` does not
+  restart after a rebuild. A helper that answered the expected
   version is not asked again until its file changes; a mismatch is never remembered. The version cannot stay behind
   its source unnoticed: `test_the_source_declares_the_version_the_engine_expects` fails on any change to the Swift
   file until its declared value is the new digest, which the failure prints. `full lifecycle status` names an

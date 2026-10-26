@@ -1246,6 +1246,39 @@ class HelperVersionTests(Folder, unittest.TestCase):
                           macos.expected_helper_version()))
 
 
+    @unittest.skipUnless(POSIX, 'POSIX modes')
+    def test_the_state_never_runs_a_helper_the_adapter_would_refuse(self):
+        # A folder others may write, a helper others may write, or a link: `unsafe`, and the helper never runs.
+        folder = self.root / 'shared'
+        folder.mkdir()
+        shared = folder / 'helper'
+        shared.write_text('')
+        os.chmod(folder, 0o770)
+        self.assertEqual(macos.helper_state(shared, run=self.mac, platform='darwin'), 'unsafe')
+        os.chmod(folder, 0o700)
+        os.chmod(shared, 0o666)
+        self.assertEqual(macos.helper_state(shared, run=self.mac, platform='darwin'), 'unsafe')
+        link = self.root / 'linked-helper'
+        link.symlink_to(self.helper)
+        self.assertEqual(macos.helper_state(link, run=self.mac, platform='darwin'), 'unsafe')
+        self.assertEqual(self.mac.calls, [], 'nothing was run')
+        self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'current')
+        linked = adapter(self.root, run=self.mac, helper=link)
+        linked.identity_matches = lambda target, *, deadline=None: True
+        self.assertEqual(linked.probe(self.APP).get('reason'), 'helper_unsafe')
+
+    def test_a_missing_source_is_named_as_such_and_runs_nothing(self):
+        with mock.patch.object(macos, 'HELPER_SOURCE', self.root / 'absent.swift'):
+            self.assertIsNone(macos.expected_helper_version())
+            self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'source_missing')
+            seen = self.adapter.probe(self.APP)
+            self.assertEqual((seen['state'], seen.get('reason')), ('setup_required', 'helper_source_missing'))
+            with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+                self.adapter.start(self.APP)
+        self.assertEqual(self.version_calls(), [], 'no helper is asked against a version nobody knows')
+        self.assertRegex(macos.expected_helper_version(), r'^[0-9a-f]{16}$', 'the shipped source is read again')
+
+
 def service_hint(code):
     from node.lifecycle import service
     return service.HINTS[code]
