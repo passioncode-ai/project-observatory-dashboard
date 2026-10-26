@@ -428,6 +428,39 @@ class ReviewFindings(TwoMachines):
         self.a.digests("write")
         self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
 
+    def test_r2_1_an_extreme_rotation_time_never_crashes_the_view(self):
+        doc = self.peer_doc()
+        doc["slots"]["alpha-web/prod/API_TOKEN"]["rotated_at"] = "0001-01-01T00:00:00+14:00"
+        self.place("machine-b.json", doc)
+        p = self.a.digests("view", check=1)
+        self.assertIn("a slot row is malformed", p.stdout)
+        self.assertNotIn("None", p.stdout)
+        self.assertNotIn("Traceback", p.stderr)
+
+    def test_r2_2_key_export_refuses_a_lost_key(self):
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.a.digests("write")
+        (self.a.vault / ".estate-digest-key").unlink()
+        target = Path(self.temp.name) / "exported"
+        p = self.a.digests("key", "export", str(target), check=2)
+        self.assertIn("key import", p.stderr)
+        self.assertFalse(target.exists())
+        self.assertFalse((self.a.vault / ".estate-digest-key").exists())
+        self.a.digests("write", check=2)
+
+    def test_r2_4_a_manifest_is_read_with_a_limit(self):
+        import vault_digests as vd
+        from unittest.mock import patch
+        path = self.peers_a / "big.json"
+        path.write_text(json.dumps({"schema": vd.SCHEMA, "pad": "x" * 500}))
+        with patch.object(vd, "MAX_MANIFEST_BYTES", 100):
+            with self.assertRaises(vd.Refused):
+                vd.read_manifest(path)
+        if hasattr(os, "mkfifo"):
+            os.mkfifo(self.peers_a / "pipe.json")
+            p = self.a.digests("view", check=1)
+            self.assertIn("pipe.json", p.stdout)
+
 
 class CompareIsPure(unittest.TestCase):
     """The comparison reads no file, no key and no value."""
@@ -448,6 +481,32 @@ class CompareIsPure(unittest.TestCase):
         self.assertEqual(a["stale"], {"where": "here", "rotated_there_at": "2026-10-20T00:00:00Z"})
         self.assertEqual(b["on_purpose"]["by"], "peer")
         self.assertFalse(view["all_match"])
+
+    def test_r2_1_a_missing_rotated_at_key_is_never_indexed(self):
+        import vault_digests as vd
+        at = datetime.datetime(2026, 10, 26, tzinfo=datetime.timezone.utc)
+        local = {"machine": "here", "generated_at": "2026-10-26T00:00:00Z", "key_id": "0" * 16,
+                 "slots": {"p/prod/A": {"digest": "1" * 64}}}
+        peer = {"machine": "there", "generated_at": "2026-10-25T23:00:00Z", "key_id": "0" * 16,
+                "slots": {"p/prod/A": {"digest": "2" * 64, "rotated_at": "2026-10-20T00:00:00Z"}}}
+        cell = vd.compare(local, [peer], at=at)["slots"][0]["machines"]["there"]
+        self.assertEqual(cell["stale"], {"where": "here", "rotated_there_at": "2026-10-20T00:00:00Z"})
+        cell = vd.compare(peer | {"machine": "here"}, [local | {"machine": "there"}], at=at)["slots"][0]["machines"]["there"]
+        self.assertEqual(cell["stale"]["where"], "peer")
+        both = vd.compare(local, [peer | {"slots": {"p/prod/A": {"digest": "2" * 64}}}], at=at)
+        self.assertNotIn("stale", both["slots"][0]["machines"]["there"])
+
+    def test_r2_3_the_newest_answer_compares_times(self):
+        import vault_digests as vd
+        at = datetime.datetime(2026, 10, 26, 1, tzinfo=datetime.timezone.utc)
+        local = {"machine": "here", "generated_at": "2026-10-26T00:30:00Z", "key_id": "0" * 16,
+                 "slots": {"p/prod/A": {"digest": "1" * 64}}}
+        # 01:00+02:00 is 23:00Z the day before: older, though its text sorts later.
+        peer = {"machine": "there", "generated_at": "2026-10-26T01:00:00+02:00", "key_id": "0" * 16,
+                "slots": {"p/prod/A": {"digest": "1" * 64}}}
+        view = vd.compare(local, [peer], at=at)
+        self.assertTrue(view["all_match"])
+        self.assertIn("newest answer 2026-10-26T00:30:00Z", view["summary"])
 
     def test_two_manifests_naming_one_machine_are_degraded(self):
         import vault_digests as vd

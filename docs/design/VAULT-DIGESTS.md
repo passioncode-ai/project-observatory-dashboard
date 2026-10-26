@@ -51,13 +51,15 @@ Two machines compare only under the same key:
 
 `import` reads FILE (or stdin, never an argument), refuses a different key unless `--replace` (every digest the machine publishes changes),
 and refuses anything but 64 hexadecimal characters. `export` creates FILE with
-`O_CREAT | O_EXCL | O_NOFOLLOW` at mode 600: it never overwrites a file and never writes through a
-link. Create, import and export are journaled in the movement journal (`vault.py movements`) with
+`O_CREAT | O_EXCL | O_NOFOLLOW` and makes it owner-only before writing (mode 600, a protected
+owner-only access list on Windows): it never overwrites a file and never writes through a link. Create, import and export are journaled in the movement journal (`vault.py movements`) with
 the key id.
 
 A lost key is not replaced silently. When the vault holds no key but this machine's `local.json`
-was made under one, `write` and `view` refuse and name `key import FILE` (from the vault's backup or
-another machine's export); deleting `local.json` is how to start a new key on purpose.
+was made under one, every path that could create a key (`write`, `view` and `key export`) refuses,
+exit 2, and names `key import FILE` (from the vault's backup or another machine's export); a key is
+created only at first use, with no `local.json`. Deleting `local.json` is how to start a new key on
+purpose.
 
 ## The manifest
 
@@ -74,8 +76,10 @@ default; the `vault-digests` folder is created at mode 700 and tightened to 700 
 
 It holds no value and no unkeyed hash. `machine` is `--machine`, else `OBSERVATORY_MACHINE_NAME`,
 else the host name; `rotated_at` is the slot's last `vault.py rotate`. A peer manifest is read only
-if it is a regular file of at most 4 MiB that parses as this schema (nesting too deep for the parser
-is refused like any other unreadable JSON), with a plain machine name, an ISO-8601 `generated_at`,
+if it is a regular file of at most 4 MiB (read with that limit, never whole; a FIFO is refused, not
+waited on) that parses as this schema (nesting too deep for the parser
+is refused like any other unreadable JSON), with a plain machine name, an ISO-8601 `generated_at` (every time in a manifest must fall in the
+years 2000 to 2999, so that converting it to UTC cannot fail),
 a `key_id` of 16 lowercase hexadecimal characters, and per slot a 64-hex digest, a `rotated_at` that
 is absent, null or an ISO-8601 time, and an `on_purpose` reason, if any, of at most 200 characters
 with no control character and no credential shape. A file that fails any of these is refused
@@ -123,7 +127,8 @@ holds a control character or a credential shape.
 
 A rotation marks the other copies stale without a separate step: the manifest carries each slot's
 `rotated_at`, and a `differs` cell names the side that rotated later, comparing the times (not
-their text, so `10:00+02:00` is earlier than `09:00Z`). A mark on purpose takes
+their text, so `10:00+02:00` is earlier than `09:00Z`); a side that never rotated is the older one.
+The `newest answer` of the one-line summary is chosen the same way. A mark on purpose takes
 precedence over staleness: a slot that is meant to differ is not reported stale.
 
 ## `observatory_credentials`

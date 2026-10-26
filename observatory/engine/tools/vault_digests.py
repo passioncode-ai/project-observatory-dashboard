@@ -102,7 +102,12 @@ def _parse_time(text: object) -> datetime.datetime | None:
         value = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
-    return value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+    value = value if value.tzinfo else value.replace(tzinfo=datetime.timezone.utc)
+    # A time this engine can have written: years 2000 to 2999. `0001-01-01T00:00:00+14:00` parses,
+    # but converting it to UTC falls off the calendar, so comparing it with another time fails.
+    if not 2000 <= value.year <= 2999:
+        return None
+    return value.astimezone(datetime.timezone.utc)
 
 
 def digest_dir() -> pathlib.Path:
@@ -178,10 +183,30 @@ def _read_key() -> str | None:
     return text
 
 
+def _refuse_a_lost_key() -> None:
+    """A key may be created only at first use: never when this machine already published under one.
+
+    The vault holding no key while `local.json` exists means the key was LOST, not never made, and
+    a fresh one would make every digest this machine publishes or exports disagree with every peer.
+    Every path that can create the key (`write`, `view`, `key export`) passes here."""
+    if not local_manifest_path().is_file():
+        return
+    try:
+        earlier = read_manifest(local_manifest_path()).get("key_id")
+    except (Refused, OSError, vault.VaultBoundaryError):
+        earlier = None
+    raise Refused(f"this machine's manifest was made under "
+                  + (f"estate key {earlier}" if earlier else "an estate key")
+                  + f", and the vault holds no estate key now; restore it with `{CMD} key import FILE` "
+                    f"(from the vault's backup or another machine's `key export`), or delete "
+                    f"{local_manifest_path()} to start a new estate key on purpose")
+
+
 def _key(create: bool) -> str | None:
     found = _read_key()
     if found or not create:
         return found
+    _refuse_a_lost_key()
     with vault._mutation_lock():
         found = _read_key()
         if found:
@@ -241,18 +266,6 @@ def write_manifest(machine: str | None = None) -> dict:
     """Compute this machine's manifest under the estate key (created on first use) and save it."""
     name = machine_name(machine)
     _private_digest_dir()
-    if _read_key() is None and local_manifest_path().is_file():
-        # THE KEY WAS LOST, NOT NEVER MADE: a fresh one would silently make every digest this
-        # machine published disagree with every peer. Say so and name the way back.
-        try:
-            earlier = read_manifest(local_manifest_path()).get("key_id")
-        except Refused:
-            earlier = None
-        if earlier:
-            raise Refused(f"this machine's manifest was made under estate key {earlier}, and the vault "
-                          f"holds no estate key now; restore it with `{CMD} key import FILE` (from the "
-                          f"vault's backup or another machine's `key export`), or delete "
-                          f"{local_manifest_path()} to start a new estate key on purpose")
     manifest = build_manifest(name, _key(create=True) or "")
     vault._atomic_write(local_manifest_path(), json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     return manifest
@@ -266,7 +279,8 @@ def read_manifest(path: pathlib.Path) -> dict:
     if path.stat().st_size > MAX_MANIFEST_BYTES:
         raise Refused("larger than a manifest can be")
     try:
-        doc = json.loads(vault._read_private(path, private=False)[:MAX_MANIFEST_BYTES + 1])
+        # Read at most the limit, without following a link or waiting on a FIFO.
+        doc = json.loads(osprivacy.read_regular(path, MAX_MANIFEST_BYTES).decode("utf-8"))
     except (ValueError, OSError, RecursionError):
         # RecursionError: deeply nested JSON exhausts the parser's stack (`[[[[...`).
         raise Refused("not readable JSON") from None
@@ -372,7 +386,8 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
     agree = all(c["state"] == SAME or (c["state"] == DIFFERS and c.get("on_purpose"))
                 for r in rows for c in r["machines"].values())
     all_match = bool(reachable) and not unreachable and not degraded and agree
-    newest = max([local["generated_at"], *(p["generated_at"] for p in reachable)])
+    stamps = [local["generated_at"], *(p["generated_at"] for p in reachable)]
+    newest = max(stamps, key=lambda t: _parse_time(t) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))
     on_purpose = sum(1 for r in rows if any(c.get("on_purpose") for c in r["machines"].values()))
     if all_match:
         summary = (f"All {total} slot(s) match on {len(reachable) + 1} machines "
@@ -409,13 +424,13 @@ def _cell(mine: dict | None, theirs: dict | None) -> dict:
         return cell
     # A ROTATION MARKS THE OTHER COPIES STALE: the side rotated later holds the current value.
     # Times, not strings: `2026-10-20T10:00:00+02:00` is earlier than `2026-10-20T09:00:00Z`.
-    never = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-    ours = _parse_time(mine.get("rotated_at")) or never
-    other = _parse_time(theirs.get("rotated_at")) or never
-    if ours > other:
-        cell["stale"] = {"where": "peer", "rotated_here_at": mine["rotated_at"]}
-    elif other > ours:
-        cell["stale"] = {"where": "here", "rotated_there_at": theirs["rotated_at"]}
+    # A side that never rotated (no valid `rotated_at`) is older than one that did.
+    ours = _parse_time(mine.get("rotated_at"))
+    other = _parse_time(theirs.get("rotated_at"))
+    if ours is not None and (other is None or ours > other):
+        cell["stale"] = {"where": "peer", "rotated_here_at": mine.get("rotated_at")}
+    elif other is not None and (ours is None or other > ours):
+        cell["stale"] = {"where": "here", "rotated_there_at": theirs.get("rotated_at")}
     return cell
 
 
@@ -592,6 +607,9 @@ def cmd_key(args) -> int:
     except FileExistsError:
         raise Refused("FILE already exists (or is a link); export never overwrites") from None
     with os.fdopen(fd, "w", encoding="ascii") as stream:
+        # Owner-only on every OS before the key is written: 0600 on POSIX, a protected owner-only
+        # ACL on Windows, where the mode argument alone sets no access list.
+        osprivacy.make_private(target)
         stream.write(found + "\n")
         stream.flush()
         os.fsync(stream.fileno())
