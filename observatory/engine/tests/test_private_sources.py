@@ -46,7 +46,7 @@ checks={
  'plugins/cloudflare_analytics.py':['TOKEN_DIR'],
  'tools/vault.py':['STORE','LEAKS','MOVES'],
  'tools/openrouter.py':['ADMIN_STORE','LEGACY','LEDGER'],
- 'tools/cloudflare.py':['ADMIN_STORE'],
+ 'tools/cloudflare.py':['ADMIN_STORE','INVENTORY_STORE'],
  'tools/digitalocean.py':['ADMIN_STORE','READ_STORE','RECORDS'],
  'tools/revoke_key.py':['SECRET'],
  'tools/install_key.py':['DESTINATIONS','PROVISIONING'],
@@ -70,7 +70,7 @@ assert not paths.HOME.exists(), 'imports created runtime state'
 ''')
 
     def test_optional_collectors_do_nothing_without_opt_in(self):
-        for name in ('github','bitbucket','cloudflare','google','heroku','mcp',
+        for name in ('github','bitbucket','cloudflare','cloudflare_account','google','heroku','mcp',
                      'openrouter','remote_env','domains','sessions','vault'):
             with self.subTest(name=name):
                 proc=subprocess.run([sys.executable, f'collectors/scan_{name}.py'],

@@ -33,6 +33,8 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("agents",   "Agents",    "agents"),
     ("domains",  "Domains",   "table"),
     ("heroku",   "Heroku",    "table"),
+    ("digitalocean", "DigitalOcean", "infra"),
+    ("cloudflare", "Cloudflare", "infra"),
     ("creds",    "Keys",      "table"),
     ("env",      "ENV",       "table"),
     ("mcp",      "MCP",       "table"),
@@ -52,6 +54,8 @@ QUESTIONS: dict[str, str] = {
     "agents":   "Which agents are working, on what, and where their work moved.",
     "domains":  "Domains, reachability, expiry and linked projects.",
     "heroku":   "Apps, state, deployments and cost.",
+    "digitalocean": "Droplets, apps, databases and volumes: state, project and cost.",
+    "cloudflare": "Workers, Pages, R2, D1 and zones: state, project and cost.",
     "creds":    "Keys, their purpose, state and the actions available.",
     "env":      "Variables by project, compared with the running environments.",
     "mcp":      "Agent servers, connections and reachability.",
@@ -69,9 +73,10 @@ ICON = "data:image/svg+xml;base64," + base64.b64encode(
     (Path(__file__).with_name("brand") / "observatory-mark.svg").read_bytes()).decode("ascii")
 NAMES = tuple(p[0] for p in PAGES)
 TABLE_PAGES = tuple(p[0] for p in PAGES if p[2] == "table")
+INFRA_PAGES = tuple(p[0] for p in PAGES if p[2] == "infra")
 NAV_GROUPS = (
     ("work", "Work", ("index", "projects", "agents", "findings")),
-    ("infrastructure", "Infrastructure", ("heroku", "domains", "traffic")),
+    ("infrastructure", "Infrastructure", ("heroku", "digitalocean", "cloudflare", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
     ("system", "System", ("health", "machine")),
 )
@@ -105,6 +110,12 @@ def _agents_line(payload: dict, t: Translator) -> str:
     needs = len((payload.get("agents") or {}).get("needsYou") or [])
     return (t.mark("{n} workflows open", n=c.get("workflowsOpen", 0)) + " · "
             + t.mark("{n} need you", n=needs))
+
+
+def _infra(page: str, payload: dict, t: Translator) -> str:
+    """The DigitalOcean or Cloudflare page's body, rendered at build time (dashboard/infra_page.py)."""
+    import infra_page
+    return infra_page.infra_html(page, payload, t)
 
 
 def _machine(payload: dict, t: Translator) -> str:
@@ -183,6 +194,33 @@ def env_default_secrets(env: dict) -> int:
                if v.get("class") == "secret")
 
 
+def _infra_count(doc: dict | None) -> int | str:
+    """A DigitalOcean or Cloudflare badge: the rows its page lists, or nothing when the
+    page lists none because nothing was read (never "0" for an unread provider)."""
+    if not doc:
+        return ""
+    rows = doc.get("resources") or []
+    return len(rows) if rows or not doc.get("degraded") else ""
+
+
+def _infra_line(doc: dict | None, t: Translator) -> str:
+    """The overview card of an infrastructure page: what it lists and what it says it costs."""
+    if not doc:
+        return t.mark("not connected")
+    tt = doc.get("totals") or {}
+    if not doc.get("resources") and doc.get("degraded"):
+        return t.mark("not read")
+    by = tt.get("by_state") or {}
+    bad = (by.get("off") or 0) + (by.get("down") or 0)
+    line = t.mark("{n} resources", n=tt.get("resources", 0))
+    if bad:
+        line += " · " + t.mark("off or down: {n}", n=bad)
+    cost = tt.get("monthly_cost")
+    if isinstance(cost, (int, float)) and cost:
+        line += " · " + t.mark("stated ${amount}/mo", amount=round(cost, 2))
+    return line
+
+
 def _unread(doc: dict) -> bool:
     """A scan that read no application and recorded why (`degraded`)."""
     return not doc.get("apps") and bool(doc.get("degraded"))
@@ -211,6 +249,8 @@ def counts_of(payload: dict) -> dict[str, int | str]:
         "domains": domain_totals(payload.get("domains") or [], payload.get("zones") or [])[0],
         # A scan that read no application is not a count of zero (audit A09).
         "heroku": len(heroku.get("apps") or []) if heroku and not _unread(heroku) else "",
+        "digitalocean": _infra_count(payload.get("digitalocean")),
+        "cloudflare": _infra_count(payload.get("cloudflare")),
         "creds": len(creds.get("credentials") or []) if creds else "",
         "env": (env_default_count(env) if env else "") or "",
         # Declarations, as the MCP page lists them (one row per agent's entry).
@@ -278,6 +318,8 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "domains": t.mark("{n} names", n=counts["domains"]) + " · "
                    + t.mark("Cloudflare zones: {n}", n=len(payload.get("zones") or [])),
         "heroku": t.mark("{n} apps", n=counts["heroku"] or 0),
+        "digitalocean": _infra_line(payload.get("digitalocean"), t),
+        "cloudflare": _infra_line(payload.get("cloudflare"), t),
         "creds": t.mark("{n} entries", n=counts["creds"] or 0),
         # The badge's number with its unit, then the population it is drawn from.
         "env": t.mark("{n} variables", n=counts["env"] or 0) + " · "
@@ -321,7 +363,8 @@ def slice_for(page: str, payload: dict) -> dict:
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
     heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
-             "google": "traffic", "machine": "machine", "agents": "agents"}
+             "google": "traffic", "machine": "machine", "agents": "agents",
+             "digitalocean": "digitalocean", "cloudflare": "cloudflare"}
     out = dict(payload)
     # WHAT PRODUCTION HOLDS is read by exactly the two pages that can say
     # something about it: the Heroku row and the ENV row.
@@ -438,4 +481,5 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
             .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
             .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
             .replace("__AGENTS__", _agents(payload, t) if page == "agents" else "")
+            .replace("__INFRA__", _infra(page, payload, t) if page in INFRA_PAGES else "")
             .replace("__DATA__", data.replace("</", "<\\/")))

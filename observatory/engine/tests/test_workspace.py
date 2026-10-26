@@ -180,7 +180,7 @@ class WorkspaceTests(unittest.TestCase):
         file.write_text(json.dumps(doc));before=file.read_bytes()
         p=self.run_cli('emit',ok=False)
         self.assertNotEqual(p.returncode,0);self.assertEqual(before,file.read_bytes())
-    def test_complete_local_workflow_and_twelve_pages(self):
+    def test_complete_local_workflow_and_fourteen_pages(self):
         self.run_cli('init')
         projects=self.base/'projects';project=projects/'example-project';project.mkdir(parents=True)
         (project/'package.json').write_text('{"name":"example-project","dependencies":{"example":"1"}}')
@@ -188,7 +188,10 @@ class WorkspaceTests(unittest.TestCase):
         for step in ['scan','merge','emit','validate','scan-events','plugins','findings','dashboard','smoke-pages']:
             self.run_cli(step)
         pages=list((self.home/'docs/dashboard').glob('*.html'))
-        self.assertEqual(len(pages),12)
+        self.assertEqual(len(pages),14)
+        # DigitalOcean and Cloudflare before any account is connected: what connecting takes (OBS-235, OBS-271).
+        self.assertIn('is not connected',(self.home/'docs/dashboard/digitalocean.html').read_text())
+        self.assertIn('scan-cloudflare-account',(self.home/'docs/dashboard/cloudflare.html').read_text())
         # The Machine page builds before any machine survey: an empty state, not a blank page.
         self.assertIn('No process survey yet.',(self.home/'docs/dashboard/machine.html').read_text())
         registry=json.loads((self.home/'registry/projects.json').read_text())

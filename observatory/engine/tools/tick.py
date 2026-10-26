@@ -570,6 +570,11 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     if stale(SCRATCH / "digitalocean.json", 24):
         log("digitalocean: refreshing (older than 24h or absent)")
         step("scan-digitalocean", PY, "collectors/scan_digitalocean.py", SCRATCH / "digitalocean.json")
+    # What each Cloudflare account holds for the Cloudflare page (OBS-271): daily, like DigitalOcean's.
+    if stale(SCRATCH / "cloudflare_account.json", 24):
+        log("cloudflare-account: refreshing (older than 24h or absent)")
+        step("scan-cloudflare-account", PY, "collectors/scan_cloudflare_account.py",
+             SCRATCH / "cloudflare_account.json")
     step("scan-mcp", PY, "collectors/scan_mcp.py", SCRATCH / "mcp.json", "--declarations-only")
     step("scan-agents", PY, "collectors/scan_agents.py", SCRATCH / "agents.json")
     # THE HARNESS: what every agent session loads, what it costs, which skills match a security rule

@@ -7,6 +7,22 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **DigitalOcean and Cloudflare pages beside Heroku** (OBS-235, OBS-271, `docs/ONBOARDING.md`). Two new pages
+  under Infrastructure list every resource with the same six columns: resource, project, account, state, cost and
+  findings. DigitalOcean shows Droplets, App Platform apps, managed databases and volumes, each team's
+  month-to-date usage, and the findings its door already raises (a Droplet off and still billed, an app with no
+  active deployment) on their rows; `emit` writes `registry/digitalocean-account.json` from the daily
+  `full scan-digitalocean`. Cloudflare shows Workers, Pages projects, R2 buckets, D1 databases and zones with their
+  plan, DNS record count and certificate expiry, from the new `full scan-cloudflare-account` (daily in the tick)
+  into `registry/cloudflare-account.json`. It reads through a new read-only door preset,
+  `tools/cloudflare.py issue --preset inventory-read --account <slug>`, filed in `secrets/cloudflare-inventory.d/`
+  and reached by `rotate`, `revoke`, `ping` and `list` as `inventory/<account>`. A cost the provider does not
+  state reads "not stated", never zero; a project is named only through a repository or a zone the registry
+  already ties to one, with its rule. A page never connected names the switch and the door's commands, a scan
+  that read nothing names why, and an empty account says so. The overview has a card for each, and three more
+  tiles (DigitalOcean resources and $/mo, Cloudflare resources) that read "not connected" or "not read" rather
+  than 0.
+
 - **Bring your enrollments over from another lifecycle broker** (OBS-79 step L5, `docs/design/LIFECYCLE.md`).
   `project-observatory full lifecycle import --from FOLDER` reads that broker's state folder on this machine without
   writing anything in it, not even SQLite's shared-memory file, and writes the targets and grants the engine accepts

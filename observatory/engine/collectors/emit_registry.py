@@ -103,6 +103,8 @@ NEW_SOURCES = [
     ("SRC-0018", "Heroku\'s config-vars endpoint through the same CLI session token, read by collectors/scan_remote_env.py: the endpoint answers with names AND values in one object and has no names-only form, so the values are TRANSIT — classified, fingerprinted with the machine-local salt collectors/scan_env.py uses, and dropped. The fingerprints stay in the gitignored scan beside the vault\'s own retired-value fingerprints; the document built from them carries only the verdict. Answers WHAT PRODUCTION IS CONFIGURED WITH, whether it matches this machine, and whether a value the vault has already rotated away is still deployed.", ["registry:remote-env.json"]),
     ("SRC-0019", "Google Analytics Admin and Data APIs, and Search Console, through the service accounts in the machine\'s secret store: every account and property the credential can see, each property\'s own declared web hosts and app bundle ids, thirty days of active users, sessions and views, and the Search Console sites. The credential signs a JWT and never leaves the collector; what is recorded is the account\'s public `client_email`. Answers WHICH PRODUCTS PEOPLE ACTUALLY USE, and joins each property to a project by what the property declares about itself rather than by a hand-written map.", ["registry:google-properties.json"]),
     ("SRC-0020", "The Fabric service descriptors (fabric-service/0.1) in the services directory `fabric_service.services_dir()` resolves, each one's Fabric manifest for its contract pins, and launchd's own job list (`launchctl list`), read by collectors/scan_agents.py; joined at emit time to the MCP inventory by the origin both name. Never anything of a descriptor's `auth`. Answers WHICH AGENTS ARE INSTALLED ON THIS MACHINE, where each answers, what contract it pins, who supervises it and which MCP declarations reach it.", ["registry:agents.json"]),
+    ("SRC-0021", "DigitalOcean's public API through each team's `observatory-read` token (or its stashed team token, named in `token_kind`), read by collectors/scan_digitalocean.py: Droplets with their stated monthly price, App Platform apps with the repositories they deploy from, managed databases (named fields only, never a password), volumes, and each team's month-to-date usage. Answers WHAT RUNS ON DIGITALOCEAN and what its listing says it costs (OBS-235).", ["registry:digitalocean-account.json"]),
+    ("SRC-0022", "Cloudflare's API through the read-only `inventory-read` token `tools/cloudflare.py` issues per account, read by collectors/scan_cloudflare_account.py: Workers, Pages projects with their source repository and latest deployment, R2 buckets, D1 databases, and each zone's plan and price, DNS record count and edge certificate expiry. Answers WHAT AN ACCOUNT HOLDS beyond its zones (OBS-271).", ["registry:cloudflare-account.json"]),
     ("SRC-0011", "Public DNS through `dig`, HTTP reachability through `curl`, and registrar records through RDAP at rdap.org. Answers whether a host resolves and answers, and what a registry says about a domain — measured, never transcribed.", ["registry:domain-liveness.json"]),
 ]
 SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
@@ -111,7 +113,8 @@ SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
     "SRC-0013": SP / "heroku.json", "SRC-0014": SP / "openrouter.json",
     "SRC-0015": SP / "env.json", "SRC-0016": SP / "cloudflare_zones.json",
     "SRC-0017": SP / "mcp.json", "SRC-0018": SP / "remote-env.json",
-    "SRC-0019": SP / "google.json", "SRC-0020": SP / "agents.json"}
+    "SRC-0019": SP / "google.json", "SRC-0020": SP / "agents.json",
+    "SRC-0021": SP / "digitalocean.json", "SRC-0022": SP / "cloudflare_account.json"}
 def source_available(sid):
     path = SOURCE_INPUTS.get(sid)
     return bool(path and (path.is_file() or (path.is_dir() and any(p.is_file() and not p.name.startswith("_") for p in path.glob("*.json")))))
@@ -562,6 +565,25 @@ if ZONES_SRC.is_file():
     print(f"cloudflare-zones.json: {_zt['zones']} zone(s), {_zt['linked']} linked to a "
           f"project, {_zt['in_domain_registry']} in the domain registry, "
           + ", ".join(f"{k} {v}" for k, v in sorted(_zt['by_standing'].items())))
+
+# ---- DigitalOcean and Cloudflare beside Heroku (OBS-235, OBS-271) ----------
+# One shape for three providers: the rows a page shows, each with its project
+# measured through a repository or a zone the registry already holds.
+import infra_registry as _infra
+_DO_SRC = paths.SCRATCH / "digitalocean.json"
+if _DO_SRC.is_file():
+    _dodoc = _infra.digitalocean_document(json.loads(_DO_SRC.read_text(encoding="utf-8")),
+                                          out_repos, relations, OBS)
+    _stamped("digitalocean-account.json", _dodoc)
+    print(f"digitalocean-account.json: {_dodoc['totals']['resources']} resource(s) in "
+          f"{len(_dodoc['accounts'])} team(s), {_dodoc['totals']['linked_to_a_project']} linked")
+_CFA_SRC = paths.SCRATCH / "cloudflare_account.json"
+if _CFA_SRC.is_file():
+    _cfadoc = _infra.cloudflare_document(json.loads(_CFA_SRC.read_text(encoding="utf-8")),
+                                         zone_rows, out_repos, relations, OBS)
+    _stamped("cloudflare-account.json", _cfadoc)
+    print(f"cloudflare-account.json: {_cfadoc['totals']['resources']} resource(s) in "
+          f"{len(_cfadoc['accounts'])} account(s), {_cfadoc['totals']['linked_to_a_project']} linked")
 
 # ---- accounts (docs/design/DEPLOYMENTS.md, PB-127) ------------------------
 import accounts as _accounts

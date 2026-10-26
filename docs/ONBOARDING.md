@@ -186,7 +186,8 @@ and token provisioning are different permissions.
 | `github` | Repository inventory | Authenticate GitHub CLI locally; it enumerates resources visible to that account |
 | `git_remotes` | Whether each checkout is current with its remote: one `git ls-remote` per checkout, run by `project-observatory full remotes` (`full local` calls no remote and skips it) | None added: it uses each checkout's own remote and SSH keys (and your `url.<base>.insteadOf` rewrites), asks no credential helper, allows only the https, http, ssh, git and file transports, and reports a remote that wants a password, or names another transport, as unreachable with git's own reason |
 | `bitbucket` | Repository inventory | A local Bitbucket credential in the configured secret store |
-| `cloudflare` | Zones and DNS inventory | User-owned account credentials; token administration is separately scoped |
+| `cloudflare` | Zones and DNS inventory, and each account's Workers, Pages, R2, D1 and zones for the Cloudflare page | User-owned account credentials; token administration is separately scoped; the page reads through one `inventory-read` token per account |
+| `digitalocean` | Droplets, apps, databases, volumes and each team's month-to-date usage for the DigitalOcean page | A team token stashed with `tools/digitalocean.py`, or its narrow `observatory-read` token minted in the control panel and installed |
 | `heroku` | Hosting inventory | Local authentication for the intended Heroku account |
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
@@ -421,6 +422,16 @@ slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET
 `PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
 what each grants.
 
+**The Cloudflare page** (OBS-271). `tools/cloudflare.py issue --preset inventory-read --account
+<slug>` mints one read-only token per account (Workers Scripts, Pages, R2 Storage and D1 Read on the
+account; Zone, DNS and SSL and Certificates Read on its zones) and files it in
+`secrets/cloudflare-inventory.d/<account>`, never in the analytics folder and never in a vault slot,
+once its new value lists the account's Workers. `rotate`, `revoke`, `ping` and `list` name it
+`inventory/<account>`. With `integrations.cloudflare` on, `full scan-cloudflare-account` (daily in the
+tick) records each account's Workers, Pages projects with their source repository, R2 buckets, D1
+databases and zones with their plan and price, DNS record count and certificate expiry in
+`store/raw/cloudflare_account.json`; `emit` turns it into `registry/cloudflare-account.json`.
+
 **Every minted credential expires, and the expiry is recorded** (OBS-191). `cloudflare.py issue`,
 `openrouter.py issue` and `heroku.py issue` mint with an expiry 90 days out unless told otherwise:
 `--token-expire-days N` for Cloudflare (its `--expire-days` stays the R2 bucket's object lifecycle),
@@ -459,6 +470,11 @@ reaches every domain of the team), `registry`, `spaces-keys` and `billing-read`.
 answers 401 to it. With `integrations.digitalocean` on, `full scan-digitalocean` (daily in the tick)
 records per team the balance, Droplets with their monthly price, apps, databases without
 credentials, volumes and domains in `store/raw/digitalocean.json`, naming each 401, 403 and 429.
+`emit` turns it into `registry/digitalocean-account.json` (OBS-235), and the DigitalOcean page lists
+every Droplet, app, database and volume with its project, team, state, stated monthly cost and
+findings, beside Heroku under Infrastructure. A cost the listing does not state (an app, a database,
+a volume) reads "not stated", never a zero. The Cloudflare page has the same six columns. A page
+never connected names the switch and the door's commands; a scan that read nothing names why.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and

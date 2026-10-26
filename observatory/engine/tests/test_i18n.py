@@ -89,6 +89,30 @@ def _python_ids(path: Path) -> tuple[set[str], str]:
     return ids, template
 
 
+def _table_page_ids(module: str) -> set[str]:
+    """A build-time page's ids: `t`/`mark` literals and every literal passed to
+    `_table` (caption, column heads, empty text)."""
+    tree = ast.parse((DASH / module).read_text(encoding="utf-8"))
+    ids, _ = _python_ids(DASH / module)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_table":
+            for arg in node.args[1:]:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    ids.add(arg.value)
+                elif isinstance(arg, ast.List):
+                    ids |= {e.elts[0].value for e in arg.elts
+                            if isinstance(e, ast.Tuple) and isinstance(e.elts[0], ast.Constant)}
+    return ids
+
+
+def infra_page_ids() -> set[str]:
+    """The DigitalOcean and Cloudflare pages' ids (OBS-235, OBS-271): literals, `_table`
+    arguments and the values translated through a variable (`infra_page.DYNAMIC`)."""
+    sys.path.insert(0, str(DASH))
+    import infra_page
+    return _table_page_ids("infra_page.py") | set(infra_page.DYNAMIC)
+
+
 def machine_page_ids() -> set[str]:
     """The Machine page's ids: `t`/`mark` literals, every literal passed to
     `_table` (caption, column heads, empty text) and the values it translates
@@ -124,6 +148,7 @@ def source_ids() -> set[str]:
     ids |= shell_ids
     ids |= machine_page_ids()
     ids |= agents_page_ids()
+    ids |= infra_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))
@@ -234,14 +259,14 @@ DYNAMIC_IDS = {
 
 
 #: Words that read the same in both languages and are never translated.
-UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "GA4", "RDAP",
+UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "DigitalOcean", "GA4", "RDAP",
                 "Project Observatory", "PassionCode.ai", "English", "Русский", "__TITLE__"}
 
 
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
         for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py",
-                     "finding_types.py", "subject_links.py", "machine_page.py"):
+                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":
                 text = text.replace('"ru": "Русский"', "")
