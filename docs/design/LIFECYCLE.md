@@ -338,7 +338,7 @@ the lock released), the config document's refusals and the verbs the source did 
 ## Step L4: what was built
 
 `observatory/engine/node/lifecycle/supervisor.py`, started by the local server's `lifecycle.Host`, tested by
-`observatory/engine/tests/test_node_lifecycle_supervisor.py` (suite `node_lifecycle_supervisor`, 23 cases) and seven
+`observatory/engine/tests/test_node_lifecycle_supervisor.py` (suite `node_lifecycle_supervisor`, 29 cases) and seven
 cases of `tests/test_node_lifecycle_service.py` (`SupervisionTests`).
 
 - **Where it runs.** In the engine's local server, as planned ("What changes on the way in", item 3): `Host.service()`
@@ -347,14 +347,22 @@ cases of `tests/test_node_lifecycle_service.py` (`SupervisionTests`).
   anywhere else (a test, a terminal) runs no pass of its own. A supervisor that cannot start is a degraded row
   (`lifecycle: supervisor unavailable, <class>`) while the tools keep serving. `start` is idempotent and the broker
   holds the state folder's exclusive lock, so two supervisors never act over one state folder.
-- **The cadence.** One thread (`lifecycle-supervisor`) waits on a wake-up event for `interval()`: 600 s
-  (`SWEEP_SECONDS`), or 60 s (`IDLE_CHECK_SECONDS`) while the broker's `launches` table holds a process it started.
-  It passes once at its start. An interval that runs out is the safety sweep: the warm-up, `Broker.prune` (the store was
-  pruned only when a broker opened; a server runs for weeks), the watcher started again if it ended, then a pass over
-  every target. A wake-up from an event passes only over the targets that event named.
+- **The cadence.** One thread (`lifecycle-supervisor`) passes once at its start, then waits on a wake-up event for
+  `interval()`. The safety sweep has a monotonic deadline of its own, every 600 s (`SWEEP_SECONDS`), checked at every
+  wake-up whatever caused it, so a stream of launch and quit events never postpones it. The sweep reads the enrolled
+  bundles again, runs the warm-up and `Broker.prune` (the store was pruned only when a broker opened; a server runs for
+  weeks), starts the watcher again if it ended, then passes over every target. Before the deadline the loop wakes every
+  60 s (`IDLE_CHECK_SECONDS`) only while an idle lease can run out (`Broker.idle_launches`: a launch of the broker's,
+  not taken over by the person, of an approved target with `idleStopMinutes` that is not held off), and that wake-up
+  passes over those targets only; a launch the idle pass never looks at (an on_demand target without idle minutes, a
+  held-off or unapproved one, an adopted one) never holds the loop at one minute. A wake-up from an event passes only
+  over the targets that event named. The waits run on the monotonic clock, which macOS pauses while the machine
+  sleeps: after a wake the next sweep can come up to about 10 minutes later.
 - **The watcher.** The adapter's `watch` runs on its own thread (`lifecycle-watch`). An `activated` event of an enrolled
   bundle goes to `Broker.note_activation` for every target of that bundle (the broker ignores one inside the 20 s
-  launch grace); a `launched` or `terminated` event wakes a pass over those targets at once. A watcher that ends (no
+  launch grace); a `launched` or `terminated` event wakes a pass over those targets at once. Events are matched against
+  the enrolled bundles read at the last sweep, so an event of another app reads no file; an app enrolled since is
+  matched from the next sweep. A watcher that ends (no
   helper built, a helper built from older source as OBS-222 makes `watch` return, a crash past its own backoff) or
   raises is started again by the next sweep, never in a tight loop, and is a log line (`supervision.watch_ended`).
   Until it runs again, activations are not seen; the presence check at a stop (frontmost with input in the last
@@ -369,7 +377,8 @@ cases of `tests/test_node_lifecycle_service.py` (`SupervisionTests`).
 - **A pass that fails is one pass.** An exception in `supervise`, `prune`, the warm-up, an activation or the watcher is
   caught; every one is a log line by its class (`supervision.pass_failed`, never its message, which may carry a
   path), and the first failed pass after a good one is one `lifecycle.supervision_failed` event with `notify`, not one
-  a minute.
+  a minute. Once the supervisor is stopping, a pass cut short by the closing store is not a failure. The event is in
+  `events.jsonl` and `full lifecycle status`; no host is told until OBS-250 joins the events feed.
 - **Other systems.** Over the adapter that answers `unsupported_platform` (Linux and Windows) the supervisor runs no
   pass, no warm-up and no watcher; the sweep only keeps the store pruned.
 - **The identity migration** is not in this step: the engine's registry admits only `designated-requirement/1`

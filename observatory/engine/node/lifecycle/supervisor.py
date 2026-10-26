@@ -6,11 +6,16 @@ WHEN to ask. It never starts, stops or probes a target itself: it calls the brok
 
 What it keeps, and why:
 
-- **No busy timer.** It wakes on a watcher event for an enrolled app, on a slow safety sweep (`SWEEP_SECONDS`, 600 s),
-  and, only while a process the broker started is alive, once a minute (`IDLE_CHECK_SECONDS`) to check its idle lease.
+- **No busy timer.** It wakes on a watcher event for an enrolled app, on a slow safety sweep (`SWEEP_SECONDS`, 600 s,
+  on a monotonic deadline of its own, so no stream of events can postpone it), and once a minute
+  (`IDLE_CHECK_SECONDS`) only while a process the broker started can still be idled out: its target has
+  `idleStopMinutes`, is approved, is not held off, and the person has not taken it over. That minute's pass looks at
+  those targets only; it is not a sweep.
 - **The watcher.** The adapter's `watch` (macOS: the helper's launch, terminate and activate events) runs on a thread
   of its own. An activation is the person bringing the app forward and goes to `Broker.note_activation`; a launch or
-  a termination of an enrolled app wakes a pass over that app's targets at once. A watcher that ends (no helper yet,
+  a termination of an enrolled app wakes a pass over that app's targets at once. Events are matched against the
+  enrolled bundles read at the last sweep, so an event of any other app reads no file; an app enrolled since is
+  matched from the next sweep. A watcher that ends (no helper yet,
   a helper built from older source, a crash past its own backoff) is started again by the next sweep, never in a
   tight loop.
 - **The sweep** also prunes the store (the broker prunes only when it opens, and a server runs for weeks) and queues
@@ -26,6 +31,7 @@ What it keeps, and why:
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable, Optional
 
 from node.lifecycle.broker import LifecycleError
@@ -55,11 +61,17 @@ class Supervisor:
                  on_failure: Optional[Callable[[str, BaseException, bool], None]] = None,
                  on_watch_end: Optional[Callable[[], None]] = None,
                  supported: Optional[bool] = None,
-                 thread: Callable[..., threading.Thread] = threading.Thread):
+                 thread: Callable[..., threading.Thread] = threading.Thread,
+                 monotonic: Callable[[], float] = time.monotonic):
         self.broker, self.adapter, self.registry = broker, adapter, registry
         self.on_failure, self.on_watch_end = on_failure, on_watch_end
         self.supported = supports_supervision(adapter) if supported is None else supported
         self.thread = thread
+        self.monotonic = monotonic
+        #: The next safety sweep, on the monotonic clock. The start's own pass stands for the first one.
+        self.next_sweep = monotonic() + SWEEP_SECONDS
+        #: Enrolled app bundles -> their target ids, read at the last sweep (or at the first event before one).
+        self._bundles: Optional[dict] = None
         self.wake = threading.Event()
         self.stop_event = threading.Event()
         self.pending: set = set()
@@ -70,22 +82,41 @@ class Supervisor:
 
     # -- what wakes it -------------------------------------------------------------------------------------------------
 
-    def interval(self) -> float:
+    def _targets(self) -> dict:
         try:
-            return IDLE_CHECK_SECONDS if self.broker.live_launches() else SWEEP_SECONDS
+            return dict(self.registry()['targets'])
+        except (LifecycleError, KeyError, TypeError):
+            return {}
+
+    def idle_targets(self) -> list:
+        """Targets whose broker-started process the idle pass can still stop: `idleStopMinutes` set, approved, not held
+        off, and a launch the person has not taken over."""
+        candidates = [key for key, t in self._targets().items()
+                      if t.get('idleStopMinutes') and t.get('desiredState') != 'held_off' and t.get('approved') is True]
+        if not candidates:
+            return []
+        try:
+            return self.broker.idle_launches(candidates)
         except Exception:  # noqa: BLE001 - a store that cannot be read now waits for the sweep, not a tight loop
-            return SWEEP_SECONDS
+            return []
+
+    def interval(self) -> float:
+        """Seconds until the next wake-up: the sweep's deadline, or a minute while an idle lease can run out."""
+        left = max(0.0, self.next_sweep - self.monotonic())
+        return min(left, IDLE_CHECK_SECONDS) if self.idle_targets() else left
+
+    def refresh_bundles(self) -> None:
+        bundles: dict = {}
+        for key, t in self._targets().items():
+            if t.get('kind') == 'app' and isinstance(t.get('identity'), dict):
+                bundles.setdefault(t['identity'].get('bundleId'), set()).add(key)
+        self._bundles = bundles
 
     def on_event(self, event: dict) -> None:
         """One watcher event: `{'event': launched | terminated | activated, 'bundleId', 'pid'}`."""
-        try:
-            targets = self.registry()['targets'].values()
-        except (LifecycleError, KeyError, TypeError):
-            return
-        bundle = event.get('bundleId')
-        ids = {t['targetId'] for t in targets
-               if t.get('kind') == 'app' and isinstance(t.get('identity'), dict)
-               and t['identity'].get('bundleId') == bundle}
+        if self._bundles is None:
+            self.refresh_bundles()
+        ids = set(self._bundles.get(event.get('bundleId'), ()))
         if not ids:
             return
         if event.get('event') == 'activated':
@@ -141,26 +172,37 @@ class Supervisor:
         self._recovered('prune')
 
     def sweep(self) -> None:
-        """The safety sweep's own work, before its pass: the warm-up, the store bounded, the watcher alive."""
+        """The safety sweep's own work, before its pass: the enrolled bundles read again, the warm-up, the store
+        bounded, the watcher alive."""
+        self.refresh_bundles()
         self.warm()
         self.prune()
         self.ensure_watcher()
 
     def step(self, woke: bool) -> list:
-        """What one wake-up does: a sweep when the interval ran out, then a pass over the targets an event named (all
-        of them after a sweep)."""
-        if not woke:
+        """What one wake-up does, whatever woke it: the sweep and a pass over every target when the sweep's deadline
+        has come; otherwise a pass over the targets an event named and, on the minute's timeout, the targets an idle
+        lease can still stop. Nothing to look at is no pass."""
+        now = self.monotonic()
+        swept = now >= self.next_sweep
+        if swept:
+            self.next_sweep = now + SWEEP_SECONDS
             self.sweep()
         with self._lock:
-            only, self.pending = (self.pending or None), set()
+            pending, self.pending = self.pending, set()
+        if swept:
+            return self.tick(None)
+        only = set(pending)
         if not woke:
-            only = None
-        return self.tick(only)
+            only |= set(self.idle_targets())
+        return self.tick(only) if only else []
 
     def run(self) -> None:
+        self.refresh_bundles()
         self.warm()
         self.ensure_watcher()
         self.tick()
+        self.next_sweep = self.monotonic() + SWEEP_SECONDS
         while not self.stop_event.is_set():
             woke = self.wake.wait(self.interval())
             self.wake.clear()
@@ -226,6 +268,8 @@ class Supervisor:
     # -- failures ------------------------------------------------------------------------------------------------------
 
     def _failed(self, what: str, exc: BaseException) -> None:
+        if self.stop_event.is_set():
+            return                  # a pass cut short by shutdown (a store closing under it) is not a failure
         first = what not in self._failing
         self._failing.add(what)
         if self.on_failure:

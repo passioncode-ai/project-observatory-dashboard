@@ -1410,6 +1410,20 @@ class Broker:
         with self.db_lock:
             return self.db.execute('SELECT count(*) FROM launches').fetchone()[0]
 
+    def idle_launches(self, target_ids) -> list:
+        """The targets among `target_ids` with a launch of the broker's the person has not taken over: the only
+        launches an idle pass can still stop. An adopted launch, or one of a target the idle pass never looks at,
+        stays recorded but needs no minute-by-minute check."""
+        ids = sorted(set(target_ids))
+        if not ids:
+            return []
+        with self.db_lock:
+            rows = self.db.execute(
+                'SELECT target FROM launches WHERE adopted IS NULL AND target IN (%s)' % ','.join('?' * len(ids)),
+                ids,
+            ).fetchall()
+        return sorted(r[0] for r in rows)
+
     def _running_op(self, target_id: str) -> bool:
         with self.db_lock:
             return self.db.execute(

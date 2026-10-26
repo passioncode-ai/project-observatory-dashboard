@@ -1225,7 +1225,8 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
   three failed starts in 30 minutes make it stop retrying and say so once in the events. It
   looks every 10 minutes, every minute while an app it started runs, and at once when an
   enrolled app launches or quits. An app you bring forward is yours from then on and is never
-  idled out. A failed supervision pass is one event (the log has every one).
+  idled out. A failed supervision pass is one event in `full lifecycle status` (the log has
+  every one); it does not reach the events feed yet (OBS-250).
 - Not yet: importing an existing broker's enrollments (step L5).
 
 ## The machine: what runs, where the disk goes, cleanup
