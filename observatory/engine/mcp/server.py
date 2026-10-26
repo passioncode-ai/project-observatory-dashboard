@@ -489,6 +489,10 @@ def observatory_credentials(
     value elsewhere. `machines` on a vault row names the machines that hold the
     slot: this one, and every peer whose current digest manifest lists it
     (`project-observatory full vault-digests` compares them, never values).
+
+    Each vault row says when its value expires, from the slot's metadata:
+    `expiresAt` as the minting door recorded it, or `expiry: none` with
+    `expiryReason`, or `expiry: not recorded` for a value put by hand.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:

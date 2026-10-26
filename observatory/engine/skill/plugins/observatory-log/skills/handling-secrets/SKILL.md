@@ -196,6 +196,12 @@ A Heroku credential is `heroku.py issue --preset read|deploy|identity --vault
 scope only, proved and delivered on stdin. Heroku cannot narrow one to a team or an app,
 so prefer `read` and name the app. Team and account membership (`heroku.py member`,
 `cloudflare.py member`) is a printed plan until `--apply`; apply only a change the task asked for.
+Every credential these doors mint expires 90 days out unless told otherwise
+(`--token-expire-days N` for Cloudflare, `--expire-days N` for OpenRouter and Heroku, at most
+365; `--no-token-expiry` or `--no-expiry` for none), and the expiry is recorded beside it, never
+the value: `use_secret.py names` and `observatory_credentials` show it for a vault slot, and the
+findings `credential.expiring` and `credential.expired` name the door's rotate command. Do not
+mint without an expiry unless the task needs a credential that outlives a rotation.
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.

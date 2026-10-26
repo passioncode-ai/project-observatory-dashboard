@@ -86,6 +86,7 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import vault as private_files  # noqa: E402  — the slot's own rules: names, symlinks, the store
+import key_expiry  # noqa: E402  how an installed token's expiry is recorded, OBS-191
 DOCTL = os.environ.get("DOCTL", "doctl")
 RETRY_DELAY = float(os.environ.get("OBSERVATORY_DO_RETRY_DELAY", "8"))
 POLL = float(os.environ.get("OBSERVATORY_DO_POLL", "15"))
@@ -1270,6 +1271,31 @@ def _label(preset: str, team: str, where: dict | None) -> str:
     return f"{preset}--{where['project']}-{where['env']}-{where['name']}".lower()
 
 
+#: Why an installed token's expiry is unknown: the API cannot mint, and the installer named none.
+EXPIRY_NOT_GIVEN = ("minted in the control panel, which this API cannot do; no --expires-on was given, "
+                    "so its expiry is not known here")
+
+
+def _expiry_fields(expires_on: str | None) -> dict:
+    """The record's expiry: the date the installer read in the control panel, or null and why
+    (OBS-191). An unreadable date is refused before anything is written."""
+    at = key_expiry.parse(expires_on) if expires_on else None
+    if expires_on and not at:
+        raise DoorError("--expires-on is the expiry the control panel shows, as YYYY-MM-DD")
+    return key_expiry.fields(at, EXPIRY_NOT_GIVEN)
+
+
+def _record_slot_expiry(rec: dict) -> None:
+    """A vault-delivered token's slot learns its expiry; never raises (the value is delivered)."""
+    if not rec.get("vault"):
+        return
+    try:
+        private_files.record_expiry(*rec["vault"].split("/"), rec.get("expires_at"),
+                                    rec.get("expiry_reason"), tool="digitalocean.py")
+    except Exception as exc:  # noqa: BLE001  the class only: a message could name a path
+        print(f"  ({rec['vault']}: expiry not recorded: {type(exc).__name__})", file=sys.stderr)
+
+
 def cmd_issue(preset: str, team: str, target: str | None, domain: str | None) -> int:
     p = PRESETS[preset]
     stash_of(team)
@@ -1278,10 +1304,11 @@ def cmd_issue(preset: str, team: str, target: str | None, domain: str | None) ->
           f"  mint it in the control panel ({PANEL_TOKENS}) while signed in to team {team}:\n"
           f"    name: observatory {_label(preset, team, None) if not target else preset + ' ' + target}\n"
           f"    custom scopes: {', '.join(p['scopes'])}\n"
-          f"  then install it from the clipboard, never through argv:\n"
+          f"    expiration: {key_expiry.DEFAULT_DAYS} days, the lifetime the other doors mint with (OBS-191)\n"
+          f"  then install it from the clipboard, never through argv, with the expiry the panel shows:\n"
           f"    pbpaste | python \"$(project-observatory full-path)/tools/digitalocean.py\" install "
           f"--preset {preset} --team {team}" + (f" --vault {target}" if target else "")
-          + (f" --domain {domain}" if domain else ""), file=sys.stderr)
+          + (f" --domain {domain}" if domain else "") + " --expires-on YYYY-MM-DD", file=sys.stderr)
     return 3
 
 
@@ -1385,6 +1412,7 @@ def _install_locked(value: str, preset: str, team: str, vault_spec: str | None, 
     label = _label(preset, team, where)
     rec_path = RECORDS / f"{label}.meta.json"
     prior = read_record(rec_path)
+    expiry = _expiry_fields(expires_on or prior.get("expires_on"))
     if prior or (not where and (READ_STORE / team).exists()):
         # Installing over a live token would orphan it: still valid at DigitalOcean, no longer known here.
         raise DoorError(f"{label} is already installed; replace it with `digitalocean.py rotate {label}` "
@@ -1401,10 +1429,12 @@ def _install_locked(value: str, preset: str, team: str, vault_spec: str | None, 
            "proven_reads": [_endpoint(x) for x in p["probes"]],
            "note": "minted in the control panel; scopes are declared by the installer, reads are proven",
            "expires_on": expires_on or prior.get("expires_on"),
+           **expiry,
            "installed_on": prior.get("installed_on") or today(),
            "rotated_on": prior.get("rotated_on"), "rotations": prior.get("rotations") or 0,
            "issued_by": "tools/digitalocean.py"}
     said = _deliver(value, rec)
+    _record_slot_expiry(rec)
     RECORDS.mkdir(parents=True, exist_ok=True)
     write_record(rec_path, rec)
     _journal("issue", rec["vault"] or f"digitalocean/{team}/read", preset=preset, team=acct["team_uuid"])
@@ -1441,17 +1471,19 @@ def _record(label: str) -> tuple[pathlib.Path, dict]:
     return path, rec
 
 
-def cmd_token_rotate(label: str) -> int:
+def cmd_token_rotate(label: str, expires_on: str | None = None) -> int:
     if sys.stdin.isatty():
         raise DoorError("give the NEW token on stdin; mint it in the control panel with the preset's scopes "
                         f"(`digitalocean.py presets`) at {PANEL_TOKENS}")
     value = one_value(sys.stdin.read())
     with records_lock():
-        return _rotate_locked(label, value)
+        return _rotate_locked(label, value, expires_on)
 
 
-def _rotate_locked(label: str, value: str) -> int:
+def _rotate_locked(label: str, value: str, expires_on: str | None = None) -> int:
     rec_path, rec = _record(label)
+    # The NEW token's expiry: the old one's date describes a value that is being replaced.
+    expiry = _expiry_fields(expires_on)
     old = _current(rec)
     if old is not None and _same(old, value):
         raise DoorError("the new value is the one already installed; mint a new token")
@@ -1459,7 +1491,10 @@ def _rotate_locked(label: str, value: str) -> int:
     _prove(value, rec["preset"], rec.get("domain"))
     _refuse_broad(value, rec["preset"])
     said = _deliver(value, rec)
-    rec.update(rotated_on=today(), rotations=(rec.get("rotations") or 0) + 1)
+    rec.pop("expiry_reason", None)
+    rec.update(rotated_on=today(), rotations=(rec.get("rotations") or 0) + 1,
+               expires_on=expires_on, **expiry)
+    _record_slot_expiry(rec)
     write_record(rec_path, rec)
     _journal("rotate", rec.get("vault") or f"digitalocean/{rec['team_label']}/read", preset=rec["preset"])
     print(f"rotated {label}; {said}")
@@ -1532,7 +1567,7 @@ def cmd_tokens_list() -> int:
         print(f"  {label:40} {rec.get('preset'):16} team {rec.get('team_label')}  "
               f"-> {rec.get('vault') or rec.get('destination')}  {rec.get('project') or '(no project)'}  "
               f"installed {rec.get('installed_on')} rotated {rec.get('rotated_on') or '-'} x{rec.get('rotations', 0)}"
-              + (f" expires {rec['expires_on']}" if rec.get("expires_on") else ""))
+              + f"  {key_expiry.describe(rec)}")
     if not st:
         print("start with `digitalocean.py stash < token-file` or `stash --from-doctl all`")
     return 0
@@ -1634,6 +1669,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("ping", help="does every token still answer for its team and do its reads")
     p = sub.add_parser("rotate", help="a NEW token on stdin replaces an installed one; the old is revoked and proved dead")
     p.add_argument("label")
+    p.add_argument("--expires-on", help="the NEW token's expiry the control panel shows (YYYY-MM-DD), recorded")
     p = sub.add_parser("revoke", help="revoke at DigitalOcean, prove it, then remove here")
     p.add_argument("label")
     p.add_argument("--forget", action="store_true",
@@ -1668,7 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.area == "ping":
             return cmd_ping()
         if a.area == "rotate":
-            return cmd_token_rotate(a.label)
+            return cmd_token_rotate(a.label, a.expires_on)
         return cmd_revoke(a.label, a.forget)
     except DoorError as e:
         print(f"digitalocean: {e}", file=sys.stderr)

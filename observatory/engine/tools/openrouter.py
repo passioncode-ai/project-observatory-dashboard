@@ -4,7 +4,7 @@
     T="$(project-observatory full-path)/tools"            # the installed engine's tools
     python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
     python "$T/openrouter.py" adopt --as main               # take the legacy file in
-    python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] [--expire-days 90 | --no-expiry] --to vault:PROJECT/prod/OPENROUTER_API_KEY
     python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
@@ -36,6 +36,14 @@ Two provider differences the shape has to absorb:
   delete-first rotation that fails halfway leaves the consumer with a dead key
   and nothing else, and a consumer that falls back to another provider silently
   would hide that failure.
+
+Every minted key expires (OBS-191): `issue` sends `expires_at`, 90 days out by
+default; `--expire-days N` (1 to 365) moves it and `--no-expiry` mints one that
+does not expire. A rotation mints its successor with the lifetime the key was
+issued with. The ledger row records the `expires_at` the provider answered (or
+null and `expiry_reason`, also when the answer did not carry the field),
+a `vault:` slot's metadata records it too, and `list` shows it; a claimed key
+records what the provider lists for it.
 
 Limits are part of issue, not an afterthought: every issued key carries a USD
 ceiling (`--limit`, default 10), `limit <name> --set` moves it, and `ping`
@@ -75,8 +83,12 @@ import oslocks
 import osprivacy
 import private_io
 import paths                                                                    
+sys.path.insert(0, str(ROOT / "tools"))
+import key_expiry  # noqa: E402  every minted key carries an expiry, recorded, OBS-191
 
 API = "https://openrouter.ai/api/v1"
+#: How a key minted with no expiry was asked for, named in its record.
+NO_EXPIRY_FLAG = "--no-expiry"
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-admin'
 LEGACY = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-provisioning'
 #: name -> where it was delivered and from which account it was minted. Names
@@ -538,6 +550,30 @@ def deliver(value: str, to: str, *, rotate: bool = False) -> str:
 
 # ─────────────────────────── issue / limits / rotate ─────────────────────────
 
+def _lifetime(expire_days: int | None, asked: str | None, provider_row: dict | None) -> dict:
+    """The expiry fields a ledger row records: what the provider ANSWERED for the key,
+    never the timestamp that was sent. An answer without `expires_at` records null with
+    `key_expiry.UNCONFIRMED`; a null one records why the key does not expire."""
+    return {"expire_days": expire_days,
+            **key_expiry.from_answer(provider_row, "expires_at", asked,
+                                     key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG))}
+
+
+def _record_slot_expiry(to: str, at: str | None, reason: str | None) -> None:
+    """A `vault:` destination's slot learns its value's expiry (OBS-191). Never raises:
+    the value is delivered, and a record that failed is said, not hidden."""
+    if not str(to or "").startswith("vault:"):
+        return
+    project, env, name = to[len("vault:"):].split("/")
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import vault
+        vault.record_expiry(project, env, name, at, reason, tool="openrouter.py")
+    except Exception as exc:                                                      
+        print(f"  ({project}/{env}/{name}: expiry not recorded: {type(exc).__name__})",
+              file=sys.stderr)
+
+
 def vault_destination(to: str) -> str:
     """A `vault:` destination with its project normalised to the vault FOLDER,
     checked BEFORE a key is minted: a key minted for a slot the vault then
@@ -667,7 +703,8 @@ def _reset(value: str | None) -> str:
 
 @_locked
 def issue_key(name: str, limit: float, account: str | None, to: str,
-              project: str | None, reset: str = "monthly") -> dict:
+              project: str | None, reset: str = "monthly",
+              expire_days: int | None = key_expiry.DEFAULT_DAYS) -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
     command line are the same key, in the same ledger, with the same ceiling.
@@ -679,6 +716,8 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a key without a ceiling is an unbounded liability; give one")
     reset = _reset(reset)
+    # Refused before anything is minted: a lifetime the door will not mint (OBS-191).
+    expires_at = key_expiry.expires_at(expire_days)
     to = vault_destination(to)
     doc = ledger()
     if (doc["issued"].get(name) or {}).get("pending"):
@@ -716,14 +755,16 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
                              f"`revoke {name}` it first (its spend is snapshotted and kept), then issue again")
         _retire(doc, name, old_row, old_row["hash"], "replaced-by-issue", kept, deleted=True)
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
-                           "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
+                           "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True,
+                           "expire_days": expire_days}
     save_ledger(doc)
     # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
     # total is reached and then stops — months later, with no warning. Found in
     # the audit that merged keyserver's mint into this door: it set the reset,
     # the door did not. Monthly unless the caller asks for daily or weekly.
     try:
-        d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset})
+        d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset,
+                                      **({"expires_at": expires_at} if expires_at else {})})
     except RuntimeError as exc:
         # Only a 4xx proves nothing was minted (the provider refused the request). A 5xx, a timeout
         # or an unreachable provider does not: the key may exist, and on an account listing past
@@ -745,17 +786,21 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         # SubprocessError: the vault's `put` timed out. A minted key that reached no slot is never
         # left live and untracked: deleted, or kept in the ledger as an orphan when the delete fails.
         _undo_mint(admin, name, row)
+    life = _lifetime(expire_days, expires_at, row)
     doc = ledger()
     doc["issued"][name] = {
         "account": label, "hash": row.get("hash"), "label": row.get("label"), "destination": to,
         "delivered_to": place, "project": project,
         "limit_usd": limit, "limit_reset": reset, "issued_on": today(),
-        "rotated_on": None, "rotations": 0, "name_check": name_check}
+        "rotated_on": None, "rotations": 0, "name_check": name_check, **life}
     save_ledger(doc)
-    _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check)
+    _record_slot_expiry(to, life["expires_at"], life.get("expiry_reason"))
+    _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check,
+             expires_at=life["expires_at"])
     return {"name": name, "account": label, "label": row.get("label"),
             "limit": limit, "limit_reset": reset, "delivered_to": place,
-            "name_check": name_check}
+            "name_check": name_check, "expires_at": life["expires_at"],
+            "expiry": key_expiry.describe(life)}
 
 
 #: What to do about a pending row (a key minted, or perhaps minted, whose delivery was never recorded).
@@ -791,9 +836,10 @@ def _undo_mint(admin: str, name: str, row: dict) -> None:
 
 
 def cmd_issue(name: str, limit: float, account: str | None, to: str,
-              project: str | None, reset: str = "monthly") -> int:
+              project: str | None, reset: str = "monthly",
+              expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     try:
-        r = issue_key(name, limit, account, to, project, reset)
+        r = issue_key(name, limit, account, to, project, reset, expire_days)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
@@ -801,7 +847,7 @@ def cmd_issue(name: str, limit: float, account: str | None, to: str,
         print(f"refused: {exc}", file=sys.stderr)
         return 1
     print(f"issued {r['name']!r} from {r['account']!r}, ceiling ${r['limit']:g} {r['limit_reset']}, "
-          f"delivered to {r['delivered_to']}")
+          f"{r['expiry']}, delivered to {r['delivered_to']}")
     if r.get("name_check"):
         print(f"note: {r['name_check']}", file=sys.stderr)
     return 0
@@ -1556,10 +1602,15 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> di
     previous_hash = rec.get("hash")
     previous_rotated_on = rec.get("rotated_on")
     previous_status = rec.get("rotation_status")
+    # The successor lives as long as the key was issued to (OBS-191); a row from before the
+    # rule gets the default, so a rotation is also how an old never-expiring key gets one.
+    days = rec["expire_days"] if "expire_days" in rec else key_expiry.DEFAULT_DAYS
+    expires_at = key_expiry.expires_at(days)
     old = find_key(admin, name)
     d = _request("/keys", admin,
                  {"name": f"{name}-next", "limit": limit,
-                  "limit_reset": rec.get("limit_reset") or "monthly"})
+                  "limit_reset": rec.get("limit_reset") or "monthly",
+                  **({"expires_at": expires_at} if expires_at else {})})
     value = d.get("key") or (d.get("data") or {}).get("key")
     new_row = d.get("data") or d
     if not value:
@@ -1591,6 +1642,11 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> di
                 undo()
             raise
     rec.pop("successor_pending", None)
+    life = _lifetime(days, expires_at, new_row)
+    rec.update(life)
+    if "expiry_reason" not in life:
+        rec.pop("expiry_reason", None)
+    _record_slot_expiry(rec["destination"], life["expires_at"], life.get("expiry_reason"))
     rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
                 "rotated_on": today(), "rotations": rotations + 1,
                 "rotation_status": "successor-delivered-predecessor-pending",
@@ -1794,7 +1850,10 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
         "account": acct, "hash": row.get("hash"), "destination": place, "delivered_to": place,
         "project": None, "limit_usd": row.get("limit"), "limit_reset": row.get("limit_reset"),
         "issued_on": None, "claimed_on": today(), "claimed": True, "claimed_by": how,
-        "provider_name": row.get("name"), "label": label, "rotated_on": None, "rotations": 0}
+        "provider_name": row.get("name"), "label": label, "rotated_on": None, "rotations": 0,
+        # What the provider lists for a key minted elsewhere; null when it lists none.
+        **key_expiry.fields(key_expiry.parse(row.get("expires_at")),
+                            "minted outside this door; the provider lists no expiry for it")}
     save_ledger(doc)
     _journal("claim", f"openrouter/{acct}/{name}", where=where, found_by=how)
     return {"name": name, "account": acct, "label": label, "limit": row.get("limit"), "found_by": how}
@@ -1967,7 +2026,8 @@ def cmd_list() -> int:
         print(f"  {n:24s} from {r['account']:14s} ${r.get('limit_usd') or 0:<6g} "
               f"-> {r['delivered_to']}"
               + (f"  [{r['project']}]" if r.get("project") else "")
-              + (f"  rotated {r['rotated_on']} x{r['rotations']}" if r.get("rotated_on") else ""))
+              + (f"  rotated {r['rotated_on']} x{r['rotations']}" if r.get("rotated_on") else "")
+              + f"  {key_expiry.describe(r)}")
     if not a:
         print("\nstart with openrouter stash --as <label>, reading a protected file on stdin")
     return 0
@@ -2086,6 +2146,7 @@ def main() -> int:
     p_is.add_argument("--to", required=True,
                       help="observatory | claude-mem | vault:<project>/<env>/<NAME>")
     p_is.add_argument("--project", help="the project this key serves")
+    key_expiry.add_flags(p_is, "--expire-days", NO_EXPIRY_FLAG, "key")
     p_is.add_argument("--reset", choices=RESETS, default="monthly",
                       help="when the ceiling starts again (default monthly)")
     p_ip = sub.add_parser("issue-for-policy",
@@ -2150,7 +2211,7 @@ def main() -> int:
     if a.cmd == "adopt":
         return cmd_adopt(a.label)
     if a.cmd == "issue":
-        return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset)
+        return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset, key_expiry.days_of(a))
     if a.cmd == "issue-for-policy":
         return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run, a.split)
     if a.cmd == "list":

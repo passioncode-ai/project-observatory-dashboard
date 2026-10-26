@@ -2276,7 +2276,9 @@ def test_or_a_daily_ceiling_is_issued_and_keeps_its_period() -> None:
     m._request = fake
     m.find_key = lambda admin, name: {"name": name, "hash": "h-d", "label": "sk-or-v1-d...d"}
     r = m.issue_key("fallback-agent", 5.0, "example", "observatory", None, "daily")
-    check("a daily ceiling is created daily", sent[0] == ("create", {"name": "fallback-agent", "limit": 5.0, "limit_reset": "daily"}), str(sent))
+    check("a daily ceiling is created daily, with an expiry (OBS-191)",
+          sent[0][0] == "create" and bool(sent[0][1].pop("expires_at", None))
+          and sent[0] == ("create", {"name": "fallback-agent", "limit": 5.0, "limit_reset": "daily"}), str(sent))
     check("and reported daily", r["limit_reset"] == "daily", str(r))
     moved = m.set_limit("fallback-agent", 8.0)
     check("moving the ceiling keeps the daily period", sent[-1] == ("patch", {"limit": 8.0, "limit_reset": "daily"}) and moved["limit_reset"] == "daily", str(sent))
@@ -2371,8 +2373,11 @@ def test_or_a_project_policy_gets_its_own_key_in_its_own_slot() -> None:
     plan = m.issue_for_policy(_policy(), "example")
     step = [s for s in plan if "to" in s]
     check("one key, for the one project-key source", len(step) == 1 and len(calls["posted"]) == 1, str(plan))
-    check("ceiling = the project limit, monthly", calls["posted"][0] == {"name": "project-a-prod-model-key", "limit": 40.0,
-          "limit_reset": "monthly"}, str(calls["posted"]))
+    # Every minted key carries an expiry (OBS-191); its value is tested in test_key_expiry.py.
+    check("ceiling = the project limit, monthly, with an expiry",
+          {k: v for k, v in calls["posted"][0].items() if k != "expires_at"}
+          == {"name": "project-a-prod-model-key", "limit": 40.0, "limit_reset": "monthly"}
+          and bool(calls["posted"][0].get("expires_at")), str(calls["posted"]))
     check("delivered into the slot the policy names", calls["delivered"] == ["vault:project-a/prod/MODEL_KEY"], str(calls["delivered"]))
     rec = json.loads(m.LEDGER.read_text())["issued"]["project-a-prod-model-key"]
     check("the ledger records the project the key serves", rec["project"] == "project-a" and rec["limit_usd"] == 40.0, str(rec))

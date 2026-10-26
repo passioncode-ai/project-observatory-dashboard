@@ -1728,6 +1728,13 @@ def collect() -> list[dict]:
     _cd = paths.REGISTRY / "credentials.json"
     out.extend(credential_findings.findings(
         json.loads(_cd.read_text(encoding="utf-8")) if _cd.is_file() else None))
+    # WHAT IS ABOUT TO EXPIRE (OBS-191). The doors mint every credential with an expiry and
+    # record it beside the credential; a date nobody reads is a key that stops one day.
+    import expiry_findings
+    _store = paths.source_path("secret_store", paths.SECRETS)
+    out.extend(expiry_findings.from_store(
+        pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR", _store / "projects")),
+        _store, TODAY))
     # WHAT SITS IN THE WORKING COPIES. The credential rules above read the
     # provider accounts; these read the disk, and the two disagree often enough
     # that neither is the other's summary.

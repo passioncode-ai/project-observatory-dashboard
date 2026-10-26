@@ -23,6 +23,7 @@
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-observability-read --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue ... [--token-expire-days 90 | --no-token-expiry]   # any preset
     python "$T/cloudflare.py" list
     python "$T/cloudflare.py" groups --account <slug> --match "email sending"
     python "$T/cloudflare.py" ping
@@ -52,6 +53,16 @@ holds the account, the purpose, the project it was issued for, and its rotation
 history, but never the value. That file is what makes `list`, `ping` and the
 credentials projection able to answer "what exists, what reads it, when was it
 last rotated" without anyone opening a secret.
+
+EVERY MINTED TOKEN EXPIRES (OBS-191). `issue` sends `expires_on`, 90 days out
+by default: `--token-expire-days N` (1 to 365) moves it, `--no-token-expiry`
+mints one that does not expire. What is recorded is the `expires_on` Cloudflare
+answers for the token, never the one sent. A roll rewrites the policy with a fresh
+`expires_on` before it rolls the value, so a rotation renews the lifetime. The
+expiry is recorded beside the token (`expires_at`, or null with
+`expiry_reason`): in its `.meta.json` for a plugin token, in the vault slot's
+metadata for a writer, and `list` shows it. (`--expire-days` is the R2
+bucket's object lifecycle, not the token's.)
 
 ROTATION IS ROLLING, NOT REPLACING. Cloudflare can issue a fresh value for an
 existing token id, which keeps the token's identity, its permissions and its
@@ -100,6 +111,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "plugins"))
 import private_io
 import paths                                                                    
+sys.path.insert(0, str(ROOT / "tools"))
+import key_expiry  # noqa: E402  every minted token carries an expiry, recorded, OBS-191
+
+#: How a token minted with no expiry was asked for, named in its record.
+NO_EXPIRY_FLAG = "--no-token-expiry"
 
 API = "https://api.cloudflare.com/client/v4"
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / 'cloudflare-admin'
@@ -633,11 +649,25 @@ def existing_token(admin: str, account_id: str, name: str) -> str | None:
 
 
 def mint(admin: str, account_id: str, preset: dict,
-         resources: dict | None = None, name: str | None = None) -> tuple[str, str]:
+         resources: dict | None = None, name: str | None = None,
+         expires_on: str | None = None) -> tuple[str, str]:
+    """(token id, value): `mint_answered` without the provider's answer."""
+    tid, value, _answer = mint_answered(admin, account_id, preset, resources, name, expires_on)
+    return tid, value
+
+
+def mint_answered(admin: str, account_id: str, preset: dict,
+                  resources: dict | None = None, name: str | None = None,
+                  expires_on: str | None = None) -> tuple[str, str, dict]:
     """(token id, value) — rolling an existing one rather than adding a twin.
 
     `resources` narrows the grant (a zone preset passes its one zone); `name`
-    is the token's name when the preset's own is a template."""
+    is the token's name when the preset's own is a template. `expires_on`
+    (`YYYY-MM-DDTHH:MM:SSZ`) is sent on the create and on the policy rewrite
+    before a roll, so a rolled token gets a fresh lifetime too; None mints one
+    without an expiry (OBS-191). The third item is Cloudflare's answer for the
+    token (the create's, or the policy rewrite's for a roll): its `expires_on` is
+    what is recorded, never the one sent."""
     ids = group_ids(admin, account_id, preset["groups"], preset.get("level", "zone"))
     name = name or preset["name"]
     resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
@@ -657,15 +687,16 @@ def mint(admin: str, account_id: str, preset: dict,
         policies.append({"effect": "allow",
                          "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
                          "permission_groups": [{"id": i} for i in acct_ids]})
+    lifetime = {"expires_on": expires_on} if expires_on else {}
     tid = existing_token(admin, account_id, name)
     if tid:
         # GRANTS FOLLOW THE PRESET. Rolling reissues the value and keeps the
         # policies as they were — so a preset that grew a permission would roll
         # tokens that never gain it. The policy is rewritten first, then rolled;
         # the token's id, name and every reader stay put.
-        _request(f"/accounts/{account_id}/tokens/{tid}", admin,
-                 {"name": name, "status": "active", "policies": policies},
-                 method="PUT")
+        rewritten = _request(f"/accounts/{account_id}/tokens/{tid}", admin,
+                             {"name": name, "status": "active", "policies": policies, **lifetime},
+                             method="PUT")
         # PUT, not POST: the account-owned roll endpoint refuses POST with
         # "Method POST not available for that URI" — found the first time a
         # roll ran for real (2026-09-14); every earlier issue was a create.
@@ -673,14 +704,14 @@ def mint(admin: str, account_id: str, preset: dict,
         value = d.get("result")
         if not isinstance(value, str) or not value:
             raise RuntimeError("cloudflare rolled the token but returned no value")
-        return tid, value
+        return tid, value, (rewritten or {}).get("result") or {}
     d = _request(f"/accounts/{account_id}/tokens", admin,
-                 {"name": name, "policies": policies})
+                 {"name": name, "policies": policies, **lifetime})
     res = d.get("result") or {}
     if not res.get("value"):
         raise RuntimeError("cloudflare created the token but returned no value"
                            + discard_fresh(admin, account_id, res.get("id"), False))
-    return res.get("id", ""), res["value"]
+    return res.get("id", ""), res["value"], res
 
 
 def discard_fresh(admin: str, account_id: str, tid: str | None, rolled: bool) -> str:
@@ -778,7 +809,9 @@ def find_account(wanted: str | None) -> tuple[str, str, dict]:
 
 
 def install_issued(value: str, label: str, account: dict, preset_key: str,
-                   project: str | None, rolled: bool, stash: str | None = None) -> int:
+                   project: str | None, rolled: bool, stash: str | None = None,
+                   expire_days: int | None = key_expiry.DEFAULT_DAYS,
+                   expiry: dict | None = None) -> int:
     """Verify the issued token can do the job, then file it with its record."""
     zs = zones_of(value)
     if not zs:
@@ -807,6 +840,10 @@ def install_issued(value: str, label: str, account: dict, preset_key: str,
         "issued_on": prior.get("issued_on") or today(),
         "rotated_on": today() if rolled else prior.get("rotated_on"),
         "rotations": (prior.get("rotations") or 0) + (1 if rolled else 0),
+        # The lifetime it was minted with (a rotation mints the next one with it) and
+        # when this value expires, or null and why (OBS-191).
+        "expire_days": expire_days,
+        **(expiry or key_expiry.fields(None, key_expiry.UNCONFIRMED)),
         "issued_by": "tools/cloudflare.py",
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _journal("rotate" if rolled else "issue", f"cloudflare/{account['name']}/{label}",
@@ -814,11 +851,13 @@ def install_issued(value: str, label: str, account: dict, preset_key: str,
     print(f"  {label}: {'rolled' if rolled else 'issued'} and installed "
           f"({len(zs)} zone(s): {', '.join(sorted(z['name'] for z in zs)[:5])}"
           f"{' …' if len(zs) > 5 else ''})"
-          + (f", for {project}" if project else ""))
+          + (f", for {project}" if project else "")
+          + f"; {key_expiry.describe(expiry or key_expiry.fields(None, key_expiry.UNCONFIRMED))}")
     return 0
 
 
-def cmd_issue(preset_key: str, account_label: str | None, project: str | None) -> int:
+def cmd_issue(preset_key: str, account_label: str | None, project: str | None,
+              expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     preset = PRESETS.get(preset_key)
     if not preset:
         print(f"unknown preset {preset_key!r} — have: {', '.join(PRESETS)}",
@@ -834,19 +873,25 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None) -
     if project and not project.startswith("project:"):
         project = f"project:{project}"
     try:
+        expires_on, _why = lifetime(expire_days)
+    except key_expiry.ExpiryError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    try:
         stash_label, admin, account = find_account(account_label)
         destination = token_dir() / slug(account["name"])
         private_io.check(destination)
         read_meta(destination)
         rolled = existing_token(admin, account["id"], preset["name"]) is not None
-        _tid, value = mint(admin, account["id"], preset)
+        _tid, value, answer = mint_answered(admin, account["id"], preset, expires_on=expires_on)
     except RuntimeError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
     # The issued file is named after the ACCOUNT, not the stash: three accounts
     # behind one stash must land as three files the plugin can tell apart.
     return install_issued(value, slug(account["name"]), account, preset_key,
-                          project, rolled, stash=stash_label)
+                          project, rolled, stash=stash_label,
+                          expire_days=expire_days, expiry=answered(answer, expires_on))
 
 
 def zone_id_of(admin: str, account_id: str, zone: str) -> str:
@@ -895,6 +940,32 @@ def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
         raise RuntimeError(f"vault refused the slot {project}/{env}/{name} "
                            f"(exit {r.returncode}); child output withheld")
 
+
+
+def lifetime(expire_days: int | None) -> tuple[str | None, str | None]:
+    """(expires_on to send, reason to record when there is none). Raises ExpiryError
+    before anything is minted for a lifetime the door will not mint."""
+    at = key_expiry.expires_at(expire_days)
+    return at, (None if at else key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG))
+
+
+def answered(answer: dict, asked: str | None) -> dict:
+    """The expiry fields to record: what Cloudflare answered for the token, never the request."""
+    return key_expiry.from_answer(answer, "expires_on", asked,
+                                  key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG))
+
+
+def record_slot_expiry(project: str, env: str, name: str, at: str | None,
+                       reason: str | None) -> str:
+    """Write the delivered token's expiry into its vault slot's metadata. Never raises:
+    the value is already delivered, and a record that failed is said, not hidden."""
+    try:
+        import vault
+        return vault.record_expiry(project, env, name, at, reason, tool="cloudflare.py")
+    except Exception as exc:                                                      
+        print(f"  ({project}/{env}/{name}: expiry not recorded: {type(exc).__name__})",
+              file=sys.stderr)
+        return "expiry not recorded"
 
 
 #: How long a freshly minted token is given to be honoured at the edge before a
@@ -946,7 +1017,8 @@ def _zone_body(body, zone: str):
 
 
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
-                   account_label: str | None, wait: float = 2.0) -> int:
+                   account_label: str | None, wait: float = 2.0,
+                   expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects, cache purge,
     edge rules) into a vault slot."""
     preset = PRESETS[preset_key]
@@ -959,6 +1031,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
         return 2
     try:
         project, env, name = parse_vault_target(target)
+        expires_on, _why = lifetime(expire_days)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
@@ -969,9 +1042,9 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
         zid = zone_id_of(admin, account["id"], zone)
         token_name = preset["name"].format(zone=zone, slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
-        tid, value = mint(admin, account["id"], preset,
-                          resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
-                          name=token_name)
+        tid, value, answer = mint_answered(admin, account["id"], preset,
+                                           resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
+                                           name=token_name, expires_on=expires_on)
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
         probe = preset.get("probe", "").format(zone_id=zid)
@@ -999,9 +1072,11 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
               file=sys.stderr)
         return 1
+    got = answered(answer, expires_on)
+    expiry = record_slot_expiry(project, env, name, got["expires_at"], got.get("expiry_reason"))
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
-             preset=preset_key, zone=zone, account=account["name"])
-    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
+             preset=preset_key, zone=zone, account=account["name"], expires_at=got["expires_at"])
+    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} ({expiry}): "
           f"{', '.join(preset['groups'])} on {zone} only"
           + (f", {', '.join(preset['account_groups'])} on its account"
              if preset.get("account_groups") else "")
@@ -1011,7 +1086,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
 
 
 def cmd_issue_account(preset_key: str, target: str | None, account_label: str | None,
-                      wait: float = 2.0) -> int:
+                      wait: float = 2.0, expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     """Issue an account-scoped writer (D1, Email Sending, Workers, a Fabric Inbox
     account) into a vault slot."""
     preset = PRESETS[preset_key]
@@ -1023,6 +1098,7 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         return 2
     try:
         project, env, name = parse_vault_target(target)
+        expires_on, _why = lifetime(expire_days)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
@@ -1032,7 +1108,8 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         _stash, admin, account = find_account(account_label)
         token_name = preset["name"].format(slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
-        tid, value = mint(admin, account["id"], preset, name=token_name)
+        tid, value, answer = mint_answered(admin, account["id"], preset, name=token_name,
+                                           expires_on=expires_on)
         # The value reaches the vault only once it has proved, with its own
         # rights, the one thing its reader needs first.
         probe = preset["probe"].format(account_id=account["id"])
@@ -1052,11 +1129,13 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
               file=sys.stderr)
         return 1
+    got = answered(answer, expires_on)
+    expiry = record_slot_expiry(project, env, name, got["expires_at"], got.get("expiry_reason"))
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
-             preset=preset_key, account=account["name"])
+             preset=preset_key, account=account["name"], expires_at=got["expires_at"])
     # An account-owned token cannot call /memberships, which is how wrangler
     # finds an account a config does not name — so the id travels with the use.
-    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
+    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} ({expiry}): "
           f"{', '.join(preset['groups'])} on account {account['name']} only"
           # A zone half is a real grant on every zone of that account; a line
           # that stopped at "account only" would hide DNS Write from its reader.
@@ -1368,7 +1447,8 @@ def _r2_bucket_refusal(bucket: str | None, jurisdiction: str) -> str:
 
 def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
                      expire_days: int | None, target: str | None, account_label: str | None,
-                     wait: float = 2.0, lifecycle_rules: list[str] | tuple = ()) -> int:
+                     wait: float = 2.0, lifecycle_rules: list[str] | tuple = (),
+                     token_expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     """Issue a one-bucket R2 key pair into three vault slots.
 
     `--vault PROJECT/ENV/PREFIX` names the slots PREFIX_ACCESS_KEY_ID,
@@ -1390,6 +1470,7 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         return 2
     try:
         plan = r2_lifecycle_plan(expire_days, list(lifecycle_rules))
+        expires_on, _why = lifetime(token_expire_days)
         project, env, prefix = parse_vault_target(target)
         slots = [f"{prefix}_{s}" for s in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ENDPOINT")]
         for s in slots:
@@ -1405,8 +1486,8 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         token_name = preset["name"].format(jurisdiction=jurisdiction, bucket=bucket)
         rolled = existing_token(admin, account["id"], token_name) is not None
         resource = f"com.cloudflare.edge.r2.bucket.{account['id']}_{jurisdiction}_{bucket}"
-        tid, value = mint(admin, account["id"], preset, resources={resource: "*"},
-                          name=token_name)
+        tid, value, answer = mint_answered(admin, account["id"], preset, resources={resource: "*"},
+                                           name=token_name, expires_on=expires_on)
         access_key, secret = r2_s3_keys(tid, value)
         endpoint = r2_endpoint(account["id"], jurisdiction)
         def prove_pair():
@@ -1422,14 +1503,21 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
               file=sys.stderr)
         return 1
+    # The pair is the token: its two keys die with it. The endpoint is an address that
+    # does not expire, and its slot says so rather than read "not recorded".
+    got = answered(answer, expires_on)
+    for slot in slots[:2]:
+        expiry = record_slot_expiry(project, env, slot, got["expires_at"], got.get("expiry_reason"))
+    record_slot_expiry(project, env, slots[2], None,
+                       "an address, not a credential: it does not expire")
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{prefix}_*",
-             preset=preset_key, bucket=bucket, jurisdiction=jurisdiction,
+             preset=preset_key, bucket=bucket, jurisdiction=jurisdiction, expires_at=got["expires_at"],
              expire_days=next((d for p, d in plan if not p), None),
              rules=[[p, d] for p, d in plan], account=account["name"])
     print(f"  bucket {bucket} ({jurisdiction}): {'created' if created else 'already there'}; "
           f"lifecycle: {r2_lifecycle_summary(plan)}")
     print(f"  {project}/{env}/{prefix}_{{ACCESS_KEY_ID,SECRET_ACCESS_KEY,ENDPOINT}}: "
-          f"{'rolled' if rolled else 'issued'} — {', '.join(preset['groups'])} on {bucket} only, "
+          f"{'rolled' if rolled else 'issued'} ({expiry}): {', '.join(preset['groups'])} on {bucket} only, "
           f"proved by a put, a get and a delete, and refused a bucket list; "
           f"use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} "
           f"{','.join(slots)} -- <command>")
@@ -1832,6 +1920,7 @@ def cmd_install(value: str) -> int:
         "project": prior.get("project"),
         "zones": [z["name"] for z in zs],
         "installed_on": prior.get("installed_on") or today(),
+        **key_expiry.fields(None, key_expiry.MINTED_ELSEWHERE),
         "note": "minted outside this program — rotation happens where it was minted",
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"installed: {label} ({len(zs)} zone(s), analytics readable)")
@@ -1878,17 +1967,22 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
                   f"managed one over it", file=sys.stderr)
             bad += 1
             continue
+        # The lifetime it was issued with; a record from before OBS-191 gets the default.
+        days = m["expire_days"] if "expire_days" in m else key_expiry.DEFAULT_DAYS
         try:
+            expires_on, _why = lifetime(days)
             _label, admin = read_admin(m.get("stash") or p.name)
-            _tid, value = mint(admin, m["account_id"], PRESETS[m["preset"]])
-        except (RuntimeError, KeyError) as exc:
+            _tid, value, answer = mint_answered(admin, m["account_id"], PRESETS[m["preset"]],
+                                                expires_on=expires_on)
+        except (RuntimeError, KeyError, ValueError) as exc:
             print(f"  {p.name}: could not rotate — {exc}", file=sys.stderr)
             bad += 1
             continue
         bad += install_issued(value, p.name,
                               {"id": m["account_id"], "name": m.get("account_name", "")},
                               m["preset"], m.get("project"), True,
-                              stash=m.get("stash") or p.name)
+                              stash=m.get("stash") or p.name,
+                              expire_days=days, expiry=answered(answer, expires_on))
     if leaked and not bad:
         # `settle` closes a leak; `rotate` writes a new value and leaves the register open.
         print(SETTLE_HINT)
@@ -1995,7 +2089,8 @@ def cmd_list() -> int:
         print(f"  {p.name:28s} {m.get('preset', '?'):12s} "
               f"{m.get('project') or '(no project)':32s} "
               f"issued {m.get('issued_on', '?')} "
-              f"rotated {m.get('rotated_on') or '—'} x{m.get('rotations', 0)}")
+              f"rotated {m.get('rotated_on') or 'never'} x{m.get('rotations', 0)}  "
+              f"{key_expiry.describe(m)}")
     if not a:
         print("\nstart with cloudflare stash, reading a protected file on stdin")
     return 0
@@ -2022,6 +2117,7 @@ def main() -> int:
     p_issue.add_argument("--lifecycle-rule", action="append", metavar="PREFIX:DAYS",
                          help="r2-bucket: objects under PREFIX are deleted after DAYS, and its "
                               "unfinished multipart uploads abort after 1 day; repeatable")
+    key_expiry.add_flags(p_issue, "--token-expire-days", NO_EXPIRY_FLAG, "token")
     p_life = sub.add_parser("lifecycle", help="replace an existing R2 bucket's lifecycle; "
                                               "no key is minted, rolled or delivered")
     p_life.add_argument("--account", help="which stashed admin token to act through")
@@ -2073,22 +2169,24 @@ def main() -> int:
             print("refused: --expire-days and --lifecycle-rule apply to --preset r2-bucket only",
                   file=sys.stderr)
             return 2
+        days = key_expiry.days_of(a)
         if scope == "zone":
-            return cmd_issue_zone(a.preset, a.zone, a.vault, a.account)
+            return cmd_issue_zone(a.preset, a.zone, a.vault, a.account, expire_days=days)
         if scope == "bucket-vault":
             if a.zone:
                 print(f"refused: preset {a.preset!r} is bucket-scoped; --zone does not apply",
                       file=sys.stderr)
                 return 2
             return cmd_issue_bucket(a.preset, a.bucket, a.jurisdiction, a.expire_days,
-                                    a.vault, a.account, lifecycle_rules=a.lifecycle_rule or [])
+                                    a.vault, a.account, lifecycle_rules=a.lifecycle_rule or [],
+                                    token_expire_days=days)
         if scope == "account-vault":
             if a.zone:
                 print(f"refused: preset {a.preset!r} is account-scoped; --zone does not apply",
                       file=sys.stderr)
                 return 2
-            return cmd_issue_account(a.preset, a.vault, a.account)
-        return cmd_issue(a.preset, a.account, a.project)
+            return cmd_issue_account(a.preset, a.vault, a.account, expire_days=days)
+        return cmd_issue(a.preset, a.account, a.project, expire_days=days)
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "groups":

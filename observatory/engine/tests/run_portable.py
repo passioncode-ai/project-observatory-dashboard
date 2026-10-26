@@ -221,6 +221,8 @@ BOUNDARY += ('disk_guard',)
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 # The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
 BOUNDARY += ('heroku_door',)
+# Every door that can mint with an expiry does, and records it (OBS-191).
+BOUNDARY += ('key_expiry',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
 BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the

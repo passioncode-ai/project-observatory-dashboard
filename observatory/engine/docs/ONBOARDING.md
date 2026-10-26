@@ -421,6 +421,26 @@ slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET
 `PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
 what each grants.
 
+**Every minted credential expires, and the expiry is recorded** (OBS-191). `cloudflare.py issue`,
+`openrouter.py issue` and `heroku.py issue` mint with an expiry 90 days out unless told otherwise:
+`--token-expire-days N` for Cloudflare (its `--expire-days` stays the R2 bucket's object lifecycle),
+`--expire-days N` for OpenRouter and Heroku, 1 to 365; `--no-token-expiry` or `--no-expiry` mints one
+that does not expire. A Cloudflare roll and an OpenRouter rotation renew the lifetime the credential
+was issued with; Heroku regenerates in place only when the authorization's expiry already matches what
+is asked, and otherwise replaces it. The expiry is written where the credential's metadata already
+lives: the vault slot's `meta.json` (`expires_at`, or null with `expiry_reason`), the OpenRouter and
+Heroku ledgers, a plugin token's record. `vault.py list`, `use_secret.py names`,
+`observatory_credentials` (each vault row's `expiresAt`, `expiry` and `expiryReason`) and each door's
+`list` show it; a value put by hand reads "expiry not recorded", which is not the same as "never".
+What is recorded is the provider's answer, never the request: an answer without an expiry field records
+null with "the provider's answer did not confirm an expiry". The findings board raises
+`credential.expiring` (warning) for a recorded expiry within 14 days and `credential.expired` (critical)
+once it has passed, each with the door's rotate command. Heroku's `rotate` regenerates in place and cannot
+change a lifetime; `issue` again replaces an authorization whose lifetime differs from what is asked.
+DigitalOcean's API cannot mint a token: `digitalocean.py issue` prints the control-panel recipe with
+an expiration to choose, and `install --expires-on YYYY-MM-DD` (and `rotate --expires-on`) records the
+date the panel shows, or null with the reason when none is given.
+
 **A DigitalOcean team's tokens, one place per team.** `tools/digitalocean.py stash` keeps a team's
 own token, read on stdin (or `stash --from-doctl CONTEXT|all`, which reads doctl's config and prints
 nothing), owner-only in `secrets/digitalocean-admin/`; it is never handed out. `teams [--probe]`

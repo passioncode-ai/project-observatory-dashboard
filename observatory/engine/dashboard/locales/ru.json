@@ -152,6 +152,8 @@
  "Key movement not recorded": "Перемещение ключа не записано",
  "Key movements": "Перемещения ключей",
  "Key rotation due": "Пора ротировать ключ",
+ "Key expired": "Ключ истёк",
+ "Key expiring soon": "Ключ скоро истечёт",
  "Key shared by several projects": "Ключ общий для нескольких проектов",
  "Key with a lifetime ceiling": "Ключ с лимитом на весь срок",
  "Key without a project": "Ключ без проекта",
@@ -1158,6 +1160,8 @@
   "many": "{key}: задан {n} дней назад, а его собственная политика требует ротации раз в {days} дн.",
   "other": "{key}: задан {n} дня назад, а его собственная политика требует ротации раз в {days} дн."
  },
+ "{key} expired on {date}": "{key}: срок истёк {date}",
+ "{key} expires on {date}": "{key}: срок истекает {date}",
  "{model} is configured in the chain and no longer exists at the provider": "{model} есть в цепочке, но у провайдера её больше нет",
  "{model} is skipped by the model chain: {reason}": "цепочка моделей пропускает {model}: {reason}",
  "{money}/mo": "{money}/мес",

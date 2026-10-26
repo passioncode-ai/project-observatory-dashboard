@@ -42,7 +42,9 @@ THE CONTRACT WITH AGENTS — the four rules the observatory skill makes mandator
      settle it: the retired value keeps working until revoked at the provider.
 
 METADATA IS NOT SECRET. `meta.json` beside each value (created, rotated, envs,
-and `header_for`, the server a slot is bound to) and `leaks.jsonl` hold names,
+`header_for`, the server a slot is bound to, and `expires_at` with its
+`expiry_reason`, which a minting door records through `record_expiry`, OBS-191)
+and `leaks.jsonl` hold names,
 dates and places — never values — so the register can be read, listed and
 rendered without touching a single secret byte.
 
@@ -74,6 +76,8 @@ import leak_register  # noqa: E402
 import paths                                            
 import safe_git  # noqa: E402  — the engine's one git door
 import vault_project  # noqa: E402
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import key_expiry  # noqa: E402  how a minted credential's expiry is recorded, OBS-191
 
 GATEWAY = paths.source_path("gateway_root", paths.HOME / "disabled/gateway")
 STORE = pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR",
@@ -336,6 +340,9 @@ def cmd_put(a) -> int:
     _atomic_write(slot, value)
     meta.setdefault("created", now())
     meta["updated"] = now()
+    # A NEW VALUE'S EXPIRY IS NOT THE OLD ONE'S. A door that minted it records its own
+    # right after (`record_expiry`); a value put by hand reads "expiry not recorded".
+    key_expiry.clear(meta)
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("put", f"{a.project}/{a.env}/{a.name}")
     print(f"stored {a.project}/{a.env}/{a.name}: length {len(value)}, "
@@ -482,6 +489,34 @@ def cmd_bind(a) -> int:
 
 
 @_serialized
+def record_expiry(project: str, env: str, name: str, expires_at: str | None,
+                  reason: str | None = None, *, tool: str = "vault.py") -> str:
+    """Record when a slot's value expires, in its `meta.json`, and journal it (OBS-191).
+
+    Metadata only: the value is never read. Called by the doors right after they
+    deliver a value they minted, with the expiry they minted it with, or with null
+    and the reason it has none. A slot that holds no value is refused, as `bind`
+    refuses one: an expiry that describes nothing hides a typo. Returns the line
+    `list` shows for it."""
+    slot = _slot(project, env, name)
+    secret = f"{project}/{env}/{name}"
+    if not slot.is_file():
+        raise VaultBoundaryError(f"nothing at {secret} to record an expiry for")
+    at = key_expiry.parse(expires_at) if expires_at else None
+    if expires_at and not at:
+        raise VaultBoundaryError("the expiry is not a timestamp (YYYY-MM-DDTHH:MM:SSZ)")
+    meta = _read_meta(slot)
+    key_expiry.record(meta, at, reason)
+    meta["expiry_recorded"] = now()
+    # Which door minted it: the expiry finding names that door's rotate command.
+    meta["expiry_by"] = tool
+    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+    journal("expiry", secret, tool=tool, expires_at=at,
+            **({} if at else {"reason": meta.get("expiry_reason")}))
+    return key_expiry.describe(meta)
+
+
+@_serialized
 def cmd_rotate(a) -> int:
     slot = _slot(a.project, a.env, a.name)
     if not slot.is_file():
@@ -505,6 +540,7 @@ def cmd_rotate(a) -> int:
     meta["rotated"] = now()
     meta.setdefault("rotations", 0)
     meta["rotations"] += 1
+    key_expiry.clear(meta)
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("rotate", f"{a.project}/{a.env}/{a.name}", archived=archive.name, scope="local_slot")
     # A local replacement is not a settlement: the retired value still works
@@ -762,6 +798,9 @@ def cmd_list(a) -> int:
             extras.append(f"rotated {meta['rotated'][:10]}×{meta.get('rotations', 1)}")
         if isinstance(meta.get("header_for"), str):
             extras.append(f"header for {meta['header_for']}")
+        if "expires_at" in meta:
+            # Only a recorded expiry is shown: most slots hold values no door minted.
+            extras.append(key_expiry.describe(meta))
         if not osprivacy.private(slot):
             extras.append(f"MODE {osprivacy.describe(slot).lstrip('0')} — READABLE BEYOND OWNER")
         print(f"  {project}/{env}/{name}  ({slot.stat().st_size}B"

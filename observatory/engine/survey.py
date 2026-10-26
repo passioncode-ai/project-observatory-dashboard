@@ -701,6 +701,28 @@ def finding_matcher(project_id: str, view: dict | None = None):
     return lambda subject: subject in exact or (bool(prefixes) and subject.startswith(prefixes))
 
 
+def _slot_expiry(slot: Path) -> dict:
+    """When a slot's value expires, from its `meta.json` (metadata, never the value).
+
+    `expiresAt` is the timestamp a minting door recorded (OBS-191), or null with
+    `expiryReason` when it minted one that does not expire or could not set one.
+    A slot whose metadata records nothing reads `expiry: "not recorded"`: a value
+    put by hand, or one minted before the doors recorded expiries, is unknown,
+    which is not the same as "never"."""
+    meta_path = slot.with_name(slot.name + ".meta.json")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    except (OSError, ValueError):
+        return {"expiry": "unreadable metadata"}
+    if not isinstance(meta, dict) or "expires_at" not in meta:
+        return {"expiry": "not recorded"}
+    at = meta.get("expires_at")
+    if isinstance(at, str) and at:
+        return {"expiresAt": at, "expiry": "expires"}
+    return {"expiresAt": None, "expiry": "none",
+            "expiryReason": meta.get("expiry_reason") or "no reason recorded"}
+
+
 def _vault_holders() -> tuple[str, dict[str, list[str]], list[dict]]:
     """(this machine's name, {slot: peers holding it}, degraded) from the digest manifests.
 
@@ -844,6 +866,7 @@ def credentials(project_id: str) -> dict:
                         # others.
                         out["vault"].append({
                             "name": slot.name, "env": envdir.name, "project": name,
+                            **_slot_expiry(slot),
                             "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
                                     f"run --env {envdir.name} {name} {slot.name} -- <command>")})
 
