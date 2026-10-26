@@ -1551,8 +1551,8 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   (no signature, bearer or body) and answered once with `repair-result/1`, the same answer again if the request comes
   again, sent only to a server that lists `repair-result/1`. `project-observatory full org repair [--org ID]` lists
   them and says whether a repair could run here at all. **Today none can**: the organization's signed policy and key
-  set are not applied yet (OE-06), so every repair that arrives is refused `bad-signature` and recorded, and the
-  check-in does not ask for any (it lists `repair-request/1` only while one could run, DEC-0117).
+  set are not applied yet (OE-06), so the check-in does not ask for any (it lists `repair-request/1` only while one
+  could run, DEC-0117), and a repair a server sends anyway is counted in the journal (`repair-unasked`) and dropped.
 
 Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
 offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.

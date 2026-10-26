@@ -717,6 +717,12 @@ remote-execution policy (FAC-SEM-068).
   layer), so remote execution stops. A request the schema refuses (a two-line `task`, a member it does not know) is
   never shown or run and is answered `refused` `bad-signature`, the one reason for a request whose signed form is not
   the contract's; one whose `id` does not read is recorded in the journal and not answered (a result needs an id).
+- **What a hostile server sends stops nothing** (the security review of #366). A request deeper than 8 levels,
+  larger than about 64 KB, or holding a lone surrogate (JSON `"\ud800"`, which no UTF-8 store or canonical form holds)
+  is refused before anything else reads it (`body_problem`), with that code as its note; any other failure on one
+  request is journalled by its exception's name (`repair-unreadable`), never its text, and the others go on. The
+  check-in's own state (the next check-in time, the protocols, an arrived policy) is saved before any repair is read,
+  so nothing a repair holds loses it.
 - **No shell, no command.** A request that passes runs only as a local action the machine's owner allow-listed for its
   `agentRef` in the owner-only `config/node-repair.json` (`{schemaVersion: 1, agents: {agentRef: {action, targetId}},
   lifecycle: {bearerSlot}}`): `restart` or `ensure_running` of a target enrolled with `node.lifecycle`, asked of the
@@ -732,16 +738,24 @@ remote-execution policy (FAC-SEM-068).
   the maintenance job) later; a decline answers it `person-declined` at once. The decision is taken again at the
   moment it would start, with the time the person was told, so a request or a policy that expired meanwhile is refused.
   A machine with role `org-cloud` binds no person: the signed request is its notice and `notifiedAt` the moment the
-  node verified it (DEC-0102), and it starts at once.
+  node verified it (DEC-0102), and it starts at once. The role comes from the server's binding, which no signature
+  covers, so it counts only when the certificate binds no person and the enrollment this machine made with a token
+  carried it (`org_cloud`, `enrolledRole`); a certificate binding a person with role `org-cloud` is refused, and a
+  renewal or a rotation that adds, drops or changes a role is refused `binding-changed` (`_same_binding`), the
+  certificate on record kept.
 - **Once per id, every step audited.** One row per request id in the enrollment's owner-only outbox database
   (`repairs`): the request as received, when it was received and the person told, the lifecycle operation, and the
   one stored `repair-result/1` (checked against its schema before it is stored). A redelivered id gets that result
-  again unchanged and never runs twice; `already-answered` is never sent. Answered ids are kept (the request bodies of
-  all but the newest 500 are cleared), so an organization that enrolls the machine again cannot run an id twice. A
-  removal or a closed organization forgets what had not started. Every step writes one journal line of codes and ids
+  again unchanged and never runs twice; `already-answered` is never sent. A body is kept only while a schema-valid
+  repair waits or runs; a refused or answered one keeps its id and result alone. An answered id is forgotten only
+  after a server took its result and 8 days passed (past any request's `expiresAt`, so it is refused anyway). At most
+  64 repairs wait and 10 000 rows are kept: past them a request is not recorded (`repair-book-full`) and the server
+  sends it again later. A removal or a closed organization forgets what had not started. Every step writes one journal line of codes and ids
   (`repair-received`, `repair-notified`, `repair-declined`, `repair-started`, `repair-answered`,
-  `repair-redelivered`, `repair-malformed`): never the bearer, the signature, the task text or a body.
-- **The wire.** A check-in response's `records.repairs` (at most 16) is read after the check-in is taken, each request
+  `repair-redelivered`, `repair-malformed`, `repair-unreadable`, `repair-book-full`, `repair-unasked`): never the bearer, the signature, the task text or a body.
+- **The wire.** A check-in response's `records.repairs` (at most 16) is read after the check-in is taken, and only
+  when that check-in listed `repair-request/1`: repairs it did not ask for are counted in the journal
+  (`repair-unasked`) and dropped, never recorded or run. Each request is
   recorded and answered or shown under the enrollment's lock; the tick's `repairs` step, after the check-in, starts
   what is due and polls what runs (a run past 30 minutes is `failed`, `timeout`). Results ride the next check-in's
   `records.repairResults` (at most 64) only to a server whose response lists `repair-result/1` (DEC-0117); a check-in
@@ -753,10 +767,12 @@ remote-execution policy (FAC-SEM-068).
 
 Not built here: the signed key set and policy are applied by OE-06, so `policy_keys` and `policy_layers` are empty
 and `repairs_enabled` answers `policy-not-applied`: the check-in does not list `repair-request/1`, and a repair a
-server sends anyway is refused `bad-signature`, recorded and answered to a server that lists `repair-result/1`. Until
+server sends anyway is counted in the journal and dropped. Until
 then the runner is exercised end to end only in tests, with the policy injected (`tests/test_node_repair.py`
 `Enrolled`). The person is told through `org status`, doctor and Health, not a system notification. A package runs
 only as a lifecycle action: a repair agent of its own, verified by its digest and run in a sandbox, is a later step.
+The bearer goes to whatever listens on the engine server's loopback port, which has no proof of its identity yet
+(OBS-248).
 
 ## Lifecycle (OBS-79)
 

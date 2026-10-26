@@ -72,6 +72,13 @@ RUN_TIMEOUT_SECONDS = 30 * 60
 #: one response may carry (`records.repairs`).
 MAX_RESULTS_PER_CHECK_IN = 64
 MAX_REQUESTS_PER_RESPONSE = 16
+#: How deep and how large a request may be before it is read at all, and how many repairs may wait and how many rows
+#: the book keeps (a request the schema admits is a few hundred bytes and four levels deep). Past the book's bounds a
+#: new request is not recorded: the server sends an unanswered one again.
+MAX_DEPTH = 8
+MAX_BODY_BYTES = 64 * 1024
+MAX_PENDING = 64
+MAX_BOOK_ROWS = 10000
 #: The local actions a repair may run, each one `node.lifecycle` tool. Never `stop`: a repair brings a service back.
 ACTIONS = {'restart': 'lifecycle.restart', 'ensure_running': 'lifecycle.ensure_running'}
 CONFIG_NAME = 'node-repair.json'
@@ -272,9 +279,43 @@ def _match(pattern: 're.Pattern', value: Any) -> bool:
     return isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
+def body_problem(doc: Any) -> Optional[str]:
+    """Why a document cannot even be read safely, walked without recursion: `too-deep` past `MAX_DEPTH` levels,
+    `too-large` past about `MAX_BODY_BYTES`, `lone-surrogate` for a string or key holding half a UTF-16 pair (JSON's
+    `"\\ud800"`, which no UTF-8 store and no canonical form can hold), or None."""
+    stack, size = [(doc, 1)], 0
+    while stack:
+        value, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            return 'too-deep'
+        if isinstance(value, str):
+            size += len(value) + 2
+            if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+                return 'lone-surrogate'
+        elif isinstance(value, dict):
+            size += 2
+            for key, item in value.items():
+                if not isinstance(key, str) or any(0xD800 <= ord(ch) <= 0xDFFF for ch in key):
+                    return 'lone-surrogate'
+                size += len(key) + 4
+                stack.append((item, depth + 1))
+        elif isinstance(value, list):
+            size += 2
+            stack.extend((item, depth + 1) for item in value)
+        else:
+            size += 24
+        if size > MAX_BODY_BYTES:
+            return 'too-large'
+    return None
+
+
 def request_problems(doc: Any) -> List[str]:
     """What `repair-request.schema.json` refuses in `doc`, each with its pointer; empty when it admits it. The runner
-    acts on nothing the schema refuses."""
+    acts on nothing the schema refuses. A document too deep, too large or holding a lone surrogate is refused before
+    anything else is read (`body_problem`)."""
+    unreadable = body_problem(doc)
+    if unreadable is not None:
+        return ['/ ' + unreadable]
     out: List[str] = []
     fields = ('type', 'org', 'id', 'device', 'package', 'task', 'issuedAt', 'expiresAt', 'signature')
     if not _closed(doc, fields, fields, '', out):
@@ -547,8 +588,6 @@ CREATE TABLE IF NOT EXISTS repairs (id TEXT PRIMARY KEY, digest TEXT NOT NULL, s
   run_after REAL, declined_at TEXT, operation_id TEXT, started_at TEXT, result TEXT, answered_at TEXT, sent_at TEXT,
   note TEXT);
 """
-#: Answered rows are kept (an id runs at most once, DEC-0102); the bodies of the oldest past this many are cleared.
-KEEP_BODIES = 500
 
 
 def lifecycle_request_id(org_id: str, repair_id: str) -> str:
@@ -585,8 +624,9 @@ def _answer(conn, ctx: Context, row_id: str, outcome: str, *, reason: Optional[s
             agent_ref: Optional[str] = None) -> dict:
     result = build_result(row_id, outcome, _iso(ctx.now), reason=reason, notified_at=notified_at,
                           started_at=started_at)
-    conn.execute("UPDATE repairs SET state = 'answered', result = ?, answered_at = ?, sent_at = NULL, note = ? "
-                 'WHERE id = ?', (json.dumps(result, sort_keys=True), _iso(ctx.now), note, row_id))
+    # An answered request needs no body: only its id (it runs once) and its result are kept.
+    conn.execute("UPDATE repairs SET state = 'answered', result = ?, answered_at = ?, sent_at = NULL, note = ?, "
+                 "request = '{}' WHERE id = ?", (json.dumps(result, sort_keys=True), _iso(ctx.now), note, row_id))
     ctx.journal('repair-answered', repair=row_id, outcome=outcome, reason=reason, note=note, agentRef=agent_ref)
     return result
 
@@ -594,8 +634,11 @@ def _answer(conn, ctx: Context, row_id: str, outcome: str, *, reason: Optional[s
 def receive(conn, ctx: Context, requests: Any) -> dict:
     """Takes the `records.repairs` of one check-in response: each request is recorded once by its id and either
     answered at once (refused by the decision, or `failed` when this machine has no action for the package) or shown
-    to the person and left to `advance`. A redelivered id gets its stored result again and is never run twice."""
-    counts = {'received': 0, 'refused': 0, 'failed': 0, 'notified': 0, 'redelivered': 0, 'malformed': 0}
+    to the person and left to `advance`. A redelivered id gets its stored result again and is never run twice.
+    Nothing one request holds stops the others or the check-in: a failure on it is journalled by its exception's
+    name, never its text, and it is left unrecorded so a later delivery is read again."""
+    counts = {'received': 0, 'refused': 0, 'failed': 0, 'notified': 0, 'redelivered': 0, 'malformed': 0,
+              'dropped': 0}
     items = requests if isinstance(requests, list) else []
     if len(items) > MAX_REQUESTS_PER_RESPONSE:
         ctx.journal('repair-over-limit', received=len(items), kept=MAX_REQUESTS_PER_RESPONSE)
@@ -607,21 +650,36 @@ def receive(conn, ctx: Context, requests: Any) -> dict:
             ctx.journal('repair-malformed', problem='no repair id that reads')
             continue
         try:
-            canonical = settings_canonical_json(item)
-        except CanonicalError:
-            canonical = json.dumps(item, sort_keys=True, ensure_ascii=True)
-        digest = 'sha256:' + hashlib.sha256(canonical.encode('utf-8', 'surrogatepass')).hexdigest()
-        held = conn.execute('SELECT state, digest FROM repairs WHERE id = ?', (rid,)).fetchone()
-        if held is not None:
-            counts['redelivered'] += 1
-            if held['state'] == 'answered':                    # DEC-0102: the same stored result, sent again
-                conn.execute('UPDATE repairs SET sent_at = NULL WHERE id = ?', (rid,))
-            ctx.journal('repair-redelivered', repair=rid, state=held['state'], same=held['digest'] == digest)
-            continue
-        counts['received'] += 1
-        with _transaction(conn):                               # recorded and answered (or shown) as one
-            _take(conn, ctx, item, rid, canonical, digest, counts)
+            _receive_one(conn, ctx, item, rid, counts)
+        except Exception as error:                             # noqa: BLE001: a hostile body stops nothing
+            counts['malformed'] += 1
+            ctx.journal('repair-unreadable', repair=rid, error=type(error).__name__)
+    _prune(conn, ctx.now)
     return counts
+
+
+def _receive_one(conn, ctx: Context, item: dict, rid: str, counts: dict) -> None:
+    problems = request_problems(item)
+    if problems:
+        canonical, digest = None, 'refused:' + problems[0][:60]
+    else:
+        canonical = settings_canonical_json(item)
+        digest = 'sha256:' + hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+    held = conn.execute('SELECT state, digest FROM repairs WHERE id = ?', (rid,)).fetchone()
+    if held is not None:
+        counts['redelivered'] += 1
+        if held['state'] == 'answered':                        # DEC-0102: the same stored result, sent again
+            conn.execute('UPDATE repairs SET sent_at = NULL WHERE id = ?', (rid,))
+        ctx.journal('repair-redelivered', repair=rid, state=held['state'], same=held['digest'] == digest)
+        return
+    rows = conn.execute('SELECT COUNT(*) AS n FROM repairs').fetchone()['n'] or 0
+    if rows >= MAX_BOOK_ROWS:
+        counts['dropped'] += 1                                 # not recorded: the server sends it again later
+        ctx.journal('repair-book-full', repair=rid, rows=rows)
+        return
+    counts['received'] += 1
+    with _transaction(conn):                                   # recorded and answered (or shown) as one
+        _take(conn, ctx, item, rid, canonical, digest, counts, problems)
 
 
 @contextlib.contextmanager
@@ -635,22 +693,23 @@ def _transaction(conn):
     conn.execute('COMMIT')
 
 
-def _take(conn, ctx: Context, item: dict, rid: str, canonical: str, digest: str, counts: dict) -> None:
+def _take(conn, ctx: Context, item: dict, rid: str, canonical: Optional[str], digest: str, counts: dict,
+          problems: List[str]) -> None:
     package = item.get('package') if isinstance(item.get('package'), dict) else {}
     agent_ref = package.get('agentRef') if _match(AGENT_REF, package.get('agentRef')) else None
     version = package.get('version') if _match(SEMVER, package.get('version')) else None
-    task = item.get('task') if isinstance(item.get('task'), str) and not TASK_FORBIDDEN.search(item['task']) \
-        else None
+    # The body and the task line are kept only for a request the schema admits; a refused one keeps its id alone.
+    task = None if problems else item['task']
     conn.execute('INSERT INTO repairs(id, digest, state, request, agent_ref, version, task, received_at) '
                  "VALUES (?, ?, 'received', ?, ?, ?, ?, ?)",
-                 (rid, digest, canonical, agent_ref, version, task and task[:300], _iso(ctx.now)))
+                 (rid, digest, canonical or '{}', agent_ref, version, task, _iso(ctx.now)))
     ctx.journal('repair-received', repair=rid, agentRef=agent_ref, version=version,
                 digest=package.get('digest') if _match(SHA256, package.get('digest')) else None)
-    problems = request_problems(item)
     if problems:
         # Nothing the schema refuses is acted on or shown; refused as one whose signed form cannot be trusted.
         counts['refused'] += 1
-        _answer(conn, ctx, rid, 'refused', reason='bad-signature', note='shape', agent_ref=agent_ref)
+        note = problems[0][2:] if problems[0].startswith('/ ') else 'shape'
+        _answer(conn, ctx, rid, 'refused', reason='bad-signature', note=note, agent_ref=agent_ref)
         return
     first = ctx.decide(item)
     if first['decision'] == 'refuse' and first['reason'] != 'person-declined':
@@ -664,6 +723,14 @@ def _take(conn, ctx: Context, item: dict, rid: str, canonical: str, digest: str,
         counts['failed'] += 1
         _answer(conn, ctx, rid, 'failed', reason='run-failed',
                 note='no-local-action' if action is None else 'no-executor', agent_ref=agent_ref)
+        return
+    pending = conn.execute("SELECT COUNT(*) AS n FROM repairs WHERE state NOT IN ('answered', 'received')"
+                           ).fetchone()['n']
+    if pending >= MAX_PENDING:                             # not recorded: the server sends it again later
+        conn.execute('DELETE FROM repairs WHERE id = ?', (rid,))
+        counts['received'] -= 1
+        counts['dropped'] += 1
+        ctx.journal('repair-book-full', repair=rid, pending=pending)
         return
     notified = _iso(ctx.now)                               # org-cloud: when it verified the request (DEC-0102)
     run_after = ctx.now if ctx.role == 'org-cloud' else ctx.now + ctx.notice_seconds
@@ -767,16 +834,16 @@ def advance(conn, ctx: Context) -> dict:
                 _answer(conn, ctx, rid, 'failed', reason='run-failed', notified_at=row['notified_at'],
                         started_at=row['started_at'], note=str(outcome.get('code') or 'failed')[:60],
                         agent_ref=agent_ref)
-    _prune(conn)
+    _prune(conn, ctx.now)
     return counts
 
 
-def _prune(conn) -> None:
-    """Every answered id stays (it runs at most once); the request bodies of all but the newest `KEEP_BODIES` answered
-    rows are cleared, so the book stays small without forgetting an id."""
-    conn.execute("UPDATE repairs SET request = '{}' WHERE state = 'answered' AND request != '{}' AND id NOT IN ("
-                 "SELECT id FROM repairs WHERE state = 'answered' ORDER BY answered_at DESC LIMIT ?)",
-                 (KEEP_BODIES,))
+def _prune(conn, now: float) -> None:
+    """An answered id is forgotten only once a server has taken its result and longer than any request may live has
+    passed since it was answered (`MAX_REPAIR_DAYS` and a day): a request with that id is past its own `expiresAt`
+    by then, so it is refused whatever the book holds."""
+    conn.execute("DELETE FROM repairs WHERE state = 'answered' AND sent_at IS NOT NULL AND answered_at < ?",
+                 (_iso(now - (MAX_REPAIR_DAYS + 1) * 86400),))
 
 
 def due_results(conn, limit: int = MAX_RESULTS_PER_CHECK_IN) -> List[dict]:

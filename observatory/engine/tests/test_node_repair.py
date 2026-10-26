@@ -483,6 +483,80 @@ class Book(unittest.TestCase):
         self.assertNotIn('Restart the example service', text)
 
 
+class Hostile(Book):
+    """The review of PR #366: what a hostile organization server sends never stops a check-in, never fills the disk,
+    and never skips the person."""
+
+    def test_a_lone_surrogate_task_is_refused_and_never_raises(self):
+        """MEDIUM 1: JSON `"\\ud800"` passed the task's character check and the SQLite insert raised."""
+        doc = self.request()
+        doc['task'] = 'fix \ud800 now'
+        counts = repair.receive(self.conn, self.ctx(), [doc])
+        self.assertEqual(counts['refused'], 1)
+        self.assertEqual((self.result()['reason'], self.row()['note'], self.row()['task']),
+                         ('bad-signature', 'lone-surrogate', None))
+        self.assertIn('/ lone-surrogate', repair.request_problems(doc))
+        self.assertTrue(repair.request_problems({'\udc00': 1}))
+
+    def test_a_deeply_nested_request_never_raises(self):
+        """MEDIUM 1: a request nested about 700 deep raised RecursionError in the canonical form."""
+        deep = 'x'
+        for _ in range(5000):
+            deep = [deep]
+        doc = dict(self.request(), package=deep)
+        counts = repair.receive(self.conn, self.ctx(), [doc])
+        self.assertEqual(counts['refused'], 1)
+        self.assertEqual(self.row()['note'], 'too-deep')
+        self.assertEqual(repair.request_problems(doc), ['/ too-deep'])
+
+    def test_any_failure_on_one_request_is_a_code_and_the_rest_go_on(self):
+        original = repair.request_problems
+
+        def broken(doc):
+            if doc.get('id') == 'rep-1':
+                raise RuntimeError('a secret-looking text that must not be written')
+            return original(doc)
+        repair.request_problems = broken
+        self.addCleanup(setattr, repair, 'request_problems', original)
+        counts = repair.receive(self.conn, self.ctx(keys=[]), [self.request('rep-1'), self.request('rep-2')])
+        self.assertEqual((counts['malformed'], counts['refused']), (1, 1))
+        self.assertIsNone(self.row('rep-1'))
+        self.assertEqual(self.result('rep-2')['reason'], 'bad-signature')
+        line = next(l for l in self.lines if l['event'] == 'repair-unreadable')
+        self.assertEqual(line, {'event': 'repair-unreadable', 'repair': 'rep-1', 'error': 'RuntimeError'})
+        self.assertNotIn('secret-looking', json.dumps(self.lines))
+
+    def test_bodies_are_kept_only_while_a_repair_is_pending(self):
+        """LOW 4: a refused request keeps no body, an answered one drops it, one larger than 64 KB is refused."""
+        repair.receive(self.conn, self.ctx(), [dict(self.request('rep-1'), extra=1)])
+        self.assertEqual(self.row('rep-1')['request'], '{}')
+        repair.receive(self.conn, self.ctx(), [dict(self.request('rep-2'), extra='x' * (70 * 1024))])
+        self.assertEqual((self.row('rep-2')['note'], self.row('rep-2')['request']), ('too-large', '{}'))
+        repair.receive(self.conn, self.ctx(), [self.request('rep-3')])
+        self.assertNotEqual(self.row('rep-3')['request'], '{}')            # notified: its body is read to start it
+        repair.decline(self.conn, self.ctx(), 'rep-3')
+        self.assertEqual(self.row('rep-3')['request'], '{}')
+
+    def test_the_book_is_bounded(self):
+        """LOW 4: at most `MAX_PENDING` repairs wait and `MAX_BOOK_ROWS` rows are kept; past them a request is not
+        recorded (the server sends it again later); an answered id is forgotten only after any request could expire."""
+        self.addCleanup(setattr, repair, 'MAX_PENDING', repair.MAX_PENDING)
+        self.addCleanup(setattr, repair, 'MAX_BOOK_ROWS', repair.MAX_BOOK_ROWS)
+        repair.MAX_PENDING, repair.MAX_BOOK_ROWS = 2, 4
+        repair.receive(self.conn, self.ctx(), [self.request('rep-%d' % i) for i in range(3)])
+        self.assertEqual(len(repair.report(self.conn)['pending']), 2)
+        self.assertIsNone(self.row('rep-2'))
+        repair.receive(self.conn, self.ctx(keys=[]), [self.request('rep-%d' % i) for i in range(10, 14)])
+        total = self.conn.execute('SELECT COUNT(*) AS n FROM repairs').fetchone()['n']
+        self.assertEqual(total, 4)
+        self.assertIn('repair-book-full', [l['event'] for l in self.lines])
+        repair.mark_sent(self.conn, ['rep-10', 'rep-11'], self.now)
+        self.now += (repair.MAX_REPAIR_DAYS + 1) * 86400 + 1
+        repair.advance(self.conn, self.ctx())                               # prunes what can no longer run
+        self.assertIsNone(self.row('rep-10'))
+        self.assertIsNotNone(self.row('rep-0'))                              # not yet taken by a server: kept
+
+
 class Config(unittest.TestCase):
 
     def setUp(self):
@@ -662,36 +736,74 @@ class Enrolled(unittest.TestCase):
     def check_ins(self):
         return [body for path, body in self.server.requests if path == '/v1/devices/check-in']
 
-    def test_with_no_policy_applied_the_node_asks_for_none_and_refuses_what_arrives(self):
+    def test_with_no_policy_applied_the_node_asks_for_none_and_reads_none(self):
+        """MEDIUM 2: repairs a check-in did not ask for are dropped, counted in the journal, never recorded or run."""
         self.assertTrue(self.make().check_in()['ok'])
         self.assertEqual(self.check_ins()[-1]['protocols'], ['fabric-device/0.1'])
         self.assertEqual(self.make().repairs()['enabled']['reason'], 'policy-not-applied')
-        self.server.repairs = [self.request()]                    # a server that sends them anyway
+        self.server.repairs = [self.request(), self.request('rep-2')]      # a server that sends them anyway
         self.assertTrue(self.make().check_in()['ok'])
         self.server.repairs = None
         status = self.make().describe()
-        (recent,) = status['repairs']['recent']
-        self.assertEqual((recent['outcome'], recent['reason']), ('refused', 'bad-signature'))
-        self.assertEqual(status['repairs']['enabled']['enabled'], False)
+        self.assertEqual((status['repairs']['recent'], status['repairs']['pending']), ([], []))
+        self.make().check_in()
+        self.assertEqual(self.server.results, [])
+        journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
+        (line,) = [json.loads(l) for l in journal.splitlines() if '"repair-unasked"' in l]
+        self.assertEqual(line['repairs'], 2)
+        self.assertNotIn('"repair-received"', journal)
+
+    def test_a_refusal_is_recorded_answered_once_and_again_for_a_redelivery(self):
+        self.enable()
+        self.make().check_in()
+        bad = sign(dict(self.request(), device={'id': 'another-device'}), self.private)
+        self.server.repairs = [bad]
+        self.assertTrue(self.make().check_in()['ok'])
+        self.server.repairs = None
+        (recent,) = self.make().describe()['repairs']['recent']
+        self.assertEqual((recent['outcome'], recent['reason']), ('refused', 'wrong-device'))
         self.make().check_in()
         (result,) = self.server.results
-        self.assertEqual((result['id'], result['outcome'], result['reason']), ('rep-1', 'refused', 'bad-signature'))
+        self.assertEqual((result['id'], result['outcome'], result['reason']), ('rep-1', 'refused', 'wrong-device'))
         self.make().check_in()
         self.assertEqual(len(self.server.results), 1)            # taken once
-        self.server.repairs = [self.request()]                    # redelivered: the same stored result again
+        self.server.repairs = [bad]                              # redelivered: the same stored result again
         self.make().check_in()
         self.server.repairs = None
         self.make().check_in()
         self.assertEqual(self.server.results, [result, result])
         journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
         self.assertIn('"repair-answered"', journal)
-        self.assertNotIn(self.request()['signature']['value'], journal)
+        self.assertNotIn(bad['signature']['value'], journal)
+
+    def test_a_check_in_keeps_what_its_response_said_whatever_the_repairs_do(self):
+        """MEDIUM 1: a repair that cannot be read never loses the check-in's own state."""
+        self.enable()
+        self.make().check_in()
+        original = repair.receive
+
+        def explode(*args, **kwargs):
+            raise RecursionError('maximum recursion depth exceeded')
+        repair.receive = explode
+        self.addCleanup(setattr, repair, 'receive', original)
+        self.server.repairs = [self.request()]
+        self.server.checkin_protocols = ['fabric-device/0.1', 'repair-result/1', 'node-summary/1']
+        self.now[0] += 10
+        self.assertTrue(self.make().check_in()['ok'])
+        state = self.make().state()
+        self.assertEqual(state['nextCheckInAt'], int(self.now[0]) + 300)
+        self.assertIn('node-summary/1', state['protocols'])
+        self.assertEqual(state['lastCheckIn']['result'], 'ok')
+        journal = (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8')
+        self.assertIn('"repair-receive-failed"', journal)
 
     def test_results_go_only_to_a_server_that_lists_repair_result(self):
+        self.enable()
         self.server.protocols = ['fabric-device/0.1', 'fabric-activity/0.1']
         self.make().enroll('https://org.example', 'et_2.' + 'T' * 32)
         self.device = self.make().keys.device_id
-        self.server.repairs = [self.request()]
+        self.make().check_in()
+        self.server.repairs = [sign(dict(self.request(), device={'id': 'another-device'}), self.private)]
         self.make().check_in()
         self.server.repairs = None
         self.make().check_in()
@@ -730,6 +842,7 @@ class Enrolled(unittest.TestCase):
 
     def test_a_person_declines(self):
         self.enable()
+        self.make().check_in()
         self.server.repairs = [self.request()]
         self.make().check_in()
         self.server.repairs = None
@@ -747,7 +860,9 @@ class Enrolled(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'no-such-repair')
 
     def test_a_server_that_refuses_the_results_never_stops_check_ins(self):
-        self.server.repairs = [self.request()]
+        self.enable()
+        self.make().check_in()
+        self.server.repairs = [sign(dict(self.request(), device={'id': 'another-device'}), self.private)]
         self.make().check_in()
         self.server.repairs = None
         self.server.refuse_results = 5
@@ -765,6 +880,7 @@ class Enrolled(unittest.TestCase):
 
     def test_a_removed_machine_runs_nothing_more(self):
         self.enable()
+        self.make().check_in()
         self.server.repairs = [self.request()]
         self.make().check_in()
         self.server.repairs = None
@@ -780,6 +896,76 @@ class Enrolled(unittest.TestCase):
         args = org_tool.parser().parse_args(['repair', '--org', ORG, '--decline', 'rep-1'])
         self.assertEqual((args.command, args.org, args.decline), ('repair', ORG, 'rep-1'))
         self.assertIn('org repair --org ID --decline REPAIR_ID', org_tool.__doc__)
+
+
+@needs_crypto
+class OrgCloud(unittest.TestCase):
+    """MEDIUM 3: `org-cloud` skips the person's notice, so it counts only when this machine enrolled with it and binds
+    no person; a rotation or renewal that adds, drops or changes a role is refused, and a person-bound `org-cloud`
+    certificate is refused whole."""
+
+    def setUp(self):
+        from node.org import Enrollment
+        self.now = [float(T0 + 3600)]
+        self.clock = lambda: self.now[0]
+        self.server = RepairServer(self.clock)
+        self.node = Path(tmpdir.mkdtemp()).resolve() / 'node'
+        self.make = lambda: Enrollment(self.node, ORG, transport=self.server, clock=self.clock,
+                                       harness=lambda: (None, None, 'no scans in this test'),
+                                       exclusions=lambda: ([], None))
+
+    def role(self):
+        enrollment = self.make()
+        return enrollment._repair_context(enrollment.state()).role
+
+    def test_enrolled_as_org_cloud_it_counts(self):
+        self.server.role = 'org-cloud'
+        self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        self.assertEqual(self.make().state()['enrolledRole'], 'org-cloud')
+        self.assertEqual(self.role(), 'org-cloud')
+
+    def test_a_state_without_the_enrolled_role_is_a_persons_machine(self):
+        self.server.role = 'org-cloud'
+        self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        enrollment = self.make()
+        with enrollment._locked():
+            state = enrollment.state()
+            state.pop('enrolledRole')
+            enrollment._save(state)
+        self.assertIsNone(self.role())
+        from node.org import OrgError
+        self.server.repairs = None
+        with self.assertRaises(OrgError) as caught:
+            self.make().decline_repair('rep-1')
+        self.assertEqual(caught.exception.code, 'no-such-repair')            # a person may decline here
+
+    def test_a_person_bound_org_cloud_certificate_is_refused(self):
+        from node.org import OrgError
+        self.server.role, self.server.user = 'org-cloud', 'member-1'
+        with self.assertRaises(OrgError) as caught:
+            self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        self.assertEqual(caught.exception.code, 'response-malformed')
+
+    def test_a_rotation_that_adds_a_role_is_refused_and_the_certificate_kept(self):
+        from node.org import OrgError
+        self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        serial = self.make().state()['certificate']['serial']
+        self.server.role = 'org-cloud'
+        with self.assertRaises(OrgError) as caught:
+            self.make().rotate()
+        self.assertEqual(caught.exception.code, 'binding-changed')
+        state = self.make().state()
+        self.assertEqual(state['certificate']['serial'], serial)
+        self.assertNotIn('role', state['certificate'])
+        self.assertIsNone(self.role())
+
+    def test_a_renewal_or_rotation_may_not_add_drop_or_change_a_role(self):
+        from node.org import _same_binding
+        self.assertFalse(_same_binding({'user': False}, {'user': False, 'role': 'org-cloud'}))
+        self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False}))
+        self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False, 'role': 'other'}))
+        self.assertTrue(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False, 'role': 'org-cloud'}))
+        self.assertTrue(_same_binding({'user': False}, {'user': False}))
 
 
 class HealthAndDocs(unittest.TestCase):

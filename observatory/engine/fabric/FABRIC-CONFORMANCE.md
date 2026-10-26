@@ -56,8 +56,8 @@ and the repair schemas and fixtures, all vendored at the pin by `tools/vendor_or
 action, the person told at least 15 minutes first and able to decline, one stored
 `repair-result/1` per id, sent only to a server whose response lists `repair-result/1`. The
 check-in lists `repair-request/1` only while a repair could run: until OE-06 applies the
-signed key set and policy it does not, and a repair sent anyway is refused `bad-signature`
-and recorded. Two readings are the safe side and named in `docs/design/NODE.md`: an
+signed key set and policy it does not, and a repair sent anyway is counted in the journal
+and dropped, never recorded or run. Two readings are the safe side and named in `docs/design/NODE.md`: an
 unreadable policy `expiresAt` stops remote execution, and a request its schema refuses is
 answered `bad-signature` and never shown or run.
 

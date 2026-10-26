@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "73bb642887ed7403e19b925ed8a2d1aff275069ae058e201d2963419536aa51a",
-      "bytes": 176805,
+      "export_sha256": "0019df7feebe9771eedbf7878680894a6ec291812ec22e931f0b821dee61708c",
+      "bytes": 176827,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "be0d7f66c49287546803a3fdff64fed74d86170bb4703f57ad6a4dec097d37c1",
-      "bytes": 146345,
+      "export_sha256": "7e5286e2411033609cfdd429bb3f8a0129552583bc0a4875733e6c2281c1bf48",
+      "bytes": 146709,
       "upstream_modified": true
     },
     {
@@ -950,8 +950,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "a19b4a6f10b503453dbb82f1fcf1d9d3fe6532695642404cc25868e22cdc8a31",
-      "bytes": 17846,
+      "export_sha256": "58a1d1f90cdc99807380e100e9729d4b80c2bbd5a50be29f4849032845a68918",
+      "bytes": 17867,
       "upstream_modified": true
     },
     {
@@ -2861,8 +2861,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f69ca129ee31d16458d64cf5a2279e70e33f505275c9b666a20576e7448258f2",
-      "bytes": 154202
+      "export_sha256": "b17da07e15a09bb7542bb287eafdbf3445ac517f8dded62786484ebd79ec3b19",
+      "bytes": 157542
     },
     {
       "path": "node/p256.py",
@@ -2889,8 +2889,8 @@
       "path": "node/repair.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3bc25d1952b7dd3c9648a56cffef0fcdf8c95dcf21a18a2f84ee3b293a0f38a5",
-      "bytes": 46174
+      "export_sha256": "357ebb46d1b1b3abf7b0fc946bcf6f1fb917f0b353b33fdb58f45f092c5165f3",
+      "bytes": 49516
     },
     {
       "path": "node/revocation.py",
@@ -4930,8 +4930,8 @@
       "path": "tests/test_node_repair.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f92f7efcd235c9569fff2ac08cddf0155e77ece98e30ac05800b116e1099bf19",
-      "bytes": 42331
+      "export_sha256": "c1b779e7ac9bfc3e6e486dc066f0e2daefd26e44086cab879a135d6b1663a311",
+      "bytes": 52646
     },
     {
       "path": "tests/test_node_revocation.py",

@@ -20,8 +20,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   again for a redelivered request), sent only to a server that lists `repair-result/1`; the journal holds codes and
   ids, never the signature, the bearer or the task text. `project-observatory full org repair [--org ID]` lists them and
   says whether a repair could run here. **Today none can**: the organization's signed policy and key set are not
-  applied yet (OE-06), so every repair that arrives is refused `bad-signature` and recorded, and the check-in does not
-  list `repair-request/1` (it does so only while a repair could run, DEC-0117).
+  applied yet (OE-06), so the check-in does not list `repair-request/1` (it does so only while a repair could run,
+  DEC-0117), and a repair a server sends anyway is counted in the journal and dropped. A request too deep, too large or
+  holding a lone surrogate is refused without stopping the check-in, an `org-cloud` machine (no notice) is one that
+  enrolled so and binds no person, and a rotation or renewal that adds or changes a role is refused.
 
 ### Changed
 

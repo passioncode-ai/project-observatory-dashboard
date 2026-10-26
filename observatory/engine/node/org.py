@@ -674,13 +674,24 @@ def _upgraded(doc: dict) -> Tuple[dict, Optional[dict]]:
     return out, undone
 
 
+def org_cloud(state: dict) -> bool:
+    """Whether this enrollment is an `org-cloud` machine (DEC-0099), whose repairs skip the person's notice (DEC-0102):
+    only when the certificate binds no person, carries the role, and the role was on the enrollment this machine
+    made with a token (`enrolledRole`). The role comes from the server's binding, which no signature covers; a
+    renewal or rotation that adds, drops or changes it is refused (`_same_binding`), so it cannot appear later."""
+    cert = state.get('certificate') if isinstance(state.get('certificate'), dict) else {}
+    return cert.get('role') == 'org-cloud' and cert.get('user') is False and state.get('enrolledRole') == 'org-cloud'
+
+
 def _same_binding(held: dict, cert: dict) -> bool:
     """Whether a renewed certificate binds what the one on record binds (DEC-0100, FAC-SEM-044, the contract's
-    `device-rules.ts` renewal check): a person or none, the same person by the binding's user id, and the same role.
+    `device-rules.ts` renewal check): a person or none, the same person by the binding's user id, and the same role:
+    one added, dropped or changed is a changed binding (OBS-193: `org_cloud` reads the role). A rotation is held to it
+    too.
     A record with a user id needs the same id in the renewal; none, or another, is a changed binding. Only a record
     saved by 0.29.0, which kept whether a person was bound but not who, is compared by that alone, and the renewal
     records the id (OBS-221). `_certificate` refuses a person-bound certificate without an id."""
-    if bool(cert.get('user')) != bool(held.get('user')) or ('role' in held and cert.get('role') != held.get('role')):
+    if bool(cert.get('user')) != bool(held.get('user')) or cert.get('role') != held.get('role'):
         return False
     if 'userId' in held:
         return cert.get('userId') == held['userId']
@@ -1030,6 +1041,8 @@ class Enrollment:
         if user is not None:
             out['userId'] = user['id']
         if isinstance(binding.get('role'), str):           # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100)
+            if binding['role'] == 'org-cloud' and user is not None:
+                raise OrgError('response-malformed', 'an org-cloud certificate binds no person (DEC-0099)')
             out['role'] = binding['role']
         return out
 
@@ -1104,6 +1117,13 @@ class Enrollment:
                'policyRootKey': answer.get('policyRootKey'), 'enrolledAt': iso(self.clock()),
                'sequenceNum': 0, 'fullState': False, 'lastCheckIn': None, 'rotate': False,
                'reEnroll': False, 'nextCheckInAt': 0, 'skewSeconds': 0}
+        # OBS-193: the role this machine enrolled with by a token; a renewal keeps it (and `_same_binding` refuses a
+        # renewal that changes it), so `org_cloud` can tell a role the enrollment carried from one added later.
+        if renewed is not None and previous is not None:
+            if 'enrolledRole' in previous:
+                doc['enrolledRole'] = previous['enrolledRole']
+        elif isinstance(cert.get('role'), str):
+            doc['enrolledRole'] = cert['role']
         if over:
             doc['previousRemoval'] = previous['removed']
         if renewed is not None and previous is not None:
@@ -1163,6 +1183,14 @@ class Enrollment:
                 self._save(state)
                 raise OrgError('rotate-refused', 'the server refused the rotation: %s (HTTP %s)' % (code, status))
             cert = self._certificate(answer)
+            if not _same_binding(state['certificate'], cert):
+                # The same machine, person and role, or no rotation: a role or person a rotation adds is refused
+                # (OBS-193), and the certificate on record stays in use.
+                state.pop('pendingRotation', None)
+                self._save(state)
+                self.journal('rotate-refused', status=status, code='binding-changed')
+                raise OrgError('binding-changed', 'the rotated certificate binds another user or role than the one '
+                               'on record')
             if cert['serial'] != state['certificate']['serial']:
                 state['previousCertificate'] = state['certificate']
             state['certificate'] = cert
@@ -1426,18 +1454,14 @@ class Enrollment:
                 state.pop('summaryRefused', None)
                 state.pop('summaryBackoffUntil', None)
             state.pop('summaryHeld', None)                 # a check-in was taken: a held summary may ride again
-            records = answer.get('records') if isinstance(answer.get('records'), dict) else {}
-            repairs_received = None
-            with self._db() as conn:
-                if results:                                # DEC-0102: the server took them; a redelivery resends
-                    repair.mark_sent(conn, [r['id'] for r in results], self.clock())
-                    state.pop('repairResultsRefused', None)
-                    state.pop('repairResultsBackoffUntil', None)
-                if 'repairs' in records:                   # OBS-193: every request recorded once and audited
-                    repairs_received = repair.receive(conn, self._repair_context(state), records['repairs'])
-                if results or repairs_received is not None:
-                    state['repairs'] = repair.report(conn)
+            if results:                                    # DEC-0102: the server took them; a redelivery resends
+                state.pop('repairResultsRefused', None)
+                state.pop('repairResultsBackoffUntil', None)
+            # What the response said is saved before any repair it carries is read: nothing a repair holds can lose
+            # the next check-in's time, the protocols or the policy that arrived.
             self._save(state)
+            records = answer.get('records') if isinstance(answer.get('records'), dict) else {}
+            repairs_received = self._take_repairs(state, doc, results, records)
             self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
                          **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}),
                          **({'repairResults': len(results)} if results else {}),
@@ -1832,10 +1856,35 @@ class Enrollment:
             self.journal('repair-config-unusable', detail=problem[:200])
         cert = state.get('certificate') if isinstance(state.get('certificate'), dict) else {}
         return repair.Context(org=self.org_id, device=state.get('device') or self.keys.device_id,
-                              role=cert.get('role') if isinstance(cert.get('role'), str) else None,
+                              role='org-cloud' if org_cloud(state) else None,
                               keys=self.policy_keys(), layers=self.policy_layers(), agents=config['agents'],
                               executor=None if problem else self.executor_for(config), now=self.clock(),
                               journal=self.journal)
+
+    def _take_repairs(self, state: dict, sent: dict, results: List[dict], records: dict) -> Optional[dict]:
+        """After a check-in was taken (its state saved): the results it carried are marked taken, and the repairs its
+        response carries are read, only when this check-in listed `repair-request/1` (DEC-0117). Repairs it did not
+        ask for are counted in the journal and dropped, never recorded or run. Whatever reading them raises is
+        journalled by its name and the check-in stands. Answers the counts, or None when nothing was read."""
+        repairs = records.get('repairs')
+        asked = REPAIR_REQUEST_PROTOCOL in (sent.get('protocols') or [])
+        if repairs is not None and not asked:
+            self.journal('repair-unasked', repairs=len(repairs) if isinstance(repairs, list) else 0)
+            repairs = None
+        if not results and repairs is None:
+            return None
+        counts = None
+        try:
+            with self._db() as conn:
+                if results:
+                    repair.mark_sent(conn, [r['id'] for r in results], self.clock())
+                if repairs is not None:            # OBS-193: every request recorded once and audited
+                    counts = repair.receive(conn, self._repair_context(state), repairs)
+                state['repairs'] = repair.report(conn)
+        except Exception as error:                 # noqa: BLE001: a repair never undoes a check-in
+            self.journal('repair-receive-failed', error=type(error).__name__)
+        self._save(state)
+        return counts
 
     def _repair_results_due(self, state: dict) -> List[dict]:
         """The stored results the next check-in carries: only to a server whose response lists `repair-result/1`
@@ -1879,7 +1928,7 @@ class Enrollment:
             if state is None:
                 raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
                                command=enroll_command(self.org_id, None))
-            if (state.get('certificate') or {}).get('role') == 'org-cloud':
+            if org_cloud(state):
                 raise OrgError('org-cloud', 'this machine has role org-cloud: it binds no person, and the '
                                'organization\'s signed request is its notice (DEC-0102)')
             with self._db() as conn:
