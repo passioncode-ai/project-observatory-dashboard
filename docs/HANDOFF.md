@@ -17,6 +17,14 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-26: release 0.29.2](runs/2026-10-26-release-0.29.2/README.md): engine 0.29.2 (`observatory-log` stays
+0.28.0, unchanged since), carrying the standing review policy (OBS-227, #357), session MCP servers that move past an
+open listen stream and updates that keep `OBSERVATORY_SYSTEM_SETUP=0` (OBS-228, OBS-229, #359), a check-in that
+reports a policy the server sent as failed rather than applied (OBS-231, #360) and `full probes` explaining its
+fixture workspace (OBS-224, #355). The final reviews' non-blocking findings are OBS-243 (#357) and OBS-244 (#359).
+Next: merge, tag `v0.29.2`, verify, install, run `project-observatory full review policy enable` once at a terminal,
+then record the receipts.
+
 [2026-10-24: a standing review policy](runs/2026-10-24-review-policy/README.md) (OBS-227, #357): a person enables a
 closed set of safe rules once at a terminal (`full review policy enable`), the tick's optional step `review-policy`
 applies them as `policy:RULE@HASH`, never as the operator, journaled and reversible (`full review undo-policy`), and

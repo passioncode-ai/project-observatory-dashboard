@@ -3,12 +3,23 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.29.2 (2026-10-26)
+
+A patch release. A standing review policy can now decide the safe part of the proposal queue every tick, as
+`policy:RULE@HASH` and never as you, and what is left for a person is prepared as one batch applied in one launch at
+your terminal. It does nothing until you enable it: after installing, run `project-observatory full review policy
+enable` once at a terminal (`full review policy show` first lists the rules and what each would decide now). Session
+MCP servers no longer stay on an old release because a client keeps a `subscriptions/listen` stream open; the move is
+made by the running server, so a session opened under 0.29.1 or earlier still answers `stale-server` once after this
+update and moves by itself from the next release on. `full update --apply` keeps `OBSERVATORY_SYSTEM_SETUP=0`, which
+likewise holds from the update after this one. A check-in no longer reports a policy the server sent as applied, and
+`full probes` explains that it needs a synthetic fixture workspace, which corrects the 0.29.0 and 0.29.1 notes:
+nothing is needed after an upgrade for `full check`.
 
 ### Added
 
 - **A standing review policy: the queue of proposals is reviewed every tick, and what needs a person is resolved in
-  one launch** (OBS-227, `docs/design/REVIEW-POLICY.md`). `project-observatory full review policy show` lists a closed
+  one launch** (OBS-227, #357, `docs/design/REVIEW-POLICY.md`). `project-observatory full review policy show` lists a closed
   set of versioned rules and what each would decide on the queue now; `full review policy enable`, at your terminal,
   enables exactly those rules and records their hash. From then the tick's new optional step `review-policy` supersedes
   exact duplicate proposals, appends `resources`-only proposals from an agent without replacing a recorded resource,
@@ -29,7 +40,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
-- **Open agent sessions move onto a new release again** (OBS-228). A session's MCP server moves itself onto an
+- **Open agent sessions move onto a new release again** (OBS-228, #359). A session's MCP server moves itself onto an
   installed release in place (OBS-159), but on a real machine none ever did: from 2026-10-21 its reload log held 30
   refusals and no swap, 29 of them "requests were still running after 60 s", so every open session answered
   `stale-server` after each release until it was restarted. A client on the 2026-07-28 protocol, Claude Code among
@@ -41,12 +52,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   changes; one that does not hears none until it listens again. A request the
   client cancelled stops counting whatever spelling its id had, and a move refused because requests were running is
   tried again the moment the last of them answers, without waiting for another request.
-- **`full update --apply` keeps `OBSERVATORY_SYSTEM_SETUP=0`** (OBS-229). It replaced an explicit `0` with `1` before
+- **`full update --apply` keeps `OBSERVATORY_SYSTEM_SETUP=0`** (OBS-229, #359). It replaced an explicit `0` with `1` before
   the new release scheduled its maintenance job, so an update in a second or test workspace loaded launchd jobs and
   wrote a Keychain item. With `0` the update now installs the release, schedules nothing and reports
   `"maintenance": "not-scheduled-here"` with the command that schedules the job. An update is run by the release it
   replaces, so the first update that keeps the `0` is the one after this release.
-- **A check-in no longer reports a policy the server sent as applied** (OBS-231). The node verifies and applies no
+- **A check-in no longer reports a policy the server sent as applied** (OBS-231, #360). The node verifies and applies no
   signed policy yet (OE-06), and every check-in said the server layer was `applied` at revision 0. That is the
   contract's report when no policy ever arrived, but the node said it as well after a check-in response carried
   one, so an organization server read a policy as in force on a machine that ignored it. A policy a response
@@ -55,7 +66,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   `policy-not-applied` once per revision), and every check-in after it reports that layer `failed` at revision 0
   with an error naming the revision that arrived. A renewal keeps the record; a closed organization drops it at
   once, and any other removal at the next enrollment. A held revision out of the schema's range is read as none.
-- **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224). Both release
+- **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224, #355). Both release
   summaries, and `docs/COMPATIBILITY.md`, said the first `full check` after updating exits 1 once and to run
   `project-observatory full probes` once. On an installed copy neither holds: `full check` runs the portable suite and
   never runs `probes-check`, so nothing is needed after an upgrade, and `full probes` could not run at all, because the
