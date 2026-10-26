@@ -7,6 +7,19 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
+  harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it
+  is inside the scanned home, kept on this machine) and every Codex skill (`~/.codex/skills` and `~/.agents/skills`,
+  name and digest), and `org summary` lists them beside Claude Code's: a project's with source `project`, Codex's with
+  source `user`, each once by name. On your own machine (mode `C`) an organization sees a project's skill only when the
+  project sits in one of its work folders, and a Codex skill only when its baseline names it; the folder never leaves.
+  A harness scan taken before this change is refused until the next tick takes a new one (`org:node-summary-unavailable`
+  for at most one tick). The person's own skill wins over a project's of the same name, as in Claude Code, and a linked
+  project is admitted by whichever of its spellings is a work folder. The consent notice now says that mode `A` sends
+  every project's own skill names and that `config/node-summary.json` is the guard for client and person names.
+  A plugin's digest is still not sent: the contract defines the field but not what it covers. So a baseline that sets
+  a plugin's digest reads `changed` for that plugin, and `org summary`, `org status` and Health say why beside it.
+
 - **Bring your enrollments over from another lifecycle broker** (OBS-79 step L5, `docs/design/LIFECYCLE.md`).
   `project-observatory full lifecycle import --from FOLDER` reads that broker's state folder on this machine without
   writing anything in it, not even SQLite's shared-memory file, and writes the targets and grants the engine accepts
@@ -117,6 +130,10 @@ while the major version is 0, a minor release may change behaviour and says so h
     A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.
   - DEC-0121 to DEC-0124 are not in this pin. DEC-0121 comes with OBS-237; DEC-0123's `open_link` is filed for the
     next re-pin as OBS-245 (`full open` still opens the browser).
+- **Documentation**: the machine-utility decision record, `docs/design/MACHINE-UTILITY.md` (OBS-76, packet OE-00):
+  the node is the engine's local server under the operating system's service manager, the planned Rust sidecar
+  is retired, the local channel and one node per account come with OBS-256, `seq` stays per enrollment (contract
+  DEC-0128), and one owner per verb on a machine. Follow-up rows OBS-255 to OBS-258.
 
 ## 0.29.2 (2026-10-26)
 
