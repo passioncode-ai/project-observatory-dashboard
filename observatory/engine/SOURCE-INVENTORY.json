@@ -944,14 +944,14 @@
       "path": "fabric-contract.lock.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b8ce04fc2650551ff79453464825b0c8c4b0b070bb544ef7283b2a17501dba68",
+      "export_sha256": "1f036546e573a7fe1c2c201f9ce3190862b8233179c0b8cd166f8e13dc575d66",
       "bytes": 215
     },
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "c1d2620e7166102aa2a6bb6d1b195168909c9e43df89e7aae04b63f74b9a8e11",
-      "bytes": 16774,
+      "export_sha256": "a768d69d8d0bfb00b33f14710f1458903275549aefce26a841f990edaadad797",
+      "bytes": 16700,
       "upstream_modified": true
     },
     {
@@ -1134,8 +1134,8 @@
       "path": "fabric/interop-schemas/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "623b9a8dfd7018eac6ce7cbed74bc077f0915617c855b913c6fe922602a33ff8",
-      "bytes": 2131
+      "export_sha256": "16046640e9f50bf951844a3f776ecf515d28d423d22925f4251a9294dfccb006",
+      "bytes": 2035
     },
     {
       "path": "fabric/interop-schemas/common.schema.json",
@@ -1143,13 +1143,6 @@
       "upstream_modified": true,
       "export_sha256": "707a28c49e8a370d3ace2898406093ad9bac93952054f05bbffeb0b912dd8e99",
       "bytes": 12834
-    },
-    {
-      "path": "fabric/interop-schemas/decision.schema.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "44ff474338e6ad5b2f3eeb725144a45d9ab6925430f90e81b677f989d1a5cc73",
-      "bytes": 2186
     },
     {
       "path": "fabric/interop-schemas/interop-common.schema.json",
@@ -1190,8 +1183,8 @@
       "path": "fabric/interop-schemas/interop-request-meta.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a91688406cd847eac13073bb76a22953b094776b42cebaae7ae34d3a95c93b36",
-      "bytes": 1248
+      "export_sha256": "ba3ce2692c4c08b99224b5e775b616f7370fe8f4296c166b366f6cba8937be46",
+      "bytes": 885
     },
     {
       "path": "fabric/interop-schemas/interop-result.schema.json",
@@ -1239,7 +1232,7 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "176bbe31bca98f24721e00936c88ba1d22e8c8c216562ac269657addac8c5b6c",
+      "export_sha256": "54cc01a7c6fc3edc3c8c988cea0ca13c1e22dc55b955ad8efa37e8301790142a",
       "bytes": 13490
     },
     {
@@ -6657,7 +6650,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 887,
+  "file_count": 886,
   "excluded": [
     "git-history",
     "operator-registries",

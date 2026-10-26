@@ -1,7 +1,7 @@
 # fabric-relay/0.1 node vectors (vendored)
 
 Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit
-`a3a66eb0052043847f6556348e37d34ca873a629`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
+`de8cec30a443421ae5603dcfda7e4ff16ed00c45`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
 every file here: `fixtures/vectors/`, `schemas/`, and the `estate-*` fixtures of `fixtures/semantic/` in `semantic/`, all
 but one: `estate-secret-value-as-slot.json` names the AWS documentation's example access key id as a slot, a shape the
 public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`. They are the contract
@@ -24,7 +24,7 @@ case; the first checks the digests below.
 `http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
 `device-enrollment.schema.json` (DEC-0031, DEC-0094), with the device fixtures in `device/` (`fixtures/positive/` and
 `fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
-`a3a66eb0052043847f6556348e37d34ca873a629` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+`de8cec30a443421ae5603dcfda7e4ff16ed00c45` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
 `gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors the whole folder at
 another commit, removes an `estate-*` fixture the commit no longer has, and rewrites every commit and the digests here:

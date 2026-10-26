@@ -370,7 +370,7 @@ whose device-key ref holds `@` but is no key reference is refused as malformed, 
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
 `enroll-token.json` and the `estate-*` fixtures of `semantic/` (83 of the contract's 84). Then they run the add, re-key
 and remove ceremonies end to end between two device-key sets, on a test estate. Since OBS-171 the whole `node-vectors/`
-folder is at one commit, the engine's contract pin (`a3a66eb0`, the release `v0.1.0+2026-10-26`, since OBS-226;
+folder is at one commit, the engine's contract pin (`de8cec30`, the release `v0.1.0+2026-10-24.2`, since OBS-226;
 `588748ab` from OBS-217; `1f31e5a` before it, after DEC-0090's
 `3d8cb17`). The re-pin brought two estate rules the port now runs: FAC-SEM-134 (DEC-0106: a machine's `profile` is
 `full`, `member` or `view`; only a full machine carries a hub key; a view machine has no placement, no secret and is
