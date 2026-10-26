@@ -313,9 +313,13 @@ def status(probe: bool = True) -> dict:
     without starting, stopping or renewing anything), every caller with its grant and whether a binding proves it,
     and the last events."""
     from node.lifecycle import macos
+    helper = macos.default_helper()
+    # `--version` only: the helper answers at once and changes nothing, so even `--no-probe` asks it (OBS-222).
+    helper_state = macos.helper_state(helper, platform=sys.platform)
     out: dict = {"platform": sys.platform, "supported": sys.platform == "darwin",
                  "config": str(S.config_path()), "configured": S.config_path().exists(),
-                 "helper": {"path": str(macos.default_helper()), "built": macos.default_helper().is_file()},
+                 "helper": {"path": str(helper), "built": helper_state in ("current", "outdated"),
+                            "state": helper_state, "expectedVersion": macos.expected_helper_version()},
                  "targets": [], "callers": [], "events": [], "degraded": []}
     try:
         doc = S.read_config()
@@ -364,9 +368,12 @@ def cmd_status(a: argparse.Namespace) -> int:
               "enroll TARGET_ID --kind app --path PATH --caller PRINCIPAL --startup-effect TEXT`.")
     for row in doc["degraded"]:
         print(f"  degraded {row['source']}: {row['reason']}")
-    if doc["supported"] and not doc["helper"]["built"]:
+    if doc["supported"] and doc["helper"]["state"] == "not_built":
         print("  the macOS helper is not built, so apps answer setup_required: "
               "`project-observatory full lifecycle build-helper`")
+    elif doc["supported"] and doc["helper"]["state"] == "outdated":
+        print("  the macOS helper was built from an older native_app.swift than this engine ships, so apps answer "
+              "setup_required: `project-observatory full lifecycle build-helper`")
     for t in doc["targets"]:
         seen = (t.get("observed") or {}).get("state", "not probed")
         print(f"  {t['targetId']} ({t['kind']}) {t['desiredState']} rev {t['policyRevision']} · {seen} · "

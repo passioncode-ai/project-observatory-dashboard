@@ -130,7 +130,8 @@ HINTS = {
     'invalid_config': 'config/node-lifecycle.json fails its schema; `project-observatory full lifecycle status` '
                       'names the fault',
     'unsafe_config': 'config/node-lifecycle.json must be an owner-only regular file reached through no link',
-    'setup_required': 'the macOS helper is not built: `project-observatory full lifecycle build-helper`',
+    'setup_required': 'the macOS helper is not built, or was built from an older source than this engine ships: '
+                      '`project-observatory full lifecycle build-helper`',
     'already_running': 'another process holds this workspace\'s lifecycle state',
 }
 

@@ -39,6 +39,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **A macOS lifecycle helper built from an older source is no longer run** (OBS-222). The helper now answers
+  `--version` with a digest of the `native_app.swift` it was built from, and the lifecycle adapter compares it with
+  the source the engine ships before it runs the helper. A helper built before this release, or from another source,
+  makes apps answer `setup_required` (`helper_outdated`) until you run `project-observatory full lifecycle
+  build-helper` again; `full lifecycle status` says so, and a stop now checks the helper as a start already did.
+  Launchd targets need no helper and are unaffected.
+
 - **Every credential a door mints now expires, and the expiry is recorded** (OBS-191, part 1).
   `tools/cloudflare.py issue` sends `expires_on`, `tools/openrouter.py issue` sends `expires_at` and
   `tools/heroku.py issue` sends `expires_in`, 90 days out by default; Cloudflare mints without one before

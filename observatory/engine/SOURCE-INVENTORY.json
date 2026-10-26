@@ -891,8 +891,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8c0347548c7d1c1eb401bb314a0e272f72509826f06eed471eb7043a9bbe0bf4",
-      "bytes": 180040,
+      "export_sha256": "9604dfce39e627d9d08740e1377f5d7cfcec2208ec1a9a46b4de9e92ae4ccec0",
+      "bytes": 180312,
       "upstream_modified": true
     },
     {
@@ -2833,22 +2833,22 @@
       "path": "node/lifecycle/macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2fc45f9974e1563fc09ef7457a3d7eee680b56b802a6c9468ec83b92facb7c08",
-      "bytes": 56324
+      "export_sha256": "e7eed586031163a62ec9e970211c50dd571d3a547b62ce2e090ef4725d29a877",
+      "bytes": 61528
     },
     {
       "path": "node/lifecycle/native_app.swift",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56c979cdbc7f670c4371e667ebd0654baf15dadff307f95659b86e791755364a",
-      "bytes": 6255
+      "export_sha256": "febb1083f1e9bbb68f1ef81ea823ad1b1ac3e707fd05ec1bc666a2dce2dc4e2b",
+      "bytes": 7012
     },
     {
       "path": "node/lifecycle/service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8fb8041ebd6146a413ba9c0d21f808f99e83fec391a468f929be44f4c151d741",
-      "bytes": 34283
+      "export_sha256": "c807395c979853505ce0abfd5abf671d821319712e6e4535b207ed2159f8ebe1",
+      "bytes": 34366
     },
     {
       "path": "node/node_summary.py",
@@ -4909,15 +4909,15 @@
       "path": "tests/test_node_lifecycle_macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d8def775146a3ca7fa9923da46237f8a5f3dbd53437e93c87cc694ea5aaec53e",
-      "bytes": 66398
+      "export_sha256": "caa002e6e57238bb4e5c5bb383ee62bcda2c7c008fb41410aa33668fd1b0db0b",
+      "bytes": 73527
     },
     {
       "path": "tests/test_node_lifecycle_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "afad8a8aa6e4f8d1f6d9fe4b1b92a0fbc3aee82fbb89acfa9a51f82469f45a3d",
-      "bytes": 50520
+      "export_sha256": "b1536fdbf7334cabcfc44a8bdd0e39745b4b60ee1737ca4850a55ad160ac51a4",
+      "bytes": 51719
     },
     {
       "path": "tests/test_node_org.py",
@@ -6279,8 +6279,8 @@
       "path": "tools/lifecycle_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0b085d084754577a3e8af8cf9a437316efc48e53aa5a47136442684e2d8d2aae",
-      "bytes": 23611
+      "export_sha256": "4990a24269d134cec7171906fd00c4560a7ae1370b595d5b9b98c7550bd13a59",
+      "bytes": 24200
     },
     {
       "path": "tools/lifecycle_findings.py",
