@@ -580,6 +580,21 @@ class TheBoardSaysWhenAKeyExpires(unittest.TestCase):
         rows = self.f.from_store(self.vault, self.store, "2026-10-26")
         self.assertIn('openrouter.py" rotate alpha-key', rows[0]["action"])
 
+    def test_a_key_that_expires_later_today_is_a_warning(self):
+        self.slot("alpha/prod/TODAY", "2026-10-26T23:00:00Z")
+        (row,) = self.f.from_store(self.vault, self.store, "2026-10-26")
+        self.assertEqual((row["type"], row["severity"]), ("credential.expiring", "warning"))
+
+    def test_a_damaged_ledger_never_stops_the_board(self):
+        self.slot("alpha/prod/SOON", "2026-11-05T00:00:00Z", door="openrouter.py")
+        do = self.store / "digitalocean-issued"
+        do.mkdir()
+        (do / "box.meta.json").write_text(json.dumps(["not", "a", "record"]))
+        for issued in (["a", "b"], "text", 5, None):
+            (self.store / "openrouter-issued.json").write_text(json.dumps({"issued": issued}))
+            rows = self.f.from_store(self.vault, self.store, "2026-10-26")
+            self.assertEqual([r["subject"] for r in rows], ["credential:vault/alpha/prod/SOON"], issued)
+
     def test_absent_stores_give_no_rows_and_the_board_runs_the_rule(self):
         self.assertEqual(self.f.from_store(self.vault / "none", self.store / "none", "2026-10-26"), [])
         src = (ROOT / "tools" / "build_findings.py").read_text(encoding="utf-8")

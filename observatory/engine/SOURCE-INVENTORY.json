@@ -4491,8 +4491,8 @@
       "path": "tests/test_key_expiry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ce9ea387ead43e79fa3d81122b9f72c39372e9f4ad68d8b71d36d1e481752d18",
-      "bytes": 33804
+      "export_sha256": "64fffc12cf65f2a7d2c962cbb6df7e5dc8a014d30945164d874b2b39c177b45b",
+      "bytes": 34713
     },
     {
       "path": "tests/test_key_shape.py",
@@ -6021,8 +6021,8 @@
       "path": "tools/expiry_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6ce25dccc3dcbdada23722458e8e8bccaf27967838d1892af287791acfb6cc43",
-      "bytes": 8709
+      "export_sha256": "73373d95da90f477f45bdb1df39869963b4524c7ef4bb6dc1734ee23e0b46544",
+      "bytes": 9087
     },
     {
       "path": "tools/export_ledger.py",

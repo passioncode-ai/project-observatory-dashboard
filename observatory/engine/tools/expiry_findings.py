@@ -74,7 +74,8 @@ def slot_action(door: str | None, slot: str, ledgers: dict) -> str:
         return (f"`{TOOL.format(door='cloudflare.py')} issue` again with the same preset and "
                 f"`--vault {slot}`: a re-issue rolls the token and renews its expiry")
     if door == "digitalocean.py":
-        labels = [n for n, r in (ledgers.get("digitalocean") or {}).items() if r.get("vault") == slot]
+        labels = [n for n, r in (ledgers.get("digitalocean") or {}).items()
+                  if isinstance(r, dict) and r.get("vault") == slot]
         return ("mint a new token in DigitalOcean's control panel, then pipe it to "
                 f"`{TOOL.format(door='digitalocean.py')} rotate {labels[0] if labels else '<label>'} "
                 "--expires-on YYYY-MM-DD`")
@@ -99,8 +100,10 @@ def _plugin_tokens(store: pathlib.Path) -> list[tuple[str, dict]]:
 
 def gather(vault_root: pathlib.Path, store: pathlib.Path) -> list[dict]:
     """Every recorded expiry as `{subject, key, expires_at, action}`, slots first."""
+    issued = _read(store / "openrouter-issued.json").get("issued")
     ledgers = {
-        "openrouter": _read(store / "openrouter-issued.json").get("issued") or {},
+        # A ledger of another shape is no ledger: one damaged file must not stop the board's build.
+        "openrouter": issued if isinstance(issued, dict) else {},
         "digitalocean": {p.name[:-len(".meta.json")]: _read(p)
                          for p in sorted((store / "digitalocean-issued").glob("*.meta.json"))}
         if (store / "digitalocean-issued").is_dir() else {},
@@ -131,7 +134,7 @@ def gather(vault_root: pathlib.Path, store: pathlib.Path) -> list[dict]:
                         "action": f"`{TOOL.format(door='openrouter.py')} rotate {name}` mints the successor "
                                   "with the key's lifetime and delivers it before the old one is deleted"})
     for label, rec in sorted(ledgers["digitalocean"].items()):
-        if rec.get("expires_at") and not rec.get("vault"):
+        if isinstance(rec, dict) and rec.get("expires_at") and not rec.get("vault"):
             out.append({"subject": f"credential:digitalocean/{label}", "key": f"DigitalOcean token {label}",
                         "expires_at": rec["expires_at"],
                         "action": "mint a new token in DigitalOcean's control panel, then pipe it to "
@@ -152,7 +155,7 @@ def findings(entries: list[dict], today: str) -> list[dict]:
         left = (at - day).days
         if left > WARN_DAYS:
             continue
-        expired = left <= 0
+        expired = left < 0  # a key that expires later today still works today: a warning, not critical
         out.append({
             "type": "credential.expired" if expired else "credential.expiring",
             "subject": e["subject"],
@@ -162,7 +165,8 @@ def findings(entries: list[dict], today: str) -> list[dict]:
             "detail": (f"The expiry recorded when it was minted is {e['expires_at']}"
                        + (", so whatever reads it is refused now." if expired
                           else f", {left} day(s) from {today}; whatever reads it stops working then.")
-                       + " The date is the provider's answer, recorded beside the credential, never its value."),
+                       + " The date is the one recorded beside the credential (the provider's answer, or the date"
+                       " typed in for a token minted by hand), never its value."),
             "action": e["action"],
         })
     return out
