@@ -7,6 +7,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Bring your enrollments over from another lifecycle broker** (OBS-79 step L5, `docs/design/LIFECYCLE.md`).
+  `project-observatory full lifecycle import --from FOLDER` reads that broker's state folder on this machine without
+  writing anything in it, not even SQLite's shared-memory file, and writes the targets and grants the engine accepts
+  into `config/node-lifecycle.json` in one replacement, journaled as one event. `--dry-run` says what would change and
+  writes nothing; a second run changes nothing and says so; your own records are never overwritten. Whatever the engine
+  refuses is one line with a code (the exit code is then 1). Callers become `agent:<name>` (`--principal` names
+  another), and no token is copied: a grant comes over only when an access binding you issued already carries that
+  caller's token, otherwise the report prints the commands that issue one. An app still enrolled under the older
+  identity is verified now and keeps its enrollment when its bundle is unchanged, or under a signing team you name
+  with `--trusted-team`. An always_on target comes over as on_demand, because until the other broker is off both
+  would restart it after a crash; the report names the `policy` command that turns it back (`--keep-always-on` keeps
+  it). The report names ids and counts, never an app's path, a team or a hash. Switching the other broker off stays
+  yours, after you check `full lifecycle status`. The `unenroll` verb is OBS-251.
+
 - **The node now supervises the apps you enrolled** (OBS-79 step L4, `docs/design/LIFECYCLE.md`). While the local
   server runs, it stops an app the node started that no caller renewed for its idle minutes (never one you took over
   or are in front of), and starts an always_on target again after it exited, until three failed starts in 30 minutes

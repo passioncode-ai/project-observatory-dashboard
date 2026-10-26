@@ -891,8 +891,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "787ee41e221b9ebcb3b2af1bce7d815a7944d0d2a8ffab2a477bd9a081a2e237",
-      "bytes": 180912,
+      "export_sha256": "a35142fa9cef25e578ca3a20617021f94b6fe053f8b17bff1ad7aab9d6adbfb4",
+      "bytes": 182444,
       "upstream_modified": true
     },
     {
@@ -2819,8 +2819,8 @@
       "path": "node/lifecycle/__init__.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "152fef3c8af62caf08cb40b889de09dec60bf2e0caf08dc17d46e61783fe9b6c",
-      "bytes": 944
+      "export_sha256": "674b12aaff0e71ed544f7ad46aa25ec6e0a7f115c8f5c39fbe33ba7fa3ab4c20",
+      "bytes": 1063
     },
     {
       "path": "node/lifecycle/broker.py",
@@ -2828,6 +2828,13 @@
       "upstream_modified": true,
       "export_sha256": "fc63382e5917641da5a49e6c645ab520ab5a5174b95618c8557a1866ead743a7",
       "bytes": 86274
+    },
+    {
+      "path": "node/lifecycle/importer.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2e8ebdd1849dfeb02ecc6fa8437af559e8d2abdc86990be85da2552a04e2c356",
+      "bytes": 34474
     },
     {
       "path": "node/lifecycle/macos.py",
@@ -2944,8 +2951,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "43c790c054f0cf868b30d19117d6a420b26dee06dec03d26a6e7ab7f0c833a57",
-      "bytes": 95228,
+      "export_sha256": "5c9257a3476d57fba3dee5b9e7e011d18dda858446fe4fb83e5901d4d0fca3c1",
+      "bytes": 95357,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3708,8 +3715,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "d96e4c52c18762d7a87e7ee98a3233e39586d5fe943940afb0ed8b742ebbb29f",
-      "bytes": 46200,
+      "export_sha256": "88c57041a96f2fe752334415b16630f3f36cdc9df0cafb461b28411321e1b808",
+      "bytes": 46475,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4449,8 +4456,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b5bf2045e53d4fb4fd33dd2ceaad8379a8748bcd663d857144a87eefc0cf1116",
-      "bytes": 23428
+      "export_sha256": "4996da387674672073a76d7e513ba83062c1ccaff0a81b3d984ead6d87d4d6a1",
+      "bytes": 23823
     },
     {
       "path": "tests/test_handoff.py",
@@ -4913,6 +4920,13 @@
       "bytes": 79804
     },
     {
+      "path": "tests/test_node_lifecycle_import.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "19dcc0818717ea6204d510b0fd5a85f5c1af252bc117042f7c245794cb7e536e",
+      "bytes": 33453
+    },
+    {
       "path": "tests/test_node_lifecycle_macos.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4923,8 +4937,8 @@
       "path": "tests/test_node_lifecycle_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9c3ecaa3fc0e5f5ff13dfad86ab1c5077e09927eb6706cdf15b989189dfa6a15",
-      "bytes": 56176
+      "export_sha256": "85fa6c0603965f79ccfa267757e196a00f4bd6e641f9b091fd46d5d999337b05",
+      "bytes": 56183
     },
     {
       "path": "tests/test_node_lifecycle_supervisor.py",
@@ -6293,8 +6307,8 @@
       "path": "tools/lifecycle_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0b2fc8e8362a1930aeb761d0aa866b4eb3495f269561f439db1f549d581eb998",
-      "bytes": 24886
+      "export_sha256": "37a64e579f1866098b0e1ec25ccd29233d3f17ea2efa5a2537b38ee3bdb647bb",
+      "bytes": 30834
     },
     {
       "path": "tools/lifecycle_findings.py",
@@ -6811,7 +6825,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 909,
+  "file_count": 911,
   "excluded": [
     "git-history",
     "operator-registries",

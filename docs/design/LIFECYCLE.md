@@ -1,7 +1,7 @@
 # `node.lifecycle`: the port plan (OBS-79)
 
-Status: plan, 2026-10-22; steps L1, L2, L3 and L4 built (see "Step L1: what was built", "Step L2: what was built",
-"Step L3: what was built" and "Step L4: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
+Status: plan, 2026-10-22; steps L1, L2, L3 and L4 built, and the engine side of L5 (see "Step L1: what was built",
+"Step L2: what was built", "Step L3: what was built", "Step L4: what was built" and "Step L5: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
 node wakes, stops and restarts enrolled desktop apps and background services for agents, and the
 mechanics (code, protocol, design) move in from an existing private broker under the operator's standing
 permission. Its records, logs, keys, the names of the apps it manages and its private paths and
@@ -49,7 +49,7 @@ helper and 203 tests in four files.
 | `acceptance.json` | 181 lines | none | one machine's acceptance run: process ids, real clients, its apps | stays |
 | `README.md`, `AGENTS.md`, its module page and runbook | about 1,000 lines | the contract and the operator rules, rewritten here | the private gateway, its ports and callers, the list of enrolled apps, incident notes naming them | this document and a section of the operator's guide |
 | tests, four files | 203 tests | every behaviour above | real signing teams, caller names and home paths in fixtures, replaced by neutral ones (`ABCDE12345`, `caller-a`, temporary folders) | `tests/test_node_lifecycle*.py` |
-| runtime state (its application-support folder, logs, credential files) | n/a | none | everything: enrollments, policies, token hashes, the SQLite store, events | stays on that machine; imported only by the operator's own command (step L5) |
+| runtime state (its application-support folder, logs, credential files) | n/a | none | everything: enrollments, policies, token hashes, the SQLite store, events | stays on that machine; imported only by the operator's own command (step L5, `full lifecycle import`), which reads it there and copies no token hash |
 
 ## What changes on the way in
 
@@ -73,7 +73,8 @@ helper and 203 tests in four files.
    the same broker; until they exist the tools answer `unsupported_platform` there, never a silent
    success.
 5. **Identity migration** keeps its rule (an unchanged bundle adopted under its own team; a changed
-   one needs the owner) with the trusted teams read from configuration.
+   one needs the owner) with the trusted teams the operator names (`full lifecycle import --trusted-team`,
+   none by default).
 
 ## Pull requests, in order
 
@@ -84,11 +85,13 @@ helper and 203 tests in four files.
 | L2r | the helper's release build inside the signed app (below, "Release"), and the adapter preferring the app's helper when the installed app satisfies its signing requirement | 0.30.0, by 2026-11-07 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import. **Built** in the L4 pull request; the identity migration runs at L5's import (below) | 0.30.0 |
-| L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); the identity migration runs inside the import (a legacy record can exist only in the private broker's state); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
+| L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); the identity migration runs inside the import (a legacy record can exist only in the private broker's state); then the private broker is switched off and its launchd job removed by its own uninstall. **Built**, the engine side, in the L5 pull request; the `unenroll` verb the L3 notes gave this step is OBS-251; running the import on the machine and the private broker's uninstall are the operator's (below) | 0.30.0, by 2026-11-07 |
 
 Each step is its own pull request with an adversarial and a confirming review round, like every node
 slice. The private broker keeps running until L5's import is verified on the machine that uses it, so
-agents never lose the tools between steps.
+agents never lose the tools between steps: the operator runs the import, checks `full lifecycle status`, moves each
+agent to the local server's `/mcp` with its access binding, and only then runs the private broker's own uninstall
+(the engine never switches it off or touches its launchd job).
 
 ## Step L1: what was built
 
@@ -322,14 +325,14 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   allocates a pseudo-terminal on purpose; the owner-only document is the boundary that holds against that.
 
 Notes for L4: the supervisor runs inside the server (`lifecycle.Host`) and must also join the event log into the events
-feed; the Health page and `observatory_machine` show each target (acceptance below). For L5: the `unenroll` verb with its
-retired revisions comes with the import. The release build of the helper inside the signed app is still its own pull
+feed; the Health page and `observatory_machine` show each target (acceptance below). The `unenroll` verb with its
+retired revisions, which this note gave L5, is row OBS-251. The release build of the helper inside the signed app is still its own pull
 request; until it lands, a source install runs `full lifecycle build-helper`.
 
 The source's 36 tests for this step, by where they went: 28 ported here (21 with neutral fixtures and a binding's bearer in place of the broker's token, 7
 adapted to the engine: the owner's token and the tools it gained at start, the host's token twice, the disposable log
 folder, the reserved names, re-enrolling); 5 wait for the `unenroll` verb
-(L5); 3 are the server's own behaviour, already tested where it lives: a second copy exits 75 and touches nothing
+(OBS-251); 3 are the server's own behaviour, already tested where it lives: a second copy exits 75 and touches nothing
 (`tests/test_fabric_service.py`), the launchd output files are rotated (`serverd.rotate_own_logs`), a client that went
 away is not a server failure (`tests/test_serverd.py`). 24 new cases cover the binding authority (the bound binding only, rebinding,
 revocation before the effect), the unsupported platform, the inert host, a damaged store (a degraded row, the server up,
@@ -383,7 +386,8 @@ cases of `tests/test_node_lifecycle_service.py` (`SupervisionTests`).
   pass, no warm-up and no watcher; the sweep only keeps the store pruned.
 - **The identity migration** is not in this step: the engine's registry admits only `designated-requirement/1`
   identities (`broker.app_identity` refuses any other record), so a legacy record can exist only in the private
-  broker's state, and its migration runs inside L5's import, before the imported document is written.
+  broker's state, and its migration runs inside L5's import, before the imported document is written (built:
+  `importer.migrate_identity`, "Step L5: what was built").
 - **Not in this step** (OBS-250): the lifecycle event log joining the server's `/fabric/v1/events` feed, which is a view
   over the tick's store with a rowid cursor and needs a cursor that orders two sources, and the Health page and
   `observatory_machine` showing each target (acceptance below).
@@ -393,6 +397,87 @@ covered by new cases here (`test_a_launch_or_termination_wakes_a_pass_over_that_
 `test_an_activation_goes_to_the_broker_for_every_target_of_that_bundle`,
 `test_the_sweep_warms_prunes_and_passes_over_every_target`,
 `test_an_always_on_target_that_exited_is_started_again_by_the_sweep`).
+
+## Step L5: what was built
+
+`observatory/engine/node/lifecycle/importer.py` and the `import` verb of `observatory/engine/tools/lifecycle_cli.py`,
+tested by `observatory/engine/tests/test_node_lifecycle_import.py` (suite `node_lifecycle_import`, 47 cases: the 7
+identity-migration cases of the source, adapted to an import, and 40 new). This is the engine side only: nothing in
+it switches the private broker off.
+
+```sh
+project-observatory full lifecycle import --from FOLDER --dry-run    # what would change; writes nothing
+project-observatory full lifecycle import --from FOLDER              # terminal only; one write, journaled
+```
+
+- **What it reads.** The private broker's state folder holds `registry.json` (`{schemaVersion: 1, targets}`, the
+  target record this engine's registry validates, with callers named by their bare names and its `owner` always
+  among them), `callers.json` (`{schemaVersion: 1, callers: {name: {tokenHash, revision, revoked, owner?, host?,
+  operatorProxy?, allowedTools, allowedTargets}}}`, the token hash being the SHA-256 hex of the bearer) and
+  `lifecycle.sqlite3`. Of the store only two counts are read: operations still running and processes it started that
+  the person has not taken over. No row of it is imported: the engine's store is its own (`<state>/node-lifecycle/`)
+  and another broker's operation ids mean nothing here.
+- **Read-only on the source.** `--from` is absolute; the folder must be a real folder of this account that nobody
+  else may change, with no link on the way (`check_folder`). Each document is opened through `broker.private_json`
+  (owner-only regular file, no link followed). The store is not opened in place: even a `mode=ro` connection to a
+  database in WAL mode creates `-shm` beside it, so the store and its write-ahead log are read as bytes into a private
+  temporary copy, queried there `mode=ro` with `query_only`, and the copy is removed. A live broker's last writes are
+  in its log, so they are counted. The two files are read one after the other, so a checkpoint between the reads
+  could pair them inconsistently: both are stamped (inode, size, times) before and after, a copy whose stamps moved
+  is taken again once, and a second that moved leaves the counts `degraded`. So does a store whose `meta` version is
+  not 1 (never guessed at) and a write-ahead log others may read. A case holds the source folder's bytes, modes and
+  times unchanged across an import while the source's writer keeps its rows in the log.
+- **Through the engine's own validation, item by item.** Each target is checked alone by `broker.validate_registry`
+  (its dependency list too: ids, at most 16), then against its dependencies: the targets on a dependency cycle are
+  refused `invalid_dependencies` and a target depending on a refused one `dependency_refused`, the others come; each grant by the rules of `config/node-lifecycle.json`. A refusal is one item with
+  a code (`invalid_registry`, `startup_effects_required`, `no_callers`, `caller_unmapped`, `dependency_refused`,
+  `reenroll_required` with its reason, `already_enrolled`; for grants `invalid_grant`, `wildcard_refused`,
+  `unknown_tool`, `already_granted`), and the rest is validated whole (`service.validate_config`) and written in one
+  replacement of the owner-only document, under the operator's lock. A write that fails leaves the document and the
+  journal as they were. The exit code is 1 when any item was refused.
+- **Idempotent.** A target or grant the engine already holds with the same content is `unchanged`; one it holds with
+  other content is refused and never overwritten. A second run writes nothing, journals nothing and says
+  `changed: false`; `--dry-run` reports `wouldChange` and writes nothing.
+- **always_on comes over as on_demand.** The local server rereads the document on every call and its supervisor
+  (L4) acts on it at once, while the private broker runs until the operator switches it off last. Each would take
+  the other's process for the person's, so a crashed always_on job would be restarted twice, under two restart
+  budgets. So an always_on target is imported as on_demand, and the report names `full lifecycle policy TARGET_ID
+  --desired always_on` for each, to run once the private broker is off. `--keep-always-on` keeps the state and says
+  why it is risky until then.
+- **Callers.** A source name becomes the principal `agent:<name>` (or itself when it already is a principal);
+  `--principal NAME=PRINCIPAL` names another. The source's `owner` and its Fabric host credential are not callers
+  here (the operator's authority is a terminal; Fabric reaches the local server through its own descriptor): both are
+  `skipped` with a code and dropped from the targets' callers, and so is a revoked grant.
+- **No token hash is copied.** The engine's grants hold no hash: each names one access binding (step L3). The
+  source's hash is the same scheme as a binding's credential (`bearer-sha256`), so it is only compared: a grant is
+  imported when a binding in force for this workspace, of that principal, carries that very digest. Otherwise the
+  caller is `reissue_required` and the report prints the two commands, `full access-binding issue` and `full
+  lifecycle allow` with its tools and targets. A grant keeps the targets that came and names the ones that did not
+  (only valid ids are named; any other string of the source is counted, never echoed).
+- **The identity migration** (the L4 note). A legacy app record (no `scheme`, a `codeHash`) is verified now, by the
+  same check enrollment runs (`macos.inspect_app`): an unchanged bundle (its metadata hash equals the enrolled one)
+  is adopted under its own signing team; a changed one only under a team the operator names with `--trusted-team`
+  (none by default); a changed bundle id never. A migrated target's `policyRevision` goes up by one. Bundles are
+  verified once, before the operator's lock is taken, and the plan made under the lock replays the answers. Off
+  macOS a legacy record is `reenroll_required` (`unsupported_platform`). A `switchboard-runtime` or `fabric-hub`
+  readiness that repeats its profile's own capability loses that field, which the engine's profiles do not carry.
+- **The report and the journal** name target ids, callers, counts and codes, and the one folder the operator gave:
+  never an app's path, a signing team, a hash or a token. A write appends one `lifecycle.imported` event to
+  `<state>/node-lifecycle/events.jsonl` (shown by `full lifecycle status`).
+
+What the operator runs next, on the machine that uses the private broker: `import --dry-run`, then `import`; issue a
+binding to each caller the report names and `allow` it as printed; enroll again any `reenroll_required` target;
+`full lifecycle status`; point each agent's MCP client at `POST http://127.0.0.1:47311/mcp` with its binding's bearer
+and check one `lifecycle.list`; then switch the private broker off with its own uninstall, and only then turn each
+target the report names back to always_on with `full lifecycle policy TARGET_ID --desired always_on`. Processes the private
+broker started are, from then on, the person's to the node: it never idles them out.
+
+Not in this step: the `unenroll` verb (OBS-251), which removes a target while the local server runs and needs a door
+of the broker's own for its store rows.
+
+Known limits, from the review of #369: if the source broker removes its write-ahead log between the stamp and the read,
+the import reports the generic "cannot be read" reason instead of retrying; and importing again after the operator has
+turned a target back to always_on reports it `already_enrolled`, with no hint that the difference is that policy.
 
 ## Acceptance
 

@@ -10,12 +10,19 @@
                                               [--background-launch on|off] [--readiness KIND ...]
     project-observatory full lifecycle hold TARGET_ID [--release]
     project-observatory full lifecycle revoke PRINCIPAL
+    project-observatory full lifecycle import --from FOLDER [--dry-run] [--json] [--principal NAME=PRINCIPAL ...]
+                                              [--trusted-team TEAM ...] [--keep-always-on]
     project-observatory full lifecycle build-helper [--dest PATH]
 
 Every verb that changes `config/node-lifecycle.json` (enroll, allow, policy, hold, revoke) needs a terminal, like
 `full access-binding`: these are the operator's grants, and a script able to write them could hand itself every app
 on the machine. There is no --yes. `status` reads and `build-helper` compiles the macOS helper; neither grants
-anything.
+anything. `import` writes too, so it needs a terminal as well; `import --dry-run` only reads.
+
+`import --from FOLDER` (step L5) reads another lifecycle broker's state folder on this machine, read-only, and writes
+the enrollments and grants the engine accepts into the same document in one replacement; whatever it refuses is one
+line with a code. A grant comes over only when an access binding in force already carries the caller's credential;
+otherwise the caller is `reissue_required`, with the commands that issue one (`node/lifecycle/importer.py`).
 
 `enroll` takes the path the operator names, absolute, and never looks for one: on macOS an app's signature is
 verified and its designated requirement (signing team and bundle id) recorded, a background job's definition and
@@ -29,7 +36,7 @@ here.
 
 Every change raises the revision the agents send back (`policyRevision` of a target, `grantRevision` of a caller),
 so an agent acting on what it read before the change is refused `policy_changed`, never served the old decision.
-The design: docs/design/LIFECYCLE.md (OBS-79, step L3).
+The design: docs/design/LIFECYCLE.md (OBS-79, steps L3 and L5).
 """
 from __future__ import annotations
 
@@ -395,6 +402,92 @@ def cmd_status(a: argparse.Namespace) -> int:
     return 0
 
 
+def _principals(pairs: list) -> dict:
+    out = {}
+    for pair in pairs:
+        name, sep, principal = pair.partition("=")
+        if not sep or not broker.ID.fullmatch(name) or not AB.PRINCIPAL.match(principal) \
+                or not broker.ID.fullmatch(principal):
+            raise LifecycleError("invalid_argument")
+        out[name] = principal
+    return out
+
+
+def cmd_import(a: argparse.Namespace) -> int:
+    from node.lifecycle import importer
+    if not a.dry_run:
+        require_terminal("import another broker's enrollments and grants")
+    try:
+        principals = _principals(a.principals)
+        if any(not broker.TEAM_ID.fullmatch(t) for t in a.trusted_teams):
+            raise LifecycleError("invalid_argument")
+    except LifecycleError:
+        print("lifecycle: refused, invalid_argument: --principal is NAME=agent:<name> or NAME=service:<name>, "
+              "--trusted-team a ten-character signing team", file=sys.stderr)
+        return 1
+    adapters: list = []
+
+    def derive(path):
+        # Built only when a legacy identity needs it: verifying a bundle is the adapter's.
+        if not adapters:
+            adapters.append(_adapter())
+        return importer.default_derive(adapters[0])(path)
+    try:
+        bindings, audience = _bindings_registry()
+        unreadable = False
+    except AB.BindingError:
+        bindings, audience, unreadable = None, None, True
+    try:
+        out = importer.run(a.source, dry_run=a.dry_run, derive=derive, trusted_teams=a.trusted_teams,
+                           principals=principals, bindings=bindings, audience=audience,
+                           keep_always_on=a.keep_always_on)
+    except LifecycleError as exc:
+        return _fail(exc)
+    finally:
+        for adapter in adapters:
+            close = getattr(adapter, "close", None)
+            if close:
+                close()
+    if unreadable:
+        out["degraded"].append({"source": "bindings", "reason": "the access bindings could not be read, so no "
+                                                                "grant could be matched to one"})
+    if a.json:
+        print(json.dumps(out, indent=1, sort_keys=True))
+    else:
+        print_import(out)
+    return 1 if any(i["outcome"] == "refused" for i in out["items"]) else 0
+
+
+def print_import(out: dict) -> None:
+    head = "would import" if out["dryRun"] else "imported"
+    print(f"lifecycle import from {out['source']}" + (" (dry run, nothing written)" if out["dryRun"] else ""))
+    for kind in ("targets", "callers"):
+        counts = ", ".join(f"{n} {k.replace('_', ' ')}" for k, n in sorted(out[kind].items())) or "none"
+        print(f"  {kind}: {counts}")
+    for item in out["items"]:
+        line = f"  {item['kind']} {item['id']}: {head if item['outcome'] == 'imported' else item['outcome']}"
+        if item.get("code"):
+            line += f" ({item['code']}" + (f", {item['reason']}" if item.get("reason") else "") + ")"
+        if item.get("principal") and item["principal"] != item["id"]:
+            line += f" as {item['principal']}"
+        if item.get("notes"):
+            line += "; " + "; ".join(item["notes"])
+        if item.get("notImported"):
+            line += "; targets not imported: " + ", ".join(item["notImported"])
+        if item.get("notImportedUnnamed"):
+            line += f"; {item['notImportedUnnamed']} more targets not imported, not valid ids"
+        print(line)
+    if out["store"]:
+        print(f"  the other broker: {out['store']['runningOperations']} operations running, "
+              f"{out['store']['startedProcesses']} processes it started")
+    for row in out["degraded"]:
+        print(f"  degraded {row['source']}: {row['reason']}")
+    if not out["dryRun"] and not out["changed"]:
+        print("  nothing changed: the engine already holds everything this folder could give it")
+    for n, step in enumerate(out["next"], 1):
+        print(f"  next {n}: {step}")
+
+
 def cmd_build_helper(a: argparse.Namespace) -> int:
     from node.lifecycle import macos
     return macos.main(["build-helper"] + (["--dest", a.dest] if a.dest else []))
@@ -445,6 +538,19 @@ def parser() -> argparse.ArgumentParser:
     h.add_argument("--release", action="store_true", help="back to on_demand")
     r = sub.add_parser("revoke", help="refuse a caller from its next call (terminal only)")
     r.add_argument("principal")
+    im = sub.add_parser("import", help="read another lifecycle broker's state folder and import its enrollments and "
+                                       "grants (terminal only; --dry-run reads only)")
+    im.add_argument("--from", dest="source", required=True, help="that broker's state folder, absolute; read only")
+    im.add_argument("--dry-run", action="store_true", help="say what would change and write nothing")
+    im.add_argument("--json", action="store_true")
+    im.add_argument("--principal", dest="principals", action="append", default=[], metavar="NAME=PRINCIPAL",
+                    help="the principal a caller of that broker becomes here; default agent:NAME; repeatable")
+    im.add_argument("--keep-always-on", action="store_true",
+                    help="keep always_on targets always_on; by default they come over as on_demand, because until the "
+                         "other broker is off both would restart them")
+    im.add_argument("--trusted-team", dest="trusted_teams", action="append", default=[], metavar="TEAM",
+                    help="a signing team whose updated apps keep their enrollment when a legacy identity is migrated; "
+                         "none by default; repeatable")
     b = sub.add_parser("build-helper", help="compile the macOS helper for a source install (needs swiftc)")
     b.add_argument("--dest", help="default <state>/node-lifecycle/bin/lifecycle-native")
     return p
@@ -453,7 +559,8 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     return {"status": cmd_status, "enroll": cmd_enroll, "allow": cmd_allow, "policy": cmd_policy,
-            "hold": cmd_hold, "revoke": cmd_revoke, "build-helper": cmd_build_helper}[a.cmd](a)
+            "hold": cmd_hold, "revoke": cmd_revoke, "import": cmd_import,
+            "build-helper": cmd_build_helper}[a.cmd](a)
 
 
 if __name__ == "__main__":

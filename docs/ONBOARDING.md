@@ -1227,7 +1227,23 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
   enrolled app launches or quits. An app you bring forward is yours from then on and is never
   idled out. A failed supervision pass is one event in `full lifecycle status` (the log has
   every one); it does not reach the events feed yet (OBS-250).
-- Not yet: importing an existing broker's enrollments (step L5).
+- Moving from another lifecycle broker on this machine (step L5): `full lifecycle import --from
+  FOLDER --dry-run` reads that broker's state folder (its `registry.json`, `callers.json` and
+  store) without writing anything there and says what would change; without `--dry-run`, at your
+  terminal, it writes what the engine accepts into `config/node-lifecycle.json` in one step and
+  records one event. Whatever the engine refuses is one line with a code, and the exit code is 1;
+  running it again changes nothing. Its callers become `agent:<name>` (`--principal NAME=PRINCIPAL`
+  names another); its owner and host credential are not callers here. No token is copied: a grant
+  comes over only when an access binding you issued already carries that caller's token, and
+  otherwise the report prints the `access-binding issue` and `lifecycle allow` to run. An app
+  still enrolled under the older identity is verified now; an updated one keeps its enrollment
+  only under a signing team you name with `--trusted-team`, otherwise enroll it again.
+- An always_on target comes over as on_demand, because until the other broker is off both would
+  restart it when it crashes (`--keep-always-on` keeps it, with that warning).
+- After the import: `full lifecycle status`, point each agent at `POST /mcp` with its binding,
+  check one call, and only then switch the other broker off with its own uninstall. Then turn
+  each target the report names back with `full lifecycle policy TARGET_ID --desired always_on`.
+  The engine never stops the other broker, and treats the processes it started as yours.
 
 ## The machine: what runs, where the disk goes, cleanup
 

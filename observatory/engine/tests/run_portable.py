@@ -254,6 +254,9 @@ BOUNDARY += ('node_lifecycle_service',)
 # OBS-79 step L4: the supervisor (the broker's pass on its cadence, the watcher's events, the sweep's prune and
 # warm-up, its threads' start and stop) against a recording fake broker and the real broker over the process seam.
 BOUNDARY += ('node_lifecycle_supervisor',)
+# OBS-79 step L5: `full lifecycle import`, another broker's state folder read without a write, its records through the
+# engine's own validation, the identity migration, against a source built from scratch and an injected bundle check.
+BOUNDARY += ('node_lifecycle_import',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
