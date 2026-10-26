@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "173fb9a22041afe98d131dcc91beaf0c6a2ca8c4abfc2753c67cc9481e3452f2",
-      "bytes": 169764,
+      "export_sha256": "327f6b7455f9e26dc22fdd315d0fe995320f491243d1a9ab588e2e0390b6e175",
+      "bytes": 171584,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "237114b2e58923509a050fda95c5f32b224f2688fa0147f10eedd83210cdd225",
-      "bytes": 142157,
+      "export_sha256": "02d94ec46b359c2607676e3ee1893bf40e5f0afc089e13225ab30d5cb7109501",
+      "bytes": 142419,
       "upstream_modified": true
     },
     {
@@ -920,8 +920,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f5e0311cd16e7ac3605af71f0e048bba028decda3b2fd13346997d06f622caef",
-      "bytes": 92161
+      "export_sha256": "3e69112a0a5c71c925500c69c005aa1f77f30787b740b84d8899e88b7a1ef26f",
+      "bytes": 93606
     },
     {
       "path": "estate.py",
@@ -2581,8 +2581,8 @@
       "path": "mcp/stdio_relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1467fa35684831518fbb7d03a65cb28589001206ae3e6fd1eacee5bcfdf61063",
-      "bytes": 19601
+      "export_sha256": "aa5cf281c16e4a1f02a411c9eb117d02d1ca6b5a85e93af16bfd6b33c104e60a",
+      "bytes": 26483
     },
     {
       "path": "mcp_inventory.py",
@@ -2735,8 +2735,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4ca671deb723d3b72fe2e56491a5af6fa47c9e5f54e7150195e4aaa914c7ae58",
-      "bytes": 136259
+      "export_sha256": "12f2e599d271a20da1971af1a93ed103e4dd51db9ac2c2dfaffb4e58242d28c8",
+      "bytes": 140451
     },
     {
       "path": "node/p256.py",
@@ -3118,8 +3118,8 @@
       "path": "session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "67ce7d6d62d432d35cdf3890b9bb822bd50290ae590ef2a0f72fbdfd98322085",
-      "bytes": 13271
+      "export_sha256": "ac9730b7924081d9323b1e432b87d38facde1ce4e87268a3c150893445fd31b8",
+      "bytes": 13867
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -4100,8 +4100,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d05b60e853d730f5caaa553093b2be60c7648a477fb4fda252e64523cb7adfcf",
-      "bytes": 73738
+      "export_sha256": "ef2abd5b90c1fdc9904f3cdc2f9cef681b0425ddccecfb8cb794ea2f9df32350",
+      "bytes": 76030
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -4776,8 +4776,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5f0bccc6724f0aec75f7ac0a7d17ecb804fe8e4d8e66d9a59e957279499bce67",
-      "bytes": 124373
+      "export_sha256": "a94dcd48d2c29ce13d02881f2429860a66ead120c1129f6269a569caf7b74703",
+      "bytes": 129449
     },
     {
       "path": "tests/test_node_pairing.py",
@@ -5267,8 +5267,8 @@
       "path": "tests/test_session_reload.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c9546ae058749db2e8f5b21e1877194fd99d7429b73bbfab0f82eebdc1bbb214",
-      "bytes": 24526
+      "export_sha256": "ac059a660e5e47f751ddd0de6c8edae0cb6c011409f3f8b5c4f2df72fe9f6115",
+      "bytes": 34932
     },
     {
       "path": "tests/test_session_start.py",

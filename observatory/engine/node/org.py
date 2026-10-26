@@ -659,6 +659,65 @@ def _same_binding(held: dict, cert: dict) -> bool:
     return True
 
 
+#: The layers a check-in reports (`policy.layers`, at most two, the server's always: devices.md).
+POLICY_SOURCES = ('server', 'mdm')
+#: The largest revision a `device-policy` may carry (its schema's maximum, JSON's safe integer).
+POLICY_REVISION_MAX = 9007199254740991
+
+
+def _policy_arrived(state: dict, policy: Any, clock: float, org_id: str) -> Optional[dict]:
+    """Records a signed policy a check-in response carried (`serverPolicy`, per source) when its `kind`, `source`,
+    `revision` and `org` read as a `device-policy` of this organization newer than any that arrived before, and returns
+    what was recorded, or None. Its signature, `issuedAt` and keys are not read here. Nothing is verified or
+    applied here: verifying a layer's signature against the organization's key set and applying it is OE-06
+    (`policy_layers`). The record exists so the next check-in says a policy arrived and is not in force (OBS-231),
+    instead of the revision 0 `applied` that means no policy ever arrived."""
+    if not isinstance(policy, dict) or policy.get('kind') != 'policy' or policy.get('source') not in POLICY_SOURCES:
+        return None
+    if not isinstance(policy.get('org'), dict) or policy['org'].get('id') != org_id:
+        return None
+    revision = policy.get('revision')
+    if not isinstance(revision, int) or isinstance(revision, bool) or not 1 <= revision <= POLICY_REVISION_MAX:
+        return None
+    held = state.get('serverPolicy') if isinstance(state.get('serverPolicy'), dict) else {}
+    before = held.get(policy['source']) if isinstance(held.get(policy['source']), dict) else {}
+    if isinstance(before.get('revision'), int) and revision <= before['revision']:
+        return None
+    held[policy['source']] = {'revision': revision, 'at': iso(clock)}
+    state['serverPolicy'] = held
+    return {'source': policy['source'], 'revision': revision}
+
+
+def policy_report(state: dict) -> List[dict]:
+    """`policy.layers` of a check-in (contract devices.md): for each delivered layer the revision this machine holds
+    and its status. This node verifies and applies no signed policy yet (OE-06), so it holds revision 0 of every layer.
+    The server layer is always reported: `applied` at revision 0 is the contract's word for "none arrived". A layer a
+    response carried is `failed`, its error naming the revision that arrived, so no server reads a policy as in force
+    on this machine (OBS-231, fabric-workspace X-7). A held revision out of the schema's range (a damaged enrollment
+    file) is read as none, so the check-in stays valid."""
+    held = state.get('serverPolicy') if isinstance(state.get('serverPolicy'), dict) else {}
+    layers = []
+    for source in POLICY_SOURCES:
+        arrived = held.get(source) if isinstance(held.get(source), dict) else None
+        revision = arrived.get('revision') if arrived is not None else None
+        if not isinstance(revision, int) or isinstance(revision, bool) or not 1 <= revision <= POLICY_REVISION_MAX:
+            if source == 'server':
+                layers.append({'source': source, 'revision': 0, 'status': 'applied'})
+            continue
+        layers.append({'source': source, 'revision': 0, 'status': 'failed',
+                       'error': 'signed policy revision %d arrived; this node version does not verify or apply '
+                                'policy yet, so none is in force' % revision})
+    return layers
+
+
+def _policy_carried(previous: Optional[dict], renewal: bool) -> dict:
+    """A renewal is the same enrollment: the policy that arrived for it stays reported. A new enrollment starts with
+    none (a removal or a closed organization discards it, DEC-0103)."""
+    if renewal and isinstance(previous, dict) and isinstance(previous.get('serverPolicy'), dict):
+        return {'serverPolicy': previous['serverPolicy']}
+    return {}
+
+
 class Enrollment:
     """One organization enrollment of this machine: its state, outbox, requests and schedule."""
 
@@ -1021,6 +1080,7 @@ class Enrollment:
             doc.update({k: previous[k] for k in ('purposeHolds', 'acknowledgedNoticeVersion', 'noticeVersion')
                         if k in previous})
         doc.update(_summary_carried(previous, renewal=renewed is not None))
+        doc.update(_policy_carried(previous, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
         with self._db() as conn:                       # a new enrollment: registrations are sent again
@@ -1180,7 +1240,7 @@ class Enrollment:
                'collectors': [{'collector': {'id': COLLECTOR_ID, 'epoch': state['epoch']}, 'source': 'meter',
                                'lastSeq': last, 'bufferedFrom': floor if floor is not None else last + 1,
                                'dropped': dropped, 'healthy': healthy}],
-               'policy': {'layers': [{'source': 'server', 'revision': 0, 'status': 'applied'}]},
+               'policy': {'layers': policy_report(state)},
                'certificate': {'serial': state['certificate']['serial'], 'notAfter': state['certificate']['notAfter']}}
         if state.get('fullState'):
             doc['fullState'] = True
@@ -1275,6 +1335,9 @@ class Enrollment:
             state['nextCheckInAt'] = int(self.clock()) + state['checkInSeconds']
             if strict_time(answer.get('collectionStart')) is not None:
                 state['collectionStart'] = answer['collectionStart']
+            arrived = _policy_arrived(state, answer.get('policy'), self.clock(), self.org_id)
+            if arrived is not None:                        # OBS-231: held, never applied, until OE-06
+                self.journal('policy-not-applied', source=arrived['source'], revision=arrived['revision'])
             # DEC-0102: the notice moved when a response names another acknowledged version (absent is no signal) or the
             # applied policy another `noticeVersion` (OE-06 applies one; until then `notice_version` is None).
             acknowledged, version = answer.get('acknowledgedNoticeVersion'), self.notice_version()

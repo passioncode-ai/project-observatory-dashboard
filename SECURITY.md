@@ -75,7 +75,9 @@ checks, downloads and installs and keeps the daily backup; `full maintain uninst
 removes the schedule, and `full init` and `full update` leave it removed until
 `full maintain ensure` or `full auto-update on`. `full init` schedules the job only
 from a person's terminal or with `OBSERVATORY_SYSTEM_SETUP=1`
-(`maintenance.system_setup_allowed`).
+(`maintenance.system_setup_allowed`). `OBSERVATORY_SYSTEM_SETUP=0` refuses it everywhere:
+`full update --apply` then schedules nothing and writes nothing to the credential store,
+and reports `"maintenance": "not-scheduled-here"` (`engine_update.system_setup_refused`).
 The assistant and the agent spend through an OpenRouter key, and an
 `OPENROUTER_API_KEY` in the environment of the process that runs them is that key,
 ahead of every key file: a key exported in your shell profile is spent by them.

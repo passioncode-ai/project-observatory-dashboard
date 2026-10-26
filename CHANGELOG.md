@@ -7,6 +7,32 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Open agent sessions move onto a new release again** (OBS-228). A session's MCP server moves itself onto an
+  installed release in place (OBS-159), but on a real machine none ever did: from 2026-10-21 its reload log held 30
+  refusals and no swap, 29 of them "requests were still running after 60 s", so every open session answered
+  `stale-server` after each release until it was restarted. A client on the 2026-07-28 protocol, Claude Code among
+  them, keeps a `subscriptions/listen` stream open for the whole session, and the server counted it as a request still
+  running, so it never found itself idle. The server now never waits for a listen stream: just before it moves, it
+  ends each open stream the protocol's graceful way, and when the tool list changed it first sends the change on that
+  stream, so a modern client learns it there. Opening a new stream is up to the client (the MCP Python SDK's own
+  client does not do it by itself): a client that listens again is acknowledged by the new release and hears later
+  changes; one that does not hears none until it listens again. A request the
+  client cancelled stops counting whatever spelling its id had, and a move refused because requests were running is
+  tried again the moment the last of them answers, without waiting for another request.
+- **`full update --apply` keeps `OBSERVATORY_SYSTEM_SETUP=0`** (OBS-229). It replaced an explicit `0` with `1` before
+  the new release scheduled its maintenance job, so an update in a second or test workspace loaded launchd jobs and
+  wrote a Keychain item. With `0` the update now installs the release, schedules nothing and reports
+  `"maintenance": "not-scheduled-here"` with the command that schedules the job. An update is run by the release it
+  replaces, so the first update that keeps the `0` is the one after this release.
+- **A check-in no longer reports a policy the server sent as applied** (OBS-231). The node verifies and applies no
+  signed policy yet (OE-06), and every check-in said the server layer was `applied` at revision 0. That is the
+  contract's report when no policy ever arrived, but the node said it as well after a check-in response carried
+  one, so an organization server read a policy as in force on a machine that ignored it. A policy a response
+  carries, read by its `kind`, `source`, `revision` and this organization's `org` (its signature is OE-06's), is now
+  recorded per source (`serverPolicy` in the enrollment, a newer revision only, journal
+  `policy-not-applied` once per revision), and every check-in after it reports that layer `failed` at revision 0
+  with an error naming the revision that arrived. A renewal keeps the record; a closed organization drops it at
+  once, and any other removal at the next enrollment. A held revision out of the schema's range is read as none.
 - **`full probes` explains itself, and the 0.29.0 and 0.29.1 notes were wrong about it** (OBS-224). Both release
   summaries, and `docs/COMPATIBILITY.md`, said the first `full check` after updating exits 1 once and to run
   `project-observatory full probes` once. On an installed copy neither holds: `full check` runs the portable suite and

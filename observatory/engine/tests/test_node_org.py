@@ -244,6 +244,7 @@ class FakeServer:
         self.closed_at = None                              # DEC-0103: the organization ended at this time
         self.closed_body = None                            # a 410 body of the server's choosing instead
         self.acknowledged = None                           # DEC-0102: the notice version the person acknowledged
+        self.policy = None                                 # a signed `device-policy` a check-in response carries
         self.user = None                                   # the person a certificate binds (none: unassigned)
         self.role = None                                   # `org-cloud` (DEC-0099): a machine no person uses
         self.refuse = None                                 # (status, code): every signed request answers that
@@ -390,6 +391,8 @@ class FakeServer:
             out['protocols'] = self.checkin_protocols
         if self.acknowledged is not None:
             out['acknowledgedNoticeVersion'] = self.acknowledged
+        if self.policy is not None:
+            out['policy'] = self.policy
         if self.clock() >= strict_time(cert['notBefore']) / 1000 + 7 * 86400 * 2 / 3:
             out['certificate'] = {'action': 'rotate'}
         return 200, out
@@ -2128,6 +2131,90 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.server.checkin_protocols = answer['protocols']
         self.assertTrue(self.make().check_in()['ok'])
         self.assertEqual(self.make().state()['protocols'], answer['protocols'])
+
+    # -- what a check-in says of the signed policy (OBS-231, fabric-workspace X-7) -------------------------------
+    def policy(self, revision, source='server'):
+        return {'protocol': 'fabric-device/0.1', 'kind': 'policy', 'org': {'id': ORG}, 'source': source,
+                'revision': revision, 'issuedAt': '2026-10-25T00:00:00Z', 'keys': {}}
+
+    def layers(self):
+        enrollment = self.make()
+        return enrollment.check_in_document(enrollment.state())['policy']['layers']
+
+    def assert_detail(self, text):
+        """The contract's `detail`: one line of at most 200 characters with no path (device-common.schema.json)."""
+        self.assertLessEqual(len(text), 200)
+        self.assertNotIn('\n', text)
+        self.assertFalse(re.search(r'[/\\~]', text), text)
+
+    def test_no_policy_arrived_is_revision_zero_applied(self):
+        self.enroll()
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.layers(), [{'source': 'server', 'revision': 0, 'status': 'applied'}])
+
+    def test_a_policy_that_arrived_and_was_not_applied_is_reported_failed(self):
+        self.enroll()
+        self.server.policy = self.policy(3)
+        self.assertTrue(self.make().check_in()['ok'])
+        [layer] = self.layers()
+        self.assertEqual((layer['source'], layer['revision'], layer['status']), ('server', 0, 'failed'))
+        self.assertIn('revision 3', layer['error'])
+        self.assert_detail(layer['error'])
+        self.assertEqual(self.make().state()['serverPolicy']['server']['revision'], 3)
+        self.server.policy = None                          # the next response carries none: still not applied
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertEqual(self.server.requests[-1][1]['policy']['layers'][0]['status'], 'failed')
+
+    def test_only_a_newer_valid_policy_moves_the_revision(self):
+        self.enroll()
+        self.server.policy = self.policy(5)
+        self.make().check_in()
+        for bad in (self.policy(4), self.policy(0), self.policy(True), self.policy('6'), self.policy(6, 'user'),
+                    dict(self.policy(6), kind='key-set'), self.policy(2 ** 53), 'policy', [self.policy(6)],
+                    dict(self.policy(6), org={'id': 'another-org'}), dict(self.policy(6), org=None)):
+            self.server.policy = bad
+            self.assertTrue(self.make().check_in()['ok'])
+            self.assertEqual(self.make().state()['serverPolicy'], {'server': {'revision': 5,
+                             'at': self.make().state()['serverPolicy']['server']['at']}}, bad)
+        self.server.policy = self.policy(7)
+        self.make().check_in()
+        self.assertEqual(self.make().state()['serverPolicy']['server']['revision'], 7)
+        self.assertIn('revision 7', self.layers()[0]['error'])
+        events = [json.loads(line)['event'] for line in
+                  (self.node / 'orgs' / ORG / 'journal.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(events.count('policy-not-applied'), 2)            # once per new revision, not per check-in
+
+    def test_an_mdm_policy_is_its_own_layer_beside_the_server(self):
+        self.enroll()
+        self.server.policy = self.policy(2, 'mdm')
+        self.make().check_in()
+        layers = self.layers()
+        self.assertEqual([(l['source'], l['revision'], l['status']) for l in layers],
+                         [('server', 0, 'applied'), ('mdm', 0, 'failed')])
+        self.assert_detail(layers[1]['error'])
+
+    def test_a_closed_organization_drops_the_arrived_policy(self):
+        self.enroll()
+        self.server.policy = self.policy(3)
+        self.make().check_in()
+        self.server.closed_at = '2026-10-25T00:00:00Z'
+        self.assertFalse(self.make().check_in()['ok'])
+        self.assertNotIn('serverPolicy', self.make().state())
+
+    def test_a_damaged_held_revision_is_read_as_none(self):
+        from node import org
+        for held in (10 ** 250, 0, -5, True, '3', None, 2.0):
+            state = {'serverPolicy': {'server': {'revision': held}, 'mdm': {'revision': held}}}
+            self.assertEqual(org.policy_report(state), [{'source': 'server', 'revision': 0, 'status': 'applied'}], held)
+        for state in ({'serverPolicy': None}, {'serverPolicy': []}, {'serverPolicy': {'server': 'x', 'mdm': [1]}}):
+            self.assertEqual(org.policy_report(state), [{'source': 'server', 'revision': 0, 'status': 'applied'}], state)
+
+    def test_a_renewal_keeps_the_arrived_policy(self):
+        from node import org
+        state = {'serverPolicy': {'server': {'revision': 3, 'at': '2026-10-25T00:00:00Z'}}, 'sequenceNum': 4}
+        self.assertEqual(org._policy_carried(state, renewal=True), {'serverPolicy': state['serverPolicy']})
+        self.assertEqual(org._policy_carried(state, renewal=False), {})
+        self.assertEqual(org._policy_carried(None, renewal=True), {})
 
     def test_only_a_schema_refusal_of_the_key_storage_is_named(self):
         from node.org import _key_schema_refusal

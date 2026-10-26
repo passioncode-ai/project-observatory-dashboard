@@ -58,6 +58,10 @@ async def observatory_reload_slow(seconds: float = 1.0) -> dict[str, Any]:
 
 '''
 ANCHOR = "# memory/0.1 (PB-137 N-025)"
+#: The 2026-07-28 request envelope: no `initialize`, the version on every request (SEP-2575 era).
+MODERN_META = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+               "io.modelcontextprotocol/clientCapabilities": {}}
+SUBSCRIPTION_ID_FIELD = "io.modelcontextprotocol/subscriptionId"
 
 
 def _replace(path: Path, text: str) -> None:
@@ -155,6 +159,28 @@ class Client:
             if msg.get("id") == mid and "method" not in msg:
                 return msg
         raise AssertionError(f"no answer to {mid} within {timeout} s")
+
+    def modern(self, mid, method: str, params: dict | None = None):
+        """One 2026-07-28 request: no handshake, the protocol version in every request's `_meta`."""
+        self.send({"jsonrpc": "2.0", "id": mid, "method": method,
+                   "params": {**(params or {}), "_meta": dict(MODERN_META)}})
+        return mid
+
+    def notices(self, method: str, count: int, timeout: float = 60) -> list[dict]:
+        """Wait until `count` notifications named `method` arrived; all of them, in order."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            found = [m for m in self.seen if m.get("method") == method]
+            if len(found) >= count:
+                return found
+            try:
+                msg = self.lines.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if msg is None:
+                break
+            self.seen.append(msg)
+        raise AssertionError(f"fewer than {count} {method} within {timeout} s")
 
     def handshake(self) -> dict:
         self.send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -315,6 +341,127 @@ class SwapOverPipes(unittest.TestCase):
         self.assertEqual(body(c.answer(50, timeout=60))["version"], "9.0.0")
         self.assertEqual(body(c.call(53, "observatory_reload_probe"))["version"], "9.1.0")
         self.assert_once(c.close(), 50, 51, 52, 53)
+
+    def test_an_open_listen_stream_does_not_hold_back_the_swap(self):
+        # OBS-228. A 2026-07-28 client (Claude Code opens one on every modern connection) keeps a
+        # `subscriptions/listen` request open for the whole session: it is a stream, never answered
+        # until the server ends it. Counted as a request still running, it refused every swap on a
+        # live machine ("requests were still running after 60 s", no swap in three days). The swap
+        # now ends the stream the spec's graceful way (its result, stamped with the subscription id)
+        # as the old process's last frame, and the client's re-listen is served by the new release.
+        c = self.client = Client(self.install.server, {**self.env, "OBSERVATORY_RELOAD_DRAIN_SECONDS": "3"},
+                                 self.base / "server.err")
+        self.assertIn("capabilities", c.answer(c.modern(1, "server/discover"))["result"])
+        c.modern(2, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        acks = c.notices("notifications/subscriptions/acknowledged", 1)
+        self.assertEqual(acks[0]["params"]["_meta"][SUBSCRIPTION_ID_FIELD], 2)
+        self.assertEqual(body(c.answer(c.modern(3, "tools/call", {"name": "observatory_reload_slow",
+                                                                   "arguments": {"seconds": 0}})))["version"], "9.0.0")
+        pid = c.proc.pid
+        self.install.install_b("9.1.0")
+        probe = body(c.answer(c.modern(4, "tools/call", {"name": "observatory_reload_probe", "arguments": {}})))
+        self.assertEqual(probe.get("version"), "9.1.0", f"the open listen stream held the swap back: {probe}")
+        self.assertEqual(c.proc.pid, pid)
+        ended = c.answer(2)
+        self.assertEqual(ended["result"]["_meta"][SUBSCRIPTION_ID_FIELD], 2)
+        self.assertEqual(ended["result"].get("resultType"), "complete")
+        import mcp_types
+        mcp_types.SubscriptionsListenResult.model_validate(ended["result"])
+        self.assertLess(c.seen.index(ended), c.seen.index(c.answer(4)), "the stream ended before the swap answered")
+        # The tool set changed. At 2026-07-28 a change event travels only on a listen stream, stamped with its
+        # subscription id, so the client learns it on the stream it holds, before that stream's terminal result;
+        # a bare (unstamped) notification is the legacy form and is never sent to a modern client.
+        changed = [m for m in c.seen if m.get("method") == "notifications/tools/list_changed"]
+        self.assertEqual([m.get("params", {}).get("_meta", {}).get(SUBSCRIPTION_ID_FIELD) for m in changed], [2],
+                         f"one stamped change event on stream 2, no bare one: {changed}")
+        self.assertLess(c.seen.index(changed[0]), c.seen.index(ended), "the change event precedes the stream's end")
+        # A client that listens again is acknowledged by the new release.
+        c.modern(5, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        acks = c.notices("notifications/subscriptions/acknowledged", 2)
+        self.assertEqual(acks[1]["params"]["_meta"][SUBSCRIPTION_ID_FIELD], 5)
+        self.assertEqual(body(c.answer(c.modern(6, "tools/call", {"name": "observatory_reload_probe",
+                                                                   "arguments": {}})))["version"], "9.1.0")
+        seen = c.close()
+        self.assert_once(seen, 1, 2, 3, 4, 6)
+        self.assertEqual([r for r in self.log() if r.get("event") == "refused"], [])
+        self.assertEqual([(r["from"], r["to"]) for r in self.log() if r.get("event") == "swapped"],
+                         [("9.0.0", "9.1.0")])
+
+    def test_a_failed_exec_with_a_listen_open_ends_the_stream_then_cancels_its_handler(self):
+        # The failed-exec branch with a 2026-07-28 listen stream open. The stream was ended on the wire just
+        # before `execv` (its change event, then its terminal result); when the exec fails this process keeps
+        # serving, so the relay cancels the SDK handler of the ended stream, which must then write nothing more
+        # for that id. The request that triggered the attempt answers `stale-server` once, and a client that
+        # listens again is acknowledged by this same process.
+        c = self.client = Client(self.install.server, {**self.env, "OBSERVATORY_RELOAD_DRAIN_SECONDS": "3",
+                                                       "OBSERVATORY_TEST_RELOAD_EXEC": "fail"},
+                                 self.base / "server.err")
+        self.assertIn("capabilities", c.answer(c.modern(1, "server/discover"))["result"])
+        c.modern(2, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        c.notices("notifications/subscriptions/acknowledged", 1)
+        pid = c.proc.pid
+        self.install.install_b("9.1.0")
+        refusal = body(c.answer(c.modern(3, "tools/call", {"name": "observatory_reload_probe", "arguments": {}})))
+        self.assertEqual(refusal["error"], "stale-server")
+        self.assertIn("could not replace this process", refusal["detail"])
+        ended = c.answer(2)
+        self.assertEqual(ended["result"]["_meta"][SUBSCRIPTION_ID_FIELD], 2)
+        self.assertLess(c.seen.index(ended), c.seen.index(c.answer(3)), "the stream ended before the refusal")
+        changed = [m for m in c.seen if m.get("method") == "notifications/tools/list_changed"]
+        self.assertEqual([m["params"]["_meta"][SUBSCRIPTION_ID_FIELD] for m in changed], [2])
+        self.assertLess(c.seen.index(changed[0]), c.seen.index(ended))
+        c.modern(4, "subscriptions/listen", {"notifications": {"toolsListChanged": True}})
+        acks = c.notices("notifications/subscriptions/acknowledged", 2)
+        self.assertEqual(acks[1]["params"]["_meta"][SUBSCRIPTION_ID_FIELD], 4)
+        c.send({"jsonrpc": "2.0", "id": 5, "method": "ping",
+                "params": {"_meta": dict(MODERN_META)}})
+        c.answer(5)
+        self.assertEqual(c.proc.pid, pid)
+        seen = c.close()
+        self.assert_once(seen, 1, 2, 3, 5)
+        after = seen[seen.index(ended) + 1:]
+        self.assertEqual([m for m in after if m.get("id") == 2
+                          or (m.get("params") or {}).get("_meta", {}).get(SUBSCRIPTION_ID_FIELD) == 2], [],
+                         "the cancelled handler writes nothing more on the ended stream")
+        self.assertEqual([(r["from"], r["to"]) for r in self.log() if r.get("event") == "swapped"], [])
+
+    def test_a_cancel_naming_the_id_as_a_string_does_not_stall_a_later_swap(self):
+        # The SDK correlates `notifications/cancelled` with requestId "60" to request 60 (it coerces a
+        # stringified integer, as the TypeScript SDK does) and then never answers it; the relay must
+        # stop counting it the moment the SDK settles it unanswered, whatever spelling the id had.
+        c = self.start(OBSERVATORY_RELOAD_DRAIN_SECONDS="3")
+        c.send({"jsonrpc": "2.0", "id": 60, "method": "tools/call",
+                "params": {"name": "observatory_reload_slow", "arguments": {"seconds": 30}}})
+        time.sleep(0.5)
+        c.send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": "60"}})
+        c.send({"jsonrpc": "2.0", "id": 61, "method": "ping"})
+        c.answers([61])
+        self.install.install_b("9.1.0")
+        answer = body(c.call(62, "observatory_reload_probe"))
+        self.assertEqual(answer.get("version"), "9.1.0", f"the cancelled request was still counted: {answer}")
+        seen = c.close()
+        self.assertEqual([m for m in seen if m.get("id") == 60 and "method" not in m], [],
+                         "a request the client cancelled is never answered")
+
+    def test_a_swap_refused_for_running_requests_moves_at_the_first_idle_moment(self):
+        # A refusal for requests still running is retried the moment the last of them answers, with no
+        # further request needed: a session the person leaves idle after a long call still moves.
+        c = self.start(OBSERVATORY_RELOAD_DRAIN_SECONDS="1")
+        c.send({"jsonrpc": "2.0", "id": 70, "method": "tools/call",
+                "params": {"name": "observatory_reload_slow", "arguments": {"seconds": 6}}})
+        time.sleep(0.5)
+        self.install.install_b("9.1.0")
+        c.send({"jsonrpc": "2.0", "id": 71, "method": "ping"})
+        c.answers([71])
+        self.assertTrue([r for r in self.log() if r.get("event") == "refused"], "the first attempt is refused")
+        self.assertEqual(body(c.answer(70, timeout=60))["version"], "9.0.0")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and not [r for r in self.log() if r.get("event") == "swapped"]:
+            time.sleep(0.2)
+        self.assertEqual([(r["from"], r["to"]) for r in self.log() if r.get("event") == "swapped"],
+                         [("9.0.0", "9.1.0")], "moved once request 70 answered, before any other request")
+        self.assertEqual(body(c.call(72, "observatory_reload_probe"))["version"], "9.1.0")
+        self.assert_once(c.close(), 70, 71, 72)
 
     def test_the_client_leaving_during_a_swap_ends_the_server_promptly(self):
         c = self.start()
