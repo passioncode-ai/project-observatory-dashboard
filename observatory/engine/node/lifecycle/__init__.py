@@ -7,5 +7,6 @@ journal, crash circuits, the always_on restart budget, and the idle and takeover
 through an adapter (`broker.Adapter`). `macos.py` is the macOS adapter (step L2): signatures checked against a
 designated requirement built from team and bundle id, trusted installed places, Launch Services through the Swift
 helper `native_app.swift`, launchd jobs, and the product readiness probes; `macos.platform_adapter` answers
-`unsupported_platform` on every other system. The MCP tools are step L3, the supervisor thread step L4.
+`unsupported_platform` on every other system. The MCP tools are step L3, the supervisor thread step L4, and
+`importer.py` step L5: the operator's import of another broker's enrollments and grants (`full lifecycle import`).
 """

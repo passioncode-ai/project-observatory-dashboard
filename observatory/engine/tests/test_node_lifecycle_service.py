@@ -1010,7 +1010,7 @@ class DispatcherTests(unittest.TestCase):
     def test_the_full_cli_hands_lifecycle_to_its_parser_and_describes_it(self):
         import observatory as cli
         self.assertIn('lifecycle', cli.OWN_PARSER_COMMANDS)
-        self.assertIn('  lifecycle status|enroll|allow|policy|hold|revoke|build-helper', cli.PUBLIC_HELP)
+        self.assertIn('  lifecycle status|enroll|allow|policy|hold|revoke|import|build-helper', cli.PUBLIC_HELP)
         self.assertEqual(cli.refusal(['lifecycle', 'status']), '')
         self.assertNotEqual(cli.refusal(['lifecycle', 'launch']), '')
 
