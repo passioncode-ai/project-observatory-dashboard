@@ -103,6 +103,10 @@ while the major version is 0, a minor release may change behaviour and says so h
     A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.
   - DEC-0121 to DEC-0124 are not in this pin. DEC-0121 comes with OBS-237; DEC-0123's `open_link` is filed for the
     next re-pin as OBS-245 (`full open` still opens the browser).
+- **Documentation**: the machine-utility decision record, `docs/design/MACHINE-UTILITY.md` (OBS-76, packet OE-00):
+  the node is the engine's local server under the operating system's service manager, the planned Rust sidecar
+  is retired, the local channel and one node per account come with OBS-256, `seq` stays per enrollment (contract
+  DEC-0128), and one owner per verb on a machine. Follow-up rows OBS-255 to OBS-258.
 
 ## 0.29.2 (2026-10-26)
 

@@ -5,6 +5,10 @@ key to a relay, sends and receives signed messages and sealed blobs through it, 
 under a key the person's estate record lists. It is the client half of the contract's `fabric-relay/0.1` (DEC-0047,
 DEC-0066) and serves the organization roadmap's **RM-21** (the agent network), stage 1: two of one person's own machines.
 
+Where the node runs (the engine's local server), what supervises it, and which owner holds each verb on a machine
+(install, check, roll back, supervise, show, compile skills, enroll, report) is decided in
+[MACHINE-UTILITY.md](MACHINE-UTILITY.md), the machine-utility decision record (OBS-OE-00).
+
 The relay is a router, not a party to trust. A delivered body is believed only when:
 
 - it carries the sender's ES256 signature under the `#sig` key of a verified estate record;
@@ -795,4 +799,4 @@ signed app (L2r) and the operator's import with the identity migration (L5) foll
 | Slice | What |
 |---|---|
 | 5 | the ceremony surface: the pairing screens and the passkey prompt, in the app that runs them (the checks above are done) |
-| 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5 |
+| 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5; it runs inside the local server, which is the node ([MACHINE-UTILITY.md](MACHINE-UTILITY.md) D1) |
