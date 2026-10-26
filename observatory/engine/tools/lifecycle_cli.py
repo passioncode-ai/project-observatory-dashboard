@@ -11,7 +11,7 @@
     project-observatory full lifecycle hold TARGET_ID [--release]
     project-observatory full lifecycle revoke PRINCIPAL
     project-observatory full lifecycle import --from FOLDER [--dry-run] [--json] [--principal NAME=PRINCIPAL ...]
-                                              [--trusted-team TEAM ...]
+                                              [--trusted-team TEAM ...] [--keep-always-on]
     project-observatory full lifecycle build-helper [--dest PATH]
 
 Every verb that changes `config/node-lifecycle.json` (enroll, allow, policy, hold, revoke) needs a terminal, like
@@ -439,7 +439,8 @@ def cmd_import(a: argparse.Namespace) -> int:
         bindings, audience, unreadable = None, None, True
     try:
         out = importer.run(a.source, dry_run=a.dry_run, derive=derive, trusted_teams=a.trusted_teams,
-                           principals=principals, bindings=bindings, audience=audience)
+                           principals=principals, bindings=bindings, audience=audience,
+                           keep_always_on=a.keep_always_on)
     except LifecycleError as exc:
         return _fail(exc)
     finally:
@@ -473,6 +474,8 @@ def print_import(out: dict) -> None:
             line += "; " + "; ".join(item["notes"])
         if item.get("notImported"):
             line += "; targets not imported: " + ", ".join(item["notImported"])
+        if item.get("notImportedUnnamed"):
+            line += f"; {item['notImportedUnnamed']} more targets not imported, not valid ids"
         print(line)
     if out["store"]:
         print(f"  the other broker: {out['store']['runningOperations']} operations running, "
@@ -542,6 +545,9 @@ def parser() -> argparse.ArgumentParser:
     im.add_argument("--json", action="store_true")
     im.add_argument("--principal", dest="principals", action="append", default=[], metavar="NAME=PRINCIPAL",
                     help="the principal a caller of that broker becomes here; default agent:NAME; repeatable")
+    im.add_argument("--keep-always-on", action="store_true",
+                    help="keep always_on targets always_on; by default they come over as on_demand, because until the "
+                         "other broker is off both would restart them")
     im.add_argument("--trusted-team", dest="trusted_teams", action="append", default=[], metavar="TEAM",
                     help="a signing team whose updated apps keep their enrollment when a legacy identity is migrated; "
                          "none by default; repeatable")

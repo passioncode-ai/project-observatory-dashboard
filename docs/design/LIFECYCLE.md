@@ -401,8 +401,8 @@ covered by new cases here (`test_a_launch_or_termination_wakes_a_pass_over_that_
 ## Step L5: what was built
 
 `observatory/engine/node/lifecycle/importer.py` and the `import` verb of `observatory/engine/tools/lifecycle_cli.py`,
-tested by `observatory/engine/tests/test_node_lifecycle_import.py` (suite `node_lifecycle_import`, 41 cases: the 7
-identity-migration cases of the source, adapted to an import, and 34 new). This is the engine side only: nothing in
+tested by `observatory/engine/tests/test_node_lifecycle_import.py` (suite `node_lifecycle_import`, 47 cases: the 7
+identity-migration cases of the source, adapted to an import, and 40 new). This is the engine side only: nothing in
 it switches the private broker off.
 
 ```sh
@@ -422,10 +422,14 @@ project-observatory full lifecycle import --from FOLDER              # terminal 
   (owner-only regular file, no link followed). The store is not opened in place: even a `mode=ro` connection to a
   database in WAL mode creates `-shm` beside it, so the store and its write-ahead log are read as bytes into a private
   temporary copy, queried there `mode=ro` with `query_only`, and the copy is removed. A live broker's last writes are
-  in its log, so they are counted. A case holds the source folder's bytes, modes and times unchanged across an import
-  while the source's writer keeps its rows in the log.
-- **Through the engine's own validation, item by item.** Each target is checked alone by `broker.validate_registry`,
-  then against its dependencies; each grant by the rules of `config/node-lifecycle.json`. A refusal is one item with
+  in its log, so they are counted. The two files are read one after the other, so a checkpoint between the reads
+  could pair them inconsistently: both are stamped (inode, size, times) before and after, a copy whose stamps moved
+  is taken again once, and a second that moved leaves the counts `degraded`. So does a store whose `meta` version is
+  not 1 (never guessed at) and a write-ahead log others may read. A case holds the source folder's bytes, modes and
+  times unchanged across an import while the source's writer keeps its rows in the log.
+- **Through the engine's own validation, item by item.** Each target is checked alone by `broker.validate_registry`
+  (its dependency list too: ids, at most 16), then against its dependencies: the targets on a dependency cycle are
+  refused `invalid_dependencies` and a target depending on a refused one `dependency_refused`, the others come; each grant by the rules of `config/node-lifecycle.json`. A refusal is one item with
   a code (`invalid_registry`, `startup_effects_required`, `no_callers`, `caller_unmapped`, `dependency_refused`,
   `reenroll_required` with its reason, `already_enrolled`; for grants `invalid_grant`, `wildcard_refused`,
   `unknown_tool`, `already_granted`), and the rest is validated whole (`service.validate_config`) and written in one
@@ -434,6 +438,12 @@ project-observatory full lifecycle import --from FOLDER              # terminal 
 - **Idempotent.** A target or grant the engine already holds with the same content is `unchanged`; one it holds with
   other content is refused and never overwritten. A second run writes nothing, journals nothing and says
   `changed: false`; `--dry-run` reports `wouldChange` and writes nothing.
+- **always_on comes over as on_demand.** The local server rereads the document on every call and its supervisor
+  (L4) acts on it at once, while the private broker runs until the operator switches it off last. Each would take
+  the other's process for the person's, so a crashed always_on job would be restarted twice, under two restart
+  budgets. So an always_on target is imported as on_demand, and the report names `full lifecycle policy TARGET_ID
+  --desired always_on` for each, to run once the private broker is off. `--keep-always-on` keeps the state and says
+  why it is risky until then.
 - **Callers.** A source name becomes the principal `agent:<name>` (or itself when it already is a principal);
   `--principal NAME=PRINCIPAL` names another. The source's `owner` and its Fabric host credential are not callers
   here (the operator's authority is a terminal; Fabric reaches the local server through its own descriptor): both are
@@ -442,7 +452,8 @@ project-observatory full lifecycle import --from FOLDER              # terminal 
   source's hash is the same scheme as a binding's credential (`bearer-sha256`), so it is only compared: a grant is
   imported when a binding in force for this workspace, of that principal, carries that very digest. Otherwise the
   caller is `reissue_required` and the report prints the two commands, `full access-binding issue` and `full
-  lifecycle allow` with its tools and targets. A grant keeps the targets that came and names the ones that did not.
+  lifecycle allow` with its tools and targets. A grant keeps the targets that came and names the ones that did not
+  (only valid ids are named; any other string of the source is counted, never echoed).
 - **The identity migration** (the L4 note). A legacy app record (no `scheme`, a `codeHash`) is verified now, by the
   same check enrollment runs (`macos.inspect_app`): an unchanged bundle (its metadata hash equals the enrolled one)
   is adopted under its own signing team; a changed one only under a team the operator names with `--trusted-team`
@@ -457,7 +468,8 @@ project-observatory full lifecycle import --from FOLDER              # terminal 
 What the operator runs next, on the machine that uses the private broker: `import --dry-run`, then `import`; issue a
 binding to each caller the report names and `allow` it as printed; enroll again any `reenroll_required` target;
 `full lifecycle status`; point each agent's MCP client at `POST http://127.0.0.1:47311/mcp` with its binding's bearer
-and check one `lifecycle.list`; then switch the private broker off with its own uninstall. Processes the private
+and check one `lifecycle.list`; then switch the private broker off with its own uninstall, and only then turn each
+target the report names back to always_on with `full lifecycle policy TARGET_ID --desired always_on`. Processes the private
 broker started are, from then on, the person's to the node: it never idles them out.
 
 Not in this step: the `unenroll` verb (OBS-251), which removes a target while the local server runs and needs a door

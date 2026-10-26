@@ -16,8 +16,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   another), and no token is copied: a grant comes over only when an access binding you issued already carries that
   caller's token, otherwise the report prints the commands that issue one. An app still enrolled under the older
   identity is verified now and keeps its enrollment when its bundle is unchanged, or under a signing team you name
-  with `--trusted-team`. The report names ids and counts, never an app's path, a team or a hash. Switching the other
-  broker off stays yours, after you check `full lifecycle status`. The `unenroll` verb is OBS-251.
+  with `--trusted-team`. An always_on target comes over as on_demand, because until the other broker is off both
+  would restart it after a crash; the report names the `policy` command that turns it back (`--keep-always-on` keeps
+  it). The report names ids and counts, never an app's path, a team or a hash. Switching the other broker off stays
+  yours, after you check `full lifecycle status`. The `unenroll` verb is OBS-251.
 
 - **The node now supervises the apps you enrolled** (OBS-79 step L4, `docs/design/LIFECYCLE.md`). While the local
   server runs, it stops an app the node started that no caller renewed for its idle minutes (never one you took over

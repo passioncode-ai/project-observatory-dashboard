@@ -201,12 +201,15 @@ class SourceFolderTests(Folder, unittest.TestCase):
 
 
 class StoreTests(Folder, unittest.TestCase):
-    def make_store(self, mode=0o600, *, live=False):
+    def make_store(self, mode=0o600, *, live=False, version=1):
         """The other broker's store; `live` keeps its writer open with the rows still in the write-ahead log only."""
         path = self.source / importer.SOURCE_STORE
         db = sqlite3.connect(path)
         db.execute('PRAGMA journal_mode=WAL')
         db.execute('PRAGMA wal_autocheckpoint=0')
+        if version is not None:
+            db.execute('CREATE TABLE meta(version INTEGER NOT NULL)')
+            db.execute('INSERT INTO meta VALUES (?)', (version,))
         db.executescript("""
             CREATE TABLE operations(id TEXT PRIMARY KEY, target TEXT, state TEXT);
             CREATE TABLE launches(target TEXT PRIMARY KEY, pid INTEGER, adopted REAL);
@@ -235,6 +238,42 @@ class StoreTests(Folder, unittest.TestCase):
                 self.assertEqual(out['store'], {'runningOperations': 1, 'startedProcesses': 1})
                 self.assertEqual(out['degraded'], [])
                 self.assertEqual(self.snapshot(), before)    # no -shm, no -wal, no byte of the folder changed
+
+    def test_a_store_of_another_or_no_version_is_not_counted(self):
+        for version in (2, None):
+            with self.subTest(version=version):
+                for p in self.source.glob(importer.SOURCE_STORE + '*'):
+                    p.unlink()
+                self.make_store(version=version)
+                store, degraded = importer.read_store(self.source)
+                self.assertIsNone(store)
+                self.assertIn('version', degraded[0]['reason'])
+
+    def test_a_write_ahead_log_others_may_read_makes_the_counts_degraded(self):
+        self.make_store(live=True)
+        os.chmod(self.source / (importer.SOURCE_STORE + '-wal'), 0o644)
+        store, degraded = importer.read_store(self.source)
+        self.assertIsNone(store)
+        self.assertIn('write-ahead log is readable or writable by others', degraded[0]['reason'])
+
+    def test_a_store_that_moved_while_copied_is_copied_again_once(self):
+        self.make_store(live=True)
+        real = importer._stamp
+        calls = []
+
+        def moving(path, *, times):
+            calls.append(path)
+            stamp = real(path)
+            return None if stamp is None else stamp + (len(calls) if len(calls) <= times else 0,)
+        # The first copy moves under the reader and the second holds: counted.
+        with mock.patch.object(importer, '_stamp', side_effect=lambda p: moving(p, times=2)):
+            store, degraded = importer.read_store(self.source)
+        self.assertEqual((store, degraded), ({'runningOperations': 1, 'startedProcesses': 1}, []))
+        calls.clear()
+        with mock.patch.object(importer, '_stamp', side_effect=lambda p: moving(p, times=99)):
+            store, degraded = importer.read_store(self.source)
+        self.assertIsNone(store)
+        self.assertIn('changed while it was copied', degraded[0]['reason'])
 
     def test_a_store_others_may_read_is_not_opened(self):
         self.make_store(mode=0o644)
@@ -363,6 +402,42 @@ class ImportTests(Folder, unittest.TestCase):
         out = self.run_import(dry_run=True)
         self.assertEqual(self.by_id(out, 'target')['gamma.app']['code'], 'caller_unmapped')
         self.assertEqual(self.by_id(out, 'target')['alpha.app']['outcome'], 'imported')
+
+    def test_a_dependency_cycle_or_a_long_list_refuses_only_the_targets_it_touches(self):
+        self.targets['gamma.app'] = source_target('gamma.app', 'gamma', dependencies=['delta.app'])
+        self.targets['delta.app'] = source_target('delta.app', 'delta', dependencies=['gamma.app'])
+        self.targets['eps.app'] = source_target('eps.app', 'eps', dependencies=['gamma.app'])
+        self.targets['zeta.app'] = source_target('zeta.app', 'zeta', dependencies=['alpha.app'] * 17)
+        self.write_source()
+        out = self.run_import()
+        targets = self.by_id(out, 'target')
+        self.assertEqual(targets['gamma.app']['code'], 'invalid_dependencies')
+        self.assertEqual(targets['delta.app']['code'], 'invalid_dependencies')
+        self.assertEqual(targets['eps.app']['code'], 'dependency_refused')
+        self.assertEqual(targets['zeta.app']['code'], 'invalid_registry')
+        self.assertEqual(set(self.engine()['targets']), {'alpha.app', 'beta.app'})
+
+    def test_an_always_on_target_comes_over_on_demand_unless_kept(self):
+        self.targets['alpha.app']['desiredState'] = 'always_on'
+        self.write_source()
+        out = self.run_import(dry_run=True)
+        step = next(s for s in out['next'] if 'always_on' in s)
+        self.assertIn('full lifecycle policy TARGET_ID --desired always_on`: alpha.app', step)
+        self.run_import()
+        self.assertEqual(self.engine()['targets']['alpha.app']['desiredState'], 'on_demand')
+        self.assertFalse(self.run_import()['changed'])          # the converted record is the one compared
+        self.config.unlink()
+        kept = self.run_import(keep_always_on=True)
+        self.assertEqual(self.engine()['targets']['alpha.app']['desiredState'], 'always_on')
+        self.assertTrue(any('--keep-always-on' in s for s in kept['next']))
+
+    def test_a_grant_target_that_is_no_id_is_counted_never_echoed(self):
+        self.callers['caller-a']['allowedTargets'] = ['alpha.app', 'gone.app', '../not an id']
+        self.write_source()
+        out = self.run_import()
+        a = self.by_id(out, 'caller')['caller-a']
+        self.assertEqual((a['notImported'], a['notImportedUnnamed']), (['gone.app'], 1))
+        self.assertNotIn('not an id', json.dumps(out))
 
     def test_a_target_whose_only_caller_is_the_owner_is_refused(self):
         self.targets['gamma.app'] = source_target('gamma.app', 'gamma', allowedCallers=['owner'])

@@ -891,8 +891,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "b2ce9a0539970033f368f2dd74d0d1d53ec07becba28362c5fe59bb2184dde34",
-      "bytes": 182149,
+      "export_sha256": "a35142fa9cef25e578ca3a20617021f94b6fe053f8b17bff1ad7aab9d6adbfb4",
+      "bytes": 182444,
       "upstream_modified": true
     },
     {
@@ -2833,8 +2833,8 @@
       "path": "node/lifecycle/importer.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "743cce4b3860d0bcc755cdd3a6fca37ed21d3c8c3d0981b5d85fbd11ac75148d",
-      "bytes": 29111
+      "export_sha256": "2e8ebdd1849dfeb02ecc6fa8437af559e8d2abdc86990be85da2552a04e2c356",
+      "bytes": 34474
     },
     {
       "path": "node/lifecycle/macos.py",
@@ -4923,8 +4923,8 @@
       "path": "tests/test_node_lifecycle_import.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "315f6e7215103a760e703ac4d23147f267e6cfe5de7ae276f0aca5bd667c3507",
-      "bytes": 29192
+      "export_sha256": "19dcc0818717ea6204d510b0fd5a85f5c1af252bc117042f7c245794cb7e536e",
+      "bytes": 33453
     },
     {
       "path": "tests/test_node_lifecycle_macos.py",
@@ -6307,8 +6307,8 @@
       "path": "tools/lifecycle_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "31b0a5a9b0e4223c09c9cc54830a2ca3f0b8f9d9b7b8438c81173fa472bdae85",
-      "bytes": 30364
+      "export_sha256": "37a64e579f1866098b0e1ec25ccd29233d3f17ea2efa5a2537b38ee3bdb647bb",
+      "bytes": 30834
     },
     {
       "path": "tools/lifecycle_findings.py",

@@ -1238,9 +1238,12 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
   otherwise the report prints the `access-binding issue` and `lifecycle allow` to run. An app
   still enrolled under the older identity is verified now; an updated one keeps its enrollment
   only under a signing team you name with `--trusted-team`, otherwise enroll it again.
+- An always_on target comes over as on_demand, because until the other broker is off both would
+  restart it when it crashes (`--keep-always-on` keeps it, with that warning).
 - After the import: `full lifecycle status`, point each agent at `POST /mcp` with its binding,
-  check one call, and only then switch the other broker off with its own uninstall. The engine
-  never stops it, and treats the processes it started as yours.
+  check one call, and only then switch the other broker off with its own uninstall. Then turn
+  each target the report names back with `full lifecycle policy TARGET_ID --desired always_on`.
+  The engine never stops the other broker, and treats the processes it started as yours.
 
 ## The machine: what runs, where the disk goes, cleanup
 
