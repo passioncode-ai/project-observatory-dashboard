@@ -17,6 +17,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import shutil
 import signal
 import socket
@@ -104,6 +105,9 @@ class FakeMac:
             return self.codesign(args, timeout)
         self.calls.append((args, timeout))
         for key in (tuple(args), tuple(args[:2]), args[0]):
+            if key == args[0] and args[1:] == ['--version']:
+                # A helper built from the source this engine ships, unless a test says otherwise by its full call.
+                return done(json.dumps({'state': 'version', 'version': macos.expected_helper_version()}))
             if key in self.answers:
                 answer = self.answers[key]
                 return answer.pop(0) if isinstance(answer, list) else answer
@@ -1136,6 +1140,150 @@ class WatchTests(Folder, unittest.TestCase):
         self.assertEqual(events, [])
 
 
+class HelperVersionTests(Folder, unittest.TestCase):
+    """OBS-222: a helper built from an older `native_app.swift` than this engine ships is never run."""
+
+    APP = {'kind': 'app', 'path': '/Applications/X.app', 'readiness': {'kind': 'process'}}
+
+    def setUp(self):
+        super().setUp()
+        self.helper = self.root / 'helper'
+        self.helper.write_text('')
+        self.mac = FakeMac()
+        self.adapter = adapter(self.root, run=self.mac)
+        self.adapter.identity_matches = lambda target, *, deadline=None: True
+
+    def says_version(self, answer):
+        self.mac.answers[(str(self.helper), '--version')] = answer
+
+    def version_calls(self):
+        return [c for c in self.mac.calls if c[0] == [str(self.helper), '--version']]
+
+    def assert_outdated(self):
+        seen = self.adapter.probe(self.APP)
+        self.assertEqual((seen['state'], seen.get('reason')), ('setup_required', 'helper_outdated'))
+        with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+            self.adapter.start(self.APP)
+        with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+            self.adapter.stop(self.APP, 42)
+        self.adapter.watch(lambda e: None, threading.Event(), popen=lambda *a, **k: self.fail('watch started'))
+        commands = [c[0][1] for c in self.mac.calls if c[0][0] == str(self.helper)]
+        self.assertEqual(set(commands), {'--version'}, 'nothing but the version question reached an old helper')
+        self.assertTrue(all(c[1] == macos.HELPER_VERSION_TIMEOUT for c in self.version_calls()))
+
+    def test_the_source_declares_the_version_the_engine_expects(self):
+        declared = macos.declared_helper_version(macos.HELPER_SOURCE.read_text(encoding='utf-8'))
+        expected = macos.expected_helper_version()
+        self.assertRegex(expected, r'^[0-9a-f]{16}$')
+        self.assertEqual(declared, expected,
+                         f'native_app.swift changed: set `let helperVersion = "{expected}"` in it, so a helper built '
+                         'from the old source reads as setup_required')
+
+    def test_the_version_follows_every_change_but_its_own_line(self):
+        source = macos.HELPER_SOURCE.read_text(encoding='utf-8')
+        version = macos.source_version(source)
+        self.assertEqual(macos.source_version(source.replace('\n', '\r\n')), version, 'a CRLF checkout is the same')
+        restamped = re.sub(r'let helperVersion = "[0-9a-f]*"', 'let helperVersion = "0000000000000000"', source)
+        self.assertEqual(macos.source_version(restamped), version, 'the declared value is not part of the digest')
+        self.assertNotEqual(macos.source_version(source.replace('"status"', '"state"', 1)), version)
+        self.assertIsNone(macos.source_version('print("no version line")'))
+
+    def test_a_current_helper_is_run_and_asked_once_per_file(self):
+        self.mac.answers[str(self.helper)] = done(json.dumps({'state': 'stopped'}))
+        self.assertEqual(self.adapter.probe(self.APP)['state'], 'stopped')
+        self.assertEqual(self.adapter.probe(self.APP)['state'], 'stopped')
+        self.assertEqual(len(self.version_calls()), 1, 'an unchanged helper is not asked again')
+        self.helper.write_text('rebuilt')
+        os.utime(self.helper, ns=(1, 1))
+        self.adapter.probe(self.APP)
+        self.assertEqual(len(self.version_calls()), 2, 'a replaced helper is asked again')
+
+    def test_an_older_version_is_setup_required_naming_the_build(self):
+        self.says_version(done(json.dumps({'state': 'version', 'version': '0123456789abcdef'})))
+        self.assert_outdated()
+        self.assertIn('build-helper', service_hint('setup_required'))
+
+    def test_a_helper_from_before_the_version_flag_is_outdated_not_a_crash(self):
+        self.says_version(done(json.dumps({'state': 'invalid_argument'}), 2))   # what such a helper answers
+        self.assert_outdated()
+
+    def test_a_helper_that_hangs_or_babbles_is_outdated(self):
+        def hung(args, timeout=10):
+            if args[1:] == ['--version']:
+                raise broker.LifecycleError('delivery_unknown')   # the Runner's answer to a timeout
+            return self.mac(args, timeout)
+        self.adapter.run = hung
+        seen = self.adapter.probe(self.APP)
+        self.assertEqual((seen['state'], seen.get('reason')), ('setup_required', 'helper_outdated'))
+        self.adapter.run = self.mac
+        for answer in (done('not json'), done('[]'), done(json.dumps({'state': 'version', 'version': 7})),
+                       done(json.dumps({'version': macos.expected_helper_version()}))):
+            self.says_version(answer)
+            self.assertEqual(self.adapter.probe(self.APP).get('reason'), 'helper_outdated', answer.stdout)
+
+    def test_a_mismatch_is_not_remembered(self):
+        self.says_version(done(json.dumps({'state': 'version', 'version': '0123456789abcdef'})))
+        self.assertEqual(self.adapter.probe(self.APP)['state'], 'setup_required')
+        del self.mac.answers[(str(self.helper), '--version')]
+        self.mac.answers[str(self.helper)] = done(json.dumps({'state': 'stopped'}))
+        self.assertEqual(self.adapter.probe(self.APP)['state'], 'stopped')
+
+    def test_the_helper_command_reports_the_versions(self):
+        with mock.patch.object(macos, 'default_helper', return_value=self.helper), \
+                mock.patch.object(macos, 'Runner', return_value=self.mac):
+            self.says_version(done(json.dumps({'state': 'version', 'version': '0123456789abcdef'})))
+            self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'outdated')
+            del self.mac.answers[(str(self.helper), '--version')]
+            self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'current')
+            self.assertEqual(macos.helper_state(self.root / 'absent', run=self.mac, platform='darwin'), 'not_built')
+            self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='linux'), 'unsupported_platform')
+            out = io.StringIO()
+            with mock.patch('sys.stdout', out):
+                self.assertEqual(macos.main(['helper']), 0)
+        doc = json.loads(out.getvalue())
+        self.assertEqual((doc['built'], doc['state'], doc['expectedVersion']),
+                         (True, 'current' if sys.platform == 'darwin' else 'unsupported_platform',
+                          macos.expected_helper_version()))
+
+
+    @unittest.skipUnless(POSIX, 'POSIX modes')
+    def test_the_state_never_runs_a_helper_the_adapter_would_refuse(self):
+        # A folder others may write, a helper others may write, or a link: `unsafe`, and the helper never runs.
+        folder = self.root / 'shared'
+        folder.mkdir()
+        shared = folder / 'helper'
+        shared.write_text('')
+        os.chmod(folder, 0o770)
+        self.assertEqual(macos.helper_state(shared, run=self.mac, platform='darwin'), 'unsafe')
+        os.chmod(folder, 0o700)
+        os.chmod(shared, 0o666)
+        self.assertEqual(macos.helper_state(shared, run=self.mac, platform='darwin'), 'unsafe')
+        link = self.root / 'linked-helper'
+        link.symlink_to(self.helper)
+        self.assertEqual(macos.helper_state(link, run=self.mac, platform='darwin'), 'unsafe')
+        self.assertEqual(self.mac.calls, [], 'nothing was run')
+        self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'current')
+        linked = adapter(self.root, run=self.mac, helper=link)
+        linked.identity_matches = lambda target, *, deadline=None: True
+        self.assertEqual(linked.probe(self.APP).get('reason'), 'helper_unsafe')
+
+    def test_a_missing_source_is_named_as_such_and_runs_nothing(self):
+        with mock.patch.object(macos, 'HELPER_SOURCE', self.root / 'absent.swift'):
+            self.assertIsNone(macos.expected_helper_version())
+            self.assertEqual(macos.helper_state(self.helper, run=self.mac, platform='darwin'), 'source_missing')
+            seen = self.adapter.probe(self.APP)
+            self.assertEqual((seen['state'], seen.get('reason')), ('setup_required', 'helper_source_missing'))
+            with self.assertRaisesRegex(broker.LifecycleError, 'setup_required'):
+                self.adapter.start(self.APP)
+        self.assertEqual(self.version_calls(), [], 'no helper is asked against a version nobody knows')
+        self.assertRegex(macos.expected_helper_version(), r'^[0-9a-f]{16}$', 'the shipped source is read again')
+
+
+def service_hint(code):
+    from node.lifecycle import service
+    return service.HINTS[code]
+
+
 class HelperBuildTests(Folder, unittest.TestCase):
     def test_the_build_writes_an_owner_only_executable_whole(self):
         calls = []
@@ -1216,6 +1364,10 @@ class HelperBuildTests(Folder, unittest.TestCase):
         self.assertEqual(json.loads(answer.stdout), {'state': 'invalid_argument'})
         outside = macos.Runner()([str(built), 'status', str(self.root / 'Elsewhere.app')])
         self.assertEqual(json.loads(outside.stdout), {'state': 'not_installed'})
+        version = macos.Runner()([str(built), '--version'])
+        self.assertEqual((version.returncode, json.loads(version.stdout)),
+                         (0, {'state': 'version', 'version': macos.expected_helper_version()}))
+        self.assertEqual(macos.helper_state(built), 'current')
 
 
 if __name__ == '__main__':

@@ -11,6 +11,7 @@
 //                                owner enrolled as understanding it
 //   quit <app> <pid>             the app's own quit path, the one Cmd+Q and the Dock use
 //   watch                        one line per launch, termination and activation, until stdin closes
+//   --version                    which source it was built from, so the engine runs no older build
 //
 // Build: `swiftc -O -o lifecycle-native native_app.swift` (macos.build_helper does it for a source
 // install; the release path is in docs/design/LIFECYCLE.md).
@@ -39,7 +40,18 @@ func inputIdleSeconds() -> Double {
     CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
 }
 
+// The version the engine compares before it runs this helper (OBS-222): the first 16 hex digits of the SHA-256 of
+// this file with the value below left empty (`macos.source_version`). Any other change to this file changes it, and
+// the engine's tests fail until the value below is the new one. A build that answers another value, or
+// `invalid_argument` because it predates `--version`, is `setup_required` until `full lifecycle build-helper`.
+let helperVersion = "2c5b06921f853259"
+
 let args = CommandLine.arguments
+
+// `--version`: answers at once and touches nothing.
+if args.count == 2 && args[1] == "--version" {
+    emit(["state": "version", "version": helperVersion]); exit(0)
+}
 
 // `watch`: one line of JSON per app launch, termination or activation, until stdin closes (the
 // broker exited), so the helper never outlives its reader.

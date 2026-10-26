@@ -1183,7 +1183,7 @@ until then every caller is refused and no state is created.
 
 ```sh
 project-observatory full lifecycle status                  # targets, callers, the last events; starts nothing
-project-observatory full lifecycle build-helper            # macOS: compile the helper once (needs swiftc)
+project-observatory full lifecycle build-helper            # macOS: compile the helper (needs swiftc); again when status says it is outdated
 project-observatory full lifecycle enroll alpha.app --kind app --path /Applications/Alpha.app --caller agent:alpha --startup-effect TEXT
 project-observatory full lifecycle allow agent:alpha --binding BINDING_ID --target alpha.app --tool lifecycle.list --tool lifecycle.status --tool lifecycle.ensure_running --tool lifecycle.operation.get
 project-observatory full lifecycle policy alpha.app --idle-minutes 30    # or --desired always_on, --background-launch on
@@ -1193,6 +1193,9 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
 
 - Every verb that changes something needs your terminal; there is no `--yes`. `status` and
   `build-helper` grant nothing.
+- After an update that changes the helper's source, apps answer `setup_required` until you
+  run `build-helper` again: `status` says the helper "was built from an older native_app.swift",
+  and no helper built from another source is run.
 - `enroll` takes the path you name and never looks for one. On macOS it verifies the app's
   signature and records its signing team and bundle id, so an update from the same team keeps
   matching and anything else is refused; a LaunchAgent is recorded by its label and the hashes

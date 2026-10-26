@@ -113,6 +113,11 @@ SWITCHBOARD_PROXY = re.compile(r'127\.0\.0\.1:[0-9]{1,5}')
 #: The compiled helper's file name, and where a source install keeps it.
 HELPER_NAME = 'lifecycle-native'
 HELPER_SOURCE = Path(__file__).with_name('native_app.swift')
+#: How long the helper may take to say which source it was built from. An older build answers at once
+#: (`invalid_argument`); one that does not answer in time is treated as outdated, never waited on.
+HELPER_VERSION_TIMEOUT = 5
+#: The line of `native_app.swift` that declares its version; its value is left out of the digest it states.
+HELPER_VERSION_LINE = re.compile(r'^let helperVersion = "([0-9a-f]*)"$', re.M)
 #: The signal that ends a process group at once; on Windows `osproc` stops the tree whatever the signal.
 _KILL = getattr(signal, 'SIGKILL', signal.SIGTERM)
 #: The fields of a helper answer the broker reads; anything else it says is dropped.
@@ -123,6 +128,104 @@ WATCH_EVENTS = ('launched', 'terminated', 'activated')
 def default_helper() -> Path:
     """Where a source install builds the helper: `<state>/node-lifecycle/bin/lifecycle-native`, owner only."""
     return default_state_dir() / 'bin' / HELPER_NAME
+
+
+def source_version(text: str) -> Optional[str]:
+    """The version a helper built from `text` declares: the first 16 hex digits of the SHA-256 of the source with the
+    value of its `let helperVersion = "..."` line left empty and line ends as LF. None without exactly one such line.
+
+    Any other change to the source changes it, and `test_the_source_declares_the_version_the_engine_expects` fails
+    until the declared value is the new one, so the version cannot stay behind its source unnoticed."""
+    text = text.replace('\r\n', '\n')
+    if len(HELPER_VERSION_LINE.findall(text)) != 1:
+        return None
+    blank = HELPER_VERSION_LINE.sub('let helperVersion = ""', text)
+    return hashlib.sha256(blank.encode('utf-8')).hexdigest()[:16]
+
+
+def declared_helper_version(text: str) -> Optional[str]:
+    """The value `text`'s `let helperVersion` line declares, which a helper built from it prints for `--version`."""
+    found = HELPER_VERSION_LINE.findall(text.replace('\r\n', '\n'))
+    return found[0] if len(found) == 1 else None
+
+
+_expected_version: dict = {}
+
+
+def expected_helper_version() -> Optional[str]:
+    """The version of the helper this engine ships (`native_app.swift` beside this module), read once per source
+    path. None when the source cannot be read: then no helper is run (`helper_source_missing`), and nothing is
+    remembered, so a restored source is read again."""
+    if HELPER_SOURCE not in _expected_version:
+        try:
+            _expected_version[HELPER_SOURCE] = source_version(HELPER_SOURCE.read_text(encoding='utf-8'))
+        except (OSError, UnicodeDecodeError):
+            return None
+    return _expected_version[HELPER_SOURCE]
+
+
+def helper_safe(helper) -> bool:
+    """The helper may be run: a regular file of this account that no one else may change, in a folder of this
+    account that no one else may write, neither of them a link. Whoever could replace it would act with every grant
+    the broker holds, so nothing runs it before this check, `helper_state` included."""
+    helper = Path(helper)
+    folder = helper.parent
+    try:
+        return (
+            # The folder first: whoever may write it may swap the file between this check and the exec.
+            folder.is_dir()
+            and not folder.is_symlink()
+            and osprivacy.owned_by_me(folder)
+            and not osprivacy.others_may_write(folder)
+            and helper.is_file()
+            and not helper.is_symlink()
+            and osprivacy.owned_by_me(helper)
+            and not osprivacy.others_may_write(helper)
+        )
+    except OSError:
+        return False
+
+
+def helper_version(helper, *, run) -> Optional[str]:
+    """What `helper --version` says it was built from, or None: an older build that does not know the flag
+    (`invalid_argument`), a timeout, an exit code, or an answer of another shape. Nothing else is asked of it."""
+    try:
+        result = run([str(helper), '--version'], timeout=HELPER_VERSION_TIMEOUT)
+    except LifecycleError:
+        return None
+    if result.returncode:
+        return None
+    try:
+        answer = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if not isinstance(answer, dict) or answer.get('state') != 'version' or not isinstance(answer.get('version'), str):
+        return None
+    return answer['version']
+
+
+def helper_current(helper, *, run) -> bool:
+    """The helper was built from the source this engine ships."""
+    expected = expected_helper_version()
+    return expected is not None and helper_version(helper, run=run) == expected
+
+
+def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> str:
+    """What `full lifecycle status` and `macos.py helper` report, decided before anything runs:
+
+    `unsupported_platform` off macOS; `not_built` (no file); `unsafe` (a link, or a file or folder others may change:
+    never run, as the adapter never runs it); `source_missing` (this engine's `native_app.swift` cannot be read, so no
+    version is known and nothing is run); then `current` or `outdated` from `helper --version`."""
+    if (platform or sys.platform) != 'darwin':
+        return 'unsupported_platform'
+    helper = Path(helper) if helper else default_helper()
+    if not helper.is_file() and not helper.is_symlink():
+        return 'not_built'
+    if not helper_safe(helper):
+        return 'unsafe'
+    if expected_helper_version() is None:
+        return 'source_missing'
+    return 'current' if helper_current(helper, run=run or Runner()) else 'outdated'
 
 
 def default_cache() -> Path:
@@ -513,6 +616,7 @@ class MacAdapter:
         self.home = Path(home) if home else Path.home()
         self.run = run if run is not None else Runner(self.home)
         self.helper = Path(helper) if helper else default_helper()
+        self._helper_current_key = None                 # the file state that last answered the expected version
         self.fabric_hub_file = Path(fabric_hub_file) if fabric_hub_file else _default_hub_file()
         self.cache_path = Path(cache_path) if cache_path else None
         self.roots = application_roots(self.home)
@@ -668,24 +772,34 @@ class MacAdapter:
 
     # -- observation -------------------------------------------------------------------------------------------------
 
-    def _helper_ready(self) -> bool:
-        """The helper is run only when it is a regular file of this account that no one else may change: whoever
-        could replace it would act with every grant the broker holds."""
-        folder = self.helper.parent
+    def _helper_problem(self) -> Optional[str]:
+        """None when the helper may run, else why not: `helper_not_built` (no file), `helper_unsafe` (a link, or a
+        file or folder others may change), `helper_source_missing` (this engine's `native_app.swift` cannot be read,
+        so no version is known) or `helper_outdated` (built from another `native_app.swift`). All are
+        `setup_required`; `full lifecycle build-helper` repairs the first, the third needs the engine reinstalled.
+
+        A helper that answered the expected version is not asked again until its file changes (device, inode, size,
+        modification and change times). A mismatch is never remembered: a rebuilt helper is current at once."""
+        if not self.helper.is_file() and not self.helper.is_symlink():
+            return 'helper_not_built'
+        if not helper_safe(self.helper):
+            return 'helper_unsafe'
+        if expected_helper_version() is None:
+            return 'helper_source_missing'
         try:
-            return (
-                # The folder first: whoever may write it may swap the file between this check and the exec.
-                folder.is_dir()
-                and not folder.is_symlink()
-                and osprivacy.owned_by_me(folder)
-                and not osprivacy.others_may_write(folder)
-                and self.helper.is_file()
-                and not self.helper.is_symlink()
-                and osprivacy.owned_by_me(self.helper)
-                and not osprivacy.others_may_write(self.helper)
-            )
+            info = self.helper.stat()
         except OSError:
-            return False
+            return 'helper_not_built'
+        key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        if self._helper_current_key == key:
+            return None
+        if not helper_current(self.helper, run=self.run):
+            return 'helper_outdated'
+        self._helper_current_key = key
+        return None
+
+    def _helper_ready(self) -> bool:
+        return self._helper_problem() is None
 
     def _helper_answer(self, args, timeout: float = 10) -> dict:
         try:
@@ -852,8 +966,9 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 return observation('login_required')
-            if not self._helper_ready():
-                return observation('setup_required', reason='helper_not_built')
+            problem = self._helper_problem()
+            if problem:
+                return observation('setup_required', reason=problem)
             try:
                 response = self._helper_status(target)
             except LifecycleError:
@@ -919,6 +1034,8 @@ class MacAdapter:
         if not self.identity_matches(target):
             raise LifecycleError('identity_mismatch')
         if target['kind'] == 'app':
+            if not self._helper_ready():
+                raise LifecycleError('setup_required')
             current = self._helper_status(target)
             if current.get('state') != 'ready' or current.get('pid') != pid:
                 raise LifecycleError('identity_mismatch')
@@ -1116,22 +1233,24 @@ def build_helper(dest=None, *, swiftc: Optional[str] = None, sdk: Optional[str] 
 
 
 def main(argv=None) -> int:
-    """`build-helper [--dest PATH]`: compile the helper for a source install. `helper`: where it is and whether it
-    exists. Each prints one JSON document; a refusal prints its code and exits 1."""
+    """`build-helper [--dest PATH]`: compile the helper for a source install. `helper`: where it is, whether it
+    exists and its `state` (`current`, `outdated`, `not_built`). Each prints one JSON document; a refusal prints its
+    code and exits 1."""
     import argparse
 
     parser = argparse.ArgumentParser(prog='macos.py', description='The lifecycle broker\'s macOS helper.')
     sub = parser.add_subparsers(dest='command', required=True)
     build = sub.add_parser('build-helper', help='compile native_app.swift with swiftc (source install)')
     build.add_argument('--dest', help='where to write it (default: <state>/node-lifecycle/bin/lifecycle-native)')
-    sub.add_parser('helper', help='where the helper is and whether it is built')
+    sub.add_parser('helper', help='where the helper is, whether it is built and from this engine\'s source')
     args = parser.parse_args(argv)
     try:
         if args.command == 'build-helper':
             print(json.dumps({'helper': str(build_helper(args.dest)), 'built': True}))
         else:
             path = default_helper()
-            print(json.dumps({'helper': str(path), 'built': path.is_file()}))
+            print(json.dumps({'helper': str(path), 'built': path.is_file(), 'state': helper_state(path),
+                              'expectedVersion': expected_helper_version()}))
     except LifecycleError as exc:
         print(json.dumps({'error': exc.code, 'detail': getattr(exc, 'detail', '')}))
         return 1
