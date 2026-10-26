@@ -19,9 +19,13 @@ while the major version is 0, a minor release may change behaviour and says so h
   and reached by `rotate`, `revoke`, `ping` and `list` as `inventory/<account>`. A cost the provider does not
   state reads "not stated", never zero; a project is named only through a repository or a zone the registry
   already ties to one, with its rule. A page never connected names the switch and the door's commands, a scan
-  that read nothing names why, and an empty account says so. The overview has a card for each, and three more
-  tiles (DigitalOcean resources and $/mo, Cloudflare resources) that read "not connected" or "not read" rather
-  than 0.
+  that read nothing names why, and an empty account says so; switched off after a read, a page shows the last
+  read under "switched off" with its date. A monthly total no row states is "not stated", and one some rows
+  leave out is "at least $X". The overview has a card for each, and three more tiles (DigitalOcean resources
+  and $/mo, Cloudflare resources) that read "not connected", "switched off" or "not read" rather than 0. A
+  Cloudflare listing is followed by `total_pages`, else `total_count`, else to its first short page, and one
+  whose end no count confirms is named in `degraded`; the step's deadline is checked per zone, what was read
+  is written, and a scan cut short (`complete: false`) is read again at the next tick.
 
 - **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
   harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it

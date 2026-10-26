@@ -590,10 +590,13 @@ def heroku_state(doc) -> str:
     return "unread" if not doc.get("apps") and doc.get("degraded") else "read"
 
 
-def infra_state(doc) -> str:
-    """`unscanned`, `unread` (a scan that read nothing and said why) or `read`."""
+def infra_state(doc, on: bool = True) -> str:
+    """`unscanned`, `off` (switched off since its last read), `unread` (a scan that read
+    nothing and said why) or `read`."""
     if not doc:
         return "unscanned"
+    if not on:
+        return "off"
     return "unread" if not doc.get("resources") and doc.get("degraded") else "read"
 
 
@@ -1065,10 +1068,12 @@ def build():
         "creds_unclaimed": (CREDS.get("totals", {}).get("unclaimed", 0) if CREDS else 0),
         # DigitalOcean and Cloudflare beside Heroku (OBS-235, OBS-271): a provider never
         # read is not a provider holding nothing, so its state travels with its count.
-        "digitalocean_state": infra_state(DIGITALOCEAN),
+        "digitalocean_state": infra_state(DIGITALOCEAN, _integrations.get("digitalocean") is True),
         "digitalocean_resources": ((DIGITALOCEAN or {}).get("totals") or {}).get("resources", 0),
-        "digitalocean_cost": ((DIGITALOCEAN or {}).get("totals") or {}).get("monthly_cost", 0),
-        "cloudflare_state": infra_state(CLOUDFLARE),
+        # Null when no row states a price, never 0; `_partial` when the sum is a floor.
+        "digitalocean_cost": ((DIGITALOCEAN or {}).get("totals") or {}).get("monthly_cost"),
+        "digitalocean_cost_partial": bool(((DIGITALOCEAN or {}).get("totals") or {}).get("monthly_cost_partial")),
+        "cloudflare_state": infra_state(CLOUDFLARE, _integrations.get("cloudflare") is True),
         "cloudflare_resources": ((CLOUDFLARE or {}).get("totals") or {}).get("resources", 0),
         "heroku_down": (sum(1 for a in HEROKU["apps"]
                             if a["state"] in ("down", "suspended") or a["crashed"])
@@ -2137,7 +2142,7 @@ const tile = (id, value) => [id.includes("{n}") ? pluralCaption(id, value) : T(i
 const HK = n => S.heroku_state === "unread" ? T("not read")
   : S.heroku_state === "unscanned" ? T("not scanned") : n;
 const IN = (state, n) => state === "unread" ? T("not read")
-  : state === "unscanned" ? T("not connected") : n;
+  : state === "unscanned" ? T("not connected") : state === "off" ? T("switched off") : n;
 const TILES_PRIMARY = [
   tile("tile@@{n} projects", S.projects), tile("tile@@{n} repositories", S.repositories),
   tile("tile@@{n} Heroku apps", HK(S.heroku_apps)), tile("tile@@{n} apps down", HK(S.heroku_down)),
@@ -2152,7 +2157,9 @@ const TILES_REST = [
   tile("tile@@{n} Heroku apps without a project", HK(S.heroku_unlinked)),
   // DigitalOcean and Cloudflare beside Heroku (OBS-235, OBS-271), by the same rule as HK.
   tile("tile@@{n} DigitalOcean resources", IN(S.digitalocean_state, S.digitalocean_resources)),
-  tile("DigitalOcean $/mo", IN(S.digitalocean_state, Math.round(S.digitalocean_cost || 0))),
+  tile("DigitalOcean $/mo", IN(S.digitalocean_state, S.digitalocean_cost == null ? T("not stated")
+    : S.digitalocean_cost_partial ? T("at least ${amount}", {amount: Math.round(S.digitalocean_cost)})
+    : Math.round(S.digitalocean_cost))),
   tile("tile@@{n} Cloudflare resources", IN(S.cloudflare_state, S.cloudflare_resources)),
   // Local state of the working copies, and the credential counts.
   tile("tile@@{n} dirty working copies", S.dirty), tile("tile@@{n} keys in the registry", S.creds),

@@ -203,10 +203,12 @@ def _infra_count(doc: dict | None) -> int | str:
     return len(rows) if rows or not doc.get("degraded") else ""
 
 
-def _infra_line(doc: dict | None, t: Translator) -> str:
+def _infra_line(doc: dict | None, t: Translator, on: bool = True) -> str:
     """The overview card of an infrastructure page: what it lists and what it says it costs."""
     if not doc:
         return t.mark("not connected")
+    if not on:
+        return t.mark("switched off") + " · " + t.mark("last read {date}", date=str(doc.get("scanned_on") or ""))
     tt = doc.get("totals") or {}
     if not doc.get("resources") and doc.get("degraded"):
         return t.mark("not read")
@@ -216,8 +218,9 @@ def _infra_line(doc: dict | None, t: Translator) -> str:
     if bad:
         line += " · " + t.mark("off or down: {n}", n=bad)
     cost = tt.get("monthly_cost")
-    if isinstance(cost, (int, float)) and cost:
-        line += " · " + t.mark("stated ${amount}/mo", amount=round(cost, 2))
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost:
+        line += " · " + (t.mark("stated at least ${amount}/mo", amount=round(cost, 2))
+                         if tt.get("monthly_cost_partial") else t.mark("stated ${amount}/mo", amount=round(cost, 2)))
     return line
 
 
@@ -318,8 +321,10 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "domains": t.mark("{n} names", n=counts["domains"]) + " · "
                    + t.mark("Cloudflare zones: {n}", n=len(payload.get("zones") or [])),
         "heroku": t.mark("{n} apps", n=counts["heroku"] or 0),
-        "digitalocean": _infra_line(payload.get("digitalocean"), t),
-        "cloudflare": _infra_line(payload.get("cloudflare"), t),
+        "digitalocean": _infra_line(payload.get("digitalocean"), t,
+                                    (payload.get("infra_integrations") or {}).get("digitalocean", True)),
+        "cloudflare": _infra_line(payload.get("cloudflare"), t,
+                                  (payload.get("infra_integrations") or {}).get("cloudflare", True)),
         "creds": t.mark("{n} entries", n=counts["creds"] or 0),
         # The badge's number with its unit, then the population it is drawn from.
         "env": t.mark("{n} variables", n=counts["env"] or 0) + " · "

@@ -2110,6 +2110,39 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
     return 1 if bad else 0
 
 
+def _leak_words(row) -> set[str]:
+    """Every path-like word of a leak row's text, lowercased: `a/b/c`, a slug, a name."""
+    texts: list[str] = []
+
+    def walk(v):
+        if isinstance(v, str):
+            texts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(row)
+    return {w.lower().strip("./") for t in texts for w in re.findall(r"[A-Za-z0-9._/-]+", t)}
+
+
+def names_label(words: set[str], label: str) -> bool:
+    """True when a word IS the label, or a path ending in it (`cloudflare/<account>/<label>`).
+    Exact, never a substring: `example` does not name `example-account`, and an analytics
+    token's label does not name the inventory reader of the same account."""
+    label = label.lower()
+    for w in words:
+        if w == label:
+            return True
+        if w.endswith("/" + label):
+            head = w[: -len(label) - 1]
+            if "/" not in label and (head == "inventory" or head.endswith("/inventory")):
+                continue
+            return True
+    return False
+
+
 def leaked_labels() -> set[str]:
     """Issued-token names that appear in an OPEN leak row.
 
@@ -2121,9 +2154,9 @@ def leaked_labels() -> set[str]:
     out: set[str] = set()
     try:
         for row in vault.open_leaks():
-            blob = json.dumps(row, ensure_ascii=False).lower()
+            words = _leak_words(row)
             for p in issued():
-                if label_of(p).lower() in blob:
+                if names_label(words, label_of(p)):
                     out.add(label_of(p))
     except Exception as exc:                                                      
         print(f"  (the leak register could not be read: {exc})", file=sys.stderr)

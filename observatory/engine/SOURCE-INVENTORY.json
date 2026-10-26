@@ -213,8 +213,8 @@
       "path": "collectors/infra_registry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b54b6aa33ccbc9767fda2726dea4607da9d4bf429ab7a3d99df1a77f9ee0a256",
-      "bytes": 17377
+      "export_sha256": "2bd01803f0adb43a1447c265eccadee0877b01bcaf326bdfcc7c3e6731a100c3",
+      "bytes": 18205
     },
     {
       "path": "collectors/listing_guard.py",
@@ -314,8 +314,8 @@
       "path": "collectors/scan_cloudflare_account.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a6a7ebd9d38ff044bf267900fc95ce234b9df64b22f55d595291a1bead4b09af",
-      "bytes": 11830
+      "export_sha256": "4dbf851155dbd15412c94e514a411ca589c8f4b6aefcb6bcafa9fd33cbf6115b",
+      "bytes": 16689
     },
     {
       "path": "collectors/scan_digitalocean.py",
@@ -592,8 +592,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "1622b49e09d39b3df62496641b8a14392f37f4d2c2b7baba2adeed7c32f58210",
-      "bytes": 284997,
+      "export_sha256": "089b6ef4f651785710948929d4c9ba281600d560833af3d725fdd9edbc22ea34",
+      "bytes": 285568,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -617,8 +617,8 @@
       "path": "dashboard/infra_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3f0215482c04719b4d3faa04c5e33af0800755fcbc1095b63e2e73ab5a617024",
-      "bytes": 14324
+      "export_sha256": "d9a8f5cb683ef9c2d547fd445290c69a11b0ea018e1cd2f7f7fab728a03639b0",
+      "bytes": 15455
     },
     {
       "path": "dashboard/locales/en.json",
@@ -631,8 +631,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3074941f4de312baea46c5bc98f4d20eaf43d4bdde0940f14524a0bc0ec1a21a",
-      "bytes": 189073
+      "export_sha256": "98ac895e2fb017d657c379fb5521425668e5673350c9c9c24e2b78fb75cf9b32",
+      "bytes": 189851
     },
     {
       "path": "dashboard/machine_page.py",
@@ -644,8 +644,8 @@
     {
       "path": "dashboard/shell.py",
       "source_sha256": "d4249174d8cbd7296825e38c520b3d841a13573022239d559b7d06f342218d30",
-      "export_sha256": "ea470d05d58577f825de451c6552549828404645d9b6d115f13edcbf903d12eb",
-      "bytes": 25173,
+      "export_sha256": "489229357c4df33454109ee8595c6a6788a2abdd3d51bb238b9f779f1a60f7f5",
+      "bytes": 25685,
       "python_comments_removed": 38,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -4589,8 +4589,8 @@
       "path": "tests/test_infra_pages.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8698a6f3d8525b43cd322b768a36242b6764625cf101e39fd58edbec49a5bf14",
-      "bytes": 29559
+      "export_sha256": "88295b82e22c69a3d822522a4718051b3ec7955cc0f0b768e7b720825823a3fa",
+      "bytes": 37001
     },
     {
       "path": "tests/test_install_key.py",
@@ -6100,8 +6100,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "834c07eb985e0f6491991eb811f9d6afb9c49bdc7f782f1352e0a418edbc096f",
-      "bytes": 122061,
+      "export_sha256": "5e5574ecfdc79e3d561e794450d4fd1b4b3947e8dd7809c4b97644ec052ed3d7",
+      "bytes": 123201,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
@@ -6688,8 +6688,8 @@
       "path": "tools/tick.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f4584a92316f54bb9313b014c0f1b9a7c6adfec82dc3229c38b06f2d88da4939",
-      "bytes": 39246
+      "export_sha256": "34d4a8f41f55087b13f44b75b9f072107600e28ee25f1d92baa9c088dbcccd60",
+      "bytes": 39810
     },
     {
       "path": "tools/tick.sh",

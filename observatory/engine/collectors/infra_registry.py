@@ -48,9 +48,15 @@ UNLINKED = {
 }
 
 
+#: The hosts a registry repository is on GitHub by. Both providers name a GitHub repository by
+#: `owner/name` alone, and the same pair on another host is another repository.
+GITHUB_HOSTS = {"github", "github.com"}
+
+
 def repo_index(repos: list[dict], relations: list[dict]) -> dict[str, str]:
-    """`owner/name` (lowercased) -> project id, through the registry's `implemented_by` edges."""
-    by_id = {r.get("id"): r for r in repos}
+    """`owner/name` (lowercased) -> project id, through the registry's `implemented_by` edges,
+    for the registry's GITHUB repositories only (DigitalOcean's and Pages' sources are GitHub's)."""
+    by_id = {r.get("id"): r for r in repos if str(r.get("host") or "").lower() in GITHUB_HOSTS}
     out: dict[str, str] = {}
     for rel in relations:
         if rel.get("type") != "implemented_by":
@@ -180,7 +186,9 @@ def cloudflare_rows(scan: dict, index: dict[str, str],
             row = _row(f"cloudflare:pages:{aid}/{p.get('name')}", "pages", p.get("name"), account,
                        pages_state(p), p.get("last_deploy_status"), host=p.get("subdomain"),
                        domains=p.get("domains") or [], last_deploy_on=p.get("last_deploy_on"))
-            _link(row, [p["repository"]] if p.get("repository") else [], index, "pages-source-repo")
+            # Only a GitHub source names a GitHub repository; a GitLab `owner/name` is another one.
+            github = p.get("repository") if p.get("source_type") == "github" else None
+            _link(row, [github] if github else [], index, "pages-source-repo")
             rows.append(row)
         for b in a.get("r2") or []:
             rows.append(_unlinkable(_row(f"cloudflare:r2:{aid}/{b.get('name')}", "r2", b.get("name"), account,
@@ -253,7 +261,10 @@ def document(provider: str, scan: dict, rows: list[dict], accounts: list[dict], 
             "linked_to_a_project": sum(1 for r in rows if r.get("project")),
             "by_kind": {k: sum(1 for r in rows if r["kind"] == k) for k in sorted({r["kind"] for r in rows})},
             "by_state": {s: sum(1 for r in rows if r["state"] == s) for s in STATES},
-            "monthly_cost": round(sum(known), 2),
+            # Null when nothing states a price: a sum of nothing is not "$0". When some rows
+            # state none, the sum is a floor, and `monthly_cost_partial` says so.
+            "monthly_cost": round(sum(known), 2) if known else None,
+            "monthly_cost_partial": bool(known) and any(r.get("monthly_cost") is None for r in rows),
             "cost_unknown": sum(1 for r in rows if r.get("monthly_cost") is None),
             "month_to_date_usage": (round(sum(a["month_to_date_usage"] for a in accounts
                                               if isinstance(a.get("month_to_date_usage"), (int, float))), 2)

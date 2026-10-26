@@ -36,6 +36,7 @@ PROVIDERS = {
     "digitalocean": {
         "name": "DigitalOcean",
         "off": "DigitalOcean is not connected. Switch it on, then connect each team with a read-only token:",
+        "switched_off": "DigitalOcean is switched off. Below is the last read, from {date}; switch it on to read again:",
         "unread": "Part of DigitalOcean could not be read:",
         "integration": "project-observatory full configure integrations digitalocean true",
         "scan": "project-observatory full scan-digitalocean",
@@ -45,6 +46,7 @@ PROVIDERS = {
     "cloudflare": {
         "name": "Cloudflare",
         "off": "Cloudflare's account inventory is not connected. Switch it on, then issue a read-only reader for each account:",
+        "switched_off": "Cloudflare is switched off. Below is the last read, from {date}; switch it on to read again:",
         "unread": "Part of Cloudflare could not be read:",
         "integration": "project-observatory full configure integrations cloudflare true",
         "scan": "project-observatory full scan-cloudflare-account",
@@ -81,6 +83,17 @@ def _money(value, t: Translator) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return t.mark("not stated")
     return "$" + t.number(round(float(value), 2))
+
+
+def _cost_total(tt: dict, t: Translator) -> str:
+    """A provider's stated monthly total: "not stated" when nothing states a price, "at
+    least $X" when some rows state none (the sum is a floor), else the sum."""
+    cost = tt.get("monthly_cost")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        return t.mark("not stated")
+    if tt.get("monthly_cost_partial"):
+        return t.mark("at least ${amount}", amount=round(float(cost), 2))
+    return _money(cost, t)
 
 
 def _table(t: Translator, caption: str, heads: list[tuple[str, bool]], rows: list[list[str]], empty: str) -> str:
@@ -158,7 +171,7 @@ def _tiles(doc: dict, provider: str, t: Translator) -> str:
          t.mark("listed only: {n}", n=by.get("listed", 0))),
         (t.mark("Off or down"), t.number((by.get("off") or 0) + (by.get("down") or 0)),
          t.mark("pending or idle: {n}", n=(by.get("pending") or 0) + (by.get("idle") or 0))),
-        (t.mark("Stated monthly cost"), _money(tt.get("monthly_cost"), t),
+        (t.mark("Stated monthly cost"), _cost_total(tt, t),
          t.mark("without a stated price: {n}", n=tt.get("cost_unknown", 0))),
     ]
     if provider == "digitalocean":
@@ -257,6 +270,11 @@ def infra_html(page: str, payload: dict, t: Translator | None = None) -> str:
         return f'<section id="infra" class="infra">{_not_connected(spec, on, t)}</section>'
     findings = _findings(payload, page)
     parts = [_degraded(doc, spec, t)]
+    if not (payload.get("infra_integrations") or {}).get(page):
+        # Switched off after a read: the last read stays, never shown as current.
+        parts.insert(0, '<section class="card panel empty not-scanned">'
+                     + t.mark(spec["switched_off"], tag="p", date=str(doc.get("scanned_on") or ""))
+                     + _command(spec["integration"], t) + "</section>")
     if doc.get("resources") or doc.get("accounts"):
         parts += [_tiles(doc, page, t), _accounts(doc, page, t), _resources(doc, findings, names, t),
                   _other_findings(findings, doc, t)]
@@ -269,5 +287,5 @@ def infra_html(page: str, payload: dict, t: Translator | None = None) -> str:
 
 #: Ids reached through a variable, so the catalog test can see them (tests/test_i18n.py).
 DYNAMIC = (tuple(KINDS.values()) + tuple(STATE_WORDS.values()) + REASONS
-           + tuple(p[k] for p in PROVIDERS.values() for k in ("off", "unread"))
+           + tuple(p[k] for p in PROVIDERS.values() for k in ("off", "switched_off", "unread"))
            + ("Resource", "Month to date", "Reader expires"))

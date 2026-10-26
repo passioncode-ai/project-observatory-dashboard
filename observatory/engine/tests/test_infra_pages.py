@@ -119,7 +119,7 @@ DO_SCAN = {"scanned_at": "2026-10-26T08:00:00Z", "scanned_on": "2026-10-26", "de
                  "created_at": "2026-02-01T00:00:00Z"}],
     "domains": []}]}
 
-REPOS = [{"id": "repository:fixture/service", "name_with_owner": "fixture/service"}]
+REPOS = [{"id": "repository:fixture/service", "name_with_owner": "fixture/service", "host": "github"}]
 RELATIONS = [{"type": "implemented_by", "from": "project:fixture-a", "to": "repository:fixture/service"}]
 
 
@@ -230,6 +230,14 @@ class Door(unittest.TestCase):
         self.assertTrue(any(meth == "DELETE" for meth, *_ in self.log), err)
         self.assertNotIn(VALUE, err)
 
+    def test_a_leak_names_a_token_by_its_exact_label(self):
+        words = self.m._leak_words({"secret": "cloudflare/example-co/inventory/example-account",
+                                    "where": "seen in a log next to example-accounts-old"})
+        self.assertTrue(self.m.names_label(words, "inventory/example-account"))
+        self.assertFalse(self.m.names_label(words, "example-account"), "the analytics token of that account")
+        self.assertFalse(self.m.names_label(words, "example"), "a substring is not a label")
+        self.assertTrue(self.m.names_label(self.m._leak_words({"secret": "p/e/example-account"}), "example-account"))
+
     def test_project_does_not_apply(self):
         rc, _o, err = quiet(self.m.cmd_issue, "inventory-read", None, "project:x")
         self.assertEqual(rc, 2, err)
@@ -300,6 +308,74 @@ class Collector(unittest.TestCase):
         self.assertEqual(degraded[0]["source"], "cloudflare-account:example-account/r2")
         self.assertIn("--preset inventory-read", degraded[0]["reason"])
 
+    def answers(self, extra: dict):
+        """CF_ANSWERS with some paths replaced: a recorded fixture per case."""
+        def call(path, token, payload=None, method=None, headers=None):
+            table = {**CF_ANSWERS, **extra}
+            if path not in table:
+                raise AssertionError(f"unexpected call {path}")
+            return table[path]
+        self.scan.door._request = call
+
+    def test_pages_are_followed_by_total_count_when_total_pages_is_absent(self):
+        self.install()
+        page1 = [{"name": f"site-{i}", "latest_deployment": {}} for i in range(10)]
+        self.answers({
+            "/accounts/acc1/pages/projects?per_page=10&page=1": {
+                "result": page1, "result_info": {"page": 1, "per_page": 10, "count": 10, "total_count": 12}},
+            "/accounts/acc1/pages/projects?per_page=10&page=2": {
+                "result": [{"name": "site-10"}, {"name": "site-11"}],
+                "result_info": {"page": 2, "per_page": 10, "count": 2, "total_count": 12}}})
+        degraded = []
+        a = self.scan.scan(degraded)[0]
+        self.assertEqual(len(a["pages"]), 12)
+        self.assertEqual(degraded, [])
+
+    def test_a_listing_whose_end_no_count_confirms_is_named(self):
+        self.install()
+        self.answers({
+            "/accounts/acc1/d1/database?per_page=100&page=1": {"result": [{"uuid": "u", "name": "n"}]},
+            "/accounts/acc1/pages/projects?per_page=10&page=1": {
+                "result": [{"name": "only"}], "result_info": {"page": 1, "per_page": 10, "total_count": 30}},
+            "/accounts/acc1/pages/projects?per_page=10&page=2": {"result": [], "result_info": {"total_count": 30}}})
+        degraded = []
+        a = self.scan.scan(degraded)[0]
+        self.assertEqual((len(a["d1"]), len(a["pages"])), (1, 1), "what was read still lands")
+        why = {d["source"]: d["reason"] for d in degraded}
+        self.assertIn("stated no count", why["cloudflare-account:example-account/d1"])
+        self.assertIn("1 of the 30", why["cloudflare-account:example-account/pages"])
+
+    def test_the_r2_cursor_is_url_encoded(self):
+        self.install()
+        self.answers({
+            "/accounts/acc1/r2/buckets?per_page=1000": {
+                "result": {"buckets": [{"name": "b1"}]}, "result_info": {"cursor": "a+b/c=="}},
+            "/accounts/acc1/r2/buckets?per_page=1000&cursor=a%2Bb%2Fc%3D%3D": {
+                "result": {"buckets": [{"name": "b2"}]}, "result_info": {}}})
+        a = self.scan.scan([])[0]
+        self.assertEqual([b["name"] for b in a["r2"]], ["b1", "b2"])
+
+    def test_the_deadline_is_checked_per_zone_and_what_was_read_lands(self):
+        self.install()
+        self.scan.door._request = fake_cloudflare([])
+        budget = iter([1000] * 6 + [0] * 100)      # the account, its 4 listings, zone z1: then out of time
+        real = self.scan.step_budget.remaining
+        self.scan.step_budget.remaining = lambda: next(budget)
+        self.addCleanup(setattr, self.scan.step_budget, "remaining", real)
+        degraded, state = [], {}
+        a = self.scan.scan(degraded, state)[0]
+        z = {x["zone_id"]: x for x in a["zones"]}
+        self.assertEqual(z["z1"]["dns_records"], 7, "the zone read before the deadline keeps its details")
+        self.assertIsNone(z["z2"]["dns_records"], "the zone after it is listed, its details not read")
+        self.assertFalse(state["complete"])
+        self.assertTrue(any("parked.example" in d["reason"] and "next tick" in d["reason"] for d in degraded), degraded)
+        tick = load("tools/tick.py", "tick_incomplete_t")
+        f = pathlib.Path(tmpdir.mkdtemp()) / "cloudflare_account.json"
+        f.write_text(json.dumps({"complete": False}))
+        self.assertTrue(tick.incomplete(f), "the next tick reads again")
+        f.write_text(json.dumps({"complete": True}))
+        self.assertFalse(tick.incomplete(f))
+
     def test_disabled_integration_writes_nothing(self):
         out = pathlib.Path(tmpdir.mkdtemp()) / "cloudflare_account.json"
         p = subprocess.run([sys.executable, str(ROOT / "collectors/scan_cloudflare_account.py"), str(out)],
@@ -343,6 +419,7 @@ class Registry(unittest.TestCase):
         self.assertTrue(rows["digitalocean:database:db-1"]["cost_note"])
         self.assertEqual(rows["digitalocean:volume:vol-1"]["state"], "idle")
         self.assertEqual(doc["totals"]["monthly_cost"], 30.0)
+        self.assertTrue(doc["totals"]["monthly_cost_partial"], "apps, databases and volumes state no price")
         self.assertEqual(doc["totals"]["month_to_date_usage"], 31.4)
         self.assertEqual(infra_registry.problems("digitalocean", doc, {"project:fixture-a"}, {"SRC-0021"}), [])
 
@@ -362,6 +439,34 @@ class Registry(unittest.TestCase):
         self.assertEqual(doc["totals"]["by_kind"],
                          {"d1": 1, "pages": 2, "r2": 1, "worker": 1, "zone": 2})
         self.assertEqual(infra_registry.problems("cloudflare", doc, {"project:fixture-a"}, {"SRC-0022"}), [])
+
+    def test_a_total_nobody_stated_is_null_never_zero(self):
+        scan = {"scanned_on": "2026-10-26", "degraded": [], "teams": [{
+            "label": "t", "team_name": "T", "droplets": [],
+            "apps": [{"id": "a", "name": "a", "serving": True, "repositories": []}]}]}
+        doc = infra_registry.digitalocean_document(scan, [], [], "2026-10-26")
+        self.assertIsNone(doc["totals"]["monthly_cost"])
+        self.assertFalse(doc["totals"]["monthly_cost_partial"])
+        body = infra_page.infra_html("digitalocean", payload_with(digitalocean=doc), Translator())
+        self.assertNotIn("$0", body)
+        self.assertNotIn("stated $", shell.cards_html(payload_with(digitalocean=doc),
+                                                       shell.counts_of(payload_with(digitalocean=doc))))
+        full = infra_registry.digitalocean_document(DO_SCAN, REPOS, RELATIONS, "2026-10-26")
+        body = infra_page.infra_html("digitalocean", payload_with(digitalocean=full), Translator())
+        self.assertIn("at least $", body, "a partial total says so")
+
+    def test_pages_links_only_a_github_source_to_a_github_repository(self):
+        scan = cf_scan()
+        page = scan["accounts"][0]["pages"][0]
+        self.assertEqual(page["source_type"], "github")
+        page["source_type"] = "gitlab"
+        doc = infra_registry.cloudflare_document(scan, ZONES, REPOS, RELATIONS, "2026-10-26")
+        row = next(r for r in doc["resources"] if r["id"] == "cloudflare:pages:acc1/fixture-site")
+        self.assertIsNone(row["project"], "a GitLab source is not the GitHub repository of the same name")
+        on_bitbucket = [dict(REPOS[0], host="bitbucket.org")]
+        doc = infra_registry.cloudflare_document(cf_scan(), ZONES, on_bitbucket, RELATIONS, "2026-10-26")
+        row = next(r for r in doc["resources"] if r["id"] == "cloudflare:pages:acc1/fixture-site")
+        self.assertIsNone(row["project"], "a registry repository on another host is not this source")
 
     def test_the_validator_refuses_planted_defects(self):
         doc = infra_registry.digitalocean_document(DO_SCAN, REPOS, RELATIONS, "2026-10-26")
@@ -413,6 +518,18 @@ class Pages(unittest.TestCase):
         self.assertIn("no team stashed", body)
         self.assertNotIn("No resources in the connected accounts", body)
         self.assertEqual(shell.counts_of(payload_with(digitalocean=doc))["digitalocean"], "")
+
+    def test_switched_off_shows_the_last_read_with_its_date(self):
+        doc = infra_registry.digitalocean_document(DO_SCAN, REPOS, RELATIONS, "2026-10-26")
+        off = payload_with(digitalocean=doc)            # the integration is off in payload_with
+        body = infra_page.infra_html("digitalocean", off, Translator())
+        self.assertIn("switched off", body)
+        self.assertIn("the last read", body)
+        self.assertIn("2026-10-26", body)
+        self.assertIn("configure integrations digitalocean true", body)
+        self.assertIn("switched off", shell.cards_html(off, shell.counts_of(off)))
+        on = dict(off, infra_integrations={"digitalocean": True, "cloudflare": True})
+        self.assertNotIn("switched off", infra_page.infra_html("digitalocean", on, Translator()))
 
     def test_read_and_empty_says_so(self):
         doc = infra_registry.digitalocean_document(
