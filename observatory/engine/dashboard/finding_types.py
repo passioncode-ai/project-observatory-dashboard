@@ -62,6 +62,8 @@ LABELS: dict[str, str] = {
     "companion.faults_unlogged": "Agent faults not logged",
     "companion.not_recording": "Agent work not recorded",
     "companion.stale_install": "Agent skill out of date",
+    "credential.expired": "Key expired",
+    "credential.expiring": "Key expiring soon",
     "credential.lifetime_cap": "Key with a lifetime ceiling",
     "credential.project_file_in_git": "Key file tracked by git",
     "credential.project_file_readable": "Key file readable by others",

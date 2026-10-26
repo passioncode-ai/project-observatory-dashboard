@@ -15,15 +15,22 @@ while the major version is 0, a minor release may change behaviour and says so h
   within 1 to 365 days, refused before anything is minted outside that range (Heroku accepted up to 3650);
   `--no-token-expiry` or `--no-expiry` mints one that does not expire and records why. A Cloudflare roll and
   an OpenRouter rotation renew the lifetime the credential was issued with (a record from before this change
-  gets the default); Heroku regenerates in place only when the authorization's expiry already matches what
-  is asked, and otherwise creates a new one and deletes the old after delivery. The expiry, never the value,
-  is written where the credential's metadata already lives: a vault slot's `meta.json` (`expires_at`, or null
+  gets the default); Heroku regenerates in place only when the authorization's lifetime already matches what
+  is asked, and otherwise creates a new one and deletes the old after delivery (its `rotate` regenerates and
+  cannot change a lifetime: a row from before this change that Heroku answers without an expiry records that,
+  with `issue` as the way to give it one). What is recorded is the expiry the provider ANSWERED, never the one
+  sent: an answer without the field records null with the reason that the provider did not confirm an expiry.
+  The expiry, never the value, is written where the credential's metadata already lives: a vault slot's `meta.json` (`expires_at`, or null
   with `expiry_reason`, through the new `vault.record_expiry`), the OpenRouter and Heroku ledgers and a
   Cloudflare plugin token's record. A value put into a slot by hand forgets the old value's expiry.
   `vault.py list`, `use_secret.py names`, `observatory_credentials` (`expiresAt`, `expiry`, `expiryReason`
   on each vault row) and each door's `list` show it. DigitalOcean's API cannot mint a token: its `issue`
   recipe names an expiration to choose, and `install --expires-on` and `rotate --expires-on` record it, or
   null with the reason.
+- **A key about to expire is on the board** (OBS-191). New findings `credential.expiring` (a recorded expiry
+  within 14 days, `warning`) and `credential.expired` (past it, `critical`), read from the vault slots'
+  metadata and the door records that reach no slot (a Cloudflare plugin token, an OpenRouter key delivered to
+  a named destination, a DigitalOcean collector token). Each names the door's rotate command, never a value.
 
 ## 0.29.2 (2026-10-26)
 

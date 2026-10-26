@@ -40,7 +40,8 @@ Two provider differences the shape has to absorb:
 Every minted key expires (OBS-191): `issue` sends `expires_at`, 90 days out by
 default; `--expire-days N` (1 to 365) moves it and `--no-expiry` mints one that
 does not expire. A rotation mints its successor with the lifetime the key was
-issued with. The ledger row records `expires_at` (or null and `expiry_reason`),
+issued with. The ledger row records the `expires_at` the provider answered (or
+null and `expiry_reason`, also when the answer did not carry the field),
 a `vault:` slot's metadata records it too, and `list` shows it; a claimed key
 records what the provider lists for it.
 
@@ -549,12 +550,13 @@ def deliver(value: str, to: str, *, rotate: bool = False) -> str:
 
 # ─────────────────────────── issue / limits / rotate ─────────────────────────
 
-def _lifetime(expire_days: int | None, provider_row: dict | None = None) -> dict:
-    """The expiry fields a ledger row records: the provider's own answer when it gave
-    one, else what was asked; null with the reason for a key minted without one."""
-    at = key_expiry.parse((provider_row or {}).get("expires_at")) or key_expiry.expires_at(expire_days)
+def _lifetime(expire_days: int | None, asked: str | None, provider_row: dict | None) -> dict:
+    """The expiry fields a ledger row records: what the provider ANSWERED for the key,
+    never the timestamp that was sent. An answer without `expires_at` records null with
+    `key_expiry.UNCONFIRMED`; a null one records why the key does not expire."""
     return {"expire_days": expire_days,
-            **key_expiry.fields(at, key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG))}
+            **key_expiry.from_answer(provider_row, "expires_at", asked,
+                                     key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG))}
 
 
 def _record_slot_expiry(to: str, at: str | None, reason: str | None) -> None:
@@ -754,7 +756,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         _retire(doc, name, old_row, old_row["hash"], "replaced-by-issue", kept, deleted=True)
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
                            "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True,
-                           **_lifetime(expire_days)}
+                           "expire_days": expire_days}
     save_ledger(doc)
     # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
     # total is reached and then stops — months later, with no warning. Found in
@@ -784,7 +786,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         # SubprocessError: the vault's `put` timed out. A minted key that reached no slot is never
         # left live and untracked: deleted, or kept in the ledger as an orphan when the delete fails.
         _undo_mint(admin, name, row)
-    life = _lifetime(expire_days, row)
+    life = _lifetime(expire_days, expires_at, row)
     doc = ledger()
     doc["issued"][name] = {
         "account": label, "hash": row.get("hash"), "label": row.get("label"), "destination": to,
@@ -1640,7 +1642,7 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> di
                 undo()
             raise
     rec.pop("successor_pending", None)
-    life = _lifetime(days, new_row)
+    life = _lifetime(days, expires_at, new_row)
     rec.update(life)
     if "expiry_reason" not in life:
         rec.pop("expiry_reason", None)

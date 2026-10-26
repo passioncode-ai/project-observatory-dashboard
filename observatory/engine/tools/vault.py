@@ -508,6 +508,8 @@ def record_expiry(project: str, env: str, name: str, expires_at: str | None,
     meta = _read_meta(slot)
     key_expiry.record(meta, at, reason)
     meta["expiry_recorded"] = now()
+    # Which door minted it: the expiry finding names that door's rotate command.
+    meta["expiry_by"] = tool
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("expiry", secret, tool=tool, expires_at=at,
             **({} if at else {"reason": meta.get("expiry_reason")}))

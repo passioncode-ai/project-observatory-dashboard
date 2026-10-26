@@ -45,6 +45,18 @@ NOW = datetime.datetime(2026, 10, 26, 12, 0, 0, tzinfo=datetime.timezone.utc)
 VALUE = "synthetic-minted-value-" + "q" * 24
 
 
+def pin_vault() -> None:
+    """This suite's scratch vault, whatever another suite in the same process set: a suite
+    imported before this one (test_credential_doors) points the environment elsewhere."""
+    os.environ["OBSERVATORY_VAULT_DIR"] = str(VAULT_DIR)
+    vault.STORE, vault.LEAKS, vault.MOVES = VAULT_DIR, VAULT_DIR / "leaks.jsonl", VAULT_DIR / "movements.jsonl"
+
+
+class Pinned(unittest.TestCase):
+    def setUp(self):
+        pin_vault()
+
+
 def load(rel: str, name: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / rel)
     module = importlib.util.module_from_spec(spec)
@@ -120,7 +132,7 @@ class TheRule(unittest.TestCase):
             p.parse_args(["--token-expire-days", "30", "--no-token-expiry"])
 
 
-class TheVaultRecordsIt(unittest.TestCase):
+class TheVaultRecordsIt(Pinned):
     """`vault.record_expiry`: metadata only, journalled, shown where slots are listed."""
 
     def test_an_expiry_lands_in_the_slots_metadata_and_the_listings(self):
@@ -188,7 +200,14 @@ def cloudflare():
     return m
 
 
-def cloudflare_fake(m, log, existing=None):
+def cloudflare_fake(m, log, existing=None, answer="echo"):
+    """`answer`: "echo" (Cloudflare's answer carries the expires_on it was sent), "absent"
+    (the answer has no expires_on), or a timestamp the provider answers whatever was sent."""
+    def said(payload):
+        if answer == "absent":
+            return {}
+        return {"expires_on": (payload or {}).get("expires_on") if answer == "echo" else answer}
+
     def fake(path, token, payload=None, method=None):
         log.append((method or ("POST" if payload is not None else "GET"), path, payload))
         if "permission_groups" in path:
@@ -201,9 +220,9 @@ def cloudflare_fake(m, log, existing=None):
         if path.endswith("/tokens?per_page=50"):
             return {"result": [{"id": "t-old", "name": existing}] if existing else []}
         if path == "/accounts/a1/tokens" and payload is not None:
-            return {"result": {"id": "t-new", "value": VALUE}}
+            return {"result": {"id": "t-new", "value": VALUE, **said(payload)}}
         if path == "/accounts/a1/tokens/t-old" and method == "PUT":
-            return {"result": {"id": "t-old"}}
+            return {"result": {"id": "t-old", **said(payload)}}
         if path == "/accounts/a1/tokens/t-old/value":
             return {"result": VALUE}
         if path.startswith("/zones/z1/dns_records"):
@@ -212,7 +231,7 @@ def cloudflare_fake(m, log, existing=None):
     m._request = fake
 
 
-class CloudflareMintsWithAnExpiry(unittest.TestCase):
+class CloudflareMintsWithAnExpiry(Pinned):
 
     def test_a_writer_is_created_with_expires_on_and_its_slot_records_it(self):
         m, log = cloudflare(), []
@@ -286,6 +305,39 @@ class CloudflareMintsWithAnExpiry(unittest.TestCase):
         self.assertTrue(40 < days_out(rewrite[0]["expires_on"]) <= 45, rewrite)
         self.assertNotIn(VALUE, out + listed + json.dumps(meta))
 
+    def test_what_is_recorded_is_cloudflares_answer_not_the_request(self):
+        m, log = cloudflare(), []
+        cloudflare_fake(m, log, answer="2027-03-01T00:00:00Z")
+        m.parse_vault_target = lambda t: tuple(t.split("/"))
+        rc, _out, err = quiet(m.cmd_issue_zone, "dns-edit", "example.com", "expiry-cf/prod/CF_ANSWERED", None,
+                              wait=0)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(meta_of("expiry-cf", "prod", "CF_ANSWERED")["expires_at"], "2027-03-01T00:00:00Z")
+
+    def test_an_answer_without_the_field_records_no_confirmed_expiry(self):
+        m, log = cloudflare(), []
+        cloudflare_fake(m, log, answer="absent")
+        m.parse_vault_target = lambda t: tuple(t.split("/"))
+        rc, _out, err = quiet(m.cmd_issue_zone, "dns-edit", "example.com", "expiry-cf/prod/CF_UNCONFIRMED",
+                              None, wait=0)
+        self.assertEqual(rc, 0, err)
+        meta = meta_of("expiry-cf", "prod", "CF_UNCONFIRMED")
+        self.assertIsNone(meta["expires_at"])
+        self.assertEqual(meta["expiry_reason"], key_expiry.UNCONFIRMED)
+
+    def test_a_roll_without_an_expiry_records_the_expiry_the_token_kept(self):
+        m, log = cloudflare(), []
+        cloudflare_fake(m, log, existing="observatory-dns-edit example.com (managed)",
+                        answer="2026-12-01T00:00:00Z")
+        m.parse_vault_target = lambda t: tuple(t.split("/"))
+        rc, _out, err = quiet(m.cmd_issue_zone, "dns-edit", "example.com", "expiry-cf/prod/CF_KEPT", None,
+                              wait=0, expire_days=None)
+        self.assertEqual(rc, 0, err)
+        rewrite = [p for meth, path, p in log if meth == "PUT" and path == "/accounts/a1/tokens/t-old"]
+        self.assertNotIn("expires_on", rewrite[0])
+        self.assertEqual(meta_of("expiry-cf", "prod", "CF_KEPT")["expires_at"], "2026-12-01T00:00:00Z",
+                         "the token kept its old expiry, and that is what is recorded")
+
     def test_the_command_line_keeps_expire_days_for_the_bucket(self):
         src = (ROOT / "tools" / "cloudflare.py").read_text(encoding="utf-8")
         self.assertIn('key_expiry.add_flags(p_issue, "--token-expire-days", NO_EXPIRY_FLAG, "token")', src)
@@ -311,8 +363,13 @@ def openrouter(answer_expiry: str | None = None):
         if path == "/keys" and payload:
             posted.append(payload)
             h = f"h-{len(posted)}"
-            row = {"hash": h, "label": f"sk-or-v1-{h}...x", "name": payload["name"],
-                   "expires_at": answer_expiry if answer_expiry is not None else payload.get("expires_at")}
+            row = {"hash": h, "label": f"sk-or-v1-{h}...x", "name": payload["name"]}
+            if answer_expiry == "absent":
+                pass
+            elif answer_expiry == "null":
+                row["expires_at"] = None
+            else:
+                row["expires_at"] = answer_expiry if answer_expiry is not None else payload.get("expires_at")
             keys[h] = row
             return {"data": row, "key": VALUE + str(len(posted))}
         if path.startswith("/keys/") and method == "DELETE":
@@ -330,7 +387,7 @@ def openrouter(answer_expiry: str | None = None):
     return m, posted
 
 
-class OpenRouterMintsWithAnExpiry(unittest.TestCase):
+class OpenRouterMintsWithAnExpiry(Pinned):
 
     def test_a_key_is_created_with_expires_at_and_the_ledger_and_slot_record_it(self):
         m, posted = openrouter()
@@ -351,6 +408,16 @@ class OpenRouterMintsWithAnExpiry(unittest.TestCase):
         m.issue_key("answered", 5.0, "example", "observatory", None, expire_days=30)
         row = json.loads(m.LEDGER.read_text())["issued"]["answered"]
         self.assertEqual(row["expires_at"], "2027-02-01T00:00:00Z")
+
+    def test_a_provider_that_answers_null_or_nothing_is_not_recorded_as_the_request(self):
+        for answer, reason in (("null", key_expiry.PROVIDER_SAID_NONE), ("absent", key_expiry.UNCONFIRMED)):
+            m, posted = openrouter(answer_expiry=answer)
+            m.deliver = lambda value, to, rotate=False: f"file {to}"
+            m.issue_key("unanswered", 5.0, "example", "observatory", None)
+            self.assertTrue(posted[0]["expires_at"], "an expiry was asked for")
+            row = json.loads(m.LEDGER.read_text())["issued"]["unanswered"]
+            self.assertIsNone(row["expires_at"], answer)
+            self.assertEqual(row["expiry_reason"], reason)
 
     def test_no_expiry_is_asked_for_and_recorded_with_its_reason(self):
         m, posted = openrouter()
@@ -389,9 +456,10 @@ class OpenRouterMintsWithAnExpiry(unittest.TestCase):
 
 # ─────────────────────────── Heroku ─────────────────────────────────────────
 
-class HerokuMintsWithAnExpiry(unittest.TestCase):
+class HerokuMintsWithAnExpiry(Pinned):
 
     def setUp(self):
+        pin_vault()
         import test_heroku_door as hd
         self.hd = hd
         self.m, self.fake, self.delivered = hd.setup()
@@ -420,6 +488,31 @@ class HerokuMintsWithAnExpiry(unittest.TestCase):
         self.assertEqual(next(iter(self.fake.auths.values()))["expires_in"], 30 * 86400)
         self.assertIn("was deleted", out)
 
+    def test_another_lifetime_replaces_the_authorization_and_the_same_one_regenerates(self):
+        self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, 30, wait=0)
+        first = set(self.fake.auths)
+        rc, _out, err = self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, 30, wait=0)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(set(self.fake.auths), first, "the same lifetime regenerates in place")
+        rc, out, err = self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, 60, wait=0)
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(set(self.fake.auths).isdisjoint(first), "another lifetime is a new authorization")
+        self.assertEqual(next(iter(self.fake.auths.values()))["expires_in"], 60 * 86400)
+        self.assertIn("was deleted", out)
+
+    def test_rotating_a_row_from_before_the_rule_never_claims_no_expiry_was_asked(self):
+        self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, None, wait=0)
+        doc = json.loads(self.m.LEDGER.read_text())
+        for field in ("expire_days", "expires_at", "expiry_reason"):
+            doc["issued"]["alpha/prod/K"].pop(field, None)
+        private_io.write(self.m.LEDGER, json.dumps(doc))
+        rc, _out, err = self.hd.run(self.m.cmd_rotate, "alpha/prod/K", False, wait=0)
+        self.assertEqual(rc, 0, err)
+        row = json.loads(self.m.LEDGER.read_text())["issued"]["alpha/prod/K"]
+        self.assertIsNone(row["expires_at"])
+        self.assertEqual(row["expiry_reason"], self.m.OLD_ROW_NO_EXPIRY)
+        self.assertNotIn("on request", row["expiry_reason"])
+
     def test_no_expiry_records_why(self):
         rc, _out, err = self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, None, wait=0)
         self.assertEqual(rc, 0, err)
@@ -431,6 +524,64 @@ class HerokuMintsWithAnExpiry(unittest.TestCase):
         rc, _out, err = self.hd.run(self.m.cmd_issue, "read", "alpha/prod/K", None, None, None, 3650, wait=0)
         self.assertEqual(rc, 2, err)
         self.assertEqual(self.fake.auths, {})
+
+
+# ─────────────────────────── the board ──────────────────────────────────────
+
+class TheBoardSaysWhenAKeyExpires(unittest.TestCase):
+    """`tools/expiry_findings.py`: within 14 days a warning, past it critical, no value."""
+
+    def setUp(self):
+        import expiry_findings
+        self.f = expiry_findings
+        base = pathlib.Path(tmpdir.mkdtemp()).resolve()
+        self.vault, self.store = base / "projects", base / "store"
+        self.tokens = self.store / "cloudflare-analytics.d"
+        for d in (self.vault, self.tokens):
+            d.mkdir(parents=True)
+
+    def slot(self, slot: str, at: str | None, door: str = "heroku.py") -> None:
+        path = self.vault / slot
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(VALUE + "\n")
+        path.with_name(path.name + ".meta.json").write_text(json.dumps({"expires_at": at, "expiry_by": door}))
+
+    def test_soon_is_a_warning_past_is_critical_and_far_is_nothing(self):
+        self.slot("alpha/prod/SOON", "2026-11-05T00:00:00Z")
+        self.slot("alpha/prod/GONE", "2026-10-20T00:00:00Z", door="cloudflare.py")
+        self.slot("alpha/prod/FAR", "2027-01-24T00:00:00Z")
+        self.slot("alpha/prod/FOREVER", None)
+        (self.store / "openrouter-issued.json").write_text(json.dumps({"issued": {
+            "agent-key": {"destination": "observatory", "expires_at": "2026-11-01T00:00:00Z"},
+            "slot-key": {"destination": "vault:alpha/prod/SOON", "expires_at": "2026-11-05T00:00:00Z"}}}))
+        (self.tokens / "acct.meta.json").write_text(json.dumps({"expires_at": "2026-10-25T00:00:00Z"}))
+        rows = {r["subject"]: r for r in self.f.from_store(self.vault, self.store, self.tokens, "2026-10-26")}
+        self.assertEqual(set(rows), {"credential:vault/alpha/prod/SOON", "credential:vault/alpha/prod/GONE",
+                                     "credential:openrouter/agent-key", "credential:cloudflare/acct"},
+                         "a key delivered to a slot is one row, from the slot")
+        soon = rows["credential:vault/alpha/prod/SOON"]
+        self.assertEqual((soon["type"], soon["severity"]), ("credential.expiring", "warning"))
+        self.assertIn("heroku.py", soon["action"])
+        self.assertEqual(soon["title"], "alpha/prod/SOON expires on 2026-11-05")
+        gone = rows["credential:vault/alpha/prod/GONE"]
+        self.assertEqual((gone["type"], gone["severity"]), ("credential.expired", "critical"))
+        self.assertIn("cloudflare.py", gone["action"])
+        self.assertIn("openrouter.py\" rotate agent-key", rows["credential:openrouter/agent-key"]["action"])
+        self.assertIn("rotate acct", rows["credential:cloudflare/acct"]["action"])
+        self.assertNotIn(VALUE, json.dumps(rows))
+
+    def test_an_openrouter_slot_names_its_key_in_the_rotate_command(self):
+        self.slot("alpha/prod/OPENROUTER_API_KEY", "2026-11-01T00:00:00Z", door="openrouter.py")
+        (self.store / "openrouter-issued.json").write_text(json.dumps({"issued": {
+            "alpha-key": {"destination": "vault:alpha/prod/OPENROUTER_API_KEY"}}}))
+        rows = self.f.from_store(self.vault, self.store, self.tokens, "2026-10-26")
+        self.assertIn('openrouter.py" rotate alpha-key', rows[0]["action"])
+
+    def test_absent_stores_give_no_rows_and_the_board_runs_the_rule(self):
+        self.assertEqual(self.f.from_store(self.vault / "none", self.store / "none", self.tokens / "none",
+                                           "2026-10-26"), [])
+        src = (ROOT / "tools" / "build_findings.py").read_text(encoding="utf-8")
+        self.assertIn("expiry_findings.from_store(", src)
 
 
 # ─────────────────────────── DigitalOcean: cannot mint ──────────────────────

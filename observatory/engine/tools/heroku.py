@@ -43,9 +43,12 @@ embeds.
 EVERY MINTED AUTHORIZATION EXPIRES (OBS-191). `issue` sends `expires_in`, 90
 days by default: `--expire-days N` (1 to 365) moves it, `--no-expiry` mints one
 that does not expire. A second issue regenerates in place only when the
-authorization's expiry already matches what is asked (both expiring, or both
-not); otherwise it creates a new one and retires the old one after delivery,
-so an old never-expiring authorization gets an expiry. What Heroku answers
+authorization's lifetime already matches what is asked (both without an expiry,
+or both with the same number of days in the ledger row); otherwise it creates a
+new one and retires the old one after delivery, so an old never-expiring
+authorization gets an expiry. `rotate` regenerates in place and cannot change a
+lifetime: a row from before this rule that Heroku answers without an expiry
+records that, with `issue` as the way to give it one. What Heroku answers
 (`access_token.expires_in`) is what is recorded: `expires_at` in the ledger row
 and the vault slot's metadata, or null with `expiry_reason`.
 
@@ -573,13 +576,29 @@ def _expires_in(auth: dict | None):
     return token.get("expires_in", auth.get("expires_in"))
 
 
-def _lifetime(auth: dict | None, expire_days: int | None) -> dict:
-    """The expiry fields a row records, from what Heroku ANSWERED, not what was asked:
-    a regenerated authorization keeps whatever lifetime Heroku gives it."""
-    at = key_expiry.from_seconds(_expires_in(auth))
-    reason = (key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG) if expire_days is None
-              else "Heroku answered no expiry for this authorization")
-    return {"expire_days": expire_days, **key_expiry.fields(at, reason)}
+#: Why a regenerated authorization from before OBS-191 has no expiry: regenerating cannot
+#: give it one, and nobody asked for none. Issuing it again replaces it with one that expires.
+OLD_ROW_NO_EXPIRY = ("issued before this door recorded lifetimes; a regenerate keeps the authorization's own "
+                     "lifetime and Heroku answered none: issue it again to replace it with one that expires")
+
+
+def _lifetime(auth: dict | None, expire_days: int | None, none_reason: str | None = None) -> dict:
+    """The expiry fields a row records, from what Heroku ANSWERED, never what was asked
+    (`access_token.expires_in`): a timestamp, null with why it does not expire, or null with
+    `key_expiry.UNCONFIRMED` when the answer did not carry the field."""
+    auth = auth or {}
+    token = auth.get("access_token") if isinstance(auth.get("access_token"), dict) else {}
+    if "expires_in" not in token and "expires_in" not in auth:
+        return {"expire_days": expire_days, **key_expiry.fields(None, key_expiry.UNCONFIRMED)}
+    seconds = _expires_in(auth)
+    at = key_expiry.from_seconds(seconds)
+    if at:
+        return {"expire_days": expire_days, **key_expiry.fields(at)}
+    if seconds is not None:
+        return {"expire_days": expire_days, **key_expiry.fields(None, key_expiry.UNCONFIRMED)}
+    reason = none_reason or (key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG) if expire_days is None
+                             else key_expiry.PROVIDER_SAID_NONE)
+    return {"expire_days": expire_days, **key_expiry.fields(None, reason)}
 
 
 def record_slot_expiry(project: str, env: str, name: str, life: dict) -> str:
@@ -593,6 +612,17 @@ def record_slot_expiry(project: str, env: str, name: str, life: dict) -> str:
         print(f"  ({project}/{env}/{name}: expiry not recorded: {type(exc).__name__})",
               file=sys.stderr)
         return "expiry not recorded"
+
+
+def same_lifetime(existing: dict, prior: dict | None, expire_days: int | None) -> bool:
+    """Whether regenerating `existing` in place gives the lifetime asked for.
+
+    No expiry asked: only an authorization that has none. An expiry asked: only one that
+    expires AND whose ledger row says it was issued with the same number of days; Heroku
+    answers seconds left, not the lifetime, so a row that names none is not a match."""
+    if expire_days is None:
+        return _expires_in(existing) is None
+    return _expires_in(existing) is not None and (prior or {}).get("expire_days") == expire_days
 
 
 @_locked
@@ -641,11 +671,11 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
                 existing = auth
                 break
         if existing and sorted(existing.get("scope") or []) == sorted(scopes) \
-                and (_expires_in(existing) is None) == (expire_days is None):
-            # The same purpose, the same scopes, the same kind of lifetime: regenerate in
-            # place, so the id and every record of it stay put. One that never expires
-            # while an expiry is asked (or the reverse) is replaced instead: regenerating
-            # cannot change an authorization's lifetime (OBS-191).
+                and same_lifetime(existing, prior, expire_days):
+            # The same purpose, the same scopes, the same lifetime: regenerate in place, so
+            # the id and every record of it stay put. Any other lifetime (one that never
+            # expires while an expiry is asked, the reverse, or another number of days) is
+            # replaced instead: regenerating cannot change an authorization's lifetime (OBS-191).
             auth = _request("POST", f"/oauth/authorizations/{q(existing['id'])}"
                                     "/actions/regenerate-tokens", admin)
             rolled = True
@@ -847,7 +877,10 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
         row["rotated_on"] = today()
         row["rotations"] = (row.get("rotations") or 0) + 1
         # What Heroku answered for the regenerated value, as at issue (OBS-191).
-        life = _lifetime(auth, row.get("expire_days") if "expire_days" in row else None)
+        # A row from before OBS-191 names no lifetime: a regenerate cannot give it one, so its
+        # record says so (not "on request"); `issue` again replaces it with one that expires.
+        life = (_lifetime(auth, row.get("expire_days")) if "expire_days" in row
+                else _lifetime(auth, None, OLD_ROW_NO_EXPIRY))
         row.pop("expiry_reason", None)
         row.update(life)
         row["expires_in"] = _expires_in(auth)

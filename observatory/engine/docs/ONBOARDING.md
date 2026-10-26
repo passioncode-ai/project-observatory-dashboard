@@ -432,6 +432,11 @@ lives: the vault slot's `meta.json` (`expires_at`, or null with `expiry_reason`)
 Heroku ledgers, a plugin token's record. `vault.py list`, `use_secret.py names`,
 `observatory_credentials` (each vault row's `expiresAt`, `expiry` and `expiryReason`) and each door's
 `list` show it; a value put by hand reads "expiry not recorded", which is not the same as "never".
+What is recorded is the provider's answer, never the request: an answer without an expiry field records
+null with "the provider's answer did not confirm an expiry". The findings board raises
+`credential.expiring` (warning) for a recorded expiry within 14 days and `credential.expired` (critical)
+once it has passed, each with the door's rotate command. Heroku's `rotate` regenerates in place and cannot
+change a lifetime; `issue` again replaces an authorization whose lifetime differs from what is asked.
 DigitalOcean's API cannot mint a token: `digitalocean.py issue` prints the control-panel recipe with
 an expiration to choose, and `install --expires-on YYYY-MM-DD` (and `rotate --expires-on`) records the
 date the panel shows, or null with the reason when none is given.

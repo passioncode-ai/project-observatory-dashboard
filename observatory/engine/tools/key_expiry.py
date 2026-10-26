@@ -10,6 +10,10 @@ within 1 to `MAX_DAYS`, and an explicit `--no-expiry` (Cloudflare:
 objects) mints one that does not expire. A credential nobody asked to outlive
 its use should not, and a leaked one that expires by itself bounds the damage.
 
+THE PROVIDER'S ANSWER, NEVER THE REQUEST. What is recorded is the expiry the
+provider answered (`from_answer`): an answer without the field records null
+with `UNCONFIRMED`, because a request is not evidence of what was minted.
+
 THE RECORD, NEVER THE VALUE. The expiry is written where the door already keeps
 the credential's metadata: the vault slot's `meta.json` (`vault.record_expiry`),
 the door's own ledger or meta file. Two fields:
@@ -40,6 +44,10 @@ MAX_DAYS = 365
 
 #: Why a credential was minted without an expiry: the issuer asked (`flag` names how).
 ASKED_FOR_NONE = "minted without an expiry on request ({flag})"
+#: Why a minted credential's expiry is unknown: the provider's answer did not carry the field.
+UNCONFIRMED = "the provider's answer did not confirm an expiry"
+#: Why a credential minted with an expiry asked for has none: the provider answered that.
+PROVIDER_SAID_NONE = "an expiry was asked for, and the provider answered that it does not expire"
 #: Why an installed credential's expiry is unknown here: it was minted elsewhere.
 MINTED_ELSEWHERE = "minted outside this program; its expiry is set where it was minted"
 
@@ -101,6 +109,25 @@ def parse(text) -> str | None:
     return stamp(moment)
 
 
+def from_answer(answer, field: str, asked: str | None, none_reason: str) -> dict:
+    """The record of what the PROVIDER answered, never of what was asked (OBS-191 review).
+
+    `answer` is the provider's object for the credential and `field` its expiry
+    field. A timestamp there is recorded. The field present and null is a
+    credential that does not expire: `none_reason` when none was asked, else
+    `PROVIDER_SAID_NONE`. The field absent, or unreadable, is `UNCONFIRMED`: the
+    request is not evidence of what the provider did with it."""
+    if not isinstance(answer, dict) or field not in answer:
+        return fields(None, UNCONFIRMED)
+    value = answer.get(field)
+    at = parse(value)
+    if at:
+        return fields(at)
+    if value is None or value == "":
+        return fields(None, none_reason if asked is None else PROVIDER_SAID_NONE)
+    return fields(None, UNCONFIRMED)
+
+
 def fields(at: str | None, reason: str | None = None) -> dict:
     """The two record fields: `expires_at`, and `expiry_reason` only when there is no expiry."""
     if at:
@@ -117,7 +144,7 @@ def record(meta: dict, at: str | None, reason: str | None = None) -> dict:
 
 def clear(meta: dict) -> dict:
     """Forget a recorded expiry: a value replaced by hand is not the one it described."""
-    for key in ("expires_at", "expiry_reason", "expiry_recorded"):
+    for key in ("expires_at", "expiry_reason", "expiry_recorded", "expiry_by"):
         meta.pop(key, None)
     return meta
 
