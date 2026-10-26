@@ -1,0 +1,78 @@
+{
+  "subject": "merged tree 9c8dd9d1 (release-deploy branch with origin/main 72c5bd3e)",
+  "runner": "shared machine gate, one command",
+  "commands": [
+    [
+      "python",
+      "observatory/engine/tests/run_portable.py",
+      "--suite",
+      "heroku_door",
+      "--suite",
+      "heroku_scoped",
+      "--suite",
+      "heroku",
+      "--suite",
+      "credential_doors",
+      "--suite",
+      "handed_commands",
+      "--suite",
+      "vault",
+      "--suite",
+      "credentials",
+      "--jobs",
+      "2",
+      "--timeout",
+      "900"
+    ],
+    [
+      "python",
+      "-m",
+      "unittest",
+      "tests.test_docs_drift",
+      "tests.test_engine_doc_copies",
+      "tests.test_release_boundaries"
+    ]
+  ],
+  "interpreter": "the installed engine's virtual environment, Python 3.14.7",
+  "portable_suites": [
+    {
+      "status": "PASS",
+      "file": "tests/test_heroku_scoped.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_heroku_door.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_heroku.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_handed_commands.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_vault.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_credentials.py"
+    },
+    {
+      "status": "PASS",
+      "file": "tests/test_credential_doors.py"
+    }
+  ],
+  "portable_status": "PASS",
+  "unittest": {
+    "ran": 42,
+    "result": "OK"
+  },
+  "exit": 0,
+  "not_claimed": [
+    "full portable set",
+    "hosted CI",
+    "live Heroku calls"
+  ]
+}

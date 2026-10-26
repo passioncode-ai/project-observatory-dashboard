@@ -46,3 +46,23 @@ Implementation, in `observatory/engine/tools/heroku.py` only: the explicit `rele
 [GREEN](green.json): the focused suite passed with 219 PASS lines; the neighbouring engine suites (`heroku_door`, `heroku_scoped`, `heroku`, `credential_doors`, `handed_commands`, `vault`, `credentials`) passed through the portable runner. The root documentation tests failed once (the new preset was named only inside a longer code span in ONBOARDING, so the door-preset rule could not find it); that result is kept in the receipt, the paragraph was corrected and the rerun passed 18 of 18. Source inventory, engine document copies and a Python 3.11 compile were checked. Documentation updated in the same change: ONBOARDING (and its engine copy), the agent secrets design, and scenario OSS-68.
 
 No provider request, credential issuance or rotation, vault value read or live Heroku call happened. Existing installed credentials are not changed. Next: independent review of this source delivery; a product release and any live protected authorization remain separate operations with their own authorization.
+
+## Independent review (2026-10-26)
+
+Two blind readings of `7e1c9054`. The unit reading passed: the gated focused run gave 219 PASS, and nine of twelve deliberate mutations made the suite fail. The seam reading failed on two blocking points, both fixed on this branch:
+
+- The module docstring, which is the `--help` text, said presets with `-protected` scopes are named after config, not deploys, and that every protected read uses the no-redirect transport. Commit `23be449f` makes both sentences true: three presets reach config vars and say so, and the first proof read (the app) still uses the shared transport.
+- The branch conflicted with `main` in `SOURCE-INVENTORY.json`. Commit `9c8dd9d1` merges `main` and regenerates the inventory; the inventory check and the engine document copy check pass on the merged tree.
+
+Non-blocking findings, proposed as follow-up rows (none was fixed here):
+
+1. The release proof regenerates before it proves. When the proof fails for a stable reason (the newest release has no slug), rotate and a repeated issue leave the slot holding a dead value, and "run rotate again" cannot help. Read the newest release shape with the admin token before regenerating.
+2. The first proof read (`/apps/{app}`) carries the new protected value through the shared transport, which follows redirects and keeps `Authorization`. The origin is fixed and HTTPS, and `config-read` and `config-write` already behave this way. Route protected proofs through an opener without redirects.
+3. `_release_read` has no retries while `prove()` retries up to six times, so a single 5xx or 429 during rotate kills the old value. Retry non-final statuses the same way.
+4. Tests replace `_release_read` with a stub, so narrowing the path allowlist to releases only stays green; the slug id match and the release proof without an app have no test.
+5. The app segment of the allowlist accepts `%` and `.`; protection rests on quoting and on Heroku not decoding `%2F`. Restrict it to the app name grammar or a UUID.
+6. Engines 0.26.0 to 0.29.1 rotate a `release-deploy` ledger row with the `read` proof (unknown preset fallback); `docs/COMPATIBILITY.md` does not say so.
+7. The agent skill `handling-secrets` still lists `read|deploy|identity` and does not warn that `deploy` is not a release credential; changing it needs an `observatory-log` version bump.
+8. Minor: the `why` text is never shown at runtime, the `list` preset column is 12 wide for a 14-character name, and deeply nested JSON raises an untyped `RecursionError`.
+
+On the merged tree (`9c8dd9d1` plus this note) the seven neighbouring engine suites passed through the portable runner and the root documentation and release boundary tests ran 42, OK ([receipt](merged-check.json)).
