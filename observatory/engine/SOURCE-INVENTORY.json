@@ -2833,8 +2833,8 @@
       "path": "node/lifecycle/importer.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c069724f33c18515ff2467610721953c5b7433b6d5f2d15a13107d4410e5bc9a",
-      "bytes": 28933
+      "export_sha256": "0f47bdc48b35186e259fa4123d0035c439d2f2c75802b2a350fb9b40774ccc13",
+      "bytes": 29043
     },
     {
       "path": "node/lifecycle/macos.py",
@@ -4923,8 +4923,8 @@
       "path": "tests/test_node_lifecycle_import.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "22d3cc7bf7602d9c611b7378e293132494d3a0009b934cf1e7e06aa8401725d4",
-      "bytes": 28764
+      "export_sha256": "bf48192e79a89b3a0822ecfc3b8c58dc449284d550b21adc92889b39ccc4d482",
+      "bytes": 29192
     },
     {
       "path": "tests/test_node_lifecycle_macos.py",

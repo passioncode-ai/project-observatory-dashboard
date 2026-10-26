@@ -214,6 +214,8 @@ def migrate_identity(target: dict, derive: Callable[[str], tuple], trusted_teams
         raise _reenroll(exc.code) from None
     except (OSError, ValueError, KeyError, TypeError):
         raise _reenroll('unreadable_bundle') from None
+    if not isinstance(identity, dict):
+        raise _reenroll('unreadable_bundle')
     exact = bool(legacy.get('bundleMetadataHash')) and legacy['bundleMetadataHash'] == metadata_hash
     if identity.get('bundleId') != legacy.get('bundleId'):
         raise _reenroll('bundle_id_changed')
@@ -323,7 +325,7 @@ def plan(source: dict, current: dict, *, derive: Callable[[str], tuple], trusted
             if isinstance(callers, list):
                 mapped = []
                 for name in callers:
-                    if name in dropped:
+                    if isinstance(name, str) and name in dropped:
                         continue
                     principal = principal_of(name)
                     if principal is None:

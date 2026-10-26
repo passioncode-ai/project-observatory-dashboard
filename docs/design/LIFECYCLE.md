@@ -401,8 +401,8 @@ covered by new cases here (`test_a_launch_or_termination_wakes_a_pass_over_that_
 ## Step L5: what was built
 
 `observatory/engine/node/lifecycle/importer.py` and the `import` verb of `observatory/engine/tools/lifecycle_cli.py`,
-tested by `observatory/engine/tests/test_node_lifecycle_import.py` (suite `node_lifecycle_import`, 40 cases: the 7
-identity-migration cases of the source, adapted to an import, and 33 new). This is the engine side only: nothing in
+tested by `observatory/engine/tests/test_node_lifecycle_import.py` (suite `node_lifecycle_import`, 41 cases: the 7
+identity-migration cases of the source, adapted to an import, and 34 new). This is the engine side only: nothing in
 it switches the private broker off.
 
 ```sh

@@ -357,6 +357,13 @@ class ImportTests(Folder, unittest.TestCase):
         self.assertEqual(callers['caller-d']['code'], 'unknown_tool')
         self.assertEqual((callers['caller-e']['outcome'], callers['caller-e']['code']), ('skipped', 'revoked'))
 
+    def test_a_malformed_caller_list_is_one_refusal_not_a_crash(self):
+        self.targets['gamma.app'] = source_target('gamma.app', 'gamma', allowedCallers=[{'name': 'x'}])
+        self.write_source()
+        out = self.run_import(dry_run=True)
+        self.assertEqual(self.by_id(out, 'target')['gamma.app']['code'], 'caller_unmapped')
+        self.assertEqual(self.by_id(out, 'target')['alpha.app']['outcome'], 'imported')
+
     def test_a_target_whose_only_caller_is_the_owner_is_refused(self):
         self.targets['gamma.app'] = source_target('gamma.app', 'gamma', allowedCallers=['owner'])
         self.write_source()
