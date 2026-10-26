@@ -329,12 +329,13 @@ def scans(probed='2026-10-21T12:00:00Z'):
 
 
 class Build(unittest.TestCase):
-    """The summary from this machine's scans: the schema's shape, an allow-list of fields, nothing guessed."""
+    """The summary from this machine's scans: the schema's shape, an allow-list of fields, nothing guessed. These
+    read the whole harness, as under `machine.mode` `A`; what `C` leaves out is the class Scope below (DEC-0118)."""
 
     def build(self, **extra):
         harness, mcp = scans()
         return ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at='2026-10-22T09:00:00Z',
-                        harness_scan=harness, mcp_scan=mcp, **extra)
+                        harness_scan=harness, mcp_scan=mcp, **{'mode': 'A', **extra})
 
     def test_the_harness_from_the_scans(self):
         summary, omitted, _ = self.build()
@@ -363,7 +364,7 @@ class Build(unittest.TestCase):
         def health(probed, at='2026-10-22T09:00:00Z'):
             harness, mcp = scans(probed)
             summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at=at,
-                                     harness_scan=harness, mcp_scan=mcp)
+                                     harness_scan=harness, mcp_scan=mcp, mode='A')
             return {r['name']: r['health'] for r in summary['harness']['mcpServers']}
         self.assertEqual(health('2026-10-20T09:00:00Z')['fabric'], 'ok', '48 hours exactly is still current')
         stale = health('2026-10-20T08:59:59Z')
@@ -411,7 +412,7 @@ class Build(unittest.TestCase):
                               {'name': '_'.join(('ghp', '0123456789abcdefghij' + 'ABCDEFGHIJ')), 'source': 'other'}]
         with self.assertRaises(ns.SummaryRefused) as refused:
             ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
-                     harness_scan=harness, mcp_scan=mcp)
+                     harness_scan=harness, mcp_scan=mcp, mode='A')
         self.assertIn('/summary/harness/plugins/1/name', str(refused.exception))
 
     def test_malformed_scans_are_an_empty_harness_never_an_exception(self):
@@ -427,7 +428,7 @@ class Build(unittest.TestCase):
         harness['plugins'].append({'name': 'someone@example', 'source': 'other'})   # FAC-SEM-128 would refuse it
         summary, omitted, excluded = ns.build(device_id='dev-1', org_id='org-1', sequence=1,
                                               at='2026-10-22T09:00:00Z', harness_scan=harness, mcp_scan=mcp,
-                                              exclude=['tidy-*', 'someone@*', 'plugin:*', 'codex'])
+                                              exclude=['tidy-*', 'someone@*', 'plugin:*', 'codex'], mode='A')
         said = json.dumps(summary)
         for gone in ('tidy-notes', 'someone@example', 'plugin:switchboard:switchboard', '"codex"'):
             self.assertNotIn(gone, said)
@@ -442,7 +443,7 @@ class Build(unittest.TestCase):
         self.assertEqual(ns.document_findings({'harness': {'skills': [{'name': 'notes.' + dashed}]}})[0]['code'],
                          'FAC-SEM-128', 'since DEC-0105 the contract catches it after a dot too')
         summary, omitted, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
-                                       harness_scan=harness, mcp_scan=mcp)
+                                       harness_scan=harness, mcp_scan=mcp, mode='A')
         self.assertNotIn('alice', json.dumps(summary))
         self.assertEqual((omitted['skills'], omitted['plugins']), (2, 1))
         for name in ('smart-home-mcp', 'end-users-guide', 'my-home-page', 'Users-guide'):   # names, not folders
@@ -474,6 +475,113 @@ class Build(unittest.TestCase):
         c['harness']['hooks']['count'] = 4
         self.assertNotEqual(ns.content_digest(a), ns.content_digest(c))
 
+
+
+class Scope(unittest.TestCase):
+    """DEC-0118: what a summary lists follows `machine.mode`. Under `C`, the default, only this organization's
+    context: the coding agents, the hook count, and the MCP servers, skills and plugins installed in one of its own
+    `workspace.folders` or named by its `harness.baseline`; under `A`, set only from an `mdm` layer, the whole harness.
+    The policies are the contract's own fixtures at the pin."""
+
+    def build(self, **extra):
+        harness, mcp = scans()
+        mcp['servers'] += [
+            {'name': 'acme-tools', 'agent': 'claude', 'scope': 'project:~/work/acme/app', 'wire': 'stdio'},
+            {'name': 'acme-web-mcp', 'agent': 'claude', 'scope': 'project:~/src/acme-web', 'wire': 'stdio'},
+            {'name': 'beta-tools', 'agent': 'claude', 'scope': 'project:~/work/beta/app', 'wire': 'stdio'},
+            {'name': 'acme-root', 'agent': 'claude', 'scope': 'project:~/work/acme', 'wire': 'stdio'}]
+        scope = {}
+        summary, omitted, excluded = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3,
+                                              at='2026-10-22T09:00:00Z', harness_scan=harness, mcp_scan=mcp,
+                                              scope=scope, **extra)
+        return summary, omitted, scope
+
+    def names(self, summary, member):
+        return [row['name'] for row in summary['harness'][member]]
+
+    def test_the_contracts_policies_resolve_to_a_mode_and_the_organizations_folders(self):
+        organization, managed = load('device-policy-organization.json'), load('device-policy-mdm-managed.json')
+        self.assertEqual(ns.policy_scope([organization]),
+                         {'mode': 'C', 'folders': ['work/acme/*', 'src/acme-*']})
+        self.assertEqual(ns.policy_scope([managed])['mode'], 'A')
+        self.assertEqual(ns.policy_scope([dict(managed, source='server')])['mode'], 'C',
+                         'mode A counts only from an mdm layer (DEC-0053)')
+        self.assertEqual(ns.policy_scope([]), {'mode': 'C', 'folders': []}, 'no policy: the default C')
+        mine = {'source': 'user', 'revision': 1, 'keys': {'workspace.folders': {'value': ['projects/*']}}}
+        self.assertEqual(ns.policy_scope([organization, mine])['folders'], ['work/acme/*', 'src/acme-*'],
+                         "a person's own layer is not the organization's and never widens what it is shown")
+        self.assertEqual(ns.policy_scope([mine])['folders'], [])
+
+    def test_under_c_without_folders_or_a_baseline_only_the_coding_agents_and_the_hooks(self):
+        summary, omitted, scope = self.build()
+        harness = summary['harness']
+        self.assertEqual(harness['codingAgents'], [{'id': 'claude-code', 'version': '2.1.296'}, {'id': 'codex'}])
+        self.assertEqual(harness['hooks'], {'count': 3})
+        self.assertEqual((harness['mcpServers'], harness['skills'], harness['plugins']), ([], [], []))
+        self.assertEqual(scope, {'mode': 'C', 'outOfContext': {'mcpServers': 8, 'skills': 3, 'plugins': 2}})
+        self.assertEqual(omitted, {}, 'a name left out as another context is not counted as a bad shape')
+        said = json.dumps(summary)
+        for never in ('fabric', 'switchboard', 'tidy-notes', 'task-pipeline', 'alpha-local', 'beta-tools'):
+            self.assertNotIn(never, said)
+        check = validator()
+        if check is not None:
+            self.assertEqual(list(check.iter_errors(summary)), [])
+        self.assertEqual(ns.summary_findings({'summary': summary, 'org': 'org-7f3a'}), [])
+
+    def test_under_c_what_its_work_folders_hold(self):
+        folders = ns.policy_scope([load('device-policy-organization.json')])['folders']
+        summary, _, scope = self.build(folders=folders)
+        self.assertEqual(self.names(summary, 'mcpServers'), ['acme-tools', 'acme-web-mcp'])
+        self.assertEqual({row['source'] for row in summary['harness']['mcpServers']}, {'local'})
+        self.assertEqual(scope['outOfContext']['mcpServers'], 6, 'beta-tools and acme-root (one segment short) stay')
+        self.assertNotIn('work/acme', json.dumps(summary), 'the folder itself never leaves')
+
+    def test_under_c_what_its_baseline_names_listed_when_present(self):
+        baseline = {'revision': 4, 'items': [{'kind': 'mcp-server', 'name': 'fabric'},
+                                             {'kind': 'skill', 'name': 'tidy-notes', 'digest': DIGEST_A},
+                                             {'kind': 'plugin', 'name': 'switchboard@passioncode'},
+                                             {'kind': 'plugin', 'name': 'absent@market'},
+                                             {'kind': 'service', 'name': 'inbox-agent.default'}]}
+        summary, _, scope = self.build(baseline=baseline)
+        self.assertEqual(self.names(summary, 'mcpServers'), ['fabric'])
+        self.assertEqual(self.names(summary, 'skills'), ['tidy-notes'])
+        self.assertEqual(self.names(summary, 'plugins'), ['switchboard@passioncode'])
+        self.assertEqual(summary['drift']['items'], [
+            {'kind': 'skill', 'name': 'tidy-notes', 'state': 'changed'},
+            {'kind': 'plugin', 'name': 'absent@market', 'state': 'missing'},
+            {'kind': 'service', 'name': 'inbox-agent.default', 'state': 'missing'}],
+            "drift is unchanged for every item the baseline names; a service judged against this context's only")
+        self.assertEqual(ns.summary_findings({'summary': summary, 'baseline': baseline, 'org': 'org-7f3a'}), [])
+        self.assertEqual(scope['outOfContext'], {'mcpServers': 7, 'skills': 2, 'plugins': 1})
+
+    def test_under_a_the_whole_harness(self):
+        whole, _, scope = self.build(mode='A')
+        self.assertEqual(scope, {'mode': 'A', 'outOfContext': {}})
+        self.assertEqual(self.names(whole, 'mcpServers'),
+                         ['acme-root', 'acme-tools', 'acme-web-mcp', 'alpha-local', 'beta-tools', 'fabric',
+                          'plugin:switchboard:switchboard'])
+        self.assertEqual(len(whole['harness']['skills']), 2)
+        self.assertEqual(len(whole['harness']['plugins']), 2)
+        for other in ('B', None, 'a'):
+            _, _, narrowed = self.build(mode=other)
+            self.assertEqual(narrowed['mode'], 'C', 'anything but A is the default C')
+
+    def test_folder_patterns_as_the_policy_schema_reads_them(self):
+        match = ns.folder_matches
+        self.assertTrue(match('~/work/acme/app', ['work/acme/*']))
+        self.assertTrue(match('work/acme/app/sub', ['work/acme/*']), 'a folder inside a work folder is in it')
+        self.assertFalse(match('work/acme', ['work/acme/*']), '`*` is one segment, never none')
+        self.assertTrue(match('src/acme-web', ['src/acme-*']))
+        self.assertFalse(match('src/acme/web', ['src/acme-*']), '`*` never crosses a separator')
+        self.assertTrue(match('work\\acme\\app', ['work/acme/*']))
+        for outside in ('/srv/work/acme/app', '~', '', 'C:/work/acme/app', 'work/../acme/x', None, 7):
+            self.assertFalse(match(outside, ['*', 'work/acme/*']), outside)
+        for refused in ('device-policy-workspace-folder-absolute.json', 'device-policy-workspace-folder-home.json'):
+            patterns = load('negative/' + refused)['keys']['workspace.folders']['value']
+            self.assertTrue(patterns)
+            self.assertFalse(any(ns.FOLDER_PATTERN.fullmatch(p) for p in patterns), refused)
+            self.assertFalse(match('srv/work/acme/x', patterns), refused)
+            self.assertFalse(match('work/acme', patterns), refused)
 
 try:
     import cryptography                                 # noqa: F401  the engine's `full` extra
@@ -521,8 +629,12 @@ class CheckIn(_Enrolled):
             self.assertEqual(list(check.iter_errors(summary)), [])
         status = self.make().describe()
         self.assertEqual(status['nodeSummary']['sequence'], 1)
-        self.assertEqual(status['nodeSummary']['counts'], {'codingAgents': 2, 'mcpServers': 3, 'skills': 2,
-                                                           'plugins': 2, 'hooks': 3, 'services': 0})
+        # No policy is applied yet (OE-06), so `machine.mode` is the default `C`: the organization sees only its own
+        # context, here the coding agents and the hook count (DEC-0118), and the person sees how much stayed here.
+        self.assertEqual(status['nodeSummary']['counts'], {'codingAgents': 2, 'mcpServers': 0, 'skills': 0,
+                                                           'plugins': 0, 'hooks': 3, 'services': 0})
+        self.assertEqual((status['nodeSummary']['mode'], status['nodeSummary']['outOfContext']),
+                         ('C', {'mcpServers': 4, 'skills': 3, 'plugins': 2}))
         self.assertIsNone(status['nodeSummary']['drift'])
         self.assertNotIn('org:node-summary-not-listed', status['degraded'])
 
@@ -617,7 +729,8 @@ class CheckIn(_Enrolled):
         answer = json.loads(out.getvalue())
         self.assertEqual(answer['schema'], 'org-summary/1')
         (row,) = answer['organizations']
-        self.assertEqual((row['summary']['type'], row['omitted']), (ns.TYPE, {'mcpServers': 1, 'skills': 1}))
+        self.assertEqual((row['summary']['type'], row['omitted']), (ns.TYPE, {}))
+        self.assertEqual((row['mode'], row['outOfContext']), ('C', {'mcpServers': 4, 'skills': 3, 'plugins': 2}))
         self.assertEqual(self.sent(), [])
 
     def test_health_and_doctor_read_the_summary_from_the_saved_state(self):
@@ -634,7 +747,7 @@ class CheckIn(_Enrolled):
         source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
         rows = source[source.index('Array.isArray(H.organizations)'):]
         for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-', '"consent-off"',
-                     '--consent on', 'S.refused'):
+                     '--consent on', 'S.refused', 'S.mode', 'S.outOfContext'):
             self.assertIn(said, rows)
 
     def test_the_preview_shows_the_next_summary_and_changes_nothing(self):

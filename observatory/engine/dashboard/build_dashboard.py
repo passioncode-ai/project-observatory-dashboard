@@ -2412,6 +2412,13 @@ if (Array.isArray(H.organizations)) {
         hb.push([label, T("harness summary taken on {date}: {agents} coding agents, {servers} MCP servers, {skills} skills, {plugins} plugins, {hooks} hooks",
           {date: S.sentAt.slice(0, 10), agents: c.codingAgents ?? "?", servers: c.mcpServers ?? "?", skills: c.skills ?? "?",
            plugins: c.plugins ?? "?", hooks: c.hooks ?? "?"}), show]);
+        // DEC-0118: the machine.mode it was built under, and how many names that mode kept on this machine as another
+        // context's (counts only); under C the organization sees coding agents and the hook count until OE-06.
+        if (S.mode) {
+          const o = S.outOfContext || {};
+          hb.push([label, T("sharing scope {mode}; kept on this machine as outside the organization's context: {servers} MCP servers, {skills} skills, {plugins} plugins",
+            {mode: S.mode, servers: o.mcpServers || 0, skills: o.skills || 0, plugins: o.plugins || 0}), show]);
+        }
         const drift = S.drift && Array.isArray(S.drift.items) ? S.drift.items : null;
         if (drift && drift.length)
           hb.push([label, T("differs from the organization's baseline: {items}",

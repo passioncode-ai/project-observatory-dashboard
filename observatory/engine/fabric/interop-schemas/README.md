@@ -1,6 +1,6 @@
 # fabric-interop/0.1 schemas (vendored)
 
-Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit `588748ab7d1c7958c6a83497e3db2cada26e35d8` (the contract pin, `schemas/`)
+Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit `de8cec30a443421ae5603dcfda7e4ff16ed00c45` (the contract pin, `schemas/`)
 by `tools/vendor_contract_schemas.py`, which takes the commit from `fabric-contract.lock.json` and copies the `$ref`
 closure of the files here. They were first copied at the commit of DEC-0017, the operator's rulings on the interop open
 questions. They are normative for a job's answer (`interop-job.schema.json`), the handle, the

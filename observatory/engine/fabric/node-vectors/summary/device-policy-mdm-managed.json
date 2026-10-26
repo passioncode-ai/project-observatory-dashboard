@@ -1,0 +1,22 @@
+{
+  "protocol": "fabric-device/0.1",
+  "kind": "policy",
+  "org": {
+    "id": "org-7f3a"
+  },
+  "source": "mdm",
+  "revision": 4,
+  "issuedAt": "2026-10-01T08:00:00Z",
+  "noticeVersion": "2026-10.1",
+  "noticeDeadline": "2026-10-15T00:00:00Z",
+  "keys": {
+    "machine.mode": {
+      "value": "A",
+      "locked": true
+    },
+    "build_channel.allowed": {
+      "value": "official",
+      "locked": true
+    }
+  }
+}

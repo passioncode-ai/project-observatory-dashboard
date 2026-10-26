@@ -391,13 +391,17 @@ def _summary_carried(previous: Optional[dict], renewal: bool) -> dict:
 def summary_notice(state: dict) -> dict:
     """The node summary's state for a person (OBS-192), from the saved state alone: whether the server reads
     `node-summary/1` (`listed`), the last one it took (`sentAt`, `sequence`, how much it listed, and its drift when the
-    organization's baseline applied: `drift` is null without one), and why the latest was not built (`note`)."""
+    organization's baseline applied: `drift` is null without one), the `machine.mode` it was built under and how many
+    names that mode kept out as another context's (`mode`, `outOfContext`, DEC-0118; counts only), and why the latest
+    was not built (`note`)."""
     last = state.get('nodeSummary') if isinstance(state.get('nodeSummary'), dict) else None
     out: Dict[str, Any] = {'listed': SUMMARY_PROTOCOL in (state.get('protocols') or []),
                            'sentAt': last.get('sentAt') if last else None,
                            'sequence': last.get('sequence') if last else None,
                            'counts': last.get('counts') if last else None,
                            'drift': last.get('drift') if last else None}
+    if last and last.get('mode') in node_summary.MODES:
+        out.update(mode=last['mode'], outOfContext=last.get('outOfContext') or {})
     consent = state.get('summaryConsent') if isinstance(state.get('summaryConsent'), dict) else {}
     out['consent'] = {'on': consent.get('on') is True, 'at': consent.get('at')}
     note = state.get('nodeSummaryNote')
@@ -1367,7 +1371,8 @@ class Enrollment:
             if pending is not None:
                 state['nodeSummary'] = {'sequence': pending['summary']['sequence'], 'sentAt': iso(self.clock()),
                                         'digest': pending['digest'], 'counts': node_summary.counts(pending['summary']),
-                                        'omitted': pending['omitted'], 'drift': pending['summary'].get('drift')}
+                                        'omitted': pending['omitted'], 'drift': pending['summary'].get('drift'),
+                                        'mode': pending.get('mode'), 'outOfContext': pending.get('outOfContext') or {}}
                 state.pop('nodeSummaryNote', None)
                 state.pop('summaryRefused', None)
                 state.pop('summaryBackoffUntil', None)
@@ -1723,8 +1728,8 @@ class Enrollment:
 
     def consents(self, state: dict) -> bool:
         """Whether the person agreed to share this machine's harness with this organization (`org summary --consent`).
-        Off until they do: a summary names every agent, skill and plugin here, whatever the context it serves, and the
-        contract's question about other contexts (CT-92) is still open."""
+        Off until they do: under `machine.mode` `C` a summary names only this organization's context (DEC-0118, CT-92's
+        first half), but whether a person may withhold it (CT-92's second half) is still open."""
         consent = state.get('summaryConsent')
         return isinstance(consent, dict) and consent.get('on') is True
 
@@ -1763,16 +1768,23 @@ class Enrollment:
             raise OrgError('node-summary-unavailable', inputs['exclusionsUnreadable'],
                            next_step='fix or remove the exclusion list; nothing is sent until it can be read',
                            command='project-observatory full org summary --org %s' % self.org_id)
-        baseline = node_summary.harness_baseline(self.policy_layers())
+        layers = self.policy_layers()
+        baseline = node_summary.harness_baseline(layers)
+        # DEC-0118: how much the summary lists follows `machine.mode`; with no policy applied yet (OE-06) it is the
+        # default `C`, so the organization sees only its own context: the coding agents, the hook count, and what its
+        # own work folders or baseline name.
+        policy = node_summary.policy_scope(layers)
+        scope: dict = {}
         try:
             summary, omitted, excluded = node_summary.build(
                 device_id=self.keys.device_id, org_id=self.org_id, sequence=sequence, at=iso(self.clock()),
                 harness_scan=inputs.get('harness'), mcp_scan=inputs.get('mcp'), services=self.services_in_context(),
-                baseline=baseline, exclude=inputs.get('exclude') or ())
+                baseline=baseline, exclude=inputs.get('exclude') or (), mode=policy['mode'],
+                folders=policy['folders'], scope=scope)
         except node_summary.SummaryRefused as error:
             raise OrgError('node-summary-refused', str(error)) from None
         return {'summary': summary, 'digest': node_summary.content_digest(summary), 'omitted': omitted,
-                'excluded': excluded}
+                'excluded': excluded, 'mode': scope.get('mode'), 'outOfContext': scope.get('outOfContext') or {}}
 
     def _summary_wanted(self, state: dict) -> bool:
         """Whether a summary may go in this check-in at all: the server reads it, the person consented, and no refusal
@@ -1823,7 +1835,8 @@ class Enrollment:
                 out.update({k: v for k, v in (('nextStep', error.next_step), ('command', error.command)) if v})
                 return out
             out.update(summary=pending['summary'], omitted=pending['omitted'], excluded=pending['excluded'],
-                       baseline='applied' if 'drift' in pending['summary'] else 'none')
+                       baseline='applied' if 'drift' in pending['summary'] else 'none', mode=pending['mode'],
+                       outOfContext=pending['outOfContext'])
             return out
 
     def register_shares(self) -> dict:

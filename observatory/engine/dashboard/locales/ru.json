@@ -2254,5 +2254,6 @@
  "a different build": "другая сборка",
  "an older version": "старая версия",
  "harness summary: not shared (consent off)": "сводка окружения агентов: не передаётся (согласие выключено)",
- "the organization server refused the harness summary ({code}) on {date}; check-ins go on without it, and it is tried again on {retry}": "сервер организации отклонил сводку окружения агентов ({code}) {date}; отметки идут без неё, новая попытка {retry}"
+ "the organization server refused the harness summary ({code}) on {date}; check-ins go on without it, and it is tried again on {retry}": "сервер организации отклонил сводку окружения агентов ({code}) {date}; отметки идут без неё, новая попытка {retry}",
+ "sharing scope {mode}; kept on this machine as outside the organization's context: {servers} MCP servers, {skills} skills, {plugins} plugins": "область передачи {mode}; осталось на этой машине как вне контекста организации: MCP-серверов {servers}, навыков {skills}, плагинов {plugins}"
 }
