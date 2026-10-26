@@ -1,7 +1,7 @@
 # The person's surfaces: home, agents, access, sharing and the personal cloud (OBS-260 to OBS-274)
 
 Status: design, 2026-10-26. Nothing here is built yet; each part is a row of
-[the backlog](../backlog.md) (OBS-260 to OBS-274) and a scenario of
+[the backlog](../backlog.md) (OBS-260 to OBS-274, and OBS-276 split from OBS-264) and a scenario of
 [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md#the-persons-surfaces-sharing-cloud-agents-access-home-2026-10-26)
 (OSS-79 to OSS-93).
 
@@ -21,7 +21,8 @@ freshness on every number, empty, loading, failed and full designed together).
 
 ## What exists today
 
-Measured on `main` at `4e29af3e`. Paths are under `observatory/engine/`.
+Measured on `main` at `4e29af3e`. Paths are under `observatory/engine/`, except `macos/`, `desktop/`
+and `site/`, which are at the repository root.
 
 | Need | What exists | Where |
 |---|---|---|
@@ -208,15 +209,20 @@ the recipient's side.
 ## The secret prompt (OSS-84, OBS-260)
 
 The agent asks Observatory, Observatory asks the person, the agent learns only that the slot is
-filled. D4 decides how the window is shown on each system.
+filled. D4 decides how the window is shown on each system. The property is exact: the value stays
+out of the chat, the agent's transcript, the logs and the agent's tool results. It does not stay out
+of the commands the agent runs with it: an agent that runs `use_secret.py run ... -- printenv` prints
+the value into its own output. Observatory removes known values from the output of `use_secret.py`
+runs (OSS-48), which narrows that, and the use is journalled; it does not make it impossible.
 
 ```
 +-- Project Observatory ----------------------------------------+
 |  claude-code asks for a key                                    |
 |  Project   billing-service      Slot  production / STRIPE_KEY  |
 |  Why       "deploy the webhook handler"                        |
+|  Your phrase: "blue heron at noon"                             |
 |  Paste the token:  [**************************]                |
-|  It is stored in the vault. The agent never sees it.           |
+|  It is stored in the vault, not in the agent's chat.           |
 |                                      [Cancel]   [Save]         |
 +----------------------------------------------------------------+
 ```
@@ -280,10 +286,13 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
   person-to-person profile (OBS-262), the engine uses its own `info` string,
   `observatory-share-envelope/1`, so that a share can never be opened as a personal placement or an
   organization's credential, and the reverse.
-- **The recipient's context.** A shared value belongs to a context of its own, `share:SHARE-ID`,
-  never the recipient's personal context (the same separation contract DEC-0111 keeps for an
-  organization's credentials). The sender's `#sig` is not in the recipient's estate record, so it is
-  pinned at the claim from the share's signed descriptor, and only that key may seal into that context.
+- **The recipient's context and a key pair per share.** A shared value belongs to a context of its
+  own, `share:SHARE-ID`, never the recipient's personal context (the same separation contract DEC-0111
+  keeps for an organization's credentials). Each side makes a fresh `#sig` and `#kem` pair for that one
+  share and never uses its device keys, so two shares, or a share and an organization enrollment,
+  cannot be linked by a key (contract DEC-0128's rule of an identity per membership, applied to
+  shares; part of the OBS-262 ask). The sender's share key is pinned by the recipient from the link
+  itself (D3), never from anything the cloud serves.
 - **Serving.** The recipient's node keeps the ciphertext sealed on disk and opens it in memory at
   each use, for the child process `use_secret.py` starts. It may reuse a ciphertext while its lease
   lasts (one hour by default, set by the sender); renewing the lease asks the cloud whether the share
@@ -304,15 +313,27 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
 - **Why minting is recommended.** A key minted for one share can be revoked without touching anyone
   else, carries its own ceiling, and its spend is the share's spend. Sharing an existing key works but
   the screen names its other consumers before the share is created.
-- **Usage reports.** The recipient's node sends, at each renewal and at least daily, a signed record
-  per key: uses per day, last use, the consumer labels (agent names) from its secret-use journal,
-  and whether the value was exported (OSS-82). Never a value, a command, an argument or an output
-  (the rule of `call-record/1`, DEC-0111 item 6). The sender's screen shows these as "reported by
+- **Usage reports (OBS-276, after the core).** The recipient's node sends, at each renewal and at
+  least daily, a record per key signed by its share key and **sealed to the sender's share `#kem`**, so
+  the cloud stores it without reading it: uses per day, last use, the consumer labels (agent names)
+  from its secret-use journal, and exports made with the export button (OSS-82). Never a value, a
+  command, an argument or an output (the rule of `call-record/1`, DEC-0111 item 6). Each report and
+  each renewal carries a random nonce and a sequence number; the cloud and the sender's node drop a
+  repeated nonce or a sequence that does not advance. The sender's screen shows these as "reported by
   their machine", beside the cloud's own delivery count. A modified recipient can under-report; the
   delivery count and the provider's spend cannot be hidden by it, which is why they are shown beside.
-- **Export.** A person's act on the recipient's screen, never an agent's tool. The export is recorded
-  and reported before the value leaves; a sender may mark a share "no export", which the honest client
-  enforces and the screen describes as a request, not a guarantee.
+- **Export, honestly.** "Exported" means "exported with the export button", a person's act on the
+  recipient's screen, recorded and reported before the value leaves. It is not the only way a value
+  leaves: any command an agent runs with the key can print it (`use_secret.py run ... -- printenv`),
+  and that is a use, not an export. So the sender's screen never says "exported: no" as a guarantee; it
+  says "exports with the button: none" and, beside it, the rule that every delivered value must be
+  treated as copyable. A sender may mark a share "no export button"; that is a request the honest
+  client keeps, not a control.
+- **What the cloud still learns.** Even blind to values and reports, the sender's cloud sees: the
+  share's existence, its id, the sender's labels for the recipient and the keys (stored as the sender
+  typed them; the build may seal them too), the number of keys, end dates, the times and frequency of
+  every claim, renewal and report, and the IP addresses of both machines. Whoever controls the cloud
+  account (the person, or Cloudflare) can read those.
 - **One machine.** A share binds one recipient machine. A recipient's second machine needs its own
   share, until their estate can carry it between their machines (OBS-194 step 2).
 - **What a subscription is not.** A subscription sign-in (a coding agent's monthly plan) is a person's
@@ -326,14 +347,15 @@ sequenceDiagram
   participant R as Recipient's node
   participant P as Provider
   S->>P: mint narrow key (door), value into the vault
-  S->>C: create share (descriptor signed by #sig, no value)
-  Note over S: link https://CLOUD/s/ID#c=CODE goes to the recipient by the person
-  R->>C: claim (proof of CODE, recipient #sig and #kem public keys, signed)
+  S->>C: create share (descriptor signed by the share #sig, no value)
+  Note over S: link https://CLOUD/s/ID#c=CODE&k=FPR goes to the recipient by the person
+  R->>C: claim: share #sig and #kem public keys, MAC under CODE, signed
   C->>S: claim waiting (on the sender's next poll)
-  S->>C: envelopes sealed to the recipient's #kem
-  R->>C: renew lease (signed); C counts a delivery
+  S->>S: check the MAC; person compares the six-digit code with the recipient
+  S->>C: envelopes sealed to the recipient's share #kem
+  R->>C: renew lease (signed, nonce); C counts a delivery
   C->>R: envelope; R opens in memory at use
-  R->>C: usage report (counts, signed)
+  R->>C: usage report (sealed to the sender's share #kem, nonce)
   S->>C: take back; C refuses from now on
   S->>P: revoke or rotate (door)
   R->>C: next contact: deletion receipt
@@ -350,10 +372,26 @@ sequenceDiagram
   and a person who does not have Observatory still gets a page that works in any browser. (c) fails
   for exactly the person who has not installed the app. (a) adds a dependency on a site the sender
   does not control; it stays as the install target, not the landing.
-- **The link:** `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE`. The code is 128 random bits, single use,
-  valid until the share's claim deadline (7 days by default). It is in the fragment so it never
-  reaches a server, a proxy log or a referrer. It grants one thing: being the first machine to present
-  its keys for this share. It holds no provider credential and opens nothing by itself.
+- **The link:** `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`. `CODE` is 128 random bits, single
+  use, valid until the share's claim deadline (7 days by default). `FPR` is the SHA-256 fingerprint of
+  the sender's share `#sig`, so the recipient pins the sender's key from the link the person sent, not
+  from the cloud. The fragment is not sent in HTTP requests, so it stays out of request lines, proxy
+  logs and referrers. **It is not hidden from the cloud:** the landing page is the cloud's own script
+  and can read the fragment, so a compromised or malicious cloud can learn `CODE`. The design does not
+  rely on the cloud being unable to read it; it relies on the next two points.
+- **The claim is bound to the code holder and checked by the sender.** The recipient's node sends its
+  share `#sig` and `#kem` public keys with `MAC = HMAC-SHA-256(CODE, share id, recipient #sig, recipient
+  #kem, FPR)`. The sender's node, not the cloud, checks the MAC; the cloud only relays the claim. Then
+  the sender **confirms each claim before anything is sealed**: both apps show the same six-digit code
+  derived from the two share keys and the code (`SAS`), and the two people compare it out of band (a
+  call, a message thread they already trust). A mismatch, or a claim the sender does not expect, is
+  refused, and the link is void.
+- **The trust this gives, stated plainly.** It is trust on first use. A cloud or anyone else who reads
+  the link before the intended recipient can claim first with its own keys; the MAC check passes
+  (they know `CODE`), but the six-digit code the sender sees will not match the one the recipient
+  reads out, so the sender refuses and nothing is sealed. A sender who skips the comparison accepts
+  that risk, and the screen says so. Once sealed, the values are readable only by the recipient's
+  share key; the cloud never holds them in the clear.
 - **The scheme:** `project-observatory://share?origin=ORIGIN&id=SHARE-ID#c=CODE`, registered by the
   macOS app (`CFBundleURLTypes`) and by the desktop app through Tauri's deep-link support (the
   registry on Windows, an `x-scheme-handler` desktop entry on Linux). The app accepts only `share`,
@@ -361,32 +399,42 @@ sequenceDiagram
   without the person's "Accept". This follows the grammar rules of contract DEC-0040 (FL-1 to FL-6)
   for its own scheme. Those rules refuse a credential in a `fabric://` link's fragment; the claim
   code is not a credential to any service, and this record keeps it out of every `fabric://` link.
+  **Another app can register the same scheme** (no operating system reserves a custom scheme for one
+  app), so the deep link is a convenience, not a trust anchor: what protects the share is the MAC,
+  the pinned `FPR` and the out-of-band code, all checked inside Observatory.
 - **"Install, then come back":** the page offers the scheme first; if nothing handles it within
   1.5 seconds (the test DEC-0040 FB-5 uses for Fabric), it shows the installer link and keeps the
   button: after installing, the person returns to the same tab and presses it again. A browser that
   blocks custom schemes gets the link as text for the app's "Open a share" field.
 
-### D4. The native secret prompt is shown by Observatory, never by the agent
+### D4. The native secret prompt is shown only by Observatory's own signed app
 
-- **The rule:** the window runs in a process the agent did not start and cannot read: the node (the
-  local server) or the Observatory app. The agent's call (`observatory_secret_request`, a job under
-  `fabric.job.*`) returns `stored`, `declined` or `no answer`; the value goes from the window to the
-  vault slot as `vault.py put` writes it, on a pipe, never in an argument, an environment variable, a
-  log, a notification or the job's result.
-- **macOS.** Options: (a) `osascript` with `display dialog ... with hidden answer`, the value read
-  from the child's stdout; (b) the Observatory app's own SwiftUI window with a `SecureField`, asked by
-  the node over the app's local channel. **Chosen: (b), with (a) as the fallback** when the app is not
-  running. (b) carries the app's name and icon, which a spoofed dialog cannot, and needs no scripting
-  permission; (a) works from any process today and reads the value over a pipe the node owns, never
-  from argv.
-- **Linux.** The desktop app's window when it runs; otherwise `zenity --password` or
-  `kdialog --password` started by the node, the value on the child's stdout.
-- **Windows.** The desktop app's window; otherwise `CredUIPromptForWindowsCredentialsW` called by the
-  node, which returns the secret into the node's memory.
-- **No desktop session** (a server, a remote shell): a one-time page on the local server (the
-  keyserver's loopback origin rules, OSS-09), its address handed over as Fabric Dashboards'
-  `open_link` (contract DEC-0123), valid for one submission and ten minutes. Never a chat.
-- **Against a fake request:** the window names the agent from its binding (not from text the agent
+- **The path of a request.** The agent calls `observatory_secret_request` (a `fabric.job.*` job) on the
+  MCP server, which is a child of the agent's process. That server shows nothing itself: it passes the
+  request to the node over the local channel (`fabric-local-channel/0.1`, contract DEC-0075), and the
+  node raises it with the channel's own `consent.prompt` to the clients that declared `consent.ui`.
+  Only Observatory's code-signed app may answer a secret prompt: the node checks the answering peer's
+  code signature (the step DEC-0075 leaves to its consumers) and refuses any other `consent.ui`
+  client. When the app is not running, the node opens it through the lifecycle broker (OSS-76), never
+  by a direct launch; when the node is down, the request fails with "Observatory is not running" and
+  no window is shown by anyone. The value goes from the app to the node on the channel and into the
+  vault slot as `vault.py put` writes it, never in an argument, an environment variable, a log, a
+  notification or the job's result, which is `stored`, `declined` or `no answer`.
+- **No scripted dialogs.** `osascript` (`display dialog ... with hidden answer`), `zenity` and
+  `kdialog` are rejected: any process of the same user, an agent included, can draw an identical
+  window and collect what the person types. A prompt that any agent can imitate teaches the person to
+  paste tokens into imitations.
+- **macOS.** The app's own SwiftUI window with a `SecureField`. **Linux and Windows.** The desktop
+  app's (Tauri) window. Both are the signed apps the release already builds.
+- **The person's phrase.** At first use the person sets a short phrase only the app knows (kept in the
+  vault, never shown to an agent or in any tool result). Every genuine prompt shows it at the top; a
+  window without the phrase is not Observatory. The phrase is shown in the app's Settings and can be
+  changed there.
+- **A machine with no desktop session** (a server, a remote shell): the node asks in the person's
+  terminal over the local channel. `full secret answer` connects as a `consent.ui` client from a
+  terminal (a TTY the person runs, refused when stdin is not a terminal), shows the request with the
+  phrase and reads the value with echo off. There is no browser page for this.
+- **Against a fake request:** the prompt names the agent from its binding (not from text the agent
   wrote), the project, the slot and the reason, quoted as the agent's words; a request for a slot that
   already holds a value says so and asks to replace; requests are limited (one open per slot, five per
   agent per hour).
@@ -405,18 +453,23 @@ sequenceDiagram
   record is a "provider says leaked or revoked" finding. Secret scanning alerts of the person's own
   repositories are read through the API with the person's GitHub sign-in; an alert's secret is
   compared in memory with the estate digest (VAULT-DIGESTS.md) and never written.
-- **Public code search (off until the person turns it on).** Eligible keys: a known provider format
-  whose random body is at least 32 characters from an alphabet of at least 36 symbols. For each one,
-  a fragment of **8 characters** at a random offset inside the random body (never the provider's
-  public prefix, never a checksum tail) is chosen **once** and its offset kept in the slot's
-  metadata. 8 base-62 characters disclose under 48 bits of a body of at least 190 bits, which leaves
-  more than 140 unknown bits; one fixed fragment means repeated searches never disclose more; and
-  62^8 (about 2 x 10^14) makes an unrelated public string containing it unlikely, so a hit is a strong
-  candidate. Sources must match substrings: public code search services that do (grep.app, public
+- **Public code search (off until the person turns it on).** Eligibility is decided per provider
+  format, from a table the build adds (prefix, body length, alphabet, checksum part): a key is
+  eligible when its random body, after the fragment is removed, still carries at least 112 unknown
+  bits. For each eligible key, a fragment of **8 characters** at a random offset inside the random
+  body (never the provider's public prefix, never a checksum tail) is chosen **once** and its offset
+  kept in the slot's metadata. The arithmetic at the floor of a 32-character body: from 36 symbols the
+  body holds about 165 bits, 8 characters disclose about 41, about 124 stay unknown; from 62 symbols,
+  about 190, 48 and 143; a 64-character hex body holds 256 bits and 8 characters disclose 32. One fixed
+  fragment means repeated searches never disclose more, and 36^8 (about 2.8 x 10^12) makes an
+  unrelated public string containing it unlikely, so a hit is a strong candidate. Sources must match substrings: public code search services that do (grep.app, public
   Sourcegraph); GitHub's REST code search matches whole tokens, so a fragment does not find a key
   there, and GitHub is covered by the provider signals instead. A hit's file is fetched, candidates
   are extracted by the provider's format, and each is compared in memory with the vault value; only
   the URL, the line, the commit and "matches slot X" are kept.
+- **Recall is low, and the screen says so.** Public code indexes cover a part of public code, with a
+  delay, and none covers pastes, chats or private places. A search that finds nothing reads "not found
+  in the sources searched on DATE", never "not leaked".
 - **Revocation.** A confirmed sighting is recorded in the leak register (`vault.py leak`, OSS-55) and
   raises the critical finding with the door's rotate command (`rotate --leaked` for OpenRouter).
 - **Never:** a fragment in a log, a finding, a report or the dashboard; a search query with a project
@@ -433,14 +486,27 @@ sequenceDiagram
   tool and answer, errors by class, key uses by slot, spend where known. This is what the Agents page
   and Home read; it is small and kept 400 days.
 - **What is archived:** raw rows older than the hot window (30 days by default), per month, as JSON
-  lines compressed with the standard library's `lzma`, encrypted with the workspace's backup
-  encryption, written beside the backups with a manifest of counts and SHA-256. Values of known vault
-  slots are replaced by their slot names before writing, as the store's redaction does. Kept two years
-  by default.
+  lines compressed with the standard library's `lzma`, encrypted with the backups' `OBSENC1` format
+  under **an archive key of its own**: 32 random bytes in a vault slot of the workspace (an
+  Observatory slot, read only by the archiver through `use_secret.py`), mirrored to the OS credential
+  store as the backup passphrase is. It is not the backup passphrase: that one is a plain file in the
+  workspace's `secrets/` that any agent of the same user can read, and when it is absent the backups
+  write nothing outside the workspace. Written beside the backups with a manifest of counts and
+  SHA-256. Values of known vault slots are replaced by their slot names before writing, as the
+  store's redaction does. Kept two years by default.
+- **No archive key:** nothing is archived and nothing is deleted; raw rows stay in the store past the
+  window, and Health says "agent records: not archived, no archive key" with the command that makes
+  one.
 - **Restoring:** `full agents archive restore MONTH --into DIR` builds a separate read-only database
   for analysis; nothing is ever restored into the live store.
-- **Order of operations:** a raw row is withdrawn (a tombstone, as `store/retention.py` does) only
-  after its archive is written and its checksum verified. Horizons live in `retention.json`; an agent
+- **How raw is actually removed.** A tombstone does not free disk: `store/retention.py` keeps the
+  canonical `ledger` row and removes only its read path and indexes. So archiving uses its own step,
+  and only for the classes it archives (session records, collected events, journals; never a ledger
+  row of a workflow, a lesson, an operator row or a `superseded` row): after a month's archive is
+  written, decrypted again and its counts and digests match the rows, the rows are deleted in one
+  transaction, a receipt row records the month, the counts and the archive's digest, and a `VACUUM`
+  returns the pages. Journal files (`secret-use.jsonl` and the like) are cut at the archived offset and
+  rewritten atomically. A failed check deletes nothing. Horizons live in `retention.json`; an agent
   cannot change them. `full forget` reaches the live store and names archives it could not rewrite in
   its receipt, as it does for backups today ([FORGET.md](FORGET.md)).
 
@@ -516,35 +582,41 @@ slow and would copy their text. The Workflows tab keeps OSS-24 to OSS-27 unchang
 | DEC-0111 | the credential envelope's construction and checks, the separate context for credentials that are not the person's own, revocation that names its request, the call record's no-content rule for usage reports |
 | DEC-0040 | the link grammar the share scheme follows; no credential in a `fabric://` link |
 | DEC-0121, DEC-0126 | every button of these screens is an agent's tool; an approval relayed from the person's own agent is the person's |
-| DEC-0123 | the no-desktop secret page and every dashboard page are handed over as Fabric Dashboards' `open_link` |
+| DEC-0123 | every dashboard page is handed over as Fabric Dashboards' `open_link` |
+| DEC-0075 | the secret request travels over the local channel and is raised with `consent.prompt`; only the code-signed app answers it |
+| DEC-0128 | a key pair per share, never the device keys, so shares cannot be linked |
 | DEC-0008 | sharing, minting, revoking and deploying are effects with scope; none runs without the person's act or a recorded grant |
-| none yet | a person-to-person share profile (a context kind, the sender's key pinned at claim, revocation across estates) and a single-person cloud service: OBS-262 asks the contract for both |
+| none yet | a person-to-person share profile (a context kind, a key pair per share, the sender's key pinned from the link, the claim MAC and the out-of-band code, revocation across estates) and a single-person cloud service: OBS-262 asks the contract for both |
 
 ## The build order
 
 The person's order was sharing and the cloud first, then the agents screen, Home, the secret prompt,
-the infrastructure pages, leak watch, and the log lifecycle. Two local and quick items move first
-because they unblock the person now: the secret prompt (agents stop asking for tokens in chats this
-week, and sharing's recipients use it too) and Home's top three (a working first screen in place of
-a wall of every finding). The contract ask goes out at once because sharing's format depends on its answer.
+the infrastructure pages, leak watch, and the log lifecycle; the person also asked for practical
+results soon. So the contract ask goes out first (sharing's format depends on its answer), and
+four local items that need nothing new land in the first week of November as visible wins: the
+secret prompt (agents stop asking for tokens in chats, and sharing's recipients use it too), Home's
+first screen, and the Cloudflare and DigitalOcean pages. Sharing's core follows the cloud, its usage
+reports come after the core, and the rest is ordered by date.
 
 | Order | Row | What | Target |
 |---|---|---|---|
-| 1 | OBS-260 | the secret prompt, macOS first (local, quick) | 2026-11-07 |
-| 2 | OBS-261 | Home: state, three problems, projects at a glance (local, quick) | 2026-11-14 |
-| 3 | OBS-262 | ask the contract for the share profile and the cloud service | 2026-10-30 |
-| 4 | OBS-263 | the personal cloud service and its deploy | 2026-11-14 |
-| 5 | OBS-264 | the share protocol on the node and the cloud | 2026-11-21 |
-| 6 | OBS-265 | the Shares screen: create, mint, usage, take back | 2026-11-28 |
-| 7 | OBS-266 | the recipient's path: link page, URL scheme, notice, export | 2026-11-28 |
-| 8 | OBS-267 | Agents: available agents and Switchboard | 2026-12-05 |
-| 9 | OBS-268 | Agents: activity per agent | 2026-12-12 |
-| 10 | OBS-269 | Access: Use | 2026-12-12 |
-| 11 | OBS-270 | labels and their ownership | 2026-12-12 |
-| 12 | OBS-271 | Infrastructure: Cloudflare page, one shape for the three | 2026-12-19 |
-| 13 | OBS-272 | leak watch | 2027-01-09 |
-| 14 | OBS-273 | the monitor | 2027-01-16 |
-| 15 | OBS-274 | the agents' log lifecycle | 2027-01-23 |
+| 1 | OBS-262 | ask the contract for the share profile and the cloud service | 2026-10-28 |
+| 2 | OBS-260 | the secret prompt (local, quick) | 2026-11-04 |
+| 3 | OBS-261 | Home: state, three problems, projects at a glance (local, quick) | 2026-11-04 |
+| 4 | OBS-271 | Infrastructure: Cloudflare page, one shape for the three (local, quick) | 2026-11-04 |
+| 5 | OBS-235 | Infrastructure: DigitalOcean collector and page (existing row, moved up) | 2026-11-04 |
+| 6 | OBS-263 | the personal cloud service and its deploy | 2026-11-07 |
+| 7 | OBS-264 | sharing core: create, claim, seal, use, stop, revoke | 2026-11-14 |
+| 8 | OBS-276 | sharing: usage reports sealed to the sender | 2026-11-21 |
+| 9 | OBS-265 | the Shares screen: create, mint, usage, take back | 2026-11-21 |
+| 10 | OBS-266 | the recipient's path: link page, URL scheme, notice, export | 2026-11-21 |
+| 11 | OBS-267 | Agents: available agents and Switchboard | 2026-11-28 |
+| 12 | OBS-268 | Agents: activity per agent | 2026-11-28 |
+| 13 | OBS-269 | Access: Use | 2026-11-28 |
+| 14 | OBS-270 | labels and their ownership | 2026-12-05 |
+| 15 | OBS-272 | leak watch | 2026-12-12 |
+| 16 | OBS-273 | the monitor | 2026-12-19 |
+| 17 | OBS-274 | the agents' log lifecycle | 2026-12-23 |
 
 ## Interface text
 

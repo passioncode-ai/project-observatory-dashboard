@@ -628,7 +628,7 @@ The person who runs Observatory asked on 2026-10-26 for the surfaces a person us
 ones an agent reads: a home page that says how the whole system is, a screen of the agents they
 have, a way to give an agent a token without pasting it into a chat, sharing keys with another
 person, a watch for leaked keys, and a personal cloud that carries what one machine cannot. The
-design and its decisions are [PERSON-SURFACES.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/PERSON-SURFACES.md); the build order is OBS-260 to OBS-274
+design and its decisions are [PERSON-SURFACES.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/PERSON-SURFACES.md); the build order is OBS-260 to OBS-274 and OBS-276
 in [the backlog](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/backlog.md). **The rules throughout:** a credential's value
 never appears in a chat, an argument, a log, a URL or a report; an agent receives a value only at
 use time and only through Observatory; what a person set is never overwritten by an agent. They
@@ -646,11 +646,14 @@ Funnel:
    (an end date, at most 90 days), and a name for the recipient that only the sender sees.
 2. Minting runs the door's own `issue` into a slot named for the share; the value goes from the
    provider into the vault and is never shown.
-3. "Create link" returns one link, `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE`, and a sentence to send
-   with it. The code after `#` never reaches a server: a browser does not send a fragment.
-4. The share is listed as "waiting for the recipient" until it is claimed (OSS-80), then "waiting for
-   your machine" while the sender's node seals each value to the recipient's machine key, then
-   "active".
+3. "Create link" returns one link, `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`, and a sentence to
+   send with it. The fragment stays out of HTTP requests and server logs, but the cloud's landing page
+   can read it, so the link is protected by the next step, not by secrecy from the cloud. `FPR` is the
+   sender's share key fingerprint, which the recipient pins from the link.
+4. The share is listed as "waiting for the recipient" until it is claimed (OSS-80). A claim shows a
+   six-digit code; the sender compares it with the recipient by a call or a message they already
+   trust and presses "Confirm" only when it matches. Then "waiting for your machine" while the
+   sender's node seals each value to the recipient's share key, then "active".
 
 Failure paths:
 - No personal cloud connected: the button says why and opens OSS-83; nothing is minted first.
@@ -662,6 +665,9 @@ Failure paths:
   share failed is revoked by the door (as OBS-16 does for a failed delivery).
 - The link is lost before it is used: "Copy link again" while it is unclaimed; a new code makes
   the old link void.
+- The six-digit codes differ, or a claim arrives that the sender did not expect: "Refuse" voids the
+  link and seals nothing (someone who saw the link claimed first). This is trust on first use, and
+  the screen says that skipping the comparison accepts that risk.
 
 Acceptance: no value in the link, the page, the cloud's storage or any journal; the share's
 record names keys by slot and provider only.
@@ -682,8 +688,9 @@ Funnel:
    the end date, and the notice: "These keys were shared with you. Your agents get them from
    Observatory when they need them. They are kept sealed, never in a file in the clear. Ask your
    agents to take a key from Observatory; never paste one into a chat." One button, "Accept".
-4. Accepting binds the share to this machine's key (the claim) and shows "waiting for the sender's
-   machine" until the sealed values arrive, then "ready" with the command an agent uses
+4. Accepting makes a key pair for this share alone, sends its public keys with a proof made from the
+   link's code (the claim), and shows a six-digit code to read to the sender; then "waiting for the
+   sender's machine" until the sealed values arrive, then "ready" with the command an agent uses
    (`use_secret.py run --vault-only shared/LABEL NAME -- COMMAND`).
 
 Failure paths:
@@ -694,6 +701,10 @@ Failure paths:
   "Open a share" field.
 - The fragment is missing (a messenger cut it): the page says the link is incomplete and asks for
   it again; nothing is claimed.
+- The sender refused the claim (the codes did not match): "The sender did not confirm this machine";
+  nothing was sealed to it.
+- Another app registered the same link scheme: it may open instead; nothing is lost, because the
+  claim's proof and the six-digit code are checked inside Observatory.
 
 Acceptance: the claim proves possession of the code without sending it to any third party; the
 recipient's machine never writes a shared value to disk in the clear.
@@ -705,7 +716,8 @@ Trigger: "is my colleague using the key, and how much? Stop it now."
 
 Funnel:
 1. Access, then Shares: one row per share with its recipient label, state, keys, uses in the last
-   7 days, last use, and whether any value was exported (OSS-82).
+   7 days, last use, and exports made with the export button (OSS-82), never "not exported" as a
+   guarantee: any command an agent runs with a key can print it.
 2. A share opens to its usage: per key, uses per day and the agent names the recipient's machine
    reported, the cloud's own count of deliveries, and the provider's spend where the door reads it
    (OpenRouter by key). Each figure says who measured it: "seen by your cloud" or "reported by their
@@ -725,7 +737,7 @@ Failure paths:
 
 Acceptance: a usage report holds counts, dates and agent names, never a value, an argument or an
 output; "taken back" is shown only when the cloud refused service and the provider confirmed.
-Coverage: none yet. Status: planned (OBS-264, OBS-265); product outcome unobserved.
+Coverage: none yet. Status: planned (OBS-264, OBS-265, OBS-276); product outcome unobserved.
 
 ### OSS-82: export a shared value on purpose
 
@@ -738,7 +750,9 @@ a file the person chose. The share's usage shows "exported on DATE" to the sende
 Failure paths: a share the sender marked "no export" shows the button disabled with that reason; an
 agent asking to export is refused: export is a person's act on the screen.
 
-Acceptance: an export is recorded before the value leaves; the record holds no value.
+Acceptance: an export with the button is recorded before the value leaves; the record holds no
+value. The screens call it "exported with the button": a value can also leave through a command an
+agent runs with it, which is a use, not an export.
 Coverage: none yet. Status: planned (OBS-266); product outcome unobserved.
 
 ### OSS-83: connect Observatory to my personal cloud
@@ -769,20 +783,26 @@ Trigger: an agent needs a key the vault does not hold.
 Funnel:
 1. The agent calls Observatory (`observatory_secret_request`: project, slot name, provider, why);
    it never asks the person in its chat.
-2. Observatory, not the agent, shows a native window: which agent asks, for which project and
-   slot, why, and one secure field: "Paste the token and press Save". On macOS the app's own
-   window; on Linux and Windows the desktop app's window; with no desktop session, a one-time local
-   page opened in Fabric Dashboards.
+2. The request goes to the node over the local channel, and only Observatory's own signed app
+   answers it: a window with the phrase the person set at first use, which agent asks, for which
+   project and slot, why, and one secure field: "Paste the token and press Save". On macOS the app's
+   own window; on Linux and Windows the desktop app's window, opened through the lifecycle broker if
+   it is not running; with no desktop session, `full secret answer` in the person's terminal.
 3. Save writes the value to the vault slot (as `vault.py put` does) and the agent's call returns
    "stored PROJECT/ENV/NAME", never the value. The agent then uses the key through `use_secret.py`.
+   The value stays out of the chat, the transcript and the logs; a command the agent runs with it
+   can still print it, and that use is journalled.
 
-Failure paths: the person presses Cancel or the window times out (10 minutes): the agent receives
+Failure paths: a window without the person's phrase is not Observatory, and the app's Settings say so;
+the node is not running: the agent receives "Observatory is not running" and no window appears; the
+person presses Cancel or the window times out (10 minutes): the agent receives
 "declined" or "no answer"; an empty or multi-line value is refused in the window; a second request
 for the same slot while one is open joins it; a slot that already holds a value asks "replace?"
 naming its last rotation.
 
-Acceptance: the value is never in an argument, an environment the agent's process can read, a log,
-a notification or the agent's output; the request and its outcome are journalled by name.
+Acceptance: the value is never in an argument, an environment the agent's own process can read, a
+log, a notification or the request's result; no scripted dialog (`osascript`, `zenity`, `kdialog`) is
+ever used; the request and its outcome are journalled by name.
 Coverage: none yet. Status: planned (OBS-260); product outcome unobserved.
 
 ### OSS-85: see which agents I have, and connect Switchboard
