@@ -686,12 +686,13 @@ def org_cloud(state: dict) -> bool:
 def _same_binding(held: dict, cert: dict) -> bool:
     """Whether a renewed certificate binds what the one on record binds (DEC-0100, FAC-SEM-044, the contract's
     `device-rules.ts` renewal check): a person or none, the same person by the binding's user id, and the same role:
-    one added, dropped or changed is a changed binding (OBS-193: `org_cloud` reads the role). A rotation is held to it
-    too.
+    one added, dropped or changed is a changed binding (OBS-193: `org_cloud` reads the role; a certificate with no role
+    is recorded `role: null`). A record saved before 0.29.0 never stored the role (no `role` key) and keeps whatever
+    the server names: its missing `enrolledRole` already keeps the person's notice. A rotation is held to it too.
     A record with a user id needs the same id in the renewal; none, or another, is a changed binding. Only a record
     saved by 0.29.0, which kept whether a person was bound but not who, is compared by that alone, and the renewal
     records the id (OBS-221). `_certificate` refuses a person-bound certificate without an id."""
-    if bool(cert.get('user')) != bool(held.get('user')) or cert.get('role') != held.get('role'):
+    if bool(cert.get('user')) != bool(held.get('user')) or ('role' in held and cert.get('role') != held.get('role')):
         return False
     if 'userId' in held:
         return cert.get('userId') == held['userId']
@@ -875,6 +876,8 @@ class Enrollment:
                   active_registered INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL);""")
             conn.executescript(repair.SCHEMA)               # the repair book (OBS-193)
+            with contextlib.suppress(sqlite3.OperationalError):    # a book from before the column
+                conn.execute('ALTER TABLE repairs ADD COLUMN expires_at INTEGER')
             with contextlib.suppress(sqlite3.OperationalError):    # an outbox from before the column
                 conn.execute('ALTER TABLE registrations ADD COLUMN active_registered INTEGER NOT NULL DEFAULT 0')
             yield conn
@@ -1040,10 +1043,11 @@ class Enrollment:
                'issuer': cert.get('issuer'), 'user': user is not None}
         if user is not None:
             out['userId'] = user['id']
-        if isinstance(binding.get('role'), str):           # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100)
-            if binding['role'] == 'org-cloud' and user is not None:
-                raise OrgError('response-malformed', 'an org-cloud certificate binds no person (DEC-0099)')
-            out['role'] = binding['role']
+        # `org-cloud` (DEC-0099): a renewal keeps it (DEC-0100). Recorded even when absent (`None`), so a renewal or
+        # rotation can tell a role added later from a record saved before roles were kept (`_same_binding`).
+        out['role'] = binding['role'] if isinstance(binding.get('role'), str) else None
+        if out['role'] == 'org-cloud' and user is not None:
+            raise OrgError('response-malformed', 'an org-cloud certificate binds no person (DEC-0099)')
         return out
 
     # -- enrollment --------------------------------------------------------------------------------------------

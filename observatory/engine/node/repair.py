@@ -79,6 +79,8 @@ MAX_DEPTH = 8
 MAX_BODY_BYTES = 64 * 1024
 MAX_PENDING = 64
 MAX_BOOK_ROWS = 10000
+#: How long past its request's own `expiresAt` an answered id is still remembered (a clock that moved back a day).
+PRUNE_MARGIN_SECONDS = 86400
 #: The local actions a repair may run, each one `node.lifecycle` tool. Never `stop`: a repair brings a service back.
 ACTIONS = {'restart': 'lifecycle.restart', 'ensure_running': 'lifecycle.ensure_running'}
 CONFIG_NAME = 'node-repair.json'
@@ -586,7 +588,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS repairs (id TEXT PRIMARY KEY, digest TEXT NOT NULL, state TEXT NOT NULL,
   request TEXT NOT NULL, agent_ref TEXT, version TEXT, task TEXT, received_at TEXT NOT NULL, notified_at TEXT,
   run_after REAL, declined_at TEXT, operation_id TEXT, started_at TEXT, result TEXT, answered_at TEXT, sent_at TEXT,
-  note TEXT);
+  note TEXT, expires_at INTEGER);
 """
 
 
@@ -700,9 +702,12 @@ def _take(conn, ctx: Context, item: dict, rid: str, canonical: Optional[str], di
     version = package.get('version') if _match(SEMVER, package.get('version')) else None
     # The body and the task line are kept only for a request the schema admits; a refused one keeps its id alone.
     task = None if problems else item['task']
-    conn.execute('INSERT INTO repairs(id, digest, state, request, agent_ref, version, task, received_at) '
-                 "VALUES (?, ?, 'received', ?, ?, ?, ?, ?)",
-                 (rid, digest, canonical or '{}', agent_ref, version, task, _iso(ctx.now)))
+    # The request's own expiry, read even from a refused request: the id is forgotten only after it (`_prune`).
+    expires = item.get('expiresAt')
+    expires_at = _time(expires) if isinstance(expires, str) and len(expires) <= 64 else None
+    conn.execute('INSERT INTO repairs(id, digest, state, request, agent_ref, version, task, received_at, expires_at) '
+                 "VALUES (?, ?, 'received', ?, ?, ?, ?, ?, ?)",
+                 (rid, digest, canonical or '{}', agent_ref, version, task, _iso(ctx.now), expires_at))
     ctx.journal('repair-received', repair=rid, agentRef=agent_ref, version=version,
                 digest=package.get('digest') if _match(SHA256, package.get('digest')) else None)
     if problems:
@@ -839,11 +844,12 @@ def advance(conn, ctx: Context) -> dict:
 
 
 def _prune(conn, now: float) -> None:
-    """An answered id is forgotten only once a server has taken its result and longer than any request may live has
-    passed since it was answered (`MAX_REPAIR_DAYS` and a day): a request with that id is past its own `expiresAt`
-    by then, so it is refused whatever the book holds."""
-    conn.execute("DELETE FROM repairs WHERE state = 'answered' AND sent_at IS NOT NULL AND answered_at < ?",
-                 (_iso(now - (MAX_REPAIR_DAYS + 1) * 86400),))
+    """An answered id is forgotten only once a server has taken its result and its own request's `expiresAt` is more
+    than `PRUNE_MARGIN_SECONDS` past: a request with that id is refused `expired` by then, whatever the book holds. Never
+    by when it was answered (a request that arrived before its `issuedAt` was answered early and is still live), and a
+    row whose request had no readable expiry is kept, bounded by `MAX_BOOK_ROWS`."""
+    conn.execute("DELETE FROM repairs WHERE state = 'answered' AND sent_at IS NOT NULL AND expires_at IS NOT NULL "
+                 'AND expires_at < ?', (int((now - PRUNE_MARGIN_SECONDS) * 1000),))
 
 
 def due_results(conn, limit: int = MAX_RESULTS_PER_CHECK_IN) -> List[dict]:

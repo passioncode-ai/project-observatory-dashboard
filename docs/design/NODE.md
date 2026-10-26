@@ -742,13 +742,16 @@ remote-execution policy (FAC-SEM-068).
   covers, so it counts only when the certificate binds no person and the enrollment this machine made with a token
   carried it (`org_cloud`, `enrolledRole`); a certificate binding a person with role `org-cloud` is refused, and a
   renewal or a rotation that adds, drops or changes a role is refused `binding-changed` (`_same_binding`), the
-  certificate on record kept.
+  certificate on record kept. A certificate without a role is recorded `role: null`; a record saved by 0.27.0 or
+  0.28.0, which kept no role at all, renews and rotates as before and, with no `enrolledRole`, keeps the notice.
 - **Once per id, every step audited.** One row per request id in the enrollment's owner-only outbox database
   (`repairs`): the request as received, when it was received and the person told, the lifecycle operation, and the
   one stored `repair-result/1` (checked against its schema before it is stored). A redelivered id gets that result
   again unchanged and never runs twice; `already-answered` is never sent. A body is kept only while a schema-valid
   repair waits or runs; a refused or answered one keeps its id and result alone. An answered id is forgotten only
-  after a server took its result and 8 days passed (past any request's `expiresAt`, so it is refused anyway). At most
+  after a server took its result and its own request's `expiresAt` is a day past (a redelivery is refused `expired`
+  by then), never by when it was answered: a request that came before its `issuedAt` is answered early and stays live.
+  A row whose request had no readable expiry is kept, within the row bound. At most
   64 repairs wait and 10 000 rows are kept: past them a request is not recorded (`repair-book-full`) and the server
   sends it again later. A removal or a closed organization forgets what had not started. Every step writes one journal line of codes and ids
   (`repair-received`, `repair-notified`, `repair-declined`, `repair-started`, `repair-answered`,

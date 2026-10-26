@@ -557,6 +557,36 @@ class Hostile(Book):
         self.assertIsNotNone(self.row('rep-0'))                              # not yet taken by a server: kept
 
 
+class Forgetting(Book):
+    """The review of #366 at 661ac7f9: an answered id is forgotten only after its own request expired, never by when it
+    was answered (contract CONTEXT.md: one result per id)."""
+
+    def test_a_request_that_arrived_early_is_kept_until_it_expired(self):
+        early = self.request(issuedAt=iso(self.T + 3 * 86400), expiresAt=iso(self.T + 10 * 86400))
+        repair.receive(self.conn, self.ctx(), [early])
+        self.assertEqual(self.result()['reason'], 'expired')                 # before its issuedAt
+        repair.mark_sent(self.conn, ['rep-1'], self.now)
+        self.now = self.T + 9 * 86400                                        # inside its window, 9 days on
+        repair.advance(self.conn, self.ctx())
+        self.assertIsNotNone(self.row())
+        counts = repair.receive(self.conn, self.ctx(), [early])
+        self.assertEqual(counts['redelivered'], 1)                          # the same result again, never run
+        self.assertEqual(self.executor.started, [])
+        self.assertEqual(self.result()['reason'], 'expired')
+        repair.mark_sent(self.conn, ['rep-1'], self.now)
+        self.now = self.T + 10 * 86400 + repair.PRUNE_MARGIN_SECONDS + 1
+        repair.advance(self.conn, self.ctx())
+        self.assertIsNone(self.row())
+
+    def test_a_row_without_a_readable_expiry_is_kept(self):
+        repair.receive(self.conn, self.ctx(), [dict(self.request(), expiresAt='not a time')])
+        self.assertIsNone(self.row()['expires_at'])
+        repair.mark_sent(self.conn, ['rep-1'], self.now)
+        self.now += 400 * 86400
+        repair.advance(self.conn, self.ctx())
+        self.assertIsNotNone(self.row())
+
+
 class Config(unittest.TestCase):
 
     def setUp(self):
@@ -956,16 +986,56 @@ class OrgCloud(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'binding-changed')
         state = self.make().state()
         self.assertEqual(state['certificate']['serial'], serial)
-        self.assertNotIn('role', state['certificate'])
+        self.assertIsNone(state['certificate']['role'])
         self.assertIsNone(self.role())
 
     def test_a_renewal_or_rotation_may_not_add_drop_or_change_a_role(self):
         from node.org import _same_binding
-        self.assertFalse(_same_binding({'user': False}, {'user': False, 'role': 'org-cloud'}))
+        self.assertFalse(_same_binding({'user': False, 'role': None}, {'user': False, 'role': 'org-cloud'}))
         self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False}))
+        self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False, 'role': None}))
         self.assertFalse(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False, 'role': 'other'}))
         self.assertTrue(_same_binding({'user': False, 'role': 'org-cloud'}, {'user': False, 'role': 'org-cloud'}))
-        self.assertTrue(_same_binding({'user': False}, {'user': False}))
+        self.assertTrue(_same_binding({'user': False, 'role': None}, {'user': False, 'role': None}))
+        # A record saved before 0.29.0 never stored the role: its renewal or rotation keeps whatever role the server
+        # names (and `enrolledRole`, absent there too, keeps the notice).
+        self.assertTrue(_same_binding({'user': False}, {'user': False, 'role': 'org-cloud'}))
+        self.assertTrue(_same_binding({'user': False}, {'user': False, 'role': None}))
+
+    def test_a_certificate_without_a_role_records_none(self):
+        self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        self.assertIsNone(self.make().state()['certificate']['role'])
+
+    def legacy(self):
+        """An org-cloud enrollment as 0.27.0 and 0.28.0 saved it: no role on the certificate, no `enrolledRole`."""
+        self.server.role = 'org-cloud'
+        self.make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        enrollment = self.make()
+        with enrollment._locked():
+            state = enrollment.state()
+            state['certificate'].pop('role')
+            state.pop('enrolledRole')
+            enrollment._save(state)
+
+    def test_an_old_record_without_a_role_rotates_and_never_skips_the_notice(self):
+        self.legacy()
+        serial = self.make().state()['certificate']['serial']
+        self.make().rotate()
+        state = self.make().state()
+        self.assertNotEqual(state['certificate']['serial'], serial)
+        self.assertEqual(state['certificate']['role'], 'org-cloud')
+        self.assertIsNone(self.role())
+
+    def test_an_old_record_without_a_role_renews_and_never_skips_the_notice(self):
+        self.server.renewal = True
+        self.legacy()
+        not_after = strict_time(self.make().state()['certificate']['notAfter']) / 1000
+        self.now[0] = not_after + 5 * 86400
+        result = self.make().check_in()
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['renewed']['by'], 'key-on-record')
+        self.assertEqual(self.make().state()['certificate']['role'], 'org-cloud')
+        self.assertIsNone(self.role())
 
 
 class HealthAndDocs(unittest.TestCase):
