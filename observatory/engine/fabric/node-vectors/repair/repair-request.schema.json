@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/repair-request.schema.json",
+  "title": "A repair an organization asks of a node, repair-request/1 (DEC-0101)",
+  "description": "Carried in a check-in response's records.repairs, signed like a policy layer by a key of the organization's current policy key set (policySigningInput, FAC-SEM-046). The node runs it only as repairDecision answers (FAC-SEM-129). docs/specification/node-summary.md#repairs.",
+  "type": "object",
+  "required": [
+    "type",
+    "org",
+    "id",
+    "device",
+    "package",
+    "task",
+    "issuedAt",
+    "expiresAt",
+    "signature"
+  ],
+  "properties": {
+    "type": {
+      "const": "repair-request/1"
+    },
+    "org": {
+      "$ref": "device-common.schema.json#/$defs/org"
+    },
+    "id": {
+      "$ref": "activity-common.schema.json#/$defs/opaqueId",
+      "description": "The repair's id; the node runs it at most once and keeps one repair-result/1 for it, repeated unchanged for a redelivered request."
+    },
+    "device": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "agentRef",
+        "version",
+        "digest"
+      ],
+      "properties": {
+        "agentRef": {
+          "$ref": "fabric-package.schema.json#/$defs/agentRef"
+        },
+        "version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "digest": {
+          "$ref": "common.schema.json#/$defs/sha256",
+          "description": "The fabric-package/1 digest; the node runs only a package whose digest the policy's repair.packages lists."
+        }
+      },
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^\\u0000-\\u001f\\u2028\\u2029]+$",
+      "description": "One line the person reads before it runs: what is repaired. Never a path, a command or a secret."
+    },
+    "issuedAt": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expiresAt": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "After issuedAt, at most 7 days after it (FAC-SEM-129)."
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "keyId",
+        "value"
+      ],
+      "properties": {
+        "alg": {
+          "enum": [
+            "ed25519",
+            "es256"
+          ]
+        },
+        "keyId": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{86}==$",
+          "description": "64 bytes, base64: an Ed25519 signature, or an ES256 signature as R ‖ S."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

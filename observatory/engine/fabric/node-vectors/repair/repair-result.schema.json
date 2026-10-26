@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/repair-result.schema.json",
+  "title": "A node's answer to a repair, repair-result/1 (DEC-0101)",
+  "description": "One result per repair-request id, sent in the next check-in's records.repairResults inside the signed device request; a redelivered request gets the same stored result again, and a receiver keeps one per id (DEC-0102).",
+  "type": "object",
+  "required": [
+    "type",
+    "id",
+    "outcome",
+    "at"
+  ],
+  "properties": {
+    "type": {
+      "const": "repair-result/1"
+    },
+    "id": {
+      "$ref": "activity-common.schema.json#/$defs/opaqueId"
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "refused"
+      ]
+    },
+    "reason": {
+      "enum": [
+        "bad-signature",
+        "wrong-device",
+        "expired",
+        "policy-expired",
+        "not-allowlisted",
+        "person-declined",
+        "run-failed"
+      ],
+      "description": "Why it was refused or failed; absent when it succeeded."
+    },
+    "notifiedAt": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the person was told, before it started; on a machine with role org-cloud, which binds no person, when the node verified the signed request, its notice (DEC-0102)."
+    },
+    "startedAt": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When it ended, or was refused."
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "succeeded"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "notifiedAt",
+          "startedAt"
+        ],
+        "properties": {
+          "reason": false,
+          "notifiedAt": true,
+          "startedAt": true
+        }
+      },
+      "else": {
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": true
+        }
+      }
+    }
+  ]
+}

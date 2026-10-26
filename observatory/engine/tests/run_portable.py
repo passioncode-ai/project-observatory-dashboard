@@ -236,6 +236,8 @@ BOUNDARY += ('session_reload',)
 BOUNDARY += ('node_org',)
 # OBS-192: the node's harness summary (node-summary/1, contract DEC-0101) and its drift, over the contract's vectors.
 BOUNDARY += ('node_summary',)
+# OBS-193: the repair runner (repair-request/1, repair-result/1, contract DEC-0101, DEC-0117) over the contract's vectors.
+BOUNDARY += ('node_repair',)
 # OBS-79 step L1: the lifecycle broker (registry, authority, durable operations, receipts, the effect journal,
 # circuits, the restart budget, idle and takeover rules) against fake adapters.
 BOUNDARY += ('node_lifecycle_broker',)
@@ -370,6 +372,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/semantic').glob('*.json'))
     selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
     selected |= set((ROOT / 'fabric/node-vectors/summary').rglob('*.json'))    # OBS-192: node-summary/1 and the catalogue
+    selected |= set((ROOT / 'fabric/node-vectors/repair').rglob('*.json'))     # OBS-193: the repair vectors and schemas
     out = []
     for source in sorted(selected):
         if not source.is_file():

@@ -2255,5 +2255,9 @@
  "an older version": "старая версия",
  "harness summary: not shared (consent off)": "сводка окружения агентов: не передаётся (согласие выключено)",
  "the organization server refused the harness summary ({code}) on {date}; check-ins go on without it, and it is tried again on {retry}": "сервер организации отклонил сводку окружения агентов ({code}) {date}; отметки идут без неё, новая попытка {retry}",
- "sharing scope {mode}; kept on this machine as outside the organization's context: {servers} MCP servers, {skills} skills, {plugins} plugins": "область передачи {mode}; осталось на этой машине как вне контекста организации: MCP-серверов {servers}, навыков {skills}, плагинов {plugins}"
+ "sharing scope {mode}; kept on this machine as outside the organization's context: {servers} MCP servers, {skills} skills, {plugins} plugins": "область передачи {mode}; осталось на этой машине как вне контекста организации: MCP-серверов {servers}, навыков {skills}, плагинов {plugins}",
+ "done": "выполнено",
+ "the organization asks to run a repair of {agent}: {task}; it starts after {time} unless you decline": "организация просит выполнить ремонт пакетом {agent}: {task}; он начнётся после {time}, если вы не откажетесь",
+ "a repair of {agent} is running: {task}": "идёт ремонт пакетом {agent}: {task}",
+ "repair {outcome} on {date} ({reason}): {task}": "ремонт {outcome} {date} ({reason}): {task}"
 }

@@ -5,6 +5,24 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **The repair runner** (OBS-193; contract DEC-0101, DEC-0102, DEC-0117, FAC-SEM-068, FAC-SEM-129). An organization's
+  administrator may ask this machine to run one package to repair it (`repair-request/1`, signed by a key of the
+  organization's policy key set). The node decides exactly as the contract's `repairDecision` does, held to every case
+  of the contract's shared vectors (now vendored in `fabric/node-vectors/repair/`), and runs a request only as a local
+  action you allow-listed for its package in the owner-only `config/node-repair.json`: a `node.lifecycle` restart or
+  start of a target you enrolled, asked through the lifecycle broker's own door with an access binding you issued for
+  it. Never a command, a path or arguments. **You are told first**: `org status`, doctor and Health show the repair
+  (the organization's one-line task, the package, when it starts) at least 15 minutes before it starts, and
+  `project-observatory full org repair --org ID --decline REPAIR_ID` declines it; it is judged again the moment it would
+  start. Every request and run is recorded once by its id and answered once with `repair-result/1` (the same answer
+  again for a redelivered request), sent only to a server that lists `repair-result/1`; the journal holds codes and
+  ids, never the signature, the bearer or the task text. `project-observatory full org repair [--org ID]` lists them and
+  says whether a repair could run here. **Today none can**: the organization's signed policy and key set are not
+  applied yet (OE-06), so every repair that arrives is refused `bad-signature` and recorded, and the check-in does not
+  list `repair-request/1` (it does so only while a repair could run, DEC-0117).
+
 ### Changed
 
 - **The engine's contract pin moves to the contract's release `v0.1.0+2026-10-24.2`** (fabric-agent-contract
@@ -22,7 +40,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   - **A key, certification or delegation window whose bound does not read is closed** (DEC-0115, DEC-0119): the
     node's certificate and transport windows already read RFC 3339 strictly (`+0100` or a space for `T` refuses the
     certificate), and `relay.key_window_holds`, the contract's `keyWindowHolds`, is the reference the signed policy,
-    key set and root certification (OE-06) and the repair key (OBS-193) will judge with; no shipped path calls it yet.
+    key set and root certification (OE-06) will judge with and the repair runner's key (OBS-193) judges with.
   - DEC-0112, DEC-0113, DEC-0116 and DEC-0117 hold because the check-in lists only `fabric-device/0.1` among what it
     reads and sends none of DEC-0111's members, even to a server that lists them; DEC-0120's four-member pin holds.
     A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.

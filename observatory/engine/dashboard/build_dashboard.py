@@ -2428,6 +2428,24 @@ if (Array.isArray(H.organizations)) {
       } else
         hb.push([label, T("harness summary not sent yet; the next check-in sends it"), show]);
     }
+    // OBS-193: a repair the organization asked of this machine (repair-request/1, contract DEC-0101) is shown here
+    // before it runs, with the command that declines it, and the latest results after.
+    const R = O.repairs;
+    if (R && O.state !== "removed") {
+      for (const P of (R.pending || [])) {
+        if (P.state === "notified" && !P.declined)
+          hb.push([label, T("the organization asks to run a repair of {agent}: {task}; it starts after {time} unless you decline",
+            {task: P.task || "?", agent: P.agentRef || "?", time: (P.runsAfter || "?").replace("T", " ").slice(0, 16)}),
+            P.declineCommand || fullCommand("org repair --org", shellArg(O.org))]);
+        else
+          hb.push([label, T("a repair of {agent} is running: {task}", {task: P.task || "?", agent: P.agentRef || "?"}),
+            fullCommand("org repair --org", shellArg(O.org))]);
+      }
+      for (const L of (R.recent || []).slice(0, 3))
+        hb.push([label, T("repair {outcome} on {date} ({reason}): {task}",
+          {outcome: L.outcome || "?", date: (L.at || "?").slice(0, 10), task: L.task || L.id || "?",
+           reason: L.reason || T("done")}), fullCommand("org repair --org", shellArg(O.org))]);
+    }
     // DEC-0100: an event kind the organization refused for its purpose, held until the person acknowledges another
     // notice (the version it waits to change is named).
     if (Array.isArray(O.purposeHolds) && O.state !== "removed")

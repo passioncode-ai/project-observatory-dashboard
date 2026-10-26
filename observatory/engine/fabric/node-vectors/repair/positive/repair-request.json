@@ -1,0 +1,23 @@
+{
+  "type": "repair-request/1",
+  "org": {
+    "id": "org-7f3a"
+  },
+  "id": "rep-0001",
+  "device": {
+    "id": "dev-01j9a"
+  },
+  "package": {
+    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+    "version": "1.2.0",
+    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+  },
+  "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+  "issuedAt": "2026-10-22T09:00:00Z",
+  "expiresAt": "2026-10-23T09:00:00Z",
+  "signature": {
+    "alg": "ed25519",
+    "keyId": "org-7f3a.policy-2026-10",
+    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  }
+}

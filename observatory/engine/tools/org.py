@@ -21,8 +21,8 @@
     project-observatory full org rotate [--org ID]
         a new certificate for the same key before expiry
     project-observatory full org tick [--org ID]
-        everything due: a renewal by the key on record after expiry, rotation, check-in, share registrations, grant
-        usage, the outbox (the maintenance job runs it)
+        everything due: a renewal by the key on record after expiry, rotation, check-in, the repairs whose notice has
+        stood long enough, share registrations, grant usage, the outbox (the maintenance job runs it)
     project-observatory full org flush [--org ID]
         send the outbox now
     project-observatory full org summary [--org ID]
@@ -35,6 +35,15 @@
         organization end it, so it is asked again. Once on, a server that lists `node-summary/1` gets one in a check-in when it changed and at
         least once a day; `org status` says when the last one was taken (`nodeSummary`), `not shared (consent off)`,
         why none could be built, or that the server refused one (check-ins go on without it; it is tried a day later)
+    project-observatory full org repair [--org ID]
+        the repairs an organization asked of this machine (`repair-request/1`, contract DEC-0101): each one waiting to
+        run, with the line the organization wrote, the package and when it runs, and the latest results; and whether a
+        repair could run here at all (`enabled`, with the reason when it cannot: until the organization's signed policy
+        and key set are applied, every repair is refused, and the check-in does not ask for any)
+    project-observatory full org repair --org ID --decline REPAIR_ID
+        decline a repair that has not started: it never runs, and the organization is answered `person-declined`.
+        A repair runs no earlier than 15 minutes after it is shown, only a local action the owner allow-listed for its
+        package in `config/node-repair.json` (a `node.lifecycle` restart or start), never a command
     project-observatory full org leave --org ID
         remove this machine's local enrollment state for one organization, its own device keys with it
     project-observatory full org records apply --record FILE [--authorities FILE]
@@ -78,6 +87,9 @@ def parser() -> argparse.ArgumentParser:
         if name == "summary":
             one.add_argument("--consent", choices=("on", "off"),
                              help="share this machine's harness summary with that organization, or stop (needs --org)")
+    repair = sub.add_parser("repair", help="the repairs an organization asked of this machine, and declining one")
+    repair.add_argument("--org", help="one organization; default every enrolled one (needed with --decline)")
+    repair.add_argument("--decline", metavar="REPAIR_ID", help="decline a repair that has not started")
     leave = sub.add_parser("leave", help="remove this machine's local state for one organization")
     leave.add_argument("--org", required=True)
     records = sub.add_parser("records", help="the estate revision and delta this machine applied")
@@ -133,8 +145,13 @@ def run(args) -> dict:
                                if args.consent == "on" else "project-observatory full org summary --org ID --consent off")
         return {"schema": "org-summary-consent/1",
                 "organizations": [_enrollment(args.org).set_summary_consent(args.consent == "on")]}
+    if args.command == "repair" and args.decline:
+        if not args.org:
+            raise org.OrgError("org-required", "a repair is declined per organization: name it with --org",
+                               command="project-observatory full org repair --org ID --decline REPAIR_ID")
+        return {"schema": "org-repair/1", "organizations": [_enrollment(args.org).decline_repair(args.decline)]}
     action = {"status": "describe", "check-in": "check_in", "rotate": "rotate", "tick": "tick", "flush": "flush",
-              "summary": "summary_preview"}
+              "summary": "summary_preview", "repair": "repairs"}
     results = []
     for org_id in _orgs(args):
         one = _enrollment(org_id)

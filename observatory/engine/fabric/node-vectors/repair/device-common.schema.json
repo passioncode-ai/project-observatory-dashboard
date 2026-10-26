@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/device-common.schema.json",
+  "title": "Shared definitions of device enrollment, policy and check-in (fabric-device/0.1, DEC-0031)",
+  "$defs": {
+    "protocol": {
+      "const": "fabric-device/0.1"
+    },
+    "org": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "base64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+    },
+    "serial": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{2,40}$"
+    },
+    "source": {
+      "enum": [
+        "mdm",
+        "server",
+        "user"
+      ]
+    },
+    "healthState": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "Open vocabulary. Known: healthy, degraded, offline, inactive, logging_disabled, tampered, never_installed, outdated. A reader shows an unknown state as it is."
+    },
+    "detail": {
+      "$comment": "Scope (CT-109): one line of free text with no path at all, so this pattern refuses the dash form after any character (my-users-list too). HOME_PATH (src/activity-rules.ts: FAC-SEM-037, FAC-SEM-040, FAC-SEM-128) refuses it only after a character that is not an ASCII letter or digit, and FAC-SEM-103 (src/proposal-rules.ts) has no dash form. Changing any of the three is a decision.",
+      "type": "string",
+      "pattern": "^(?![\\s\\S]*(?:(?:^|[\\s\"'`=(\\[{<,;:])[/\\\\~]|[A-Za-z]:[/\\\\]|%(?:25)?2[fF]|(?:^|[^A-Za-z0-9])(?:[Uu]sers|home)[/\\\\]|-(?:[Uu]sers|home)-[A-Za-z0-9]))[^\\r\\n]{1,200}$",
+      "description": "One line of at most 200 characters with no path: no absolute path anywhere in it (a slash, backslash or tilde at the start of a word, or a drive letter), no URL-encoded slash, and no home directory in its slash or dash form (F-B-104). Never a username or content (DEC-0031)."
+    },
+    "canonicalValue": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 1024
+        },
+        {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/canonicalValue"
+          }
+        },
+        {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/canonicalValue"
+          }
+        }
+      ],
+      "description": "A value canonical JSON can sign: no fraction (write it as a string)."
+    },
+    "p256Key": {
+      "type": "string",
+      "pattern": "^B[A-Za-z0-9+/]{85}[AEIMQUYcgkosw048]=$",
+      "description": "A raw 65-byte uncompressed P-256 point (0x04 ‖ X ‖ Y), base64."
+    },
+    "signingKey": {
+      "type": "object",
+      "required": [
+        "keyId",
+        "publicKey"
+      ],
+      "properties": {
+        "keyId": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        },
+        "alg": {
+          "enum": [
+            "ed25519",
+            "es256"
+          ],
+          "description": "The key's algorithm; absent means ed25519. A verifier accepts only this algorithm for this key (DEC-0053)."
+        },
+        "publicKey": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "type": "object",
+        "properties": {
+          "alg": {
+            "const": "es256"
+          }
+        },
+        "required": [
+          "alg"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "publicKey": {
+            "$ref": "#/$defs/p256Key"
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "publicKey": {
+            "$ref": "device-key-set.schema.json#/$defs/rawKey"
+          }
+        }
+      },
+      "description": "A public key that names its algorithm: Ed25519 (raw 32 bytes, never of small order, DEC-0045) or ES256 (P-256, DEC-0053)."
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "alg",
+        "keyId",
+        "value"
+      ],
+      "properties": {
+        "alg": {
+          "enum": [
+            "ed25519",
+            "es256"
+          ]
+        },
+        "keyId": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9+/]{86}==$",
+          "description": "64 bytes, base64: an Ed25519 signature, or an ES256 signature as r ‖ s."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

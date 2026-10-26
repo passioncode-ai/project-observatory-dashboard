@@ -106,7 +106,22 @@ FILES = {**{name: "fixtures/vectors/" + name for name in (
          "device/device-check-in-response-acknowledged.json":
              "fixtures/positive/device-check-in-response-acknowledged.json",
          "device/device-check-in-response-acknowledged-bad.json":
-             "fixtures/negative/device-check-in-response-acknowledged-bad.json"}
+             "fixtures/negative/device-check-in-response-acknowledged-bad.json",
+         # The repair runner (DEC-0101, DEC-0102, DEC-0117; OBS-193): `repairDecision`'s shared vectors, the request
+         # and result schemas with the two they refer to that `summary/` does not hold (`device-common`, and
+         # `fabric-package` for its `agentRef`), every repair fixture, and FAC-SEM-068's remote-execution case.
+         "repair/repair-decision.json": "fixtures/vectors/repair-decision.json",
+         "repair/repair-request.schema.json": "schemas/repair-request.schema.json",
+         "repair/repair-result.schema.json": "schemas/repair-result.schema.json",
+         "repair/device-common.schema.json": "schemas/device-common.schema.json",
+         "repair/fabric-package.schema.json": "schemas/fabric-package.schema.json",
+         **{"repair/positive/%s.json" % name: "fixtures/positive/%s.json" % name
+            for name in ("repair-request", "repair-result", "repair-result-refused", "repair-result-org-cloud")},
+         **{"repair/negative/%s.json" % name: "fixtures/negative/%s.json" % name
+            for name in ("repair-request-task-two-lines", "repair-result-already-answered",
+                         "repair-result-refused-without-reason", "repair-result-succeeded-unnotified")},
+         "repair/semantic/device-action-expired-remote-execution.json":
+             "fixtures/semantic/device-action-expired-remote-execution.json"}
 #: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
 SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
 #: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;

@@ -55,7 +55,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import osprivacy
 import private_io
 
-from . import http_signature, node_summary, share_registration
+from . import http_signature, node_summary, repair, share_registration
 from .relay import strict_time
 
 LOG = logging.getLogger('observatory.node.org')
@@ -64,12 +64,17 @@ DEVICE_PROTOCOL = 'fabric-device/0.1'
 ACTIVITY_PROTOCOL = 'fabric-activity/0.1'
 SHARE_PROTOCOL = share_registration.TYPE
 SUMMARY_PROTOCOL = node_summary.TYPE
-#: What this node's check-in lists in its own `protocols`: what it READS from the server (DEC-0067, DEC-0094). A server
-#: gates what it sends on this list (DEC-0116, DEC-0117), so a revision belongs here only once the node reads it:
-#: `repair-request/1` with the repair runner (OBS-193); `credential-decision/1`, `fabric-credential-envelope/1`,
-#: `credential-revocation/1` and `call-record/1` with the credential exchange (OBS-191, OBS-194). Until then no server
-#: sends this node `records.repairs`, credential members or `callRecordsAccepted`.
+#: What this node's check-in always lists in its own `protocols`: what it READS from the server (DEC-0067, DEC-0094). A
+#: server gates what it sends on this list (DEC-0116, DEC-0117), so a revision belongs here only once the node reads it:
+#: `credential-decision/1`, `fabric-credential-envelope/1`, `credential-revocation/1` and `call-record/1` with the
+#: credential exchange (OBS-191, OBS-194). `repair-request/1` is added per check-in by `Enrollment.reads`, only while a
+#: repair could run here (`repairs_enabled`, OBS-193): DEC-0117 lists it when the node "reads repairs and acts on
+#: them", and a node that would refuse every repair does not ask to be sent them.
 NODE_READS = (DEVICE_PROTOCOL,)
+#: The repair runner's two revisions (DEC-0101, DEC-0117): what the node reads, and what it sends only to a server whose
+#: response lists it.
+REPAIR_REQUEST_PROTOCOL = repair.TYPE
+REPAIR_RESULT_PROTOCOL = repair.RESULT_TYPE
 #: DEC-0111's check-in members this node never sends yet (the credential exchange is OBS-191 and OBS-194): each would
 #: go only to a server whose response lists `credential-request/1` or `call-record/1` (DEC-0116).
 UNSENT_RECORDS = ('credentialRequests', 'callRecords')
@@ -272,6 +277,9 @@ def notice(org_id: str, state: dict, now: float) -> dict:
     else:
         out['state'] = 'valid'
     out['summary'] = summary_notice(state)
+    repairs = repairs_notice(org_id, state)
+    if repairs is not None and not isinstance(removed, dict):
+        out['repairs'] = repairs
     holds = Enrollment.purpose_holds(state)
     if holds and not isinstance(removed, dict):        # DEC-0100: what this machine does not send, and why
         out['purposeHolds'] = [{'kind': kind, 'since': hold.get('at'),
@@ -421,6 +429,22 @@ def summary_notice(state: dict) -> dict:
     else:
         out['state'] = 'sent' if out['sentAt'] else 'pending'
     return out
+
+
+def repairs_notice(org_id: str, state: dict) -> Optional[dict]:
+    """What a person must know about this organization's repairs (OBS-193), from the saved state alone: each repair
+    waiting to run (the one line the organization wrote, the package, when it runs, and the command that declines it)
+    and the latest results; None when there is none of either."""
+    held = state.get('repairs') if isinstance(state.get('repairs'), dict) else {}
+    pending = [dict(item, declineCommand='project-observatory full org repair --org %s --decline %s'
+                    % (org_id, item.get('id')))
+               if item.get('state') == 'notified' and not item.get('declined') else dict(item)
+               for item in held.get('pending') or [] if isinstance(item, dict)]
+    recent = [dict(item) for item in held.get('recent') or [] if isinstance(item, dict)]
+    if not pending and not recent:
+        return None
+    return {'pending': pending, 'recent': recent, 'unsent': held.get('unsent') or 0,
+            'command': 'project-observatory full org repair --org %s' % org_id}
 
 
 def node_folder(home: Path) -> Path:
@@ -729,7 +753,9 @@ class Enrollment:
                  clock: Callable[[], float] = time.time, meter_db: Optional[Path] = None,
                  paths: Optional[Dict[str, str]] = None,
                  harness: Optional[Callable[[], Tuple[Any, Any, Optional[str]]]] = None,
-                 exclusions: Optional[Callable[[], Tuple[List[str], Optional[str]]]] = None):
+                 exclusions: Optional[Callable[[], Tuple[List[str], Optional[str]]]] = None,
+                 repair_config: Optional[Callable[[], Tuple[dict, Optional[str]]]] = None,
+                 executor: Optional[Callable[[dict], Any]] = None):
         if not isinstance(org_id, str) or not ORG_ID.fullmatch(org_id):
             raise OrgError('org-id', 'an organization id is [A-Za-z0-9][A-Za-z0-9_-]{0,127}')
         self.node, self.org_id = Path(node), org_id
@@ -738,6 +764,9 @@ class Enrollment:
         self.paths = dict(PATHS, **(paths or {}))
         self.harness = harness or (lambda: read_harness_scans(self.clock()))
         self.exclusions = exclusions or read_exclusions
+        # The repair runner (OBS-193): the owner's allow-list of local actions and the executor it names.
+        self.repair_config = repair_config or repair.read_config
+        self.executor_for = executor or repair.executor_from
         self._held = threading.local()                     # re-entry is per thread: another thread waits
 
     # -- the lock ----------------------------------------------------------------------------------------------
@@ -834,6 +863,7 @@ class Enrollment:
                   attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
                   active_registered INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL);""")
+            conn.executescript(repair.SCHEMA)               # the repair book (OBS-193)
             with contextlib.suppress(sqlite3.OperationalError):    # an outbox from before the column
                 conn.execute('ALTER TABLE registrations ADD COLUMN active_registered INTEGER NOT NULL DEFAULT 0')
             yield conn
@@ -930,12 +960,16 @@ class Enrollment:
             dropped = conn.execute("UPDATE events SET state = 'dropped', key = NULL, reason = ? WHERE state = 'pending'",
                                    (('removed:' + code)[:40],)).rowcount
             conn.execute("DELETE FROM meta WHERE name IN ('retry', 'inflight')")
+            repairs_dropped = repair.drop_pending(conn)    # OBS-193: nothing more runs for it; answered ids stay
             registrations = 0
             if closed_at is not None:
                 registrations = conn.execute('DELETE FROM registrations').rowcount
                 conn.execute('DELETE FROM events')
                 conn.execute('DELETE FROM meta')
         state['removed'] = {'at': iso(self.clock()), 'code': code, 'status': status, 'droppedEvents': dropped}
+        if repairs_dropped:
+            state['removed']['droppedRepairs'] = repairs_dropped
+        state.pop('repairs', None)
         if closed_at is not None:
             state['removed'].update(closedAt=closed_at, droppedRegistrations=registrations)
             for held in ('collectionStart', 'policyRootKey', 'keySet', 'serverPolicy', 'purposeHolds',
@@ -1084,6 +1118,9 @@ class Enrollment:
             doc.update({k: previous[k] for k in ('purposeHolds', 'acknowledgedNoticeVersion', 'noticeVersion')
                         if k in previous})
         doc.update(_summary_carried(previous, renewal=renewed is not None))
+        if previous is not None and not over:          # OBS-193: the repair book lives on; so does what it shows
+            doc.update({k: previous[k] for k in ('repairs', 'repairResultsRefused', 'repairResultsBackoffUntil')
+                        if k in previous})
         doc.update(_policy_carried(previous, renewal=renewed is not None))
         private_io.parent(self.folder)
         self._save(doc)
@@ -1237,7 +1274,7 @@ class Enrollment:
         healthy = not retrying and not dropped
         health = {'state': 'healthy'} if healthy else \
             {'state': 'degraded', 'detail': 'activity outbox retrying' if retrying else 'activity events dropped'}
-        doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'check-in', 'protocols': list(NODE_READS),
+        doc = {'protocol': DEVICE_PROTOCOL, 'kind': 'check-in', 'protocols': self.reads(state),
                'device': {'id': self.keys.device_id}, 'sequenceNum': state['sequenceNum'] + 1, 'at': iso(self.clock()),
                'agent': {'version': VERSION, 'buildChannel': 'official'},
                'health': health, 'logging': {'enabled': True},
@@ -1284,6 +1321,10 @@ class Enrollment:
                     pending = None
             if pending is not None:
                 state['summarySequence'] = pending['summary']['sequence']   # spent once sent, as sequenceNum
+            # DEC-0117: stored repair results ride only to a server whose response lists `repair-result/1`.
+            results = self._repair_results_due(state)
+            if results:
+                doc.setdefault('records', {})['repairResults'] = results
             self._save(state)
             def resend(sent: dict):
                 def again(current: dict) -> dict:          # resent under the previous certificate: it names that one
@@ -1295,7 +1336,7 @@ class Enrollment:
                 return again
             status, answer = self._signed(state, self.paths['check-in'], doc, resend(doc))
             removed = isinstance(state.get('removed'), dict)   # DEC-0103 or OBS-204: nothing is sent again
-            if pending is not None and not removed and _summary_suspect(status, answer):
+            if (pending is not None or results) and not removed and _summary_suspect(status, answer):
                 code, first_status = _error_code(answer) or 'http-%d' % status, status
                 state['sequenceNum'] += 1                  # the same check-in, without the summary, signed afresh
                 bare = dict({k: v for k, v in doc.items() if k != 'records'}, sequenceNum=state['sequenceNum'])
@@ -1303,16 +1344,24 @@ class Enrollment:
                 status, answer = self._signed(state, self.paths['check-in'], bare, resend(bare))
                 if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
                     # Refused without it too: the summary is not to blame, and it waits for the next check-in that
-                    # is taken, so a refusing server gets one request per check-in, not two.
-                    state['summaryHeld'] = True
+                    # is taken, so a refusing server gets one request per check-in, not two. Repair results stay
+                    # unsent and ride again with the next check-in.
+                    if pending is not None:
+                        state['summaryHeld'] = True
                 else:
                     retry = int(self.clock()) + SUMMARY_BACKOFF_SECONDS
-                    state['summaryRefused'] = {'at': iso(self.clock()), 'status': first_status,
-                                               'code': code, 'sequence': pending['summary']['sequence'],
-                                               'retryAt': iso(retry)}
-                    state['summaryBackoffUntil'] = retry
-                    self.journal('node-summary-refused', code=code)
-                    pending = None
+                    if pending is not None:
+                        state['summaryRefused'] = {'at': iso(self.clock()), 'status': first_status,
+                                                   'code': code, 'sequence': pending['summary']['sequence'],
+                                                   'retryAt': iso(retry)}
+                        state['summaryBackoffUntil'] = retry
+                        self.journal('node-summary-refused', code=code)
+                    if results:                            # held a day, as a refused summary is; never dropped
+                        state['repairResultsRefused'] = {'at': iso(self.clock()), 'status': first_status,
+                                                         'code': code, 'retryAt': iso(retry)}
+                        state['repairResultsBackoffUntil'] = retry
+                        self.journal('repair-results-refused', code=code, results=len(results))
+                    pending, results = None, []
             if status != 200 or not isinstance(answer, dict) or answer.get('kind') != 'check-in-response':
                 code = _error_code(answer) or ('unreachable' if status == 0 else 'http-%d' % status)
                 state['lastCheckIn'] = {'at': iso(self.clock()), 'result': code}
@@ -1377,9 +1426,22 @@ class Enrollment:
                 state.pop('summaryRefused', None)
                 state.pop('summaryBackoffUntil', None)
             state.pop('summaryHeld', None)                 # a check-in was taken: a held summary may ride again
+            records = answer.get('records') if isinstance(answer.get('records'), dict) else {}
+            repairs_received = None
+            with self._db() as conn:
+                if results:                                # DEC-0102: the server took them; a redelivery resends
+                    repair.mark_sent(conn, [r['id'] for r in results], self.clock())
+                    state.pop('repairResultsRefused', None)
+                    state.pop('repairResultsBackoffUntil', None)
+                if 'repairs' in records:                   # OBS-193: every request recorded once and audited
+                    repairs_received = repair.receive(conn, self._repair_context(state), records['repairs'])
+                if results or repairs_received is not None:
+                    state['repairs'] = repair.report(conn)
             self._save(state)
             self.journal('checked-in', sequenceNum=state['sequenceNum'], action=action, flags=flags,
-                         **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}))
+                         **({'nodeSummary': pending['summary']['sequence']} if pending is not None else {}),
+                         **({'repairResults': len(results)} if results else {}),
+                         **({'repairs': repairs_received} if repairs_received is not None else {}))
             newly_listed = self.accepts_shares(state) and not listed_before
             if notice_moved:                               # DEC-0102: a notice refusal is sent again on a new notice
                 with self._db() as conn:
@@ -1719,6 +1781,121 @@ class Enrollment:
         under a policy without a baseline."""
         return []
 
+    def policy_keys(self) -> List[dict]:
+        """The organization's current policy key set this machine verified and applied (`{keyId, alg?, publicKey,
+        notBefore?, notAfter?}`, devices.md "Key sets", FAC-SEM-046), which a repair request's signature is verified
+        under. None yet: verifying and applying the key set is OE-06, so every repair is refused `bad-signature` until
+        then, and the check-in does not list `repair-request/1`."""
+        return []
+
+    # -- the repair runner (DEC-0101, DEC-0102, DEC-0117; OBS-193) -----------------------------------------------
+    def repairs_enabled(self, state: Optional[dict] = None) -> dict:
+        """Whether a repair could run on this machine for this organization now, and if not the first reason: the
+        signed key set and policy are applied (OE-06), the policy lists `repair.packages`, remote execution has not
+        stopped with the policy (FAC-SEM-068), the owner allow-listed a local action for at least one package
+        (`config/node-repair.json`) and named the lifecycle door's bearer slot. Only then does the check-in list
+        `repair-request/1` (DEC-0117): a node that would refuse every repair does not ask to be sent them."""
+        layers = self.policy_layers()
+        allowed = node_summary.signed_policy_value(layers, 'repair.packages')
+        if not self.policy_keys():
+            return {'enabled': False, 'reason': 'policy-not-applied',
+                    'detail': 'the organization\'s signed policy and key set are not applied on this machine yet, so '
+                              'every repair would be refused'}
+        if not isinstance(allowed, list) or not allowed:
+            return {'enabled': False, 'reason': 'no-allowlist',
+                    'detail': 'the organization\'s policy lists no package a repair may run (repair.packages)'}
+        if not repair.remote_execution_allowed(layers, int(self.clock() * 1000)):
+            return {'enabled': False, 'reason': 'policy-expired',
+                    'detail': 'the organization\'s policy expired, so remote execution stops until a newer one arrives'}
+        config, problem = self.repair_config()
+        if problem:
+            return {'enabled': False, 'reason': 'config-unusable', 'detail': problem}
+        if not config['agents']:
+            return {'enabled': False, 'reason': 'no-local-action',
+                    'detail': 'config/node-repair.json allow-lists no local action for any package'}
+        if self.executor_for(config) is None:
+            return {'enabled': False, 'reason': 'no-executor',
+                    'detail': 'config/node-repair.json names no lifecycle bearer slot (lifecycle.bearerSlot)'}
+        return {'enabled': True}
+
+    def reads(self, state: dict) -> List[str]:
+        """The check-in's own `protocols` (DEC-0067, DEC-0094, DEC-0117): `NODE_READS`, and `repair-request/1` while
+        a repair could run here."""
+        out = list(NODE_READS)
+        if self.repairs_enabled(state)['enabled']:
+            out.append(REPAIR_REQUEST_PROTOCOL)
+        return out
+
+    def _repair_context(self, state: dict) -> 'repair.Context':
+        config, problem = self.repair_config()
+        if problem:
+            self.journal('repair-config-unusable', detail=problem[:200])
+        cert = state.get('certificate') if isinstance(state.get('certificate'), dict) else {}
+        return repair.Context(org=self.org_id, device=state.get('device') or self.keys.device_id,
+                              role=cert.get('role') if isinstance(cert.get('role'), str) else None,
+                              keys=self.policy_keys(), layers=self.policy_layers(), agents=config['agents'],
+                              executor=None if problem else self.executor_for(config), now=self.clock(),
+                              journal=self.journal)
+
+    def _repair_results_due(self, state: dict) -> List[dict]:
+        """The stored results the next check-in carries: only to a server whose response lists `repair-result/1`
+        (DEC-0117), not while a refusal of them is waited out, at most 64."""
+        if REPAIR_RESULT_PROTOCOL not in (state.get('protocols') or []):
+            return []
+        if self.clock() < (state.get('repairResultsBackoffUntil') or 0):
+            return []
+        with self._db() as conn:
+            return repair.due_results(conn)
+
+    def run_repairs(self) -> dict:
+        """The tick's repair step: what is due of the repairs already received (a decline answered, a notice that has
+        stood long enough decided again and started, a started one polled to its end). Under the lock."""
+        with self._locked():
+            state = self.state()
+            if state is None or isinstance(state.get('removed'), dict):
+                return {'result': 'not-enrolled' if state is None else 'removed'}
+            with self._db() as conn:
+                if not conn.execute("SELECT 1 FROM repairs WHERE state != 'answered' LIMIT 1").fetchone():
+                    return {'result': 'none-pending'}
+                counts = repair.advance(conn, self._repair_context(state))
+                state['repairs'] = repair.report(conn)
+            self._save(state)
+            return counts
+
+    def repairs(self) -> dict:
+        """`org repair`: this organization's repairs as the person sees them, and whether one could run here."""
+        state = self.state()
+        if state is None:
+            raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
+                           command=enroll_command(self.org_id, None))
+        said = repairs_notice(self.org_id, state) or {'pending': [], 'recent': [], 'unsent': 0}
+        return {'org': self.org_id, 'enabled': self.repairs_enabled(state),
+                'listed': REPAIR_RESULT_PROTOCOL in (state.get('protocols') or []), **said}
+
+    def decline_repair(self, repair_id: str) -> dict:
+        """The person declines a repair that has not started; the next tick answers it `person-declined`."""
+        with self._locked():
+            state = self.state()
+            if state is None:
+                raise OrgError('not-enrolled', 'this machine is not enrolled in organization %s' % self.org_id,
+                               command=enroll_command(self.org_id, None))
+            if (state.get('certificate') or {}).get('role') == 'org-cloud':
+                raise OrgError('org-cloud', 'this machine has role org-cloud: it binds no person, and the '
+                               'organization\'s signed request is its notice (DEC-0102)')
+            with self._db() as conn:
+                before = repair.decline(conn, self._repair_context(state), repair_id)
+                if before is None:
+                    raise OrgError('no-such-repair', 'organization %s asked no repair %s of this machine'
+                                   % (self.org_id, repair_id), command='project-observatory full org repair --org %s'
+                                   % self.org_id)
+                if before != 'notified':
+                    raise OrgError('repair-not-pending', 'repair %s already %s' % (
+                        repair_id, 'started' if before in ('starting', 'running') else 'ended'),
+                        command='project-observatory full org repair --org %s' % self.org_id)
+                state['repairs'] = repair.report(conn)
+            self._save(state)
+            return {'org': self.org_id, 'declined': repair_id, **(repairs_notice(self.org_id, state) or {})}
+
     def services_in_context(self) -> List[dict]:
         """The agent services placed in this organization's context, and no other. None yet: a Fabric service
         descriptor names no context and no agent reference an estate placement could be matched to, so no service on
@@ -2023,6 +2200,7 @@ class Enrollment:
             steps = [('rotate', lambda: self.rotate() if self.rotation_due(self.state()) else 'not-due'),
                      ('checkIn', lambda: self.check_in(force_renewal=False, inputs=inputs)
                       if self.clock() >= (self.state().get('nextCheckInAt') or 0) else 'not-due'),
+                     ('repairs', self.run_repairs),
                      ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage),
                      ('outbox', self.flush)]
             for name, step in steps:
@@ -2055,6 +2233,11 @@ class Enrollment:
                and (self.expired(state) or bool(state.get('reEnroll'))),
                'rotationPending': isinstance(state.get('pendingRotation'), dict),
                'key': self._key_declaration(), 'nodeSummary': said['summary']}
+        if not isinstance(state.get('removed'), dict):    # OBS-193: nothing more runs for an organization that left
+            out['repairs'] = dict(said.get('repairs') or {'pending': [], 'recent': [], 'unsent': 0},
+                                  enabled=self.repairs_enabled(state),
+                                  **({'refused': state['repairResultsRefused']}
+                                     if isinstance(state.get('repairResultsRefused'), dict) else {}))
         out.update({k: said[k] for k in ('removed', 'nextStep', 'command', 'renewUntil', 'renewalRefused',
                                          'purposeHolds') if k in said})
         out['outbox'] = {'pending': 0, 'acked': 0, 'rejected': 0, 'dropped': 0, 'lastBatch': None, 'retry': None}
@@ -2094,6 +2277,8 @@ class Enrollment:
             degraded.append('org:node-summary-' + summary_state)
         if out.get('purposeHolds'):
             degraded.append('org:purpose-held')
+        if 'refused' in out.get('repairs', {}):
+            degraded.append('org:repair-results-refused')
         if out['outbox']['pending'] and (out['outbox']['retry'] or {}).get('attempts'):
             degraded.append('org:outbox-retrying')
         out['degraded'] = degraded

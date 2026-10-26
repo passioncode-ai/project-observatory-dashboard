@@ -30,9 +30,9 @@ The probe receipt's `contractCommit` comes from the pin, its `localProfile` and
 On top of what OBS-217 brought (below): a node summary under `machine.mode` `C`, the default, lists only the
 organization's context, under `A` the whole harness (DEC-0118, `node_summary.policy_scope`); the device certificate's
 window reads its bounds as RFC 3339 read strictly and closes on one that does not read (DEC-0115, DEC-0119), and
-`relay.key_window_holds` is the reference the key, certification and delegation windows of OE-06 and OBS-193 will judge
-with (no shipped path calls it yet); DEC-0112, DEC-0113,
-DEC-0116 and DEC-0117 hold because the check-in lists and sends none of the members they judge. DEC-0120 (a pin of four
+`relay.key_window_holds` is the reference the key, certification and delegation windows are judged with: the repair
+runner's key (OBS-193, below) calls it, and OE-06's policy key and key set will; DEC-0112, DEC-0113 and DEC-0116 hold
+because the check-in lists and sends none of the members they judge, and DEC-0117 as the repair runner says below. DEC-0120 (a pin of four
 members) holds for `../fabric-contract.lock.json`. The pin is the latest release before DEC-0121, which the engine
 pins only after CT-124 and CT-125 land (OBS-237); DEC-0121 to DEC-0124 are not in it.
 
@@ -45,8 +45,21 @@ server's clock) and its check-in and attribution judgement (DEC-0114), the home 
 after any separator (DEC-0105), and the estate's machine profiles and delta anchor
 (FAC-SEM-134, FAC-SEM-137). Its check-in lists only `fabric-device/0.1` among what it
 reads, so a server gates repairs and credential members off (DEC-0116, DEC-0117); it
-sends none of DEC-0111's members. The credential exchange (DEC-0111 to DEC-0113) and the
-repair runner are not conformance claims of this release: OBS-191, OBS-193 and OBS-194.
+sends none of DEC-0111's members. The credential exchange (DEC-0111 to DEC-0113) is not a
+conformance claim of this release: OBS-191 and OBS-194.
+
+**The repair runner (OBS-193, DEC-0101, DEC-0102, DEC-0117; FAC-SEM-068, FAC-SEM-129).**
+`node/repair.py` ports `repairDecision` and is held to every case of the contract's shared
+vectors (`node-vectors/repair/repair-decision.json`), FAC-SEM-068's remote-execution case
+and the repair schemas and fixtures, all vendored at the pin by `tools/vendor_org_vectors.py`
+(`tests/test_node_repair.py`). A request runs only as an owner-allow-listed `node.lifecycle`
+action, the person told at least 15 minutes first and able to decline, one stored
+`repair-result/1` per id, sent only to a server whose response lists `repair-result/1`. The
+check-in lists `repair-request/1` only while a repair could run: until OE-06 applies the
+signed key set and policy it does not, and a repair sent anyway is refused `bad-signature`
+and recorded. Two readings are the safe side and named in `docs/design/NODE.md`: an
+unreadable policy `expiresAt` stops remote execution, and a request its schema refuses is
+answered `bad-signature` and never shown or run.
 
 **Three schema releases, one pin per file.** The lock's `releases` lists, for every
 bundled schema and fixture, the one release tag that published it: the first eight

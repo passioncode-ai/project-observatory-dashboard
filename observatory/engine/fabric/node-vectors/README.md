@@ -34,6 +34,8 @@ The node's harness summary (DEC-0101, DEC-0102; OBS-192) is pinned with them: `s
 
 The re-pin of OBS-217 added, at the same commit: the DEC-0105 home-path fixtures (`summary/semantic/node-summary-home-after-dot.json`, `-home-after-at.json`), the nine baselines the policy schema refuses since DEC-0102 (`summary/negative/device-policy-baseline-*.json`, run by `node_summary.baseline_problems`), the seven check-in fixtures of DEC-0114 (`summary/semantic/credential-check-in-summary-*.json` and `device-attribution-*.json`, run by `check_in_summary_findings` and `check_in_attribution_findings`), DEC-0103's `device-organization-closed.schema.json` with its positive fixture and six of its seven negative ones in `device/` (`-path` names a home folder the public-release gate refuses; `tests/test_node_org.py` rebuilds it from the positive), and the batch acknowledgements and check-in responses of DEC-0100 and DEC-0102 (`device/activity-batch-ack-purpose.json`, `-before-purpose.json`, `device/device-check-in-response-acknowledged.json` and its negative). DEC-0111 to DEC-0113 (the credential exchange) are not vendored here: OBS-191 and OBS-194 vendor them with the code that reads them.
 
+The repair runner (DEC-0101, DEC-0102, DEC-0117; OBS-193) is pinned with them in `repair/`: `repair-decision.json`, the contract's shared vectors for `repairDecision` (FAC-SEM-129, written by its `tools/vectors/repair-decision.ts`), the `repair-request/1` and `repair-result/1` schemas with `device-common.schema.json` and `fabric-package.schema.json` (the two they refer to that `summary/` does not hold), every repair fixture (`repair/positive/`, `repair/negative/`) and FAC-SEM-068's remote-execution case (`repair/semantic/device-action-expired-remote-execution.json`). `tests/test_node_repair.py` runs the port (`node/repair.py`) over them.
+
 Do not edit them here. When the contract changes, copy the files again from the new commit and update the commit and
 the digests below.
 
@@ -111,3 +113,17 @@ the digests below.
 | `summary/device-policy-mdm-managed.json` | `14a1062781993cf469a99bb3d5ce30baa165640b5ba8a74b2f36e9774e5db0bc` |
 | `summary/negative/device-policy-workspace-folder-absolute.json` | `8597d106c9ddefcaeba3bba760e5fe5c77eadc14f64cf9e59ecd0f7e3298d308` |
 | `summary/negative/device-policy-workspace-folder-home.json` | `0bb59e634126b1e6edb302e7f905f49fc2fb7bb44da60a2e5296d3025b871592` |
+| `repair/repair-decision.json` | `ee3b71c2aa3a7fe67193a67cdedc4c4571bb04f3760979ad6bb772a355d2f39d` |
+| `repair/repair-request.schema.json` | `46188f4fa2866857dd2457765f321470dfea494ea2ec4a33255adca62c921833` |
+| `repair/repair-result.schema.json` | `166d5397dbb984f55162805114e202b17c8aaa54ac9b8b67d8acc676af2760be` |
+| `repair/device-common.schema.json` | `54a640bf7469f5dca331c03e589bbb05b059f401275d0b13a96b39c391c48230` |
+| `repair/fabric-package.schema.json` | `a413ab4884dff154a81034e50d74303c4af8ca7b5902deaeda11a77c275bed43` |
+| `repair/positive/repair-request.json` | `a09b84af8688e9ec97289e6b97f246e45db196dae2a1caa12d92d173b9ad15bd` |
+| `repair/positive/repair-result.json` | `0a4d02f9342987cf73083dd01d24445852ef2f9236b76c18415a66c3f6d7f573` |
+| `repair/positive/repair-result-refused.json` | `7fec7fb4505de9e23b5009fa285cb9587880ec09a857ff9e493cba4c2e65b316` |
+| `repair/positive/repair-result-org-cloud.json` | `347af54396c474c03216f8987e1477a1af5891abbc76bc1d5fd24c913d9d6368` |
+| `repair/negative/repair-request-task-two-lines.json` | `1789b30acb0b4f31f83fbcdcdc32f5d78e1081777041f0d26cbb75671c926719` |
+| `repair/negative/repair-result-already-answered.json` | `b738982e5258a9a27aab1b199fe745560840ce5ce06e28f43ed4d0c7cade86a3` |
+| `repair/negative/repair-result-refused-without-reason.json` | `fe6d7663891683d791d6b09f2d1947efec2d8c6eef7be8ff0add50a7c800760b` |
+| `repair/negative/repair-result-succeeded-unnotified.json` | `329567488c644013d73e70a12fba879ef86497f8046b205870a180a75c16468b` |
+| `repair/semantic/device-action-expired-remote-execution.json` | `5638ed124984182c3ebf9062697a080a885c6aa40ec0b01671930ccd57d13b51` |

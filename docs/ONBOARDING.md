@@ -1533,6 +1533,26 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   no drift, as the contract asks; a signed policy the server sends is recorded and reported `failed` with its
   revision, never as in force, OBS-231). No agent service is listed yet: nothing on this machine ties a service to an
   organization's context, and a person's other services are never listed.
+- **Repairs** (`repair-request/1`, contract DEC-0101): an organization's administrator may ask this machine to run one
+  package to repair it, signed by a key of the organization's policy key set. Nothing runs on that alone: the request
+  is judged as the contract's `repairDecision` judges it (the signature under a key in its validity window, this
+  device and organization, at most 7 days, a policy that has not expired, the package on the policy's
+  `repair.packages` list) and runs only as a local action you allow-listed for that package in
+  `config/node-repair.json`, mode 0600 in a folder only you can write to:
+  `{"schemaVersion": 1, "agents": {"urn:fabric:agent:PUBLISHER:ID": {"action": "restart", "targetId": "TARGET"}},
+  "lifecycle": {"bearerSlot": "PROJECT/ENV/NAME"}}`. `action` is `restart` or `ensure_running` of a target you
+  enrolled with `full lifecycle` (never a command, a path or arguments), and `bearerSlot` is the vault slot holding the
+  bearer of an access binding you issued for the repair runner and granted only those targets and the tools
+  `lifecycle.list`, `lifecycle.operation.get` and the action's own (`full access-binding issue`,
+  `full lifecycle allow PRINCIPAL --binding ID --target TARGET --tool ...`). **You are told first**: `org status`, doctor
+  and Health show the repair (the line the organization wrote, the package, when it starts) at least 15 minutes before
+  it starts; `project-observatory full org repair --org ID --decline REPAIR_ID` declines it, and it never runs. It is
+  judged again the moment it would start. Every request and run is recorded once by its id in the enrollment's journal
+  (no signature, bearer or body) and answered once with `repair-result/1`, the same answer again if the request comes
+  again, sent only to a server that lists `repair-result/1`. `project-observatory full org repair [--org ID]` lists
+  them and says whether a repair could run here at all. **Today none can**: the organization's signed policy and key
+  set are not applied yet (OE-06), so every repair that arrives is refused `bad-signature` and recorded, and the
+  check-in does not ask for any (it lists `repair-request/1` only while one could run, DEC-0117).
 
 Check-ins run as often as the maintenance job (hourly), not at the server's interval: a server that marks a device
 offline after three missed intervals shows it offline between passes. Run `org check-in` for a fresh one.

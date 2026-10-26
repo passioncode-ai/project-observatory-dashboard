@@ -1,0 +1,588 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/fabric-package.schema.json",
+  "title": "Fabric package (fabric-package/1)",
+  "description": "DEC-0050 (format and digest) and DEC-0051 (signatures): one version of an agent or a skill set, as the file fabric.package.json at the root of its folder. The digest is SHA-256 over RFC 8785 of this document without digest and signatures; every other file of the folder is covered through files[]. docs/specification/package.md.",
+  "type": "object",
+  "required": [
+    "schema",
+    "kind",
+    "id",
+    "version",
+    "publisher",
+    "licence",
+    "files",
+    "digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fabric-package/1"
+    },
+    "kind": {
+      "enum": [
+        "agent",
+        "skill-set"
+      ]
+    },
+    "id": {
+      "$ref": "#/$defs/name",
+      "description": "The package's name, unique for its publisher, equal to the Claude Code plugin name in .claude-plugin/plugin.json when the folder has one."
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/semver"
+    },
+    "publisher": {
+      "$ref": "#/$defs/name",
+      "description": "Who publishes the package: the scope of id and the middle of agentRef. A name, never a key; the key that signs is pinned by the installing machine."
+    },
+    "agentRef": {
+      "$ref": "#/$defs/agentRef"
+    },
+    "licence": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "An SPDX license expression."
+    },
+    "layer": {
+      "enum": [
+        "base",
+        "org",
+        "team",
+        "workplace",
+        "person"
+      ],
+      "description": "The narrowest audience a skill set is published for: a publication scope, never an identity."
+    },
+    "runners": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9./-]+$"
+      }
+    },
+    "skills": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        "maxLength": 64
+      }
+    },
+    "allowedToolsCeiling": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "listingChars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "provider": {
+      "$ref": "#/$defs/path",
+      "description": "The agent's provider manifest (fabric-agent.json, manifest.schema.json) inside the folder."
+    },
+    "service": {
+      "type": "object",
+      "description": "The service template: what of a service descriptor the package fixes. The installing machine adds the origin, the token file, the supervisor, the paths and installedAt/installedBy.",
+      "required": [
+        "id",
+        "name",
+        "entry"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "service-common.schema.json#/$defs/serviceId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "entry": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "description": "argv; entry[0] is a path inside the folder (FAC-SEM-064)."
+        },
+        "runtime": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "enum": [
+                "node",
+                "python",
+                "binary"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "secrets": {
+      "type": "array",
+      "description": "DEC-0013: the secret slots the agent needs, by name. A value never appears here; the installing machine places each one where the estate record says (FAC-SEM-065).",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "purpose"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "optional": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "requires": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "service-common.schema.json#/$defs/serviceId"
+          }
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "publisher",
+              "id",
+              "range"
+            ],
+            "properties": {
+              "publisher": {
+                "$ref": "#/$defs/name"
+              },
+              "id": {
+                "$ref": "#/$defs/name"
+              },
+              "range": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "darwin",
+              "linux",
+              "windows"
+            ]
+          }
+        },
+        "gpu": {
+          "type": "boolean"
+        },
+        "mcp": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "description": "DEC-0071: the MCP servers the agent calls, by role: the server registered under that role name in the placement's configuration (in Claude Code's .mcp.json, the server key), and the tools it must expose. Never an address or a token; those come with the placement.",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "tools"
+            ],
+            "properties": {
+              "role": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "contract": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$",
+                "description": "An optional name of the tool set, for people (for example org-admin); never a host name."
+              },
+              "tools": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+                }
+              },
+              "secrets": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "description": "DEC-0074: the secret slots (by name, from secrets[]) the placement uses to configure this role's server entry: its address and its token. Each named slot is declared in secrets[], and one slot feeds one role (FAC-SEM-102)."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "costPresets": {
+      "$ref": "manifest.schema.json#/properties/costPresets"
+    },
+    "resultSignal": {
+      "type": "object",
+      "description": "What counts as done for the agent. Fabric's result event names it; the meter's receipts and Fabric's results join on the root run.",
+      "required": [
+        "name",
+        "says"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "says": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "array",
+      "description": "What moves when a placement moves, relative to the service's data folder. Absent or empty: nothing moves.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "purpose"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/path"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "evals": {
+      "type": "object",
+      "required": [
+        "suite"
+      ],
+      "properties": {
+        "suite": {
+          "$ref": "#/$defs/path"
+        },
+        "receipt": {
+          "type": "object",
+          "description": "The publisher's run of the suite, as packed.",
+          "required": [
+            "ranAt",
+            "suite",
+            "passed",
+            "failed"
+          ],
+          "properties": {
+            "ranAt": {
+              "$ref": "common.schema.json#/$defs/timestamp"
+            },
+            "suite": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            "passed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "skipped": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "array",
+      "description": "Vendored (with path) or hash-locked (without): the installing machine fetches nothing whose sha256 is not here.",
+      "items": {
+        "type": "object",
+        "required": [
+          "ecosystem",
+          "name",
+          "version",
+          "sha256"
+        ],
+        "properties": {
+          "ecosystem": {
+            "enum": [
+              "npm",
+              "pypi",
+              "cargo",
+              "go",
+              "other"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 214
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "path": {
+            "$ref": "#/$defs/path"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every file of the folder but fabric.package.json, with its bytes' SHA-256.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/path"
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "digest": {
+      "$ref": "common.schema.json#/$defs/sha256",
+      "description": "SHA-256 over the RFC 8785 form of this document without digest and signatures (DEC-0043, DEC-0050)."
+    },
+    "signatures": {
+      "type": "array",
+      "description": "DEC-0051: exactly one publisher signature, and organization countersignatures, each over the digest and naming its algorithm.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "alg",
+          "kid",
+          "sig"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "publisher",
+              "organization"
+            ]
+          },
+          "alg": {
+            "enum": [
+              "EdDSA"
+            ],
+            "description": "EdDSA (Ed25519) today; ES256 is added when Fabric records its decision D2."
+          },
+          "kid": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+          },
+          "sig": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "contains": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "const": "publisher"
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "minContains": 1,
+      "maxContains": 1
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    }
+  },
+  "additionalProperties": false,
+  "if": {
+    "properties": {
+      "kind": {
+        "const": "agent"
+      }
+    },
+    "required": [
+      "kind"
+    ]
+  },
+  "then": {
+    "required": [
+      "agentRef",
+      "resultSignal",
+      "evals"
+    ],
+    "properties": {
+      "agentRef": true,
+      "provider": true,
+      "resultSignal": true,
+      "evals": {
+        "type": "object",
+        "required": [
+          "receipt"
+        ],
+        "properties": {
+          "receipt": true
+        }
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "not": {
+            "required": [
+              "provider"
+            ],
+            "properties": {
+              "provider": true
+            }
+          }
+        },
+        "then": {
+          "description": "DEC-0071: an agent without a provider manifest is a consumer agent: it serves nothing and calls the MCP servers it requires by role, as the plugin it is.",
+          "required": [
+            "skills",
+            "requires"
+          ],
+          "properties": {
+            "service": false,
+            "skills": {
+              "type": "array",
+              "minItems": 1
+            },
+            "requires": {
+              "type": "object",
+              "required": [
+                "mcp"
+              ],
+              "properties": {
+                "mcp": true
+              }
+            },
+            "state": false,
+            "layer": false
+          }
+        }
+      }
+    ]
+  },
+  "else": {
+    "required": [
+      "layer",
+      "skills"
+    ],
+    "properties": {
+      "layer": true,
+      "agentRef": false,
+      "provider": false,
+      "service": false,
+      "secrets": false,
+      "costPresets": false,
+      "resultSignal": false,
+      "state": false,
+      "skills": {
+        "type": "array",
+        "minItems": 1
+      }
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "description": "A kebab-case name, as a Claude Code plugin name is."
+    },
+    "agentRef": {
+      "type": "string",
+      "maxLength": 146,
+      "pattern": "^urn:fabric:agent:[a-z][a-z0-9]*(?:-[a-z0-9]+)*:[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "description": "urn:fabric:agent:<publisher>:<id> — one agent across its versions (FAC-SEM-066)."
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^(?![/~])(?![\\s\\S]*\\\\)(?![\\s\\S]*//)(?!(?:[\\s\\S]*/)?\\.{1,2}(?:/|$))[^\\u0000-\\u001f:]{1,256}(?<!/)$",
+      "description": "A path inside the package folder: relative, forward slashes, no . or .. segment, no drive, no control character."
+    }
+  }
+}

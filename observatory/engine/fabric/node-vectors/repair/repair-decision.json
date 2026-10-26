@@ -1,0 +1,2925 @@
+{
+  "about": "Vectors for repairDecision (FAC-SEM-129, docs/specification/node-summary.md#repairs; DEC-0101, DEC-0102, DEC-0115), written by tools/vectors/repair-decision.ts, never by hand. Each case is repairDecision(input) and its expected answer {decision, reason?}; absent values are absent members. Every request is signed with Ed25519 (its value standard base64) over the settings canonical form of the request without signature (policySigningInput), by the test key whose 32-byte seed is keys.policy.seed (SHA-256 of a fixed label); keys.other signs the request another key made. The order is already-answered, bad-signature, wrong-device, expired, policy-expired, not-allowlisted, person-declined; a key's window is judged at at (an absent bound open, one that does not read closing it); a request with no canonical form (a fraction, a lone surrogate) is refused as bad-signature; a machine with role org-cloud skips only the person step. Every case holds in every time zone.",
+  "keys": {
+    "policy": {
+      "keyId": "org-7f3a.policy-2026-10",
+      "alg": "ed25519",
+      "seed": "b86002073dc2be1069a48d7af4093a8653a19a94df1cc49fc96a586b0fe00520",
+      "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+    },
+    "other": {
+      "seed": "e10eedc312f420a010e94e7036f2c6522b45b855a04b714baf7d6a702d27d7ef",
+      "publicKey": "PfcLXVh6uL3EyxwfLkCu5ixf+/VV1mBdun8jgYpJAdE="
+    }
+  },
+  "signingInput": "{\"device\": {\"id\": \"dev-01j9a\"}, \"expiresAt\": \"2026-10-23T09:00:00Z\", \"id\": \"rep-0001\", \"issuedAt\": \"2026-10-22T09:00:00Z\", \"org\": {\"id\": \"org-7f3a\"}, \"package\": {\"agentRef\": \"urn:fabric:agent:passioncode:observatory-repair\", \"digest\": \"sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2\", \"version\": \"1.2.0\"}, \"task\": \"Restart the Observatory node service and reinstall the Fabric MCP server entry\", \"type\": \"repair-request/1\"}",
+  "cases": [
+    {
+      "name": "a signed, current, allowlisted repair the person was told of runs",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "an id already answered is refused before anything else, even with no key",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z",
+        "answered": true
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "already-answered"
+      }
+    },
+    {
+      "name": "an id already answered, otherwise runnable",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z",
+        "answered": true
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "already-answered"
+      }
+    },
+    {
+      "name": "the signature before the device",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [],
+        "device": {
+          "id": "dev-other",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "the device before the window",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-other",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-24T10:00:00Z",
+        "notifiedAt": "2026-10-24T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "wrong-device"
+      }
+    },
+    {
+      "name": "the window before the policy",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-23T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-23T10:00:00Z",
+        "notifiedAt": "2026-10-23T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "the policy before the allowlist",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-22T09:00:00Z",
+            "keys": {}
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "policy-expired"
+      }
+    },
+    {
+      "name": "the allowlist before the person",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {}
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "a changed task breaks the signature",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "something else",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "no key in the current set",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key under another keyId",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-09",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key of another algorithm under the same keyId",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "es256",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key without alg is ed25519",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "signed by another key",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "wwlIq5/ZSRMDIRs3VquY6CjVnQxpraWsIrwa2I9K4cFOSa60JHukcb4ouwIFskY2D6kM4bytjMto81mZdBcZCQ=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a request with a fraction has no canonical form",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          },
+          "attempt": 1.5
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a request with a lone surrogate has no canonical form",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "a \ud800 b",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "no input at all",
+      "input": null,
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key whose notAfter passed before at",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notAfter": "2026-10-01T00:00:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key whose notBefore is after at",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notBefore": "2026-10-23T00:00:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key valid at issuedAt but not at at",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notAfter": "2026-10-22T09:30:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a key valid at at but not at issuedAt",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notBefore": "2026-10-22T09:30:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "a key whose notAfter is at itself",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notAfter": "2026-10-22T10:00:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "a key whose notBefore is at itself",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notBefore": "2026-10-22T10:00:00Z"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "a key bound that does not read closes the window",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o=",
+            "notAfter": "next year"
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "a clock that does not read",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "not a time",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "another device",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-other",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "wrong-device"
+      }
+    },
+    {
+      "name": "another organization",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-other"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "wrong-device"
+      }
+    },
+    {
+      "name": "at the request's issuedAt",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T09:00:00Z",
+        "notifiedAt": "2026-10-22T09:00:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "before the request's issuedAt",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T08:59:59Z",
+        "notifiedAt": "2026-10-22T08:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "at the request's expiresAt",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-23T09:00:00Z",
+        "notifiedAt": "2026-10-23T08:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "a window of exactly 7 days",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-29T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "vrPazHvCZ3lglo/BlSgAdQChd7xGTSK6mqAdB5XSaIphwvlMdEXkUMDfASoWU/U0rUXl12zt4ve4GO+PKeD7AQ=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "a window a second longer than 7 days",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-29T09:00:01Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "EI6mU97aFG5dm3qJabKl/fQwmYluy9/TS/EEshMnoYsaOjj8ZGq4EBBXWnvTAwx8fXVeSD5YxWCGx2eqmcWSDw=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "a policy that expired",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-22T09:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "policy-expired"
+      }
+    },
+    {
+      "name": "a policy that expires at at itself",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-22T10:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "a policy with no expiresAt does not expire",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "no policy layers",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "no repair.packages",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {}
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "the same agent at another digest",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "an allowlist set only in the person's user layer",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {}
+          },
+          {
+            "source": "user",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "an allowlist set only in an mdm layer",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "mdm",
+            "revision": 1,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "the person was not told",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "person-declined"
+      }
+    },
+    {
+      "name": "the person was told after it would start",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T10:00:01Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "person-declined"
+      }
+    },
+    {
+      "name": "the person was told at at itself",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "the person declined",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "notifiedAt": "2026-10-22T09:59:00Z",
+        "declined": true
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "person-declined"
+      }
+    },
+    {
+      "name": "an org-cloud machine runs without a notice",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a",
+          "role": "org-cloud"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "an org-cloud machine runs even with declined set",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a",
+          "role": "org-cloud"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z",
+        "declined": true
+      },
+      "expect": {
+        "decision": "run"
+      }
+    },
+    {
+      "name": "an org-cloud machine still needs the allowlist",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a",
+          "role": "org-cloud"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {}
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "not-allowlisted"
+      }
+    },
+    {
+      "name": "an org-cloud machine still needs the signature",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a",
+          "role": "org-cloud"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "another role is a person's machine",
+      "input": {
+        "request": {
+          "type": "repair-request/1",
+          "org": {
+            "id": "org-7f3a"
+          },
+          "id": "rep-0001",
+          "device": {
+            "id": "dev-01j9a"
+          },
+          "package": {
+            "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+            "version": "1.2.0",
+            "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+          },
+          "task": "Restart the Observatory node service and reinstall the Fabric MCP server entry",
+          "issuedAt": "2026-10-22T09:00:00Z",
+          "expiresAt": "2026-10-23T09:00:00Z",
+          "signature": {
+            "alg": "ed25519",
+            "keyId": "org-7f3a.policy-2026-10",
+            "value": "yVhEc0048I53CnRLFC2BK5RkrbN5xg69uFaTMiGOIBv5bOIvvRvfCLOvVyiFJEMcF0h/VyR7qMxqyFPzWVVGAA=="
+          }
+        },
+        "keys": [
+          {
+            "keyId": "org-7f3a.policy-2026-10",
+            "alg": "ed25519",
+            "publicKey": "l1slw7ZxGL7ZNLgLhSPlVH+YJsUDxjD7z2cACmC4I+o="
+          }
+        ],
+        "device": {
+          "id": "dev-01j9a",
+          "org": "org-7f3a",
+          "role": "person"
+        },
+        "layers": [
+          {
+            "source": "server",
+            "revision": 7,
+            "expiresAt": "2026-10-30T00:00:00Z",
+            "keys": {
+              "repair.packages": {
+                "value": [
+                  {
+                    "agentRef": "urn:fabric:agent:passioncode:observatory-repair",
+                    "digest": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "at": "2026-10-22T10:00:00Z"
+      },
+      "expect": {
+        "decision": "refuse",
+        "reason": "person-declined"
+      }
+    }
+  ]
+}
