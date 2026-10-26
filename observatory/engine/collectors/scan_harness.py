@@ -17,6 +17,9 @@ It also lists, for the node summary an organization receives (OBS-192, contract 
 `name@marketplace` with the version Claude Code recorded, and the coding agents of the contract's catalogue (DEC-0093)
 installed here: an agent whose launch command is an executable in a bin folder, its version read from where the
 launcher resolves (a versions folder, a Homebrew keg, an npm package.json), never by running it. No path is recorded.
+For the same summary it lists each project's own skills (`project_skills`: name, digest, and the project's folder as
+`~/<path>`, kept here so the summary can judge an organization's work folders, never sent) and Codex's skills
+(`codex_skills`: name, source and digest).
 
 The first sight of a skill records its digest in `store/state/harness-pins.json`; a later change is reported
 until `full harness --accept KEY` (tools/harness.py) records the new digest.
@@ -479,12 +482,33 @@ def skill_usage(claude: Path, days: int = USAGE_DAYS) -> tuple[dict[str, int], i
     return uses, read
 
 
-def project_skills(roots: list[Path], user_listing: int, limit: int) -> tuple[list[dict], list[dict]]:
+def home_relative(folder: Path, home: Path | None) -> str | None:
+    """`folder` as `~/<path>` when it is inside the scanned home (how the MCP scan spells a folder), else None: the
+    node summary matches it against an organization's `workspace.folders`, which are relative to the home, and never
+    sends it."""
+    if home is None:
+        return None
+    for base in dict.fromkeys((home, home.resolve())):
+        for candidate in dict.fromkeys((folder, folder.resolve())):
+            try:
+                rel = candidate.relative_to(base).as_posix()
+            except ValueError:
+                continue
+            return "~/" + rel if rel not in ("", ".") else None
+    return None
+
+
+def project_skills(roots: list[Path], user_listing: int, limit: int,
+                   home: Path | None = None) -> tuple[list[dict], list[dict], list[dict]]:
     """A project's own `.claude/skills` load only when a session works in that project, on top of the user-level
     listing. (Per project: name, its skills' listing characters, the session total; rule hits, tier 1 since the
     projects folder is this operator's own.) One level under each projects folder; a project's folder named
-    like a worktree is still a project, so it is read the same way."""
-    projects, hits = [], []
+    like a worktree is still a project, so it is read the same way.
+
+    The third list is one row per skill for the node summary (OBS-192): its name, the project's folder as `~/<path>`
+    when it is inside the scanned home (None otherwise) and its content digest. The folder stays on this machine: the
+    summary reads it only to judge whether the skill sits in an organization's `workspace.folders` (DEC-0118)."""
+    projects, hits, rows_out = [], [], []
     seen: set[str] = set()
     for root in roots:
         if not root.is_dir():
@@ -506,6 +530,7 @@ def project_skills(roots: list[Path], user_listing: int, limit: int) -> tuple[li
                 invocable = str(meta.get("disable-model-invocation", "")).lower() != "true"
                 rows.append({"name": name, "listing_chars": listing_chars(meta, name) if invocable else 0})
                 sha, _n, _s, files = digest(skill.parent)
+                rows_out.append({"name": name, "folder": home_relative(skills_dir.parent.parent, home), "digest": sha})
                 for h in hits_for(name, skill.parent, files, meta, 1):
                     hits.append({**h, "skill": f"{project}/{name}", "project": project, "digest": sha})
             if not rows:
@@ -516,15 +541,17 @@ def project_skills(roots: list[Path], user_listing: int, limit: int) -> tuple[li
                              # Only the project's own skills can be blamed for an overflow the user level does not
                              # already cause; otherwise every project would repeat the user-level finding.
                              "pushes_over": user_listing <= limit < user_listing + own})
-    return projects, hits
+    return projects, hits, rows_out
 
 
-def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict]]:
+def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict], list[dict]]:
     """Codex's harness: the skills it loads from `~/.codex/skills` and the shared `~/.agents/skills`. (Its listing
     — skills and description characters, counted the way the Agent Skills standard truncates — and rule hits,
-    named `codex/skill`.) A skill linked into both folders is counted once."""
+    named `codex/skill`.) A skill linked into both folders is counted once. The third list is one row per skill for
+    the node summary (OBS-192): its name, `source` `user` (both folders are the person's own) and its content
+    digest; no path."""
     seen: set[str] = set()
-    rows, hits = [], []
+    rows, hits, skill_rows = [], [], []
     for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
         for skill in sorted(folder.glob("*/SKILL.md")):
             real = str(skill.parent.resolve())
@@ -540,9 +567,10 @@ def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict]]:
             rows.append(listing_chars(meta, name))
             tier = tier_of(skill.parent, None, roots, set())
             sha, _n, _s, files = digest(skill.parent)
+            skill_rows.append({"name": name, "source": "user", "digest": sha})
             for h in hits_for(name, skill.parent, files, meta, tier):
                 hits.append({**h, "skill": f"codex/{name}", "harness": "codex", "digest": sha})
-    return {"skills": len(rows), "listing_chars": sum(rows)}, hits
+    return {"skills": len(rows), "listing_chars": sum(rows)}, hits, skill_rows
 
 
 #: Where agent tools keep provider credentials of their own (OBS-74), and how each file is read. A tool's own login
@@ -772,9 +800,9 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
                 break
             dropped.append(s["name"])
             over -= s["listing_chars"]
-    projects, project_hits = project_skills(roots, total, limit)
+    projects, project_hits, project_rows = project_skills(roots, total, limit, home)
     security += project_hits
-    codex, codex_hits = codex_skills(home, roots)
+    codex, codex_hits, codex_rows = codex_skills(home, roots)
     security += codex_hits
     pins = read_json(pins_file)
     changed = []
@@ -817,6 +845,8 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "projects": projects,
         "tool_plaintext": tool_plaintext(home, degraded, roots),
         "codex": codex,
+        "project_skills": project_rows,
+        "codex_skills": codex_rows,
         "hooks": hooks,
         "hook_security": hooks_found,
         "plugins": enabled_plugins(claude),

@@ -7,6 +7,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
+  harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it
+  is inside the scanned home, kept on this machine) and every Codex skill (`~/.codex/skills` and `~/.agents/skills`,
+  name and digest), and `org summary` lists them beside Claude Code's: a project's with source `project`, Codex's with
+  source `user`, each once by name. On your own machine (mode `C`) an organization sees a project's skill only when the
+  project sits in one of its work folders, and a Codex skill only when its baseline names it; the folder never leaves.
+  A harness scan taken before this change is refused until the next tick takes a new one (`org:node-summary-unavailable`
+  for at most one tick). A plugin's digest is still not sent: the contract does not say what it is a digest of.
+
 - **Bring your enrollments over from another lifecycle broker** (OBS-79 step L5, `docs/design/LIFECYCLE.md`).
   `project-observatory full lifecycle import --from FOLDER` reads that broker's state folder on this machine without
   writing anything in it, not even SQLite's shared-memory file, and writes the targets and grants the engine accepts

@@ -612,7 +612,13 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   or in Homebrew's and `/usr/local`'s; a generic command, `agent`, `cmd`, `cn`, `pi`, `omp` or `zed`, counts only when
   it resolves into the agent's own package or bundle; its version is read from where the launcher resolves, a
   `versions/<v>` folder, a Homebrew keg or cask, or its npm package's `package.json`, never by running it, and kept
-  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`). The MCP scan (`collectors/scan_mcp.py`)
+  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`),
+  `project_skills` (each project's own `.claude/skills` one level under the configured projects folder: name, content
+  digest and the project's folder as `~/<path>` when it is inside the scanned home, else none; the folder is read only to
+  judge the work folders below and never leaves) and `codex_skills` (Codex's `~/.codex/skills` and the shared
+  `~/.agents/skills`, a skill linked into both once: name, source `user`, content digest). The summary lists skills
+  once by name, Claude Code's user-level and plugin skills first, then a project's (source `project`), then Codex's;
+  the first read wins. The MCP scan (`collectors/scan_mcp.py`)
   gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
   declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
   server Claude Code keeps per folder is `local`, its folder never sent.
@@ -621,7 +627,8 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `workspace.folders` from the signed layers only (a person's `user` layer never widens what an organization is shown).
   Under `C` the summary lists the coding agents, the hook count, and only those MCP servers, skills and plugins that are
   installed in a folder matching `workspace.folders` (an MCP server Claude Code keeps for such a folder: each pattern
-  segment matches one folder segment, `*` any run inside it, a folder inside a work folder counts; `folder_matches`) or
+  segment matches one folder segment, `*` any run inside it, a folder inside a work folder counts; `folder_matches`;
+  a project's own skill whose project folder matches) or
   named by the baseline with their kind; everything else, installed for the person, machine-wide or for another
   context, is left out and counted per list in `outOfContext`, which stays here and is shown in `org summary`,
   `org status` and Health beside `mode`. No package names a context on this machine yet, so none is admitted as
@@ -670,7 +677,8 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `_summary_carried`).
 - **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
   sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
-  (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
+  (one of `plugins`, `coding_agents`, `project_skills` or `codex_skills` missing, `org.HARNESS_SUMMARY_LISTS`):
+  nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
   `org:node-summary-unavailable`. A summary built from a missing, stale or partial scan would tell the organization the
   machine runs nothing of that kind, or what it ran days ago. A fresh MCP scan is not fresh health: the tick's scan
   reads declarations only and carries the last on-demand probe's verdicts for up to seven days under a new
@@ -694,9 +702,13 @@ Not built here: the drift reaches an organization only once the node applies its
 `policy_layers` is empty, no baseline applies, and the summary carries no drift, as the contract asks of a summary
 under a policy without one. The agent services of the summary's context: a Fabric service descriptor names no context
 and no agent reference an estate placement could match, so `services_in_context` is empty rather than guessed, and a
-person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). A
-plugin's digest (a baseline naming one reads `changed` until it is computed), Codex's skills and a project's own skills
-are not listed yet.
+person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). At
+the pin (`de8cec30`) the contract still names no context in a service descriptor (`docs/specification/contexts.md`:
+"a service descriptor carries none"; `schemas/service-descriptor.schema.json` has no context member), and an estate
+placement names an `agentRef`, which no descriptor carries, so there is nothing to place a service by. A plugin's
+digest: the schema carries `plugins[].digest` but, unlike a skill's ("SHA-256 of the skill's files as installed"),
+says nothing of what it is a digest of, and no vector computes one, so the node sends none rather than one a server
+could not reproduce; a baseline naming a plugin's digest reads `changed`.
 
 ## The repair runner (OBS-193)
 

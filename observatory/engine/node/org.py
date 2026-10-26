@@ -296,6 +296,11 @@ EXCLUSIONS_FILE = 'node-summary.json'
 EXCLUSIONS_MAX = 1000
 
 
+#: The lists a harness scan carries since it feeds the node summary (OBS-192): without one, a summary would tell the
+#: organization that this machine runs nothing of that kind.
+HARNESS_SUMMARY_LISTS = ('plugins', 'coding_agents', 'project_skills', 'codex_skills')
+
+
 def read_harness_scans(now: float, scratch: Optional[Path] = None,
                        enabled: Optional[Callable[[str], bool]] = None) -> Tuple[Any, Any, Optional[str]]:
     """The two scans a node summary is built from (`store/raw/harness.json` from `collectors/scan_harness.py`,
@@ -303,7 +308,7 @@ def read_harness_scans(now: float, scratch: Optional[Path] = None,
     and a summary built without one would tell the organization that this machine runs nothing of that kind, so each
     is refused when its integration is off (a scan left from before is not sent), when it is older than
     `SCAN_MAX_AGE_SECONDS` by its own time, when it cannot be read, and, for the harness scan, when it predates the
-    node summary (no `plugins` or `coding_agents`)."""
+    node summary (one of `HARNESS_SUMMARY_LISTS` missing)."""
     if scratch is None or enabled is None:
         import configuration as _configuration
         import paths as _paths
@@ -329,9 +334,9 @@ def read_harness_scans(now: float, scratch: Optional[Path] = None,
         if age > SCAN_MAX_AGE_SECONDS:
             return None, None, ('the %s scan was taken %s, %d h ago, past the %d h a summary is built from'
                                 % (name, doc.get(stamp), age // 3600, SCAN_MAX_AGE_SECONDS // 3600))
-        if name == 'harness' and not all(isinstance(doc.get(k), list) for k in ('plugins', 'coding_agents')):
-            return None, None, ('the harness scan predates the node summary (no plugins or coding agents listed); '
-                                'the next tick takes a new one')
+        if name == 'harness' and not all(isinstance(doc.get(k), list) for k in HARNESS_SUMMARY_LISTS):
+            return None, None, ('the harness scan predates the node summary (no plugins, coding agents, project '
+                                'skills or Codex skills listed); the next tick takes a new one')
         docs.append(doc)
     return docs[0], docs[1], None
 
