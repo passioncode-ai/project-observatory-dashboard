@@ -395,14 +395,18 @@ sequenceDiagram
   2. the sender's node, having received `C`, picks a 256-bit `nonce_s` and sends it with the sender's
      share keys;
   3. the recipient reveals `nonce_r`; the sender's node checks it against `C`;
-  4. both apps show `SAS = first 20 bits of SHA-256("observatory-share-sas/1", sender keys,
-     recipient keys, nonce_r, nonce_s)` as six digits, and the two people compare them by a call or a
-     message thread they already trust.
+  4. both apps show `SAS = (the first 4 bytes of SHA-256("observatory-share-sas/1", sender keys,
+     recipient keys, nonce_r, nonce_s) as an unsigned big-endian integer) mod 1,000,000`, written as six
+     digits with leading zeros, and the two people compare them by a call or a message thread they
+     already trust.
   Because the recipient is bound to its keys and `nonce_r` before it sees `nonce_s`, and the sender
   picks `nonce_s` after the commitment is fixed, a party in the middle cannot try key pairs until the
   codes match: each attempt is one guess with a chance of 1 in 10^6. **One attempt per link:** a
   mismatch, an abandoned exchange or a claim the sender does not expect voids the link and seals
-  nothing; a new attempt needs a new link the sender makes.
+  nothing; a new attempt needs a new link the sender makes. Both ends enforce it: the sender's node
+  answers one commitment per link, and the recipient's app reveals a `nonce_r` for a link once and
+  never again, so a cloud posing as the sender cannot abort and rerun the recipient's side for fresh
+  codes. Each run also needs the person's Accept on the recipient's side.
 - **The trust this gives, stated plainly.** It is trust on first use with a one-in-a-million residual
   per link. A cloud or anyone else who reads the link before the intended recipient can claim first
   with its own keys; the MAC check passes (they know `CODE`), and the six-digit code matches the
@@ -430,7 +434,12 @@ sequenceDiagram
 - **The path of a request, until the contract decides a channel method.** The agent calls
   `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
   agent's process. That server shows nothing itself and never touches a value: it records the request
-  (agent from its binding, project, slot, provider, reason) in the node's request queue. The node asks
+  (agent from its binding, project, slot, provider, reason) in the node's request queue. Only the node
+  writes that queue: it lives in the node's owner-only state, the MCP server reaches it through the
+  node's authenticated `POST /mcp` under its own access binding, and the node takes the agent's name
+  from that binding, so one agent cannot file a request under another agent's name (an agent that can
+  write the node's state files directly already holds the person's account, which no prompt can
+  guard). The node asks
   the lifecycle broker (OSS-76) to open Observatory's own code-signed app with the request id, never a
   direct launch. The app reads the request from the node, shows the window, and writes the value into
   the vault slot itself, in its own process, as `vault.py put` writes it: **the value never crosses the
@@ -451,8 +460,14 @@ sequenceDiagram
 - **macOS.** The app's own SwiftUI window with a `SecureField`. **Linux and Windows.** The desktop
   app's (Tauri) window. Both are the signed apps the release already builds.
 - **The person's phrase.** At first use the person sets a short phrase. It is kept in the signed
-  app's own store, never in a vault slot: on macOS a Keychain item limited to the app's access group,
-  on Windows the app's DPAPI-protected store, on Linux the desktop app's Secret Service item. A vault
+  app's own store, never in a vault slot. **On macOS** it is an item of the data protection keychain
+  limited to the app's access group, which another process of the same user cannot read (a legacy
+  login-keychain item is not used: it can be released to an agent through a `security` prompt the
+  person approves). **On Linux and Windows no store separates one app of a user from another:** a
+  Secret Service item in an unlocked collection, and DPAPI, which is per user, are readable by any
+  agent running as the same user. There the phrase only keeps an agent that does not look for it
+  from imitating the prompt; the design says so on the setting itself, and the stronger defence on
+  those systems is to run agents as another user or in a container. A vault
   slot will not do, because `use_secret.py` releases a slot to any caller unless a grant is required
   (`slotsRequireGrant` defaults to `when-token`, `tools/use_secret.py`), so any agent could read the
   phrase and draw a convincing imitation. Every genuine prompt shows the phrase; a window without it
@@ -515,11 +530,14 @@ sequenceDiagram
   and Home read; it is small and kept 400 days.
 - **What is archived:** raw rows older than the hot window (30 days by default), per month, as JSON
   lines compressed with the standard library's `lzma`, encrypted with the backups' `OBSENC1` format
-  under **an archive key of its own**: 32 random bytes kept in the OS credential store under an item
-  only the engine's archiver reads (on macOS a Keychain item limited to the signed app's access group,
-  the archiver running under the app), never in a vault slot, because `use_secret.py` releases a slot
-  to any agent unless a grant is required (`slotsRequireGrant` defaults to `when-token`), and never in
-  the workspace. It is not the backup passphrase: that one is a plain file in the
+  under **an archive key of its own**: 32 random bytes kept in the OS credential store, never in a vault
+  slot. On macOS it is a data protection keychain item limited to the signed app's access group, so
+  only the app can read it: archiving and restoring run in the signed app, and the engine's Python
+  archiver asks the app to do it (with the app not running, nothing is archived and nothing raw is
+  deleted). On Linux and Windows the same limit as the phrase applies: any agent running as the same
+  user can read the item, and the design says so where the archive is set up. It is never in a vault
+  slot because `use_secret.py` releases a slot to any agent unless a grant is required
+  (`slotsRequireGrant` defaults to `when-token`), and never in the workspace. It is not the backup passphrase: that one is a plain file in the
   workspace's `secrets/` that any agent of the same user can read, and when it is absent the backups
   write nothing outside the workspace. Written beside the backups with a manifest of counts and
   SHA-256. Values of known vault slots are replaced by their slot names before writing, as the
