@@ -475,6 +475,10 @@ broker started are, from then on, the person's to the node: it never idles them 
 Not in this step: the `unenroll` verb (OBS-251), which removes a target while the local server runs and needs a door
 of the broker's own for its store rows.
 
+Known limits, from the review of #369: if the source broker removes its write-ahead log between the stamp and the read,
+the import reports the generic "cannot be read" reason instead of retrying; and importing again after the operator has
+turned a target back to always_on reports it `already_enrolled`, with no hint that the difference is that policy.
+
 ## Acceptance
 
 - The 182 behaviours of the broker's tests that move pass here, with neutral fixtures (the other 21 test
