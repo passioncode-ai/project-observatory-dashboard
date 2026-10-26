@@ -701,6 +701,31 @@ def finding_matcher(project_id: str, view: dict | None = None):
     return lambda subject: subject in exact or (bool(prefixes) and subject.startswith(prefixes))
 
 
+def _vault_holders() -> tuple[str, dict[str, list[str]], list[dict]]:
+    """(this machine's name, {slot: peers holding it}, degraded) from the digest manifests.
+
+    A failure here costs the `machines` detail, never the answer: it is named in `degraded`."""
+    import sys as _sys
+    tools = str(Path(__file__).resolve().parent / "tools")
+    if tools not in _sys.path:
+        _sys.path.insert(0, tools)
+    try:
+        import vault_digests
+        local = vault_digests.local_manifest_path()
+        here = None
+        if local.is_file():
+            try:
+                here = vault_digests.read_manifest(local)["machine"]
+            except vault_digests.Refused:
+                here = None
+        here = here or vault_digests.machine_name()
+        held, notes = vault_digests.holders_index(here)
+        return here, held, notes
+    except Exception as exc:  # noqa: BLE001: a detail of the answer, never the answer
+        return "this-machine", {}, [{"source": "vault-digests", "code": "machines-unknown",
+                                     "reason": f"which machines hold each slot is unknown: {type(exc).__name__}"}]
+
+
 def credentials(project_id: str) -> dict:
     """What a project can authenticate with, by NAME, and how to use one blind.
 
@@ -821,6 +846,14 @@ def credentials(project_id: str) -> dict:
                             "name": slot.name, "env": envdir.name, "project": name,
                             "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
                                     f"run --env {envdir.name} {name} {slot.name} -- <command>")})
+
+    # WHICH MACHINES HOLD EACH SLOT (OBS-194): this one, and every peer whose digest manifest
+    # lists it. Read from the manifests alone, which carry keyed digests and names, never values.
+    if out["vault"]:
+        here, held, notes = _vault_holders()
+        for row in out["vault"]:
+            row["machines"] = [here, *held.get(f"{row['project']}/{row['env']}/{row['name']}", [])]
+        out["degraded"].extend(notes)
 
     out["totals"] = {
         "env_variables": len(out["env"]),
