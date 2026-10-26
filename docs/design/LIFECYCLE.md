@@ -66,8 +66,9 @@ helper and 203 tests in four files.
    meter's ledger (`<state>/meter/meter.db`) set the same precedent. Enrollments and policies live in `config/node-lifecycle.json`, owner
    only. The name differs from `config/lifecycle.json`, which configures the lifecycle watch
    (`collectors/scan_lifecycle.py`), a different thing.
-3. **The supervisor runs inside the node service** (OBS-198, slice 6) once that exists; until then it
-   runs inside the engine's local server, which launchd already keeps up.
+3. **The supervisor runs inside the node, which is the engine's local server** under its OS unit (launchd,
+   systemd, Task Scheduler); the node service of OBS-198 is that same process, not a second one
+   ([MACHINE-UTILITY.md](MACHINE-UTILITY.md) D1, D2).
 4. **macOS first.** The adapter is NSWorkspace and `codesign`. Linux (systemd user units and
    `.desktop` launches) and Windows (the service manager and `ShellExecute`) are later adapters behind
    the same broker; until they exist the tools answer `unsupported_platform` there, never a silent

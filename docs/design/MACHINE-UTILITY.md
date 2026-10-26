@@ -95,12 +95,21 @@ memory over HTTP and the key server become routes of the server. Today:
 supervises nothing of the engine's own. (c) Everything in one process.
 
 **Decision.** (b), with the routes of v4. The OS service manager supervises the node, the tick, the maintenance job
-and the update check; nothing in the engine restarts the node. The node supervises what it starts and what the
-operator enrolled (`node.lifecycle`), and only those carry `lifecycle.manager: node`. The tick keeps its own job: it
-already has its own process group and ceiling, which is what v4 asks of a "supervised child", it runs on all three
-systems through `osschedule`, and a crashed server does not stop collection or the reverse. Memory over HTTP and the
-key server become routes of the node, so the machine has one listening process for agents
-([OBS-255](../backlog.md)).
+and the update check; nothing in the engine supervises the node or restarts it on failure. (The maintenance job does
+stop and start the server on purpose, for its daily snapshot and to activate an update, `AGENTS.md:198`,
+[`engine_update.py:18-20`](../../observatory/engine/engine_update.py); that is maintenance, not supervision.) The node
+supervises what it starts and what the operator enrolled (`node.lifecycle`), and only those carry
+`lifecycle.manager: node`. Memory over HTTP and the key server become routes of the node, so the machine has one
+listening process for agents ([OBS-255](../backlog.md)).
+
+**The tick is not the node's child: Observatory's reading of v4.** v4 §5 keeps the tick's collectors "a supervised
+child" of the node, and the CROSSWALK-v4 row V4-OBS-01 and Observatory's own answer in v4 §19 ("tick stays a
+supervised child") say the same. This repository owns V4-OBS-01 and reads the requirement behind those words as: the
+tick has its own process group and its own ceiling, so a slow scan never stalls the always-on server. The tick already
+meets that as its own OS job, which runs on all three systems through `osschedule`, and keeping it there means a
+crashed server does not stop collection or the reverse. So the tick keeps its own job and the node does not spawn it.
+This departs from the letter of v4 and of V4-OBS-01, and it is listed under "Where the plans are not followed" below;
+the CROSSWALK-v4 cell lives in fabric-workspace, so its wording is open question 6 for that owner.
 
 **Consequences.** `full update` keeps stopping and starting the server and the tick around an install, as today.
 A descriptor of a service the node starts as its child says `manager: node` once the node starts children (LIFECYCLE.md
@@ -115,7 +124,7 @@ JSON-RPC with `channel.hello` first, the methods `health`, `enroll.status` and `
 `consent.prompt` the other way, published in the node's descriptor as `channels.local`. The engine serves none of it
 (no `channel.hello`, `node.sock` or `channels.local` anywhere under `observatory/`, measured 2026-10-26). Callers reach
 `node.lifecycle` over loopback HTTP with an access binding's bearer, checked before the body is read
-([`tools/serverd.py:729-739`](../../observatory/engine/tools/serverd.py)). The repair runner sends that bearer to
+(`_mcp`, [`tools/serverd.py:751-781`](../../observatory/engine/tools/serverd.py)). The repair runner sends that bearer to
 whatever listens on the server's port, with no proof of the server ([OBS-248](../backlog.md)).
 
 **Options.** (a) Loopback HTTP and bindings only. (b) The contract's channel in the node, beside loopback HTTP. (c)
@@ -124,8 +133,11 @@ Move `node.lifecycle` onto the channel.
 **Decision.** (b). The node serves `fabric-local-channel/0.1` exactly as the contract writes it and publishes
 `channels.local`; loopback HTTP stays for the dashboard and for MCP, which the contract keeps off the channel ("it
 carries no MCP"). A payload method (`node.lifecycle.*`, `skills.compile`) joins the channel only by its owner's
-contract decision (open question 1). The channel's lock (`run/node.lock`) is also the rule of one node per OS account
-(D6). Built as [OBS-256](../backlog.md).
+contract decision (open question 1). The channel's lock is also the rule of one node per OS account (D6): on macOS
+`run/node.lock` in the owner-only folder beside `node.sock`; on Linux the same lock in `$XDG_RUNTIME_DIR/<node>/` (or
+the contract's `${XDG_STATE_HOME:-~/.local/state}/<node>/run/` when that variable is unset); on Windows there is no
+run folder, and the lock is the pipe itself, `\\.\pipe\<node>-<user SID>` created with
+`FILE_FLAG_FIRST_PIPE_INSTANCE`, which a second server of the same account cannot create. Built as [OBS-256](../backlog.md).
 
 **Consequences.** Fabric, Switchboard and Fabric Dashboards discover the node from its descriptor, never by a computed
 path. The owner-only run folder is one of the two proofs OBS-248 names for the repair runner's door. The hub on the
@@ -147,16 +159,27 @@ cursor. (c) A child the node starts on a timer. (d) An OS job of its own.
 
 **Decision.** (b). The collector is a step of the tick, run as its own child process under the step watchdog, reading
 from a cursor (file, offset, content hash of the last line read), so the node keeps its own budget and a slow or
-hostile transcript costs one step. Its budgets, which OE-01a's tests and `full doctor` hold it to:
+hostile transcript costs one step. Its budgets, which OE-01a's tests and `full doctor` hold it to. Only the first
+exists in code today; every other value is new, set here for OE-01a to build:
 
-| Budget | Value |
-|---|---|
-| wall time per tick | at most the collector share of the tick ceiling (40 % of 1500 s); what is left is read next tick |
-| memory | at most 256 MB resident; a run over it is a `degraded` row and the next run reads half as many lines |
-| catch-up | nothing older than 30 days; at most 200 MB of transcript per tick until caught up |
-| one line | a line over 1 MiB is skipped and counted, never parsed |
-| content | prompt, output and tool text are dropped at read; only times, model, token counts, project and session ids are kept |
-| idle | no process between ticks, no timer, no file watcher (organization lifecycle LC-08) |
+| Budget | Value | In code today |
+|---|---|---|
+| wall time per tick | at most the collector share of the tick ceiling (40 % of 1500 s); what is left is read next tick | yes: [`tick_budget.py:52`](../../observatory/engine/tick_budget.py), [`tick_budget.py:69`](../../observatory/engine/tick_budget.py) |
+| CPU per tick | at most 120 CPU-seconds (user plus system) per run, at the tick's low priority (Nice 5, `AGENTS.md:196`); over it, a `degraded` row and the next run reads half as many lines | new |
+| memory | at most 256 MB peak resident; over it, a `degraded` row and the next run reads half as many lines | new |
+| catch-up | nothing older than 30 days; at most 200 MB of transcript per tick until caught up | new |
+| one line | a line over 1 MiB is skipped and counted, never parsed | new |
+| content | prompt, output and tool text are dropped at read; only times, model, token counts, project and session ids are kept | new |
+| idle | no process between ticks, no timer, no file watcher (organization lifecycle LC-08) | the tick's own rule |
+
+**How CPU and memory are measured.** Nothing enforces memory or CPU in the engine today. The tick's step runner reads
+the finished child's peak resident size and CPU time: on macOS and Linux from `resource.getrusage(RUSAGE_CHILDREN)`
+taken before and after the step (`ru_maxrss` is bytes on macOS and KiB on Linux; `ru_utime` plus `ru_stime`), on
+Windows from the child's handle (`GetProcessMemoryInfo` `PeakWorkingSetSize`, `GetProcessTimes`) before it is closed.
+These are measured and reported, not hard limits: an operating-system cap (`RLIMIT_AS` is not enforced on macOS, a Job
+Object on Windows) would kill the step mid-file and lose the cursor's progress, so the budget acts on the next run by
+halving its batch, and the wall-time watchdog stays the hard stop. OE-01a's acceptance (catch-up on the operator's
+machine within the declared RSS ceiling, reported by `full doctor`) is measured this way.
 
 **Consequences.** An interval reaches the journal within one tick (30 minutes) of being written, which the batched
 activity stream of DEC-0030 allows. The `Stop` hook of `observatory-log` may ask for an early run; it never reads a
@@ -173,7 +196,12 @@ state. The node does it otherwise, and the contract decided since:
   `bufferedFrom` from the same store ([`node/org.py:1300-1316`](../../observatory/engine/node/org.py)); acks consume
   it there (NODE.md "Organization enrollment", Outbox);
 - contract DEC-0128 (UE-1): each enrollment keeps its own "collector ids and counters"; one counter shared by two
-  organizations would let them link the machine.
+  organizations would let them link the machine;
+- every enrollment names its collector `observatory-node` ([`node/org.py:92`](../../observatory/engine/node/org.py)),
+  a constant every machine running the engine shares: it names the software, not the machine or the enrollment, and
+  the epoch and `seq` beside it are already per enrollment. Whether that constant satisfies UE-1's "collector ids" is
+  judged over the contract's vectors at the re-pin, in [OBS-252](../backlog.md), which also covers any per-enrollment
+  counter the vectors find shared.
 
 **Decision.** Follow the contract: each enrollment's outbox issues its own `seq` and is the one writer of its
 acknowledgement state. The local journal (OE-01a) gives each event a stable id, which the outbox uses as its
@@ -219,7 +247,7 @@ rule on today's bindings.
 **Decision.** (b), following the contract over the plan. The audience stays the workspace instance and never carries
 a device or estate id. There is no binding type for an organization server: the node calls its organization outward
 (signed check-ins, DEC-0056) and is reached by members only through a relay, judged by the member list, not by a
-binding. Every inbound HTTP door refuses before it parses a body and limits each binding's rate; `POST /mcp` gains the
+binding ([OBS-254](../backlog.md) adopts DEC-0134 on the node). Every inbound HTTP door refuses before it parses a body and limits each binding's rate; `POST /mcp` gains the
 rate when OE-04 is built.
 
 **Consequences.** OE-04's acceptance becomes: no door parses a request before admission, each door rates per
@@ -241,13 +269,15 @@ result.
 | install an agent or package on this machine | the node | Fabric, the person | Fabric Dashboards | not built (v4 packet V4-OBS-03, Stage 3) |
 | check what is installed against its record | the node | Fabric, an organization (through the summary) | Fabric Dashboards, the organization | harness summary built (OBS-192, DEC-0118 mode `C`) |
 | roll back an install | the node | the person, Fabric | Fabric Dashboards | not built (with V4-OBS-03) |
-| update the node itself | the node's own updater (the maintenance job) | the person | Health, `full doctor` | built (`engine_update.py:18-20`, a rollback wheel kept) |
+| update the node itself | the maintenance job, an OS job of its own (D2), running the engine's updater | the person | Health, `full doctor` | built (`engine_update.py:18-20`, a rollback wheel kept) |
 | supervise a service or app (start, stop, restart, idle stop) | the node (`node.lifecycle`) | Fabric, Switchboard, Dashboards, agents with a grant | Dashboards | macOS built (OBS-79 L1 to L4); Windows and Linux OBS-257 |
 | supervise the node | the OS service manager | none | Health | built |
 | show this machine's services | Fabric Dashboards | the person | none | Dashboards FD-52 |
 | compile skill layers into a session set | the node (`skills compile`, OE-08a) | Fabric, Switchboard | the session | not built (OE-08a) |
-| start a session with a compiled set | the program that starts the session: Fabric or Switchboard | the person | the node | open question 3 for others |
+| start a session with a compiled set | the program that starts the session | the person | the node | Fabric (FAB-OE-05a) and Switchboard (SB-OE-08) for theirs; open question 3 for others |
 | enroll this machine in an organization | the node (`full org enroll`) | the person | the organization | built (OBS-161) |
+| issue an event's `seq` | each enrollment's outbox (D5) | the node's collectors | the organization (in the batch) | built (OBS-161) |
+| hold the acknowledgement state | each enrollment's outbox (D5) | the organization's acks | the check-in (`lastSeq`, `bufferedFrom`) | built (OBS-161) |
 | report this machine to its estate's hub | the node (`machine-report/1`, DEC-0132) | Fabric's hub | Fabric's hub | OBS-253 |
 | hold the device key and sign with it | the node (file keys today; the signed key helper next) | Fabric's hub | none | file keys built; helper OBS-258 |
 | issue a delegation token | Fabric's hub | an agent | the meter | Fabric's |
@@ -268,7 +298,8 @@ the tick and maintenance install on both ([`tools/serverd.py:1016`](../../observ
 lifecycle adapter answers `unsupported_platform` off macOS
 ([`node/lifecycle/macos.py:31`](../../observatory/engine/node/lifecycle/macos.py)).
 
-**Decision.** Every decision above holds on all three systems. Workstations use per-user units (LaunchAgent, user
+**Decision.** Every decision above holds on all three systems; the one-node-per-account lock is the run folder's lock on
+macOS and Linux and the first pipe instance on Windows (D3). Workstations use per-user units (LaunchAgent, user
 systemd, Scheduled Task); an organization's host uses what v4 §5 names (a LaunchDaemon through SMAppService, a system
 unit with `DynamicUser=`, a Scheduled Task with an S4U or SYSTEM principal). The channel is a named pipe with the
 DEC-0033 DACL on Windows. The device key moves to CNG or a TPM on Windows and to a TPM on Linux through the key helper;
@@ -298,8 +329,10 @@ These need another repository's owner; they are not decided here.
    separately, for its 0.5.0, "the hub holds no private key, the node signs with the device key", and the contract leaves the
    helper's check that its peer is the signed Fabric binary to platform code signing. OBS-258 builds the helper
    against whatever Fabric decides.
+6. **The CROSSWALK-v4 cell for V4-OBS-01** (owner: fabric-workspace). It says the tick becomes a supervised child of
+   the node; D2 keeps the tick as its own OS job. The cell's wording is that file's owner's to change or to keep.
 
-## Where the 2026-10-08 plan is not followed
+## Where the plans are not followed
 
 | Plan item | Here | Why |
 |---|---|---|
@@ -309,7 +342,8 @@ These need another repository's owner; they are not decided here.
 | an instance id bound to the device | the audience names no device (D7) | contract DEC-0128 |
 | a binding type for the organization's server | none; members meet over the relay (D7) | contract DEC-0056, DEC-0134 |
 | a policy decision method on the local channel | none | contract DEC-0075, v4 §7 (no policy decision point) |
+| v4 §5 and V4-OBS-01: the tick a supervised child of the node | the tick stays its own OS job (D2) | Observatory's reading, as owner of V4-OBS-01: its own group and ceiling already keep a slow scan off the server, and the two fail independently |
 
 The contract decisions after the engine's pin (`de8cec30`) that this record relies on, DEC-0128, DEC-0132 and DEC-0134,
 are adopted by their own rows at the re-pin past DEC-0121 ([OBS-237](../backlog.md), [OBS-252](../backlog.md),
-[OBS-253](../backlog.md)). DEC-0118 is inside the pin and built (OBS-192).
+[OBS-253](../backlog.md), and [OBS-254](../backlog.md) for DEC-0134). DEC-0118 is inside the pin and built (OBS-192).
