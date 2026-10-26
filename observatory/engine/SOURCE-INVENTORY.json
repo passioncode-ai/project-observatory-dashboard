@@ -6040,8 +6040,8 @@
       "path": "tools/heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c9f3e711591f4ebc181271aaafdf72ad295ea87bec3a248ea3ed9df21b97880d",
-      "bytes": 59501
+      "export_sha256": "2509e72a45a1a5affc976d4b9313dad5514fcbb9f2a7fc4b650a90c23d778bb3",
+      "bytes": 59674
     },
     {
       "path": "tools/heroku_findings.py",

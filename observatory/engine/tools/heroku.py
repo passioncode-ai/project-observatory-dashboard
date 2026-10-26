@@ -36,8 +36,9 @@ to be a grant: they are written into the description Heroku shows beside the
 authorization, recorded in the ledger, and they are what the proof reads before
 the value is delivered. The preset table states this, and `list` repeats it.
 
-`read` and `write` exclude config vars; the `-protected` scopes include them,
-which is why the presets that grant them are named after config, not deploys.
+`read` and `write` exclude config vars; the `-protected` scopes include them.
+The presets that grant them are `config-read`, `config-write` and
+`release-deploy`, and each one says that it reaches config vars.
 Heroku's own caveat holds: even `read` can see a credential a log drain's URL
 embeds.
 
@@ -51,9 +52,11 @@ release (one row, by the pinned descending Range) and that release's exact slug
 info. The slug id must be a string that is exactly a UUID before any slug path
 is built; an app whose newest release names none (no slug build yet, or an app
 generation without slugs) is refused before delivery. The proof reads no config
-vars and writes nothing to the app. Its protected reads go through their own
-transport (`_release_read`): fixed origin, an allowlist of three path shapes, no
-redirect followed, a one-MiB body bound, and typed value-free failures. These
+vars and writes nothing to the app. The builds, releases
+and slug reads go through their own transport (`_release_read`): fixed origin,
+an allowlist of three path shapes, no redirect followed, a one-MiB body bound,
+and typed value-free failures. The first read, the app itself, still goes
+through the shared transport that every preset's proof uses. These
 reads prove read access only, not that a deploy will succeed.
 
 EVERY ISSUED AUTHORIZATION HAS A LEDGER ROW in `heroku-issued.json` beside the
