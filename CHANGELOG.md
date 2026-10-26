@@ -22,7 +22,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   - **A key, certification or delegation window whose bound does not read is closed** (DEC-0115, DEC-0119): the
     node's certificate and transport windows already read RFC 3339 strictly (`+0100` or a space for `T` refuses the
     certificate), and `relay.key_window_holds`, the contract's `keyWindowHolds`, is the reference the signed policy,
-    key set and root certification (OE-06) and the repair key (OBS-193) judge with.
+    key set and root certification (OE-06) and the repair key (OBS-193) will judge with; no shipped path calls it yet.
   - DEC-0112, DEC-0113, DEC-0116 and DEC-0117 hold because the check-in lists only `fabric-device/0.1` among what it
     reads and sends none of DEC-0111's members, even to a server that lists them; DEC-0120's four-member pin holds.
     A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.

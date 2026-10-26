@@ -747,7 +747,7 @@ class CheckIn(_Enrolled):
         source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
         rows = source[source.index('Array.isArray(H.organizations)'):]
         for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-', '"consent-off"',
-                     '--consent on', 'S.refused'):
+                     '--consent on', 'S.refused', 'S.mode', 'S.outOfContext'):
             self.assertIn(said, rows)
 
     def test_the_preview_shows_the_next_summary_and_changes_nothing(self):

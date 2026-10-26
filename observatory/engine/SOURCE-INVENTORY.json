@@ -578,8 +578,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "2b41669d82d3d6b631a108d1c58e3f8849155bd761528b8bf50a3409bc3cf2e4",
-      "bytes": 280179,
+      "export_sha256": "48904df2c639c48e9fb1417224c9e7be15b83fbe14297daaee73d4a9d17c88d2",
+      "bytes": 280768,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -610,8 +610,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "85b28cb29ec75f2e0061b39cf6f7b35e1f773f479a59abd5ef8ac7b8f8ac3e68",
-      "bytes": 182041
+      "export_sha256": "8c78ee45737bf4481eeabf3dcc6df2f35f07d49f0133f7ddb5f764a86a404693",
+      "bytes": 182413
     },
     {
       "path": "dashboard/machine_page.py",
@@ -950,8 +950,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "a768d69d8d0bfb00b33f14710f1458903275549aefce26a841f990edaadad797",
-      "bytes": 16700,
+      "export_sha256": "9c68d9e9c3b00c50cff7da929510232757cec5787cb093c7e261bbe2c2efaddd",
+      "bytes": 16766,
       "upstream_modified": true
     },
     {
@@ -4839,8 +4839,8 @@
       "path": "tests/test_node_summary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b89cd513732e68a871048340f79fcad3af536ecc7a72acacb443436ed0b86248",
-      "bytes": 62045
+      "export_sha256": "0f48f12480f454e173a83b89992bf18857efa543973b91ba892c713c57e54f0f",
+      "bytes": 62073
     },
     {
       "path": "tests/test_notification.py",
