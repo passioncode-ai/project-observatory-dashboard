@@ -1912,6 +1912,26 @@ estate. On the new machine:
    [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
    Scheduling is a per-machine decision, which is why a profile does not carry it.
 
+### Which machine holds which key
+
+Each machine has its own vault. `project-observatory full vault-digests` shows every vault slot per
+machine as `same`, `differs`, `only here`, `missing` or `unreachable` (with the time of that
+machine's last answer), and one line when all match. Machines compare keyed HMAC-SHA-256 digests
+under one estate key, never values, so both need the same key once:
+
+```sh
+project-observatory full vault-digests key export /path/to/new-file    # on the first machine
+project-observatory full vault-digests key import /path/to/new-file    # on the second; then delete the file
+project-observatory full vault-digests write                          # on each: the manifest, no values
+```
+
+Until machines exchange manifests by themselves (OBS-194, step 2), copy the second machine's
+`<state>/vault-digests/local.json` into the first machine's `<state>/vault-digests/peers/` under the
+second machine's name, for example `machine-b.json`. A slot meant to differ is marked with
+`full vault-digests mark PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
+machines' copies read as stale. `observatory_credentials` names, for each vault row, the machines
+that hold it. The design: [docs/design/VAULT-DIGESTS.md](design/VAULT-DIGESTS.md).
+
 ## Staying in step
 
 ### Updates install themselves (0.17.0 and later)

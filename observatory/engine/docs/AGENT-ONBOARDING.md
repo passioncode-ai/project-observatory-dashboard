@@ -37,6 +37,15 @@ only when I ask for an unattended key), copy its public line with `ssh-keys copy
 it with `ssh-keys send NAME --to github` or `--to server:ALIAS --verify`. A cloud has no door yet:
 say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`).
 
+## The same key on my other machines
+
+To learn whether my other machines hold a slot, and the same value, run `project-observatory full
+vault-digests --json` (or read `machines` on each vault row of `observatory_credentials`). It compares
+keyed digests under the estate key and never a value: never open a vault file or a `.env` to compare.
+`unreachable` with a `last_answer` means that machine's answer is old, not that it agrees. Mark a slot
+that should differ with `full vault-digests mark PROJECT ENV NAME --why "..."` only when I say so. The
+estate key moves only as a file (`key export FILE`, then `key import FILE` on the other machine); never print it.
+
 ## Waking, stopping and restarting my apps
 
 Never launch, quit or kill an app or background job I enrolled (no `open -a`, `osascript`,
