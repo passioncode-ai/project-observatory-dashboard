@@ -2420,9 +2420,15 @@ if (Array.isArray(H.organizations)) {
             {mode: S.mode, servers: o.mcpServers || 0, skills: o.skills || 0, plugins: o.plugins || 0}), show]);
         }
         const drift = S.drift && Array.isArray(S.drift.items) ? S.drift.items : null;
+        // OBS-192: a plugin reads "changed" against a baseline digest because this node sends none (the contract does
+        // not say what a plugin's digest covers); the cause is said beside it, never sent.
+        const causes = {};
+        for (const c of (S.driftCauses || []))
+          causes[c.kind + " " + c.name] = T("this node sends no plugin digest; the contract does not say what it covers");
         if (drift && drift.length)
           hb.push([label, T("differs from the organization's baseline: {items}",
-            {items: drift.map(d => d.kind + " " + d.name + ": " + (DRIFT_STATE[d.state] || d.state)).join("; ")}), show]);
+            {items: drift.map(d => d.kind + " " + d.name + ": " + (DRIFT_STATE[d.state] || d.state)
+              + (causes[d.kind + " " + d.name] ? " (" + causes[d.kind + " " + d.name] + ")" : "")).join("; ")}), show]);
         else if (drift)
           hb.push([label, T("matches the organization's baseline"), show]);
       } else

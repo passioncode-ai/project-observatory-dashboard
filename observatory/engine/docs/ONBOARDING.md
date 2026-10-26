@@ -1563,7 +1563,9 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
   `project-observatory full org summary --org ID` to read exactly what would leave (it sends nothing and works before
   you agree), then `project-observatory full org summary --org ID --consent on` (or `--consent off` to stop; the time
   is recorded). Until then `org status` and Health say `harness summary: not shared (consent off)`. Why off: whether
-  a person may withhold the summary is still the contract's open question (CT-92's second half). To keep names back, list them in
+  a person may withhold the summary is still the contract's open question (CT-92's second half). Names can carry a
+  client's or a person's name: on a machine the organization administers (mode `A`) every project's own skill names
+  leave. To keep names back, list them in
   `config/node-summary.json` as `{"exclude": ["private-*", "plugin:*:mine"]}` (shell-style globs on whole names), mode
   0600 in a folder only you can write to: they are never sent, only counted here (`excluded`); a list that is a
   link, not owner-only, in a folder others may write to or not readable sends nothing, and says which. The consent

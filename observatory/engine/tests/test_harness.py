@@ -205,16 +205,31 @@ class Harness(unittest.TestCase):
         (codex / "shared-one").symlink_to(target)
         self.configure(["sources", "projects", str(inside)])
         doc = self.scan()
-        self.assertEqual([(r["name"], r["folder"]) for r in doc["project_skills"]], [("acme-deploy", "~/work/acme-app")])
+        self.assertEqual([(r["name"], r["folders"]) for r in doc["project_skills"]],
+                         [("acme-deploy", ["~/work/acme-app"])])
         self.configure(["sources", "projects", str(outside)])
         doc = self.scan()
-        self.assertEqual([(r["name"], r["folder"]) for r in doc["project_skills"]], [("beta-deploy", None)],
+        self.assertEqual([(r["name"], r["folders"]) for r in doc["project_skills"]], [("beta-deploy", [])],
                          "a project outside the scanned home has no folder an organization's work folders could name")
         self.assertEqual([(r["name"], r["source"]) for r in doc["codex_skills"]],
                          [("codex-only", "user"), ("shared-one", "user")], "a skill linked into both folders once")
         for row in doc["project_skills"] + doc["codex_skills"]:
             self.assertRegex(row["digest"], r"^[0-9a-f]{64}$")
         self.assertNotIn(str(self.home.parent), json.dumps(doc["project_skills"] + doc["codex_skills"]))
+
+    def test_a_linked_project_is_one_project_with_every_spelling_kept(self):
+        """OBS-192: a project reached through a link is read once, by the folder it resolves to, and every spelling
+        inside the home is kept, so whichever one an organization's work folders name admits it."""
+        real = self.home / "work" / "acme" / "app"
+        skill(real / ".claude" / "skills", "acme-deploy", "Deploys acme.")
+        projects = self.home / "projects"
+        projects.mkdir()
+        (projects / "acme-link").symlink_to(real)
+        (projects / "zz-again").symlink_to(real)
+        self.configure(["sources", "projects", str(projects)])
+        (row,) = self.scan()["project_skills"]
+        self.assertEqual(row["folders"], ["~/projects/acme-link", "~/work/acme/app", "~/projects/zz-again"])
+        self.assertNotIn(str(self.home), json.dumps(row))
 
     def test_codex_skills_are_read_once_each(self):
         codex = self.home / ".codex" / "skills"

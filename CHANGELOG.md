@@ -14,7 +14,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   source `user`, each once by name. On your own machine (mode `C`) an organization sees a project's skill only when the
   project sits in one of its work folders, and a Codex skill only when its baseline names it; the folder never leaves.
   A harness scan taken before this change is refused until the next tick takes a new one (`org:node-summary-unavailable`
-  for at most one tick). A plugin's digest is still not sent: the contract does not say what it is a digest of.
+  for at most one tick). The person's own skill wins over a project's of the same name, as in Claude Code, and a linked
+  project is admitted by whichever of its spellings is a work folder. The consent notice now says that mode `A` sends
+  every project's own skill names and that `config/node-summary.json` is the guard for client and person names.
+  A plugin's digest is still not sent: the contract defines the field but not what it covers. So a baseline that sets
+  a plugin's digest reads `changed` for that plugin, and `org summary`, `org status` and Health say why beside it.
 
 - **Bring your enrollments over from another lifecycle broker** (OBS-79 step L5, `docs/design/LIFECYCLE.md`).
   `project-observatory full lifecycle import --from FOLDER` reads that broker's state folder on this machine without

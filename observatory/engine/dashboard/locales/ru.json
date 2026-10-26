@@ -2253,6 +2253,7 @@
  "harness summary taken on {date}: {agents} coding agents, {servers} MCP servers, {skills} skills, {plugins} plugins, {hooks} hooks": "сводка окружения агентов принята {date}: агентов для кода {agents}, MCP-серверов {servers}, навыков {skills}, плагинов {plugins}, хуков {hooks}",
  "differs from the organization's baseline: {items}": "отличается от эталона организации: {items}",
  "matches the organization's baseline": "совпадает с эталоном организации",
+ "this node sends no plugin digest; the contract does not say what it covers": "этот узел не отправляет дайджест плагина: контракт не говорит, что он охватывает",
  "harness summary not sent yet; the next check-in sends it": "сводка окружения агентов ещё не отправлена; её отправит следующая отметка на сервере",
  "not installed": "не установлен",
  "a different build": "другая сборка",

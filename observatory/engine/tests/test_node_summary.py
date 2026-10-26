@@ -377,10 +377,10 @@ class Build(unittest.TestCase):
     def test_project_and_codex_skills_join_the_skills_by_name_and_digest(self):
         harness, mcp = scans()
         harness['project_skills'] = [
-            {'name': 'alpha-deploy', 'folder': '~/projects/alpha-web', 'digest': 'e5' * 32},
-            {'name': 'tidy-notes', 'folder': '~/projects/alpha-web', 'digest': 'f6' * 32},
-            {'name': 'loose-one', 'folder': None, 'digest': 'not hex'},
-            {'name': 'has space', 'folder': '~/projects/alpha-web', 'digest': 'e5' * 32}]
+            {'name': 'alpha-deploy', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32},
+            {'name': 'tidy-notes', 'folders': ['~/projects/alpha-web'], 'digest': 'f6' * 32},
+            {'name': 'loose-one', 'folders': [], 'digest': 'not hex'},
+            {'name': 'has space', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32}]
         harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32},
                                    {'name': 'alpha-deploy', 'source': 'user', 'digest': '08' * 32},
                                    {'name': 'odd-source', 'source': 'elsewhere'}]
@@ -403,7 +403,7 @@ class Build(unittest.TestCase):
 
     def test_a_baseline_digest_of_a_project_skill_is_compared(self):
         harness, mcp = scans()
-        harness['project_skills'] = [{'name': 'alpha-deploy', 'folder': '~/projects/alpha-web', 'digest': 'e5' * 32}]
+        harness['project_skills'] = [{'name': 'alpha-deploy', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32}]
         harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32}]
         baseline = {'revision': 2, 'items': [{'kind': 'skill', 'name': 'alpha-deploy', 'digest': 'sha256:' + 'e5' * 32},
                                              {'kind': 'skill', 'name': 'codex-review', 'digest': DIGEST_A}]}
@@ -596,12 +596,12 @@ class Scope(unittest.TestCase):
     def test_under_c_a_projects_skills_in_its_work_folders_and_codex_skills_its_baseline_names(self):
         harness, mcp = scans()
         harness['project_skills'] = [
-            {'name': 'acme-deploy', 'folder': '~/work/acme/app', 'digest': 'e5' * 32},
-            {'name': 'acme-web-lint', 'folder': '~/src/acme-web', 'digest': 'e6' * 32},
-            {'name': 'beta-deploy', 'folder': '~/work/beta/app', 'digest': 'e7' * 32},
-            {'name': 'shared-check', 'folder': '~/work/beta/app', 'digest': 'e8' * 32},
-            {'name': 'shared-check', 'folder': '~/work/acme/app', 'digest': 'e9' * 32},
-            {'name': 'outside', 'folder': None, 'digest': 'ea' * 32}]
+            {'name': 'acme-deploy', 'folders': ['~/work/acme/app'], 'digest': 'e5' * 32},
+            {'name': 'acme-web-lint', 'folders': ['~/src/acme-web'], 'digest': 'e6' * 32},
+            {'name': 'beta-deploy', 'folders': ['~/work/beta/app'], 'digest': 'e7' * 32},
+            {'name': 'shared-check', 'folders': ['~/work/beta/app'], 'digest': 'e8' * 32},
+            {'name': 'shared-check', 'folders': ['~/work/acme/app'], 'digest': 'e9' * 32},
+            {'name': 'outside', 'folders': [], 'digest': 'ea' * 32}]
         harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32},
                                    {'name': 'codex-other', 'source': 'user', 'digest': '08' * 32}]
         folders = ns.policy_scope([load('device-policy-organization.json')])['folders']
@@ -623,6 +623,71 @@ class Scope(unittest.TestCase):
         for never in ('work/acme', 'beta-deploy', 'codex-other', 'outside', 'tidy-notes'):
             self.assertNotIn(never, said)
         self.assertEqual(ns.summary_findings({'summary': summary, 'baseline': baseline, 'org': 'org-7f3a'}), [])
+
+    def c_skills(self, project_skills, skills=None, baseline=None, folders=('work/acme/*',), codex=()):
+        harness, mcp = scans()
+        if skills is not None:
+            harness['skills'] = skills
+        harness['project_skills'], harness['codex_skills'] = project_skills, list(codex)
+        scope = {}
+        summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at='2026-10-22T09:00:00Z',
+                                 harness_scan=harness, mcp_scan=mcp, folders=list(folders), baseline=baseline,
+                                 scope=scope)
+        return summary['harness']['skills'], scope['outOfContext'], summary
+
+    def test_under_c_the_persons_own_skill_shadows_a_projects_of_the_same_name(self):
+        mine = [{'name': 'deploy', 'source': 'plain', 'digest': 'b2' * 32}]
+        theirs = [{'name': 'deploy', 'folders': ['~/work/acme/app'], 'digest': 'e5' * 32}]
+        skills, out, _ = self.c_skills(theirs, skills=mine)
+        self.assertEqual(skills, [], "Claude Code loads the person's `deploy`, so the project's is not reported")
+        self.assertEqual(out['skills'], 1)
+        skills, _, _ = self.c_skills(theirs, skills=mine, baseline={'revision': 1, 'items': [
+            {'kind': 'skill', 'name': 'deploy'}]})
+        self.assertEqual(skills, [{'name': 'deploy', 'source': 'user', 'digest': 'sha256:' + 'b2' * 32}],
+                         'the baseline names it: the one the agent loads is listed, as under A')
+        whole, _, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
+                               harness_scan=dict(scans()[0], skills=mine, project_skills=theirs), mcp_scan={},
+                               mode='A')
+        self.assertEqual(whole['harness']['skills'], skills, 'mode A reports the same skill')
+        plugin = [{'name': 'deploy', 'source': 'plugin:tool@family', 'digest': 'a1' * 32}]
+        skills, _, _ = self.c_skills(theirs, skills=plugin)
+        self.assertEqual([r['source'] for r in skills], ['project'], "a plugin's skill is namespaced and shadows none")
+
+    def test_under_c_a_baseline_admits_a_projects_skill_outside_the_work_folders(self):
+        skills, _, _ = self.c_skills([{'name': 'audit', 'folders': ['~/elsewhere/beta'], 'digest': 'e5' * 32}],
+                                     baseline={'revision': 1, 'items': [{'kind': 'skill', 'name': 'audit'}]})
+        self.assertEqual([(r['name'], r['source']) for r in skills], [('audit', 'project')])
+
+    def test_under_c_a_linked_project_is_admitted_by_whichever_spelling_is_a_work_folder(self):
+        row = {'name': 'acme-deploy', 'folders': ['~/projects/acme-link', '~/work/acme/app'], 'digest': 'e5' * 32}
+        skills, _, summary = self.c_skills([row])
+        self.assertEqual([r['name'] for r in skills], ['acme-deploy'])
+        self.assertNotIn('acme-link', json.dumps(summary))
+        skills, _, _ = self.c_skills([dict(row, folders=['~/projects/acme-link'])])
+        self.assertEqual(skills, [])
+
+    def test_under_c_dot_dot_case_and_prefix_folders_are_refused(self):
+        for folder in ('~/work/acme/../beta/app', '~/Work/acme/app', '~/work/acmex/app', '~/workshop/acme/app',
+                       '~/work/acme', 'work/acme/app/../../beta', '/opt/work/acme/app', '~work/acme/app'):
+            skills, out, _ = self.c_skills([{'name': 'acme-deploy', 'folders': [folder], 'digest': 'e5' * 32}])
+            self.assertEqual(skills, [], folder)
+        skills, _, _ = self.c_skills([{'name': 'lint', 'folders': ['~/src/acme'], 'digest': 'e5' * 32}],
+                                     folders=['src/acme-*'])
+        self.assertEqual(skills, [], '`src/acme-*` is a prefix with a dash, never `src/acme` itself')
+
+    def test_a_plugin_digest_in_the_baseline_reads_changed_and_says_why(self):
+        baseline = {'revision': 2, 'items': [{'kind': 'plugin', 'name': 'switchboard@passioncode',
+                                              'digest': DIGEST_A},
+                                             {'kind': 'skill', 'name': 'tidy-notes', 'digest': DIGEST_A}]}
+        _, _, summary = self.c_skills([], baseline=baseline)
+        self.assertEqual(summary['drift']['items'][0], {'kind': 'plugin', 'name': 'switchboard@passioncode',
+                                                        'state': 'changed'})
+        self.assertNotIn('digest', summary['harness']['plugins'][0])
+        self.assertEqual(ns.drift_causes(summary['drift']), [
+            {'kind': 'plugin', 'name': 'switchboard@passioncode', 'cause': ns.PLUGIN_DIGEST_CAUSE}],
+            "only the plugin's: a skill's changed is a real difference")
+        self.assertEqual(ns.drift_causes(None), [])
+        self.assertNotIn('cause', json.dumps(summary), 'the cause stays here')
 
     def test_under_a_the_whole_harness(self):
         whole, _, scope = self.build(mode='A')
@@ -819,6 +884,29 @@ class CheckIn(_Enrolled):
         for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-', '"consent-off"',
                      '--consent on', 'S.refused', 'S.mode', 'S.outOfContext'):
             self.assertIn(said, rows)
+
+    def test_the_preview_and_the_status_say_why_a_plugin_reads_changed(self):
+        from node import org
+        state = {'protocols': [org.SUMMARY_PROTOCOL], 'summaryConsent': {'on': True},
+                 'nodeSummary': {'sentAt': '2026-10-22T09:00:00Z', 'sequence': 2, 'counts': {},
+                                 'drift': {'policyRevision': 2, 'items': [
+                                     {'kind': 'plugin', 'name': 'tool@family', 'state': 'changed'},
+                                     {'kind': 'plugin', 'name': 'gone@family', 'state': 'missing'}]}}}
+        self.assertEqual(org.summary_notice(state)['driftCauses'], [
+            {'kind': 'plugin', 'name': 'tool@family', 'cause': ns.PLUGIN_DIGEST_CAUSE}])
+        self.assertNotIn('driftCauses', org.summary_notice(dict(state, nodeSummary={'sentAt': None})))
+        source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
+        self.assertIn('S.driftCauses', source)
+        self.assertIn(ns.PLUGIN_DIGEST_CAUSE, (ROOT / 'dashboard' / 'locales' / 'ru.json').read_text(encoding='utf-8'))
+
+    def test_the_consent_notice_names_mode_a_and_the_exclusion_list(self):
+        from node import org
+        preview = self.make().summary_preview()
+        self.assertNotIn('notice', preview, 'consent is on here')
+        answer = self.make().set_summary_consent(False)
+        for said in ('mode A', "every project's own skill names", 'config/node-summary.json', 'client and person'):
+            self.assertIn(said, answer['notice'])
+        self.assertEqual(self.make().summary_preview()['notice'], org.CONSENT_NOTICE)
 
     def test_the_preview_shows_the_next_summary_and_changes_nothing(self):
         before = self.make().state()

@@ -17,8 +17,8 @@ It also lists, for the node summary an organization receives (OBS-192, contract 
 `name@marketplace` with the version Claude Code recorded, and the coding agents of the contract's catalogue (DEC-0093)
 installed here: an agent whose launch command is an executable in a bin folder, its version read from where the
 launcher resolves (a versions folder, a Homebrew keg, an npm package.json), never by running it. No path is recorded.
-For the same summary it lists each project's own skills (`project_skills`: name, digest, and the project's folder as
-`~/<path>`, kept here so the summary can judge an organization's work folders, never sent) and Codex's skills
+For the same summary it lists each project's own skills (`project_skills`: name, digest, and every spelling of the
+project's folder as `~/<path>`, kept here so the summary can judge an organization's work folders, never sent) and Codex's skills
 (`codex_skills`: name, source and digest).
 
 The first sight of a skill records its digest in `store/state/harness-pins.json`; a later change is reported
@@ -482,20 +482,23 @@ def skill_usage(claude: Path, days: int = USAGE_DAYS) -> tuple[dict[str, int], i
     return uses, read
 
 
-def home_relative(folder: Path, home: Path | None) -> str | None:
-    """`folder` as `~/<path>` when it is inside the scanned home (how the MCP scan spells a folder), else None: the
-    node summary matches it against an organization's `workspace.folders`, which are relative to the home, and never
-    sends it."""
+def home_relatives(folder: Path, home: Path | None) -> list[str]:
+    """Every spelling of `folder` as `~/<path>` inside the scanned home (how the MCP scan spells a folder): the path as
+    found and, when a link leads elsewhere in the home, the path it resolves to. Empty outside the home. The node
+    summary matches them against an organization's `workspace.folders`, which are relative to the home, and never
+    sends them."""
     if home is None:
-        return None
+        return []
+    out: list[str] = []
     for base in dict.fromkeys((home, home.resolve())):
         for candidate in dict.fromkeys((folder, folder.resolve())):
             try:
                 rel = candidate.relative_to(base).as_posix()
             except ValueError:
                 continue
-            return "~/" + rel if rel not in ("", ".") else None
-    return None
+            if rel not in ("", ".") and "~/" + rel not in out:
+                out.append("~/" + rel)
+    return out
 
 
 def project_skills(roots: list[Path], user_listing: int, limit: int,
@@ -505,19 +508,24 @@ def project_skills(roots: list[Path], user_listing: int, limit: int,
     projects folder is this operator's own.) One level under each projects folder; a project's folder named
     like a worktree is still a project, so it is read the same way.
 
-    The third list is one row per skill for the node summary (OBS-192): its name, the project's folder as `~/<path>`
-    when it is inside the scanned home (None otherwise) and its content digest. The folder stays on this machine: the
-    summary reads it only to judge whether the skill sits in an organization's `workspace.folders` (DEC-0118)."""
+    The third list is one row per skill for the node summary (OBS-192): its name, every spelling of the project's
+    folder as `~/<path>` inside the scanned home (`folders`, empty outside it) and its content digest. A project is
+    read once by the folder it resolves to, so a project reached through a link is one project, and every spelling it
+    was reached by is kept: whichever of them sits in an organization's `workspace.folders` admits it (DEC-0118). The
+    folders stay on this machine: the summary reads them only for that judgement."""
     projects, hits, rows_out = [], [], []
-    seen: set[str] = set()
+    seen: dict[str, list[dict]] = {}
     for root in roots:
         if not root.is_dir():
             continue
         for skills_dir in sorted(root.glob("*/.claude/skills")):
             real = str(skills_dir.resolve())
+            spellings = home_relatives(skills_dir.parent.parent, home)
             if real in seen:
+                for row in seen[real]:
+                    row["folders"] += [f for f in spellings if f not in row["folders"]]
                 continue
-            seen.add(real)
+            seen[real] = held = []
             project = skills_dir.parent.parent.name
             rows = []
             for skill in sorted(skills_dir.glob("*/SKILL.md")):
@@ -530,7 +538,8 @@ def project_skills(roots: list[Path], user_listing: int, limit: int,
                 invocable = str(meta.get("disable-model-invocation", "")).lower() != "true"
                 rows.append({"name": name, "listing_chars": listing_chars(meta, name) if invocable else 0})
                 sha, _n, _s, files = digest(skill.parent)
-                rows_out.append({"name": name, "folder": home_relative(skills_dir.parent.parent, home), "digest": sha})
+                held.append({"name": name, "folders": list(spellings), "digest": sha})
+                rows_out.append(held[-1])
                 for h in hits_for(name, skill.parent, files, meta, 1):
                     hits.append({**h, "skill": f"{project}/{name}", "project": project, "digest": sha})
             if not rows:
