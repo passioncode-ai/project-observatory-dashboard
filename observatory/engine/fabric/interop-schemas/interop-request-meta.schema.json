@@ -20,6 +20,10 @@
     "protocols": {
       "$ref": "common.schema.json#/$defs/protocols",
       "description": "DEC-0087 (DEC-0067's list): the revisions the caller reads. A caller that names `fabric-interop/0.2` accepts `null` and `partial` in a job's `usage`; absent, it reads `fabric-interop/0.1`."
+    },
+    "decision": {
+      "$ref": "decision.schema.json",
+      "description": "DEC-0121 (AP-2): the operator's decision a T0 or T1 caller carries on a relayed action; a service performs that action as the operator's, and answers operator-decision-required without one and decision-invalid for one that is not valid (docs/specification/service.md#actions)."
     }
   },
   "additionalProperties": true

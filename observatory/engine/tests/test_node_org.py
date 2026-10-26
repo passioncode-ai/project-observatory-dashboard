@@ -2269,5 +2269,108 @@ class TokenSlot(unittest.TestCase):
             org.read_token('only-two/parts')
 
 
+
+#: DEC-0115's and DEC-0119's forms the schema's `date-time` admits and RFC 3339 read strictly does not: an offset
+#: without a colon, a space for `T`, an hour-only offset, a leap second.
+LOOSE_TIMES = ('2026-10-19T08:00:00+0100', '2026-10-19 08:00:00Z', '2026-10-19T08:00:00+01', '2026-10-19T08:00:60Z',
+               '2026-10-19T08:00:00+0000')
+
+
+class StrictWindows(unittest.TestCase):
+    """DEC-0115 and DEC-0119: a key, certification or delegation window whose bound does not read is closed, and the
+    verifier's clock is read as strictly. The node's own windows (the device certificate it accepts, the receiver's
+    check over `http-signature.json`) and the shared reference `key_window_holds` that the policy, key set and root
+    certification (OE-06) and the repair key (OBS-193) will judge with."""
+
+    def test_the_loose_forms_do_not_read_and_the_strict_ones_do(self):
+        for loose in LOOSE_TIMES:
+            self.assertIsNone(strict_time(loose), loose)
+        for strict in ('2026-10-19T08:00:00Z', '2026-10-19T09:00:00+01:00', '2026-10-19t08:00:00.5z'):
+            self.assertIsNotNone(strict_time(strict), strict)
+        self.assertEqual(strict_time('2026-10-19T09:00:00+01:00'), T0 * 1000)
+
+    def test_key_window_holds_as_the_contract_reads_it(self):
+        from node.relay import key_window_holds
+        at = T0 * 1000
+        self.assertTrue(key_window_holds(at, {}), 'absent bounds are open')
+        self.assertTrue(key_window_holds(at, {'notBefore': '2026-10-19T08:00:00Z', 'notAfter': '2026-10-19T08:00:00Z'}),
+                        'both bounds are inside')
+        self.assertFalse(key_window_holds(at, {'notAfter': '2026-10-19T07:59:59Z'}))
+        self.assertFalse(key_window_holds(at, {'notBefore': '2026-10-19T08:00:01Z'}))
+        for loose in LOOSE_TIMES + (None, 7, ''):
+            self.assertFalse(key_window_holds(at, {'notBefore': loose}), loose)
+            self.assertFalse(key_window_holds(at, {'notAfter': loose}), loose)
+        for clock in (float('nan'), float('inf'), None, True, '2026-10-19T08:00:00Z'):
+            self.assertFalse(key_window_holds(clock, {}), clock)
+        self.assertFalse(key_window_holds(at, None))
+
+    def test_the_receiver_closes_a_certificate_whose_bound_does_not_read(self):
+        data = vectors('http-signature')
+        case = next(c for c in data['cases'] if c['expect'] == 'accepted')
+        certs = {c['serial']: c for c in data['certificates']}
+        serial = case.get('clientCertificateSerial') or hs._parsed(case['request']['headers'])['keyid']
+        for member in ('notBefore', 'notAfter'):
+            for loose in LOOSE_TIMES:
+                broken = dict(certs, **{serial: dict(certs[serial], **{member: loose})})
+                with self.subTest(member=member, value=loose):
+                    result = hs.verify_request(case['request'], public_base_url=data['publicBaseUrl'],
+                                               certificate=broken.get, at_ms=strict_time(data['at']),
+                                               client_certificate_serial=case.get('clientCertificateSerial'))
+                    self.assertEqual(result.get('code'), 'certificate-expired')
+
+    @needs_crypto
+    def test_the_node_refuses_a_certificate_whose_window_does_not_read(self):
+        from node.org import Enrollment, OrgError
+        now = [float(T0 + 3600)]
+        server = FakeServer(lambda: now[0])
+        issue = server._issue
+        for member in ('notBefore', 'notAfter'):
+            for loose in ('2026-10-19T09:00:00+0100', '2026-10-19 09:00:00Z'):
+                def loosened(csr, device, member=member, loose=loose):
+                    answer = issue(csr, device)
+                    answer[member] = loose
+                    return answer
+                server._issue = loosened
+                node = Path(tmpdir.mkdtemp()).resolve() / 'node'
+                with self.subTest(member=member, value=loose), self.assertRaises(OrgError) as raised:
+                    Enrollment(node, ORG, transport=server, clock=lambda: now[0]).enroll(
+                        'https://org.example', 'et_1.' + 'S' * 32)
+                self.assertEqual(raised.exception.code, 'response-malformed')
+                self.assertFalse((node / 'orgs' / ORG / 'enrollment.json').exists())
+                server.used.clear()
+
+
+class CredentialGates(unittest.TestCase):
+    """DEC-0112, DEC-0113, DEC-0116 and DEC-0117 at this pin: a check-in lists in its own `protocols` only what the
+    node reads, so no server sends it a repair (`repair-request/1`), a credential decision, envelope or revocation
+    (`credential-revocation/1` now requires `requestId`, DEC-0113) or `callRecordsAccepted`; and none of DEC-0111's
+    request members is sent, so the check-in's own rules over them (DEC-0112) have nothing to judge."""
+
+    def test_the_node_reads_and_sends_none_of_them(self):
+        from node import org
+        self.assertEqual(org.NODE_READS, ('fabric-device/0.1',))
+        for revision in ('repair-request/1', 'credential-decision/1', 'fabric-credential-envelope/1',
+                         'credential-revocation/1', 'call-record/1'):
+            self.assertNotIn(revision, org.NODE_READS)
+        self.assertEqual(org.UNSENT_RECORDS, ('credentialRequests', 'callRecords'))
+
+    @needs_crypto
+    def test_a_check_in_carries_no_credential_member_even_to_a_server_that_lists_them(self):
+        from node.org import Enrollment
+        now = [float(T0 + 3600)]
+        server = FakeServer(lambda: now[0], protocols=('fabric-device/0.1', 'fabric-activity/0.1',
+                                                       'credential-request/1', 'call-record/1'))
+        node = Path(tmpdir.mkdtemp()).resolve() / 'node'
+        make = lambda: Enrollment(node, ORG, transport=server, clock=lambda: now[0])   # noqa: E731
+        make().enroll('https://org.example', 'et_1.' + 'S' * 32)
+        make().check_in()
+        make().check_in()
+        bodies = [body for path, body in server.requests if path == '/v1/devices/check-in']
+        self.assertGreaterEqual(len(bodies), 2)
+        for body in bodies:
+            self.assertEqual(body['protocols'], ['fabric-device/0.1'])
+            for member in ('credentialRequests', 'callRecords', 'repairResults'):
+                self.assertNotIn(member, body.get('records') or {})
+
 if __name__ == '__main__':
     unittest.main()

@@ -1507,12 +1507,15 @@ outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
 - **The harness summary** (`node-summary/1`, contract DEC-0101): what this machine's coding agents run: the coding
   agents of the contract's catalogue installed here with their versions, the MCP servers they load (name, source,
   transport, health), the Claude Code skills (name, source, digest) and enabled plugins (name, source, version), and
-  how many hooks they load. **It is not shared until you say so, per organization**: run
+  how many hooks they load. How much it lists follows the machine's mode (DEC-0118): on your own machine (mode `C`, the
+  default and, until the organization's signed policy is applied, the only one) an organization sees the coding agents,
+  the hook count, and only the MCP servers, skills and plugins installed in its own work folders or named by its
+  baseline; the rest stays here, counted as `outOfContext`. Only a machine the organization administers (mode `A`,
+  set by an `mdm` profile) lists the whole harness. **It is not shared until you say so, per organization**: run
   `project-observatory full org summary --org ID` to read exactly what would leave (it sends nothing and works before
   you agree), then `project-observatory full org summary --org ID --consent on` (or `--consent off` to stop; the time
-  is recorded). Until then `org status` and Health say `harness summary: not shared (consent off)`. Why off: the
-  contract ships the whole harness whatever the machine's mode, and whether an organization should also see what serves
-  your other contexts is still its open question CT-92. To keep names back, list them in
+  is recorded). Until then `org status` and Health say `harness summary: not shared (consent off)`. Why off: whether
+  a person may withhold the summary is still the contract's open question (CT-92's second half). To keep names back, list them in
   `config/node-summary.json` as `{"exclude": ["private-*", "plugin:*:mine"]}` (shell-style globs on whole names), mode
   0600 in a folder only you can write to: they are never sent, only counted here (`excluded`); a list that is a
   link, not owner-only, in a folder others may write to or not readable sends nothing, and says which. The consent

@@ -3,6 +3,33 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Changed
+
+- **The engine's contract pin moves to the contract's release `v0.1.0+2026-10-26`** (fabric-agent-contract
+  `a3a66eb0`; OBS-226), through `tools/vendor_org_vectors.py`: the node vectors and their README, the interop schemas
+  (`_meta.decision` of DEC-0121 in `interop-request-meta`, and `decision.schema.json`) and the pin, in one change. The
+  node does what it owes for DEC-0112 to DEC-0124 there, each over the contract's own vectors or the decision's own
+  cases:
+  - **A harness summary lists only the organization's own context on your machine** (DEC-0118). Under
+    `machine.mode` `C`, the default, an organization sees the coding agents, the hook count, and only the MCP
+    servers, skills and plugins installed in one of its own `workspace.folders` or named by its baseline; the rest
+    stays here, counted per list as `outOfContext`, shown beside `mode` in `org summary`, `org status` and Health.
+    Only `A`, set by an `mdm` layer, lists the whole harness. No signed policy is applied yet (OE-06), so every
+    summary is built under `C` today: an organization that took the whole harness before now gets the coding agents
+    and the hook count.
+  - **A key, certification or delegation window whose bound does not read is closed** (DEC-0115, DEC-0119): the
+    node's certificate and transport windows already read RFC 3339 strictly (`+0100` or a space for `T` refuses the
+    certificate), and `relay.key_window_holds`, the contract's `keyWindowHolds`, is the reference the signed policy,
+    key set and root certification (OE-06) and the repair key (OBS-193) judge with.
+  - DEC-0112, DEC-0113, DEC-0116 and DEC-0117 hold because the check-in lists only `fabric-device/0.1` among what it
+    reads and sends none of DEC-0111's members, even to a server that lists them; DEC-0120's four-member pin holds.
+    A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.
+  - DEC-0121 to DEC-0124 bind a service, not the node: the engine's own dashboard owes DEC-0121's agent twins
+    (OBS-237) and DEC-0123's `open_link` (OBS-245: `full open` still opens the browser); it serves no A2A Agent
+    Card (DEC-0122) and draws no Fabric button (DEC-0124).
+
 ## 0.29.2 (2026-10-26)
 
 A patch release. A standing review policy can now decide the safe part of the proposal queue every tick, as

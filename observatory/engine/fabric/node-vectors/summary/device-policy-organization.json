@@ -1,0 +1,78 @@
+{
+  "protocol": "fabric-device/0.1",
+  "kind": "policy",
+  "org": {
+    "id": "org-7f3a"
+  },
+  "source": "server",
+  "revision": 14,
+  "issuedAt": "2026-10-12T08:00:00Z",
+  "noticeVersion": "2026-10.1",
+  "expiresAt": "2026-10-19T08:00:00Z",
+  "keys": {
+    "logging.required": {
+      "value": true,
+      "locked": true
+    },
+    "telemetry.git_branch": {
+      "value": "hash",
+      "locked": true
+    },
+    "retention.raw_days": {
+      "value": 30
+    },
+    "accounts.tenants": {
+      "value": [
+        {
+          "provider": "anthropic",
+          "tenantRef": "sha256:f66da9b3a3b7674866b62dd9f47614673747056cec008cc2866de0ef3421294d",
+          "accountClass": "organization"
+        },
+        {
+          "provider": "openai",
+          "tenantRef": "sha256:29fdc8a920723a23016655e2c054cedde13e84bcb7b4f26ae41effc56e571d3d",
+          "accountClass": "organization"
+        }
+      ],
+      "locked": true
+    },
+    "models.credentials": {
+      "value": [
+        {
+          "credentialRef": "org-7f3a.anthropic-team",
+          "provider": "anthropic",
+          "credentialKind": "api-org",
+          "fingerprint": "hmac-sha256:5d0f6a0c4e1b2a39f8e7d6c5b4a39281706f5e4d3c2b1a0918e7d6c5b4a39281",
+          "callers": [
+            "grp-engineering"
+          ],
+          "quota": {
+            "period": "month",
+            "usd": "2000"
+          },
+          "dataClasses": [
+            "public",
+            "internal",
+            "confidential"
+          ]
+        }
+      ],
+      "locked": true
+    },
+    "models.personal_key_sharing": {
+      "value": "forbidden",
+      "locked": true
+    },
+    "workspace.folders": {
+      "value": [
+        "work/acme/*",
+        "src/acme-*"
+      ]
+    }
+  },
+  "signature": {
+    "alg": "ed25519",
+    "keyId": "org-7f3a.policy-2026",
+    "value": "0ECd4H1m0ywS8gbjSlVgBzzQqYUEWQ5ACY9WXx9ha+FD9C0KubyltlCwX1w6NS3W/Go+OSwsRNh79cr2PHXZAQ=="
+  }
+}

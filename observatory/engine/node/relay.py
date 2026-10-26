@@ -88,6 +88,22 @@ def strict_time(value: Any) -> Optional[int]:
     return _epoch_ms(match, minutes)
 
 
+def key_window_holds(at_ms: Any, key: Any) -> bool:
+    """The contract's `keyWindowHolds` (DEC-0115, DEC-0119): whether a signing key's window holds at `at_ms`, the
+    verifier's clock in milliseconds. An absent `notBefore` or `notAfter` is open; one that is not an RFC 3339 instant
+    read strictly (`+0100`, a space for `T`, `+01`, a leap second) closes the window, as does a clock that is not a
+    finite number; both bounds are inside. Every key, certification and delegation window the node judges reads its
+    bounds this way: a policy's key and its key set (OE-06), a repair's key (OBS-193)."""
+    if isinstance(at_ms, bool) or not isinstance(at_ms, (int, float)) or at_ms != at_ms \
+            or at_ms in (float('inf'), float('-inf')):
+        return False
+    if not isinstance(key, dict):
+        return False
+    start = strict_time(key['notBefore']) if 'notBefore' in key else float('-inf')
+    end = strict_time(key['notAfter']) if 'notAfter' in key else float('inf')
+    return start is not None and end is not None and start <= at_ms <= end
+
+
 def iso_ms(ms: int) -> str:
     """An instant as `YYYY-MM-DDTHH:MM:SS.mmmZ`, the form the vectors print."""
     seconds, millis = divmod(ms, 1000)

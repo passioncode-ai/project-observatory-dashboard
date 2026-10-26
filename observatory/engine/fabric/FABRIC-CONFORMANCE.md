@@ -26,7 +26,17 @@ which still reads the profile lock under its old name for one release when no
 The probe receipt's `contractCommit` comes from the pin, its `localProfile` and
 `schemaRelease` from the profile lock.
 
-**What the node owes at the pin (OBS-217, contract `588748ab`).** The organization node
+**What the node owes at the pin (OBS-226, contract `a3a66eb0`, the release `v0.1.0+2026-10-26`).**
+On top of what OBS-217 brought (below): a node summary under `machine.mode` `C`, the default, lists only the
+organization's context, under `A` the whole harness (DEC-0118, `node_summary.policy_scope`); every key, certification
+and delegation window reads its bounds as RFC 3339 read strictly and closes on one that does not read, as does the
+verifier's clock (DEC-0115, DEC-0119: `relay.key_window_holds`, the device certificate); DEC-0112, DEC-0113,
+DEC-0116 and DEC-0117 hold because the check-in lists and sends none of the members they judge. DEC-0120 (a pin of four
+members) holds for `../fabric-contract.lock.json`. DEC-0121 to DEC-0124 bind a service, not the node: the engine's own
+service owes DEC-0121's actions (OBS-237) and DEC-0123's `open_link` (OBS-245); it serves no A2A Agent Card
+(DEC-0122) and draws no Fabric button (DEC-0124).
+
+**What the node owed at the previous pin (OBS-217, contract `588748ab`).** The organization node
 ports and tests, over the contract's own vectors: `organization-closed` (DEC-0103: 410 at
 transport step 4, final on one answer, the share-registration gate's `stop`), the
 `purpose` hold and its resume on a new notice or acknowledgement (DEC-0100, DEC-0102),

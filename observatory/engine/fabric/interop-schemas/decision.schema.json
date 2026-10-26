@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/decision.schema.json",
+  "title": "The operator's decision a call carries in _meta.decision (fabric-actions/0.1, DEC-0121 AP-2)",
+  "description": "The operator's decision on one relayed action, carried by a T0 or T1 caller in its request's _meta.decision, or in a hub agent.call's or sealed call's call.decision (DEC-0121 AP-2). An agent sets it only for the operator's own words, from the sources and in the form AP-3 names (docs/specification/service.md#actions); an elicitation the person accepted is the service's own record, never this. action is the declared action's id and must be the called one; target, when present, the one object the operator named, which the service compares with the call's. A service reads at strictly (src/rfc3339.ts strictTime) and refuses decision-invalid a decision more than 60 s after its clock or more than 24 h before it.",
+  "type": "object",
+  "required": [
+    "by",
+    "via",
+    "action",
+    "instruction",
+    "at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "by": {
+      "const": "operator"
+    },
+    "via": {
+      "const": "relayed-instruction"
+    },
+    "action": {
+      "$ref": "interop-common.schema.json#/$defs/requestKey",
+      "description": "The id of the action this decision is for: a declared action's (extensions/actions/0.1), or a job input request's key (C3.3)."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The one object the operator named (a review, a draft, a job), as the service identifies it; the service refuses decision-invalid when the call acts on another."
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "The operator's sentence that names this action, verbatim; or, for a confirmation, the agent's question that names the action and the operator's answer, both verbatim (AP-3)."
+    },
+    "at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the operator decided."
+    }
+  }
+}

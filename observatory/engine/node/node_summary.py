@@ -12,7 +12,10 @@ This module is the node's half, ported from the contract's `src/node-summary.ts`
 - `summary_findings` is FAC-SEM-128 over `{summary, baseline?, org?}` and `document_findings` its clauses that read a
   summary alone; `build` checks what it built with the latter and refuses to hand over a summary it would flag.
 - `build` turns this machine's harness scan (`collectors/scan_harness.py`, `store/raw/harness.json`) and MCP scan
-  (`collectors/scan_mcp.py`, `store/raw/mcp.json`) into the summary for one organization's context.
+  (`collectors/scan_mcp.py`, `store/raw/mcp.json`) into the summary for one organization's context. How much it lists
+  follows `machine.mode` (DEC-0118, `policy_scope`): under `C`, the default, only what belongs to that organization's
+  context (the coding agents, the hook count, and the MCP servers, skills and plugins installed in one of its own
+  `workspace.folders` or named by its baseline); under `A`, set only by an `mdm` layer, the whole harness.
 
 WHAT NEVER LEAVES. The summary names software and services: catalogue ids and versions, MCP server names with their
 source, transport and health, skill and plugin names with a version or digest, the number of hooks. It copies an
@@ -201,6 +204,58 @@ def harness_baseline(layers: Any) -> Optional[dict]:
     value = setting.get('value')
     return {'revision': layer.get('revision'), 'items': value.get('items') if isinstance(value, dict) else None}
 
+
+
+# -- what a summary lists: machine.mode (DEC-0118) -----------------------------------------------------------------
+
+#: `machine.mode`'s values (`device-policy.schema.json`): `A`, the organization administers the whole machine (set only
+#: from an `mdm` layer, DEC-0053); `C`, the default, it manages only its own work on the machine.
+MODES = ('A', 'C')
+#: `workspace.folders`' item shape (`device-policy.schema.json`): relative to the person's home, no `..` segment.
+FOLDER_PATTERN = re.compile(r'(?![/\\~])(?![A-Za-z]:)(?!(?:[\s\S]*[/\\])?\.\.(?:[/\\]|\Z))[A-Za-z0-9._*/\\-]+\Z')
+_SEPARATOR = re.compile(r'[/\\]')
+
+
+def _segment(pattern: str) -> 're.Pattern':
+    """One segment of a `workspace.folders` pattern: `*` any run of characters inside one segment, the rest
+    literal."""
+    return re.compile(''.join('[^/\\\\]*' if part == '*' else re.escape(part) for part in re.split(r'(\*)', pattern))
+                      + r'\Z')
+
+
+def folder_matches(folder: Any, patterns: Any) -> bool:
+    """Whether `folder`, a path relative to the person's home (`projects/acme/app`, or `~/projects/acme/app` as the
+    MCP scan spells it), is one of the organization's `workspace.folders` or inside one: each pattern segment matches
+    one folder segment, `*` any run of characters in it. A folder outside the home, an absolute one, one with a `..`
+    segment, and a pattern outside the schema's shape match nothing."""
+    if not isinstance(folder, str):
+        return False
+    folder = folder[2:] if folder.startswith('~/') else folder
+    if not folder or not FOLDER_PATTERN.fullmatch(folder) or '*' in folder:
+        return False
+    parts = [part for part in _SEPARATOR.split(folder) if part not in ('', '.')]
+    for pattern in _list_of_str(patterns):
+        if not FOLDER_PATTERN.fullmatch(pattern):
+            continue
+        wanted = [part for part in _SEPARATOR.split(pattern) if part not in ('', '.')]
+        if wanted and len(parts) >= len(wanted) \
+                and all(_segment(want).match(have) for want, have in zip(wanted, parts)):
+            return True
+    return False
+
+
+def _list_of_str(value: Any) -> List[str]:
+    return [item for item in value if isinstance(item, str)] if isinstance(value, (list, tuple)) else []
+
+
+def policy_scope(layers: Any) -> dict:
+    """What a summary lists under these policy layers (DEC-0118): `{mode, folders}`, `mode` the effective
+    `machine.mode` (`A` counts only from an `mdm` layer, `resolve_policy`; anything else is the default `C`) and
+    `folders` the organization's own `workspace.folders`, read from the signed layers only: a person's `user` layer is
+    not the organization's and never widens what it is shown."""
+    mode = (resolve_policy(layers).get('machine.mode') or {}).get('value')
+    return {'mode': mode if mode in MODES else 'C',
+            'folders': _list_of_str(signed_policy_value(layers, 'workspace.folders'))}
 
 
 #: What a baseline item may carry, by kind (`device-policy.schema.json`, `harness.baseline`, DEC-0102): a version only
@@ -470,6 +525,52 @@ class _Gate:
         return False
 
 
+class _Scope:
+    """What a summary under `machine.mode` `C` lists of the MCP servers, skills and plugins (DEC-0118): an item
+    installed in a folder matching the organization's own `workspace.folders` (an MCP server declared for such a
+    folder), or named by its `harness.baseline` with the item's kind. A package placed in this context would count
+    too, but no package on this machine names a context yet, so none is admitted that way. Everything else (installed
+    for the person, machine-wide, for another context) is left out and counted per list in `out_of_context`, which stays
+    on this machine with the names it counts."""
+
+    def __init__(self, folders: Any = (), baseline_items: Any = ()):
+        self.folders = _list_of_str(folders)
+        self.named: Dict[str, set] = {}
+        for item in _list(baseline_items):
+            if isinstance(item.get('kind'), str) and isinstance(item.get('name'), str):
+                self.named.setdefault(item['kind'], set()).add(item['name'])
+        self.out_of_context: Dict[str, int] = {}
+        self._left: set = set()
+
+    def _leave(self, member: str, name: str) -> None:
+        if (member, name) not in self._left:
+            self._left.add((member, name))
+            self.out_of_context[member] = self.out_of_context.get(member, 0) + 1
+
+    def keeps(self, kind: str, name: str) -> bool:
+        if name in self.named.get(kind, ()):
+            return True
+        self._leave({'skill': 'skills', 'plugin': 'plugins'}[kind], name)
+        return False
+
+    def keeps_server(self, row: dict) -> bool:
+        name, where = row.get('name'), row.get('scope')
+        if name in self.named.get('mcp-server', ()) or (isinstance(where, str) and where.startswith('project:')
+                                                        and folder_matches(where[len('project:'):], self.folders)):
+            return True
+        self._leave('mcpServers', name)
+        return False
+
+    def settle(self, harness: dict) -> None:
+        """Forgets a server left out under one declaration and listed under another (one in a matching folder)."""
+        listed = {row['name'] for row in harness.get('mcpServers', [])}
+        left = sum(1 for member, name in self._left if member == 'mcpServers' and name not in listed)
+        if left:
+            self.out_of_context['mcpServers'] = left
+        else:
+            self.out_of_context.pop('mcpServers', None)
+
+
 def _fresh_health(row: dict, at_ms: Optional[int]) -> str:
     """A declaration's verdict as a summary's health, `unknown` unless its probe (`liveness_at`) is at most
     `LIVENESS_MAX_AGE_SECONDS` before the summary's own time (`at_ms`; none: the verdict is not judged by age)."""
@@ -482,13 +583,16 @@ def _fresh_health(row: dict, at_ms: Optional[int]) -> str:
     return health
 
 
-def _mcp_servers(scan: dict, gate: _Gate, at_ms: Optional[int] = None) -> List[dict]:
+def _mcp_servers(scan: dict, gate: _Gate, at_ms: Optional[int] = None, scope: Optional['_Scope'] = None) -> List[dict]:
     """One row per server name the coding agents load: a declaration switched off is not loaded and not listed; the
-    strongest current verdict of its declarations is its health (`_fresh_health`)."""
+    strongest current verdict of its declarations is its health (`_fresh_health`). Under `machine.mode` `C` only the
+    declarations `scope` keeps are read (DEC-0118)."""
     rows: Dict[str, dict] = {}
     for row in _list(scan.get('servers')):
         name = row.get('name')
         if not isinstance(name, str) or row.get('disabled') is True:
+            continue
+        if scope is not None and not scope.keeps_server(row):
             continue
         if name not in rows and not gate.admit(name, 'mcpServers'):
             continue
@@ -503,7 +607,7 @@ def _mcp_servers(scan: dict, gate: _Gate, at_ms: Optional[int] = None) -> List[d
     return [rows[name] for name in sorted(rows)]
 
 
-def _skills(scan: dict, gate: _Gate) -> List[dict]:
+def _skills(scan: dict, gate: _Gate, scope: Optional['_Scope'] = None) -> List[dict]:
     """Claude Code's user-level and plugin skills, by the name the harness shows (a plugin's skill under its own
     name), once each: the first the scan read wins, the user's own before a plugin's."""
     out: Dict[str, dict] = {}
@@ -511,7 +615,7 @@ def _skills(scan: dict, gate: _Gate) -> List[dict]:
         name, source = row.get('name'), row.get('source')
         if not isinstance(name, str) or not isinstance(source, str):
             continue
-        if name in out or not gate.admit(name, 'skills'):
+        if name in out or (scope is not None and not scope.keeps('skill', name)) or not gate.admit(name, 'skills'):
             continue
         entry = {'name': name, 'source': 'plugin' if source.startswith('plugin:') else SKILL_SOURCES.get(source, 'other')}
         digest = row.get('digest')
@@ -521,11 +625,12 @@ def _skills(scan: dict, gate: _Gate) -> List[dict]:
     return list(out.values())
 
 
-def _plugins(scan: dict, gate: _Gate) -> List[dict]:
+def _plugins(scan: dict, gate: _Gate, scope: Optional['_Scope'] = None) -> List[dict]:
     out: Dict[str, dict] = {}
     for row in _list(scan.get('plugins')):
         name = row.get('name')
-        if not isinstance(name, str) or name in out or not gate.admit(name, 'plugins'):
+        if not isinstance(name, str) or name in out or (scope is not None and not scope.keeps('plugin', name)) \
+                or not gate.admit(name, 'plugins'):
             continue
         entry = {'name': name, 'source': row.get('source') if row.get('source') in PLUGIN_SOURCES else 'other'}
         if isinstance(row.get('version'), str) and VERSION.fullmatch(row['version']):
@@ -576,18 +681,22 @@ def _bounded(rows: List[dict], member: str, omitted: Dict[str, int]) -> List[dic
 
 
 def harness_of(harness_scan: Any, mcp_scan: Any, gate: Optional[_Gate] = None,
-               at: Optional[str] = None) -> Tuple[dict, Dict[str, int]]:
+               at: Optional[str] = None, scope: Optional[_Scope] = None) -> Tuple[dict, Dict[str, int]]:
     """The `harness` member from the two scans, and what was left out of each list for its shape (counts only).
-    `at` is the summary's time: an MCP verdict probed more than 48 hours before it reads `unknown`."""
+    `at` is the summary's time: an MCP verdict probed more than 48 hours before it reads `unknown`. With `scope`
+    (`machine.mode` `C`, DEC-0118) the MCP servers, skills and plugins are those it keeps; the coding agents and the
+    hook count are listed under either mode."""
     gate = gate or _Gate()
     harness_scan = harness_scan if isinstance(harness_scan, dict) else {}
     mcp_scan = mcp_scan if isinstance(mcp_scan, dict) else {}
     omitted = gate.omitted
     harness = {'codingAgents': _bounded(_coding_agents(harness_scan, gate), 'codingAgents', omitted),
-               'mcpServers': _bounded(_mcp_servers(mcp_scan, gate, strict_time(at)), 'mcpServers', omitted),
-               'skills': _bounded(_skills(harness_scan, gate), 'skills', omitted),
-               'plugins': _bounded(_plugins(harness_scan, gate), 'plugins', omitted),
+               'mcpServers': _bounded(_mcp_servers(mcp_scan, gate, strict_time(at), scope), 'mcpServers', omitted),
+               'skills': _bounded(_skills(harness_scan, gate, scope), 'skills', omitted),
+               'plugins': _bounded(_plugins(harness_scan, gate, scope), 'plugins', omitted),
                'hooks': {'count': min(len(_list(harness_scan.get('hooks'))), 100000)}}
+    if scope is not None:
+        scope.settle(harness)
     return harness, omitted
 
 
@@ -608,16 +717,23 @@ class SummaryRefused(ValueError):
 
 
 def build(*, device_id: str, org_id: str, sequence: int, at: str, harness_scan: Any, mcp_scan: Any,
-          services: Any = (), baseline: Optional[dict] = None,
-          exclude: Any = ()) -> Tuple[dict, Dict[str, int], Dict[str, int]]:
+          services: Any = (), baseline: Optional[dict] = None, exclude: Any = (), mode: str = 'C',
+          folders: Any = (), scope: Optional[dict] = None) -> Tuple[dict, Dict[str, int], Dict[str, int]]:
     """The summary this machine sends to organization `org_id`, the counts it left out for their shape (`omitted`),
     and the counts the person's exclusion list kept back (`excluded`, the globs of `exclude`); both stay here.
 
     `services` are the agent services placed in this organization's context and no other; `baseline` is
     `harness_baseline(layers)` over the policy layers this machine verified and applied, or None, when the summary
-    carries no drift. Raises SummaryRefused rather than hand over a summary FAC-SEM-128 would flag."""
+    carries no drift. `mode` and `folders` are `policy_scope(layers)`: under `machine.mode` `C`, the default and the
+    value of anything that is not `A`, the summary lists only this organization's context (DEC-0118, `_Scope`); under
+    `A` the whole harness. A `scope` dict given is filled with `{mode, outOfContext}`, the counts `C` left out, which
+    stay here. Raises SummaryRefused rather than hand over a summary FAC-SEM-128 would flag."""
     gate = _Gate(exclude)
-    harness, omitted = harness_of(harness_scan, mcp_scan, gate, at)
+    narrowed = None if mode == 'A' else _Scope(folders, (baseline or {}).get('items'))
+    harness, omitted = harness_of(harness_scan, mcp_scan, gate, at, narrowed)
+    if scope is not None:
+        scope.update(mode='A' if narrowed is None else 'C',
+                     outOfContext=dict(narrowed.out_of_context) if narrowed is not None else {})
     summary = {'type': TYPE, 'device': {'id': device_id}, 'context': 'org:' + org_id, 'sequence': int(sequence),
                'at': at, 'harness': harness, 'services': _bounded(_services(services, gate), 'services', omitted)}
     if baseline is not None:
