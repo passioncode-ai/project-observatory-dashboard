@@ -1734,7 +1734,7 @@ def collect() -> list[dict]:
     _store = paths.source_path("secret_store", paths.SECRETS)
     out.extend(expiry_findings.from_store(
         pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR", _store / "projects")),
-        _store, _store / "cloudflare-analytics.d", TODAY))
+        _store, TODAY))
     # WHAT SITS IN THE WORKING COPIES. The credential rules above read the
     # provider accounts; these read the disk, and the two disagree often enough
     # that neither is the other's summary.

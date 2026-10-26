@@ -15,7 +15,7 @@ WHERE THE DATES COME FROM, metadata only, never a value:
   the vault slots   `projects/<project>/<env>/<NAME>.meta.json` (`expires_at`,
                     `expiry_by`: the door that recorded it, `vault.record_expiry`)
   door records      what reaches no vault slot: a Cloudflare plugin token's
-                    `.meta.json`, an OpenRouter ledger row delivered to a named
+                    `.meta.json` (found by its `issued_by`), an OpenRouter ledger row delivered to a named
                     destination, a DigitalOcean collector token's record
 
 A credential delivered to a slot is read from the slot alone, so one key is one
@@ -82,7 +82,22 @@ def slot_action(door: str | None, slot: str, ledgers: dict) -> str:
             f"`{TOOL.format(door='vault.py')} rotate {project} {env} {name}`")
 
 
-def gather(vault_root: pathlib.Path, store: pathlib.Path, plugin_tokens: pathlib.Path) -> list[dict]:
+def _plugin_tokens(store: pathlib.Path) -> list[tuple[str, dict]]:
+    """Plugin tokens the Cloudflare door issued, found by the record each carries
+    (`issued_by`), never by a plugin's folder name: a core file that names a plugin
+    is the coupling `tests/test_metric_series.py` forbids."""
+    out = []
+    if not store.is_dir():
+        return out
+    for folder in sorted(p for p in store.iterdir() if p.is_dir() and p.name != "projects"):
+        for meta in sorted(folder.glob("*.meta.json")):
+            doc = _read(meta)
+            if doc.get("issued_by") == "tools/cloudflare.py" and doc.get("kind") == "issued":
+                out.append((meta.name[:-len(".meta.json")], doc))
+    return out
+
+
+def gather(vault_root: pathlib.Path, store: pathlib.Path) -> list[dict]:
     """Every recorded expiry as `{subject, key, expires_at, action}`, slots first."""
     ledgers = {
         "openrouter": _read(store / "openrouter-issued.json").get("issued") or {},
@@ -102,15 +117,12 @@ def gather(vault_root: pathlib.Path, store: pathlib.Path, plugin_tokens: pathlib
             slot = f"{meta.parent.parent.name}/{meta.parent.name}/{name}"
             out.append({"subject": f"credential:vault/{slot}", "key": slot, "expires_at": doc["expires_at"],
                         "action": slot_action(doc.get("expiry_by"), slot, ledgers)})
-    if plugin_tokens.is_dir():
-        for meta in sorted(plugin_tokens.glob("*.meta.json")):
-            doc = _read(meta)
-            label = meta.name[:-len(".meta.json")]
-            if doc.get("expires_at"):
-                out.append({"subject": f"credential:cloudflare/{label}", "key": f"cloudflare plugin token {label}",
-                            "expires_at": doc["expires_at"],
-                            "action": f"`{TOOL.format(door='cloudflare.py')} rotate {label}` rolls it and "
-                                      "renews its expiry"})
+    for label, doc in _plugin_tokens(store):
+        if doc.get("expires_at"):
+            out.append({"subject": f"credential:cloudflare/{label}", "key": f"cloudflare plugin token {label}",
+                        "expires_at": doc["expires_at"],
+                        "action": f"`{TOOL.format(door='cloudflare.py')} rotate {label}` rolls it and "
+                                  "renews its expiry"})
     for name, row in sorted(ledgers["openrouter"].items()):
         if isinstance(row, dict) and row.get("expires_at") \
                 and not str(row.get("destination") or "").startswith("vault:"):
@@ -156,7 +168,6 @@ def findings(entries: list[dict], today: str) -> list[dict]:
     return out
 
 
-def from_store(vault_root: pathlib.Path, store: pathlib.Path, plugin_tokens: pathlib.Path,
-               today: str) -> list[dict]:
+def from_store(vault_root: pathlib.Path, store: pathlib.Path, today: str) -> list[dict]:
     """The rule over this workspace's own stores. Absent stores give no rows, not a clean bill."""
-    return findings(gather(vault_root, store, plugin_tokens), today)
+    return findings(gather(vault_root, store), today)

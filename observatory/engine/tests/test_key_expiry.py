@@ -536,7 +536,7 @@ class TheBoardSaysWhenAKeyExpires(unittest.TestCase):
         self.f = expiry_findings
         base = pathlib.Path(tmpdir.mkdtemp()).resolve()
         self.vault, self.store = base / "projects", base / "store"
-        self.tokens = self.store / "cloudflare-analytics.d"
+        self.tokens = self.store / "plugin-tokens.d"
         for d in (self.vault, self.tokens):
             d.mkdir(parents=True)
 
@@ -554,8 +554,11 @@ class TheBoardSaysWhenAKeyExpires(unittest.TestCase):
         (self.store / "openrouter-issued.json").write_text(json.dumps({"issued": {
             "agent-key": {"destination": "observatory", "expires_at": "2026-11-01T00:00:00Z"},
             "slot-key": {"destination": "vault:alpha/prod/SOON", "expires_at": "2026-11-05T00:00:00Z"}}}))
-        (self.tokens / "acct.meta.json").write_text(json.dumps({"expires_at": "2026-10-25T00:00:00Z"}))
-        rows = {r["subject"]: r for r in self.f.from_store(self.vault, self.store, self.tokens, "2026-10-26")}
+        (self.tokens / "acct.meta.json").write_text(json.dumps({"expires_at": "2026-10-25T00:00:00Z",
+                                                                "kind": "issued",
+                                                                "issued_by": "tools/cloudflare.py"}))
+        (self.tokens / "other.meta.json").write_text(json.dumps({"expires_at": "2026-10-25T00:00:00Z"}))
+        rows = {r["subject"]: r for r in self.f.from_store(self.vault, self.store, "2026-10-26")}
         self.assertEqual(set(rows), {"credential:vault/alpha/prod/SOON", "credential:vault/alpha/prod/GONE",
                                      "credential:openrouter/agent-key", "credential:cloudflare/acct"},
                          "a key delivered to a slot is one row, from the slot")
@@ -574,12 +577,11 @@ class TheBoardSaysWhenAKeyExpires(unittest.TestCase):
         self.slot("alpha/prod/OPENROUTER_API_KEY", "2026-11-01T00:00:00Z", door="openrouter.py")
         (self.store / "openrouter-issued.json").write_text(json.dumps({"issued": {
             "alpha-key": {"destination": "vault:alpha/prod/OPENROUTER_API_KEY"}}}))
-        rows = self.f.from_store(self.vault, self.store, self.tokens, "2026-10-26")
+        rows = self.f.from_store(self.vault, self.store, "2026-10-26")
         self.assertIn('openrouter.py" rotate alpha-key', rows[0]["action"])
 
     def test_absent_stores_give_no_rows_and_the_board_runs_the_rule(self):
-        self.assertEqual(self.f.from_store(self.vault / "none", self.store / "none", self.tokens / "none",
-                                           "2026-10-26"), [])
+        self.assertEqual(self.f.from_store(self.vault / "none", self.store / "none", "2026-10-26"), [])
         src = (ROOT / "tools" / "build_findings.py").read_text(encoding="utf-8")
         self.assertIn("expiry_findings.from_store(", src)
 
