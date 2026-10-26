@@ -97,7 +97,7 @@ supervises nothing of the engine's own. (c) Everything in one process.
 **Decision.** (b), with the routes of v4. The OS service manager supervises the node, the tick, the maintenance job
 and the update check; nothing in the engine supervises the node or restarts it on failure. (The maintenance job does
 stop and start the server on purpose, for its daily snapshot and to activate an update, `AGENTS.md:198`,
-[`engine_update.py:18-20`](../../observatory/engine/engine_update.py); that is maintenance, not supervision.) The node
+[`engine_update.py:21-22`](../../observatory/engine/engine_update.py); that is maintenance, not supervision.) The node
 supervises what it starts and what the operator enrolled (`node.lifecycle`), and only those carry
 `lifecycle.manager: node`. Memory over HTTP and the key server become routes of the node, so the machine has one
 listening process for agents ([OBS-255](../backlog.md)).
@@ -173,8 +173,9 @@ exists in code today; every other value is new, set here for OE-01a to build:
 | idle | no process between ticks, no timer, no file watcher (organization lifecycle LC-08) | the tick's own rule |
 
 **How CPU and memory are measured.** Nothing enforces memory or CPU in the engine today. The tick's step runner reads
-the finished child's peak resident size and CPU time: on macOS and Linux from `resource.getrusage(RUSAGE_CHILDREN)`
-taken before and after the step (`ru_maxrss` is bytes on macOS and KiB on Linux; `ru_utime` plus `ru_stime`), on
+the finished child's peak resident size and CPU time: on macOS and Linux from `os.wait4` on that child alone (its own
+`ru_maxrss`, bytes on macOS and KiB on Linux, and `ru_utime` plus `ru_stime`; `getrusage(RUSAGE_CHILDREN)` would report
+the largest of all the tick's earlier children, so it cannot give one step's peak), on
 Windows from the child's handle (`GetProcessMemoryInfo` `PeakWorkingSetSize`, `GetProcessTimes`) before it is closed.
 These are measured and reported, not hard limits: an operating-system cap (`RLIMIT_AS` is not enforced on macOS, a Job
 Object on Windows) would kill the step mid-file and lose the cursor's progress, so the budget acts on the next run by
@@ -269,7 +270,7 @@ result.
 | install an agent or package on this machine | the node | Fabric, the person | Fabric Dashboards | not built (v4 packet V4-OBS-03, Stage 3) |
 | check what is installed against its record | the node | Fabric, an organization (through the summary) | Fabric Dashboards, the organization | harness summary built (OBS-192, DEC-0118 mode `C`) |
 | roll back an install | the node | the person, Fabric | Fabric Dashboards | not built (with V4-OBS-03) |
-| update the node itself | the maintenance job, an OS job of its own (D2), running the engine's updater | the person | Health, `full doctor` | built (`engine_update.py:18-20`, a rollback wheel kept) |
+| update the node itself | the maintenance job, an OS job of its own (D2), running the engine's updater | the person | Health, `full doctor` | built (`engine_update.py:18-22`, a rollback wheel kept) |
 | supervise a service or app (start, stop, restart, idle stop) | the node (`node.lifecycle`) | Fabric, Switchboard, Dashboards, agents with a grant | Dashboards | macOS built (OBS-79 L1 to L4); Windows and Linux OBS-257 |
 | supervise the node | the OS service manager | none | Health | built |
 | show this machine's services | Fabric Dashboards | the person | none | Dashboards FD-52 |
