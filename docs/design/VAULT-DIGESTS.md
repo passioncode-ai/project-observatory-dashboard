@@ -41,9 +41,9 @@ HMAC of a fixed label under the key, which tells two keys apart and reveals neit
 Two machines compare only under the same key:
 
     project-observatory full vault-digests key export FILE        # machine A: a NEW owner-only file
-    project-observatory full vault-digests key import < FILE      # machine B: the key on stdin, then delete FILE
+    project-observatory full vault-digests key import FILE        # machine B: reads FILE (or stdin), then delete FILE
 
-`import` refuses a different key unless `--replace` (every digest the machine publishes changes),
+`import` reads FILE (or stdin, never an argument), refuses a different key unless `--replace` (every digest the machine publishes changes),
 and refuses anything but 64 hexadecimal characters. `export` never overwrites a file. Create,
 import and export are journaled in the movement journal (`vault.py movements`) with the key id.
 

@@ -245,7 +245,13 @@ class VaultDigestsTests(unittest.TestCase):
     def test_key_import_and_export_refusals(self):
         bad = self.b.run("vault_digests.py", "key", "import", value="not-a-key", check=2)
         self.assertIn("64 lowercase hexadecimal", bad.stderr)
-        self.b.digests("write")
+        # From the file `key export` wrote, as the documentation hands it.
+        exported = Path(self.temp.name) / "estate-key"
+        self.a.digests("key", "export", str(exported))
+        self.b.digests("key", "import", str(exported))
+        self.assertEqual(self.b.digests("key", "status").stdout.split()[2],
+                         self.a.digests("key", "status").stdout.split()[2])
+        exported.unlink()
         other = "ab" * 32
         p = self.b.run("vault_digests.py", "key", "import", value=other, check=2)
         self.assertIn("already holds another estate key", p.stderr)

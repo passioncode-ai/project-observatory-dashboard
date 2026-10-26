@@ -870,8 +870,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "0ee4f0b352248d980aee054523c04dae2173922a935a98708ce6f712525ca5ca",
-      "bytes": 26492,
+      "export_sha256": "313aa3694174f66f6ef4b4c49165e4fe91928e81934367d0dc6bfd4bd3a8c9c4",
+      "bytes": 26498,
       "upstream_modified": true
     },
     {
@@ -891,7 +891,7 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "fac4128747cde8cd76d6d703fb029f16aaa9111591ebb8f19b00c7132b21ac0f",
+      "export_sha256": "bca82fdcf335083bc317924a2d3448d0782cf910c12f154e02441de92c9be803",
       "bytes": 175528,
       "upstream_modified": true
     },
@@ -4309,8 +4309,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "51ba8ecbbaa0a2a6baf371fa0b2aeb4b5875016c300f41c0a93ae1b3ffa67bd8",
-      "bytes": 23212
+      "export_sha256": "e748a73be95549a4ee9d29663bedb098c4cc4ba2b2f1c61c75172b8bf34f17a6",
+      "bytes": 23319
     },
     {
       "path": "tests/test_handoff.py",
@@ -5577,8 +5577,8 @@
       "path": "tests/test_vault_digests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "417b9c35c330ebdb4fe254562e4ead41c6f54b4a60fafdbb2338948a26bbbfd8",
-      "bytes": 16262
+      "export_sha256": "f117d54a92f95d57744431981e1e9469f572606141049ac27798c40a4cd63f12",
+      "bytes": 16648
     },
     {
       "path": "tests/test_vault_project.py",
@@ -6570,8 +6570,8 @@
       "path": "tools/vault_digests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "07244efc045ecfdb03a6bc39547a018b33802edd9f508cfcbc588f2edc0d611f",
-      "bytes": 26465
+      "export_sha256": "4be27736b22f7f588a0830300b39fcfed8513eacc3a9ed5022aebf530e12da36",
+      "bytes": 26801
     },
     {
       "path": "tools/workflow_cli.py",

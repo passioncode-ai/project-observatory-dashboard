@@ -11,7 +11,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   `docs/design/VAULT-DIGESTS.md`). `project-observatory full vault-digests` shows every vault slot per machine as
   `same`, `differs`, `only here`, `missing` or `unreachable` (with the time of that machine's last answer), and one
   line when all match. Machines compare HMAC-SHA-256 digests of the values under an estate key kept in the vault
-  (`.estate-digest-key`, created on first use, never printed; `key export FILE` and `key import` on stdin give a
+  (`.estate-digest-key`, created on first use, never printed; `key export FILE` and `key import FILE` give a
   second machine the same key); a manifest holds no value and no unkeyed hash. `mark` records a slot that differs
   on purpose, and a `vault.py rotate` makes the other machines' copies read as stale. Each vault row of
   `observatory_credentials` gains `machines`, read from the manifests alone. In this step a peer's manifest is a

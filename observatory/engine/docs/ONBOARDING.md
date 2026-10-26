@@ -1898,7 +1898,7 @@ under one estate key, never values, so both need the same key once:
 
 ```sh
 project-observatory full vault-digests key export /path/to/new-file    # on the first machine
-project-observatory full vault-digests key import < /path/to/new-file  # on the second; then delete the file
+project-observatory full vault-digests key import /path/to/new-file    # on the second; then delete the file
 project-observatory full vault-digests write                          # on each: the manifest, no values
 ```
 

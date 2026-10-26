@@ -6,7 +6,7 @@
     project-observatory full vault-digests mark PROJECT ENV NAME --why TEXT
     project-observatory full vault-digests unmark PROJECT ENV NAME
     project-observatory full vault-digests key status
-    project-observatory full vault-digests key import < FILE
+    project-observatory full vault-digests key import [FILE]
     project-observatory full vault-digests key export FILE
 
 The design: docs/design/VAULT-DIGESTS.md (OBS-194, step 1).
@@ -22,7 +22,7 @@ WHERE THE ESTATE KEY LIVES. In the vault itself (`.estate-digest-key` at the sto
 `leaks.jsonl` and `movements.jsonl`, owner-only), so the vault's own backup carries it and no
 second store exists. `write` creates it on first use; nothing prints it. Two machines compare
 only under one key: `key export FILE` writes it to a new owner-only file and `key import` reads it
-on stdin. Moving it between machines as a sealed envelope is step 2, with the transport.
+from that file, or from stdin; never from an argument. Moving it between machines as a sealed envelope is step 2, with the transport.
 
 WHAT A PEER IS IN STEP 1. A manifest file in the peers folder (`--peers`, else
 `OBSERVATORY_VAULT_PEERS`, else `<state>/vault-digests/peers`). Step 2 delivers them over the
@@ -474,14 +474,20 @@ def cmd_key(args) -> int:
     if args.action == "status":
         found = _read_key()
         print(f"estate key {key_id(found)} at {key_path()} (value hidden)" if found else
-              f"no estate key yet; `{CMD} write` creates one, `{CMD} key import` reads the estate's on stdin")
+              f"no estate key yet; `{CMD} write` creates one, `{CMD} key import FILE` takes the estate's")
         return 0
     if args.action == "import":
-        if sys.stdin.isatty():
-            raise Refused("the key must arrive on stdin from a protected file, never in an argument")
-        text = sys.stdin.read().strip()
+        if args.file:
+            given = pathlib.Path(args.file).expanduser()
+            source = given.parent.resolve() / given.name
+            vault._no_symlinks(source)
+            text = vault._read_private(source, private=False)[:256].strip()
+        elif sys.stdin.isatty():
+            raise Refused("the key arrives in the file `key export` wrote, or on stdin; never in an argument")
+        else:
+            text = sys.stdin.read(256).strip()
         if not KEY_SHAPE.fullmatch(text):
-            raise Refused("stdin did not hold 64 lowercase hexadecimal characters")
+            raise Refused("the key read was not 64 lowercase hexadecimal characters")
         with vault._mutation_lock():
             found = _read_key()
             if found and not hmac.compare_digest(found, text) and not args.replace:
@@ -505,7 +511,7 @@ def cmd_key(args) -> int:
     vault.journal("estate-key-export", "estate/digest-key", tool="vault_digests.py",
                   key_id=key_id(found), into=str(target))
     print(f"estate key {key_id(found)} written to {target} (600, value hidden); import it on the other "
-          f"machine with `{CMD} key import < FILE`, then delete the file")
+          f"machine with `{CMD} key import FILE`, then delete the file")
     return 0
 
 
@@ -526,7 +532,7 @@ def parser() -> argparse.ArgumentParser:
     m.add_argument("--why", required=True)
     u = sub.add_parser("unmark", help="clear that mark")
     vault._slot_args(u)
-    k = sub.add_parser("key", help="the estate key: status, import (stdin), export FILE")
+    k = sub.add_parser("key", help="the estate key: status, import [FILE] (else stdin), export FILE")
     k.add_argument("action", choices=("status", "import", "export"))
     k.add_argument("file", nargs="?")
     k.add_argument("--replace", action="store_true", help="import over a different key")

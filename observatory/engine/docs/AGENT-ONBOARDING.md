@@ -44,7 +44,7 @@ vault-digests --json` (or read `machines` on each vault row of `observatory_cred
 keyed digests under the estate key and never a value: never open a vault file or a `.env` to compare.
 `unreachable` with a `last_answer` means that machine's answer is old, not that it agrees. Mark a slot
 that should differ with `full vault-digests mark PROJECT ENV NAME --why "..."` only when I say so. The
-estate key moves only as a file I import on stdin (`key export FILE`, `key import < FILE`); never print it.
+estate key moves only as a file (`key export FILE`, then `key import FILE` on the other machine); never print it.
 
 ## Waking, stopping and restarting my apps
 
