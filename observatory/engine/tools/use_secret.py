@@ -376,6 +376,16 @@ def project_vault_folders(folder: str) -> list[str]:
     return vault_project.folders_of(folder, VAULT)
 
 
+def _expiry_note(slot) -> str:
+    """When a vault slot's value expires, from its metadata (OBS-191); empty when no door
+    recorded one, since most slots hold values no door minted."""
+    try:
+        meta = private_files._read_meta(slot)
+    except (OSError, ValueError, private_files.VaultBoundaryError):
+        return "metadata unreadable"
+    return private_files.key_expiry.describe(meta) if "expires_at" in meta else ""
+
+
 def cmd_names(args) -> int:
     private_files.validate_names(args.project)
     private_files._no_symlinks(VAULT / args.project)
@@ -387,7 +397,7 @@ def cmd_names(args) -> int:
             if f.get("project") != args.project:
                 continue
             for v in f.get("variables", []):
-                rows.append((v["name"], v["class"], f["path"]))
+                rows.append((v["name"], v["class"], f["path"], ""))
     for folder in project_vault_folders(args.project):
         vdir = VAULT / folder
         for directory in sorted(vdir.iterdir()):
@@ -397,19 +407,20 @@ def cmd_names(args) -> int:
             for slot in sorted(directory.iterdir()):
                 private_files._no_symlinks(slot)
                 if slot.is_file() and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", slot.name):
-                    rows.append((slot.name, "vault", f"vault:{folder}/{directory.name}"))
+                    rows.append((slot.name, "vault", f"vault:{folder}/{directory.name}",
+                                 _expiry_note(slot)))
     if not rows:
         print(f"{args.project}: nothing in the vault and nothing in the env "
               f"inventory. `project-observatory full env` refreshes the second.")
         return 0
     width = max(len(r[0]) for r in rows)
     seen = set()
-    for name, cls, where in sorted(rows, key=lambda r: (r[1] != "vault", r[0])):
+    for name, cls, where, note in sorted(rows, key=lambda r: (r[1] != "vault", r[0])):
         key = (name, where)
         if key in seen:
             continue
         seen.add(key)
-        print(f"  {name.ljust(width)}  {cls:11}  {where}")
+        print(f"  {name.ljust(width)}  {cls:11}  {where}" + (f"  ({note})" if note else ""))
     print(f"\n{len(seen)} name(s). Values are never printed — to USE one:\n"
           f"  {USE} run [--env ENV] {args.project} <NAME> -- <command>")
     return 0

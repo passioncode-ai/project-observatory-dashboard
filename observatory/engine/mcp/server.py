@@ -487,6 +487,10 @@ def observatory_credentials(
     their values are equal, which is what "what breaks if I rotate this" means.
     `available_in` is the opposite — a slot empty here whose name holds a live
     value elsewhere.
+
+    Each vault row says when its value expires, from the slot's metadata:
+    `expiresAt` as the minting door recorded it, or `expiry: none` with
+    `expiryReason`, or `expiry: not recorded` for a value put by hand.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:

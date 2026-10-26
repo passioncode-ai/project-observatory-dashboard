@@ -5,7 +5,7 @@
     heroku auth:token | python "$T/heroku.py" stash     # the CLI session's token, through a pipe
     python "$T/heroku.py" stash --from-cli              # the same, the pipe made inside this program
     python "$T/heroku.py" issue --preset read --vault PROJECT/ENV/NAME [--team TEAM] [--app APP]
-    python "$T/heroku.py" issue --preset deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90]
+    python "$T/heroku.py" issue --preset deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90 | --no-expiry]
     python "$T/heroku.py" list
     python "$T/heroku.py" ping
     python "$T/heroku.py" rotate PROJECT/ENV/NAME        # or --leaked, for every open leak
@@ -39,6 +39,15 @@ the value is delivered. The preset table states this, and `list` repeats it.
 which is why the presets that grant them are named after config, not deploys.
 Heroku's own caveat holds: even `read` can see a credential a log drain's URL
 embeds.
+
+EVERY MINTED AUTHORIZATION EXPIRES (OBS-191). `issue` sends `expires_in`, 90
+days by default: `--expire-days N` (1 to 365) moves it, `--no-expiry` mints one
+that does not expire. A second issue regenerates in place only when the
+authorization's expiry already matches what is asked (both expiring, or both
+not); otherwise it creates a new one and retires the old one after delivery,
+so an old never-expiring authorization gets an expiry. What Heroku answers
+(`access_token.expires_in`) is what is recorded: `expires_at` in the ledger row
+and the vault slot's metadata, or null with `expiry_reason`.
 
 EVERY ISSUED AUTHORIZATION HAS A LEDGER ROW in `heroku-issued.json` beside the
 stash: its id at Heroku, preset, scopes, slot, team, app, dates and rotation
@@ -96,6 +105,11 @@ import oslocks
 import osprivacy
 import private_io
 import paths
+sys.path.insert(0, str(ROOT / "tools"))
+import key_expiry  # noqa: E402  every minted authorization carries an expiry, recorded, OBS-191
+
+#: How an authorization minted with no expiry was asked for, named in its record.
+NO_EXPIRY_FLAG = "--no-expiry"
 
 API = "https://api.heroku.com"
 ACCEPT = "application/vnd.heroku+json; version=3"
@@ -552,9 +566,39 @@ def _delete_fresh(admin: str, auth_id: str | None) -> str:
     return f"; the authorization this call created ({auth_id}) was deleted again"
 
 
+def _expires_in(auth: dict | None):
+    """Heroku's `access_token.expires_in` for an authorization: seconds left, or None."""
+    auth = auth or {}
+    token = auth.get("access_token") if isinstance(auth.get("access_token"), dict) else {}
+    return token.get("expires_in", auth.get("expires_in"))
+
+
+def _lifetime(auth: dict | None, expire_days: int | None) -> dict:
+    """The expiry fields a row records, from what Heroku ANSWERED, not what was asked:
+    a regenerated authorization keeps whatever lifetime Heroku gives it."""
+    at = key_expiry.from_seconds(_expires_in(auth))
+    reason = (key_expiry.ASKED_FOR_NONE.format(flag=NO_EXPIRY_FLAG) if expire_days is None
+              else "Heroku answered no expiry for this authorization")
+    return {"expire_days": expire_days, **key_expiry.fields(at, reason)}
+
+
+def record_slot_expiry(project: str, env: str, name: str, life: dict) -> str:
+    """Write the delivered value's expiry into its vault slot's metadata. Never raises:
+    the value is delivered, and a record that failed is said, not hidden."""
+    try:
+        import vault
+        return vault.record_expiry(project, env, name, life.get("expires_at"),
+                                   life.get("expiry_reason"), tool="heroku.py")
+    except Exception as exc:                                                      
+        print(f"  ({project}/{env}/{name}: expiry not recorded: {type(exc).__name__})",
+              file=sys.stderr)
+        return "expiry not recorded"
+
+
 @_locked
 def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | None,
-              admin_label: str | None, expire_days: int | None, wait: float = 2.0) -> int:
+              admin_label: str | None, expire_days: int | None = key_expiry.DEFAULT_DAYS,
+              wait: float = 2.0) -> int:
     preset = PRESETS.get(preset_key)
     if not preset:
         print(f"unknown preset {preset_key!r}; have: {', '.join(PRESETS)}", file=sys.stderr)
@@ -567,8 +611,10 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
         print(f"refused: preset {preset_key!r} reaches config vars and needs --app, the one "
               f"app it is for, so the description and the proof name it", file=sys.stderr)
         return 2
-    if expire_days is not None and not 1 <= expire_days <= 3650:
-        print("refused: --expire-days must be between 1 and 3650", file=sys.stderr)
+    try:
+        key_expiry.check_days(expire_days)
+    except key_expiry.ExpiryError as exc:
+        print(f"refused: --expire-days: {exc}", file=sys.stderr)
         return 2
     try:
         project, env, name = parse_vault_target(target)
@@ -594,9 +640,12 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
             if auth.get("description") == description:
                 existing = auth
                 break
-        if existing and sorted(existing.get("scope") or []) == sorted(scopes):
-            # The same purpose, the same scopes: regenerate in place, so the id and
-            # every record of it stay put.
+        if existing and sorted(existing.get("scope") or []) == sorted(scopes) \
+                and (_expires_in(existing) is None) == (expire_days is None):
+            # The same purpose, the same scopes, the same kind of lifetime: regenerate in
+            # place, so the id and every record of it stay put. One that never expires
+            # while an expiry is asked (or the reverse) is replaced instead: regenerating
+            # cannot change an authorization's lifetime (OBS-191).
             auth = _request("POST", f"/oauth/authorizations/{q(existing['id'])}"
                                     "/actions/regenerate-tokens", admin)
             rolled = True
@@ -634,10 +683,13 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
             if exc.status != 404:
                 retired += (f"; the slot's previous authorization {old} could NOT be deleted "
                             f"({exc}): `revoke {old}`")
+    life = _lifetime(auth, expire_days)
+    expiry = record_slot_expiry(project, env, name, life)
     put_row(slot, {
         "authorization_id": auth_id, "preset": preset_key, "scopes": scopes,
         "description": description, "team": team, "app": app, "admin": label,
         "expires_in": ((auth or {}).get("access_token") or {}).get("expires_in"),
+        **life,
         "issued_on": (prior or {}).get("issued_on") or today(),
         "rotated_on": today() if rolled else (prior or {}).get("rotated_on"),
         "rotations": ((prior or {}).get("rotations") or 0) + (1 if rolled else 0),
@@ -646,7 +698,7 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
     _journal("rotate" if rolled else "issue", slot, preset=preset_key,
              authorization=auth_id, team=team, app=app)
     print(f"  {slot}: {'regenerated' if rolled else 'issued'} authorization {auth_id}, "
-          f"scope {', '.join(scopes)}{retired}")
+          f"scope {', '.join(scopes)}, {expiry}{retired}")
     # Exactly what was proved, and nothing more: an `identity` value reads the
     # account and no team, so a team named beside it is a stated purpose only.
     print(f"  proved with its own value before delivery: it read {', '.join(proved)}")
@@ -681,7 +733,7 @@ def cmd_list() -> int:
         print(f"  {slot:36s} {r.get('preset', '?'):12s} {','.join(r.get('scopes') or []):28s} "
               f"{('team ' + r['team']) if r.get('team') else '':16s} {('app ' + r['app']) if r.get('app') else '':16s} "
               f"issued {r.get('issued_on', '?')} rotated {r.get('rotated_on') or 'never'} "
-              f"x{r.get('rotations', 0)}  id {r.get('authorization_id')}")
+              f"x{r.get('rotations', 0)}  id {r.get('authorization_id')}  {key_expiry.describe(r)}")
     if not a:
         print("\nstart with: heroku auth:token | python heroku.py stash")
     return 0
@@ -794,6 +846,12 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
             continue
         row["rotated_on"] = today()
         row["rotations"] = (row.get("rotations") or 0) + 1
+        # What Heroku answered for the regenerated value, as at issue (OBS-191).
+        life = _lifetime(auth, row.get("expire_days") if "expire_days" in row else None)
+        row.pop("expiry_reason", None)
+        row.update(life)
+        row["expires_in"] = _expires_in(auth)
+        record_slot_expiry(project, env, name, life)
         put_row(slot, row)
         _journal("rotate", slot, authorization=row.get("authorization_id"))
         print(f"  {slot}: regenerated in place and delivered (authorization {row.get('authorization_id')})")
@@ -1051,8 +1109,7 @@ def main() -> int:
     p.add_argument("--team", help="the team it is for: named in its description, read by its proof")
     p.add_argument("--app", help="the app it is for: named in its description, read by its proof")
     p.add_argument("--admin", help="which stashed admin token to issue from")
-    p.add_argument("--expire-days", type=int, default=None,
-                   help="expire the authorization after this many days (default: Heroku's, none)")
+    key_expiry.add_flags(p, "--expire-days", NO_EXPIRY_FLAG, "authorization")
     sub.add_parser("list", help="what exists, with dates; never values")
     sub.add_parser("ping", help="is every admin alive and every issued authorization still there")
     p = sub.add_parser("rotate", help="regenerate an authorization's value in place")
@@ -1087,7 +1144,7 @@ def main() -> int:
             return 2
         return cmd_stash(sys.stdin.read().strip(), a.label)
     if a.cmd == "issue":
-        return cmd_issue(a.preset, a.vault, a.team, a.app, a.admin, a.expire_days)
+        return cmd_issue(a.preset, a.vault, a.team, a.app, a.admin, key_expiry.days_of(a))
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":
