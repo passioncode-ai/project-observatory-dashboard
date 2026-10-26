@@ -31,6 +31,27 @@ while the major version is 0, a minor release may change behaviour and says so h
   within 14 days, `warning`) and `credential.expired` (past it, `critical`), read from the vault slots'
   metadata and the door records that reach no slot (a Cloudflare plugin token, an OpenRouter key delivered to
   a named destination, a DigitalOcean collector token). Each names the door's rotate command, never a value.
+- **The engine's contract pin moves to the contract's release `v0.1.0+2026-10-24.2`** (fabric-agent-contract
+  `de8cec30`; OBS-226), through `tools/vendor_org_vectors.py`: the node vectors and their README, the interop schemas'
+  README and the pin, in one change. It is the latest release before DEC-0121, which the engine pins only after
+  CT-124 and CT-125 land (OBS-237). The node does what it owes for DEC-0112 to DEC-0120 there, each over the
+  contract's own vectors or the decision's own cases:
+  - **A harness summary lists only the organization's own context on your machine** (DEC-0118). Under
+    `machine.mode` `C`, the default, an organization sees the coding agents, the hook count, and only the MCP
+    servers, skills and plugins installed in one of its own `workspace.folders` or named by its baseline; the rest
+    stays here, counted per list as `outOfContext`, shown beside `mode` in `org summary`, `org status` and Health.
+    Only `A`, set by an `mdm` layer, lists the whole harness. No signed policy is applied yet (OE-06), so every
+    summary is built under `C` today: an organization that took the whole harness before now gets the coding agents
+    and the hook count.
+  - **A key, certification or delegation window whose bound does not read is closed** (DEC-0115, DEC-0119): the
+    node's certificate and transport windows already read RFC 3339 strictly (`+0100` or a space for `T` refuses the
+    certificate), and `relay.key_window_holds`, the contract's `keyWindowHolds`, is the reference the signed policy,
+    key set and root certification (OE-06) and the repair key (OBS-193) will judge with; no shipped path calls it yet.
+  - DEC-0112, DEC-0113, DEC-0116 and DEC-0117 hold because the check-in lists only `fabric-device/0.1` among what it
+    reads and sends none of DEC-0111's members, even to a server that lists them; DEC-0120's four-member pin holds.
+    A check-in's `policy.layers` (OBS-231) is unchanged by the pin: the schema changed only a description.
+  - DEC-0121 to DEC-0124 are not in this pin. DEC-0121 comes with OBS-237; DEC-0123's `open_link` is filed for the
+    next re-pin as OBS-245 (`full open` still opens the browser).
 
 ## 0.29.2 (2026-10-26)
 

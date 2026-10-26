@@ -81,6 +81,12 @@ FILES = {**{name: "fixtures/vectors/" + name for name in (
             for name in ("coding-agent-digest", "coding-agent-name", "dotted-suffix", "mcp-server-digest",
                          "mcp-server-min-version", "service-digest", "service-min-version", "service-name",
                          "skill-min-version")},
+         # What a summary lists follows `machine.mode` (DEC-0118): an organization's policy with its own
+         # `workspace.folders`, an `mdm` layer that sets mode A, and two folder lists the policy schema refuses.
+         "summary/device-policy-organization.json": "fixtures/positive/device-policy-organization.json",
+         "summary/device-policy-mdm-managed.json": "fixtures/positive/device-policy-mdm-managed.json",
+         **{"summary/negative/device-policy-workspace-folder-%s.json" % name:
+            "fixtures/negative/device-policy-workspace-folder-%s.json" % name for name in ("absolute", "home")},
          # A check-in's summary read with the check-in and judged against the client certificate (DEC-0114).
          **{"summary/semantic/%s.json" % name: "fixtures/semantic/%s.json" % name
             for name in ("credential-check-in-summary-ok", "credential-check-in-summary-other-device",

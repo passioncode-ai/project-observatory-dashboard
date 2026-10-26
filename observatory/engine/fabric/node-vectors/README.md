@@ -1,7 +1,7 @@
 # fabric-relay/0.1 node vectors (vendored)
 
 Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit
-`588748ab7d1c7958c6a83497e3db2cada26e35d8`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
+`de8cec30a443421ae5603dcfda7e4ff16ed00c45`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
 every file here: `fixtures/vectors/`, `schemas/`, and the `estate-*` fixtures of `fixtures/semantic/` in `semantic/`, all
 but one: `estate-secret-value-as-slot.json` names the AWS documentation's example access key id as a slot, a shape the
 public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`. They are the contract
@@ -24,7 +24,7 @@ case; the first checks the digests below.
 `http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
 `device-enrollment.schema.json` (DEC-0031, DEC-0094), with the device fixtures in `device/` (`fixtures/positive/` and
 `fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
-`588748ab7d1c7958c6a83497e3db2cada26e35d8` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+`de8cec30a443421ae5603dcfda7e4ff16ed00c45` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
 `gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors the whole folder at
 another commit, removes an `estate-*` fixture the commit no longer has, and rewrites every commit and the digests here:
@@ -60,7 +60,7 @@ the digests below.
 | `device/device-enrollment-key-on-record-with-token.json` | `df17dd6bb544c7f53fb7bb4be94bcec531daf4e9a9bcc3775745259d65e9b982` |
 | `summary/node-summary.schema.json` | `48979db88e36ba994755e717f990d99e20153d27d7253860a2b7a735034a46b2` |
 | `summary/common.schema.json` | `707a28c49e8a370d3ace2898406093ad9bac93952054f05bbffeb0b912dd8e99` |
-| `summary/activity-common.schema.json` | `f1870a093e69fa8ada024c5c1b9fb82e302000d2ca4217c593654a9a2c61b0fc` |
+| `summary/activity-common.schema.json` | `82ffe926bb82c2d78525c947389c24aa718bf3a0d3f8367117c0e3fbefef7bec` |
 | `summary/coding-agents.json` | `97c663b787a82881a94313a47b0bbf1cf9c4030ab86287f207ba4152b33c1d65` |
 | `summary/device-policy-harness-baseline.json` | `21c73ba6abe991ea52d65fd6fa8d1ba4fcb2a76425cfacb554b5a448b784206a` |
 | `summary/positive/node-summary.json` | `2c35d0e21a3a1853786fe569c30935c909831b4c701c2ac3303ba077ead01958` |
@@ -107,3 +107,7 @@ the digests below.
 | `device/activity-batch-ack-before-purpose.json` | `0791d78443303a890db6dd8bcabfceb0069bba4b95998d66756dc97a6505057d` |
 | `device/device-check-in-response-acknowledged.json` | `4aef11b8c8ff31c001f44e492553d79c083180170874abd3311b212a40fca1f1` |
 | `device/device-check-in-response-acknowledged-bad.json` | `f17998c87e9a41fa5bc8cd47914bc343620f035e9794d60b9a9ab95c2b567bb5` |
+| `summary/device-policy-organization.json` | `1b645475054a87cadd8679a6e03f36071f1a2e7b23e2da36a49f6078fc4ae57f` |
+| `summary/device-policy-mdm-managed.json` | `14a1062781993cf469a99bb3d5ce30baa165640b5ba8a74b2f36e9774e5db0bc` |
+| `summary/negative/device-policy-workspace-folder-absolute.json` | `8597d106c9ddefcaeba3bba760e5fe5c77eadc14f64cf9e59ecd0f7e3298d308` |
+| `summary/negative/device-policy-workspace-folder-home.json` | `0bb59e634126b1e6edb302e7f905f49fc2fb7bb44da60a2e5296d3025b871592` |

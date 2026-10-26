@@ -370,7 +370,8 @@ whose device-key ref holds `@` but is no key reference is refused as malformed, 
 `tests/test_node_pairing.py` and `tests/test_node_enroll.py` run every case of the contract's `pairing.json`,
 `enroll-token.json` and the `estate-*` fixtures of `semantic/` (83 of the contract's 84). Then they run the add, re-key
 and remove ceremonies end to end between two device-key sets, on a test estate. Since OBS-171 the whole `node-vectors/`
-folder is at one commit, the engine's contract pin (`588748ab` since OBS-217; `1f31e5a` before it, after DEC-0090's
+folder is at one commit, the engine's contract pin (`de8cec30`, the release `v0.1.0+2026-10-24.2`, since OBS-226;
+`588748ab` from OBS-217; `1f31e5a` before it, after DEC-0090's
 `3d8cb17`). The re-pin brought two estate rules the port now runs: FAC-SEM-134 (DEC-0106: a machine's `profile` is
 `full`, `member` or `view`; only a full machine carries a hub key; a view machine has no placement, no secret and is
 the source of none; `estate.machine_profile`) and FAC-SEM-137 (DEC-0107: a revision keeps its parent's `deltaAnchor`,
@@ -615,9 +616,22 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
   declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
   server Claude Code keeps per folder is `local`, its folder never sent.
-- **Consent, per organization.** The contract sends the whole harness whatever the machine's mode (S8), and whether an
-  organization also sees what serves a person's other contexts is still the contract's open question CT-92. Until it
-  is answered the node takes the safest reversible choice: sending is OFF for each organization until the person runs
+- **How much it lists: `machine.mode` (DEC-0118, OBS-226).** `policy_scope(layers)` reads the effective
+  `machine.mode` (`A` only from an `mdm` layer, anything else the default `C`) and the organization's own
+  `workspace.folders` from the signed layers only (a person's `user` layer never widens what an organization is shown).
+  Under `C` the summary lists the coding agents, the hook count, and only those MCP servers, skills and plugins that are
+  installed in a folder matching `workspace.folders` (an MCP server Claude Code keeps for such a folder: each pattern
+  segment matches one folder segment, `*` any run inside it, a folder inside a work folder counts; `folder_matches`) or
+  named by the baseline with their kind; everything else, installed for the person, machine-wide or for another
+  context, is left out and counted per list in `outOfContext`, which stays here and is shown in `org summary`,
+  `org status` and Health beside `mode`. No package names a context on this machine yet, so none is admitted as
+  placed in it. Under `A` the summary lists the whole harness. Until the signed policy is applied (OE-06) no layer is
+  held, so every summary is built under `C`: the organization sees the coding agents and the hook count.
+  `tests/test_node_summary.py` (class `Scope`) holds it to the contract's `device-policy-organization.json` and
+  `device-policy-mdm-managed.json` and its two refused folder lists.
+- **Consent, per organization.** Under `C` an organization sees only its own context (DEC-0118, CT-92's first half);
+  whether a person may withhold the summary altogether is still the contract's open question (CT-92's second half).
+  Until it is answered the node takes the safest reversible choice: sending is OFF for each organization until the person runs
   `full org summary --org ID --consent on` (recorded in that enrollment's state with its time; `--consent off` stops
   it). `org status` and Health say `harness summary: not shared (consent off)` with that command; the dry run
   `full org summary --org ID` works before consent, so the person reads what they would share first.
