@@ -905,8 +905,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "4687b1aefa97026b632cd980f227e5406807e0a39e7f28f4ea1a2efd7f6f04ee",
-      "bytes": 29853,
+      "export_sha256": "332e31ef8a510edbb29b707583a08d7c53b44fef223de5fa46ac90e62f2ed17b",
+      "bytes": 30726,
       "upstream_modified": true
     },
     {
@@ -6100,7 +6100,7 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "a102cc073458bda9697aed580985607792eb94c09be15b7ce30dc660a0544c4d",
+      "export_sha256": "834c07eb985e0f6491991eb811f9d6afb9c49bdc7f782f1352e0a418edbc096f",
       "bytes": 122061,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,

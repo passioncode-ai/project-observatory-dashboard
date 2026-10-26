@@ -122,7 +122,7 @@ API = "https://api.cloudflare.com/client/v4"
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / 'cloudflare-admin'
 #: Where the inventory-read tokens live, one per account (OBS-271): read by
 #: `collectors/scan_cloudflare_account.py` and nothing else, never by a plugin.
-INVENTORY_STORE = paths.source_path("secret_store", paths.SECRETS) / 'cloudflare-inventory.d'
+INVENTORY_STORE = paths.source_path("secret_store", paths.SECRETS) / "cloudflare-inventory.d"
 #: The name every token this program issues carries, per preset. Finding it
 #: again is what makes a second issue ROLL one token instead of leaving a trail
 #: of orphans nobody can identify in the operator's account.
