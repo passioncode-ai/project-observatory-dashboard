@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-79`
+**Next free OSS id:** `OSS-94`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -621,3 +621,303 @@ Each step writes a receipt. A failed check stops the rotation before any removal
 step to retry. Until OBS-112 the same sequence runs by hand with `create`, `send … --verify` and
 `gh ssh-key delete`.
 Status: specified; OBS-112.
+
+## The person's surfaces: sharing, cloud, agents, access, home (2026-10-26)
+
+The person who runs Observatory asked on 2026-10-26 for the surfaces a person uses, not only the
+ones an agent reads: a home page that says how the whole system is, a screen of the agents they
+have, a way to give an agent a token without pasting it into a chat, sharing keys with another
+person, a watch for leaked keys, and a personal cloud that carries what one machine cannot. The
+design and its decisions are [PERSON-SURFACES.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/PERSON-SURFACES.md); the build order is OBS-260 to OBS-274
+in [the backlog](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/backlog.md). **The rules throughout:** a credential's value
+never appears in a chat, an argument, a log, a URL or a report; an agent receives a value only at
+use time and only through Observatory; what a person set is never overwritten by an agent. They
+are OSS-79 to OSS-93. Every one is planned: Coverage none yet, product outcome unobserved.
+
+### OSS-79: share keys with another person
+
+Trigger: "give my colleague access to the translation API for this project, and let me take it
+back later".
+
+Funnel:
+1. Access, then Shares, then "New share". The screen asks three things in order: what to share
+   (keys from the vault, or "mint a new narrow key" through a door: an OpenRouter key with a
+   ceiling, a Cloudflare token with one preset, a Heroku or DigitalOcean preset), for how long
+   (an end date, at most 90 days), and a name for the recipient that only the sender sees.
+2. Minting runs the door's own `issue` into a slot named for the share; the value goes from the
+   provider into the vault and is never shown.
+3. "Create link" returns one link, `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE`, and a sentence to send
+   with it. The code after `#` never reaches a server: a browser does not send a fragment.
+4. The share is listed as "waiting for the recipient" until it is claimed (OSS-80), then "waiting for
+   your machine" while the sender's node seals each value to the recipient's machine key, then
+   "active".
+
+Failure paths:
+- No personal cloud connected: the button says why and opens OSS-83; nothing is minted first.
+- A chosen key is one the sender's own projects use: the screen names those consumers and says that
+  taking the key back later means rotating it for them too; it recommends minting a narrow key
+  instead. A door the person has not stashed an admin key for: the mint option is shown disabled
+  with the stash command.
+- A mint that fails at the provider leaves no share and no slot; a mint that succeeded before the
+  share failed is revoked by the door (as OBS-16 does for a failed delivery).
+- The link is lost before it is used: "Copy link again" while it is unclaimed; a new code makes
+  the old link void.
+
+Acceptance: no value in the link, the page, the cloud's storage or any journal; the share's
+record names keys by slot and provider only.
+Coverage: none yet. Status: planned (OBS-264, OBS-265); product outcome unobserved.
+
+### OSS-80: open a share someone sent me
+
+Trigger: a recipient opens a link a colleague sent.
+
+Funnel:
+1. The link opens a page served by the sender's personal cloud. It reads the code from the
+   fragment in the browser, names the sender's label and the number of keys, and offers one button,
+   "Open in Project Observatory", which hands `project-observatory://share?origin=...&id=...#c=CODE`
+   to the installed app.
+2. No app: the page says what Observatory is in one sentence, links the installer on
+   passioncode.ai, and keeps the button: "After installing, come back here and press the button".
+3. The app opens Access, Shares, "Received": the sender's label, each key's provider and purpose,
+   the end date, and the notice: "These keys were shared with you. Your agents get them from
+   Observatory when they need them. They are kept sealed, never in a file in the clear. Ask your
+   agents to take a key from Observatory; never paste one into a chat." One button, "Accept".
+4. Accepting binds the share to this machine's key (the claim) and shows "waiting for the sender's
+   machine" until the sealed values arrive, then "ready" with the command an agent uses
+   (`use_secret.py run --vault-only shared/LABEL NAME -- COMMAND`).
+
+Failure paths:
+- The link was already claimed by another machine: "This link was already used on another
+  machine. Ask the sender for a new one"; the sender sees the same claim (OSS-81).
+- The link expired or the share was revoked: the page and the app say which, with the date.
+- The browser blocks the custom scheme: the page shows the link as text to copy into the app's
+  "Open a share" field.
+- The fragment is missing (a messenger cut it): the page says the link is incomplete and asks for
+  it again; nothing is claimed.
+
+Acceptance: the claim proves possession of the code without sending it to any third party; the
+recipient's machine never writes a shared value to disk in the clear.
+Coverage: none yet. Status: planned (OBS-266); product outcome unobserved.
+
+### OSS-81: see how my shared keys are used, and take them back
+
+Trigger: "is my colleague using the key, and how much? Stop it now."
+
+Funnel:
+1. Access, then Shares: one row per share with its recipient label, state, keys, uses in the last
+   7 days, last use, and whether any value was exported (OSS-82).
+2. A share opens to its usage: per key, uses per day and the agent names the recipient's machine
+   reported, the cloud's own count of deliveries, and the provider's spend where the door reads it
+   (OpenRouter by key). Each figure says who measured it: "seen by your cloud" or "reported by their
+   machine".
+3. "Take back" names what it does before it runs: the cloud stops serving at once; the recipient's
+   machine deletes its sealed copy on its next contact; and, because a value that reached another
+   machine can have been copied, the key is revoked at the provider (a key minted for the share) or
+   rotated (a key of the sender's own, with the consumers named).
+
+Failure paths:
+- The provider rotation fails: the share is still revoked at the cloud; the row says "stopped
+  serving; the key is still valid at the provider" with the door's command to retry.
+- The recipient's machine has not been in contact since: "stopped serving; their machine has not
+  confirmed the deletion yet", never "deleted".
+- The cloud is unreachable: the take-back waits in the outbox and the row says so; the provider
+  revocation still runs.
+
+Acceptance: a usage report holds counts, dates and agent names, never a value, an argument or an
+output; "taken back" is shown only when the cloud refused service and the provider confirmed.
+Coverage: none yet. Status: planned (OBS-264, OBS-265); product outcome unobserved.
+
+### OSS-82: export a shared value on purpose
+
+Trigger: the recipient needs the value outside Observatory (a vendor's web form).
+
+Funnel: Received, a key, "Export the value". The dialog says the sender will see that it was
+exported and when, then copies the value to the clipboard (cleared after 60 seconds) or writes it to
+a file the person chose. The share's usage shows "exported on DATE" to the sender.
+
+Failure paths: a share the sender marked "no export" shows the button disabled with that reason; an
+agent asking to export is refused: export is a person's act on the screen.
+
+Acceptance: an export is recorded before the value leaves; the record holds no value.
+Coverage: none yet. Status: planned (OBS-266); product outcome unobserved.
+
+### OSS-83: connect Observatory to my personal cloud
+
+Trigger: "sharing needs my cloud" (OSS-79), or "keep my machines in step".
+
+Funnel:
+1. Settings, then Personal cloud: "Not connected", what the cloud is for (sharing, reaching one's
+   machines, later backups), and what it holds (sealed values and their names, never a value in the
+   clear).
+2. "Deploy to my Cloudflare account": the Cloudflare door mints a narrow deploy token, uploads the
+   engine's cloud service to the person's own account and registers this machine's public keys. The
+   screen shows the address it got and "Connected".
+3. When the PassionCode personal cloud is the person's, "Move to PassionCode cloud" moves the same
+   service there; shares keep working because their values are sealed to machines, not to the host.
+
+Failure paths: no Cloudflare admin key stashed: the stash command and why it is needed; a deploy
+the account refuses (plan limits): the refusal verbatim and nothing half deployed; the cloud does
+not answer later: shares stop at their lease (OSS-80) and Home shows "personal cloud unreachable".
+
+Acceptance: the cloud's storage, logs and responses never hold a value or a private key.
+Coverage: none yet. Status: planned (OBS-263); product outcome unobserved.
+
+### OSS-84: give an agent a token without pasting it into a chat
+
+Trigger: an agent needs a key the vault does not hold.
+
+Funnel:
+1. The agent calls Observatory (`observatory_secret_request`: project, slot name, provider, why);
+   it never asks the person in its chat.
+2. Observatory, not the agent, shows a native window: which agent asks, for which project and
+   slot, why, and one secure field: "Paste the token and press Save". On macOS the app's own
+   window; on Linux and Windows the desktop app's window; with no desktop session, a one-time local
+   page opened in Fabric Dashboards.
+3. Save writes the value to the vault slot (as `vault.py put` does) and the agent's call returns
+   "stored PROJECT/ENV/NAME", never the value. The agent then uses the key through `use_secret.py`.
+
+Failure paths: the person presses Cancel or the window times out (10 minutes): the agent receives
+"declined" or "no answer"; an empty or multi-line value is refused in the window; a second request
+for the same slot while one is open joins it; a slot that already holds a value asks "replace?"
+naming its last rotation.
+
+Acceptance: the value is never in an argument, an environment the agent's process can read, a log,
+a notification or the agent's output; the request and its outcome are journalled by name.
+Coverage: none yet. Status: planned (OBS-260); product outcome unobserved.
+
+### OSS-85: see which agents I have, and connect Switchboard
+
+Trigger: "which agents do I have, and can I manage them from here?"
+
+Funnel: Agents opens on "Available": the coding agents installed on this machine (from the harness
+scan), the Fabric services running here (from the services folder, OSS-72) and, for each, whether it
+answers, its version and where it runs. A Switchboard card says "connected", "installed but not
+running" or "not installed" with the one step that installs and connects it and what it adds
+(accounts, limits, handing work between agents). The workflows view of today (OSS-24 to OSS-27)
+moves to a tab of its own.
+
+Failure paths: no harness scan yet: "not scanned yet" with the command, never "no agents"; a
+service whose descriptor is unreadable is listed as such.
+
+Acceptance: absent and not measured are different states on the screen.
+Coverage: none yet. Status: planned (OBS-267); product outcome unobserved.
+
+### OSS-86: see what one agent did
+
+Trigger: "what did this agent touch this week, and did it ask for anything?"
+
+Funnel: an agent's page: branches it created, files it changed (per repository, with counts), the
+permissions it asked for and the answers, errors by kind, keys it used through Observatory (OSS-91),
+and its sessions, newest first, each over a stated period with its freshness.
+
+Failure paths: a harness whose transcripts the scan cannot read: the section says "not recorded for
+this agent" and why; a branch since deleted is shown as deleted, not dropped.
+
+Acceptance: file paths are shown relative to their repository; no transcript text is shown.
+Coverage: none yet. Status: planned (OBS-268); product outcome unobserved.
+
+### OSS-87: keep agents' logs without filling the disk
+
+Trigger: logs grow; the person wants daily figures now and the detail on demand.
+
+Funnel: Agents, then "Logs": fresh raw records for the hot window (30 days by default), daily
+aggregates kept long, and monthly archives listed with their size; "Restore for analysis" opens a
+month into a separate, read-only store and says where.
+
+Failure paths: an archive that fails its checksum is named and never restored over anything; the
+backup passphrase is needed to open an archive and its absence is stated.
+
+Acceptance: archiving never deletes a raw record before its archive is written and verified;
+retention is set in `retention.json`, never by an agent.
+Coverage: none yet. Status: planned (OBS-274); product outcome unobserved.
+
+### OSS-88: see the whole system at a glance, and the three things that need me first
+
+Trigger: the person opens Observatory.
+
+Funnel: Home shows, top to bottom: the state of the system in tiles (sites up and down, apps up and
+down, disk and memory, keys health, agents working, personal cloud), each with its period and
+freshness; the three findings that need the person first, each with its action, and "All problems
+(N)" to the findings page; projects at a glance grouped by organization and label; recent activity.
+
+Failure paths: a source not measured shows "not measured" on its tile, never green; nothing needs
+the person: "Nothing needs you" with the time of the last check; a fresh install shows what to
+connect first instead of empty tiles.
+
+Acceptance: the home page shows at most three findings; every tile links to its page.
+Coverage: none yet. Status: planned (OBS-261); product outcome unobserved.
+
+### OSS-89: name and group my things; agents suggest, never overwrite
+
+Trigger: "group these projects under the client they belong to", or an agent labels a project it
+created.
+
+Funnel: any project, key, site or agent has "Labels". A label the person sets is theirs. An agent
+may set a label where the person set none; it shows as "suggested by AGENT", and the person keeps,
+edits or removes it. An agent's change to a label the person set becomes a proposal in the review
+queue, applied only when the person accepts it.
+
+Failure paths: two agents suggest different labels: both are shown, neither wins; a label with a
+credential-shaped value is refused.
+
+Acceptance: no write path lets an agent replace a label whose owner is the person.
+Coverage: none yet. Status: planned (OBS-270); product outcome unobserved.
+
+### OSS-90: see my Cloudflare and DigitalOcean resources beside Heroku
+
+Trigger: "what runs where, and what does it cost?"
+
+Funnel: Infrastructure lists Heroku, DigitalOcean and Cloudflare, each a page: what runs (apps,
+droplets, databases; Workers, Pages, R2, D1, zones), its state, its account, its cost where the
+provider reports one, and the findings that concern it.
+
+Failure paths: a provider with no read key: the page says how to connect it with the door's
+read-only preset; a provider that refused: the refusal and the time.
+
+Acceptance: read-only keys only; nothing on these pages changes a resource.
+Coverage: none yet. Status: planned (OBS-271, DigitalOcean by OBS-235); product outcome unobserved.
+
+### OSS-91: check that agents handled access correctly
+
+Trigger: "did my agents use keys the way they should?"
+
+Funnel: Access, then "Use": every use of a key by an agent from the secret-use journal, grouped by
+agent and key: through the vault, refused, failed, or by a fallback the rules forbid (a `.env`), and
+the findings about keys seen outside their home.
+
+Failure paths: a journal that cannot be read is named; an agent that used a key outside Observatory
+is visible only where the leak scan saw it, and the screen says so.
+
+Acceptance: the screen shows names, counts and dates, never a value or a command line.
+Coverage: none yet. Status: planned (OBS-269); product outcome unobserved.
+
+### OSS-92: know whether my keys appear in public, without sending them anywhere
+
+Trigger: "has any of my keys leaked?"
+
+Funnel: Access, then "Leak watch": per key, the last check, the sources checked and the result.
+Providers' own signals (a key the provider disabled or reported) and alerts on the person's own
+repositories are read by default; public code search is off until the person turns it on, and the
+panel says exactly what leaves the machine (eight characters of each eligible key, the same eight
+every time). A confirmed sighting is a critical finding with the rotate command.
+
+Failure paths: a key too short for a safe fragment is checked by provider signals only, and says
+so; a source that refused is named with its time.
+
+Acceptance: a full key never leaves the machine; a candidate found in public is compared on this
+machine and never stored.
+Coverage: none yet. Status: planned (OBS-272); product outcome unobserved.
+
+### OSS-93: be told when something I connected breaks
+
+Trigger: a site goes down, a key stops working, the disk fills.
+
+Funnel: the watcher checks connected resources, keys, disk and memory on the maintenance schedule;
+a change that needs the person becomes a notification once, with the action; Home's "hot" line names
+the newest.
+
+Failure paths: notifications switched off: Home still shows it; a check that could not run is "not
+checked", never "fine".
+
+Acceptance: one notification per change, never a repeat for the same state.
+Coverage: none yet. Status: planned (OBS-273); product outcome unobserved.
