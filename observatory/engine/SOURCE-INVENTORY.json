@@ -578,8 +578,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "2208f6a6c33236ab34bbb3e482f1a95e41b3902503f4b28e6526dc2ee142708f",
-      "bytes": 282000,
+      "export_sha256": "48904df2c639c48e9fb1417224c9e7be15b83fbe14297daaee73d4a9d17c88d2",
+      "bytes": 280768,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -610,8 +610,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f16bf18bf3b699b8ae161bd30317f0a5ff3e2e94d63c7371b59c58ead5eb5dee",
-      "bytes": 182933
+      "export_sha256": "8c78ee45737bf4481eeabf3dcc6df2f35f07d49f0133f7ddb5f764a86a404693",
+      "bytes": 182413
     },
     {
       "path": "dashboard/machine_page.py",
@@ -870,8 +870,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "1101591c67918f71b8e9d4965f35ab7596ac8b713f2b6ecc84cd2f69b1121a5c",
-      "bytes": 25836,
+      "export_sha256": "313aa3694174f66f6ef4b4c49165e4fe91928e81934367d0dc6bfd4bd3a8c9c4",
+      "bytes": 26498,
       "upstream_modified": true
     },
     {
@@ -891,15 +891,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "0019df7feebe9771eedbf7878680894a6ec291812ec22e931f0b821dee61708c",
-      "bytes": 176827,
+      "export_sha256": "c78771d4fcc3d87ac4f1ce2fa873b00ef060dfb11f13fe8b52b40a14d0e21e43",
+      "bytes": 175945,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "7e5286e2411033609cfdd429bb3f8a0129552583bc0a4875733e6c2281c1bf48",
-      "bytes": 146709,
+      "export_sha256": "d53110924283f36011dba8e88f0f52f18f21b1ff813932f433bd598888955554",
+      "bytes": 144162,
       "upstream_modified": true
     },
     {
@@ -950,8 +950,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "58a1d1f90cdc99807380e100e9729d4b80c2bbd5a50be29f4849032845a68918",
-      "bytes": 17867,
+      "export_sha256": "9c68d9e9c3b00c50cff7da929510232757cec5787cb093c7e261bbe2c2efaddd",
+      "bytes": 16766,
       "upstream_modified": true
     },
     {
@@ -1232,8 +1232,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ce1c9a1ae1d91d8657411aebcffb95a63b8c0bdfdaf5b3d220459ccd41519c46",
-      "bytes": 15785
+      "export_sha256": "54cc01a7c6fc3edc3c8c988cea0ca13c1e22dc55b955ad8efa37e8301790142a",
+      "bytes": 13490
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1430,104 +1430,6 @@
       "upstream_modified": true,
       "export_sha256": "47563a359dc876500bb0405689eaa8c43bd9e148ab09c77c1a0f74e5850d42bb",
       "bytes": 224568
-    },
-    {
-      "path": "fabric/node-vectors/repair/device-common.schema.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "54a640bf7469f5dca331c03e589bbb05b059f401275d0b13a96b39c391c48230",
-      "bytes": 4897
-    },
-    {
-      "path": "fabric/node-vectors/repair/fabric-package.schema.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "a413ab4884dff154a81034e50d74303c4af8ca7b5902deaeda11a77c275bed43",
-      "bytes": 15822
-    },
-    {
-      "path": "fabric/node-vectors/repair/negative/repair-request-task-two-lines.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "1789b30acb0b4f31f83fbcdcdc32f5d78e1081777041f0d26cbb75671c926719",
-      "bytes": 628
-    },
-    {
-      "path": "fabric/node-vectors/repair/negative/repair-result-already-answered.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "b738982e5258a9a27aab1b199fe745560840ce5ce06e28f43ed4d0c7cade86a3",
-      "bytes": 140
-    },
-    {
-      "path": "fabric/node-vectors/repair/negative/repair-result-refused-without-reason.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "fe6d7663891683d791d6b09f2d1947efec2d8c6eef7be8ff0add50a7c800760b",
-      "bytes": 108
-    },
-    {
-      "path": "fabric/node-vectors/repair/negative/repair-result-succeeded-unnotified.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "329567488c644013d73e70a12fba879ef86497f8046b205870a180a75c16468b",
-      "bytes": 149
-    },
-    {
-      "path": "fabric/node-vectors/repair/positive/repair-request.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "a09b84af8688e9ec97289e6b97f246e45db196dae2a1caa12d92d173b9ad15bd",
-      "bytes": 687
-    },
-    {
-      "path": "fabric/node-vectors/repair/positive/repair-result-org-cloud.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "347af54396c474c03216f8987e1477a1af5891abbc76bc1d5fd24c913d9d6368",
-      "bytes": 195
-    },
-    {
-      "path": "fabric/node-vectors/repair/positive/repair-result-refused.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "7fec7fb4505de9e23b5009fa285cb9587880ec09a857ff9e493cba4c2e65b316",
-      "bytes": 139
-    },
-    {
-      "path": "fabric/node-vectors/repair/positive/repair-result.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "0a4d02f9342987cf73083dd01d24445852ef2f9236b76c18415a66c3f6d7f573",
-      "bytes": 189
-    },
-    {
-      "path": "fabric/node-vectors/repair/repair-decision.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "ee3b71c2aa3a7fe67193a67cdedc4c4571bb04f3760979ad6bb772a355d2f39d",
-      "bytes": 93268
-    },
-    {
-      "path": "fabric/node-vectors/repair/repair-request.schema.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "46188f4fa2866857dd2457765f321470dfea494ea2ec4a33255adca62c921833",
-      "bytes": 3060
-    },
-    {
-      "path": "fabric/node-vectors/repair/repair-result.schema.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "166d5397dbb984f55162805114e202b17c8aaa54ac9b8b67d8acc676af2760be",
-      "bytes": 2187
-    },
-    {
-      "path": "fabric/node-vectors/repair/semantic/device-action-expired-remote-execution.json",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "5638ed124984182c3ebf9062697a080a885c6aa40ec0b01671930ccd57d13b51",
-      "bytes": 3237
     },
     {
       "path": "fabric/node-vectors/revocation-delta.json",
@@ -2696,8 +2598,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "a1d52cc5cadcdcbb96e29ad291545bd0fa87ee394b2a32eaca6d58a4f790f7dd",
-      "bytes": 112805,
+      "export_sha256": "35a869932bfec11e17ddb386d495ecb25d97f1cb8a49e24b321c372b56ae55d6",
+      "bytes": 113014,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -2861,8 +2763,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b17da07e15a09bb7542bb287eafdbf3445ac517f8dded62786484ebd79ec3b19",
-      "bytes": 157542
+      "export_sha256": "ce12a3f2bd6c271ada37f351e267ac3fef775ee3a8e595ea8fe9d46f70aa3411",
+      "bytes": 141503
     },
     {
       "path": "node/p256.py",
@@ -2884,13 +2786,6 @@
       "upstream_modified": true,
       "export_sha256": "57205727c3cbbe03694e3341a8d378ac533bfea47a8c859d26db1c0ee514b78c",
       "bytes": 25630
-    },
-    {
-      "path": "node/repair.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "357ebb46d1b1b3abf7b0fc946bcf6f1fb917f0b353b33fdb58f45f092c5165f3",
-      "bytes": 49516
     },
     {
       "path": "node/revocation.py",
@@ -2937,8 +2832,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "fff07441a5a354fee7b4ee82ba0951ce2abc10516469dae689e7d1585539b1a1",
-      "bytes": 94435,
+      "export_sha256": "43c790c054f0cf868b30d19117d6a420b26dee06dec03d26a6e7ab7f0c833a57",
+      "bytes": 95228,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3468,8 +3363,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "931db65de46a00b48893db833c813f85a5162ee34173dc1bb15045c752b59f52",
-      "bytes": 74823,
+      "export_sha256": "acdfc48b0beb7d90d3cb4368a5ded169b5793fb01ca85fdd1310f28c64d31d65",
+      "bytes": 76391,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -3701,8 +3596,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "a47dc0caba893dc16acea97a4ac35ef58732f116190f603601f4691607ac0b79",
-      "bytes": 45716,
+      "export_sha256": "f24d95b1126c0e3ca773647c62302fbc8f39b7087d9c4df1c9ccb7dc2f46bd88",
+      "bytes": 45555,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4442,8 +4337,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dfd06cc15eea66a71bf187a4c0556a8c38b5ed8e2cf82ace45137cd7a2f285cd",
-      "bytes": 23321
+      "export_sha256": "e748a73be95549a4ee9d29663bedb098c4cc4ba2b2f1c61c75172b8bf34f17a6",
+      "bytes": 23319
     },
     {
       "path": "tests/test_handoff.py",
@@ -4925,13 +4820,6 @@
       "upstream_modified": true,
       "export_sha256": "504185831b5d0bb3f434653994deeaa4b63798f9df3de5c8a7112db77461fecd",
       "bytes": 21989
-    },
-    {
-      "path": "tests/test_node_repair.py",
-      "source_sha256": null,
-      "upstream_modified": true,
-      "export_sha256": "c1b779e7ac9bfc3e6e486dc066f0e2daefd26e44086cab879a135d6b1663a311",
-      "bytes": 52646
     },
     {
       "path": "tests/test_node_revocation.py",
@@ -5714,6 +5602,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/test_vault_digests.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a666d125bb862567a9ca97c417d7a0b28555b796ce2066f8b18fe137e54b6030",
+      "bytes": 27581
+    },
+    {
       "path": "tests/test_vault_project.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6337,8 +6232,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2536bc3b75ff2a0031d0bc9d1766cef8b116666536ea655bad2aee0a3c5d234",
-      "bytes": 12438
+      "export_sha256": "afac67b9ba3b82d2a400f6329d8efa522f43a1c99091d9b744d4af602734f05b",
+      "bytes": 10729
     },
     {
       "path": "tools/project_into_vault.py",
@@ -6700,6 +6595,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/vault_digests.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d30696dbb9c7a5f09a7bf50aabaaba8a5931341c4e687019fe8e482bf6256f1d",
+      "bytes": 33124
+    },
+    {
       "path": "tools/workflow_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6762,7 +6664,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 902,
+  "file_count": 888,
   "excluded": [
     "git-history",
     "operator-registries",

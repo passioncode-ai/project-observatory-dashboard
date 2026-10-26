@@ -468,7 +468,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "memory-http", "forget",
-                       "ssh-keys", "org", "lifecycle", "review")
+                       "ssh-keys", "vault-digests", "org", "lifecycle", "review")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -533,6 +533,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
                                ed25519 key, copy its public line, send it to GitHub or a server;
                                the private key is never shown or moved
+  vault-digests [view|write|mark|unmark|key]   every vault slot per machine (same, differs, only
+                               here, missing, unreachable), compared by keyed HMAC-SHA-256 digests under
+                               the estate key, never values; mark a slot different on purpose; peers'
+                               manifests are read from <state>/vault-digests/peers
   org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
                                enrollments (fabric-device/0.1): enroll with a token from a vault slot,
                                signed check-ins, rotation, the activity outbox, share registrations
@@ -843,6 +847,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
+    if name == "vault-digests":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import vault_digests
+        return argparse_refusal(lambda: vault_digests.parser().parse_args(vault_digests.arguments(rest)))
     if name == "review":
         sys.path.insert(0, str(ROOT / "tools"))
         import review
@@ -1243,6 +1251,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return ssh_keys.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "vault-digests":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import vault_digests
+        return vault_digests.main(argv[2:])
     if len(argv) > 1 and argv[1] == "review":
         # Its own parser since OBS-227 (policy, batch, undo-policy); with nothing after it, it lists
         # the queue as the `review` step always did.

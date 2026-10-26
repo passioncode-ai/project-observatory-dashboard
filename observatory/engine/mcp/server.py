@@ -486,7 +486,9 @@ def observatory_credentials(
     `shared_with` is measured rather than declared: two projects carry it when
     their values are equal, which is what "what breaks if I rotate this" means.
     `available_in` is the opposite — a slot empty here whose name holds a live
-    value elsewhere.
+    value elsewhere. `machines` on a vault row names the machines that hold the
+    slot: this one, and every peer whose current digest manifest lists it
+    (`project-observatory full vault-digests` compares them, never values).
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:

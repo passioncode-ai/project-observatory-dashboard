@@ -94,6 +94,8 @@ SAMPLES = {
     "REPAIR_ID": "rep-0001",
     # The review batch file `review.py batch prepare` names (OBS-227).
     "{out}": "/srv/example-ws/store/review/batch.json",
+    # A vault slot's environment (`full vault-digests mark PROJECT ENV NAME`, OBS-194).
+    "ENV": "prod",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")
