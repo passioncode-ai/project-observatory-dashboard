@@ -435,11 +435,15 @@ sequenceDiagram
   `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
   agent's process. That server shows nothing itself and never touches a value: it records the request
   (agent from its binding, project, slot, provider, reason) in the node's request queue. Only the node
-  writes that queue: it lives in the node's owner-only state, the MCP server reaches it through the
-  node's authenticated `POST /mcp` under its own access binding, and the node takes the agent's name
-  from that binding, so one agent cannot file a request under another agent's name (an agent that can
-  write the node's state files directly already holds the person's account, which no prompt can
-  guard). The node asks
+  writes that queue, in its owner-only state. **This is new work (OBS-260):** today the stdio MCP
+  server has no binding of its own (it is the built-in `local:stdio` principal shared by every local
+  agent, `observatory/engine/access_binding.py`), and the node's `POST /mcp` serves only the
+  `node.lifecycle` tools behind a lifecycle grant (`tools/serverd.py`). OBS-260 adds a binding per local
+  agent, issued when the agent is connected, and a `secret.request` tool on `POST /mcp` that takes the
+  agent's name from that binding. The limit, stated plainly: a binding's token file is owner-only, so
+  any agent running as the same user can read another agent's token and file a request under its
+  name, the same limit as the phrase on Linux and Windows; the prompt still shows the slot and the
+  reason, and nothing is stored without the person typing it. The node asks
   the lifecycle broker (OSS-76) to open Observatory's own code-signed app with the request id, never a
   direct launch. The app reads the request from the node, shows the window, and writes the value into
   the vault slot itself, in its own process, as `vault.py put` writes it: **the value never crosses the
