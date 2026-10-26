@@ -528,7 +528,7 @@ class _Gate:
 class _Scope:
     """What a summary under `machine.mode` `C` lists of the MCP servers, skills and plugins (DEC-0118): an item
     installed in a folder matching the organization's own `workspace.folders` (an MCP server declared for such a
-    folder), or named by its `harness.baseline` with the item's kind. A package placed in this context would count
+    folder, a project's own skill in one), or named by its `harness.baseline` with the item's kind. A package placed in this context would count
     too, but no package on this machine names a context yet, so none is admitted that way. Everything else (installed
     for the person, machine-wide, for another context) is left out and counted per list in `out_of_context`, which stays
     on this machine with the names it counts."""
@@ -547,8 +547,11 @@ class _Scope:
             self._left.add((member, name))
             self.out_of_context[member] = self.out_of_context.get(member, 0) + 1
 
-    def keeps(self, kind: str, name: str) -> bool:
-        if name in self.named.get(kind, ()):
+    def keeps(self, kind: str, name: str, folders: Any = ()) -> bool:
+        """Whether an item of `kind` is listed: the baseline names it (wherever it is installed, a project outside
+        the work folders included, DEC-0118), or (a project's skill) one of its `folders`, as the harness scan spells
+        them (`~/<path>`), is one of the organization's work folders or inside one."""
+        if name in self.named.get(kind, ()) or any(folder_matches(f, self.folders) for f in _list_of_str(folders)):
             return True
         self._leave({'skill': 'skills', 'plugin': 'plugins'}[kind], name)
         return False
@@ -562,13 +565,16 @@ class _Scope:
         return False
 
     def settle(self, harness: dict) -> None:
-        """Forgets a server left out under one declaration and listed under another (one in a matching folder)."""
-        listed = {row['name'] for row in harness.get('mcpServers', [])}
-        left = sum(1 for member, name in self._left if member == 'mcpServers' and name not in listed)
-        if left:
-            self.out_of_context['mcpServers'] = left
-        else:
-            self.out_of_context.pop('mcpServers', None)
+        """Forgets a name left out under one row and listed under another: a server declared for a matching folder
+        too, a skill a project in a work folder holds under the name the person's own skill or another project's
+        has."""
+        for member in ('mcpServers', 'skills'):
+            listed = {row['name'] for row in harness.get(member, [])}
+            left = sum(1 for held, name in self._left if held == member and name not in listed)
+            if left:
+                self.out_of_context[member] = left
+            else:
+                self.out_of_context.pop(member, None)
 
 
 def _fresh_health(row: dict, at_ms: Optional[int]) -> str:
@@ -607,18 +613,48 @@ def _mcp_servers(scan: dict, gate: _Gate, at_ms: Optional[int] = None, scope: Op
     return [rows[name] for name in sorted(rows)]
 
 
-def _skills(scan: dict, gate: _Gate, scope: Optional['_Scope'] = None) -> List[dict]:
-    """Claude Code's user-level and plugin skills, by the name the harness shows (a plugin's skill under its own
-    name), once each: the first the scan read wins, the user's own before a plugin's."""
-    out: Dict[str, dict] = {}
+def _skill_rows(scan: dict) -> List[Tuple[str, str, List[str], Any]]:
+    """(name, summary source, folders, digest) of every skill the scan read, in the order a name is first listed:
+    Claude Code's user-level and plugin skills (`skills`), a project's own (`project_skills`, source `project`, every
+    spelling of its folder as `~/<path>`), then Codex's (`codex_skills`, its own `user` folders)."""
+    rows = []
     for row in _list(scan.get('skills')):
         name, source = row.get('name'), row.get('source')
-        if not isinstance(name, str) or not isinstance(source, str):
+        if isinstance(name, str) and isinstance(source, str):
+            rows.append((name, 'plugin' if source.startswith('plugin:') else SKILL_SOURCES.get(source, 'other'),
+                         [], row.get('digest')))
+    for row in _list(scan.get('project_skills')):
+        if isinstance(row.get('name'), str):
+            rows.append((row['name'], 'project', _list_of_str(row.get('folders')), row.get('digest')))
+    for row in _list(scan.get('codex_skills')):
+        if isinstance(row.get('name'), str):
+            source = row.get('source')
+            rows.append((row['name'], source if source in ('user', 'managed') else 'other', [], row.get('digest')))
+    return rows
+
+
+def _skills(scan: dict, gate: _Gate, scope: Optional['_Scope'] = None) -> List[dict]:
+    """Every skill the coding agents load (`_skill_rows`), by the name the harness shows (a plugin's skill under its
+    own name), once each: the first the scan read wins, Claude Code's user-level before a plugin's, then a project's,
+    then Codex's. Under `machine.mode` `C` a project's skill is listed when one of its folders is one of the
+    organization's work folders, any skill when the baseline names it (`_Scope.keeps`); the folders never leave.
+
+    The person's own skill wins under either mode, as it does in Claude Code (a personal skill shadows a project's
+    of the same name): under `C` a project's skill whose name the person's own skill (source `user`) already holds is
+    not listed, so the organization never reads a project's `x` where the agent loads the person's `x`, and the
+    person's `x` stays out unless the baseline names it."""
+    out: Dict[str, dict] = {}
+    shadowed: set = set()
+    for name, source, folders, digest in _skill_rows(scan):
+        if name in out or (source == 'project' and name in shadowed):
             continue
-        if name in out or (scope is not None and not scope.keeps('skill', name)) or not gate.admit(name, 'skills'):
+        if scope is not None and not scope.keeps('skill', name, folders):
+            if source == 'user':
+                shadowed.add(name)
             continue
-        entry = {'name': name, 'source': 'plugin' if source.startswith('plugin:') else SKILL_SOURCES.get(source, 'other')}
-        digest = row.get('digest')
+        if not gate.admit(name, 'skills'):
+            continue
+        entry = {'name': name, 'source': source}
         if isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest):
             entry['digest'] = 'sha256:' + digest
         out[name] = entry
@@ -698,6 +734,21 @@ def harness_of(harness_scan: Any, mcp_scan: Any, gate: Optional[_Gate] = None,
     if scope is not None:
         scope.settle(harness)
     return harness, omitted
+
+
+#: Why a plugin's drift reads `changed` while the node sends no plugin digest (OBS-192, OBS-275): the contract defines
+#: `plugins[].digest` (`docs/specification/node-summary.md` line 28 at the pin, `node-summary.schema.json`) but not what
+#: it covers, so a baseline naming a plugin's digest reads `changed` for every plugin it names ("another, or none").
+PLUGIN_DIGEST_CAUSE = 'this node sends no plugin digest; the contract does not say what it covers'
+
+
+def drift_causes(drift: Any) -> List[dict]:
+    """Beside a summary's drift, the drift this node causes itself: every plugin item reading `changed` (only a
+    digest makes a plugin `changed`, and the node sends none), with `PLUGIN_DIGEST_CAUSE`. Empty otherwise; shown to
+    the person in `org summary`, `org status` and Health, never sent."""
+    items = drift.get('items') if isinstance(drift, dict) else None
+    return [{'kind': 'plugin', 'name': item.get('name'), 'cause': PLUGIN_DIGEST_CAUSE} for item in _list(items)
+            if item.get('kind') == 'plugin' and item.get('state') == 'changed']
 
 
 def content_digest(summary: dict) -> str:

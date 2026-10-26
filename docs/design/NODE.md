@@ -616,7 +616,14 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   or in Homebrew's and `/usr/local`'s; a generic command, `agent`, `cmd`, `cn`, `pi`, `omp` or `zed`, counts only when
   it resolves into the agent's own package or bundle; its version is read from where the launcher resolves, a
   `versions/<v>` folder, a Homebrew keg or cask, or its npm package's `package.json`, never by running it, and kept
-  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`). The MCP scan (`collectors/scan_mcp.py`)
+  only when it is a release's version: dotted numbers with at most one prerelease word, `STRICT_VERSION`),
+  `project_skills` (each project's own `.claude/skills` one level under the configured projects folder: name, content
+  digest and every spelling of the project's folder as `~/<path>` inside the scanned home, none outside it; a project
+  reached through a link is read once, by the folder it resolves to, with every spelling it was reached by kept; the
+  folders are read only to judge the work folders below and never leave) and `codex_skills` (Codex's
+  `~/.codex/skills` and the shared `~/.agents/skills`, a skill linked into both once: name, source `user`, content
+  digest). The summary lists skills once by name, Claude Code's user-level and plugin skills first, then a project's
+  (source `project`), then Codex's; the first read wins. The MCP scan (`collectors/scan_mcp.py`)
   gives the servers: a switched-off declaration is not loaded and not listed, the strongest verdict of a name's
   declarations is its health (`connected` ok, `needs-auth` degraded, `failed` down, anything unheard unknown), and a
   server Claude Code keeps per folder is `local`, its folder never sent.
@@ -625,8 +632,14 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `workspace.folders` from the signed layers only (a person's `user` layer never widens what an organization is shown).
   Under `C` the summary lists the coding agents, the hook count, and only those MCP servers, skills and plugins that are
   installed in a folder matching `workspace.folders` (an MCP server Claude Code keeps for such a folder: each pattern
-  segment matches one folder segment, `*` any run inside it, a folder inside a work folder counts; `folder_matches`) or
-  named by the baseline with their kind; everything else, installed for the person, machine-wide or for another
+  segment matches one folder segment, `*` any run inside it, a folder inside a work folder counts; `folder_matches`;
+  a project's own skill when any spelling of its project folder matches, so a linked project is admitted by the
+  spelling that is a work folder) or named by the baseline with their kind, wherever it is installed: a baseline
+  naming `x` also admits a project's skill `x` from a project outside the work folders (DEC-0118 admits what the
+  baseline names). The person's own skill wins under either mode, as it does in Claude Code (a personal skill shadows
+  a project's of the same name): under `C` a project's skill whose name the person's own skill holds is not listed,
+  so the organization never reads a project's `x` where the agent loads the person's `x`, and the person's `x` is
+  listed only when the baseline names it, the same row `A` reports (`_skills`). Everything else, installed for the person, machine-wide or for another
   context, is left out and counted per list in `outOfContext`, which stays here and is shown in `org summary`,
   `org status` and Health beside `mode`. No package names a context on this machine yet, so none is admitted as
   placed in it. Under `A` the summary lists the whole harness. Until the signed policy is applied (OE-06) no layer is
@@ -638,7 +651,9 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   Until it is answered the node takes the safest reversible choice: sending is OFF for each organization until the person runs
   `full org summary --org ID --consent on` (recorded in that enrollment's state with its time; `--consent off` stops
   it). `org status` and Health say `harness summary: not shared (consent off)` with that command; the dry run
-  `full org summary --org ID` works before consent, so the person reads what they would share first.
+  `full org summary --org ID` works before consent, so the person reads what they would share first. The preview
+  without consent and the answer to `--consent` carry `notice` (`org.CONSENT_NOTICE`): names can carry a client's or
+  a person's name, mode `A` sends every project's own skill names, and the exclusion list below is the guard.
 - **The person's exclusion list.** `config/node-summary.json`, `{"exclude": [glob, ...]}`, owner-only: shell-style
   globs matched against each whole name (a coding agent's id, an MCP server, a skill, a plugin, a service key), applied
   before anything is checked or sent. What it keeps back is counted in `excluded`, which stays here. A list that is a
@@ -674,7 +689,8 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `_summary_carried`).
 - **Only current scans.** `read_harness_scans` refuses a scan whose integration is off (a file left from before is not
   sent), one older than 48 hours by its own time, one without a time, and a harness scan written before this change
-  (no `plugins` or `coding_agents`): nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
+  (one of `plugins`, `coding_agents`, `project_skills` or `codex_skills` missing, `org.HARNESS_SUMMARY_LISTS`):
+  nothing is sent, the reason is kept (`nodeSummaryNote`) and `org status` says
   `org:node-summary-unavailable`. A summary built from a missing, stale or partial scan would tell the organization the
   machine runs nothing of that kind, or what it ran days ago. A fresh MCP scan is not fresh health: the tick's scan
   reads declarations only and carries the last on-demand probe's verdicts for up to seven days under a new
@@ -692,15 +708,24 @@ contract DEC-0101, corrected by DEC-0102 (`docs/specification/node-summary.md` t
   `org status` (`nodeSummary` with its `state`: `not-listed`, `consent-off`, `unavailable`, `refused`, `pending` or
   `sent`; the first, third and fourth also as `org:node-summary-*` in `degraded`), doctor and Health read the saved
   state (`summary_notice`): whether the server reads it, the consent, when it last took one, how much it listed, and
-  the drift.
+  the drift. Beside a plugin's drift that reads `changed`, `driftCauses` (`node_summary.drift_causes`, also in the
+  preview) and Health say `this node sends no plugin digest; the contract does not say what it covers`: the cause is
+  this node's, not the machine's (below).
 
 Not built here: the drift reaches an organization only once the node applies its signed policy (OE-06): until then
 `policy_layers` is empty, no baseline applies, and the summary carries no drift, as the contract asks of a summary
 under a policy without one. The agent services of the summary's context: a Fabric service descriptor names no context
 and no agent reference an estate placement could match, so `services_in_context` is empty rather than guessed, and a
-person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). A
-plugin's digest (a baseline naming one reads `changed` until it is computed), Codex's skills and a project's own skills
-are not listed yet.
+person's services in other contexts are never listed (DEC-0082; the operator's question is the contract's CT-92). At
+the pin (`de8cec30`) the contract still names no context in a service descriptor (`docs/specification/contexts.md`:
+"a service descriptor carries none"; `schemas/service-descriptor.schema.json` has no context member), and an estate
+placement names an `agentRef`, which no descriptor carries, so there is nothing to place a service by. A plugin's
+digest: the contract defines the field (`docs/specification/node-summary.md` line 28 and the schema's
+`plugins[].digest`) but not what it covers, unlike a skill's ("SHA-256 of the skill's files as installed"), and no
+vector computes one, so the node sends none rather than one a server could not reproduce. The cost: the drift rule
+(`node-summary.md` line 75, `changed` when the item "carries another, or none") makes every plugin whose baseline
+item sets a digest read `changed` for as long as that holds, which is why the cause is shown beside it (above). The
+question is with the contract (OBS-275).
 
 ## The repair runner (OBS-193)
 

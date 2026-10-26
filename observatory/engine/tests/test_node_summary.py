@@ -309,6 +309,8 @@ def scans(probed='2026-10-21T12:00:00Z'):
                      'installed': True},
                     {'name': 'odd@market', 'source': 'somewhere', 'version': 'not a version'}],
         'coding_agents': [{'id': 'claude-code', 'version': '2.1.296'}, {'id': 'codex'}],
+        'project_skills': [],
+        'codex_skills': [],
         'hooks': [{'event': 'PreToolUse', 'program': 'python3', 'command_sha': 'abc'}] * 3,
         'instructions': [{'path': '~/.claude/CLAUDE.md', 'lines': 3}],
         'tool_plaintext': [{'file': '~/.codex/config.toml', 'name': 'OPENROUTER_API_KEY'}],
@@ -371,6 +373,43 @@ class Build(unittest.TestCase):
         self.assertEqual((stale['fabric'], stale['plugin:switchboard:switchboard']), ('unknown', 'unknown'))
         self.assertEqual(health(None)['fabric'], 'unknown', 'a verdict with no probe time is not current')
         self.assertEqual(health('not a time')['fabric'], 'unknown')
+
+    def test_project_and_codex_skills_join_the_skills_by_name_and_digest(self):
+        harness, mcp = scans()
+        harness['project_skills'] = [
+            {'name': 'alpha-deploy', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32},
+            {'name': 'tidy-notes', 'folders': ['~/projects/alpha-web'], 'digest': 'f6' * 32},
+            {'name': 'loose-one', 'folders': [], 'digest': 'not hex'},
+            {'name': 'has space', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32}]
+        harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32},
+                                   {'name': 'alpha-deploy', 'source': 'user', 'digest': '08' * 32},
+                                   {'name': 'odd-source', 'source': 'elsewhere'}]
+        summary, omitted, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3,
+                                       at='2026-10-22T09:00:00Z', harness_scan=harness, mcp_scan=mcp, mode='A')
+        self.assertEqual(summary['harness']['skills'], [
+            {'name': 'task-pipeline', 'source': 'plugin', 'digest': 'sha256:' + 'a1' * 32},
+            {'name': 'tidy-notes', 'source': 'user', 'digest': 'sha256:' + 'b2' * 32},
+            {'name': 'alpha-deploy', 'source': 'project', 'digest': 'sha256:' + 'e5' * 32},
+            {'name': 'loose-one', 'source': 'project'},
+            {'name': 'codex-review', 'source': 'user', 'digest': 'sha256:' + '07' * 32},
+            {'name': 'odd-source', 'source': 'other'}],
+            "Claude Code's own first, then a project's, then Codex's; a name listed once, the first read wins")
+        self.assertEqual(omitted, {'mcpServers': 1, 'skills': 1}, "a refused name is counted once per list")
+        self.assertNotIn('alpha-web', json.dumps(summary), 'the folder never leaves')
+        check = validator()
+        if check is not None:
+            self.assertEqual(list(check.iter_errors(summary)), [])
+        self.assertEqual(ns.summary_findings({'summary': summary, 'org': 'org-7f3a'}), [])
+
+    def test_a_baseline_digest_of_a_project_skill_is_compared(self):
+        harness, mcp = scans()
+        harness['project_skills'] = [{'name': 'alpha-deploy', 'folders': ['~/projects/alpha-web'], 'digest': 'e5' * 32}]
+        harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32}]
+        baseline = {'revision': 2, 'items': [{'kind': 'skill', 'name': 'alpha-deploy', 'digest': 'sha256:' + 'e5' * 32},
+                                             {'kind': 'skill', 'name': 'codex-review', 'digest': DIGEST_A}]}
+        summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at='2026-10-22T09:00:00Z',
+                                 harness_scan=harness, mcp_scan=mcp, baseline=baseline, mode='A')
+        self.assertEqual(summary['drift']['items'], [{'kind': 'skill', 'name': 'codex-review', 'state': 'changed'}])
 
     def test_it_matches_the_schema_and_carries_nothing_it_never_carries(self):
         summary, _, _ = self.build()
@@ -553,6 +592,102 @@ class Scope(unittest.TestCase):
             "drift is unchanged for every item the baseline names; a service judged against this context's only")
         self.assertEqual(ns.summary_findings({'summary': summary, 'baseline': baseline, 'org': 'org-7f3a'}), [])
         self.assertEqual(scope['outOfContext'], {'mcpServers': 7, 'skills': 2, 'plugins': 1})
+
+    def test_under_c_a_projects_skills_in_its_work_folders_and_codex_skills_its_baseline_names(self):
+        harness, mcp = scans()
+        harness['project_skills'] = [
+            {'name': 'acme-deploy', 'folders': ['~/work/acme/app'], 'digest': 'e5' * 32},
+            {'name': 'acme-web-lint', 'folders': ['~/src/acme-web'], 'digest': 'e6' * 32},
+            {'name': 'beta-deploy', 'folders': ['~/work/beta/app'], 'digest': 'e7' * 32},
+            {'name': 'shared-check', 'folders': ['~/work/beta/app'], 'digest': 'e8' * 32},
+            {'name': 'shared-check', 'folders': ['~/work/acme/app'], 'digest': 'e9' * 32},
+            {'name': 'outside', 'folders': [], 'digest': 'ea' * 32}]
+        harness['codex_skills'] = [{'name': 'codex-review', 'source': 'user', 'digest': '07' * 32},
+                                   {'name': 'codex-other', 'source': 'user', 'digest': '08' * 32}]
+        folders = ns.policy_scope([load('device-policy-organization.json')])['folders']
+        baseline = {'revision': 3, 'items': [{'kind': 'skill', 'name': 'codex-review'}]}
+        scope = {}
+        summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at='2026-10-22T09:00:00Z',
+                                 harness_scan=harness, mcp_scan=mcp, folders=folders, baseline=baseline, scope=scope)
+        self.assertEqual(summary['harness']['skills'], [
+            {'name': 'acme-deploy', 'source': 'project', 'digest': 'sha256:' + 'e5' * 32},
+            {'name': 'acme-web-lint', 'source': 'project', 'digest': 'sha256:' + 'e6' * 32},
+            {'name': 'shared-check', 'source': 'project', 'digest': 'sha256:' + 'e9' * 32},
+            {'name': 'codex-review', 'source': 'user', 'digest': 'sha256:' + '07' * 32}],
+            "a project's skill in a work folder, a Codex skill the baseline names; the person's own stay")
+        self.assertEqual(scope['outOfContext']['skills'], 6,
+                         'task-pipeline, tidy-notes, has space, beta-deploy, outside, codex-other; shared-check is '
+                         'listed from the acme folder, so it is not counted as left out')
+        self.assertEqual(summary['drift']['items'], [])
+        said = json.dumps(summary)
+        for never in ('work/acme', 'beta-deploy', 'codex-other', 'outside', 'tidy-notes'):
+            self.assertNotIn(never, said)
+        self.assertEqual(ns.summary_findings({'summary': summary, 'baseline': baseline, 'org': 'org-7f3a'}), [])
+
+    def c_skills(self, project_skills, skills=None, baseline=None, folders=('work/acme/*',), codex=()):
+        harness, mcp = scans()
+        if skills is not None:
+            harness['skills'] = skills
+        harness['project_skills'], harness['codex_skills'] = project_skills, list(codex)
+        scope = {}
+        summary, _, _ = ns.build(device_id='dev-01j9a', org_id='org-7f3a', sequence=3, at='2026-10-22T09:00:00Z',
+                                 harness_scan=harness, mcp_scan=mcp, folders=list(folders), baseline=baseline,
+                                 scope=scope)
+        return summary['harness']['skills'], scope['outOfContext'], summary
+
+    def test_under_c_the_persons_own_skill_shadows_a_projects_of_the_same_name(self):
+        mine = [{'name': 'deploy', 'source': 'plain', 'digest': 'b2' * 32}]
+        theirs = [{'name': 'deploy', 'folders': ['~/work/acme/app'], 'digest': 'e5' * 32}]
+        skills, out, _ = self.c_skills(theirs, skills=mine)
+        self.assertEqual(skills, [], "Claude Code loads the person's `deploy`, so the project's is not reported")
+        self.assertEqual(out['skills'], 1)
+        skills, _, _ = self.c_skills(theirs, skills=mine, baseline={'revision': 1, 'items': [
+            {'kind': 'skill', 'name': 'deploy'}]})
+        self.assertEqual(skills, [{'name': 'deploy', 'source': 'user', 'digest': 'sha256:' + 'b2' * 32}],
+                         'the baseline names it: the one the agent loads is listed, as under A')
+        whole, _, _ = ns.build(device_id='dev-1', org_id='org-1', sequence=1, at='2026-10-22T09:00:00Z',
+                               harness_scan=dict(scans()[0], skills=mine, project_skills=theirs), mcp_scan={},
+                               mode='A')
+        self.assertEqual(whole['harness']['skills'], skills, 'mode A reports the same skill')
+        plugin = [{'name': 'deploy', 'source': 'plugin:tool@family', 'digest': 'a1' * 32}]
+        skills, _, _ = self.c_skills(theirs, skills=plugin)
+        self.assertEqual([r['source'] for r in skills], ['project'], "a plugin's skill is namespaced and shadows none")
+
+    def test_under_c_a_baseline_admits_a_projects_skill_outside_the_work_folders(self):
+        skills, _, _ = self.c_skills([{'name': 'audit', 'folders': ['~/elsewhere/beta'], 'digest': 'e5' * 32}],
+                                     baseline={'revision': 1, 'items': [{'kind': 'skill', 'name': 'audit'}]})
+        self.assertEqual([(r['name'], r['source']) for r in skills], [('audit', 'project')])
+
+    def test_under_c_a_linked_project_is_admitted_by_whichever_spelling_is_a_work_folder(self):
+        row = {'name': 'acme-deploy', 'folders': ['~/projects/acme-link', '~/work/acme/app'], 'digest': 'e5' * 32}
+        skills, _, summary = self.c_skills([row])
+        self.assertEqual([r['name'] for r in skills], ['acme-deploy'])
+        self.assertNotIn('acme-link', json.dumps(summary))
+        skills, _, _ = self.c_skills([dict(row, folders=['~/projects/acme-link'])])
+        self.assertEqual(skills, [])
+
+    def test_under_c_dot_dot_case_and_prefix_folders_are_refused(self):
+        for folder in ('~/work/acme/../beta/app', '~/Work/acme/app', '~/work/acmex/app', '~/workshop/acme/app',
+                       '~/work/acme', 'work/acme/app/../../beta', '/opt/work/acme/app', '~work/acme/app'):
+            skills, out, _ = self.c_skills([{'name': 'acme-deploy', 'folders': [folder], 'digest': 'e5' * 32}])
+            self.assertEqual(skills, [], folder)
+        skills, _, _ = self.c_skills([{'name': 'lint', 'folders': ['~/src/acme'], 'digest': 'e5' * 32}],
+                                     folders=['src/acme-*'])
+        self.assertEqual(skills, [], '`src/acme-*` is a prefix with a dash, never `src/acme` itself')
+
+    def test_a_plugin_digest_in_the_baseline_reads_changed_and_says_why(self):
+        baseline = {'revision': 2, 'items': [{'kind': 'plugin', 'name': 'switchboard@passioncode',
+                                              'digest': DIGEST_A},
+                                             {'kind': 'skill', 'name': 'tidy-notes', 'digest': DIGEST_A}]}
+        _, _, summary = self.c_skills([], baseline=baseline)
+        self.assertEqual(summary['drift']['items'][0], {'kind': 'plugin', 'name': 'switchboard@passioncode',
+                                                        'state': 'changed'})
+        self.assertNotIn('digest', summary['harness']['plugins'][0])
+        self.assertEqual(ns.drift_causes(summary['drift']), [
+            {'kind': 'plugin', 'name': 'switchboard@passioncode', 'cause': ns.PLUGIN_DIGEST_CAUSE}],
+            "only the plugin's: a skill's changed is a real difference")
+        self.assertEqual(ns.drift_causes(None), [])
+        self.assertNotIn('cause', json.dumps(summary), 'the cause stays here')
 
     def test_under_a_the_whole_harness(self):
         whole, _, scope = self.build(mode='A')
@@ -749,6 +884,29 @@ class CheckIn(_Enrolled):
         for said in ('S.listed', 'S.sentAt', 'S.drift', 'org summary --org', 'node-summary-', '"consent-off"',
                      '--consent on', 'S.refused', 'S.mode', 'S.outOfContext'):
             self.assertIn(said, rows)
+
+    def test_the_preview_and_the_status_say_why_a_plugin_reads_changed(self):
+        from node import org
+        state = {'protocols': [org.SUMMARY_PROTOCOL], 'summaryConsent': {'on': True},
+                 'nodeSummary': {'sentAt': '2026-10-22T09:00:00Z', 'sequence': 2, 'counts': {},
+                                 'drift': {'policyRevision': 2, 'items': [
+                                     {'kind': 'plugin', 'name': 'tool@family', 'state': 'changed'},
+                                     {'kind': 'plugin', 'name': 'gone@family', 'state': 'missing'}]}}}
+        self.assertEqual(org.summary_notice(state)['driftCauses'], [
+            {'kind': 'plugin', 'name': 'tool@family', 'cause': ns.PLUGIN_DIGEST_CAUSE}])
+        self.assertNotIn('driftCauses', org.summary_notice(dict(state, nodeSummary={'sentAt': None})))
+        source = (ROOT / 'dashboard' / 'build_dashboard.py').read_text(encoding='utf-8')
+        self.assertIn('S.driftCauses', source)
+        self.assertIn(ns.PLUGIN_DIGEST_CAUSE, (ROOT / 'dashboard' / 'locales' / 'ru.json').read_text(encoding='utf-8'))
+
+    def test_the_consent_notice_names_mode_a_and_the_exclusion_list(self):
+        from node import org
+        preview = self.make().summary_preview()
+        self.assertNotIn('notice', preview, 'consent is on here')
+        answer = self.make().set_summary_consent(False)
+        for said in ('mode A', "every project's own skill names", 'config/node-summary.json', 'client and person'):
+            self.assertIn(said, answer['notice'])
+        self.assertEqual(self.make().summary_preview()['notice'], org.CONSENT_NOTICE)
 
     def test_the_preview_shows_the_next_summary_and_changes_nothing(self):
         before = self.make().state()
@@ -981,6 +1139,13 @@ class Scans(unittest.TestCase):
     def test_a_harness_scan_written_before_the_summary_is_refused(self):
         del self.harness['coding_agents']
         self.assertIn('predates the node summary', self.read()[2])
+
+    def test_a_harness_scan_without_project_or_codex_skills_is_refused(self):
+        for key in ('project_skills', 'codex_skills'):
+            harness, _ = scans()
+            self.harness = dict(harness, generated_at='2026-10-19T07:30:00Z')
+            del self.harness[key]
+            self.assertIn('predates', self.read()[2], key)
 
     def test_the_exclusion_list_is_owner_only_or_nothing_is_sent(self):
         import os
