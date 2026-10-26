@@ -524,10 +524,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   access-binding show|issue|revoke  which agent may reach memory over HTTP; issue writes the
                                bearer to a new owner-only file; issue and revoke need a terminal
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
-  lifecycle status|enroll|allow|policy|hold|revoke|build-helper   which enrolled apps and background
+  lifecycle status|enroll|allow|policy|hold|revoke|import|build-helper   which enrolled apps and background
                                jobs the node may wake, stop and restart, and for which caller (an access
                                binding's principal); served at POST /mcp on the local server. Every change
-                               needs a terminal; nothing is served until you enroll a target
+                               needs a terminal; nothing is served until you enroll a target. import --from
+                               FOLDER [--dry-run] reads another broker's state and imports what it accepts
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
   ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
