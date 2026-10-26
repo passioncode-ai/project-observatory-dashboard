@@ -38,7 +38,7 @@ RULES = {"digitalocean": {"digitalocean-app-repo"},
          "cloudflare": {"pages-source-repo", "zone-site"}}
 SOURCES = {"digitalocean": "SRC-0021", "cloudflare": "SRC-0022"}
 #: App Platform's deployment phases still on their way.
-IN_PROGRESS = frozenset({"PENDING", "PENDING_BUILD", "BUILDING", "PENDING_DEPLOY", "DEPLOYING"})
+IN_PROGRESS = {"PENDING", "PENDING_BUILD", "BUILDING", "PENDING_DEPLOY", "DEPLOYING"}
 NO_PRICE = "the provider's listing states no price for this resource"
 UNLINKED = {
     "no-repo": "the provider names no repository it deploys from",
