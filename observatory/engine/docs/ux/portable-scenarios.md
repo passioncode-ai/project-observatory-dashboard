@@ -649,10 +649,12 @@ Funnel:
 3. "Create link" returns one link, `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`, and a sentence to
    send with it. The fragment stays out of HTTP requests and server logs, but the cloud's landing page
    can read it, so the link is protected by the next step, not by secrecy from the cloud. `FPR` is the
-   sender's share key fingerprint, which the recipient pins from the link.
+   sender's share key fingerprint, pinned only when the recipient pastes the original link into the app
+   (a handoff through the landing page is protected by the code of the next step alone).
 4. The share is listed as "waiting for the recipient" until it is claimed (OSS-80). A claim shows a
-   six-digit code; the sender compares it with the recipient by a call or a message they already
-   trust and presses "Confirm" only when it matches. Then "waiting for your machine" while the
+   six-digit code made by commit and reveal from both sides' keys and random numbers; the sender
+   compares it with the recipient by a call or a message they already trust and presses "Confirm"
+   only when it matches. One attempt per link: a mismatch voids it. Then "waiting for your machine" while the
    sender's node seals each value to the recipient's share key, then "active".
 
 Failure paths:
@@ -666,8 +668,9 @@ Failure paths:
 - The link is lost before it is used: "Copy link again" while it is unclaimed; a new code makes
   the old link void.
 - The six-digit codes differ, or a claim arrives that the sender did not expect: "Refuse" voids the
-  link and seals nothing (someone who saw the link claimed first). This is trust on first use, and
-  the screen says that skipping the comparison accepts that risk.
+  link and seals nothing (someone who saw the link claimed first). This is trust on first use with a
+  one-in-a-million chance per link that an impostor's code matches, and the screen says that skipping
+  the comparison accepts the risk.
 
 Acceptance: no value in the link, the page, the cloud's storage or any journal; the share's
 record names keys by slot and provider only.
@@ -783,17 +786,20 @@ Trigger: an agent needs a key the vault does not hold.
 Funnel:
 1. The agent calls Observatory (`observatory_secret_request`: project, slot name, provider, why);
    it never asks the person in its chat.
-2. The request goes to the node over the local channel, and only Observatory's own signed app
-   answers it: a window with the phrase the person set at first use, which agent asks, for which
-   project and slot, why, and one secure field: "Paste the token and press Save". On macOS the app's
-   own window; on Linux and Windows the desktop app's window, opened through the lifecycle broker if
-   it is not running; with no desktop session, `full secret answer` in the person's terminal.
+2. The request goes to the node, which opens Observatory's own signed app through the lifecycle
+   broker: a window with the phrase the person set at first use (kept in the app's own store, never in
+   a slot an agent can read), which agent asks, for which project and slot, why, and one secure field:
+   "Paste the token and press Save". On macOS the app's own window; on Linux and Windows the desktop
+   app's window. The app writes the value into the vault itself; it never crosses a channel.
 3. Save writes the value to the vault slot (as `vault.py put` does) and the agent's call returns
    "stored PROJECT/ENV/NAME", never the value. The agent then uses the key through `use_secret.py`.
    The value stays out of the chat, the transcript and the logs; a command the agent runs with it
    can still print it, and that use is journalled.
 
 Failure paths: a window without the person's phrase is not Observatory, and the app's Settings say so;
+a machine with no desktop session: the request is refused with the step for the person (run
+`vault.py put` in their own shell and paste the value on its stdin), because a terminal answer could
+be driven by an agent;
 the node is not running: the agent receives "Observatory is not running" and no window appears; the
 person presses Cancel or the window times out (10 minutes): the agent receives
 "declined" or "no answer"; an empty or multi-line value is refused in the window; a second request

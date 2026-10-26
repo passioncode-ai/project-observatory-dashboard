@@ -291,8 +291,9 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
   keeps for an organization's credentials). Each side makes a fresh `#sig` and `#kem` pair for that one
   share and never uses its device keys, so two shares, or a share and an organization enrollment,
   cannot be linked by a key (contract DEC-0128's rule of an identity per membership, applied to
-  shares; part of the OBS-262 ask). The sender's share key is pinned by the recipient from the link
-  itself (D3), never from anything the cloud serves.
+  shares; part of the OBS-262 ask). The sender's share key is pinned by the recipient from the
+  original link only when that link reaches the app untouched (D3); a handoff through the cloud's
+  landing page is protected by the commit-reveal code alone.
 - **Serving.** The recipient's node keeps the ciphertext sealed on disk and opens it in memory at
   each use, for the child process `use_secret.py` starts. It may reuse a ciphertext while its lease
   lasts (one hour by default, set by the sender); renewing the lease asks the cloud whether the share
@@ -374,24 +375,40 @@ sequenceDiagram
   does not control; it stays as the install target, not the landing.
 - **The link:** `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`. `CODE` is 128 random bits, single
   use, valid until the share's claim deadline (7 days by default). `FPR` is the SHA-256 fingerprint of
-  the sender's share `#sig`, so the recipient pins the sender's key from the link the person sent, not
-  from the cloud. The fragment is not sent in HTTP requests, so it stays out of request lines, proxy
+  the sender's share `#sig`. **It is pinned only when the original link reaches the app untouched:**
+  the person pastes it into the app's "Open a share" field, or opens it with the scheme carrying the
+  `k=FPR` the person can see is the one in the link they were sent. The `project-observatory://share`
+  URL the landing page builds is built by the cloud's own script, so a fingerprint arriving that way
+  proves nothing about the cloud, and a landing-page handoff is protected by the commit-reveal code
+  below and by nothing else. The fragment is not sent in HTTP requests, so it stays out of request lines, proxy
   logs and referrers. **It is not hidden from the cloud:** the landing page is the cloud's own script
   and can read the fragment, so a compromised or malicious cloud can learn `CODE`. The design does not
   rely on the cloud being unable to read it; it relies on the next two points.
 - **The claim is bound to the code holder and checked by the sender.** The recipient's node sends its
   share `#sig` and `#kem` public keys with `MAC = HMAC-SHA-256(CODE, share id, recipient #sig, recipient
-  #kem, FPR)`. The sender's node, not the cloud, checks the MAC; the cloud only relays the claim. Then
-  the sender **confirms each claim before anything is sealed**: both apps show the same six-digit code
-  derived from the two share keys and the code (`SAS`), and the two people compare it out of band (a
-  call, a message thread they already trust). A mismatch, or a claim the sender does not expect, is
-  refused, and the link is void.
-- **The trust this gives, stated plainly.** It is trust on first use. A cloud or anyone else who reads
-  the link before the intended recipient can claim first with its own keys; the MAC check passes
-  (they know `CODE`), but the six-digit code the sender sees will not match the one the recipient
-  reads out, so the sender refuses and nothing is sealed. A sender who skips the comparison accepts
-  that risk, and the screen says so. Once sealed, the values are readable only by the recipient's
-  share key; the cloud never holds them in the clear.
+  #kem, FPR)`. The sender's node, not the cloud, checks the MAC; the cloud only relays the claim. The
+  MAC alone does not stop a cloud that knows `CODE`, so the sender **confirms each claim before
+  anything is sealed** with a six-digit code compared out of band, derived by **commit and reveal**
+  (the numeric comparison of Bluetooth Secure Simple Pairing and ZRTP's short authentication string):
+  1. the recipient picks a 256-bit `nonce_r` and sends only the commitment
+     `C = SHA-256(recipient #sig, recipient #kem, nonce_r)` with its claim;
+  2. the sender's node, having received `C`, picks a 256-bit `nonce_s` and sends it with the sender's
+     share keys;
+  3. the recipient reveals `nonce_r`; the sender's node checks it against `C`;
+  4. both apps show `SAS = first 20 bits of SHA-256("observatory-share-sas/1", sender keys,
+     recipient keys, nonce_r, nonce_s)` as six digits, and the two people compare them by a call or a
+     message thread they already trust.
+  Because the recipient is bound to its keys and `nonce_r` before it sees `nonce_s`, and the sender
+  picks `nonce_s` after the commitment is fixed, a party in the middle cannot try key pairs until the
+  codes match: each attempt is one guess with a chance of 1 in 10^6. **One attempt per link:** a
+  mismatch, an abandoned exchange or a claim the sender does not expect voids the link and seals
+  nothing; a new attempt needs a new link the sender makes.
+- **The trust this gives, stated plainly.** It is trust on first use with a one-in-a-million residual
+  per link. A cloud or anyone else who reads the link before the intended recipient can claim first
+  with its own keys; the MAC check passes (they know `CODE`), and the six-digit code matches the
+  recipient's only with probability 1 in 10^6, so the sender refuses and nothing is sealed. A sender
+  who skips the comparison accepts that risk, and the screen says so. Once sealed, the values are
+  readable only by the recipient's share key; the cloud never holds them in the clear.
 - **The scheme:** `project-observatory://share?origin=ORIGIN&id=SHARE-ID#c=CODE`, registered by the
   macOS app (`CFBundleURLTypes`) and by the desktop app through Tauri's deep-link support (the
   registry on Windows, an `x-scheme-handler` desktop entry on Linux). The app accepts only `share`,
@@ -400,8 +417,9 @@ sequenceDiagram
   for its own scheme. Those rules refuse a credential in a `fabric://` link's fragment; the claim
   code is not a credential to any service, and this record keeps it out of every `fabric://` link.
   **Another app can register the same scheme** (no operating system reserves a custom scheme for one
-  app), so the deep link is a convenience, not a trust anchor: what protects the share is the MAC,
-  the pinned `FPR` and the out-of-band code, all checked inside Observatory.
+  app), so the deep link is a convenience, not a trust anchor: what protects the share is the
+  commit-reveal code, and the pinned `FPR` when the original link reached the app; all are checked
+  inside Observatory.
 - **"Install, then come back":** the page offers the scheme first; if nothing handles it within
   1.5 seconds (the test DEC-0040 FB-5 uses for Fabric), it shows the installer link and keeps the
   button: after installing, the person returns to the same tab and presses it again. A browser that
@@ -409,31 +427,41 @@ sequenceDiagram
 
 ### D4. The native secret prompt is shown only by Observatory's own signed app
 
-- **The path of a request.** The agent calls `observatory_secret_request` (a `fabric.job.*` job) on the
-  MCP server, which is a child of the agent's process. That server shows nothing itself: it passes the
-  request to the node over the local channel (`fabric-local-channel/0.1`, contract DEC-0075), and the
-  node raises it with the channel's own `consent.prompt` to the clients that declared `consent.ui`.
-  Only Observatory's code-signed app may answer a secret prompt: the node checks the answering peer's
-  code signature (the step DEC-0075 leaves to its consumers) and refuses any other `consent.ui`
-  client. When the app is not running, the node opens it through the lifecycle broker (OSS-76), never
-  by a direct launch; when the node is down, the request fails with "Observatory is not running" and
-  no window is shown by anyone. The value goes from the app to the node on the channel and into the
-  vault slot as `vault.py put` writes it, never in an argument, an environment variable, a log, a
-  notification or the job's result, which is `stored`, `declined` or `no answer`.
+- **The path of a request, until the contract decides a channel method.** The agent calls
+  `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
+  agent's process. That server shows nothing itself and never touches a value: it records the request
+  (agent from its binding, project, slot, provider, reason) in the node's request queue. The node asks
+  the lifecycle broker (OSS-76) to open Observatory's own code-signed app with the request id, never a
+  direct launch. The app reads the request from the node, shows the window, and writes the value into
+  the vault slot itself, in its own process, as `vault.py put` writes it: **the value never crosses the
+  local channel or any other process boundary.** The job then reads the outcome, `stored`,
+  `declined` or `no answer`; no value is ever in an argument, an environment variable, a log, a
+  notification or the result. When the node is down, the request fails with "Observatory is not
+  running" and no window is shown by anyone.
+- **Why not DEC-0075's `consent.prompt`.** The local channel's consent prompt carries
+  `{promptId, purposeId, noticeVersion, deadline}`, is answered `given` or `denied` only, goes to every
+  `consent.ui` client, and carries no request text and no value (the channel's specification,
+  consent section). A secret request needs a method of its own with client admission at `hello`
+  (only the signed app may declare it), not a check at answer time. That method is part of the
+  OBS-262 ask; until the contract decides it, the broker path above is used.
 - **No scripted dialogs.** `osascript` (`display dialog ... with hidden answer`), `zenity` and
   `kdialog` are rejected: any process of the same user, an agent included, can draw an identical
   window and collect what the person types. A prompt that any agent can imitate teaches the person to
   paste tokens into imitations.
 - **macOS.** The app's own SwiftUI window with a `SecureField`. **Linux and Windows.** The desktop
   app's (Tauri) window. Both are the signed apps the release already builds.
-- **The person's phrase.** At first use the person sets a short phrase only the app knows (kept in the
-  vault, never shown to an agent or in any tool result). Every genuine prompt shows it at the top; a
-  window without the phrase is not Observatory. The phrase is shown in the app's Settings and can be
-  changed there.
-- **A machine with no desktop session** (a server, a remote shell): the node asks in the person's
-  terminal over the local channel. `full secret answer` connects as a `consent.ui` client from a
-  terminal (a TTY the person runs, refused when stdin is not a terminal), shows the request with the
-  phrase and reads the value with echo off. There is no browser page for this.
+- **The person's phrase.** At first use the person sets a short phrase. It is kept in the signed
+  app's own store, never in a vault slot: on macOS a Keychain item limited to the app's access group,
+  on Windows the app's DPAPI-protected store, on Linux the desktop app's Secret Service item. A vault
+  slot will not do, because `use_secret.py` releases a slot to any caller unless a grant is required
+  (`slotsRequireGrant` defaults to `when-token`, `tools/use_secret.py`), so any agent could read the
+  phrase and draw a convincing imitation. Every genuine prompt shows the phrase; a window without it
+  is not Observatory. It is changed in the app's Settings, never shown in a tool result.
+- **A machine with no desktop session** (a server, a remote shell): an agent's request is **refused**
+  with "no desktop to ask the person on" and the step for the person: run `vault.py put PROJECT ENV
+  NAME` in their own shell and paste the value on its stdin. There is no terminal answer to an agent's
+  request, because an agent can drive a terminal through a pseudo-terminal, would see the phrase, and
+  could type a value of its choosing; a person putting a value in by hand is not answering an agent.
 - **Against a fake request:** the prompt names the agent from its binding (not from text the agent
   wrote), the project, the slot and the reason, quoted as the agent's words; a request for a slot that
   already holds a value says so and asks to replace; requests are limited (one open per slot, five per
@@ -487,9 +515,11 @@ sequenceDiagram
   and Home read; it is small and kept 400 days.
 - **What is archived:** raw rows older than the hot window (30 days by default), per month, as JSON
   lines compressed with the standard library's `lzma`, encrypted with the backups' `OBSENC1` format
-  under **an archive key of its own**: 32 random bytes in a vault slot of the workspace (an
-  Observatory slot, read only by the archiver through `use_secret.py`), mirrored to the OS credential
-  store as the backup passphrase is. It is not the backup passphrase: that one is a plain file in the
+  under **an archive key of its own**: 32 random bytes kept in the OS credential store under an item
+  only the engine's archiver reads (on macOS a Keychain item limited to the signed app's access group,
+  the archiver running under the app), never in a vault slot, because `use_secret.py` releases a slot
+  to any agent unless a grant is required (`slotsRequireGrant` defaults to `when-token`), and never in
+  the workspace. It is not the backup passphrase: that one is a plain file in the
   workspace's `secrets/` that any agent of the same user can read, and when it is absent the backups
   write nothing outside the workspace. Written beside the backups with a manifest of counts and
   SHA-256. Values of known vault slots are replaced by their slot names before writing, as the
@@ -583,10 +613,10 @@ slow and would copy their text. The Workflows tab keeps OSS-24 to OSS-27 unchang
 | DEC-0040 | the link grammar the share scheme follows; no credential in a `fabric://` link |
 | DEC-0121, DEC-0126 | every button of these screens is an agent's tool; an approval relayed from the person's own agent is the person's |
 | DEC-0123 | every dashboard page is handed over as Fabric Dashboards' `open_link` |
-| DEC-0075 | the secret request travels over the local channel and is raised with `consent.prompt`; only the code-signed app answers it |
+| DEC-0075 | its `consent.prompt` carries no request text or value and goes to every `consent.ui` client, so it is not used for secrets; a secret-request method with admission at `hello` is part of the OBS-262 ask, and until then the node opens its signed app through the lifecycle broker and the value never crosses the channel |
 | DEC-0128 | a key pair per share, never the device keys, so shares cannot be linked |
 | DEC-0008 | sharing, minting, revoking and deploying are effects with scope; none runs without the person's act or a recorded grant |
-| none yet | a person-to-person share profile (a context kind, a key pair per share, the sender's key pinned from the link, the claim MAC and the out-of-band code, revocation across estates) and a single-person cloud service: OBS-262 asks the contract for both |
+| none yet | a person-to-person share profile (a context kind, a key pair per share, the sender's key pinned from the original link, the claim MAC, the commit-reveal six-digit code with one attempt per link, revocation across estates), a local-channel method for secret requests admitted at `hello` to the signed app only, and a single-person cloud service: OBS-262 asks the contract for all three |
 
 ## The build order
 
