@@ -1,7 +1,7 @@
 # `node.lifecycle`: the port plan (OBS-79)
 
-Status: plan, 2026-10-22; steps L1, L2 and L3 built (see "Step L1: what was built", "Step L2: what was built" and
-"Step L3: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
+Status: plan, 2026-10-22; steps L1, L2, L3 and L4 built (see "Step L1: what was built", "Step L2: what was built",
+"Step L3: what was built" and "Step L4: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
 node wakes, stops and restarts enrolled desktop apps and background services for agents, and the
 mechanics (code, protocol, design) move in from an existing private broker under the operator's standing
 permission. Its records, logs, keys, the names of the apps it manages and its private paths and
@@ -83,8 +83,8 @@ helper and 203 tests in four files.
 | L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app was planned before L3's tools were served; it was not built, and 0.29.0 serves the tools with the source-install helper (`full lifecycle build-helper`); the release build is step L2r | 0.29.0 |
 | L2r | the helper's release build inside the signed app (below, "Release"), and the adapter preferring the app's helper when the installed app satisfies its signing requirement | 0.30.0, by 2026-11-07 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
-| L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import | 0.30.0 |
-| L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
+| L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import. **Built** in the L4 pull request; the identity migration runs at L5's import (below) | 0.30.0 |
+| L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); the identity migration runs inside the import (a legacy record can exist only in the private broker's state); then the private broker is switched off and its launchd job removed by its own uninstall | 0.30.0, by 2026-11-07 |
 
 Each step is its own pull request with an adversarial and a confirming review round, like every node
 slice. The private broker keeps running until L5's import is verified on the machine that uses it, so
@@ -146,7 +146,7 @@ Notes for L4: the store is pruned only when a broker opens (`prune`); the superv
 too. An activation inside the 20 s launch grace is ignored by `note_activation`; the presence check at stop
 (frontmost with recent input) still protects the person then, and the watcher may deliver a later activation.
 
-What L1 does not do yet: no MCP tool, CLI verb or event log (L3), no thread runs `supervise` (L4), no adapter
+What L1 does not do yet: no MCP tool, CLI verb or event log (L3), no thread runs `supervise` (L4, built since), no adapter
 acts on a real app (L2). Nothing in the engine calls the broker, so no reader-facing surface changes in this
 step.
 
@@ -319,6 +319,56 @@ folder, the reserved names, re-enrolling); 5 wait for the `unenroll` verb
 away is not a server failure (`tests/test_serverd.py`). 24 new cases cover the binding authority (the bound binding only, rebinding,
 revocation before the effect), the unsupported platform, the inert host, a damaged store (a degraded row, the server up,
 the lock released), the config document's refusals and the verbs the source did not have.
+
+## Step L4: what was built
+
+`observatory/engine/node/lifecycle/supervisor.py`, started by the local server's `lifecycle.Host`, tested by
+`observatory/engine/tests/test_node_lifecycle_supervisor.py` (suite `node_lifecycle_supervisor`, 23 cases) and seven
+cases of `tests/test_node_lifecycle_service.py` (`SupervisionTests`).
+
+- **Where it runs.** In the engine's local server, as planned ("What changes on the way in", item 3): `Host.service()`
+  builds the service and calls `Service.start_supervision()`; `Host.close()` stops it with the service, and
+  `Service.close()` stops the supervisor before the broker, so no pass starts on a closing store. A service built
+  anywhere else (a test, a terminal) runs no pass of its own. A supervisor that cannot start is a degraded row
+  (`lifecycle: supervisor unavailable, <class>`) while the tools keep serving. `start` is idempotent and the broker
+  holds the state folder's exclusive lock, so two supervisors never act over one state folder.
+- **The cadence.** One thread (`lifecycle-supervisor`) waits on a wake-up event for `interval()`: 600 s
+  (`SWEEP_SECONDS`), or 60 s (`IDLE_CHECK_SECONDS`) while the broker's `launches` table holds a process it started.
+  It passes once at its start. An interval that runs out is the safety sweep: the warm-up, `Broker.prune` (the store was
+  pruned only when a broker opened; a server runs for weeks), the watcher started again if it ended, then a pass over
+  every target. A wake-up from an event passes only over the targets that event named.
+- **The watcher.** The adapter's `watch` runs on its own thread (`lifecycle-watch`). An `activated` event of an enrolled
+  bundle goes to `Broker.note_activation` for every target of that bundle (the broker ignores one inside the 20 s
+  launch grace); a `launched` or `terminated` event wakes a pass over those targets at once. A watcher that ends (no
+  helper built, a helper built from older source as OBS-222 makes `watch` return, a crash past its own backoff) or
+  raises is started again by the next sweep, never in a tight loop, and is a log line (`supervision.watch_ended`).
+  Until it runs again, activations are not seen; the presence check at a stop (frontmost with input in the last
+  minute) still protects the person.
+- **The warm-up.** On its start and on each sweep it asks the adapter whether each enrolled target's identity still
+  matches, with a deadline of now: the macOS adapter queues the deep `codesign` check and answers
+  `verification_pending` at once, so the result is cached before an agent's first call instead of inside it.
+- **It decides nothing.** Every rule stays the broker's: `in_use_by_person`, `held_off`, leases, the takeover grace,
+  the crash circuit and the restart budget. The cases over the real broker show the supervisor admits an idle stop
+  only when the broker would, never stops an app the person is in front of or took over, never starts a held-off
+  target, and brings an always_on target back on the sweep.
+- **A pass that fails is one pass.** An exception in `supervise`, `prune`, the warm-up, an activation or the watcher is
+  caught; every one is a log line by its class (`supervision.pass_failed`, never its message, which may carry a
+  path), and the first failed pass after a good one is one `lifecycle.supervision_failed` event with `notify`, not one
+  a minute.
+- **Other systems.** Over the adapter that answers `unsupported_platform` (Linux and Windows) the supervisor runs no
+  pass, no warm-up and no watcher; the sweep only keeps the store pruned.
+- **The identity migration** is not in this step: the engine's registry admits only `designated-requirement/1`
+  identities (`broker.app_identity` refuses any other record), so a legacy record can exist only in the private
+  broker's state, and its migration runs inside L5's import, before the imported document is written.
+- **Not in this step** (OBS-250): the lifecycle event log joining the server's `/fabric/v1/events` feed, which is a view
+  over the tick's store with a rowid cursor and needs a cursor that orders two sources, and the Health page and
+  `observatory_machine` showing each target (acceptance below).
+
+The source's four supervisor cases (the watcher's wake-ups, the sweep) are not in this repository; their behaviours are
+covered by new cases here (`test_a_launch_or_termination_wakes_a_pass_over_that_apps_targets_only`,
+`test_an_activation_goes_to_the_broker_for_every_target_of_that_bundle`,
+`test_the_sweep_warms_prunes_and_passes_over_every_target`,
+`test_an_always_on_target_that_exited_is_started_again_by_the_sweep`).
 
 ## Acceptance
 

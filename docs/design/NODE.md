@@ -785,9 +785,10 @@ and step by step, is [LIFECYCLE.md](LIFECYCLE.md). Steps L1 to L3 are merged and
 operations and receipts, the effect journal, circuits, the restart budget, the idle and takeover rules), tested against
 fake adapters by `tests/test_node_lifecycle_broker.py` (#342); L2, the macOS adapter `node/lifecycle/macos.py` and its
 Swift helper compiled for a source install (`full lifecycle build-helper`, #344); L3, the six `lifecycle.*` tools on
-the local server behind access bindings, the well-known `node.lifecycle` entry and `full lifecycle` (#347). The
-helper's release build inside the signed app, the supervisor thread (L4) and the operator's import (L5) follow in
-0.30.0.
+the local server behind access bindings, the well-known `node.lifecycle` entry and `full lifecycle` (#347). L4, the
+supervisor (`node/lifecycle/supervisor.py`: the broker's pass on its cadence inside the local server, the watcher's
+events fed to the broker, the store pruned on the sweep), is built for 0.30.0. The helper's release build inside the
+signed app (L2r) and the operator's import with the identity migration (L5) follow in 0.30.0.
 
 ## What comes next
 

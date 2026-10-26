@@ -7,6 +7,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The node now supervises the apps you enrolled** (OBS-79 step L4, `docs/design/LIFECYCLE.md`). While the local
+  server runs, it stops an app the node started that no caller renewed for its idle minutes (never one you took over
+  or are in front of), and starts an always_on target again after it exited, until three failed starts in 30 minutes
+  make it stop retrying and say so once. It looks every 10 minutes, every minute while an app it started runs, and at
+  once when an enrolled app launches or quits; an app you bring forward is yours from then on. The sweep also keeps
+  the lifecycle store bounded and checks each app's signature ahead of the first call. A failed pass is one
+  `notify` event and a log line each time; on Linux and Windows it only keeps the store bounded. Not yet: the
+  lifecycle events in the server's events feed and each target on Health (OBS-250).
+
 - **The repair runner** (OBS-193; contract DEC-0101, DEC-0102, DEC-0117, FAC-SEM-068, FAC-SEM-129). An organization's
   administrator may ask this machine to run one package to repair it (`repair-request/1`, signed by a key of the
   organization's policy key set). The node decides exactly as the contract's `repairDecision` does, held to every case

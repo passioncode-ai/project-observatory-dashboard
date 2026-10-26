@@ -251,6 +251,9 @@ BOUNDARY += ('node_lifecycle_macos',)
 # OBS-79 step L3: the six MCP tools on the local server behind access bindings, the event log and the operator's
 # `full lifecycle` verbs, against fake adapters and an in-process server on an ephemeral port.
 BOUNDARY += ('node_lifecycle_service',)
+# OBS-79 step L4: the supervisor (the broker's pass on its cadence, the watcher's events, the sweep's prune and
+# warm-up, its threads' start and stop) against a recording fake broker and the real broker over the process seam.
+BOUNDARY += ('node_lifecycle_supervisor',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.

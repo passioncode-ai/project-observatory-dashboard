@@ -434,6 +434,97 @@ class HostTests(Workspace, unittest.TestCase):
         self.service().close()                          # not `already_running`
 
 
+class SupervisionTests(Workspace, unittest.TestCase):
+    """OBS-79 step L4: the local server's Host starts the supervisor with the service and stops it first."""
+
+    def test_the_host_starts_supervision_and_close_stops_it_before_the_broker(self):
+        host = S.Host(factory=self.service, config=self.config)
+        host.start()
+        service = host.service()
+        self.assertTrue(service.supervisor.running)
+        self.assertFalse(service.start_supervision(), 'one supervisor per service')
+        order = []
+        real_close = service.broker.close
+        service.broker.close = lambda *a, **k: (order.append(service.supervisor.running), real_close(*a, **k))
+        host.close()
+        self.assertEqual(order, [False], 'the supervisor had stopped when the broker closed')
+        self.assertTrue(any(json.loads(line)['event'] == 'supervision.started'
+                            for line in (self.state / 'logs' / S.LOG_FILE).read_text().splitlines()))
+
+    def test_a_service_built_outside_the_server_runs_no_supervisor(self):
+        service = self.service()
+        try:
+            self.assertFalse(service.supervisor.running)
+        finally:
+            service.close()
+
+    def test_two_services_over_one_state_folder_never_run_two_supervisors(self):
+        first = S.Host(factory=self.service, config=self.config)
+        first.start()
+        second = S.Host(factory=self.service, config=self.config)
+        second.start()
+        try:
+            self.assertTrue(first.service().supervisor.running)
+            self.assertIsNone(second.service())
+            self.assertEqual(second.degraded(), [{'source': 'node-lifecycle',
+                                                  'reason': 'lifecycle: unavailable, already_running'}])
+        finally:
+            first.close()
+            second.close()
+
+    def test_a_supervisor_that_cannot_start_is_a_degraded_row_and_the_tools_still_serve(self):
+        service = self.service()
+
+        def refuse():
+            raise RuntimeError("can't start new thread")
+        service.start_supervision = refuse
+        host = S.Host(factory=lambda: service, config=self.config)
+        host.start()
+        try:
+            self.assertIs(host.service(), service)
+            self.assertEqual(host.entry()['state'], 'serving')
+            self.assertEqual(host.degraded(), [{'source': 'node-lifecycle',
+                                                'reason': 'lifecycle: supervisor unavailable, RuntimeError'}])
+        finally:
+            host.close()
+
+    def test_a_failed_pass_is_one_notify_event_and_every_failure_a_log_line(self):
+        service = self.service()
+        try:
+            with mock.patch.object(service.broker, 'supervise', side_effect=sqlite3.OperationalError('locked')):
+                service.supervisor.tick()
+                service.supervisor.tick()
+        finally:
+            service.close()
+        failed = [e for e in self.events() if e['kind'] == 'lifecycle.supervision_failed']
+        self.assertEqual(len(failed), 1)
+        self.assertTrue(failed[0]['notify'])
+        self.assertNotIn('locked', failed[0]['text'], 'never the raw error text')
+        lines = [json.loads(x) for x in (self.state / 'logs' / S.LOG_FILE).read_text().splitlines()]
+        rows = [x for x in lines if x['event'] == 'supervision.pass_failed']
+        self.assertEqual([(r['error'], r['first']) for r in rows], [('OperationalError', True),
+                                                                    ('OperationalError', False)])
+
+    def test_a_watcher_that_ended_is_a_log_line(self):
+        service = self.service()
+        try:
+            service.watch_ended()
+        finally:
+            service.close()
+        lines = [json.loads(x) for x in (self.state / 'logs' / S.LOG_FILE).read_text().splitlines()]
+        self.assertIn('supervision.watch_ended', [x['event'] for x in lines])
+
+    def test_off_macos_the_supervisor_only_keeps_the_store_bounded(self):
+        service = self.service(adapter=macos.UnsupportedAdapter('linux'))
+        try:
+            self.assertFalse(service.supervisor.supported)
+            with mock.patch.object(service.broker, 'supervise') as supervise:
+                service.supervisor.step(woke=False)
+            supervise.assert_not_called()
+        finally:
+            service.close()
+
+
 # -- the local server ----------------------------------------------------------------------------------------------------
 
 class HTTPTests(Workspace, unittest.TestCase):

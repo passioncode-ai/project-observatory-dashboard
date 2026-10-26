@@ -1216,8 +1216,14 @@ project-observatory full lifecycle revoke agent:alpha      # refused from its ne
   owner-only. Enrollments and grants are in `config/node-lifecycle.json`, owner-only.
 - On Linux and Windows there is no adapter yet: every tool answers `unsupported_platform` and
   nothing is started or stopped.
-- Not yet: the supervisor that stops an idle app and brings an always_on target back after a
-  crash (step L4), and importing an existing broker's enrollments (step L5).
+- While the local server runs, it supervises what you enrolled: an app the node started that
+  no caller renewed for its `--idle-minutes`, that you have not taken over and are not in
+  front of, is stopped; an `--desired always_on` target that exited is started again, until
+  three failed starts in 30 minutes make it stop retrying and say so once in the events. It
+  looks every 10 minutes, every minute while an app it started runs, and at once when an
+  enrolled app launches or quits. An app you bring forward is yours from then on and is never
+  idled out. A failed supervision pass is one event (the log has every one).
+- Not yet: importing an existing broker's enrollments (step L5).
 
 ## The machine: what runs, where the disk goes, cleanup
 

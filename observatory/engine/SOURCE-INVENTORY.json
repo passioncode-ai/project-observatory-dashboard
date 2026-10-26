@@ -891,8 +891,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8c0347548c7d1c1eb401bb314a0e272f72509826f06eed471eb7043a9bbe0bf4",
-      "bytes": 180040,
+      "export_sha256": "b6e565c1e33d6eceb63f300d14408f896b99e1e43bc1d1fab86c531e24dc814c",
+      "bytes": 180562,
       "upstream_modified": true
     },
     {
@@ -2847,8 +2847,15 @@
       "path": "node/lifecycle/service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8fb8041ebd6146a413ba9c0d21f808f99e83fec391a468f929be44f4c151d741",
-      "bytes": 34283
+      "export_sha256": "2592b96604638bb05fdde20a44d895d786f10229a84698f9d4e416a6a1a6c83f",
+      "bytes": 37207
+    },
+    {
+      "path": "node/lifecycle/supervisor.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5de662f79049412b6ce16bcc039933400baaaa4b50cae50734a0739e06a7a39f",
+      "bytes": 11079
     },
     {
       "path": "node/node_summary.py",
@@ -3701,8 +3708,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "b0b9082702f1527af589193680880d227383cc5ebe3d50b326690c80e22c32de",
-      "bytes": 45930,
+      "export_sha256": "d96e4c52c18762d7a87e7ee98a3233e39586d5fe943940afb0ed8b742ebbb29f",
+      "bytes": 46200,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4916,8 +4923,15 @@
       "path": "tests/test_node_lifecycle_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "afad8a8aa6e4f8d1f6d9fe4b1b92a0fbc3aee82fbb89acfa9a51f82469f45a3d",
-      "bytes": 50520
+      "export_sha256": "32877da8368a7a90f0dc12f7949adcce5554f0a6751a88fbf8726e5fdcd00589",
+      "bytes": 54849
+    },
+    {
+      "path": "tests/test_node_lifecycle_supervisor.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "05d7a9e73117d385dc3c2a1ffab8ea9ad7ecdf765d9fa06433745c5032828ceb",
+      "bytes": 16372
     },
     {
       "path": "tests/test_node_org.py",
@@ -6797,7 +6811,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 907,
+  "file_count": 909,
   "excluded": [
     "git-history",
     "operator-registries",

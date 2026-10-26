@@ -29,8 +29,10 @@ it keeps, and why:
   answers every caller `denied`; nothing starts, stops or probes until the operator enrolls a target and allows a
   caller.
 
-The supervisor (always_on restarts, idle stops) is step L4: until then an idle app the node started is not stopped by
-itself, and an always_on target is not brought back after a crash.
+- **Supervised while it serves (step L4).** Once the local server builds the service, `Host` starts its supervisor
+  (`supervisor.py`): the broker's supervision pass on a cadence (a 600 s safety sweep, 60 s while a process the node
+  started runs, at once on a watcher event for an enrolled app), activations fed to the broker, and the store pruned
+  on the sweep. It stops before the broker closes. An always_on target that keeps failing is one `notify` event.
 """
 from __future__ import annotations
 
@@ -49,6 +51,7 @@ import interop
 import private_io
 
 from node.lifecycle import broker
+from node.lifecycle import supervisor as supervision
 from node.lifecycle.broker import TOOLS, LifecycleError
 
 #: What the well-known document and the descriptor's hosts call this service.
@@ -374,9 +377,25 @@ class Service:
         self.broker = broker.Broker(lambda: registry_of(self.read()), self.state, self.authority, self.adapter,
                                     clock=clock, on_finish=self.operation_finished, on_admit=self.operation_admitted,
                                     on_gave_up=self.supervision_gave_up)
+        # Built here, started by `start_supervision` (the local server's `Host`): a service a test or a terminal
+        # builds runs no pass of its own.
+        try:
+            self.supervisor = supervision.Supervisor(self.broker, self.adapter, lambda: registry_of(self.read()),
+                                                     on_failure=self.supervision_failed,
+                                                     on_watch_end=self.watch_ended)
+        except BaseException:
+            self.broker.close()                         # never a half-built service holding the state's lock
+            raise
         # Through `note`, which never raises: the broker above already holds the state's lock, and a log that
         # cannot be written must not leave a half-built service holding it.
         self.note('service.started', platform=sys.platform)
+
+    def start_supervision(self) -> bool:
+        """Start the supervisor once (always_on restarts, idle stops, the sweep); True when this call started it."""
+        started = self.supervisor.start()
+        if started:
+            self.note('supervision.started', supported=self.supervisor.supported)
+        return started
 
     def read(self) -> dict:
         return read_config(self.config_path)
@@ -448,6 +467,23 @@ class Service:
         self.note('supervision.gave_up', 'warning', targetId=target_id, failedStarts=info.get('failedStarts'),
                   windowSeconds=info.get('windowSeconds'), causes=info.get('causes'))
 
+    def supervision_failed(self, what: str, exc: BaseException, first: bool) -> None:
+        """A supervision pass, a prune, the warm-up or the watcher raised. Logged every time by the class of what
+        raised (never its message, which may carry a path); the first failed pass after a good one is one notify
+        event, so a store that stays broken does not wake a host every minute."""
+        self.note(f'supervision.{what}_failed', 'warning', error=type(exc).__name__, first=first)
+        if what == 'pass' and first:
+            try:
+                self.events.append('lifecycle.supervision_failed', 'error',
+                                   'A supervision pass failed; the node tries again at its next pass.', notify=True)
+            except OSError:
+                pass
+
+    def watch_ended(self) -> None:
+        """The watcher ended while the server runs (no helper yet, an outdated one, a crash): the next sweep starts
+        it again. Until then activations are not seen; the presence check at a stop still protects the person."""
+        self.note('supervision.watch_ended', 'warning')
+
     # -- the wire ------------------------------------------------------------------------------------------------------
 
     def authenticate(self, header: Any) -> dict:
@@ -513,6 +549,7 @@ class Service:
         return admit(principal, args, traceparent)
 
     def close(self) -> None:
+        self.supervisor.close()                         # first: no pass starts on a closing broker
         self.broker.close()
         close = getattr(self.adapter, 'close', None)
         if close:
@@ -544,8 +581,9 @@ class Host:
     """What the local server holds: the service, built when `config/node-lifecycle.json` exists and not before.
 
     `start()` at the server's start recovers operations a previous process left running; `service()` builds it the
-    first time a caller arrives after the operator enrolled while the server ran. A start that fails (another process
-    holds the state, an unreadable document) is a `degraded` row of the server, never a crash of it."""
+    first time a caller arrives after the operator enrolled while the server ran, and starts its supervisor, which
+    `close()` stops with it. A start that fails (another process holds the state, an unreadable document) is a
+    `degraded` row of the server, never a crash of it."""
 
     def __init__(self, factory: Callable[[], Service] = Service, config: Optional[Path] = None):
         self.factory = factory
@@ -585,6 +623,12 @@ class Host:
                     return None
                 self._service = self.factory()
                 self._problem = None
+                start = getattr(self._service, 'start_supervision', None)
+                if callable(start):
+                    try:
+                        start()
+                    except Exception as exc:  # noqa: BLE001 - the tools still serve; the row says what is missing
+                        self._problem = f'lifecycle: supervisor unavailable, {type(exc).__name__}'
             except LifecycleError as exc:
                 self._problem = f'lifecycle: unavailable, {exc.code}'
             except Exception as exc:  # noqa: BLE001 - a damaged store (sqlite3.DatabaseError) is a degraded row,
