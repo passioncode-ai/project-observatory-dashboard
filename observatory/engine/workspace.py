@@ -591,16 +591,21 @@ def _organizations(base: Path) -> list[dict] | dict:
 
 
 def _lifecycle_helper(base: Path) -> dict:
-    """`macos.helper_choice` once a target is enrolled; `inert` before, so a workspace without node.lifecycle runs
-    no `codesign` and no helper."""
-    if not (base / "config" / "node-lifecycle.json").exists():
+    """`macos.helper_choice` once a target is enrolled in `config/node-lifecycle.json`; `inert` before (no document, or
+    one with no target), so a workspace without node.lifecycle runs no `codesign` and no helper. A document the
+    lifecycle tools refuse is `unknown` with its code."""
+    path = base / "config" / "node-lifecycle.json"
+    if not path.exists():
         return {"state": "inert"}
-    sys.path.insert(0, str(config.SOURCE))
+    if str(config.SOURCE) not in sys.path:
+        sys.path.insert(0, str(config.SOURCE))
     try:
-        from node.lifecycle import macos
+        from node.lifecycle import macos, service
+        if not service.read_config(path)["targets"]:
+            return {"state": "inert"}
         return macos.helper_choice()
     except Exception as exc:  # noqa: BLE001 - doctor reports, never fails, on what a helper check raised
-        return {"state": "unknown", "reason": type(exc).__name__}
+        return {"state": "unknown", "reason": getattr(exc, "code", None) or type(exc).__name__}
 
 
 def _vector_namespaces(base: Path) -> list[dict]:

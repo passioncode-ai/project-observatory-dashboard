@@ -261,9 +261,9 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
 ## Step L2r: what was built
 
 `macos/scripts/build-app.sh`, the macOS job of `.github/workflows/release.yml`, and the helper choice in
-`observatory/engine/node/lifecycle/macos.py` (`MacAdapter._helper_problem`, `check_app_helper`, `helper_choice`), shown by
+`observatory/engine/node/lifecycle/macos.py` (`MacAdapter._choose_helper`, `check_app_helper`, `helper_choice`), shown by
 `full lifecycle status` and `full doctor`; tested by `observatory/engine/tests/test_node_lifecycle_helper.py` (suite
-`node_lifecycle_helper`, 26 cases, every tool and the app faked, nothing compiled) and five cases of
+`node_lifecycle_helper`, 35 cases, every tool and the app faked, nothing compiled) and five cases of
 `tests/test_keychain_and_app_scripts.py` (`TheAppCarriesTheLifecycleHelper`).
 
 - **The build.** `build-app.sh` compiles `observatory/engine/node/lifecycle/native_app.swift` once per architecture in
@@ -286,22 +286,29 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
   verifier and persisted cache as an enrolled app; the helper's own signature satisfies the requirement of its identifier
   under the same team; and only then it answers `--version` with the version of the source this engine ships (OBS-222).
   A bundle whose helper passed is not checked again until the metadata walk over the bundle (the helper included)
-  changes. Otherwise the source-built helper serves, as before (`helper_not_built`, `helper_unsafe`,
+  changes; one refused for a lasting reason (another team, an outdated helper) is not checked again for
+  `APP_REFUSAL_SECONDS` (300 s) unless it changes, and a pending or failed check is never remembered. Otherwise the source-built helper serves, as before (`helper_not_built`, `helper_unsafe`,
   `helper_source_missing`, `helper_outdated`), and the reason the app's was not used is kept: `app_not_installed`,
   `app_helper_missing` (an app older than 0.30.0; no `codesign` runs), `app_untrusted`, `app_signature_invalid` (a
   local QA build signed ad hoc, or another team), `app_helper_signature_invalid`, `app_verification_pending`,
   `app_verification_failed` or `app_helper_outdated` (the app and the engine are different releases).
-- **No call waits long.** When a source-built helper could serve, a call waits at most `APP_CHECK_GRACE_SECONDS` (2 s)
-  for the app's first deep check and is served by the source helper if it has not landed; the check finishes in the
-  background and the next call takes the app's helper. With no source helper the call waits up to
-  `VERIFY_WAIT_SECONDS`, as an enrolled app's check does. Deciding that asks the source helper `--version` once, and
-  nothing else.
+- **One call, one choice.** Each call (probe, start, stop, the watcher) runs the helper its own choice returned
+  (`MacAdapter._choose_helper`, a `HelperChoice`), never one read back from the adapter afterwards, so a call never runs
+  a helper another call checked or refused at the same time. `last_choice` is kept for reports and tests only.
+- **How long a call waits.** When a source-built helper could serve, the app's first deep check holds a call at most
+  `APP_CHECK_GRACE_SECONDS` (2 s) and the source helper serves if it has not landed; the check finishes in the
+  background and the next call takes the app's helper. With no source helper the deep check may hold the call up to
+  `VERIFY_WAIT_SECONDS`, as an enrolled app's check does. Once the deep check passed, the helper's own plain signature
+  check (one small file, bounded by `PLAIN_VERIFY_TIMEOUT`, 60 s) and its `--version` (`HELPER_VERSION_TIMEOUT`, 5 s)
+  run in the call, once per bundle state. Deciding whether to wait asks the source helper `--version` once, and nothing
+  else.
 - **What says which one runs.** A `setup_required` probe carries `appHelper` (the app's reason) beside `reason` (the
   source helper's). `full lifecycle status` prints whether apps are driven by the helper inside the signed app or by
   the source build and why, names the build-helper repair only when neither can run, and its JSON carries
-  `helperInUse` (`macos.helper_choice`: `inUse`, `path`, `app {path, state, reason}`, `source {path, state}`).
-  `full doctor` carries the same as `lifecycle_helper` once `config/node-lifecycle.json` exists, and `{"state":
-  "inert"}` before, so a workspace without node.lifecycle runs no `codesign`. `macos.py helper` adds `choice`.
+  `helperInUse` (`macos.helper_choice`: `inUse`, `path`, `app {path, state, reason}`, `source {path, state}`); with
+  `--no-probe`, or with nothing enrolled, it checks nothing (`checked: false`) and runs no `codesign`. `full doctor`
+  carries the same as `lifecycle_helper` once `config/node-lifecycle.json` enrolls a target, and `{"state": "inert"}`
+  before (no document, or one with no target); a document the tools refuse is `unknown` with its code. `macos.py helper` adds `choice`.
 - **Injected helpers stay pinned.** An adapter given a `helper` looks at no installed app unless it is also given an
   `app` (`MacAdapter(app=...)`: a path, `INSTALLED` or None), so the adapter's tests never reach an app of the machine
   that runs them.

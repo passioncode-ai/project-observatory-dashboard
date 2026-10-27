@@ -143,8 +143,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   the helper's own signature, the version of the source this engine ships), and the helper you built with `full
   lifecycle build-helper` otherwise. `full lifecycle status` says which one drives apps and why the app's was not used
   (for example a local QA build signed ad hoc, or an app and an engine of different releases), and `full doctor` reports
-  the same as `lifecycle_helper` once something is enrolled. A first check of the app holds a call at most 2 seconds
-  while a source-built helper can serve.
+  the same as `lifecycle_helper` once something is enrolled; `status --no-probe` checks nothing. While a source-built
+  helper can serve, the first deep check of the app holds a call at most 2 seconds; the helper's own signature and
+  version checks then run once per app build. An app refused for a lasting reason is not checked again for 5 minutes
+  unless it changes.
 
 - **A macOS lifecycle helper built from an older source is no longer run** (OBS-222). The helper now answers
   `--version` with a digest of the `native_app.swift` it was built from, and the lifecycle adapter compares it with

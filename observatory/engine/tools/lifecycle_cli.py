@@ -71,6 +71,10 @@ def _adapter():
     return S.default_adapter()
 
 
+#: `helperInUse` when the choice was not made: `--no-probe`, nothing enrolled, or no macOS.
+NOT_CHECKED = {"inUse": None, "path": None, "checked": False, "app": None, "source": None}
+
+
 def _helper_choice() -> dict:
     """Which helper drives apps now and why (OBS-79 L2r): the signed app's, the source-built one, or none."""
     from node.lifecycle import macos
@@ -334,13 +338,17 @@ def status(probe: bool = True) -> dict:
                  "config": str(S.config_path()), "configured": S.config_path().exists(),
                  "helper": {"path": str(helper), "built": helper_state in ("current", "outdated", "source_missing"),
                             "state": helper_state, "expectedVersion": macos.expected_helper_version()},
-                 "helperInUse": _helper_choice(),
+                 # The app's helper is checked (codesign, the helpers' --version) only when probing and something
+                 # is enrolled: `--no-probe` and an inert workspace run no tool (OBS-79 L2r).
+                 "helperInUse": dict(NOT_CHECKED),
                  "targets": [], "callers": [], "events": [], "degraded": []}
     try:
         doc = S.read_config()
     except LifecycleError as exc:
         out["degraded"].append({"source": "config", "reason": f"{exc.code}: {getattr(exc, 'detail', '')}".strip(": ")})
         return out
+    if probe and sys.platform == "darwin" and doc["targets"]:
+        out["helperInUse"] = _helper_choice()
     adapter = _adapter() if probe and doc["targets"] else None
     try:
         for key, t in sorted(doc["targets"].items()):
@@ -398,11 +406,13 @@ def cmd_status(a: argparse.Namespace) -> int:
         print(f"  apps are driven by the helper built from source ({choice['path']}); {why}")
     elif doc["supported"] and app_reason and app_reason != "app_not_installed":
         print(f"  the signed app's helper is not used: {macos_reason(app_reason)}")
+    elif doc["supported"] and choice.get("checked") is False and doc["configured"]:
+        print("  which helper drives apps was not checked (--no-probe)")
     # Which source-built helper fault keeps apps at setup_required; none applies while the app's helper serves.
     state = doc["helper"]["state"] if doc["supported"] and not choice.get("inUse") else None
     if state == "not_built":
-        print("  the macOS helper is not built and no signed app carries one that can run, so apps answer "
-              "setup_required: install the Project Observatory app 0.30.0 or later, or "
+        print("  the macOS helper is not built, so apps answer setup_required unless the signed app carries one that "
+              "passes its checks: install the Project Observatory app 0.30.0 or later, or "
               "`project-observatory full lifecycle build-helper`")
     elif state == "outdated":
         print("  the macOS helper was built from an older native_app.swift than this engine ships, so apps answer "

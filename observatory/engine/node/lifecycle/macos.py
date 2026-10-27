@@ -54,7 +54,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, NamedTuple, Optional
 
 if __name__ == '__main__':                             # run as a script: `python3 node/lifecycle/macos.py ...`
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -148,6 +148,9 @@ APP_HELPER_REASONS = {
 }
 #: How long a call the source-built helper could serve waits for the app's first deep check before it falls back.
 APP_CHECK_GRACE_SECONDS = 2
+#: How long a bundle state whose helper was refused for a lasting reason (another team, an outdated helper) is not
+#: checked again. A changed bundle is checked at once: the refusal is keyed by its metadata.
+APP_REFUSAL_SECONDS = 300
 #: How a failed check of the app (`_app_matches`) reads as a reason. Anything else is `app_untrusted`.
 _APP_CHECK_REASONS = {
     'verification_pending': 'app_verification_pending',
@@ -262,6 +265,15 @@ def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> st
     if expected_helper_version() is None:
         return 'source_missing'
     return 'current' if helper_current(helper, run=run or Runner()) else 'outdated'
+
+
+class HelperChoice(NamedTuple):
+    """One call's choice of helper: the `path` it runs (None: `setup_required`), whether it is the signed `app`'s or
+    the `source`-built one, the source helper's `problem` when neither may run, and why the app's was not used."""
+    path: Optional[Path]
+    in_use: Optional[str]
+    problem: Optional[str]
+    app_reason: Optional[str]
 
 
 def app_identity() -> dict:
@@ -711,11 +723,14 @@ class MacAdapter:
         else:
             fixed = Path(app)
             self._find_app = lambda: fixed if fixed.is_dir() else None
-        # The helper the last choice settled on, and why the app's was not it (`_helper_problem`).
-        self._chosen: Optional[Path] = None
-        self.helper_in_use: Optional[str] = None        # 'app', 'source' or None (setup_required)
-        self.app_helper_reason: Optional[str] = None
+        # The last choice, for reports and tests only: no code runs a helper from it (each call runs the path its own
+        # `_choose_helper` returned, so one thread never runs a helper another thread checked or refused).
+        self.last_choice: Optional[HelperChoice] = None
         self._app_helper_key = None                     # (app path, bundle metadata hash) whose helper passed every check
+        # (app path, bundle metadata hash) -> (reason, monotonic expiry): a bundle state whose helper was refused for
+        # a lasting reason is not deep-checked again on every call (APP_REFUSAL_SECONDS).
+        self._app_refused: dict = {}
+        self._app_lock = threading.Lock()
         self.fabric_hub_file = Path(fabric_hub_file) if fabric_hub_file else _default_hub_file()
         self.cache_path = Path(cache_path) if cache_path else None
         self.roots = application_roots(self.home)
@@ -871,31 +886,28 @@ class MacAdapter:
 
     # -- observation -------------------------------------------------------------------------------------------------
 
-    @property
-    def helper(self) -> Path:
-        """The helper the calls run: the one the last `_helper_problem` chose, else the source-built one."""
-        return self._chosen or self.source_helper
+    def _choose_helper(self, *, wait: Optional[bool] = None) -> HelperChoice:
+        """Which helper this call runs: the signed app's (step L2r) while `_app_helper` finds every check passed, else
+        the source-built one, else none (`problem`, all `setup_required`). The caller runs `choice.path` and nothing
+        else, so a choice another thread made at the same time can never hand it a helper it did not check.
 
-    def _helper_problem(self, *, wait: Optional[bool] = None) -> Optional[str]:
-        """Choose the helper and say None when one may run, else why not (all `setup_required`).
-
-        The signed app's helper first (step L2r), while `_app_helper` finds every check passed; else the source-built
-        one, with the app's reason kept on `app_helper_reason`. `wait`: whether the first deep check of the app may
-        hold this call up to VERIFY_WAIT_SECONDS. By default it does only when no source-built helper could run
-        meanwhile; otherwise it waits APP_CHECK_GRACE_SECONDS and the source helper serves until the check lands in
-        the cache."""
+        `wait`: whether the first deep check of the app may hold this call up to VERIFY_WAIT_SECONDS. By default it
+        does only when no source-built helper could run meanwhile; otherwise the deep check may take
+        APP_CHECK_GRACE_SECONDS and the source helper serves until it lands in the cache. Either way, once the deep
+        check passed, the helper's own plain signature check (up to PLAIN_VERIFY_TIMEOUT) and its `--version` (up to
+        HELPER_VERSION_TIMEOUT) run in this call, once per bundle state."""
+        reason = None
         if self._find_app is not None:
             helper, reason = self._app_helper(wait)
             if helper is not None:
-                self._chosen, self.helper_in_use, self.app_helper_reason = helper, 'app', None
-                return None
-        else:
-            reason = None
+                choice = HelperChoice(helper, 'app', None, None)
+                self.last_choice = choice
+                return choice
         problem = self._source_problem()
-        self._chosen = self.source_helper if problem is None else None
-        self.helper_in_use = 'source' if problem is None else None
-        self.app_helper_reason = reason
-        return problem
+        choice = (HelperChoice(self.source_helper, 'source', None, reason) if problem is None
+                  else HelperChoice(None, None, problem, reason))
+        self.last_choice = choice
+        return choice
 
     def _app_helper(self, wait: Optional[bool]) -> tuple:
         """(the app's helper, None) when it may run, else (None, a key of `APP_HELPER_REASONS`).
@@ -915,6 +927,10 @@ class MacAdapter:
         key = (str(app), state)
         if self._app_helper_key == key:
             return Path(app) / APP_HELPER, None
+        with self._app_lock:
+            refused = self._app_refused.get(key)
+        if refused and refused[1] > time.monotonic():
+            return None, refused[0]
         if wait is None:
             wait = self._source_problem() is not None
         # A first deep check of the small app bundle usually lands within the grace; one that does not leaves the
@@ -926,11 +942,21 @@ class MacAdapter:
             if bundle_metadata_hash(app) != state:
                 return None, 'app_verification_pending'
         except LifecycleError as exc:
-            return None, exc.code if exc.code in APP_HELPER_REASONS else 'app_untrusted'
+            return None, self._refuse(key, exc.code if exc.code in APP_HELPER_REASONS else 'app_untrusted')
         except OSError:
-            return None, 'app_untrusted'
+            return None, self._refuse(key, 'app_untrusted')
         self._app_helper_key = key
         return helper, None
+
+    def _refuse(self, key, reason: str) -> str:
+        """Remember a lasting refusal of this bundle state for APP_REFUSAL_SECONDS (a changed bundle is a new key, so
+        an update is checked at once); a pending or failed check is not remembered: it decided nothing."""
+        if reason not in ('app_verification_pending', 'app_verification_failed'):
+            with self._app_lock:
+                self._app_refused[key] = (reason, time.monotonic() + APP_REFUSAL_SECONDS)
+                for stale in [k for k, (_, until) in self._app_refused.items() if until <= time.monotonic()]:
+                    del self._app_refused[stale]
+        return reason
 
     def _source_problem(self) -> Optional[str]:
         """None when the source-built helper may run, else why not: `helper_not_built` (no file), `helper_unsafe` (a
@@ -959,20 +985,17 @@ class MacAdapter:
         self._helper_current_key = key
         return None
 
-    def _helper_ready(self) -> bool:
-        return self._helper_problem() is None
-
-    def _helper_answer(self, args, timeout: float = 10) -> dict:
+    def _helper_answer(self, helper: Path, args, timeout: float = 10) -> dict:
         try:
-            answer = json.loads(self.run([str(self.helper), *args], timeout=timeout).stdout)
+            answer = json.loads(self.run([str(helper), *args], timeout=timeout).stdout)
         except ValueError:
             raise LifecycleError('failed') from None
         if not isinstance(answer, dict) or not isinstance(answer.get('state'), str):
             raise LifecycleError('failed')
         return answer
 
-    def _helper_status(self, target: dict) -> dict:
-        return self._helper_answer(['status', target['path']])
+    def _helper_status(self, helper: Path, target: dict) -> dict:
+        return self._helper_answer(helper, ['status', target['path']])
 
     def _launchd_state(self, target: dict) -> dict:
         if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
@@ -1127,12 +1150,12 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 return observation('login_required')
-            problem = self._helper_problem()
-            if problem:
-                extra = {'appHelper': self.app_helper_reason} if self.app_helper_reason else {}
-                return observation('setup_required', reason=problem, **extra)
+            choice = self._choose_helper()
+            if choice.problem:
+                extra = {'appHelper': choice.app_reason} if choice.app_reason else {}
+                return observation('setup_required', reason=choice.problem, **extra)
             try:
-                response = self._helper_status(target)
+                response = self._helper_status(choice.path, target)
             except LifecycleError:
                 return observation('failed')
             seen = observation(response['state'], **{k: response[k] for k in HELPER_FIELDS if k in response})
@@ -1159,12 +1182,13 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 raise LifecycleError('login_required')
-            if not self._helper_ready():
+            choice = self._choose_helper()
+            if choice.path is None:
                 raise LifecycleError('setup_required')
             args = ['open', target['path']]
             if target.get('backgroundLaunch') is True:
                 args.append('--background')             # only for a target the owner enrolled as understanding it
-            response = self._helper_answer(args, timeout=12)
+            response = self._helper_answer(choice.path, args, timeout=12)
             if response['state'] not in ('ready', 'accepted_by_os'):
                 raise LifecycleError(response['state'])
             return 'launch_services_open'
@@ -1196,13 +1220,14 @@ class MacAdapter:
         if not self.identity_matches(target):
             raise LifecycleError('identity_mismatch')
         if target['kind'] == 'app':
-            if not self._helper_ready():
+            helper = self._choose_helper().path
+            if helper is None:
                 raise LifecycleError('setup_required')
-            current = self._helper_status(target)
+            current = self._helper_status(helper, target)
             if current.get('state') != 'ready' or current.get('pid') != pid:
                 raise LifecycleError('identity_mismatch')
             if mode == 'quit' and not force:
-                response = self._helper_answer(['quit', target['path'], str(pid)])
+                response = self._helper_answer(helper, ['quit', target['path'], str(pid)])
                 if response.get('state') == 'quit_requested':
                     return 'quit_requested'
                 if response.get('state') == 'identity_mismatch':
@@ -1210,7 +1235,7 @@ class MacAdapter:
                     # `status` and `quit` (the pid is gone: the stop is done, `already_exited`), or the pid is someone
                     # else's process now. Probe again to tell them apart; nothing is signalled in either case.
                     try:
-                        again = self._helper_status(target)
+                        again = self._helper_status(helper, target)
                     except LifecycleError:
                         raise LifecycleError('identity_mismatch') from None
                     if again.get('state') == 'stopped':
@@ -1248,12 +1273,13 @@ class MacAdapter:
         helper that crashes is started again with backoff (5 s, doubling to 300 s, reset after a minute of life)."""
         backoff = 5
         while not stop_event.is_set():
-            if not self._helper_ready():
+            helper = self._choose_helper().path
+            if helper is None:
                 return
             started = time.monotonic()
             try:
                 proc = popen(
-                    [str(self.helper), 'watch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    [str(helper), 'watch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, text=True, env={'PATH': SYSTEM_PATH, 'HOME': str(self.home)},
                     **osproc.new_group(),
                 )
@@ -1346,14 +1372,14 @@ def helper_choice(*, run=None, home=None, helper=None, app=INSTALLED, platform: 
     adapter = MacAdapter(run=run, home=home, helper=source, app=app, platform=platform,
                          fabric_hub_file=Path(os.devnull))
     try:
-        adapter._helper_problem(wait=True)
+        choice = adapter._choose_helper(wait=True)
         found = adapter._find_app() if adapter._find_app is not None else None
-        reason = adapter.app_helper_reason
+        reason = choice.app_reason
         return {
-            'inUse': adapter.helper_in_use,
-            'path': str(adapter.helper) if adapter.helper_in_use else None,
+            'inUse': choice.in_use,
+            'path': str(choice.path) if choice.path else None,
             'app': {'path': str(found) if found else None,
-                    'state': ('in_use' if adapter.helper_in_use == 'app'
+                    'state': ('in_use' if choice.in_use == 'app'
                               else 'not_installed' if reason in (None, 'app_not_installed') else 'not_used'),
                     'reason': reason},
             'source': {'path': str(source), 'state': helper_state(source, run=adapter.run, platform=platform)},

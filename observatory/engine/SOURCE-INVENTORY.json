@@ -2875,8 +2875,8 @@
       "path": "node/lifecycle/macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9ddfa82ad653df6eb750bdad5e7b69d97297ba270cfd617d9ec81e4b431ca702",
-      "bytes": 74006
+      "export_sha256": "e8ef245b6051ada2b871ddbf5cc72fd8321e5b99261cdb075c4ed2c598e93f9f",
+      "bytes": 75938
     },
     {
       "path": "node/lifecycle/native_app.swift",
@@ -4993,8 +4993,8 @@
       "path": "tests/test_node_lifecycle_helper.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "21c4f5308431ebb4fb61cc5192a4bf8a076d86c4cb38706516dde6eb9d756512",
-      "bytes": 18833
+      "export_sha256": "53ba7acede4a235a127b37b6d5f8d388a22a723d3bb8d6d3394581ed84b744e6",
+      "bytes": 25666
     },
     {
       "path": "tests/test_node_lifecycle_import.py",
@@ -6398,8 +6398,8 @@
       "path": "tools/lifecycle_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0cf4226695a26c4b99cfc30b0b0d4d6133e8631aa4c91277914855dd1cddd0fa",
-      "bytes": 32153
+      "export_sha256": "267437a9a0f8665b2c887348ea11eb9da251ef8773fc02701f70d79232946131",
+      "bytes": 32826
     },
     {
       "path": "tools/lifecycle_findings.py",
@@ -6891,8 +6891,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "9479b62d48a1b5f333a06f92b971c6e3b6c175bb1a6657a2db2ce8775639e5c0",
-      "bytes": 56199,
+      "export_sha256": "2a30713152c2ab066e0714a7f939072016e40ed5d8cd8463d34f99ba9015933e",
+      "bytes": 56529,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
