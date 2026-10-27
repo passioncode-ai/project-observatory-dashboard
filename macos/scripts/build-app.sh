@@ -58,7 +58,7 @@ done
 # The helper answers the version of the source it was built from; the engine runs no other.
 DECLARED=$(sed -n 's/^let helperVersion = "\([0-9a-f]*\)"$/\1/p' "$HELPER_SRC")
 case " $ARCHS " in
-  *" $(uname -m) "*)
+  *" $(sysctl -n hw.machine) "*)
     ANSWER=$("$HELPER" --version)
     [[ "$ANSWER" == *"\"version\":\"$DECLARED\""* ]] \
       || { echo "build-app.sh: the lifecycle helper answered '$ANSWER', not version $DECLARED" >&2; exit 1; } ;;
