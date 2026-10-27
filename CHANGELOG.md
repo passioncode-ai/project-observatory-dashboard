@@ -135,6 +135,19 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **Windows is verified on every change, and what does not pass yet is named** (OBS-277, OBS-278, OBS-279,
+  `docs/design/WINDOWS-LINUX.md`). The `windows` CI job no longer lets a step fail unseen: locks (with the path
+  behind a descriptor, OBS-98), owner-only ACLs, process groups, a whole tick, the server and the tick as Task
+  Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 198 of 293 suites
+  pass on windows-latest, and the other 95 are listed in `tools/windows-known.json`, each with its backlog row and
+  what it showed; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
+  passes. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
+  person runs to check install, the node, the tick, the desktop app and an agent's MCP connection on a real Windows
+  machine. Two fixes reach every Windows user: `project-observatory full` and a direct `observatory.py` run the engine
+  in UTF-8 mode on Windows (step headings and non-Latin-1 text no longer fail under the cp1252 code page), and the
+  portable runner gives each suite a Windows home, temporary folder and UTF-8 console and stops a timed-out suite's
+  whole process tree.
+
 - **The Mac app carries the lifecycle helper, so a released install needs no Swift compiler** (OBS-79 step L2r,
   `docs/design/LIFECYCLE.md`). `macos/scripts/build-app.sh` builds the helper that wakes and stops enrolled apps into
   `Project Observatory.app/Contents/Helpers/lifecycle-native` for both architectures and signs it before the app; the

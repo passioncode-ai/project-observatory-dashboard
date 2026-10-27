@@ -1,5 +1,482 @@
 {
   "schema_version": 1,
-  "about": "Portable engine suites that do not pass on windows-latest, each with the backlog row that makes it pass. tools/check_windows_suites.py fails the windows job when a suite outside this list fails or skips, or a suite on it passes. The list only shrinks.",
-  "suites": {}
+  "about": "Portable engine suites that do not pass on windows-latest, each with the backlog row that makes it pass and what it showed in CI. tools/check_windows_suites.py fails the windows job when a suite outside this list fails or skips, or a suite on it passes: the list only shrinks.",
+  "measured": "windows-latest, Python 3.14, run 40573876802 (2026-10-27)",
+  "suites": {
+    "action_outcomes": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FAIL  [ru] success: the button stays locked until a rescan: {}"
+    },
+    "agent_plugin": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "`full agent install` runs a script Windows cannot execute directly ([WinError 193]), and the server's log stays open after its stop"
+    },
+    "api_listings": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+    },
+    "ask_why": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError"
+    },
+    "ask_why_reach": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 1 != 0 :"
+    },
+    "assistant": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "backup_vault": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 1 != 0"
+    },
+    "checkout_inventory": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+    },
+    "checkout_state": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+    },
+    "companion": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "`not a git repository` is not a fault: {'recorded': False, 'reason': 'cwd does not exist', 'fault': True, 'at': '2026-10-27T20:08:40Z', 'session': 's-3'}"
+    },
+    "companion_faults": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "and a neighbour's quiet turn takes it: if this ever passes with fault=True the slot stopped being a slot, and the log below is no longer the only durable record"
+    },
+    "companion_hook": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "no observatory checkout: exits 0: 1"
+    },
+    "credential_doors": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "times out on windows-latest at 601 s"
+    },
+    "curation_paths": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "ModuleNotFoundError: No module named 'termios'"
+    },
+    "dashboard_portability": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: \"<path> chars]5b9\\project folders/project's folder/secrets/key file.json\" != \"<path> chars]5b9\\project folders\\project's folder\\secrets\\key file.json\""
+    },
+    "dashboard_stop": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 1 is not None : the server exited before answering"
+    },
+    "digitalocean_door": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "ValueError: list.index(x): x not in list"
+    },
+    "disk_guard": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "times out on windows-latest at 123 s"
+    },
+    "docs_current": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "docs/AGENT_SYNC.md describes configuration 39b8f406fdd2, the live one is 8b3aa2f8e1ae: regenerate with `agent_sync.py setup`"
+    },
+    "domain_probe": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "each carries the reason: {'checked_at': '2026-10-27T20:17:46Z', 'nameservers': [], 'a': [], 'cname': [], 'registrable': 'example.com', 'resolves': None, 'unmeasured': 'dig is not instal"
+    },
+    "engine_update": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "times out on windows-latest at 123 s"
+    },
+    "env_inventory": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "KeyError: 'wants/.env'"
+    },
+    "fabric_service": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "forget_receipt": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "git_hardening": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']"
+    },
+    "harness": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: '~\\.claude\\CLAUDE.md' != '~/.claude/CLAUDE.md'"
+    },
+    "heroku": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a checkout INSIDE a project's folder links it too"
+    },
+    "heroku_door": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "at mode 600: 0o100666"
+    },
+    "infra_pages": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "install_key": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "the companion's destination is a .env file, the only file its worker reads: <path>"
+    },
+    "interop": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 'completed' != 'cancelled'"
+    },
+    "key": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "PermissionError: [WinError 5] Access is denied: '<path>'"
+    },
+    "keyserver": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a group-readable token is refused by the real reader"
+    },
+    "keyserver_boundary": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "leak_coverage": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 'scanned' != 'unreadable'"
+    },
+    "lifecycle": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: '<path>' not found in ['']"
+    },
+    "lifecycle_watch": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: Lists differ: [('log-over-cap', 'serverd.err')] != [('log-over-cap', 'serverd.err'), ('log-readable', 'gate.log')]"
+    },
+    "local_folders": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable"
+    },
+    "lost_projects": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a JSON array yields the estate-relative folders: set()"
+    },
+    "machine": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None)"
+    },
+    "machine_backup": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "PermissionError: [Errno 13] Permission denied: '<path>'"
+    },
+    "machine_mcp_inventory": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: Items in the first set but not the second:"
+    },
+    "maintenance": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "mcp_inventory": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a stdio server records its executable's NAME and whether it exists: {\"name\": \"local\", \"transport\": \"stdio\", \"wire\": \"stdio\", \"target\": \"env\", \"command\": \"env\", \"args_count\": 2, \"key_in_url\": false, \"key_in_header\": false"
+    },
+    "memory_access": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "merge_membership": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FileNotFoundError: [Errno 2] No such file or directory: '<path>'"
+    },
+    "meter": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "grant files are named by their URN (`urn:grant:...json`), and ':' cannot be in a Windows file name: the hub's grant projection needs a Windows name"
+    },
+    "meter_wire": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+    },
+    "node_ceremony": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "node_cli": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: '0o777' != '0o700'"
+    },
+    "node_enroll": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: ValueError not raised"
+    },
+    "node_foundation": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384 : device.json"
+    },
+    "node_lifecycle_broker": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: LifecycleError not raised"
+    },
+    "node_lifecycle_helper": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "the macOS adapter's launchd domain reads os.getuid (node/lifecycle/macos.py), so choosing the helper raises on Windows instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work"
+    },
+    "node_lifecycle_import": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: {'runningOperations': 1, 'startedProcesses': 1} is not None"
+    },
+    "node_lifecycle_macos": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "the macOS adapter calls os.getuid while it decides a path is trusted (node/lifecycle/macos.py trusted_path), so on Windows it raises instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work"
+    },
+    "node_lifecycle_service": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "node_repair": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable"
+    },
+    "pipeline": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "every path handed on a command line was checked (0): 0: the sweep is only as wide as the commands"
+    },
+    "policy_residue": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "it refuses with no terminal: review: nothing to fold for project:x on 2026-09-05: 0 waiting record(s), no (project, kind, owner, day) group holds more than one"
+    },
+    "private_sources": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError"
+    },
+    "project_secrets": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "the mode is carried as it is:"
+    },
+    "provider_secret_boundaries": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "public_contracts": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError"
+    },
+    "recovery": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'"
+    },
+    "retrieval_audit": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "review_policy": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 0 == 0"
+    },
+    "review_queue": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "promoting without a terminal is refused: promoted mem:test0000: proposed -> observed (revision 2, owner operator)"
+    },
+    "runtime_identity": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AttributeError: module 'os' has no attribute 'mkfifo'"
+    },
+    "scan_agents": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: False is not true : <path>"
+    },
+    "schema_compatibility": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 292 != 256"
+    },
+    "scrub": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a backup of claude-mem.db was taken first, at mode 600: [<path>]"
+    },
+    "secret_header": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "ModuleNotFoundError: No module named 'termios'"
+    },
+    "secret_prompt": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 'waiting' != 'cancelled'"
+    },
+    "secrets": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+    },
+    "serverd": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AttributeError: 'TaskSchedulerJob' object has no attribute 'units'"
+    },
+    "skill": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "the hook ran under `bash`, which on windows-latest resolves to the WSL launcher (it answered in UTF-16 that no Linux distribution is installed), not Git Bash"
+    },
+    "ssh_keys": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 2 != 1"
+    },
+    "store_faults": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'"
+    },
+    "store_modes": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "directories become 700: 0o777 0o777 0o777"
+    },
+    "tick_budget": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "times out on windows-latest at 122 s"
+    },
+    "tick_progress": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "OSError: [WinError 10106] The requested service provider could not be loaded or initialized"
+    },
+    "trace_opens": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "a percent-encoded URI (paths.sqlite_uri) is recorded as its plain path, read-only: [['w', 'tests/_traced/t.db'], ['r', 'tests/_traced/t.db'], ['w', 'tests/_traced/t two.db']]"
+    },
+    "traps": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "T27 old/fixture-a is not recorded as its own repository: ['example-org/fixture-a', 'example-org/fixture-b', 'example-org/fixture-module-a', 'example-org/fixture-module-b', 'example-org/fixture-parent', 'old/fixture-a', '"
+    },
+    "use_secret": {
+      "expect": "FAIL",
+      "row": "OBS-279",
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+    },
+    "vault": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "the file is mode 600: 0o666"
+    },
+    "vault_boundaries": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: ValueError not raised"
+    },
+    "vault_digests": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "workflow_memory": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "FAILED (errors=1)"
+    },
+    "workspace": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "workspace_boundaries": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 420"
+    },
+    "workspace_profile": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: '0o666' != '0o600'"
+    },
+    "workspace_scheduler": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: 438 != 384"
+    },
+    "workspace_upgrade": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "AssertionError: [] is not true"
+    },
+    "write_surface": {
+      "expect": "FAIL",
+      "row": "OBS-278",
+      "reason": "ModuleNotFoundError: No module named 'termios'"
+    }
+  }
 }
