@@ -8,10 +8,11 @@ Sender:
         to your terminal
     project-observatory full share status ID
         what the recipient did; the six-digit code when it is ready
-    project-observatory full share confirm ID CODE
-        the code the recipient read to you matches: seal and send (a terminal)
+    project-observatory full share confirm ID
+        type the six digits the recipient read to you; a match seals and sends, a mismatch seals nothing
+        (a terminal)
     project-observatory full share confirm ID --without-comparing
-        seal without comparing: trust on first use (a terminal)
+        seal without comparing: trust on first use (a terminal, and a typed phrase)
     project-observatory full share revoke ID
         take it back: the mailbox refuses from now on
     project-observatory full share provider-ended ID
@@ -19,8 +20,8 @@ Sender:
 
 Recipient:
 
-    project-observatory full share accept LINK
-        open a link the sender gave you; LINK `-` reads it from stdin (a terminal)
+    project-observatory full share accept
+        open a link the sender gave you: it asks for the link, which keeps it out of your shell history (a terminal)
     project-observatory full share status ID
         the code to read to the sender, then the keys you received
     python "$(project-observatory full-path)/tools/use_secret.py" run --share ID SLOT -- COMMAND
@@ -31,7 +32,7 @@ Both:
     project-observatory full share list --json
         every share, sent and received, after one pass to the mailbox
     project-observatory full share differ ID
-        the codes differ: stop this share; nothing more is sealed or opened
+        the codes differ: before sealing, nothing is sealed; after it, the sender takes the share back
     project-observatory full share sync ID
         one pass to the mailbox for one share, or every share without ID
 
@@ -65,6 +66,12 @@ def _is_terminal() -> bool:
     return sys.stdin.isatty()
 
 
+def _shows_code() -> bool:
+    """The comparison code is printed only to a terminal: never into --json, a pipe or a file an agent reads. On this
+    machine any program running as you can still drive a terminal; the limit is stated in ONBOARDING."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
 def require_terminal(action: str) -> None:
     if not _is_terminal():
         raise SystemExit(f"share: refusing to {action} without a terminal. It is a person's act (DEC-0142: comparing "
@@ -93,6 +100,9 @@ def store():
         value, _where = use_secret.resolve(use_secret.project_for_reading(project), slot, env, vault_only=True)
         return value
     root = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node") / "shares"
+    if any(p.is_symlink() for p in (root, *root.parents)):
+        raise SystemExit("share: the share store's path holds a symbolic link; keys and sealed copies are kept only "
+                         "where no link can redirect them")
     return SH, SH.Shares(root.resolve(), read_value=read_value)
 
 
@@ -112,14 +122,16 @@ def _print(side: str, record: dict, SH, as_json: bool) -> None:
         print(f"  waiting: {view['problem']['code']}: {view['problem']['message']}")
     if view.get("warning"):
         print(f"  warning: {view['warning']}")
-    if view.get("code"):
-        digits = view["code"]
+    if view.get("codeReady"):
+        digits = record.get("code") or ""
+        shown = f"your code {digits[:3]} {digits[3:]}" if _shows_code() else "a code is ready (shown only in a terminal)"
         if side == "sent":
-            print(f"  code {digits[:3]} {digits[3:]}: ask the recipient to read you theirs, by a call or a thread you "
-                  f"already trust; if it matches: {PROG} confirm {short} {digits}; if not: {PROG} differ {short}")
+            print(f"  {shown}. Ask the recipient to read you the six digits their machine shows, by a call or a "
+                  f"thread you already trust; then run `{PROG} confirm {short}` and type what they read. If they "
+                  f"differ, it seals nothing.")
         else:
-            print(f"  code {digits[:3]} {digits[3:]}: read it to the sender by a call or a thread you already trust; "
-                  f"if theirs differs: {PROG} differ {short}")
+            print(f"  {shown}. Read it to the sender by a call or a thread you already trust; if theirs differs, "
+                  f"run `{PROG} differ {short}`.")
     if side == "sent":
         for s in view["slots"]:
             sealed = f"sealed #{s['sequence']} until {s['exp']}" if s["sealedAt"] else "not sealed yet"
@@ -211,7 +223,7 @@ def cmd_list(args) -> int:
         print(json.dumps([SH.summary(side, r) for side, r in pairs], indent=1, sort_keys=True))
         return 0
     if not pairs:
-        print("no share yet: `full share create PROJECT ENV SLOT --to LABEL` shares a key; `full share accept LINK` "
+        print("no share yet: `full share create PROJECT ENV SLOT --to LABEL` shares a key; `full share accept` "
               "opens a link someone sent you")
     for side, record in pairs:
         _print(side, record, SH, False)
@@ -221,11 +233,14 @@ def cmd_list(args) -> int:
 def cmd_sync(args) -> int:
     SH, s = store()
     try:
-        pairs = s.sync(args.id)
+        pairs = s.sync(args.id, due_only=args.due)
     except SH.ShareError as exc:
         print(f"share: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps([SH.summary(side, r) for side, r in pairs], indent=1, sort_keys=True))
+    rows = [r if "failed" in r else SH.summary(side, r) for side, r in pairs]
+    failed = [r for r in rows if "failed" in r or r.get("mailboxError") or r.get("problem")]
+    print(json.dumps({"schema": "observatory-share-sync/1", "shares": rows, "problems": len(failed)}, indent=1,
+                     sort_keys=True))
     return 0
 
 
@@ -239,11 +254,19 @@ def cmd_confirm(args) -> int:
     if side != "sent":
         print("share: only the sender confirms; read your code to the sender", file=sys.stderr)
         return 2
-    if not args.without_comparing and not args.code:
-        print("share: give the six digits the recipient read to you, or --without-comparing", file=sys.stderr)
-        return 2
+    if args.without_comparing:
+        typed = input("Seal without comparing codes: whoever claimed first may receive the key. "
+                      "Type: share without comparing\n> ").strip().lower()
+        if typed != "share without comparing":
+            print("not sealed")
+            return 1
+        code = None
+    else:
+        # The digits the OTHER machine shows, read aloud by its person: never your own screen's, which an agent
+        # could copy, and never an argument.
+        code = input("Type the six digits the recipient read to you: ").strip()
     try:
-        record = s.confirm(share_id, code=args.code, without_comparing=args.without_comparing)
+        record = s.confirm(share_id, code=code, without_comparing=args.without_comparing)
     except SH.ShareError as exc:
         print(f"share: {exc.code}: {exc}", file=sys.stderr)
         return 1
@@ -295,7 +318,11 @@ def cmd_provider_ended(args) -> int:
 def cmd_accept(args) -> int:
     require_terminal("accept a share")
     SH, s = store()
-    link = sys.stdin.readline().strip() if args.link == "-" else args.link
+    if args.link in (None, "-"):
+        # Read, not taken from argv: a link on a command line stays in the shell's history.
+        link = input("Paste the link you were sent and press Enter: ").strip()
+    else:
+        link = args.link
     print(SH.REPORT_CONSENT)
     answer = input("Accept this share on this machine? Type yes to accept: ").strip().lower()
     if answer != "yes":
@@ -335,7 +362,9 @@ def parser() -> argparse.ArgumentParser:
     c.add_argument("env", choices=("local", "stage", "prod"))
     c.add_argument("slots", help="one SLOT or several separated by commas")
     c.add_argument("--to", required=True, help="the recipient's label, as you will read it (Alex laptop)")
-    c.add_argument("--expires", type=int, default=30, help="days until the share ends (default 30)")
+    c.add_argument("--expires", type=int, default=30,
+                   help="days until the share ends (default 30); each sealed copy lives at most 90 days and the "
+                        "maintenance job seals it again before it ends")
     c.add_argument("--claim-days", type=int, default=7, help="days the link can be opened, 1 to 7 (default 7)")
     c.add_argument("--lease", type=int, default=3600, help="seconds a renewal lasts, 60 to 86400 (default 3600)")
     c.add_argument("--mailbox", help="the mailbox's https origin (default: the one `full cloud` recorded)")
@@ -352,12 +381,14 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument("--json", action="store_true")
     q.add_argument("--offline", action="store_true", help="do not ask the mailboxes")
     q.set_defaults(fn=cmd_list)
-    q = sub.add_parser("sync", help="one pass to the mailbox for one share or all (JSON)")
+    q = sub.add_parser("sync", help="one pass to the mailbox for one share or all (JSON); the maintenance job runs "
+                                    "it with --due")
     q.add_argument("id", nargs="?")
+    q.add_argument("--due", action="store_true", help="renew a received share only when its lease ended or its "
+                                                      "last report is a day old")
     q.set_defaults(fn=cmd_sync)
-    q = sub.add_parser("confirm", help="the code the recipient read to you matches: seal and send (a terminal)")
+    q = sub.add_parser("confirm", help="type the code the recipient read to you; a match seals and sends (a terminal)")
     q.add_argument("id")
-    q.add_argument("code", nargs="?")
     q.add_argument("--without-comparing", action="store_true", help="seal without comparing (trust on first use)")
     q.set_defaults(fn=cmd_confirm)
     for name, fn, text in (("differ", cmd_differ, "the codes differ: stop this share"),
@@ -367,8 +398,9 @@ def parser() -> argparse.ArgumentParser:
         q = sub.add_parser(name, help=text)
         q.add_argument("id")
         q.set_defaults(fn=fn)
-    q = sub.add_parser("accept", help="open a link someone sent you (a terminal; - reads it from stdin)")
-    q.add_argument("link")
+    q = sub.add_parser("accept", help="open a link someone sent you (a terminal; without LINK, or with -, it asks "
+                                      "for the link)")
+    q.add_argument("link", nargs="?")
     q.add_argument("--label", help="your name for this share (default share-<id>)")
     q.set_defaults(fn=cmd_accept)
     q = sub.add_parser("mailbox-trial", help="a loopback mailbox for a trial between two workspaces on this machine")

@@ -297,6 +297,152 @@ class ShareFlow(unittest.TestCase):
         self.assertNotIn(code, seen)                          # the claim code never travels in a request
         self.assertNotIn('claude-code', seen)                 # the report is sealed: agent names travel inside it
 
+    # ---- the review of #385 ---------------------------------------------------------------------------------
+
+    def test_codes_that_differ_after_sealing_take_the_share_back(self):
+        """M1: after sealing, "They differ" revokes: the recipient's machine stops at its next renewal, within one
+        lease, never at the envelope's end."""
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        self.assertEqual(self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code'), VALUE)
+        sent = self.sender.differ(share_id)
+        self.assertEqual(sent['state'], 'taking-back')
+        self.assertTrue(sent['revocationObserved'])
+        self.assertIn('taken back', sent['warning'])
+        self.clock.advance(3601)                                  # one lease (3600 s) later
+        with self.assertRaises(SH.ShareError) as refused:
+            self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
+        self.assertEqual(refused.exception.code, 'revoked')
+        sent = self.sender.sync_sent(share_id)                    # the pass goes on: the receipt arrives
+        self.assertIsNotNone(sent['deletion'])
+
+    def test_the_recipients_differ_deletes_its_copies(self):
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        received = self.recipient.differ(share_id)
+        self.assertEqual(received['state'], 'burnt')
+        self.assertFalse((self.recipient._received(share_id).path / 'envelopes').exists())
+        with self.assertRaises(SH.ShareError):
+            self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
+        sent = self.sender.sync_sent(share_id)
+        self.assertEqual(sent['late'], 1)
+        self.assertIn('the recipient said the codes differ', sent['warning'])   # a warning to take it back
+
+    def test_the_summary_never_carries_the_code(self):
+        """M2: --json and every non-terminal output read the summary, which says a code waits and never shows it."""
+        share_id, _, sent, received = self._exchange()
+        for side, record in (('sent', sent), ('received', received)):
+            view = SH.summary(side, record)
+            self.assertTrue(view['codeReady'])
+            self.assertNotIn(record['code'], json.dumps(view))
+
+    def test_the_maintenance_pass_syncs_shares(self):
+        """M3: the maintenance job runs `full share sync --due` hourly where a share exists, and fails soft."""
+        import datetime
+        import maintenance
+
+        class Commands:
+            def __init__(self, answer):
+                self.calls, self.answer = [], answer
+
+            def full(self, *args, timeout=0, env=None):
+                self.calls.append((args, env))
+                return self.answer
+        base = Path(self.tmp.name) / 'ws'
+        at = datetime.datetime(2026, 10, 27, 10, tzinfo=datetime.timezone.utc)
+        state: dict = {}
+        none = Commands((0, {}, ''))
+        self.assertEqual(maintenance.step_shares(base, state, at, none)['result'], 'none')
+        (base / 'node' / 'shares' / 'sent' / ('a' * 32)).mkdir(parents=True)
+        ran = Commands((0, {'shares': [{}], 'problems': 0}, ''))
+        self.assertEqual(maintenance.step_shares(base, state, at, ran), {'result': 'ran', 'shares': 1})
+        self.assertEqual(ran.calls[0][0], ('share', 'sync', '--due'))
+        self.assertEqual(ran.calls[0][1]['OBSERVATORY_NODE'], str(base / 'node'))
+        self.assertEqual(maintenance.step_shares(base, state, at + datetime.timedelta(minutes=10), ran)['result'],
+                         'not-due')
+        failed = Commands((1, {}, 'the mailbox did not answer'))
+        answer = maintenance.step_shares(base, state, at + datetime.timedelta(hours=1), failed)
+        self.assertEqual((answer['result'], answer['degraded']), ('error', 'shares.unsynced'))
+
+    def test_a_due_pass_renews_only_when_the_lease_ended_or_a_report_is_due(self):
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        deliveries = self.box.shares[share_id]['deliveries']
+        self.recipient.sync(due_only=True)
+        self.assertEqual(self.box.shares[share_id]['deliveries'], deliveries)           # lease live, report fresh
+        self.clock.advance(3601)
+        self.recipient.sync(due_only=True)
+        self.assertEqual(self.box.shares[share_id]['deliveries'], deliveries + 1)       # the lease ended
+
+    def test_the_last_week_is_not_resealed_every_pass(self):
+        share_id, link = self._create(expires_days=10)
+        self.recipient.accept(link)
+        self.sender.sync_sent(share_id)
+        received = self.recipient.sync_received(share_id)
+        self.sender.sync_sent(share_id)
+        self.sender.confirm(share_id, code=received['code'])
+        self.clock.advance(5 * 86400)
+        self.sender.sync_sent(share_id)
+        self.sender.sync_sent(share_id)
+        self.assertEqual(self.sender._sent(share_id).record()['slots'][0]['sequence'], 1)
+
+    def test_a_lost_reveal_is_sent_again_with_the_same_nonce(self):
+        share_id, link = self._create()
+        self.recipient.accept(link)
+        self.sender.sync_sent(share_id)
+        folder = self.recipient._received(share_id)
+        record = folder.record()
+        record['revealed'] = True                                # as if the post was lost after the record was kept
+        folder.save(record)
+        received = self.recipient.sync_received(share_id)
+        reveals = [f for f in self.box.shares[share_id]['frames'] if f.get('role') == 'recipient']
+        self.assertEqual([f['nonce'] for f in reveals], [record['nonce']])
+        self.sender.sync_sent(share_id)
+        self.assertEqual(self.recipient.sync_received(share_id)['state'], 'comparing')
+
+    def test_a_report_past_400_entries_is_split_not_cut(self):
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        folder = self.recipient._received(share_id)
+        lines = ''.join(json.dumps({'at': SH._iso(self.clock()), 'slot': 'OPENROUTER_API_KEY', 'agent': f'agent-{i}'})
+                        + '\n' for i in range(450))
+        SH._write(folder.path / 'uses.jsonl', lines + 'not json\n')    # a damaged line is skipped
+        self.clock.advance(3601)
+        self.recipient.sync_received(share_id)
+        sent = self.sender.sync_sent(share_id)
+        self.assertEqual(len({c['agent'] for c in sent['usage']['consumers']}), 450)
+
+    def test_no_receipt_when_the_copies_could_not_be_deleted(self):
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        self.sender.revoke(share_id)
+        import shutil as _shutil
+        real = _shutil.rmtree
+        SH.shutil.rmtree = lambda *a, **k: (_ for _ in ()).throw(PermissionError('planted'))
+        try:
+            record = self.recipient.sync_received(share_id)
+        finally:
+            SH.shutil.rmtree = real
+        self.assertEqual(record['problem']['code'], 'delete-failed')
+        self.assertIsNone(record['deletion'])
+        self.assertIsNone(self.box.shares[share_id]['deletion'])
+        self.assertEqual(self.recipient.sync_received(share_id)['state'], 'removed')
+
+    def test_a_seal_the_contract_refuses_is_a_problem_not_a_crash(self):
+        share_id, _, _, received = self._exchange()
+        real = PS.seal_peer_share
+        SH.PS.seal_peer_share = lambda **kw: (_ for _ in ()).throw(ValueError('lifetime-too-long: planted'))
+        try:
+            sent = self.sender.confirm(share_id, code=received['code'])
+        finally:
+            SH.PS.seal_peer_share = real
+        self.assertEqual(sent['problem']['code'], 'seal-refused')
+
     def test_a_metered_agent_cannot_use_a_share(self):
         """CT-187: until who pays for a share's use is decided, a delegated agent's use of a share is refused."""
         sys.path.insert(0, str(ROOT / 'tools'))

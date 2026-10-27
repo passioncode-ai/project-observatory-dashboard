@@ -308,6 +308,13 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
   (PS-2, contract DEC-0128's rule of an identity per membership, applied to shares). The sender's share key is pinned by the recipient from the
   original link only when that link reaches the app untouched (D3); a handoff through the cloud's
   landing page is protected by the commit-reveal code alone.
+- **The person's acts on this machine, stated plainly.** The command line keeps the comparison code
+  out of `--json` and piped output, asks the sender to type the digits the recipient read aloud
+  (never its own), and takes no answer to `confirm`, `accept` or `provider-ended` as an argument. A
+  program running as the same user can still drive a pseudo-terminal, read the screen, or read the
+  share's owner-only files (the code, the share key, the sealed copies). The CLI does not claim to
+  stop it; the comparison moves into the signed app's window (OBS-280, after OBS-265 and OBS-266),
+  where the secret prompt's window already draws the same line (D4).
 - **Serving.** The recipient's node keeps the ciphertext sealed on disk and opens it in memory at
   each use, for the child process `use_secret.py` starts. It may reuse a ciphertext while its lease
   lasts (one hour by default, set by the sender, at most 24 hours, and never more than 24 hours from

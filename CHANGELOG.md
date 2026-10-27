@@ -11,16 +11,20 @@ while the major version is 0, a minor release may change behaviour and says so h
   to OSS-81, `docs/ONBOARDING.md` "Share a key with another person's Observatory", design
   `docs/design/PERSON-SURFACES.md` D2, D3, D8). The command line first: `full share create PROJECT ENV SLOT --to
   LABEL --mailbox URL` makes a key pair for the share alone, registers it at the mailbox and prints the link once
-  (`https://MAILBOX/s/ID#c=CODE&k=FINGERPRINT`); the recipient runs `full share accept -` (at a terminal: it says
-  what the sender will see and asks to accept); both machines commit and reveal and `full share status ID` shows the
-  same six digits on both sides; the sender compares them with the recipient and runs `full share confirm ID CODE`
-  (at a terminal), which seals each value to the recipient's share key; the recipient's agents use it with
+  (`https://MAILBOX/s/ID#c=CODE&k=FINGERPRINT`); the recipient runs `full share accept` (at a terminal: it asks for
+  the link, says what the sender will see and asks to accept); both machines commit and reveal and show the same six
+  digits, in a terminal only (never in `--json` or piped output); the recipient reads theirs aloud and the sender runs
+  `full share confirm ID` and types what they heard, which seals each value to the recipient's share key; the recipient's agents use it with
   `use_secret.py run --share ID NAME -- COMMAND`, opened in memory for that command under a lease and counted;
   usage reports come back sealed to the sender, beside the mailbox's delivery count; `full share revoke ID` makes
   the mailbox refuse at once, the recipient's machine deletes its copy and returns a signed receipt, and the share
   reads "taken back" only after `full share provider-ended ID`. One attempt per link: a second claim, a claim whose
   MAC fails, a code that differs, a sender key that does not match the link, or a link older than its claim deadline
-  (at most 7 days) burns the share and seals nothing. No value travels anywhere but sealed to the recipient's share
+  (at most 7 days) burns the share and seals nothing; "they differ" after sealing takes the share back, so the
+  recipient's machine stops within one lease. The maintenance job makes one pass over the shares an hour: reseals before
+  a sealed copy ends and after a rotation, reads reports, and renews and reports at least daily on the recipient's
+  side (`shares.unsynced` when a pass fails). The limit, stated in ONBOARDING: a program running as you can drive a
+  terminal or read the share's owner-only files, so the comparison moves into the signed app's window (OBS-280). No value travels anywhere but sealed to the recipient's share
   key: not in the link, the mailbox's storage, a record, a journal or a log. An agent holding a Fabric delegation
   token is refused a shared key until the contract decides who pays for its use (CT-187). The mailbox protocol,
   `observatory-cloud/1`, is the engine's own (`node/mailbox.py`); deploying one into your Cloudflare account is

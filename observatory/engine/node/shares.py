@@ -46,6 +46,8 @@ DEFAULT_EXPIRES_DAYS = 30
 DEFAULT_LEASE_SECONDS = 3600
 #: The sender seals again this long before an envelope's `exp`, so a recipient never waits on an ended envelope.
 RESEAL_BEFORE_MS = 7 * PS.DAY_MS
+#: A received share reports at least this often when the maintenance job runs (PS-8: at each renewal and daily).
+REPORT_EVERY_MS = 20 * 3600 * 1000
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,63}')
 
 #: What the recipient's "Accept" names (PS-8): accepting is the recipient's consent to it.
@@ -311,6 +313,9 @@ class Shares:
         except ShareError as error:
             # A slot removed from the vault, or one that no longer reads: the share waits, and says why.
             record['problem'] = {'code': error.code, 'message': str(error), 'at': _iso(now)}
+        except ValueError as error:
+            # A seal the contract's checks refuse (a value no recipient would open): never sent, and said.
+            record['problem'] = {'code': 'seal-refused', 'message': str(error).split(':')[0], 'at': _iso(now)}
         else:
             record.pop('mailbox', None)
             record.pop('problem', None)
@@ -399,24 +404,40 @@ class Shares:
         return self.sync_sent(share_id)
 
     def differ(self, share_id: str) -> dict:
-        """"They differ" on either side: the side posts its one `abort` and the share seals nothing more (PS-6)."""
-        side, _ = ('sent', share_id) if self._sent(share_id).exists() else ('received', share_id)
+        """"They differ" on either side (PS-6). Before the sender sealed, the side posts its one `abort` and nothing is
+        sealed. After it sealed, an abort no longer stops the recipient's machine (the mailbox carries it to the sender
+        only as a warning), so the sender's "They differ" takes the share back: the signed revocation makes the
+        mailbox refuse every renewal, and the recipient's honest machine stops at its next renewal, within one lease.
+        The recipient's own "They differ" deletes its copies at once, opens nothing more, and warns the sender."""
+        side = 'sent' if self._sent(share_id).exists() else 'received'
         folder = self._sent(share_id) if side == 'sent' else self._received(share_id)
         record = folder.record()
+        now = self.clock()
+        if side == 'sent' and record['sealed']:
+            record['differedAt'] = _iso(now)
+            folder.save(record)
+            record = self.revoke(share_id)
+            record['warning'] = ("you said the codes differ after the key was sealed: the share is being taken back. "
+                                 "The mailbox refuses it now; the recipient's machine stops at its next renewal, "
+                                 "within one lease; whoever received it may have copied it, so revoke or rotate the "
+                                 "key at its provider")
+            folder.save(record)
+            return record
         role = 'sender' if side == 'sent' else 'recipient'
         client = self._client(record['origin'], folder, record)
         try:
             client.post_frame({'schema': PS.PEER_FRAME_SCHEMA, 'step': 'abort', 'role': role,
                                'shareId': share_id})
         except MB.MailboxError as error:
-            record['mailbox'] = {'error': error.code, 'at': _iso(self.clock())}
+            record['mailbox'] = {'error': error.code, 'at': _iso(now)}
         if side == 'received':
-            for path in (folder.path / 'envelopes').glob('*.json') if (folder.path / 'envelopes').is_dir() else []:
-                path.unlink()
+            shutil.rmtree(folder.path / 'envelopes', ignore_errors=True)
             record['lease'] = None
             record['marks'] = []
-        self._burn(record, 'aborted', 'a person said the codes differ: nothing more is sealed or opened')
-        record['state'] = 'burnt'
+            why = 'you said the codes differ: this machine deleted its copies and opens nothing of this share'
+        else:
+            why = 'you said the codes differ: nothing was sealed, and this link is spent'
+        self._burn(record, 'aborted', why)
         folder.save(record)
         return record
 
@@ -429,10 +450,20 @@ class Shares:
             return
         status = client.status(share_id)
         record['deliveries'], record['lastRenewal'] = status.get('deliveries'), status.get('lastRenewal')
-        record['late'] = status.get('late', 0)
-        if record['sealed'] and record['late']:
-            record['warning'] = ('a claim or an abort arrived after the share was sealed: whoever claimed may hold '
-                                 'the value; take the share back')
+        late = status.get('late', 0)
+        if record['sealed'] and late and late != record.get('late') and record['revocation'] is None:
+            # After the first envelope the mailbox carries a late claim or abort to the sender only, as a warning to
+            # take the share back (PS-6): the recipient's own "they differ", or a claim by whoever read the link.
+            steps = {f.get('step') for f in client.frames(share_id).get('late') or [] if isinstance(f, dict)}
+            if 'abort' in steps:
+                record['warning'] = (f"the recipient said the codes differ after the key was sealed: take the share "
+                                     f"back with `full share revoke {share_id[:8]}`, and revoke or rotate the key at "
+                                     f"its provider")
+            else:
+                record['warning'] = (f"another machine claimed this link after the key was sealed: whoever claimed "
+                                     f"may have read the link; take the share back with `full share revoke "
+                                     f"{share_id[:8]}` if you did not expect it")
+        record['late'] = late
         deletion = status.get('deletion')
         if record['revocation'] is not None:
             record['revocationObserved'] = status.get('revocation') == record['revocation']
@@ -453,21 +484,27 @@ class Shares:
         if now >= ends:
             return
         sig = folder.key('sig')
+        target = min(ends, now + PS.MAX_PEER_ENVELOPE_DAYS * PS.DAY_MS)
         for entry in record['slots']:
             value = self._value(record['project'], record['env'], entry['slot'])
             mac = self._value_mac(folder, value)
             exp = relay.instant(entry['exp']) if entry['exp'] else None
-            if entry['sealedAt'] and mac == entry['valueMac'] and exp is not None and exp - now > RESEAL_BEFORE_MS:
+            changed = not entry['sealedAt'] or mac != entry['valueMac'] or exp is None
+            # Near its end an envelope is sealed again only when the new one lasts longer (the share's own end caps
+            # both in its last week, and a pass must not reseal it every time).
+            ending = exp is not None and exp - now <= RESEAL_BEFORE_MS and target > exp
+            if not (changed or ending):
                 continue
-            exp_ms = min(ends, now + PS.MAX_PEER_ENVELOPE_DAYS * PS.DAY_MS)
+            sequence = entry['sequence'] + 1
+            entry['sequence'] = sequence
+            folder.save(record)                                # a sequence is never used for two envelopes
             sealed = PS.seal_peer_share(recipient_kem=record['recipientKeys']['kem'], signer_sig=record['keys']['sig'],
-                                        signer=sig, share_id=record['shareId'], sequence=entry['sequence'] + 1,
-                                        iat_ms=now, exp_ms=exp_ms, slot=entry['slot'], provider=entry['provider'],
+                                        signer=sig, share_id=record['shareId'], sequence=sequence,
+                                        iat_ms=now, exp_ms=target, slot=entry['slot'], provider=entry['provider'],
                                         plaintext=value.encode('utf-8'))
             del value
             client.put_envelope(sealed)
-            entry.update(sequence=entry['sequence'] + 1, sealedAt=_iso(now), exp=sealed['header']['exp'],
-                         valueMac=mac)
+            entry.update(sealedAt=_iso(now), exp=sealed['header']['exp'], valueMac=mac)
             record['sealed'] = True
             folder.save(record)
         record['state'] = 'active'
@@ -481,8 +518,8 @@ class Shares:
                    'recipientSig': record['recipientKeys']['sig'], 'lastSequence': usage['lastSequence']}
             opened = PS.open_peer_report(report, ctx, kem)
             if not opened['ok']:
-                usage.setdefault('refused', []).append({'sequence': report.get('header', {}).get('sequence'),
-                                                        'refusal': opened['refusal']})
+                usage['refused'] = (usage.get('refused', []) + [{'sequence': report.get('header', {}).get('sequence'),
+                                                                 'refusal': opened['refusal']}])[-50:]
                 continue
             body = opened['body']
             for day in body['days']:
@@ -584,14 +621,20 @@ class Shares:
         folder.save(record)
         return self.sync_received(share_id) if record['state'] == 'exchanging' else record
 
-    def sync_received(self, share_id: str) -> dict:
-        """One pass of the recipient's side against the mailbox; answers the record."""
+    def sync_received(self, share_id: str, *, due_only: bool = False) -> dict:
+        """One pass of the recipient's side against the mailbox; answers the record. `due_only` (the maintenance job)
+        renews an active share only when its lease ended or its last report is older than REPORT_EVERY_MS, so the
+        sender's delivery count stays a count of renewals the recipient needed, and a report still goes daily."""
         folder = self._received(share_id)
         record = folder.record()
         if record['state'] in ('burnt', 'removed', 'declined'):
             return record
         client = self._client(record['origin'], folder, record)
         now = self.clock()
+        reported = relay.instant(record.get('lastReportAt')) or 0
+        if due_only and record['state'] == 'active' and self._lease_live(record, now) \
+                and now - reported < REPORT_EVERY_MS:
+            return record
         try:
             if record['state'] in ('claiming', 'exchanging'):
                 self._exchange_received(folder, record, client, now)
@@ -600,6 +643,9 @@ class Shares:
             record.pop('mailbox', None)
         except MB.MailboxError as error:
             record['mailbox'] = {'error': error.code, 'at': _iso(now)}
+        except (ShareError, ValueError) as error:
+            record['problem'] = {'code': getattr(error, 'code', 'refused'), 'message': str(error).split(':')[0],
+                                 'at': _iso(now)}
         record['updatedAt'] = _iso(now)
         folder.save(record)
         return record
@@ -639,11 +685,13 @@ class Shares:
         record.update(senderKeys=commit['keys'], senderCommit=commit['commit'])
         if not record['revealed']:
             record['revealed'] = True
-            folder.save(record)                                # once and never again, even if the post is lost
-            if not any(f.get('step') == 'reveal' and f.get('role') == 'recipient' for f in frames):
-                client.post_frame({'schema': PS.PEER_FRAME_SCHEMA, 'step': 'reveal', 'role': 'recipient',
-                                   'shareId': share_id, 'nonce': record['nonce']})
-                frames = client.frames(share_id).get('frames') or []
+            folder.save(record)                                # one nonce for this share id, never a second
+        if not any(f.get('step') == 'reveal' and f.get('role') == 'recipient' for f in frames):
+            # The same committed nonce again when its first post was lost: never a fresh one, so a mailbox posing as
+            # the sender cannot rerun this side for another code.
+            client.post_frame({'schema': PS.PEER_FRAME_SCHEMA, 'step': 'reveal', 'role': 'recipient',
+                               'shareId': share_id, 'nonce': record['nonce']})
+            frames = client.frames(share_id).get('frames') or []
         reveal = next((f for f in frames if f.get('step') == 'reveal' and f.get('role') == 'sender'), None)
         if reveal is None:
             return
@@ -712,8 +760,19 @@ class Shares:
             record['lease'] = None
             record['warning'] = 'the mailbox refuses this share without a revocation the sender signed'
             return
-        shutil.rmtree(folder.path / 'envelopes', ignore_errors=True)
-        record.update(lease=None, marks=[], revocation=revocation, state='removed', removedAt=_iso(now))
+        record.update(lease=None, marks=[])
+        try:
+            shutil.rmtree(folder.path / 'envelopes')
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            # A receipt says the copies are deleted: it is signed only once they are.
+            record['problem'] = {'code': 'delete-failed', 'message': f'the sealed copies could not be deleted '
+                                 f'({type(error).__name__}); retried at the next pass', 'at': _iso(now)}
+            folder.save(record)
+            return
+        record.pop('problem', None)
+        record.update(revocation=revocation, state='removed', removedAt=_iso(now))
         receipt = PS.sign_peer_record({'type': PS.PEER_DELETION_TYPE, 'shareId': record['shareId'], 'at': _iso(now),
                                        'revocation': PS.peer_digest(revocation)}, record['keys']['sig'],
                                       folder.key('sig'))
@@ -731,8 +790,17 @@ class Shares:
         return now < min(expires, granted + PS.MAX_LEASE_SECONDS * 1000, received + PS.MAX_LEASE_SECONDS * 1000)
 
     def _uses(self, folder: _Folder) -> list:
-        text = folder.text('uses.jsonl') or ''
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
+        """The use journal's readable lines: a line cut short or damaged is skipped, never fatal to every later use."""
+        out = []
+        for line in (folder.text('uses.jsonl') or '').splitlines():
+            try:
+                use = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(use, dict) and relay.instant(use.get('at')) is not None \
+                    and PS.SLOT.fullmatch(str(use.get('slot', ''))) and PS.AGENT_NAME.fullmatch(str(use.get('agent', ''))):
+                out.append(use)
+        return out
 
     def _report(self, folder: _Folder, record: dict, client: MB.MailboxClient, now: int) -> None:
         """The usage report (PS-8), sealed to the sender's share `#kem`, at each renewal: the days since the last day
@@ -756,20 +824,24 @@ class Shares:
         today = _day(now)
         for slot in record['slots']:
             days.setdefault((today, slot['slot']), {'uses': 0, 'lastUse': None})
-        body = {'days': [{'date': d, 'slot': s, 'uses': v['uses'], 'lastUse': v['lastUse']}
-                         for (d, s), v in sorted(days.items())][-400:],
-                'consumers': consumers[:400], 'exports': []}
-        sequence = record['reportSequence'] + 1
-        report = PS.seal_peer_report(recipient_kem=record['senderKeys']['kem'], signer_sig=record['keys']['sig'],
-                                     signer=folder.key('sig'), share_id=record['shareId'], sequence=sequence,
-                                     iat_ms=now, body=body)
-        record['reportSequence'] = sequence
-        folder.save(record)                                    # a sequence is never used twice
-        client.post_report(report)
+        day_rows = [{'date': d, 'slot': s, 'uses': v['uses'], 'lastUse': v['lastUse']} for (d, s), v in sorted(days.items())]
+        pages = max(1, -(-len(day_rows) // 400), -(-len(consumers) // 400))
+        # A list past 400 entries is split over reports of consecutive sequences, sent together (PS-8).
+        for page in range(pages):
+            body = {'days': day_rows[page * 400:(page + 1) * 400], 'consumers': consumers[page * 400:(page + 1) * 400],
+                    'exports': []}
+            sequence = record['reportSequence'] + 1
+            record['reportSequence'] = sequence
+            folder.save(record)                                # a sequence is never used twice
+            report = PS.seal_peer_report(recipient_kem=record['senderKeys']['kem'], signer_sig=record['keys']['sig'],
+                                         signer=folder.key('sig'), share_id=record['shareId'], sequence=sequence,
+                                         iat_ms=now, body=body)
+            client.post_report(report)
         record.update(lastReportDay=today, lastReportAt=_iso(now))
         # The journal keeps what the next report still needs: today's uses, which it reports again as they grow.
-        kept = [json.dumps(u, sort_keys=True) + '\n' for u in self._uses(folder) if u['at'][:10] >= today]
-        _write(folder.path / 'uses.jsonl', ''.join(kept))
+        with private_io.lock(folder.path / 'uses.lock'):
+            kept = [json.dumps(u, sort_keys=True) + '\n' for u in self._uses(folder) if u['at'][:10] >= today]
+            _write(folder.path / 'uses.jsonl', ''.join(kept))
 
     def open_value(self, ref: str, slot: str, *, agent: str) -> str:
         """The use path (PS-3, PS-7): the slot's value, opened in memory for one use, under a live lease (renewed here
@@ -804,21 +876,27 @@ class Shares:
         opened = PS.open_peer_share(env, ctx, folder.key('kem'))
         if not opened['ok']:
             raise ShareError(opened['refusal'], f'the envelope for {slot} was refused: {opened["refusal"]}')
-        _append(folder.path / 'uses.jsonl', json.dumps({'at': _iso(now), 'slot': slot, 'agent': agent},
-                                                       sort_keys=True) + '\n')
+        with private_io.lock(folder.path / 'uses.lock'):
+            _append(folder.path / 'uses.jsonl', json.dumps({'at': _iso(now), 'slot': slot, 'agent': agent},
+                                                           sort_keys=True) + '\n')
         return opened['secret'].decode('utf-8')
 
     # ================================================================================================================
     # Both
     # ================================================================================================================
 
-    def sync(self, ref: Optional[str] = None) -> list:
-        """One pass over one share or every share this node holds."""
+    def sync(self, ref: Optional[str] = None, *, due_only: bool = False) -> list:
+        """One pass over one share or every share this node holds. A share whose pass fails in a way its own record
+        cannot hold is answered as a failure and the others still run."""
         targets = [self.find(ref)] if ref else [('sent', i) for i in self._ids('sent')] + \
             [('received', i) for i in self._ids('received')]
         out = []
         for side, share_id in targets:
-            out.append((side, self.sync_sent(share_id) if side == 'sent' else self.sync_received(share_id)))
+            try:
+                out.append((side, self.sync_sent(share_id) if side == 'sent'
+                            else self.sync_received(share_id, due_only=due_only)))
+            except (ShareError, OSError, ValueError, KeyError, RuntimeError) as error:
+                out.append((side, {'shareId': share_id, 'failed': f'{type(error).__name__}: {getattr(error, "code", "")}'}))
         return out
 
     def records(self) -> list:
@@ -830,7 +908,8 @@ class Shares:
 
 def summary(side: str, record: dict) -> dict:
     """A share as the CLI and the dashboard show it: names, states, counts and who measured each; never a value, a
-    claim code or a private key."""
+    claim code, a private key or the comparison code (`codeReady` says one waits; the CLI shows the digits only on a
+    terminal, so a JSON reader or a piped output never carries them)."""
     common = {'side': side, 'shareId': record['shareId'], 'label': record['label'], 'state': record['state'],
               'mailbox': record['origin'], 'burnt': record.get('burnt'), 'mailboxError': record.get('mailbox'),
               'warning': record.get('warning'), 'problem': record.get('problem')}
@@ -842,7 +921,7 @@ def summary(side: str, record: dict) -> dict:
                 'slots': [{'slot': s['slot'], 'provider': s['provider'], 'sequence': s['sequence'],
                            'sealedAt': s['sealedAt'], 'exp': s['exp']} for s in record['slots']],
                 'claimDeadline': record['claimDeadline'], 'endsAt': record['endsAt'],
-                'code': record['code'] if record['state'] == 'comparing' else None,
+                'codeReady': record['state'] == 'comparing' and record['code'] is not None,
                 'confirmed': record['confirmed'],
                 'usage': {'uses7d': uses7, 'reportedBy': 'their machine', 'consumers': usage['consumers'],
                           'exportsWithTheButton': usage['exports'], 'lastReportAt': usage.get('lastReportAt')},
@@ -852,6 +931,6 @@ def summary(side: str, record: dict) -> dict:
                     'mailboxRefuses': record['revocationObserved'], 'recipientDeleted': record['deletion'] is not None,
                     'providerEnded': record['providerEnded'],
                     'takenBack': bool(record['revocationObserved'] and record['providerEnded'])}}
-    return {**common, 'slots': record['slots'], 'code': record['code'] if record['state'] in ('comparing',) else None,
+    return {**common, 'slots': record['slots'], 'codeReady': record['state'] == 'comparing' and record['code'] is not None,
             'pinned': record['pinned'], 'lease': record['lease'],
             'revocation': record['revocation'] is not None, 'deletionReceiptSent': record['deletion'] is not None}

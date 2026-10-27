@@ -72,16 +72,31 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
             return subprocess.run(command, env=self.env(who), capture_output=True, text=True, timeout=60,
                                   stdin=subprocess.DEVNULL)
         import pty
+        import select
+        # A person at a terminal: stdin and stdout both the pseudo-terminal, as a shell gives them.
         master, slave = pty.openpty()
+        chunks = []
         try:
-            proc = subprocess.Popen(command, env=self.env(who), stdin=slave, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(command, env=self.env(who), stdin=slave, stdout=slave, stderr=subprocess.PIPE)
+            os.close(slave)
             os.write(master, stdin_text.encode())
-            out, err = proc.communicate(timeout=60)
+            while True:
+                ready, _, _ = select.select([master], [], [], 60)
+                if not ready:
+                    break
+                try:
+                    data = os.read(master, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+            proc.wait(timeout=60)
+            err = proc.stderr.read().decode('utf-8', 'replace')
+            proc.stderr.close()
         finally:
             os.close(master)
-            os.close(slave)
-        return subprocess.CompletedProcess(command, proc.returncode, out, err)
+        return subprocess.CompletedProcess(command, proc.returncode, b''.join(chunks).decode('utf-8', 'replace'), err)
 
     def test_two_people(self):
         # Sam shares a key with Alex: the link once, never in a log.
@@ -94,20 +109,29 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
         refused = self.share('alex', 'accept', '-', stdin_text=link + '\n')
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn('terminal', refused.stderr)
-        accepted = self.share('alex', 'accept', '-', '--label', 'from Sam', terminal=True,
+        accepted = self.share('alex', 'accept', '--label', 'from Sam', terminal=True,
                               stdin_text=link + '\nyes\n')
         self.assertEqual(accepted.returncode, 0, accepted.stderr + accepted.stdout)
         self.assertIn('The sender will see', accepted.stdout)
-        # Each side's next pass: Sam's node commits and reveals, Alex's reveals and shows the code.
+        # Each side's next pass: Sam's node commits and reveals, Alex's reveals and has the code.
         self.share('sam', 'status', share_id[:8])
-        alex = json.loads(self.share('alex', 'status', share_id[:8], '--json').stdout)
-        sam = json.loads(self.share('sam', 'status', share_id[:8], '--json').stdout)
-        self.assertEqual(alex['code'], sam['code'])
-        self.assertRegex(sam['code'], r'^[0-9]{6}$')
-        # The comparison is Sam's act.
-        self.assertNotEqual(self.share('sam', 'confirm', share_id[:8], sam['code']).returncode, 0)
-        confirmed = self.share('sam', 'confirm', share_id[:8], sam['code'], terminal=True)
+        alex_json = self.share('alex', 'status', share_id[:8], '--json').stdout
+        sam_json = self.share('sam', 'status', share_id[:8], '--json').stdout
+        self.assertTrue(json.loads(alex_json)['codeReady'] and json.loads(sam_json)['codeReady'])
+        # The code is in no --json and no piped output; Alex reads it on Alex's own terminal.
+        code = json.loads((self.homes['alex'] / 'node' / 'shares' / 'received' / share_id / 'share.json').read_text())['code']
+        self.assertRegex(code, r'^[0-9]{6}$')
+        plain = self.share('alex', 'status', share_id[:8])
+        for text in (alex_json, sam_json, plain.stdout):
+            self.assertNotIn(code, text)
+        self.assertIn('shown only in a terminal', plain.stdout)
+        shown = self.share('alex', 'status', share_id[:8], terminal=True)
+        self.assertIn(f'{code[:3]} {code[3:]}', shown.stdout)
+        # The comparison is Sam's act: Sam types the digits Alex read aloud.
+        self.assertNotEqual(self.share('sam', 'confirm', share_id[:8]).returncode, 0)
+        confirmed = self.share('sam', 'confirm', share_id[:8], terminal=True, stdin_text=code + '\n')
         self.assertEqual(confirmed.returncode, 0, confirmed.stderr + confirmed.stdout)
+        self.assertIn('active', confirmed.stdout)
         # Alex's agent uses the key at use time; its output is scrubbed.
         self.share('alex', 'status', share_id[:8])
         run = subprocess.run([sys.executable, str(ROOT / 'tools' / 'use_secret.py'), 'run', '--share', '--consumer',
