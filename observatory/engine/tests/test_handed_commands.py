@@ -100,6 +100,9 @@ SAMPLES = {
     "{out}": "/srv/example-ws/store/review/batch.json",
     # A vault slot's environment (`full vault-digests mark PROJECT ENV NAME`, OBS-194).
     "ENV": "prod",
+    # A share (OBS-264): a link read from stdin, a comparison code, a vault slot.
+    "LINK": "-", "CODE": "123456", "SLOT": "OPENROUTER_API_KEY", "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
+    "DAYS": "30", "URL": "https://mailbox.example",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

@@ -437,6 +437,50 @@ def cmd_where(args) -> int:
     return 0
 
 
+def check_share_use() -> None:
+    """A shared credential is not a project key (contract DEC-0142 PS-3, CT-187): a grant names project keys only, so
+    under a delegation token, or where every slot needs a grant, a share is refused rather than released unmetered."""
+    if _DELEGATION_TOKEN is not None or slot_mode() == "always":
+        raise SlotRefused("no-grant", "refused: no-grant: a key shared with you by another person is not a project "
+                          "key a grant can name; until who pays for a share's use is decided (contract CT-187), "
+                          "a metered agent does not use it")
+
+
+def shares_store():
+    """This node's share stores (node/shares/), reached over HTTPS to each share's mailbox."""
+    sys.path.insert(0, str(ROOT))
+    from node import shares as share_store
+    root = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node") / "shares"
+    if any(p.is_symlink() for p in (root, *root.parents)):
+        raise LookupError("the share store's path holds a symbolic link; a shared key is opened only where no link "
+                          "can redirect it")
+    return share_store, share_store.Shares(root.resolve())
+
+
+def _consumer_label(explicit: str | None) -> str:
+    """The agent's name for the share's usage report: --consumer, else OBSERVATORY_CONSUMER, else the parent process."""
+    return explicit or os.environ.get("OBSERVATORY_CONSUMER") or _parent_name()
+
+
+def resolve_shared(ref: str, names: list[str], consumer: str) -> tuple[dict[str, str], dict[str, str]]:
+    """The values of `names` from the share `ref`, opened in memory for this one run (PS-3, PS-7)."""
+    share_store, store = shares_store()
+    values, wheres = {}, {}
+    for n in names:
+        try:
+            values[n] = store.open_value(ref, n, agent=consumer)
+        except share_store.ShareError as exc:
+            values.clear()
+            raise LookupError(f"share {ref}: {exc}") from None
+        except (RuntimeError, OSError) as exc:
+            # A share file or its lock that is not a private regular file (a link, another owner): nothing is opened.
+            values.clear()
+            raise LookupError(f"share {ref}: its files could not be read safely ({type(exc).__name__}); nothing "
+                              f"was opened") from None
+        wheres[n] = f"share:{ref}/{n}"
+    return values, wheres
+
+
 def cmd_run(args) -> int:
     names = [n.strip() for n in args.names.split(",") if n.strip()]
     if not names:
@@ -453,16 +497,21 @@ def cmd_run(args) -> int:
         return 2
     values: dict[str, str] = {}
     wheres: dict[str, str] = {}
-    for n in names:
-        try:
-            values[n], wheres[n] = resolve(args.project, n, args.env,
-                                           vault_only=args.vault_only or vault_only_default()
-                                           or grant_required())
-        except LookupError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
     try:
-        verdict = check_slots(wheres)
+        if args.share:
+            # A key another person shared with this machine: never a project's vault slot (DEC-0142 PS-3).
+            check_share_use()
+            values, wheres = resolve_shared(args.project, names, _consumer_label(args.consumer))
+            verdict = "share"
+        else:
+            for n in names:
+                values[n], wheres[n] = resolve(args.project, n, args.env,
+                                               vault_only=args.vault_only or vault_only_default()
+                                               or grant_required())
+            verdict = check_slots(wheres)
+    except LookupError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except SlotRefused as exc:
         values.clear()
         audit("use-refused", f"{args.project}:{','.join(names)}",
@@ -860,8 +909,13 @@ def main(argv: list[str]) -> int:
     p.set_defaults(fn=cmd_where)
 
     p = sub.add_parser("run", help="run a command with the value in its environment")
-    p.add_argument("project")
+    p.add_argument("project", help="the project; with --share, the share's id or label")
     p.add_argument("names", help="one NAME, or several separated by commas")
+    p.add_argument("--share", action="store_true",
+                   help="take the names from a key another person shared with this machine (full share list): "
+                        "opened at this use, counted for the sender's usage report, never from the vault")
+    p.add_argument("--consumer", help="with --share: the agent's name the usage report carries (default "
+                                      "OBSERVATORY_CONSUMER, else the parent process)")
     p.add_argument("--env", choices=ENVS)
     p.add_argument("--as", dest="as_name",
                    help="also export it under this name (one variable only)")
@@ -911,7 +965,7 @@ def main(argv: list[str]) -> int:
             private_files.validate_names("placeholder", name=a.as_name)
         if a.cmd == "pipe":
             private_files.validate_names("placeholder", name=a.name)
-        if getattr(a, "project", None):
+        if getattr(a, "project", None) and not getattr(a, "share", False):
             a.project = project_for_reading(a.project)
         return a.fn(a)
     except private_files.VaultBoundaryError as exc:

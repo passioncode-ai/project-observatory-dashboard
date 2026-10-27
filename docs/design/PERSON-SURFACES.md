@@ -202,6 +202,12 @@ Alex (laptop) > translation-api (OpenRouter, $20 ceiling)
 | Failed | cloud unreachable, sealing failed, provider rotation failed, each with its retry | link used elsewhere, expired, revoked, each with the date |
 | Ended | expired or taken back, with what was confirmed (D2) | removed from this machine, with the date |
 
+**Built so far (OBS-264, OBS-276, the command line):** `full share create|status|confirm|differ|revoke|
+provider-ended|accept|list|sync` over the contract's `fabric-peer-share/1` (`node/peer_share.py`, run
+over the contract's vectors), both stores (`node/shares.py`), a client and an in-process mailbox for
+`observatory-cloud/1` (`node/mailbox.py`), and the use path `use_secret.py run --share`. The deployed
+mailbox is OBS-263; the screen OBS-265; the landing page and the scheme OBS-266.
+
 The protocol is D2, the link D3. **Data:** the share records of the local node (sent and received)
 under the workspace's node folder, the cloud's delivery counts, the recipient's signed usage
 reports, the provider's spend through the door (OpenRouter today), and `logs/secret-use.jsonl` on
@@ -279,26 +285,41 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
   makes every cloud breach a key breach. (a) gives the sender nothing to stop: once copied, the value
   is beyond reach. (c) keeps the cloud blind, gives the sender a real stop for every use that goes
   through Observatory, and a count it observes itself.
-- **The envelope.** The construction of `fabric-credential-envelope/1` (contract DEC-0111 item 3):
+- **The contract answered (DEC-0142, `fabric-peer-share/1`, pinned at `v0.1.0+2026-10-27.3`).** The
+  engine follows it where it departs from this design's first draft, each departure with the
+  contract's reason: no `share:` context kind (below); both sides commit, then both reveal; the code
+  is the first five bytes of the transcript's SHA-256, and the claim's MAC and the code's transcript
+  are over RFC 8785 objects with a `type`; the claim deadline is at most 7 days; the lease at most
+  24 hours; an envelope at most 90 days; a usage report carries no random nonce; requests to the
+  mailbox are signed with DEC-0056's construction and the share keys, not with the node's `#sig`.
+- **The envelope.** `fabric-peer-share-envelope/1` (PS-7): the construction of the secret envelope,
   HPKE base mode, suite `[16, 1, 1]` (DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM), to the
-  recipient's `#kem`, the header as additional data, signed ES256 over the RFC 8785 bytes of
-  `{header, ct}` by the sender's `#sig`. The header names the share, the slot label, the provider,
-  the end date and a sequence for anti-rollback, never the value. Until the contract defines a
-  person-to-person profile (OBS-262), the engine uses its own `info` string,
-  `observatory-share-envelope/1`, so that a share can never be opened as a personal placement or an
-  organization's credential, and the reverse.
-- **The recipient's context and a key pair per share.** A shared value belongs to a context of its
-  own, `share:SHARE-ID`, never the recipient's personal context (the same separation contract DEC-0111
-  keeps for an organization's credentials). Each side makes a fresh `#sig` and `#kem` pair for that one
-  share and never uses its device keys, so two shares, or a share and an organization enrollment,
-  cannot be linked by a key (contract DEC-0128's rule of an identity per membership, applied to
-  shares; part of the OBS-262 ask). The sender's share key is pinned by the recipient from the
+  recipient's share `#kem`, `info` the ASCII `fabric-peer-share-envelope/1`, the header as additional
+  data, signed ES256 over the RFC 8785 bytes of `{header, ct}` by the sender's share `#sig`. The header
+  names the share, the slot, the provider, `iat`, `exp` (at most 90 days) and a sequence per share and
+  slot for anti-rollback, never the value. Its `info` differs from every other envelope's, so a share
+  never opens as a personal placement or an organization's credential, and the reverse.
+- **Held apart from every vault, and a key pair per share.** The contract adds no context kind
+  (PS-3): `contextId` stays `personal` or `org:<id>`, and a received share is neither. The
+  recipient's node keeps it under `node/shares/received/<id>/`, apart from every context's vault,
+  and serves it only through its own use path (`use_secret.py run --share`), which counts each use
+  for the report. Each side makes a fresh `#sig` and `#kem` pair for that one share and never uses its
+  device keys, so two shares, or a share and an organization enrollment, cannot be linked by a key
+  (PS-2, contract DEC-0128's rule of an identity per membership, applied to shares). The sender's share key is pinned by the recipient from the
   original link only when that link reaches the app untouched (D3); a handoff through the cloud's
   landing page is protected by the commit-reveal code alone.
+- **The person's acts on this machine, stated plainly.** The command line keeps the comparison code
+  out of `--json` and piped output, asks the sender to type the digits the recipient read aloud
+  (never its own), and takes no answer to `confirm`, `accept` or `provider-ended` as an argument. A
+  program running as the same user can still drive a pseudo-terminal, read the screen, or read the
+  share's owner-only files (the code, the share key, the sealed copies). The CLI does not claim to
+  stop it; the comparison moves into the signed app's window (OBS-280, after OBS-265 and OBS-266),
+  where the secret prompt's window already draws the same line (D4).
 - **Serving.** The recipient's node keeps the ciphertext sealed on disk and opens it in memory at
   each use, for the child process `use_secret.py` starts. It may reuse a ciphertext while its lease
-  lasts (one hour by default, set by the sender); renewing the lease asks the cloud whether the share
-  is still active and counts a delivery. When the sender rotates a shared key, the sender's node seals
+  lasts (one hour by default, set by the sender, at most 24 hours, and never more than 24 hours from
+  its grant whatever the mailbox says); renewing the lease asks the cloud whether the share is still
+  active and counts a delivery. When the sender rotates a shared key, the sender's node seals
   the new value to every active recipient, and their next renewal picks it up.
 - **Taking back.** In this order, each step shown with what was confirmed:
   1. the cloud refuses every renewal and delivery for the share at once (observed by the sender's own
@@ -319,9 +340,10 @@ D10. Its output is Home's "hot" line, the tiles' states and one notification per
   least daily, a record per key signed by its share key and **sealed to the sender's share `#kem`**, so
   the cloud stores it without reading it: uses per day, last use, the consumer labels (agent names)
   from its secret-use journal, and exports made with the export button (OSS-82). Never a value, a
-  command, an argument or an output (the rule of `call-record/1`, DEC-0111 item 6). Each report and
-  each renewal carries a random nonce and a sequence number; the cloud and the sender's node drop a
-  repeated nonce or a sequence that does not advance. The sender's screen shows these as "reported by
+  command, an argument or an output (the rule of `call-record/1`, DEC-0111 item 6). Each report carries
+  a sequence, and its header is the additional data its signature covers, so the cloud can neither
+  move a report between shares nor play one again; the sender's node refuses a sequence that does not
+  advance (PS-8; the contract dropped the random nonce as redundant). The sender's screen shows these as "reported by
   their machine", beside the cloud's own delivery count. A modified recipient can under-report; the
   delivery count and the provider's spend cannot be hidden by it, which is why they are shown beside.
 - **Export, honestly.** "Exported" means "exported with the export button", a person's act on the
@@ -375,8 +397,8 @@ sequenceDiagram
   for exactly the person who has not installed the app. (a) adds a dependency on a site the sender
   does not control; it stays as the install target, not the landing.
 - **The link:** `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`. `CODE` is 128 random bits, single
-  use, valid until the share's claim deadline (7 days by default). `FPR` is the SHA-256 fingerprint of
-  the sender's share `#sig`. **It is pinned only when the original link reaches the app untouched:**
+  use, valid until the share's claim deadline (at most 7 days, PS-4). `FPR` is the RFC 7638 SHA-256
+  thumbprint of the sender's share `#sig`. **It is pinned only when the original link reaches the app untouched:**
   the person pastes it into the app's "Open a share" field, or opens it with the scheme carrying the
   `k=FPR` the person can see is the one in the link they were sent. The `project-observatory://share`
   URL the landing page builds is built by the cloud's own script, so a fingerprint arriving that way
@@ -386,35 +408,38 @@ sequenceDiagram
   and can read the fragment, so a compromised or malicious cloud can learn `CODE`. The design does not
   rely on the cloud being unable to read it; it relies on the next two points.
 - **The claim is bound to the code holder and checked by the sender.** The recipient's node sends its
-  share `#sig` and `#kem` public keys with `MAC = HMAC-SHA-256(CODE, share id, recipient #sig, recipient
-  #kem, FPR)`. The sender's node, not the cloud, checks the MAC; the cloud only relays the claim. The
-  MAC alone does not stop a cloud that knows `CODE`, so the sender **confirms each claim before
-  anything is sealed** with a six-digit code compared out of band, derived by **commit and reveal**
-  (the numeric comparison of Bluetooth Secure Simple Pairing and ZRTP's short authentication string):
-  1. the recipient picks a 256-bit `nonce_r` and sends only the commitment
-     `C = SHA-256(recipient #sig, recipient #kem, nonce_r)` with its claim;
-  2. the sender's node, having received `C`, picks a 256-bit `nonce_s` and sends it with the sender's
-     share keys;
-  3. the recipient reveals `nonce_r`; the sender's node checks it against `C`;
-  4. both apps show `SAS = (the first 4 bytes of SHA-256("observatory-share-sas/1", sender keys,
-     recipient keys, nonce_r, nonce_s) as an unsigned big-endian integer) mod 1,000,000`, written as six
-     digits with leading zeros, and the two people compare them by a call or a message thread they
-     already trust.
-  Because the recipient is bound to its keys and `nonce_r` before it sees `nonce_s`, and the sender
-  picks `nonce_s` after the commitment is fixed, a party in the middle cannot try key pairs until the
-  codes match: each attempt is one guess with a chance of 1 in 10^6. **One attempt per link:** a
-  mismatch, an abandoned exchange or a claim the sender does not expect voids the link and seals
-  nothing; a new attempt needs a new link the sender makes. Both ends enforce it: the sender's node
-  answers one commitment per link, and the recipient's app reveals a `nonce_r` for a link once and
-  never again, so a cloud posing as the sender cannot abort and rerun the recipient's side for fresh
-  codes. Each run also needs the person's Accept on the recipient's side.
+  share `#sig` and `#kem` public keys, its commitment, and `mac`, HMAC-SHA-256 keyed with the code's 16
+  bytes over the RFC 8785 form of `{type: "fabric-peer-claim/1", shareId, keys, fpr}` (PS-5). The
+  sender's node, not the cloud, checks the MAC; the cloud only relays the claim. The MAC alone does not
+  stop a cloud that knows `CODE`, so the sender **confirms each claim before anything is sealed** with
+  a six-digit code compared out of band, contract DEC-0084's construction under the share's own types
+  (PS-6):
+  1. the recipient's claim carries its commitment, `sha256:` and the SHA-256 of the RFC 8785 form of
+     `{type: "fabric-peer-commit/1", shareId, role, keys, nonce}` over a 32-byte nonce;
+  2. the sender's node answers with a commit frame carrying its share keys and its own commitment;
+  3. each side reveals its nonce only after it holds the other's commitment, and checks the other's
+     reveal against it;
+  4. both apps show the code: the first five bytes of the SHA-256 of the RFC 8785 form of
+     `{type: "fabric-peer-code/1", shareId, sender: {keys, nonce}, recipient: {keys, nonce}}` as a
+     big-endian integer, modulo 1,000,000, six digits with leading zeros; the two people compare them
+     by a call or a message thread they already trust.
+  Each side's commitment is fixed before it learns the other's nonce, so a party in the middle cannot
+  try key pairs until the codes match: each attempt is one guess with a chance of 1 in 10^6. **One
+  attempt per link** (`peerExchangeVerdict`, run by both nodes and the mailbox): a frame out of order, a
+  second claim, a reveal that does not open its commitment, an abort or the claim deadline passing
+  burns the exchange and seals nothing; a new attempt needs a new share the sender makes. The
+  recipient's app reveals a nonce for a share id once and never again, so a cloud posing as the
+  sender cannot rerun the recipient's side for fresh codes. Each run also needs the person's Accept
+  on the recipient's side.
 - **The trust this gives, stated plainly.** It is trust on first use with a one-in-a-million residual
   per link. A cloud or anyone else who reads the link before the intended recipient can claim first
   with its own keys; the MAC check passes (they know `CODE`), and the six-digit code matches the
   recipient's only with probability 1 in 10^6, so the sender refuses and nothing is sealed. A sender
   who skips the comparison accepts that risk, and the screen says so. Once sealed, the values are
   readable only by the recipient's share key; the cloud never holds them in the clear.
-- **The scheme:** `project-observatory://share?origin=ORIGIN&id=SHARE-ID#c=CODE`, registered by the
+- **The scheme:** it carries the share link's parts as the link does (PS-4): the share id in its
+  path and `c` and `k` in its fragment only, never in a query, never logged, the code used once
+  (the exact form lands with OBS-266). It is registered by the
   macOS app (`CFBundleURLTypes`) and by the desktop app through Tauri's deep-link support (the
   registry on Windows, an `x-scheme-handler` desktop entry on Linux). The app accepts only `share`,
   validates every parameter, refuses an unknown or repeated one, and opens a view; it never claims
@@ -605,9 +630,12 @@ tool.
   SQLite storage), and keeps the data in the person's own account.
 - **The service.** One Worker with one Durable Object per share and one for the owner, speaking
   `observatory-cloud/1`: register owner keys, create, claim, seal, renew, report, revoke, and the share
-  landing page. Every request is signed by a node's `#sig` over method, path, body digest and time;
-  the owner's public key is written into the Worker's configuration at deploy, recipients' at their
-  claim. The code ships in the engine's wheel, pinned by version and digest.
+  landing page. Every request is signed with contract DEC-0056's construction (PS-10) under the label
+  `fabric-peer-share`, `keyid` the thumbprint of the signing side's share `#sig` (never the node's
+  device key); a share's creation is also signed under the label `observatory-owner` by the owner key
+  the node makes once under `node/shares/owner/` and registers at deploy, and recipients' keys are
+  learnt at their claim. The routes are the engine's (`node/mailbox.py`), since the contract leaves
+  them to the product (CT-185). The code ships in the engine's wheel, pinned by version and digest.
 - **Deploying.** The Cloudflare door gains the deploy step: a narrow token (`workers-edit` plus the
   Durable Object binding it needs) minted from the stashed admin into a slot, the script uploaded
   through Cloudflare's API, the token kept for updates and revocable on disconnect. An engine update
@@ -648,7 +676,8 @@ slow and would copy their text. The Workflows tab keeps OSS-24 to OSS-27 unchang
 | DEC-0075 | its `consent.prompt` carries no request text or value and goes to every `consent.ui` client, so it is not used for secrets; a secret-request method with admission at `hello` is part of the OBS-262 ask, and until then the node opens its signed app through the lifecycle broker and the value never crosses the channel |
 | DEC-0128 | a key pair per share, never the device keys, so shares cannot be linked |
 | DEC-0008 | sharing, minting, revoking and deploying are effects with scope; none runs without the person's act or a recorded grant |
-| none yet | a person-to-person share profile (a context kind, a key pair per share, the sender's key pinned from the original link, the claim MAC, the commit-reveal six-digit code with one attempt per link, revocation across estates), a local-channel method for secret requests admitted at `hello` to the signed app only, and a single-person cloud service: OBS-262 asks the contract for all three |
+| DEC-0142 | `fabric-peer-share/1`, the answer to OBS-262: a key pair per share, the link and its pin, the claim MAC, the commit-reveal code with one attempt per link, the envelope, usage reports, revocation and deletion, and what the mailbox may see and do (PS-1 to PS-10); no context kind; the mailbox's routes are the product's (CT-185); who pays for a share's use is open (CT-187) |
+| DEC-0143 | the local channel's `secret.prompt` (secret requests), the other half of the OBS-262 ask; adopted by OBS-260's app half |
 
 ## The build order
 

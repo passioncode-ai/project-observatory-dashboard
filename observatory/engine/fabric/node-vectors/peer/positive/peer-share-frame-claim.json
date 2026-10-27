@@ -1,0 +1,21 @@
+{
+  "schema": "peer-share-frame/1",
+  "step": "claim",
+  "shareId": "1cbbf01dbcb842d86e9b25c6cb286dbd",
+  "keys": {
+    "sig": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "eN5VZ_wZXGBXQ9mjGzlAIRB3jof4cLddJvoQRm1xTmw",
+      "y": "TucaNZqx5e16LFjIxPAagDWVUTKDN1_ehGND4xlOfG4"
+    },
+    "kem": {
+      "kty": "EC",
+      "crv": "P-256",
+      "x": "EvVcKVtV7AxOlba4g_lF_24zRSoXFQpV5_zlKeLXlhk",
+      "y": "Ziby9Q51EkqGo1Ql6yI7D-eyboydYVpIzwJpAmsuv_c"
+    }
+  },
+  "mac": "PBOuZKG6B9AmujGPxz_3jO0CfBBe0aCl63WtO0H8S5E",
+  "commit": "sha256:68a58116a84599f0d55e5497590bb452695d49907d9db82b23584a18c4ebb84a"
+}

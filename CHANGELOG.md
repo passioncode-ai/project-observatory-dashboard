@@ -7,6 +7,30 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Share a key with another person's Observatory, see its use, take it back** (OBS-264, OBS-276, scenarios OSS-79
+  to OSS-81, `docs/ONBOARDING.md` "Share a key with another person's Observatory", design
+  `docs/design/PERSON-SURFACES.md` D2, D3, D8). The command line first: `full share create PROJECT ENV SLOT --to
+  LABEL --mailbox URL` makes a key pair for the share alone, registers it at the mailbox and prints the link once
+  (`https://MAILBOX/s/ID#c=CODE&k=FINGERPRINT`); the recipient runs `full share accept` (at a terminal: it asks for
+  the link, says what the sender will see and asks to accept); both machines commit and reveal and show the same six
+  digits, in a terminal only (never in `--json` or piped output); the recipient reads theirs aloud and the sender runs
+  `full share confirm ID` and types what they heard, which seals each value to the recipient's share key; the recipient's agents use it with
+  `use_secret.py run --share ID NAME -- COMMAND`, opened in memory for that command under a lease and counted;
+  usage reports come back sealed to the sender, beside the mailbox's delivery count; `full share revoke ID` makes
+  the mailbox refuse at once, the recipient's machine deletes its copy and returns a signed receipt, and the share
+  reads "taken back" only after `full share provider-ended ID`. One attempt per link: a second claim, a claim whose
+  MAC fails, a code that differs, a sender key that does not match the link, or a link older than its claim deadline
+  (at most 7 days) burns the share and seals nothing; "they differ" after sealing takes the share back, so the
+  recipient's machine stops within one lease. The maintenance job makes one pass over the shares an hour: reseals before
+  a sealed copy ends and after a rotation, reads reports, and renews and reports at least daily on the recipient's
+  side (`shares.unsynced` when a pass fails). The limit, stated in ONBOARDING: a program running as you can drive a
+  terminal or read the share's owner-only files, so the comparison moves into the signed app's window (OBS-280). No value travels anywhere but sealed to the recipient's share
+  key: not in the link, the mailbox's storage, a record, a journal or a log. An agent holding a Fabric delegation
+  token is refused a shared key until the contract decides who pays for its use (CT-187). The mailbox protocol,
+  `observatory-cloud/1`, is the engine's own (`node/mailbox.py`); deploying one into your Cloudflare account is
+  OBS-263, the Shares screen OBS-265, the landing page and the app's link scheme OBS-266. `full share
+  mailbox-trial` runs a loopback mailbox to try a share between two workspaces on one machine.
+
 - **An agent asks Observatory for a key instead of asking you in its chat** (OBS-260, OSS-84,
   `docs/ONBOARDING.md`, design `docs/design/PERSON-SURFACES.md` D4). The server half: the new MCP tool
   `observatory_secret_request` (project, env, slot, why, optional provider and `replace`) files a request with
@@ -147,6 +171,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   in UTF-8 mode on Windows (step headings and non-Latin-1 text no longer fail under the cp1252 code page), and the
   portable runner gives each suite a Windows home, temporary folder and UTF-8 console and stops a timed-out suite's
   whole process tree.
+
+- **The contract pin moves to `v0.1.0+2026-10-27.3`** (`759704b4`, contract DEC-0142 and DEC-0143): the node
+  vendors `fabric-peer-share/1`'s vectors, schemas and fixtures (`fabric/node-vectors/peer/`), and the estate
+  record's rules gain DEC-0128's context hub keys and context issuers and DEC-0127's organization pins
+  (FAC-SEM-073, FAC-SEM-076, FAC-SEM-114, FAC-SEM-134, FAC-SEM-147), so the seven new estate fixtures hold.
 
 - **The Mac app carries the lifecycle helper, so a released install needs no Swift compiler** (OBS-79 step L2r,
   `docs/design/LIFECYCLE.md`). `macos/scripts/build-app.sh` builds the helper that wakes and stops enrolled apps into

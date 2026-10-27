@@ -68,6 +68,8 @@ for it. A name or note shaped like a credential is refused, never stored.
 | List slots | `vault.py list PROJECT ENV` |
 | Run a command using a slot | `use_secret.py run [--env ENV] [--vault-only] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
 | Receive a value from another local command | `use_secret.py pipe NAME -- COMMAND ARGUMENTS` |
+| Use a key another person shared with this machine | `use_secret.py run --share SHARE NAME -- COMMAND ARGUMENTS` (SHARE from `project-observatory full share list`; flags before SHARE; refused under a delegation token) |
+| Share a vault key with another person's machine (the person's act, at their terminal) | `project-observatory full share create PROJECT ENV NAME --to LABEL`; then the person compares the six-digit code and runs `full share confirm ID CODE`; `full share revoke ID` takes it back |
 | Bind a slot to the one MCP server allowed to receive it as a header (the operator, once) | `vault.py bind PROJECT ENV NAME --header-for https://HOST[:PORT]` (a bare host means https), or `http://127.0.0.1:PORT` / `http://[::1]:PORT` for a loopback server (`localhost` is refused); `--clear` removes it; both are journalled |
 | Give an HTTP MCP server its bearer through the client's header helper | `use_secret.py header [--env ENV] [--name Authorization] [--scheme Bearer] PROJECT NAME`, written into Claude Code's `headersHelper` entry; for Codex's `http_headers_helper` add `--server-url URL`, since Codex exports no server URL. Never run by hand |
 | Populate a project's ignored environment file | `vault.py inject PROJECT ENV DIRECTORY` |
@@ -106,6 +108,14 @@ and the value has no control character; two URLs that disagree are refused
 `--server-url` to make it answer: that prints the value into your transcript. Each call
 is audited, with the caller it claimed. Binding is the
 operator's decision; ask for it, do not run `bind` to make a call succeed.
+
+**A shared key is not a vault slot.** A key another person shared with this machine
+(contract DEC-0142) is held apart from every vault under `node/shares/received/`,
+sealed, and opened only by `use_secret.py run --share` for the one command, which
+counts the use in the sender's report. Never look for it in a file, never copy it
+into the vault, and never run `full share confirm`, `accept` or `provider-ended`:
+comparing the code, consenting to the reports and stating that a provider ended a
+key are the person's acts. A share that is not `active` needs the person.
 
 **Stdin carries one thing.** Never pipe a secret into `python3 -`, `node -` or
 `sh -s`, or combine a secret pipe with a heredoc program. A program goes in a

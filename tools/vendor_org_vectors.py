@@ -121,7 +121,16 @@ FILES = {**{name: "fixtures/vectors/" + name for name in (
             for name in ("repair-request-task-two-lines", "repair-result-already-answered",
                          "repair-result-refused-without-reason", "repair-result-succeeded-unnotified")},
          "repair/semantic/device-action-expired-remote-execution.json":
-             "fixtures/semantic/device-action-expired-remote-execution.json"}
+             "fixtures/semantic/device-action-expired-remote-execution.json",
+         # A credential shared with another person's estate (DEC-0142, OBS-264): the reference's vectors, the four
+         # schemas of what crosses between the two estates, and their positive and negative fixtures.
+         "peer/peer-share.json": "fixtures/vectors/peer-share.json",
+         **{"peer/peer-share-%s.schema.json" % name: "schemas/peer-share-%s.schema.json" % name
+            for name in ("envelope", "frame", "record", "report")},
+         **{"peer/positive/peer-share-%s.json" % name: "fixtures/positive/peer-share-%s.json" % name
+            for name in ("envelope", "frame-claim", "report", "revocation")},
+         **{"peer/negative/peer-share-%s.json" % name: "fixtures/negative/peer-share-%s.json" % name
+            for name in ("deletion-no-revocation", "envelope-value", "frame-claim-code", "report-device-key")}}
 #: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
 SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
 #: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;

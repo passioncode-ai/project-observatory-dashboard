@@ -20,7 +20,12 @@ timer on Linux — and each pass does only what is due:
 4. once a day: a full encrypted snapshot of the workspace (settings, registry, vault,
    store), with this workspace's tick and server stopped for the copy;
 5. once a day: the machine's agent setup into one encrypted `.obmachine` bundle in the same
-   root (machine_backup.py, OBS-157), with every job running.
+   root (machine_backup.py, OBS-157), with every job running;
+6. once an hour, where this node holds a share with another person's machine (OBS-264):
+   `full share sync --due`, in a process of its own (`step_shares`): the sender reads reports,
+   seals again before a sealed copy ends or after a rotation, and hands the mailbox a revocation
+   it did not take; the recipient renews and reports at least daily. A failed pass is recorded as
+   `shares.unsynced` and retried at the next hour.
 
 The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the
@@ -998,6 +1003,34 @@ def step_org(base: Path, commands: "Commands") -> dict:
             **({"detail": tail} if code != 0 and tail else {})}
 
 
+#: How often the maintenance pass syncs this node's shares (contract DEC-0142): the sender reads reports and seals
+#: again before a sealed copy ends or after the vault value changed; the recipient renews and reports at least daily
+#: (`full share sync --due` renews a received share only when its lease ended or its last report is a day old).
+SHARES_EVERY = datetime.timedelta(hours=1)
+
+
+def step_shares(base: Path, state: dict, at: datetime.datetime, commands: "Commands") -> dict:
+    """Shares with other people's machines (OBS-264): one `full share sync --due` an hour, in a process of its own.
+    Nothing runs on a machine with no share; a failure is recorded with the degraded reason `shares.unsynced`, never
+    raised, and the next pass tries again. A share whose mailbox did not answer is counted, not hidden."""
+    node = Path(os.environ.get("OBSERVATORY_NODE") or base / "node").expanduser()
+    folders = [node / "shares" / side for side in ("sent", "received")]
+    if not any(f.is_dir() and any(f.iterdir()) for f in folders):
+        return {"result": "none"}
+    if not due(state, "shares", SHARES_EVERY, at, slack=CHECK_SLACK):
+        return {"result": "not-due", "last": (state.get("shares") or {}).get("at")}
+    code, doc, tail = commands.full("share", "sync", "--due", timeout=600, env={"OBSERVATORY_NODE": str(node)})
+    rows = doc.get("shares") if isinstance(doc.get("shares"), list) else []
+    problems = doc.get("problems") if isinstance(doc.get("problems"), int) else None
+    result = {"result": "ran" if code == 0 else "error", "shares": len(rows)}
+    if code != 0:
+        result.update(degraded="shares.unsynced", detail=tail)
+    elif problems:
+        result.update(problems=problems, degraded="shares.unsynced")
+    state["shares"] = {"at": iso(at), "result": result["result"], **({"problems": problems} if problems else {})}
+    return result
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
              clock=time.monotonic, guard=step_guard, machine=None) -> dict:
@@ -1063,6 +1096,11 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                 report["jobs"] = step_jobs()
         if not report["update"]["result"].startswith("updated"):
             report["org"] = step_org(base, commands or Commands(base))
+            try:
+                report["shares"] = step_shares(base, state, at, commands or Commands(base))
+            except Exception as exc:  # noqa: BLE001: a share never stops the pass
+                report["shares"] = {"result": "error", "degraded": "shares.unsynced",
+                                    "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
         state["pass"] = {"at": iso(at)}
         report["log_retention"] = state["log_retention"] = _rotate_logs(base)
         write_state(base, state)
