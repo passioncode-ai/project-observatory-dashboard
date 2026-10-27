@@ -1146,6 +1146,19 @@ def build():
         PAYLOAD["machine"] = machine_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["machine"] = {"degraded": [{"source": "machine", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # THE DISK GUARD'S OWN LINES (GB), so Home's disk tile judges a fresh measurement by
+    # the same thresholds the guard acts on (tools/disk_guard.level_for), never by a stale
+    # guard run. Absent when the guard's configuration cannot be read; Home then uses the
+    # guard's shipped defaults.
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import disk_guard as _disk_guard
+        _lv = (_disk_guard.load_config().get("levels") or {})
+        PAYLOAD["machine"]["diskLevels"] = {
+            k: _disk_guard._number((_lv.get(k) or {}).get("free_gb"), d)
+            for k, d in (("critical", 10), ("low", 25))}
+    except Exception as exc:  # noqa: BLE001 (a page, not a crash)
+        print(f"  disk guard lines unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.

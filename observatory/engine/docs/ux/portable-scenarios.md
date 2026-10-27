@@ -875,6 +875,8 @@ Coverage: `tests/test_home_page.py` (`test_six_tiles_in_order_each_with_its_time
 `test_a_source_that_did_not_run_says_not_measured_never_zero_or_green`,
 `test_a_failed_source_keeps_its_tile_with_the_reason_and_the_rest_render`,
 `test_three_kinds_ranked_one_row_per_kind_with_its_count`,
+`test_each_problem_row_shows_its_action`, `test_a_stale_guard_never_turns_a_fresh_low_disk_green`,
+`test_a_title_naming_a_placeholder_never_becomes_a_live_tag_on_any_page`,
 `test_nothing_open_says_nothing_needs_you_with_the_time_of_the_check`,
 `test_grouped_by_organization_with_need_and_last_activity`,
 `test_a_fresh_install_shows_what_to_connect_and_no_tiles`). Status: implemented (OBS-261); grouping by

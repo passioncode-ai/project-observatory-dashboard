@@ -22,6 +22,7 @@ a file, asks a provider or runs a command; a command it shows is copied, never r
 from __future__ import annotations
 
 import html
+import re
 
 from i18n import Translator
 
@@ -135,6 +136,25 @@ def apps_tile(payload: dict, t: Translator) -> dict:
                  "heroku.html?f=down" if down else "heroku.html", t)
 
 
+LEVELS = ("normal", "low", "critical")
+
+
+def disk_level(m: dict, free: float) -> str:
+    """The worse of two readings: the level the measured free space falls in (the guard's
+    own lines, `diskLevels` from the build, else its defaults) and the guard's last level,
+    counted only when the guard ran no earlier than the measurement. A guard run from
+    weeks ago at `normal` never turns a fresh 4 GB green (review of #377)."""
+    lines = m.get("diskLevels") or {}
+    critical = lines.get("critical") if isinstance(lines.get("critical"), (int, float)) else DISK_CRITICAL_GB
+    low = lines.get("low") if isinstance(lines.get("low"), (int, float)) else DISK_LOW_GB
+    level = "critical" if free < critical else "low" if free < low else "normal"
+    guard = m.get("guard") or {}
+    at, measured = str(guard.get("at") or ""), str(m.get("measuredAt") or "")
+    if guard.get("level") in LEVELS and at and measured and at[:19] >= measured[:19]:
+        level = max(level, guard["level"], key=LEVELS.index)
+    return level
+
+
 def disk_tile(payload: dict, t: Translator) -> dict:
     name = t.mark("Disk and memory")
     m = payload.get("machine") or {}
@@ -142,9 +162,7 @@ def disk_tile(payload: dict, t: Translator) -> dict:
     free = volume.get("free_gb")
     if not m.get("measuredAt") or not isinstance(free, (int, float)) or isinstance(free, bool):
         return _unmeasured("disk", name, t.mark("never measured"), _reason(m.get("degraded")), "machine.html", t)
-    level = (m.get("guard") or {}).get("level")
-    if level not in ("normal", "low", "critical"):
-        level = "critical" if free < DISK_CRITICAL_GB else "low" if free < DISK_LOW_GB else "normal"
+    level = disk_level(m, free)
     mem = m.get("memory") or {}
     used = None
     if isinstance(mem.get("total_mb"), (int, float)) and isinstance(mem.get("free_mb"), (int, float)):
@@ -177,12 +195,14 @@ def agents_tile(payload: dict, t: Translator) -> dict:
     if not counters:
         return _unmeasured("agents", name, t.mark("never measured"), _reason(a.get("degraded")), "agents.html", t)
     stalled = int(counters.get("stalled") or 0)
-    # The period only: the store is read when the page is built, so a time here would be the
-    # build's own clock (the header's "Measured"), and two builds a minute apart would differ.
-    at = t.mark("last 24 hours")
+    # Each number names its own period: sessions with a turn in the last hour
+    # (agents_view.ACTIVE_SECONDS) and workflows stalled now. Both are read from the store
+    # when the page is built, so the time is the header's "Measured", not a clock here
+    # (two builds a minute apart would differ).
+    at = t.mark("as of this page's measurement")
     return _tile("agents", name, "warn" if stalled else "ok",
-                 t.mark("home@@{n} sessions working", n=int(counters.get("sessionsActive") or 0)),
-                 t.mark("home@@{n} workflows stalled", n=stalled), at, "agents.html", t)
+                 t.mark("home@@{n} sessions active in the last hour", n=int(counters.get("sessionsActive") or 0)),
+                 t.mark("home@@{n} workflows stalled now", n=stalled), at, "agents.html", t)
 
 
 def cloud_tile(payload: dict, t: Translator) -> dict:
@@ -258,9 +278,21 @@ def first_problems(findings: dict | None, limit: int = NEEDS_LIMIT) -> list[dict
     return ranked[:limit]
 
 
+_TOOL = re.compile(r'\bpython "\$\(project-observatory full-path\)/([^"]+)"')
+
+
+def runnable(text: str, payload: dict) -> str:
+    """The page script's `runnable`: a rule names a tool as `python "$(project-observatory
+    full-path)/tools/..."`; with this engine's interpreter and path known it becomes them."""
+    rt = payload.get("runtime") or {}
+    if not rt.get("python"):
+        return text
+    engine = str(rt.get("engine") or ".").rstrip("/")
+    return _TOOL.sub(lambda m: _shell_arg(rt["python"]) + " " + _shell_arg(engine + "/" + m.group(1)), text)
+
+
 def _anchor(fid: object) -> str:
     """The findings page's row anchor, as `renderFindings` writes it."""
-    import re
     return "f-" + re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(fid))
 
 
@@ -278,7 +310,9 @@ def needs_html(payload: dict, t: Translator) -> str:
                 + _copy(full_command(payload, "local"), t) + "</div>")
         return f'<section class="home-needs" aria-labelledby="home-needs-h">{head}{body}</section>'
     counts = f.get("counts") or {}
-    total = sum(int(counts.get(k) or 0) for k in ("critical", "warning", "info"))
+    items = f.get("items") or []
+    total = (sum(int(counts.get(k) or 0) for k in ("critical", "warning", "info"))
+             if counts else len(items))
     when = _stamp(f.get("built_at"))
     groups = first_problems(f)
     if not total or not groups:
@@ -295,12 +329,18 @@ def needs_html(payload: dict, t: Translator) -> str:
         chip = f'<span class="chip{(" " + SEVERITY_CHIP[sev]) if SEVERITY_CHIP.get(sev) else ""}"><span class="dot"></span>{word}</span>'
         label = t.mark(labels[g["type"]]) if labels.get(g["type"]) else _e(g["type"])
         count = (f' <span class="home-count">{t.mark("open: {n}", n=g["count"])}</span>' if g["count"] > 1 else "")
-        subject = (f' <a class="plink fsubj" href="{_e(lead["href"])}">→ {_e(lead.get("href_label") or "")}</a>'
+        # A page subject's label is a message id (`subject_links.PAGE_SUBJECTS`); a row's is a name.
+        target = (t.mark(lead["href_label"]) if lead.get("href_page") else _e(lead.get("href_label") or ""))
+        subject = (f' <a class="plink fsubj" href="{_e(lead["href"])}">→ {target}</a>'
                    if lead.get("href") and lead.get("href_label") else "")
+        # The action the rule names, as the findings page writes it (English, L10N: a
+        # finding's detail and action stay as the rule wrote them; `runnable` as on the page).
+        action = str(lead.get("action") or "").strip()
+        act = f'<span class="act home-act">{t.known(runnable(action, payload))}</span>' if action else ""
         review = f'<a class="fdetail" href="findings.html#{_e(_anchor(lead.get("id")))}">{t.mark("Review →")}</a>'
         rows.append(f'<li class="f" data-type="{_e(g["type"])}" data-sev="{_e(sev)}">{chip}'
                     f'<span class="t"><span class="ftl">{label}{count}</span>{_title(lead, t)}{subject}</span>'
-                    f'{review}</li>')
+                    f'{act}{review}</li>')
     more = f'<p class="home-more"><a href="findings.html">{t.mark("All problems ({n})", n=total)}</a></p>'
     return (f'<section class="home-needs" aria-labelledby="home-needs-h">{head}'
             f'<ol class="flist home-list">{"".join(rows)}</ol>{more}</section>')

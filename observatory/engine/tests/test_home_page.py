@@ -102,9 +102,9 @@ class StateBand(unittest.TestCase):
         self.assertIn("12 without a project", keys)
         self.assertIn('href="creds.html?f=c-leaked"', tile(out, "keys"))
         agents = text(tile(out, "agents"))
-        self.assertIn("2 sessions working", agents)
-        self.assertIn("1 workflow stalled", agents)
-        self.assertIn("last 24 hours", agents)
+        self.assertIn("2 sessions active in the last hour", agents)
+        self.assertIn("1 workflow stalled now", agents)
+        self.assertIn("as of this page's measurement", agents)
         for key, page in (("sites", "domains"), ("apps", "heroku"), ("disk", "machine"), ("agents", "agents")):
             self.assertRegex(tile(out, key), r'^<a[^>]*href="' + page + r'\.html')
 
@@ -201,7 +201,7 @@ class States(unittest.TestCase):
     def test_russian(self):
         out = text(home_page.home_html(full_payload(), RU))
         for part in ("Сайты", "1 работает", "Диск и память", "свободно 8 ГБ", "3 утекли и не сменены",
-                     "2 сессии работают", "1 задача стоит", "Личное облако", "не подключено",
+                     "2 сессии активны за последний час", "1 задача стоит сейчас", "Личное облако", "не подключено",
                      "Требует вас в первую очередь", "Все проблемы (5)", "открыто: 2",
                      "Проекты одним взглядом", "Без организации"):
             self.assertIn(part, out)
@@ -222,6 +222,82 @@ class Shell(unittest.TestCase):
         self.assertNotIn('id="home"', shell.page_html(template, "projects", full_payload()))
         css = (ROOT / "dashboard/workspace.css").read_text(encoding="utf-8")
         self.assertIn('body[data-page="index"] #findings { display: none; }', css.replace(",\n", ", "))
+
+
+class ReviewFixes(unittest.TestCase):
+    """Findings of the independent review of #377."""
+
+    BAD = "__DATA__<img src=x onerror=alert(1)>"
+
+    def template(self):
+        import ast
+        source = ast.parse((ROOT / "dashboard/build_dashboard.py").read_text())
+        return next(ast.literal_eval(node.value) for node in source.body
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
+
+    def test_a_title_naming_a_placeholder_never_becomes_a_live_tag_on_any_page(self):
+        payload = full_payload()
+        payload["findings"]["items"].insert(0, {
+            "id": "x1", "type": "secret.leaked", "severity": "critical", "first_seen": "2026-01-01",
+            "action": "rotate it", "title": self.BAD})
+        payload["findings"]["counts"]["critical"] += 1
+        self.assertEqual(home_page.first_problems(payload["findings"])[0]["type"], "secret.leaked",
+                         "the planted title ranks in the top three")
+        template = self.template()
+        for page in shell.NAMES:
+            with self.subTest(page=page):
+                out = shell.page_html(template, page, payload)
+                body = re.sub(r"<script\b.*?</script>", "", out, flags=re.S)
+                self.assertNotIn("<img src=x", body)
+                self.assertEqual(out.count('"rows":'), 1, "the payload is spliced exactly once")
+        home = shell.page_html(template, "index", payload)
+        self.assertIn("__DATA__&lt;img src=x onerror=alert(1)&gt;", home)
+
+    def test_fill_placeholders_is_one_pass(self):
+        out = shell.fill_placeholders("a __X__ b __Y__ c __KEEP_ME__ __X__",
+                                      {"X": lambda: "__Y__", "Y": lambda: "y"})
+        self.assertEqual(out, "a __Y__ b y c __KEEP_ME__ __Y__")
+
+    def test_a_stale_guard_never_turns_a_fresh_low_disk_green(self):
+        machine = lambda **guard: {"machine": {"measuredAt": "2026-10-27T10:00:00Z",
+                                               "disk": {"volume": {"free_gb": 4}}, "guard": guard},
+                                   "rows": [{"id": "project:a"}]}
+        stale = home_page.disk_tile(machine(at="2026-10-01T10:00:00Z", level="normal"), EN)
+        self.assertEqual(stale["state"], "bad", "4 GB measured today is under the critical line")
+        fresh = {"machine": {"measuredAt": "2026-10-27T10:00:00Z", "disk": {"volume": {"free_gb": 30}},
+                             "guard": {"at": "2026-10-27T10:05:00Z", "level": "critical"}}}
+        self.assertEqual(home_page.disk_tile(fresh, EN)["state"], "bad", "a guard run after the measurement counts")
+        old = {"machine": {"measuredAt": "2026-10-27T10:00:00Z", "disk": {"volume": {"free_gb": 30}},
+                           "guard": {"at": "2026-10-01T10:05:00Z", "level": "critical"}}}
+        self.assertEqual(home_page.disk_tile(old, EN)["state"], "ok", "an old guard run is ignored")
+        lines = {"machine": {"measuredAt": "2026-10-27T10:00:00Z", "disk": {"volume": {"free_gb": 12}},
+                             "diskLevels": {"critical": 15, "low": 40}}}
+        self.assertEqual(home_page.disk_tile(lines, EN)["state"], "bad", "the guard's own lines decide")
+
+    def test_each_problem_row_shows_its_action(self):
+        out = home_page.needs_html(full_payload(), EN)
+        rows = re.findall(r'<li class="f".*?</li>', out, re.S)
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertIn('class="act home-act"', row)
+            self.assertIn("do it", text(row))
+        payload = full_payload()
+        payload["runtime"] = {"python": "/example/python", "engine": "/example/engine"}
+        payload["findings"]["items"][0]["action"] = 'run python "$(project-observatory full-path)/tools/vault.py" leaks'
+        self.assertIn("run '/example/python' '/example/engine/tools/vault.py' leaks",
+                      html.unescape(home_page.needs_html(payload, EN)))
+
+    def test_a_page_subject_label_is_translated(self):
+        payload = full_payload()
+        payload["findings"]["items"][0].update(href="domains.html?f=d-noproject", href_label="Domains",
+                                               href_page=True)
+        self.assertIn("→ Домены", text(home_page.needs_html(payload, RU)))
+
+    def test_all_problems_counts_items_when_counts_are_absent(self):
+        payload = full_payload()
+        payload["findings"].pop("counts")
+        self.assertIn("All problems (5)", text(home_page.needs_html(payload, EN)))
 
 
 if __name__ == "__main__":

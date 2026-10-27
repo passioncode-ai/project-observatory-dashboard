@@ -671,12 +671,12 @@
   "one": "{n} without a project",
   "other": "{n} without a project"
  },
- "home@@{n} sessions working": {
-  "one": "{n} session working",
-  "other": "{n} sessions working"
+ "home@@{n} sessions active in the last hour": {
+  "one": "{n} session active in the last hour",
+  "other": "{n} sessions active in the last hour"
  },
- "home@@{n} workflows stalled": {
-  "one": "{n} workflow stalled",
-  "other": "{n} workflows stalled"
+ "home@@{n} workflows stalled now": {
+  "one": "{n} workflow stalled now",
+  "other": "{n} workflows stalled now"
  }
 }

@@ -12,10 +12,13 @@ while the major version is 0, a minor release may change behaviour and says so h
   memory, keys, agents, personal cloud), each with the time or period it was measured; a source that did not run says
   "not measured" with its reason, never 0 and never green, and the personal cloud says "not connected" until it exists
   (OBS-263). Below them sit the three problems to do first (by severity, then whether you can act now, then age, then
-  how many projects they touch; one row per kind with its count) and "All problems (N)" to the findings page, then your
+  how many projects they touch; one row per kind with its count and the action its rule names) and "All problems (N)" to the findings page, then your
   projects at a glance grouped by organization, then activity and the section cards. A fresh install shows what to
   connect first, with the commands, instead of a row of zeros; nothing open reads "Nothing needs you" with the time of
-  the last check. Home reads only what the pages already read; the eight-row findings preview no longer opens the page.
+  the last check. Home reads only what the pages already read; the eight-row findings preview no longer opens the page. The disk tile
+  takes the worse of the level the measured free space falls in (the disk guard's own lines) and a guard run no older
+  than that measurement. Pages are now filled in one pass, so a title that names a placeholder such as `__DATA__`
+  stays text.
 
 - **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
   harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it

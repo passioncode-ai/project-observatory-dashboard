@@ -435,14 +435,41 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
     template = re.sub(r'<main(\s+id="out"[^>]*)></main>', r'<div\1></div>', template, count=1)
     template = template.replace("__NAV__", '__NAV__\n<main id="workspace" class="workspace" tabindex="-1">', 1)
     template = template.replace("</footer>", "</footer>\n</main>", 1)
-    return (template.replace("__PAGE__", page)
-            .replace("__TITLE__", html.escape(f"{t(title)} — {TITLE_SUFFIX}"))
-            .replace("__PAGE_TITLE__", html.escape(title))
-            .replace("__H1__", t.mark(title, tag="h1"))
-            .replace("__SUB__", t.mark(QUESTIONS[page]) if page in QUESTIONS else "")
-            .replace("__NAV__", nav_html(page, counts, t))
-            .replace("__HOME__", _home(payload, t) if page == "index" else "")
-            .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
-            .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
-            .replace("__AGENTS__", _agents(payload, t) if page == "agents" else "")
-            .replace("__DATA__", data.replace("</", "<\\/")))
+    # ONE PASS. Each placeholder is filled exactly once and no inserted text is scanned
+    # again: with chained `str.replace`, a project or finding title holding the literal
+    # `__DATA__` (which `html.escape` leaves alone) was replaced by the raw payload JSON
+    # in body context, a live tag on the page (review of #377). Unknown `__NAME__` tokens
+    # (a comment in the script, a placeholder another builder fills) are left as they are.
+    fills = {
+        "PAGE": lambda: page,
+        "TITLE": lambda: html.escape(f"{t(title)} — {TITLE_SUFFIX}"),
+        "PAGE_TITLE": lambda: html.escape(title),
+        "H1": lambda: t.mark(title, tag="h1"),
+        "SUB": lambda: t.mark(QUESTIONS[page]) if page in QUESTIONS else "",
+        "NAV": lambda: nav_html(page, counts, t),
+        "HOME": lambda: _home(payload, t) if page == "index" else "",
+        "CARDS": lambda: cards_html(payload, counts, t) if page == "index" else "",
+        "MACHINE": lambda: _machine(payload, t) if page == "machine" else "",
+        "AGENTS": lambda: _agents(payload, t) if page == "agents" else "",
+        "DATA": lambda: data.replace("</", "<\\/"),
+    }
+    return fill_placeholders(template, fills)
+
+
+#: `__NAME__` in a page template: capitals, digits and inner underscores, shortest match.
+PLACEHOLDER = re.compile(r"__([A-Z][A-Z0-9_]*?)__")
+
+
+def fill_placeholders(template: str, fills: dict) -> str:
+    """Every `__NAME__` with a fill, in one left-to-right pass; the text a fill returns is
+    never scanned for placeholders, so data cannot name one. Each fill runs once."""
+    done: dict[str, str] = {}
+
+    def one(m: re.Match) -> str:
+        name = m.group(1)
+        if name not in fills:
+            return m.group(0)
+        if name not in done:
+            done[name] = fills[name]()
+        return done[name]
+    return PLACEHOLDER.sub(one, template)
