@@ -1236,22 +1236,38 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   is never in an argument, the environment, a log, a notification or anything the agent reads,
   and the local server sees only the slot's metadata afterwards. The child answers only when one
   of its parents, while running, satisfies the enrolled app's code requirement (its team and
-  bundle id); a program that runs the same command is refused `client-unverified`.
+  bundle id); a program that runs the same command on its own is refused `client-unverified`.
+- **Only with an engine no other program can change.** That parent check proves only that the
+  request came through the app's own process tree, and whatever the app runs is in that tree: a
+  program of your user that can change the engine the app runs (the program path in its
+  settings, a per-user install, its interpreter or its files) could read the queue, answer
+  requests and see what you type. So the app shows the window only when the engine is inside the
+  signed app or owned by the system and writable by nobody else, and runs it with a scrubbed
+  environment; otherwise it answers each request `no-client`, reason `engine-untrusted`, with your
+  `vault.py put` step. On an ordinary per-user install (a virtual environment, Homebrew,
+  `~/.local/bin`) that means no window in this release.
 - **Your phrase.** At the first request the window asks you to set a short phrase; change it in
   the app's Settings. Every genuine prompt shows it, so a window without it is not Observatory's:
   cancel it. It is kept in the data protection keychain, in the app's own access group, which no
-  other program of your user can read, and never in a vault slot or a tool result. That group
-  needs the signed release built with its provisioning profile; a build without it (a source or
-  ad hoc build) keeps no phrase, shows no window and answers each request `no-client` with your
-  `vault.py put` step.
+  other program of your user can read, and never in a vault slot or a tool result. The window is
+  kept out of screen sharing and of capture that honours a window's sharing setting, and the
+  phrase is left out of the accessibility tree (a neutral label stands in for it). The limit: a
+  program you granted Screen Recording may still capture the window on recent macOS, so do not
+  grant it to an agent's host. That keychain group needs the app signed with a provisioning
+  profile, and **this release's app is not**: it keeps no phrase, shows no window and answers each
+  request `no-client` with your `vault.py put` step (the release will fetch the profile through
+  the App Store Connect API in a follow-up).
 - **Not on Windows or Linux yet.** Windows has no lifecycle broker in this release (OBS-277), and
   the window is opened only through it, so a request there is answered `no-client`, reason
   `broker-unsupported`. On Linux the local server cannot verify that a window is Observatory's own
   signed app, so the answer stays `no-client`. When the desktop app's window ships, its phrase is
   kept with DPAPI on Windows and the Secret Service on Linux, which any program running as your
   user can read: there the phrase only stops an agent that does not look for it.
-- **The limit, on the Mac too.** The request queue is an owner-only file, so another program of
-  your user can read the requests' text on disk; it cannot answer a request or see a value.
+- **The limits, on the Mac too.** The request queue is an owner-only file, so another program of
+  your user can read the requests' text on disk. A stored value sits in the vault slot, which any
+  program of your user can read: the prompt keeps the value out of the agent's chat, transcript,
+  logs and tool results, not out of reach of a program that goes looking. Running agents as
+  another user, or in a container, is the stronger defence.
 
 Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D4.
 

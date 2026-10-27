@@ -92,6 +92,10 @@ enum DashboardMode: Equatable {
     @Published var secretBusy = false
     /// The phrase's store: the signed app's data protection keychain group, or a stand-in in tests.
     let phraseStore: PhraseStore
+    /// Whether the engine the app runs may receive a typed key (`EngineTrust`); tests replace it.
+    var engineCheck: (String) -> EngineTrust.Verdict = { EngineTrust.verdict(executable: $0, bundle: Bundle.main.bundlePath) }
+    /// The verdict for the engine this model runs now.
+    func secretEngineVerdict() -> EngineTrust.Verdict { engineCheck(activeExecutable) }
     var secretWatch: Task<Void, Never>?
     var dashboardError: String? { dashboardFailure.map { message($0.code, $0.detail) } }
     var error: String? { failure.map { message($0.code, $0.detail) } }

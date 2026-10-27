@@ -44,9 +44,17 @@ does with it. What it keeps, and why:
   enrolled app (its team and bundle id): an agent that runs the same command has no such parent and is refused
   `client-unverified`. `client_store` writes the value into the slot here, as `vault.py put` (an empty slot) or
   `rotate` (a replacement) writes it, so the value travels only on the pipe between the app and its own child and
-  never through the node, an argument, the environment, a log, the journal or an answer. The limit, stated plainly:
-  the queue file itself is owner-only, so another program of the same user can read the requests' text on disk;
-  what it cannot do is answer a request or see a value.
+  never through the node, an argument, the environment, a log, the journal or an answer.
+- **The limits, stated plainly.** The parent check proves only that the request came through the app's own process
+  tree. Whatever the app runs is in that tree, so a program of the same user that can change what the app runs (the
+  engine executable the app's settings name, its interpreter or the engine's files) would pass it, read the queue,
+  answer requests and see a value typed into the window. The app therefore answers `engine-untrusted` and shows no
+  window unless the engine it runs is inside the signed app or owned by the system and writable by nobody else
+  (`EngineTrust` in the Mac app), and it runs that engine with a scrubbed environment. On an ordinary per-user
+  install that means no window. Beyond that: the queue file is owner-only, so another program of the same user can
+  read the requests' text on disk; and once stored, the slot is readable by any program of the same user, which is
+  D4's stated property (out of the chat, transcripts, logs and tool results, not out of reach of a program that goes
+  looking).
 """
 from __future__ import annotations
 
@@ -59,6 +67,7 @@ import secrets as _secrets
 import sys
 import threading
 import time
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -110,6 +119,10 @@ MESSAGES = {
     "client-unverified": "only Observatory's own signed app may read or answer a secret request",
     "request-closed": "the request is no longer waiting",
     "not-stored": "the value was not written to the vault slot",
+    "value-empty": "the value is empty; nothing was written",
+    "value-multiline": "the value carries a line break; one secret per slot, nothing was written",
+    "value-unchanged": "the new value equals the one the slot holds; nothing was written",
+    "slot-filled-now": "the slot was filled after the request without asking to replace it; nothing was written",
 }
 #: Why a window cannot be shown (`no-client`), by reason code.
 NO_CLIENT = {
@@ -122,8 +135,11 @@ NO_CLIENT = {
     "app-held-off": "Observatory's app is held off with the lifecycle broker, so the node does not open it",
     "broker-unsupported": "this release has no lifecycle broker on Windows (OBS-277), and the prompt window is opened "
                           "only through it",
-    "phrase-store-unavailable": "Observatory's app cannot keep the person's phrase on this Mac (a build without the "
-                                "keychain entitlement), and a window without the phrase is not shown",
+    "phrase-store-unavailable": "this release of Observatory's app cannot keep the person's phrase yet (its "
+                                "signing carries no provisioning profile for the keychain group), and a window "
+                                "without the phrase is not shown",
+    "engine-untrusted": "Observatory's app shows a prompt only with an engine no other program of this user can "
+                        "change (one inside the app, or owned by the system), and this one can be changed",
 }
 #: The steps that make a genuine window possible, by reason code; shown beside the person's vault.py step.
 NO_CLIENT_FIX = {
@@ -131,12 +147,11 @@ NO_CLIENT_FIX = {
                          "observatory.app --kind app --path PATH --caller service:observatory --startup-effect TEXT, "
                          "with PATH the installed Project Observatory.app"),
     "app-held-off": "release it at your terminal: project-observatory full lifecycle hold observatory.app --release",
-    "phrase-store-unavailable": "install the signed release of Project Observatory.app",
 }
 #: Observatory's own Mac app, the only app the node opens for a prompt (macos/scripts/build-app.sh).
 OBSERVATORY_BUNDLE_ID = "ai.passioncode.observatory"
 #: What the app may say when it cannot show a genuine window (`client_unavailable`).
-CLIENT_REASONS = ("phrase-store-unavailable",)
+CLIENT_REASONS = ("phrase-store-unavailable", "engine-untrusted")
 
 
 class BindingsError(ValueError):
@@ -497,8 +512,10 @@ def validate(arguments: Any) -> dict:
                                  or credential_shape.find(provider)):
         raise Refused("invalid-argument", field="provider")
     reason = arguments["why"].strip()
-    if len(reason) > REASON_MAX or "\n" in reason or "\r" in reason:
-        raise Refused("invalid-argument", field="why", why=f"one line of at most {REASON_MAX} characters")
+    # One plain line: no control, format or separator character (U+2028, U+2029, the bidi overrides and isolates),
+    # which could reorder or hide what the window shows as the agent's words.
+    if len(reason) > REASON_MAX or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in reason):
+        raise Refused("invalid-argument", field="why", why=f"one plain line of at most {REASON_MAX} characters")
     if credential_shape.find(reason):
         raise Refused("invalid-argument", field="why", why="it looks like it carries a credential; say why the "
                                                           "key is needed, never a value")
@@ -844,8 +861,9 @@ def client_store(request_id: Any, value: Any) -> dict:
         vault.store_value(r["project"], r["env"], r["name"], value, replace=bool(r["replaces"]),
                           tool="secret-prompt")
     except vault.VaultBoundaryError as exc:
-        # The vault's messages name the rule and the slot, never the value.
-        raise Refused("not-stored", why=str(exc)) from None
+        # The vault's reason by its code (an empty value, a line break, the same value, a slot filled since); its
+        # messages name the rule and the slot, never the value.
+        raise Refused(getattr(exc, "code", None) or "not-stored", why=str(exc)) from None
     finally:
         value = None
     return answer(r["id"], "stored")

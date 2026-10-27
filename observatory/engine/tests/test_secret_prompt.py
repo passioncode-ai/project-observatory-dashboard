@@ -590,11 +590,24 @@ class TheAppsDoor(Base):
 
     def test_a_value_with_a_line_break_or_nothing_is_not_stored(self):
         rid = ask("alpha", "DOOR_BAD_KEY")["request"]["requestId"]
-        for value in ("", "   ", "first\nsecond"):
+        for value, why in (("", "value-empty"), ("   ", "value-empty"), ("first\nsecond", "value-multiline")):
             code, answer, text = self.door({"op": "store", "requestId": rid, "value": value})
-            self.assertEqual((code, answer), (1, {"error": "not-stored"}))
+            self.assertEqual((code, answer), (1, {"error": why}), "the vault's reason reaches the window")
         self.assertFalse(SP.slot_state(PROJECT, ENV, "DOOR_BAD_KEY")["filled"])
         self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_an_unchanged_value_says_so(self):
+        app_writes("DOOR_SAME_KEY")
+        rid = ask("alpha", "DOOR_SAME_KEY", replace=True)["request"]["requestId"]
+        self.assertEqual(self.door({"op": "store", "requestId": rid, "value": VALUE})[1], {"error": "value-unchanged"})
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_an_engine_the_app_cannot_trust_is_answered_no_client(self):
+        rid = ask("alpha", "DOOR_ENGINE_KEY")["request"]["requestId"]
+        out = self.door({"op": "unavailable", "requestId": rid, "reason": "engine-untrusted"})[1]["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "engine-untrusted"))
+        self.assertIn("vault.py", out["step"])
+        self.assertNotIn("fix", out, "no step tells the person to install what they already run")
 
     def test_decline_and_no_place_for_the_phrase(self):
         rid = ask("alpha", "DOOR_DECLINED_KEY")["request"]["requestId"]
@@ -653,6 +666,12 @@ class ReviewFollowUps(Base):
         with mock.patch.object(hmac, "compare_digest", wraps=hmac.compare_digest) as compared:
             SP.agent_for("Bearer " + "w" * 40)
         self.assertGreater(compared.call_count, 0)
+
+    def test_a_reason_with_a_line_separator_or_a_bidi_control_is_refused(self):
+        for bad in ("deploy\u2028the handler", "deploy\u2029x", "pay \u202eredli", "x\u2066y\u2069", "a\x07b"):
+            out = ask("alpha", "BIDI_KEY", why=bad)
+            self.assertEqual((out["error"], out["field"]), ("invalid-argument", "why"), repr(bad))
+        self.assertEqual(SP.waiting(), [])
 
     def test_a_bad_project_is_reported_as_the_project_field(self):
         out = call("alpha", "secret.request", {"project": "../up", "env": ENV, "slot": "FIELD_KEY", "why": "x"})

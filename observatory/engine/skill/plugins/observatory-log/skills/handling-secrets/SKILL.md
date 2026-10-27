@@ -34,8 +34,9 @@ their own shell (`vault.py put`, the value on its stdin); relay that step, never
 a request for the value. The MCP server needs `--agent NAME`, which `project-observatory
 full agent-binding issue NAME` prints when the person connects the agent. The
 window is the Mac app's, which the node opens through its lifecycle broker and
-which shows the person's own phrase; on Windows and Linux, or with the app not
-enrolled with the broker, a request is answered `no-client` with that step.
+which shows the person's own phrase; on Windows and Linux, with the app not
+enrolled, or without a phrase store or a trusted engine, a request is answered
+`no-client` with that step.
 
 ## Start here
 

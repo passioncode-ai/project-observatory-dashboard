@@ -110,6 +110,11 @@ def backup_script(root: pathlib.Path) -> pathlib.Path | None:
 class VaultBoundaryError(ValueError):
     """Safe static diagnostics, never interpolated secret or request values."""
 
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        #: A short reason a caller can word (`store_value`), or None.
+        self.code = code
+
 
 def die(msg: str) -> None:
     sys.exit(f"vault: {msg}")
@@ -369,18 +374,19 @@ def store_value(project: str, env: str, name: str, value: str, *, replace: bool,
     slot = _slot(project, env, name)
     value = (value or "").strip()
     if not value:
-        raise VaultBoundaryError("the value is empty")
+        raise VaultBoundaryError("the value is empty", "value-empty")
     if "\n" in value or "\r" in value:
-        raise VaultBoundaryError("the value carries a line break; one secret per slot")
+        raise VaultBoundaryError("the value carries a line break; one secret per slot", "value-multiline")
     meta = _read_meta(slot)
     label = f"{project}/{env}/{name}"
     if not slot.is_file():
         _write_put(slot, meta, value, label, tool=tool)
         return "put"
     if not replace:
-        raise VaultBoundaryError("the slot already holds a value and the request did not ask to replace it")
+        raise VaultBoundaryError("the slot already holds a value and the request did not ask to replace it",
+                                 "slot-filled-now")
     if value == _read_private(slot).strip():
-        raise VaultBoundaryError("the new value equals the old one")
+        raise VaultBoundaryError("the new value equals the old one", "value-unchanged")
     _write_rotate(slot, meta, value, label, tool=tool)
     return "rotate"
 

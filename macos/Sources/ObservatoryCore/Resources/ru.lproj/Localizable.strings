@@ -65,8 +65,8 @@
 "No spending limit is set." = "Лимит расходов не задан.";
 "Not connected" = "Нет подключения";
 "Not connected to an engine." = "Нет подключения к движку.";
-"Observatory cannot keep your phrase on this Mac, so it shows no secret prompt. Install the signed release of Project Observatory." = "Observatory не может хранить вашу фразу на этом Mac, поэтому не показывает запросы ключей. Установите подписанный выпуск Project Observatory.";
 "Observatory is not installed yet" = "Observatory ещё не установлен";
+"Observatory shows a secret prompt only with an engine no other program can change: one inside the app, or owned by the system. Store a key yourself with vault.py put in your own shell." = "Observatory показывает запрос ключа, только если его движок не может изменить другая программа: движок внутри приложения или принадлежащий системе. Сохраните ключ сами командой vault.py put в своём терминале.";
 "Only Observatory's own signed app can answer a secret request." = "Ответить на запрос ключа может только подписанное приложение Observatory.";
 "Open System Settings" = "Открыть Системные настройки";
 "Open at login" = "Открывать при входе в систему";
@@ -157,6 +157,7 @@
 "The engine stopped with an error{detail}. Check the program and workspace in Settings." = "Движок завершился с ошибкой{detail}. Проверьте программу и папку данных в настройках.";
 "The engine took too long. Refresh to check whether your request was accepted." = "Движок не ответил вовремя. Нажмите «Обновить», чтобы проверить, принят ли запрос.";
 "The findings could not be read." = "Не удалось прочитать находки.";
+"The key is empty. Nothing was saved." = "Ключ пустой. Ничего не сохранено.";
 "The key must be one line." = "Ключ должен занимать одну строку.";
 "The key was not saved. Check that it is one line, then try again." = "Ключ не сохранён. Проверьте, что он занимает одну строку, и попробуйте снова.";
 "The machine snapshot could not be read." = "Не удалось прочитать снимок машины.";
@@ -174,6 +175,7 @@
 "The question looks like it contains a credential. Remove it — keys are never sent to the model." = "Похоже, в вопросе есть ключ. Удалите его: ключи никогда не передаются модели.";
 "The request was stopped before it finished." = "Запрос остановлен до завершения.";
 "The runner stopped before an answer was saved. Send the question again." = "Обработчик остановился до сохранения ответа. Отправьте вопрос снова.";
+"The slot was filled after the agent asked. Nothing was saved; the agent can ask again to replace it." = "Ячейку заполнили после запроса агента. Ничего не сохранено; агент может запросить замену ещё раз.";
 "The update could not start. It installs when you quit Project Observatory." = "Обновление не запустилось. Оно установится при выходе из Project Observatory.";
 "The workspace could not be written. Check its permissions and free space." = "Не удалось записать в папку данных. Проверьте права доступа и свободное место.";
 "They differ" = "Они различаются";
@@ -181,8 +183,10 @@
 "This conversation has reached its limit of 32 turns. Start a new conversation." = "Диалог достиг предела в 32 хода. Начните новый диалог.";
 "This folder is not a workspace yet" = "Это ещё не папка данных";
 "This folder is not an Observatory workspace yet. Create it with `project-observatory full init` (with OBSERVATORY_HOME set to it), or choose an existing workspace in Settings." = "Это ещё не папка данных Observatory. Создайте её командой `project-observatory full init` (с OBSERVATORY_HOME, указывающим на неё) или выберите существующую папку данных в настройках.";
+"This is the value the slot already holds. Nothing was saved." = "В ячейке уже это значение. Ничего не сохранено.";
 "This machine's disk and memory are not measured yet: run `project-observatory full machine`." = "Диск и память этой машины ещё не измерены: выполните `project-observatory full machine`.";
 "This machine's keys could not be read or created. Run `project-observatory full node --init` in a terminal to see why." = "Не удалось прочитать или создать ключи этой машины. Выполните `project-observatory full node --init` в терминале, чтобы узнать причину.";
+"This release of Project Observatory cannot keep your phrase yet, so it shows no secret prompt. Store a key yourself with vault.py put in your own shell." = "Этот выпуск Project Observatory пока не может хранить вашу фразу, поэтому не показывает запросы ключей. Сохраните ключ сами командой vault.py put в своём терминале.";
 "This request is no longer waiting." = "Этот запрос больше не ждёт ответа.";
 "This slot already holds a value, last changed {when}. Saving replaces it; the old value is archived." = "В этой ячейке уже есть значение, последнее изменение: {when}. Сохранение заменит его, а старое значение уйдёт в архив.";
 "This workspace has no dashboard yet" = "У этой папки данных ещё нет дашборда";
@@ -203,6 +207,7 @@
 "Your passkey signs a revision that adds {machine} to your network. Check that these keys are the new machine's before you sign:" = "Ключ входа подпишет ревизию, которая добавит {machine} в вашу сеть. Перед подписью проверьте, что эти ключи принадлежат новой машине:";
 "Your passkey signs on the hub's page, which is not live yet. Nothing has been signed." = "Ключ входа подписывает на странице хаба, а она ещё не работает. Ничего не подписано.";
 "Your phrase" = "Ваша фраза";
+"Your phrase is shown on screen" = "Ваша фраза показана на экране";
 "Your phrase: “{phrase}”" = "Ваша фраза: «{phrase}»";
 "engine without the dashboard actions" = "движок без действий дашборда";
 "measurement time unknown" = "время измерения неизвестно";

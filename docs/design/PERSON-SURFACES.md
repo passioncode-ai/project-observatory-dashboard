@@ -442,7 +442,17 @@ person's phrase in the data protection keychain (the app's access group, signed 
 provisioning profile; a build without it answers `no-client`). How the value moves, exactly: the
 window hands it to the engine process the app spawned, on that process's stdin; that process writes it
 into the slot with the vault's own writer (`vault.store_value`, as `put` or `rotate`) and drops it; the
-node reads only the slot's metadata. Not built: the Windows desktop window (the node has no lifecycle
+node reads only the slot's metadata. That pipe and child are inside the app's process tree, which is
+what the door's parent check proves; a program of the same user that can change what the app runs
+could pass it, so the app shows the window only when its engine is inside the signed app or owned by
+the system and writable by nobody else (`EngineTrust`), runs it with a scrubbed environment, and
+answers `no-client`, reason `engine-untrusted`, otherwise: on an ordinary per-user install, no window.
+The window is excluded from sharing (`NSWindow.sharingType = .none`) and the phrase from the
+accessibility tree; a program with Screen Recording may still capture it on recent macOS. This
+release's app is not signed with the provisioning profile the keychain group needs, so it keeps no
+phrase and answers `no-client`, reason `phrase-store-unavailable`; the follow-up is that the release
+fetches or creates the Developer ID profile through the App Store Connect API with the key it already
+holds. Not built: the Windows desktop window (the node has no lifecycle
 broker on Windows yet, OBS-277, and the window is opened only through it), so Windows answers
 `no-client`, reason `broker-unsupported`; Linux stays `no-client` (DEC-0143 SP-2). The queue's states and
 outcomes are those of the contract's draft `secret.prompt` channel method (DEC-0143, SP-1 to SP-7), so
@@ -463,9 +473,10 @@ tool.
   name, the same limit as the phrase on Linux and Windows; the prompt still shows the slot and the
   reason, and nothing is stored without the person typing it. The node asks
   the lifecycle broker (OSS-76) to open Observatory's own code-signed app with the request id, never a
-  direct launch. The app reads the request from the node, shows the window, and writes the value into
-  the vault slot itself, in its own process, as `vault.py put` writes it: **the value never crosses the
-  local channel or any other process boundary.** The job then reads the outcome, `stored`,
+  direct launch. The app reads the request from the node, shows the window, and the value goes into the
+  vault slot without crossing the local channel or reaching the node: the window hands it on stdin to
+  the engine process the app itself spawned, which writes it as `vault.py put` writes it (the status
+  note above says exactly how, and what that does not protect against). The job then reads the outcome, `stored`,
   `declined` or `no answer`; no value is ever in an argument, an environment variable, a log, a
   notification or the result. When the node is down, the request fails with "Observatory is not
   running" and no window is shown by anyone.

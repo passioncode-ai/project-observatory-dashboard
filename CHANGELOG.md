@@ -31,8 +31,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   running parent satisfies the enrolled app's code requirement reads or answers a request (`client-unverified`
   otherwise). The phrase is set at the first request and changed in Settings, and kept in the data protection
   keychain in the app's own access group; the signing setup adds that entitlement only with a provisioning profile
-  (`OBSERVATORY_PROVISIONING_PROFILE`, `OBSERVATORY_TEAM_ID`), and a build without it shows no window and answers
-  `no-client`. Windows answers `no-client`, reason `broker-unsupported`, until it has a lifecycle broker (OBS-277);
+  (`OBSERVATORY_PROVISIONING_PROFILE`, `OBSERVATORY_TEAM_ID`); this release's app is not signed with one yet, so it
+  keeps no phrase, shows no window and answers `no-client` with your `vault.py put` step. The window is also shown
+  only when the engine the app runs is inside the app or owned by the system and writable by nobody else (otherwise
+  `engine-untrusted`, which is the case for an ordinary per-user install), the engine runs with a scrubbed
+  environment, the window is kept out of screen sharing, the phrase out of the accessibility tree, Save needs a
+  click (not Return), and a reason carrying a line separator or a bidi control is refused. Windows answers `no-client`, reason `broker-unsupported`, until it has a lifecycle broker (OBS-277);
   Linux stays `no-client`. Fixed from the review of #378: the bearer is compared in constant time, a bad project is
   reported as the project field, the provider goes through the credential-shape check, invalid arguments are
   journalled, and a request is withdrawn when its job cannot start or its runner is refused.

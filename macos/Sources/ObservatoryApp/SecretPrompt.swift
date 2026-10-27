@@ -24,16 +24,19 @@ extension Model {
         }
     }
 
-    /// One read of the queue. A request appears: with no place for the phrase it is answered `no-client` at once and
-    /// no window is shown; otherwise the window comes forward.
+    /// One read of the queue. A request appears: with an engine another program could change, or no place for the
+    /// phrase, it is answered `no-client` at once and no window is shown; otherwise the window comes forward. A
+    /// request that is gone from the queue (withdrawn, answered elsewhere, past its ten minutes) leaves the window.
     func readSecretRequests() async {
         guard let input = SecretRequest.input(op: "list"),
               let answer = try? await secretCall(input), let requests = SecretRequest.list(answer: answer) else { return }
-        let stage = SecretPromptStage.of(phraseStore)
+        var stage = SecretPromptStage.of(phraseStore)
+        if !requests.isEmpty, !secretEngineVerdict().trusted { stage = .untrustedEngine }
         secretStage = stage
-        if stage == .unavailable {
+        let refusal = stage == .untrustedEngine ? "engine-untrusted" : stage == .unavailable ? "phrase-store-unavailable" : nil
+        if let refusal {
             for r in requests {
-                if let refuse = SecretRequest.input(op: "unavailable", requestId: r.requestId, reason: "phrase-store-unavailable") {
+                if let refuse = SecretRequest.input(op: "unavailable", requestId: r.requestId, reason: refusal) {
                     _ = try? await secretCall(refuse)
                 }
             }
@@ -85,10 +88,25 @@ extension Model {
         switch f.code {
         case "client-unverified": return t("Only Observatory's own signed app can answer a secret request.")
         case "request-closed": return t("This request is no longer waiting.")
+        case "value-empty": return t("The key is empty. Nothing was saved.")
+        case "value-multiline": return t("The key must be one line.")
+        case "value-unchanged": return t("This is the value the slot already holds. Nothing was saved.")
+        case "slot-filled-now": return t("The slot was filled after the agent asked. Nothing was saved; the agent can ask again to replace it.")
         case "not-stored": return t("The key was not saved. Check that it is one line, then try again.")
         default: return message(f.code, f.detail)
         }
     }
+}
+
+/// Keeps the window out of screen sharing and capture that honours `NSWindow.sharingType` (OBS-260, M2 of the review
+/// of #382): the phrase is the one thing an imitation would need.
+struct UnsharedWindow: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { view.window?.sharingType = .none }
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) { view.window?.sharingType = .none }
 }
 
 struct SecretPromptView: View {
@@ -97,6 +115,7 @@ struct SecretPromptView: View {
     @State private var value = ""
     @State private var phrase = ""
     @State private var phraseRefused = false
+    @State private var shownId: String?
     @FocusState private var field: String?
 
     var body: some View {
@@ -106,7 +125,10 @@ struct SecretPromptView: View {
             }
             switch m.secretStage {
             case .unavailable:
-                Text(m.t("Observatory cannot keep your phrase on this Mac, so it shows no secret prompt. Install the signed release of Project Observatory."))
+                Text(m.t("This release of Project Observatory cannot keep your phrase yet, so it shows no secret prompt. Store a key yourself with vault.py put in your own shell."))
+                    .foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            case .untrustedEngine:
+                Text(m.t("Observatory shows a secret prompt only with an engine no other program can change: one inside the app, or owned by the system. Store a key yourself with vault.py put in your own shell."))
                     .foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             case .needsPhrase:
                 phraseSetup
@@ -123,6 +145,14 @@ struct SecretPromptView: View {
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.bg)
+        .background(UnsharedWindow())
+        // A new request never inherits what was typed for another; a withdrawn one takes the window down.
+        .onChange(of: m.secretRequests.first?.requestId) { _, now in
+            value = ""
+            if shownId != nil, now == nil { dismiss() }
+            shownId = now
+        }
+        .onAppear { shownId = m.secretRequests.first?.requestId }
         // The value never outlives the window.
         .onDisappear { value = "" }
     }
@@ -133,7 +163,7 @@ struct SecretPromptView: View {
                 .accessibilityAddTraits(.isHeader)
             Text(m.t("Choose a short phrase only you know. Every genuine secret prompt shows it, so a window without it is not Observatory's."))
                 .foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            TextField(m.t("Your phrase"), text: $phrase).focused($field, equals: "phrase").focusEffectDisabled()
+            SecureField(m.t("Your phrase"), text: $phrase).focused($field, equals: "phrase").focusEffectDisabled()
                 .fieldChrome(focused: field == "phrase").accessibilityLabel(m.t("Your phrase"))
             if phraseRefused {
                 Text(m.t("A phrase is 3 to 64 characters on one line.")).font(.callout).foregroundStyle(Tone.warning.color)
@@ -145,31 +175,42 @@ struct SecretPromptView: View {
 
     private func prompt(_ r: SecretRequest, phrase: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(m.t("{agent} asks for a key", ["agent": r.agent])).font(.title2.weight(.semibold))
-                .foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-                GridRow { label(m.t("Project")); Text(r.project).foregroundStyle(Theme.text).textSelection(.enabled) }
-                GridRow { label(m.t("Slot")); Text(r.env + " / " + r.name).foregroundStyle(Theme.text).textSelection(.enabled) }
-                if let provider = r.provider {
-                    GridRow { label(m.t("Provider")); Text(provider).foregroundStyle(Theme.text) }
+            // The request's text scrolls; the phrase, the field and the buttons stay on screen.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(m.t("{agent} asks for a key", ["agent": r.agent])).font(.title2.weight(.semibold))
+                        .foregroundStyle(Theme.text).accessibilityAddTraits(.isHeader)
+                    Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                        GridRow { label(m.t("Project")); Text(r.project).foregroundStyle(Theme.text).textSelection(.enabled) }
+                        GridRow { label(m.t("Slot")); Text(r.env + " / " + r.name).foregroundStyle(Theme.text).textSelection(.enabled) }
+                        if let provider = r.provider {
+                            GridRow { label(m.t("Provider")); Text(provider).foregroundStyle(Theme.text) }
+                        }
+                        // The agent's own words, quoted: never the app's sentence.
+                        GridRow { label(m.t("Why")); Text("“" + r.reason + "”").foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    if r.replaces {
+                        Text(m.t("This slot already holds a value, last changed {when}. Saving replaces it; the old value is archived.",
+                                 ["when": r.lastChange ?? "?"]))
+                            .font(.callout).foregroundStyle(Tone.warning.color).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                // The agent's own words, quoted: never the app's sentence.
-                GridRow { label(m.t("Why")); Text("“" + r.reason + "”").foregroundStyle(Theme.text).fixedSize(horizontal: false, vertical: true) }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 220)
+            // The phrase is drawn for the eye only: the accessibility tree reads a neutral label, never the phrase.
             Text(m.t("Your phrase: “{phrase}”", ["phrase": phrase])).font(.callout.weight(.semibold)).foregroundStyle(Tone.info.color)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(m.t("Your phrase is shown on screen"))
             Text(m.t("If this window does not show your phrase, it is not Observatory. Cancel it."))
                 .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            if r.replaces {
-                Text(m.t("This slot already holds a value, last changed {when}. Saving replaces it; the old value is archived.",
-                         ["when": r.lastChange ?? "?"]))
-                    .font(.callout).foregroundStyle(Tone.warning.color).fixedSize(horizontal: false, vertical: true)
-            }
             SecureField(m.t("Paste the key"), text: $value).focused($field, equals: "value").focusEffectDisabled()
                 .fieldChrome(focused: field == "value").accessibilityLabel(m.t("Paste the key"))
             if !value.isEmpty, SecretValue.problem(value) == .lineBreak {
                 Text(m.t("The key must be one line.")).font(.callout).foregroundStyle(Tone.warning.color)
             }
             Text(m.t("It is stored in the vault, not in the agent's chat.")).font(.caption).foregroundStyle(Theme.muted)
+            // No default action: Return in the field saves nothing, Save takes a deliberate click.
             HStack(spacing: 10) {
                 Button(m.t("Cancel")) { let shown = r; value = ""; Task { await m.answerSecret(shown, value: nil) } }
                     .buttonStyle(SecondaryButtonStyle()).disabled(m.secretBusy)
@@ -178,7 +219,7 @@ struct SecretPromptView: View {
                     value = ""
                     Task { await m.answerSecret(shown, value: typed) }
                 }
-                .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                .buttonStyle(PrimaryButtonStyle())
                 .disabled(m.secretBusy || SecretValue.problem(value) != nil)
             }
             .padding(.top, 8)
@@ -201,12 +242,12 @@ struct PhraseSettings: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(m.t("Secret prompt phrase")).font(.callout.weight(.semibold)).foregroundStyle(Theme.text)
             switch SecretPromptStage.of(m.phraseStore) {
-            case .unavailable:
-                Text(m.t("Observatory cannot keep your phrase on this Mac, so it shows no secret prompt. Install the signed release of Project Observatory."))
+            case .unavailable, .untrustedEngine:
+                Text(m.t("This release of Project Observatory cannot keep your phrase yet, so it shows no secret prompt. Store a key yourself with vault.py put in your own shell."))
                     .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             case .needsPhrase, .prompt:
                 HStack(spacing: 10) {
-                    TextField(m.t("Your phrase"), text: $phrase).focused($focused).focusEffectDisabled()
+                    SecureField(m.t("Your phrase"), text: $phrase).focused($focused).focusEffectDisabled()
                         .fieldChrome(focused: focused).accessibilityLabel(m.t("Your phrase"))
                     Button(m.t("Save phrase")) { refused = !m.savePhrase(phrase); if !refused { phrase = "" } }
                         .buttonStyle(SecondaryButtonStyle())

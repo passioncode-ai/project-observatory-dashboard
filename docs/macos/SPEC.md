@@ -53,7 +53,15 @@ log, the answer or the journal. The app reads `list` every five seconds and brin
 `Secret request` window forward when a request appears; the window shows the person's
 phrase from the data protection keychain (the app's own access group; the signing setup
 applies `macos/ProjectObservatory.entitlements` only with a provisioning profile). With no
-place for the phrase the app shows no window and answers `unavailable`.
+place for the phrase the app shows no window and answers `unavailable` (`phrase-store-unavailable`).
+It also answers `unavailable` (`engine-untrusted`) and shows no window unless the program it runs
+is inside the app bundle or, with its script interpreter and the folder trees they live in, owned
+by root and writable by nobody else (`EngineTrust`): the parent check vouches only for the app's
+process tree, and a program of the same user that can change what the app runs would be in it.
+The `secret` action runs with a scrubbed environment (system PATH, `PYTHONNOUSERSITE=1`, no
+`PYTHON*` or `DYLD_*` variables). The window has `sharingType = .none`, the phrase is hidden
+from the accessibility tree behind a neutral label, Return does not save, a new request clears
+the field, and a request that leaves the queue closes the window.
 Unknown actions/fields/ids fail closed. A full
 disk is `disk-full`, an unwritable workspace `workspace-unwritable`.
 

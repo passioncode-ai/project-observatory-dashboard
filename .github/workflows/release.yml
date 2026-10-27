@@ -96,6 +96,10 @@ jobs:
       - name: Build the app, signed with the Developer ID
         env:
           OBSERVATORY_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
+          # The keychain group for the secret prompt's phrase (OBS-260) is signed in only together with a Developer
+          # ID provisioning profile in OBSERVATORY_PROVISIONING_PROFILE; no step provides one yet (the follow-up
+          # fetches or creates it through the App Store Connect API with the key above), so this is a no-op today.
+          OBSERVATORY_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: macos/scripts/build-app.sh dist/macos
       - uses: passioncode-ai/.github/actions/notarize@v1
         with:
