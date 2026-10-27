@@ -9,6 +9,9 @@ export class MemoryStorage {
   async put(key, value) { this.map.set(key, structuredClone(value)); }
   async delete(key) { return this.map.delete(key); }
   async deleteAll() { this.map.clear(); this.alarmAt = null; }
+  async list({ prefix = "" } = {}) {
+    return new Map([...this.map].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)]));
+  }
   async setAlarm(ms) { this.alarmAt = ms; }
   async getAlarm() { return this.alarmAt; }
 }
@@ -32,8 +35,9 @@ export class MemoryNamespace {
 }
 
 /** An env as the deployed Worker sees it: the namespace, the owner's key, the digest. */
-export function memoryEnv({ ownerJwk = null, digest = null } = {}) {
-  const env = { OWNER_JWK: ownerJwk ? JSON.stringify(ownerJwk) : undefined, WORKER_DIGEST: digest };
+export function memoryEnv({ ownerJwk = null, digest = null, openCreation = false } = {}) {
+  const env = { OWNER_JWK: ownerJwk ? JSON.stringify(ownerJwk) : undefined, WORKER_DIGEST: digest,
+    OPEN_CREATION: openCreation ? "loopback-trial" : undefined };
   env.SHARES = new MemoryNamespace(env);
   return env;
 }

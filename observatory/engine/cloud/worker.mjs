@@ -19,7 +19,7 @@
 
 export const PROTOCOL = "observatory-cloud/1";
 export const PEER_SHARE_PROTOCOL = "fabric-peer-share/1";
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 const LABEL = "fabric-peer-share";
 const OWNER_LABEL = "observatory-owner";
 const ALG = "ecdsa-p256-sha256";
@@ -30,7 +30,6 @@ const MAX_LEASE_SECONDS = 86_400;
 const MAX_CLAIM_DAYS = 7;
 const DAY_MS = 86_400_000;
 const MAX_FRAMES = 16;
-const MAX_LATE = 32;
 const MAX_REPORTS = 1000;
 const REQUESTS_PER_MINUTE = 120;
 const FRAME_SCHEMA = "peer-share-frame/1";
@@ -370,7 +369,7 @@ export async function readSignature(headers, label, { method, uri, body, atMs })
   if (Math.abs(atMs / 1000 - got.created.v) > WINDOW_SECONDS) return { ok: false, code: "signature-stale" };
   const paramsText = `("@method" "@target-uri" "content-digest");created=${got.created.v};nonce="${got.nonce.v}";keyid="${got.keyid.v}";alg="${ALG}"`;
   const base = `"@method": ${method}\n"@target-uri": ${uri}\n"content-digest": ${digest}\n"@signature-params": ${paramsText}`;
-  return { ok: true, keyid: got.keyid.v, nonce: got.nonce.v, base, signature: b64urlEncode(sigValue.v) };
+  return { ok: true, keyid: got.keyid.v, nonce: got.nonce.v, created: got.created.v, base, signature: b64urlEncode(sigValue.v) };
 }
 
 async function signatureHolds(read, jwk) {
@@ -412,16 +411,28 @@ this link.</p>
 
 // ---- One share's mailbox, over a storage the Durable Object or a test provides -------------------------------------
 
+/** The most a sealed envelope or report may weigh as stored: under a Durable Object's value limit, so one padded
+ * message can never make the share's own record (and with it a revocation) fail to store. */
+const MAX_ITEM_BYTES = 120 * 1024;
+/** Late claims carried after sealing: one per claiming key, at most this many keys; the recipient's abort apart. */
+const MAX_LATE_CLAIMS = 16;
+/** A failed signature costs a verify and nothing stored; past this many in a minute such requests answer 429. */
+const FAILURES_PER_MINUTE = 600;
+
 /**
- * The rules for one share. `storage` holds `get(key)`, `put(key, value)`, `delete(key)`, `deleteAll()`,
- * `setAlarm(ms)`; `ownerJwk` is the owner's key (or null for a mailbox that admits any creator, a test's choice);
- * `now()` answers milliseconds. The state is one record under the key `share`.
+ * The rules for one share. `storage` holds `get`, `put`, `delete`, `deleteAll`, `list({prefix})` and `setAlarm`;
+ * `ownerJwk` is the owner's key; `openCreation` admits any creator (a loopback trial's and a test's choice, never the
+ * deployed Worker's, which fails closed without an owner key); `now()` answers milliseconds. The share's own record is
+ * kept under `share`, each envelope under `env:<SLOT>` and each report under `rep:<sequence>`, so no one message can
+ * make the record too large to store.
  */
 export class ShareMailbox {
-  constructor(storage, { ownerJwk = null, now = () => Date.now() } = {}) {
+  constructor(storage, { ownerJwk = null, openCreation = false, now = () => Date.now() } = {}) {
     this.storage = storage;
     this.ownerJwk = ownerJwk;
+    this.openCreation = openCreation;
     this.now = now;
+    this.failures = { minute: 0, count: 0 };
   }
 
   async handle(request, shareId, sub) {
@@ -439,58 +450,81 @@ export class ShareMailbox {
     if (sub === null && method === "PUT") return this.create(shareId, request.headers, sig, doc, now);
     const share = await this.storage.get("share");
     if (!share) return refuse(404, "unknown-share", "the mailbox holds no such share");
+    // A claim is signed by its own keys, and only a claim being carried (a POST) may name its signer so: a body
+    // sent with any other request is never a key this share admits.
+    const claim = sub === "frames" && method === "POST" && isObject(doc) && doc.step === "claim" ? doc : null;
+    const signer = await this.signer(share, request.headers, sig, claim, now);
+    if (signer instanceof Response) return signer;               // nothing stored for a request no party signed
+    // Each party has its own minute bucket, counted only once its signature holds, and the sender taking a share back
+    // is never refused for it: a stranger or a hostile recipient cannot keep the sender's revocation out.
+    const revoking = sub === "revocation" && method === "PUT" && signer === "sender";
     const minute = Math.floor(now / 60000);
-    share.rate = share.rate && share.rate.minute === minute ? share.rate : { minute, count: 0 };
-    if (++share.rate.count > REQUESTS_PER_MINUTE) {
+    share.rates = share.rates && share.rates.minute === minute ? share.rates : { minute, counts: {} };
+    share.rates.counts[signer] = (share.rates.counts[signer] || 0) + 1;
+    if (!revoking && share.rates.counts[signer] > REQUESTS_PER_MINUTE) {
       await this.storage.put("share", share);
-      return refuse(429, "too-many", "too many requests for this share; try again in a minute");
+      return refuse(429, "too-many", "too many requests from this key for this share; try again in a minute");
     }
-    const signer = await this.signer(share, request.headers, sig, sub === "frames" ? doc : null, now);
-    if (signer instanceof Response) { await this.storage.put("share", share); return signer; }
     let result;
     if (sub === "frames" && method === "POST") result = await this.frame(share, signer, doc, now);
     else if (sub === "frames" && method === "GET") {
-      await this.expire(share, now);
-      result = answer(200, { frames: share.frames, verdict: share.verdict, late: share.late, sealed: share.sealed });
-    } else if (sub && sub.startsWith("envelopes/") && method === "PUT") result = await this.envelope(share, signer, sub.slice(10), doc, now);
+      if (signer !== "sender" && signer !== "recipient") result = refuse(403, "forbidden", "only the two sides read the frames");
+      else {
+        await this.expire(share, now);
+        result = answer(200, { frames: share.frames, verdict: share.verdict, late: this.lateFrames(share), sealed: share.sealed });
+      }
+    } else if (sub && sub.startsWith("envelopes/") && method === "PUT") result = await this.envelope(share, signer, sub.slice(10), doc, body, now);
     else if (sub === "lease" && method === "POST") result = await this.lease(share, signer, now);
-    else if (sub === "reports" && method === "POST") result = this.report(share, signer, doc);
+    else if (sub === "reports" && method === "POST") result = await this.report(share, signer, doc, body);
     else if (sub === "reports" && method === "GET") {
       if (signer !== "sender") result = refuse(403, "forbidden", "only the sender reads the reports");
       else {
         const after = Number.parseInt(url.searchParams.get("after") || "0", 10) || 0;
-        result = answer(200, { reports: share.reports.filter((r) => r.header.sequence > after) });
+        const reports = [];
+        for (const seq of share.reportSeqs.filter((s) => s > after).slice(0, 200)) {
+          const report = await this.storage.get(`rep:${seq}`);
+          if (report) reports.push(report);
+        }
+        result = answer(200, { reports });
       }
     } else if (sub === "revocation" && method === "PUT") result = await this.revocation(share, signer, doc);
     else if (sub === "deletion" && method === "PUT") result = await this.deletion(share, signer, doc);
     else if (sub === null && method === "GET") {
-      await this.expire(share, now);
-      result = answer(200, this.status(share));
+      if (signer !== "sender" && signer !== "recipient") result = refuse(403, "forbidden", "only the two sides read a share");
+      else {
+        await this.expire(share, now);
+        result = answer(200, this.status(share));
+      }
     } else result = refuse(405, "method-not-allowed", "no such method on this route");
     await this.storage.put("share", share);
     await this.storage.setAlarm(this.keepUntil(share));
     return result;
   }
 
-  async signer(share, headers, sig, frame, now) {
+  async signer(share, headers, sig, claim, now) {
+    const minute = Math.floor(now / 60000);
+    const failed = (response) => {
+      this.failures = this.failures.minute === minute ? this.failures : { minute, count: 0 };
+      return ++this.failures.count > FAILURES_PER_MINUTE ? refuse(429, "too-many", "too many unsigned requests") : response;
+    };
     const read = await readSignature(headers, LABEL, sig);
-    if (!read.ok) return refuse(401, read.code, "the request is not signed by a share key");
+    if (!read.ok) return failed(refuse(401, read.code, "the request is not signed by a share key"));
     let sides = { sender: share.senderSig };
     if (share.recipientSig !== null) sides.recipient = share.recipientSig;
-    // A claim is signed by the keys it carries: whoever holds the share id may claim, and every claim counts.
-    if (isObject(frame) && frame.step === "claim" && isObject(frame.keys)) sides = { claimant: frame.keys.sig };
+    if (claim !== null && isObject(claim.keys)) sides = { claimant: claim.keys.sig };
     let who = null;
     for (const [name, jwk] of Object.entries(sides)) if (await signatureHolds(read, jwk)) { who = name; break; }
     if (who === null) {
       if (share.recipientSig === null && sig.method === "GET" && new URL(sig.uri).pathname.endsWith("/frames")) {
-        return refuse(409, "no-claim", "no claim has reached the mailbox");
+        return failed(refuse(409, "no-claim", "no claim has reached the mailbox"));
       }
-      return refuse(401, "signature-invalid", "the signature is not by a key of this share");
+      return failed(refuse(401, "signature-invalid", "the signature is not by a key of this share"));
     }
     share.nonces = Object.fromEntries(Object.entries(share.nonces || {}).filter(([, until]) => until >= now));
     const held = `${read.keyid} ${read.nonce}`;
     if (Object.hasOwn(share.nonces, held)) return refuse(401, "signature-replayed", "this nonce was used");
-    share.nonces[held] = now + WINDOW_SECONDS * 1000;
+    // Kept as long as a signature made at `created` is fresh (created + 300 s): a clock ahead of ours included.
+    share.nonces[held] = Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000;
     return who;
   }
 
@@ -506,6 +540,9 @@ export class ShareMailbox {
     if (!Number.isSafeInteger(lease) || lease < 60 || lease > MAX_LEASE_SECONDS) return refuse(400, "lease", "a lease is 60 s to 24 h");
     const read = await readSignature(headers, LABEL, sig);
     if (!(await signatureHolds(read, doc.sender.sig))) return refuse(401, read.code || "signature-invalid", "a share is created by its own #sig");
+    if (this.ownerJwk === null && !this.openCreation) {
+      return refuse(503, "no-owner", "this mailbox has no owner key bound; it files no share until it is deployed again");
+    }
     if (this.ownerJwk !== null) {
       const owner = await readSignature(headers, OWNER_LABEL, sig);
       if (!(await signatureHolds(owner, this.ownerJwk))) return refuse(403, "not-owner", "only the mailbox's owner files shares here");
@@ -517,12 +554,17 @@ export class ShareMailbox {
     }
     const share = {
       shareId, senderSig: doc.sender.sig, claimDeadline: doc.claimDeadline, leaseSeconds: lease, createdAt: rfc3339(now),
-      frames: [], late: [], verdict: { state: "open" }, recipientSig: null, sealed: false, envelopes: {}, revocation: null,
-      deletion: null, reports: [], deliveries: 0, lastRenewal: null, nonces: { [`${read.keyid} ${read.nonce}`]: now + WINDOW_SECONDS * 1000 },
+      frames: [], lateAbort: null, lateClaims: [], verdict: { state: "open" }, recipientSig: null, sealed: false,
+      envelopeEnds: {}, revocation: null, deletion: null, reportSeqs: [], deliveries: 0, lastRenewal: null,
+      nonces: { [`${read.keyid} ${read.nonce}`]: Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000 },
     };
     await this.storage.put("share", share);
     await this.storage.setAlarm(this.keepUntil(share));
     return answer(201, { created: true });
+  }
+
+  lateFrames(share) {
+    return [...(share.lateAbort ? [share.lateAbort] : []), ...share.lateClaims.map((c) => c.frame)];
   }
 
   async expire(share, now) {
@@ -537,10 +579,18 @@ export class ShareMailbox {
     if (step === "claim" && signer !== "claimant") return refuse(403, "forbidden", "a claim is signed by its own keys");
     if ((step === "commit" && signer !== "sender") || (role !== null && role !== signer)) return refuse(403, "forbidden", "a side posts only its own frames");
     if (share.sealed) {
-      // After the first envelope: no verdict; a later claim or abort is carried to the sender as a warning.
-      if (step === "claim" || step === "abort") {
-        if (share.late.length >= MAX_LATE) return refuse(429, "too-many", "this share carries no more late frames");
-        share.late.push(frame);
+      // After the first envelope: no verdict; a later claim or abort is carried to the sender as a warning. One abort
+      // (the recipient's own) and one claim per claiming key, so strangers cannot crowd the recipient's abort out.
+      if (step === "abort") {
+        if (share.lateAbort === null) share.lateAbort = frame;
+        return answer(202, { carried: true, late: true });
+      }
+      if (step === "claim") {
+        const key = `${frame.keys.sig.x}.${frame.keys.sig.y}`;
+        if (!share.lateClaims.some((c) => c.key === key)) {
+          if (share.lateClaims.length >= MAX_LATE_CLAIMS) return refuse(429, "too-many", "this share carries no more late claims");
+          share.lateClaims.push({ key, frame });
+        }
         return answer(202, { carried: true, late: true });
       }
       return refuse(409, "sealed", "the share is sealed; only a claim or an abort is carried now");
@@ -554,7 +604,7 @@ export class ShareMailbox {
     return answer(202, { carried: true, index: share.frames.length - 1, verdict: share.verdict });
   }
 
-  async envelope(share, signer, slot, env, now) {
+  async envelope(share, signer, slot, env, body, now) {
     if (signer !== "sender") return refuse(403, "forbidden", "only the sender stores envelopes");
     if (share.revocation !== null) return refuse(410, "revoked", "the share was taken back");
     await this.expire(share, now);
@@ -565,8 +615,10 @@ export class ShareMailbox {
     if (!SLOT.test(slot) || !peerSealedShape(env, ENVELOPE_TYPE) || env.header.shareId !== share.shareId || env.header.slot !== slot) {
       return refuse(400, "malformed", "not an envelope of this share and slot");
     }
-    if (!Object.hasOwn(share.envelopes, slot) && Object.keys(share.envelopes).length >= 64) return refuse(429, "too-many", "a share carries at most 64 slots");
-    share.envelopes[slot] = env;
+    if (body.length > MAX_ITEM_BYTES) return refuse(413, "too-large", "an envelope is larger than the mailbox keeps");
+    if (!Object.hasOwn(share.envelopeEnds, slot) && Object.keys(share.envelopeEnds).length >= 64) return refuse(429, "too-many", "a share carries at most 64 slots");
+    await this.storage.put(`env:${slot}`, env);
+    share.envelopeEnds[slot] = env.header.exp;
     share.sealed = true;
     return answer(200, { stored: true });
   }
@@ -582,15 +634,24 @@ export class ShareMailbox {
     share.deliveries += 1;
     share.lastRenewal = rfc3339(now);
     const lease = { grantedAt: rfc3339(now), expiresAt: rfc3339(now + Math.min(share.leaseSeconds, MAX_LEASE_SECONDS) * 1000) };
-    return answer(200, { lease, envelopes: Object.values(share.envelopes) });
+    const envelopes = [];
+    for (const slot of Object.keys(share.envelopeEnds)) {
+      const env = await this.storage.get(`env:${slot}`);
+      if (env) envelopes.push(env);
+    }
+    return answer(200, { lease, envelopes });
   }
 
-  report(share, signer, report) {
+  async report(share, signer, report, body) {
     if (signer !== "recipient") return refuse(403, "forbidden", "only the recipient reports");
     if (!peerSealedShape(report, REPORT_TYPE) || report.header.shareId !== share.shareId) return refuse(400, "malformed", "not a report of this share");
-    if (share.reports.some((r) => r.header.sequence === report.header.sequence)) return answer(200, { stored: false });
-    share.reports.push(report);
-    if (share.reports.length > MAX_REPORTS) share.reports.splice(0, share.reports.length - MAX_REPORTS);
+    if (body.length > MAX_ITEM_BYTES) return refuse(413, "too-large", "a report is larger than the mailbox keeps");
+    const seq = report.header.sequence;
+    if (share.reportSeqs.includes(seq)) return answer(200, { stored: false });
+    await this.storage.put(`rep:${seq}`, report);
+    share.reportSeqs.push(seq);
+    share.reportSeqs.sort((a, b) => a - b);
+    while (share.reportSeqs.length > MAX_REPORTS) await this.storage.delete(`rep:${share.reportSeqs.shift()}`);
     return answer(200, { stored: true });
   }
 
@@ -599,7 +660,12 @@ export class ShareMailbox {
     if (!(await peerRecordStands(record, REVOCATION_TYPE, share.shareId, share.senderSig)).ok) {
       return refuse(400, "malformed", "not a revocation the sender's share #sig signed");
     }
-    if (share.revocation === null) share.revocation = record;
+    if (share.revocation === null) {
+      share.revocation = record;
+      // Taken back: no sealed copy is ever served again, so none is kept.
+      for (const slot of Object.keys(share.envelopeEnds)) await this.storage.delete(`env:${slot}`);
+      share.envelopeEnds = {};
+    }
     return answer(200, { held: true, revocation: share.revocation });
   }
 
@@ -616,19 +682,22 @@ export class ShareMailbox {
     return {
       protocol: PROTOCOL, shareId: share.shareId, claimDeadline: share.claimDeadline, leaseSeconds: share.leaseSeconds,
       verdict: share.verdict, sealed: share.sealed, deliveries: share.deliveries, lastRenewal: share.lastRenewal,
-      revocation: share.revocation, deletion: share.deletion, reports: share.reports.length, late: share.late.length,
+      revocation: share.revocation, deletion: share.deletion, reports: share.reportSeqs.length,
+      late: this.lateFrames(share).length,
     };
   }
 
-  /** When the share's state is no longer needed: a day after its claim deadline while unsealed; once sealed, 30 days
-   * after the last envelope ends, so a revocation is still answered to a recipient that comes back late. */
+  /** When the share is forgotten whole. Unsealed: a day after its claim deadline. Sealed: 30 days after the latest
+   * of its last sealed copy's end, its revocation and its last renewal, so a recipient that comes back late still
+   * learns it was taken back. Never measured from now: a request does not push it out. */
   keepUntil(share) {
-    if (!share.sealed) return (instant(share.claimDeadline) ?? this.now()) + DAY_MS;
-    const ends = Object.values(share.envelopes).map((e) => instant(e.header.exp) ?? 0);
-    return Math.max(this.now(), ...ends) + 30 * DAY_MS;
+    if (!share.sealed) return (instant(share.claimDeadline) ?? 0) + DAY_MS;
+    const times = [...Object.values(share.envelopeEnds || {}).map((exp) => instant(exp) ?? 0),
+      instant(share.revocation?.at) ?? 0, instant(share.lastRenewal) ?? 0, instant(share.createdAt) ?? 0];
+    return Math.max(...times) + 30 * DAY_MS;
   }
 
-  /** The alarm: a share past its keep-until is forgotten whole. */
+  /** The alarm: a share past its keep-until is forgotten whole, its sealed copies and reports with it. */
   async alarm() {
     const share = await this.storage.get("share");
     if (!share) return;
@@ -651,7 +720,9 @@ function ownerOf(env) {
 export class ShareBox {
   constructor(ctx, env) {
     this.ctx = ctx;
-    this.mailbox = new ShareMailbox(ctx.storage, { ownerJwk: ownerOf(env) });
+    // Without a readable owner key the mailbox files no share (fails closed); only the loopback trial and the tests
+    // set OPEN_CREATION, and `full cloud deploy` never binds it.
+    this.mailbox = new ShareMailbox(ctx.storage, { ownerJwk: ownerOf(env), openCreation: env.OPEN_CREATION === "loopback-trial" });
   }
 
   async fetch(request) {
