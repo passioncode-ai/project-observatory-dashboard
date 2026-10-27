@@ -545,6 +545,9 @@ def doctor(base: Path) -> dict:
             # OBS-199, OBS-204: each organization enrollment's certificate expiry and state, with the
             # person's next step when there is one (expiring, expired, removed), read without the network.
             "organizations": _organizations(base),
+            # OBS-79 L2r: which helper drives enrolled apps (the signed app's or a source build) and why; inert,
+            # with no codesign run, until something is enrolled in config/node-lifecycle.json.
+            "lifecycle_helper": _lifecycle_helper(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -584,6 +587,19 @@ def _organizations(base: Path) -> list[dict] | dict:
     try:
         return org.notices(org.node_folder(base))
     except (OSError, ValueError, RuntimeError) as exc:          # doctor answers whatever the node folder holds
+        return {"state": "unknown", "reason": type(exc).__name__}
+
+
+def _lifecycle_helper(base: Path) -> dict:
+    """`macos.helper_choice` once a target is enrolled; `inert` before, so a workspace without node.lifecycle runs
+    no `codesign` and no helper."""
+    if not (base / "config" / "node-lifecycle.json").exists():
+        return {"state": "inert"}
+    sys.path.insert(0, str(config.SOURCE))
+    try:
+        from node.lifecycle import macos
+        return macos.helper_choice()
+    except Exception as exc:  # noqa: BLE001 - doctor reports, never fails, on what a helper check raised
         return {"state": "unknown", "reason": type(exc).__name__}
 
 

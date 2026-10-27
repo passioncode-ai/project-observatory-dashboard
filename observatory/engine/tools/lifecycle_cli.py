@@ -71,6 +71,12 @@ def _adapter():
     return S.default_adapter()
 
 
+def _helper_choice() -> dict:
+    """Which helper drives apps now and why (OBS-79 L2r): the signed app's, the source-built one, or none."""
+    from node.lifecycle import macos
+    return macos.helper_choice(platform=sys.platform)
+
+
 def _fail(exc: LifecycleError) -> int:
     detail = getattr(exc, "detail", "") or S.HINTS.get(exc.code, "")
     print(f"lifecycle: refused, {exc.code}" + (f": {detail}" if detail else ""), file=sys.stderr)
@@ -328,6 +334,7 @@ def status(probe: bool = True) -> dict:
                  "config": str(S.config_path()), "configured": S.config_path().exists(),
                  "helper": {"path": str(helper), "built": helper_state in ("current", "outdated", "source_missing"),
                             "state": helper_state, "expectedVersion": macos.expected_helper_version()},
+                 "helperInUse": _helper_choice(),
                  "targets": [], "callers": [], "events": [], "degraded": []}
     try:
         doc = S.read_config()
@@ -364,6 +371,11 @@ def status(probe: bool = True) -> dict:
     return out
 
 
+def macos_reason(code: str) -> str:
+    from node.lifecycle import macos
+    return macos.APP_HELPER_REASONS.get(code, code)
+
+
 def cmd_status(a: argparse.Namespace) -> int:
     doc = status(probe=not a.no_probe)
     if a.json:
@@ -376,17 +388,30 @@ def cmd_status(a: argparse.Namespace) -> int:
               "enroll TARGET_ID --kind app --path PATH --caller PRINCIPAL --startup-effect TEXT`.")
     for row in doc["degraded"]:
         print(f"  degraded {row['source']}: {row['reason']}")
-    if doc["supported"] and doc["helper"]["state"] == "not_built":
-        print("  the macOS helper is not built, so apps answer setup_required: "
+    choice = doc["helperInUse"]
+    app_reason = (choice.get("app") or {}).get("reason")
+    if doc["supported"] and choice.get("inUse") == "app":
+        print(f"  apps are driven by the helper inside the signed app ({choice['path']})")
+    elif doc["supported"] and choice.get("inUse") == "source":
+        why = (f"the app's own helper is not used: {macos_reason(app_reason)}"
+               if app_reason and app_reason != "app_not_installed" else "no signed app is installed")
+        print(f"  apps are driven by the helper built from source ({choice['path']}); {why}")
+    elif doc["supported"] and app_reason and app_reason != "app_not_installed":
+        print(f"  the signed app's helper is not used: {macos_reason(app_reason)}")
+    # Which source-built helper fault keeps apps at setup_required; none applies while the app's helper serves.
+    state = doc["helper"]["state"] if doc["supported"] and not choice.get("inUse") else None
+    if state == "not_built":
+        print("  the macOS helper is not built and no signed app carries one that can run, so apps answer "
+              "setup_required: install the Project Observatory app 0.30.0 or later, or "
               "`project-observatory full lifecycle build-helper`")
-    elif doc["supported"] and doc["helper"]["state"] == "outdated":
+    elif state == "outdated":
         print("  the macOS helper was built from an older native_app.swift than this engine ships, so apps answer "
               "setup_required: `project-observatory full lifecycle build-helper`")
-    elif doc["supported"] and doc["helper"]["state"] == "unsafe":
+    elif state == "unsafe":
         print(f"  the macOS helper at {doc['helper']['path']} is a link or others may change it or its folder, so it is "
               "never run and apps answer setup_required: remove it, then `project-observatory full lifecycle "
               "build-helper`")
-    elif doc["supported"] and doc["helper"]["state"] == "source_missing":
+    elif state == "source_missing":
         print("  this engine's native_app.swift is missing, so no helper version is known and apps answer "
               "setup_required: reinstall the engine, then `project-observatory full lifecycle build-helper`")
     for t in doc["targets"]:

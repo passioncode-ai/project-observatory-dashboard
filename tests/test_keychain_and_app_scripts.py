@@ -259,5 +259,66 @@ class TheAppIsUniversal(unittest.TestCase):
         self.assertLess(text.index("lipo -archs"), text.index("codesign --force"))
 
 
+class TheAppCarriesTheLifecycleHelper(unittest.TestCase):
+    """OBS-79 L2r: the release build of the lifecycle broker's helper lives inside the signed app, built for every
+    architecture the app is, signed as nested code before the app, and refused when it does not answer the version
+    of the source it was built from. The release run proves the signature on the notarized bundle."""
+
+    def script(self) -> str:
+        return (ROOT / "macos/scripts/build-app.sh").read_text(encoding="utf-8")
+
+    def test_the_helper_is_compiled_from_the_engines_source_for_every_architecture(self):
+        text = self.script()
+        self.assertIn('HELPER_SRC="$ROOT/observatory/engine/node/lifecycle/native_app.swift"', text)
+        self.assertTrue((ROOT / "observatory/engine/node/lifecycle/native_app.swift").is_file())
+        self.assertIn('-target "$arch-apple-macos14"', text)
+        self.assertIn('for arch in $ARCHS; do', text[text.index("HELPER_SRC="):])
+        self.assertIn('lipo -create "${SLICES[@]}" -output "$HELPER"', text)
+        self.assertIn('the lifecycle helper has slices', text)
+        self.assertIn('HELPER="$APP/Contents/Helpers/lifecycle-native"', text)
+
+    def test_the_helper_must_answer_its_sources_version(self):
+        text = self.script()
+        self.assertIn('"$HELPER" --version', text)
+        self.assertIn("let helperVersion", text)
+        source = (ROOT / "observatory/engine/node/lifecycle/native_app.swift").read_text(encoding="utf-8")
+        self.assertEqual(len(re.findall(r'^let helperVersion = "[0-9a-f]+"$', source, re.M)), 1)
+
+    def test_nested_code_is_signed_first_with_the_hardened_runtime_and_its_identifier(self):
+        text = self.script()
+        signed = text[text.index("# The helper is nested code"):]
+        release_helper = signed.index('--identifier "$HELPER_ID" --sign "$OBSERVATORY_SIGN_IDENTITY" "$HELPER"')
+        release_app = signed.index('--sign "$OBSERVATORY_SIGN_IDENTITY" "$APP"')
+        self.assertLess(release_helper, release_app)
+        self.assertIn("--options runtime --timestamp --identifier", signed)
+        self.assertLess(signed.index('--identifier "$HELPER_ID" --sign - "$HELPER"'), signed.index('--sign - "$APP"'))
+        self.assertIn('codesign --verify --strict --deep "$APP"', signed)
+        self.assertLess(text.index("lipo -create"), text.index("codesign --force"))
+
+    def test_the_script_and_the_release_name_what_the_adapter_checks(self):
+        adapter = (ROOT / "observatory/engine/node/lifecycle/macos.py").read_text(encoding="utf-8")
+        identifier = re.search(r"^APP_HELPER_IDENTIFIER = '([^']+)'$", adapter, re.M).group(1)
+        self.assertIn("APP_HELPER = Path('Contents/Helpers') / HELPER_NAME", adapter)
+        self.assertIn("HELPER_NAME = 'lifecycle-native'", adapter)
+        self.assertIn(f"HELPER_ID={identifier}\n", self.script())
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn(f'identifier \\"{identifier}\\"', release)
+        self.assertIn('identifier \\"ai.passioncode.observatory\\"', release)
+        self.assertIn('"$app/Contents/Helpers/lifecycle-native"', release)
+        # release.yml reads the team app_update.py pins with this very pattern.
+        pinned = (ROOT / "observatory/engine/app_update.py").read_text(encoding="utf-8")
+        self.assertRegex(pinned, re.compile(r'^TEAM_ID = "[A-Z0-9]{10}"$', re.M))
+        self.assertIn(r's/^TEAM_ID = "\([A-Z0-9]\{10\}\)"$/\1/p', release)
+
+    def test_the_release_checks_both_requirements_on_the_notarized_bundle(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        macos_job = release[release.index("  macos:"):release.index("  windows:")]
+        check = macos_job.index("The app and its lifecycle helper satisfy")
+        self.assertLess(macos_job.index("actions/notarize@"), check)
+        self.assertLess(check, macos_job.index("Package the stapled app"))
+        self.assertIn('-R "=anchor apple generic and identifier \\"ai.passioncode.observatory.lifecycle-native\\"',
+                      macos_job)
+
+
 if __name__ == "__main__":
     unittest.main()
