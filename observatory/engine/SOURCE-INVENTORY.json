@@ -919,8 +919,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "3bdcebae4e000a616888019bc407fbebce77542aa5bbc13ea4f9242ff88cad36",
-      "bytes": 192913,
+      "export_sha256": "6bb33656dee05407719bc9ccaa555cbb16b6dc6b7af704009db196bef3b84cb1",
+      "bytes": 193081,
       "upstream_modified": true
     },
     {
@@ -3134,8 +3134,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4b30b5a23cf121a3a9563c378537fa58b0ddd2aa6673f845df581ae8ff5465de",
-      "bytes": 49660
+      "export_sha256": "5f4305d8ea23dbf1e73e95c66f8f05df02434e4357d3f1f196c3326602df8348",
+      "bytes": 49705
     },
     {
       "path": "node/webauthn.py",
@@ -4680,8 +4680,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4996da387674672073a76d7e513ba83062c1ccaff0a81b3d984ead6d87d4d6a1",
-      "bytes": 23823
+      "export_sha256": "350ef38256faa59a29cf97288abfabadd6a29e5ce4aae70691852bbae249db41",
+      "bytes": 24066
     },
     {
       "path": "tests/test_handoff.py",
@@ -6325,8 +6325,8 @@
     {
       "path": "tools/check_secrets.py",
       "source_sha256": "bfd9be34804f652745f6085df1791139eea563b8e924002f9b7759d2f2f05f41",
-      "export_sha256": "c0e13b28090826e85c3558503a68d32c75d6c4198ffc910e292146509a5a44e2",
-      "bytes": 47469,
+      "export_sha256": "6d98de8146638761018011b3b0a7726441f611ca419add36d5e83c0aacaa51b3",
+      "bytes": 47815,
       "python_comments_removed": 69,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -6872,8 +6872,8 @@
       "path": "tools/share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c7e3f639b120bef0c42736078e2c81e2f686c7a44088d23de32d16d64765c106",
-      "bytes": 17459
+      "export_sha256": "22ae6c2dbc1aefa09a5cf25bcc9e01a552cae1b14cbd98eadf62977de9a5a7f3",
+      "bytes": 17946
     },
     {
       "path": "tools/sign_credential.py",

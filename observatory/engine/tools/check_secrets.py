@@ -221,6 +221,10 @@ ALLOWLIST: dict[str, str] = {
         "the contract's secret-envelope vector, vendored byte for byte with its digest "
         "checked (fabric/node-vectors/README.md): its sealed `secret` is the placeholder "
         "'example-secret-value-not-real' and its keys are RFC 9180 A.3.1's published test keys",
+    "fabric/node-vectors/peer/peer-share.json":
+        "the contract's fabric-peer-share/1 vectors (DEC-0142), vendored byte for byte with their digest checked "
+        "(fabric/node-vectors/README.md): their sealed `secret` is the placeholder "
+        "'or-key-minted-for-this-share' and every key is one the generator made for the vectors",
 }
 
 #: Paths never scanned, with the reason (listed in AGENT-SECRETS's table). The

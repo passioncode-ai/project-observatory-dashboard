@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import osprivacy
 import private_io
 
 from . import mailbox as MB, peer_share as PS, relay
@@ -95,7 +96,7 @@ def _write(path: Path, text: str) -> None:
 def _append(path: Path, line: str) -> None:
     """One line added owner-only with O_APPEND, so two commands using a share at once lose no use."""
     _private_dir(path.parent)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    fd = osprivacy.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
     try:
         os.write(fd, line.encode('utf-8'))
     finally:

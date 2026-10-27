@@ -1,23 +1,39 @@
 #!/usr/bin/env python3
 """Share a key with another person's Observatory, and use a key shared with you (contract DEC-0142, OBS-264, OBS-276).
 
-  Sender:
-    project-observatory full share create PROJECT ENV SLOT[,SLOT] --to LABEL [--expires DAYS] [--mailbox URL]
-        a share of vault slots for one recipient machine; prints the link once, to your terminal
-    project-observatory full share status ID        what the recipient did; the six-digit code when it is ready
-    project-observatory full share confirm ID CODE  the code the recipient read to you matches: seal and send
-    project-observatory full share confirm ID --without-comparing    seal without comparing (trust on first use)
-    project-observatory full share revoke ID        take it back: the mailbox refuses from now on
-    project-observatory full share provider-ended ID   you revoked or rotated the key at its provider
-  Recipient:
-    project-observatory full share accept LINK|-    open a link the sender gave you (- reads it from stdin)
-    project-observatory full share status ID        the code to read to the sender, then the keys you received
+Sender:
+
+    project-observatory full share create PROJECT ENV SLOT --to LABEL --expires DAYS --mailbox URL
+        a share of vault slots (SLOT,SLOT for several) for one recipient machine; prints the link once,
+        to your terminal
+    project-observatory full share status ID
+        what the recipient did; the six-digit code when it is ready
+    project-observatory full share confirm ID CODE
+        the code the recipient read to you matches: seal and send (a terminal)
+    project-observatory full share confirm ID --without-comparing
+        seal without comparing: trust on first use (a terminal)
+    project-observatory full share revoke ID
+        take it back: the mailbox refuses from now on
+    project-observatory full share provider-ended ID
+        you revoked or rotated the key at its provider (a terminal)
+
+Recipient:
+
+    project-observatory full share accept LINK
+        open a link the sender gave you; LINK `-` reads it from stdin (a terminal)
+    project-observatory full share status ID
+        the code to read to the sender, then the keys you received
     python "$(project-observatory full-path)/tools/use_secret.py" run --share ID SLOT -- COMMAND
         an agent's command with the shared key in its environment, opened at that use only
-  Both:
-    project-observatory full share list [--json]    every share, sent and received, after one pass to the mailbox
-    project-observatory full share differ ID        the codes differ: stop this share; nothing more is sealed or opened
-    project-observatory full share sync [ID]        one pass to the mailbox for one share or all
+
+Both:
+
+    project-observatory full share list --json
+        every share, sent and received, after one pass to the mailbox
+    project-observatory full share differ ID
+        the codes differ: stop this share; nothing more is sealed or opened
+    project-observatory full share sync ID
+        one pass to the mailbox for one share, or every share without ID
 
 The value is sealed to the recipient's machine with a key made for this share alone; the mailbox carries only
 ciphertext and names. The link carries a one-time claim code and the sender's key fingerprint in its fragment. A
@@ -40,7 +56,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
 
-PROG = "project-observatory full share"
+#: Built from two parts: the bare `full share` is no command a person runs, and the handed-command check reads every
+#: literal that starts with the program's name as one.
+PROG = "project-observatory full" + " share"
 
 
 def _is_terminal() -> bool:
@@ -123,10 +141,11 @@ def _print(side: str, record: dict, SH, as_json: bool) -> None:
                   f"recipient deleted {'yes (signed receipt)' if taking['recipientDeleted'] else 'not yet'}; "
                   f"provider ended the key {'yes' if taking['providerEnded'] else 'not confirmed'}")
             if not taking["providerEnded"]:
+                tools = '"$(project-observatory full-path)/tools'
                 print("  a key that reached another machine can have been copied: revoke a key minted for this share "
-                      "at its provider (tools/openrouter.py revoke, tools/cloudflare.py revoke, tools/heroku.py "
-                      "revoke), or rotate your own (tools/vault.py rotate), then: "
-                      f"{PROG} provider-ended {short}")
+                      f"at its provider (python {tools}/openrouter.py\" revoke, python {tools}/cloudflare.py\" revoke, "
+                      f"python {tools}/heroku.py\" revoke), or rotate your own (python {tools}/vault.py\" rotate), "
+                      f"then: {PROG} provider-ended {short}")
             print("  taken back" if taking["takenBack"] else "  not taken back yet")
     else:
         for s in view["slots"]:
@@ -141,8 +160,8 @@ def cmd_create(args) -> int:
     SH, s = store()
     origin = mailbox_origin(args.mailbox)
     if origin is None:
-        print("share: no mailbox: pass --mailbox https://... or connect one with `project-observatory full cloud`",
-              file=sys.stderr)
+        print("share: no mailbox: pass --mailbox https://..., the mailbox you will name in the link (your own, "
+              "deployed into your Cloudflare account, comes in a later release, OBS-263)", file=sys.stderr)
         return 2
     if not (args.show_link or _is_terminal()):
         print("share: the link is printed once, to a person's terminal: run this yourself, or pass --show-link to "

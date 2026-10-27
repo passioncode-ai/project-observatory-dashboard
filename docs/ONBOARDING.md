@@ -1244,7 +1244,7 @@ later release); until it is deployed, pass a mailbox with `--mailbox https://...
 The sender, at their own terminal:
 
 ```sh
-project-observatory full share create alpha-web prod OPENROUTER_API_KEY --to "Alex laptop" --mailbox https://MAILBOX
+project-observatory full share create alpha-web prod OPENROUTER_API_KEY --to Alex --mailbox https://MAILBOX
 #   prints the link once: https://MAILBOX/s/SHARE-ID#c=CODE&k=FINGERPRINT; send it to Alex yourself
 project-observatory full share status SHARE-ID      # once Alex accepted: the six-digit code
 project-observatory full share confirm SHARE-ID 123456    # the code Alex read to you matches: seal and send
@@ -1253,7 +1253,7 @@ project-observatory full share confirm SHARE-ID 123456    # the code Alex read t
 The recipient, at their own terminal:
 
 ```sh
-project-observatory full share accept -             # paste the link on stdin, read what the sender will see, type yes
+project-observatory full share accept LINK          # LINK - reads it from stdin; read what the sender will see, type yes
 project-observatory full share status SHARE-ID      # the code to read to the sender, then the keys you received
 python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-ID OPENROUTER_API_KEY -- COMMAND
 ```
@@ -1265,6 +1265,8 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   comparing": whoever claimed first may hold the value. One attempt per link: a second claim, a
   link opened twice on one machine or an expired link (at most 7 days) burns the share, and a new
   attempt is a new share.
+- **The link.** `accept -` reads the link from stdin, which keeps it out of your shell history; it is
+  opened once on one machine, and a second machine needs its own share.
 - **The person's acts.** `confirm`, `accept` and `provider-ended` need a terminal: an agent cannot
   compare a code, consent to the reports or state that a provider ended a key for you. `create`
   prints the link only to a terminal, or with `--show-link`.
