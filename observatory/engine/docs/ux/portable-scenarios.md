@@ -815,7 +815,7 @@ prompt's replace flag; `stored` only after a slot write, `unconfirmed`, `decline
 a late answer ignored, `cancelled` from the job, `no-client`; the node down and no desktop with no
 window and no filing; no value in an argument, an environment, the queue, the journal, the runner's
 log or the job's result), `tests/test_mcp_wire.py` (the tool is published).
-Status: partly built (OBS-260): the agent binding, the node's queue, the tool and its job, the
+Status: partly built on branch feat/obs-260-secret-prompt, pull request #378 (OBS-260): the agent binding, the node's queue, the tool and its job, the
 limits and every refusal; the windows and the person's phrase are not built yet, so every request
 with a desktop is answered `no-client` with the `vault.py put` step; product outcome unobserved.
 
