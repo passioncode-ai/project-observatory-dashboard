@@ -87,8 +87,8 @@
       "path": "checkout_graph.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ddc107eadbc38a13dc3ac887d94fbdba4ece6d728887112c6dd049a33ee4bb03",
-      "bytes": 7697
+      "export_sha256": "f4dce5fe428349360268c5e3958cf58dd59e20412468e53ab4a7dadbd2bc55c2",
+      "bytes": 8174
     },
     {
       "path": "checkout_inventory.py",
