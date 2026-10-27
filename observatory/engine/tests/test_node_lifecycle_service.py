@@ -770,6 +770,10 @@ class CliTests(Workspace, unittest.TestCase):
         patches = [mock.patch.object(S, 'config_path', return_value=self.config),
                    mock.patch.object(S, 'state_dir', return_value=self.state),
                    mock.patch.object(lifecycle_cli, '_is_terminal', return_value=True),
+                   # OBS-79 L2r: `status` never looks at an installed app here (tests/test_node_lifecycle_helper.py).
+                   mock.patch.object(lifecycle_cli, '_helper_choice', return_value={
+                       'inUse': None, 'path': None, 'app': {'path': None, 'state': 'not_installed',
+                                                            'reason': 'app_not_installed'}}),
                    mock.patch.object(lifecycle_cli, '_bindings_registry',
                                      side_effect=lambda: (self.registry(), AUDIENCE))]
         for p in patches:

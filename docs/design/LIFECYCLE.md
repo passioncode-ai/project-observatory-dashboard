@@ -1,7 +1,7 @@
 # `node.lifecycle`: the port plan (OBS-79)
 
-Status: plan, 2026-10-22; steps L1, L2, L3 and L4 built, and the engine side of L5 (see "Step L1: what was built",
-"Step L2: what was built", "Step L3: what was built", "Step L4: what was built" and "Step L5: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
+Status: plan, 2026-10-22; steps L1, L2, L2r, L3 and L4 built, and the engine side of L5 (see "Step L1: what was built",
+"Step L2: what was built", "Step L2r: what was built", "Step L3: what was built", "Step L4: what was built" and "Step L5: what was built"). Decided by the operator on 2026-10-12 (organization architecture v4, D5): the
 node wakes, stops and restarts enrolled desktop apps and background services for agents, and the
 mechanics (code, protocol, design) move in from an existing private broker under the operator's standing
 permission. Its records, logs, keys, the names of the apps it manages and its private paths and
@@ -42,7 +42,7 @@ helper and 203 tests in four files.
 |---|---|---|---|---|
 | `broker.py` | 1,387 lines | the closed registry schema and its validation, the authority (callers, per-tool scopes, token hashes compared in constant time), admission, durable operations, idempotency receipts, the effect journal, crash circuits, the restart budget, idle and takeover rules | the names of its callers; nothing else is hard-coded beyond the public bundle ids of Fabric and Switchboard, which stay as built-in readiness profiles | `node/lifecycle/broker.py` |
 | `native.py` | 911 lines | `codesign` reading, the designated requirement built from team and bundle id, trusted paths, child processes in their own process group and killed with it, the NSWorkspace adapter (status, open with `--background`, quit, watch), the Fabric hub and Switchboard probes | none | `node/lifecycle/macos.py` |
-| `native_app.swift` | 103 lines | the NSWorkspace helper (status, open, quit, an event stream of launch, terminate and activate) | none | `node/lifecycle/native_app.swift`; a source install compiles it with `swiftc` (L2), and the desktop app's release workflow is to build it into the app and sign it with the app (see "How the helper is built") |
+| `native_app.swift` | 103 lines | the NSWorkspace helper (status, open, quit, an event stream of launch, terminate and activate) | none | `node/lifecycle/native_app.swift`; a source install compiles it with `swiftc` (L2), and the Mac app's build script compiles it into the app, which the release signs and notarises with it (L2r; see "How the helper is built") |
 | `lifecycle.py` | 1,952 lines | the supervisor (always_on, idle stop, a 600 s safety sweep, 60 s while a started app runs), the MCP handler and its `instructions` text, the event log, the private log file handler, the admin CLI verbs, identity migration | its fixed port and launchd label, its own install, release, rollback and uninstall machinery (the engine's install and update replace it), its own credential files (the engine's access bindings replace them), and the one trusted signing team its migration names (a configuration value here, empty by default) | `node/lifecycle/service.py` (supervisor and MCP), `tools/lifecycle_cli.py` (verbs under `full lifecycle`) |
 | `selftest.py` | 117 lines | a disposable broker on an ephemeral loopback port, authenticated MCP, the second-instance exit | none | a test in `tests/test_node_lifecycle_service.py` |
 | `vendor/` | 2 files | none: the engine has its own `fabric_service.py` and Fabric interop | the vendored copies and their provenance | dropped |
@@ -83,7 +83,7 @@ helper and 203 tests in four files.
 |---|---|---|
 | L1 | `node/lifecycle/broker.py` with the registry, authority, operations, receipts, journal, circuits and restart budget, and the one-pass supervision decision (`supervise`), against a fake adapter; the broker's tests for these ported with neutral fixtures. **Built**, pull request #342 | 0.29.0 |
 | L2 | `node/lifecycle/macos.py` and the Swift helper, compiled by `swiftc` for a source install; the adapter tests (signature parsing, requirement text, process groups). **Built**, pull request #344. The helper's release build inside the signed app was planned before L3's tools were served; it was not built, and 0.29.0 serves the tools with the source-install helper (`full lifecycle build-helper`); the release build is step L2r | 0.29.0 |
-| L2r | the helper's release build inside the signed app (below, "Release"), and the adapter preferring the app's helper when the installed app satisfies its signing requirement | 0.30.0, by 2026-11-07 |
+| L2r | the helper's release build inside the signed app (below, "Release"), and the adapter preferring the app's helper when the installed app satisfies its signing requirement. **Built** in the L2r pull request; that a notarised release carries it is proven by the first release run (the release's own requirement check) | 0.30.0, by 2026-11-07 |
 | L3 | the six MCP tools in the engine's server, the well-known service entry, `lifecycle.manager: node`, the `instructions` text, and `full lifecycle enroll / allow / policy / hold / revoke / status`. **Built**, pull request #347 | 0.29.0, by 2026-10-31 |
 | L4 | the supervisor: the thread that runs `supervise` on its cadence (a 600 s safety sweep, 60 s while a started app runs), the watcher's activation events fed to `note_activation`, and the identity migration if it does not run at L5's import. **Built** in the L4 pull request; the identity migration runs at L5's import (below) | 0.30.0 |
 | L5 | `full lifecycle import --from PATH`: the operator imports their own enrollments and policies from the private broker's state folder on the same machine (read locally, never committed); the identity migration runs inside the import (a legacy record can exist only in the private broker's state); then the private broker is switched off and its launchd job removed by its own uninstall. **Built**, the engine side, in the L5 pull request; the `unenroll` verb the L3 notes gave this step is OBS-251; running the import on the machine and the private broker's uninstall are the operator's (below) | 0.30.0, by 2026-11-07 |
@@ -238,14 +238,13 @@ requirement checks, trusted and interpreter paths, the product probes, stop by s
   file until its declared value is the new digest, which the failure prints. `full lifecycle status` names an
   outdated helper beside the not-built one, and the `setup_required` hint of the six tools names both. Refusals: `swiftc_missing`, `helper_build_failed` (the compiler's last lines on `detail`),
   `unsupported_platform`.
-- **Release (step L2r, 0.30.0 by 2026-11-07; L3's tools are served meanwhile with the source-install helper).** `macos/scripts/build-app.sh` compiles the
-  same source for both architectures (`swiftc -target arm64-apple-macos14` and `x86_64-apple-macos14`, joined with
+- **Release (step L2r, built; see "Step L2r: what was built").** `macos/scripts/build-app.sh` compiles the same
+  source for every architecture of the app (`swiftc -target arm64-apple-macos14` and `x86_64-apple-macos14`, joined with
   `lipo`), places it at `Project Observatory.app/Contents/Helpers/lifecycle-native`, and signs it with the release
-  identity and the hardened runtime before it signs the app (nested code first), so `.github/workflows/release.yml`
-  notarises it with the app. The adapter then prefers the app's helper when the installed app satisfies
-  `requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)`, and falls back to a source-built one. It is not in this
-  step because a nested executable's notarisation can be proven only by a release run, and the adapter must check the
-  app's signature before it runs a helper from inside it.
+  identity, the hardened runtime and the identifier `ai.passioncode.observatory.lifecycle-native` before it signs the app
+  (nested code first), so `.github/workflows/release.yml` notarises it with the app. The adapter prefers the app's helper
+  when the installed app satisfies `requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)`, and falls back to a
+  source-built one.
 
 Notes for L3: the tools construct the broker over `macos.platform_adapter(cache_path=macos.default_cache())`;
 `full lifecycle enroll` calls `adapter.fingerprint(kind, path)` and writes what it returns; `full lifecycle
@@ -258,6 +257,64 @@ own install, release, rollback and uninstall, and 7 that L1 counted for L2 but t
 the interpreter of its own launchd plist: the engine's installer owns its plists (`tools/install_launchd.py`,
 `lint_plist`), so they leave with that machinery. The adapter's own rule for a target's interpreter
 (`stable_executable`) is ported.
+
+## Step L2r: what was built
+
+`macos/scripts/build-app.sh`, the macOS job of `.github/workflows/release.yml`, and the helper choice in
+`observatory/engine/node/lifecycle/macos.py` (`MacAdapter._choose_helper`, `check_app_helper`, `helper_choice`), shown by
+`full lifecycle status` and `full doctor`; tested by `observatory/engine/tests/test_node_lifecycle_helper.py` (suite
+`node_lifecycle_helper`, 35 cases, every tool and the app faked, nothing compiled) and five cases of
+`tests/test_keychain_and_app_scripts.py` (`TheAppCarriesTheLifecycleHelper`).
+
+- **The build.** `build-app.sh` compiles `observatory/engine/node/lifecycle/native_app.swift` once per architecture in
+  `ARCHS` (`xcrun --sdk macosx swiftc -O -target <arch>-apple-macos14`), joins the slices with `lipo` into
+  `Contents/Helpers/lifecycle-native` (mode 0755) and stops when a slice is missing, like the app's own executable
+  (PL-01). On a machine that can run one of its slices it asks the result `--version` and stops unless it answers the
+  `helperVersion` its source declares. The unsigned CI build signs both ad hoc; with `OBSERVATORY_SIGN_IDENTITY` the
+  helper is signed first with `--options runtime --timestamp --identifier ai.passioncode.observatory.lifecycle-native`,
+  then the app, and `codesign --verify --strict --deep` checks the app with its nested helper.
+- **The release proves it.** After notarisation the release's macOS job checks the stapled bundle against the
+  requirements the adapter evaluates, with the team read from `TEAM_ID` in `app_update.py` (not the workflow variable):
+  the app deep and strict for `ai.passioncode.observatory`, the helper for its own identifier. A release they refuse
+  stops before its zip is packaged, so no release ships a helper no engine would run. Notarisation of nested code can be
+  proven only by a release run; the first 0.30.0 run is that proof.
+- **The choice.** The adapter built by the local server (`platform_adapter(cache_path=...)`, no helper injected) looks
+  for the installed app on every choice (`app_update.installed_app`: `/Applications`, else `~/Applications`). Its helper
+  runs when, cheapest first: the helper is a regular file at a trusted place (`trusted_path`: no link, every folder root's
+  or this account's and no one else may write it, `/Applications` as macOS ships it the one exception); the app
+  satisfies `requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)`, deep and strict, through the same single-flight
+  verifier and persisted cache as an enrolled app; the helper's own signature satisfies the requirement of its identifier
+  under the same team; and only then it answers `--version` with the version of the source this engine ships (OBS-222).
+  A bundle whose helper passed is not checked again until the metadata walk over the bundle (the helper included)
+  changes; one refused for a lasting reason (another team, an outdated helper) is not checked again for
+  `APP_REFUSAL_SECONDS` (300 s) unless it changes, and a pending or failed check is never remembered. Otherwise the source-built helper serves, as before (`helper_not_built`, `helper_unsafe`,
+  `helper_source_missing`, `helper_outdated`), and the reason the app's was not used is kept: `app_not_installed`,
+  `app_helper_missing` (an app older than 0.30.0; no `codesign` runs), `app_untrusted`, `app_signature_invalid` (a
+  local QA build signed ad hoc, or another team), `app_helper_signature_invalid`, `app_verification_pending`,
+  `app_verification_failed` or `app_helper_outdated` (the app and the engine are different releases).
+- **One call, one choice.** Each call (probe, start, stop, the watcher) runs the helper its own choice returned
+  (`MacAdapter._choose_helper`, a `HelperChoice`), never one read back from the adapter afterwards, so a call never runs
+  a helper another call checked or refused at the same time. `last_choice` is kept for reports and tests only.
+- **How long a call waits.** When a source-built helper could serve, the app's first deep check holds a call at most
+  `APP_CHECK_GRACE_SECONDS` (2 s) and the source helper serves if it has not landed; the check finishes in the
+  background and the next call takes the app's helper. With no source helper the deep check may hold the call up to
+  `VERIFY_WAIT_SECONDS`, as an enrolled app's check does. Once the deep check passed, the helper's own plain signature
+  check (one small file, bounded by `PLAIN_VERIFY_TIMEOUT`, 60 s) and its `--version` (`HELPER_VERSION_TIMEOUT`, 5 s)
+  run in the call, once per bundle state. Deciding whether to wait asks the source helper `--version` once, and nothing
+  else.
+- **What says which one runs.** A `setup_required` probe carries `appHelper` (the app's reason) beside `reason` (the
+  source helper's). `full lifecycle status` prints whether apps are driven by the helper inside the signed app or by
+  the source build and why, names the build-helper repair only when neither can run, and its JSON carries
+  `helperInUse` (`macos.helper_choice`: `inUse`, `path`, `app {path, state, reason}`, `source {path, state}`); with
+  `--no-probe`, or with nothing enrolled, it checks nothing (`checked: false`) and runs no `codesign`. `full doctor`
+  carries the same as `lifecycle_helper` once `config/node-lifecycle.json` enrolls a target, and `{"state": "inert"}`
+  before (no document, or one with no target); a document the tools refuse is `unknown` with its code. `macos.py helper` adds `choice`.
+- **Injected helpers stay pinned.** An adapter given a `helper` looks at no installed app unless it is also given an
+  `app` (`MacAdapter(app=...)`: a path, `INSTALLED` or None), so the adapter's tests never reach an app of the machine
+  that runs them.
+
+Not in this step: the first release run that notarises and checks the nested helper (0.30.0); a source install keeps
+`full lifecycle build-helper`.
 
 ## Step L3: what was built
 
@@ -327,8 +384,8 @@ the interpreter of its own launchd plist: the engine's installer owns its plists
 
 Notes for L4: the supervisor runs inside the server (`lifecycle.Host`) and must also join the event log into the events
 feed; the Health page and `observatory_machine` show each target (acceptance below). The `unenroll` verb with its
-retired revisions, which this note gave L5, is row OBS-251. The release build of the helper inside the signed app is still its own pull
-request; until it lands, a source install runs `full lifecycle build-helper`.
+retired revisions, which this note gave L5, is row OBS-251. The release build of the helper inside the signed app was its own pull
+request, step L2r (built since); a source install with no signed app runs `full lifecycle build-helper`.
 
 The source's 36 tests for this step, by where they went: 28 ported here (21 with neutral fixtures and a binding's bearer in place of the broker's token, 7
 adapted to the engine: the owner's token and the tools it gained at start, the host's token twice, the disposable log
