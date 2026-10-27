@@ -54,13 +54,15 @@ log, the answer or the journal. The app reads `list` every five seconds and brin
 phrase from the data protection keychain (the app's own access group; the signing setup
 applies `macos/ProjectObservatory.entitlements` only with a provisioning profile). With no
 place for the phrase the app shows no window and answers `unavailable` (`phrase-store-unavailable`).
-It also answers `unavailable` (`engine-untrusted`) and shows no window unless the program it runs
-is inside the app bundle or, with its script interpreter and the folder trees they live in, owned
-by root and writable by nobody else (`EngineTrust`): the parent check vouches only for the app's
-process tree, and a program of the same user that can change what the app runs would be in it.
-The `secret` action runs with a scrubbed environment (system PATH, `PYTHONNOUSERSITE=1`, no
-`PYTHON*` or `DYLD_*` variables). The window has `sharingType = .none`, the phrase is hidden
-from the accessibility tree behind a neutral label, Return does not save, a new request clears
+The `secret` action never uses the `executable` preference, PATH or a launcher: the app runs
+only the engine inside its own bundle (`SecretEngine.relativePath`), by the absolute path it
+computes, after `SecStaticCodeCheckValidity` on its own bundle (all architectures, strict,
+nested code, sealed resources, the pinned team from its sealed Info.plist key
+`ObservatoryTeamID`) immediately before each call. With no such engine (every release so far)
+it reads nothing; the node has already answered the request `no-client`, reason
+`engine-untrusted`. The `secret` action runs with a scrubbed environment (system PATH, `PYTHONNOUSERSITE=1`, no
+`PYTHON*` or `DYLD_*` variables). The window has `sharingType = .none` (set as its view joins
+the window), the phrase is `accessibilityHidden` and a neutral label stands in for it, Return does not save, a new request clears
 the field, and a request that leaves the queue closes the window.
 Unknown actions/fields/ids fail closed. A full
 disk is `disk-full`, an unwritable workspace `workspace-unwritable`.

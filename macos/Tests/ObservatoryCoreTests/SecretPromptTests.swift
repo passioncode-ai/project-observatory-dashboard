@@ -46,7 +46,7 @@ final class MemoryPhraseStore: PhraseStore {
         XCTAssertNil(SecretRequest.input(op: "store", requestId: rid, value: "first\nsecond"), "one line only")
         XCTAssertNil(SecretRequest.input(op: "decline", requestId: rid, value: value), "a value travels only in store")
         XCTAssertNil(SecretRequest.input(op: "unavailable", requestId: rid, reason: "other"))
-        XCTAssertEqual(SecretRequest.input(op: "unavailable", requestId: rid, reason: "engine-untrusted")?["reason"], "engine-untrusted")
+        XCTAssertNil(SecretRequest.input(op: "unavailable", requestId: rid, reason: "engine-untrusted"), "the node answers that one, before filing")
         XCTAssertNil(SecretRequest.input(op: "list", requestId: rid))
         XCTAssertNil(SecretRequest.input(op: "ask"))
         XCTAssertTrue(Backend.actions.contains("secret"))
@@ -79,7 +79,7 @@ final class MemoryPhraseStore: PhraseStore {
             sent.append(input)
             return input["op"] == "list" ? ["requests": [self.request()]] : ["request": [:]]
         }, phraseStore: MemoryPhraseStore(unavailable: true))
-        m.engineCheck = { _ in .systemOwned }
+        m.secretEngine = { SecretPromptTests.bundled }
         await m.readSecretRequests()
         XCTAssertEqual(sent, [["op": "list"], ["op": "unavailable", "requestId": rid, "reason": "phrase-store-unavailable"]])
         XCTAssertEqual(m.secretRequests, [])
@@ -92,7 +92,7 @@ final class MemoryPhraseStore: PhraseStore {
             sent.append(input)
             return input["op"] == "list" ? ["requests": [self.request()]] : ["request": ["outcome": "stored"]]
         }, phraseStore: MemoryPhraseStore("blue heron at noon"))
-        m.engineCheck = { _ in .systemOwned }
+        m.secretEngine = { SecretPromptTests.bundled }
         await m.readSecretRequests()
         XCTAssertEqual(m.secretStage, .prompt(phrase: "blue heron at noon"))
         let r = try XCTUnwrap(m.secretRequests.first)
@@ -111,7 +111,7 @@ final class MemoryPhraseStore: PhraseStore {
             throw BridgeError.backend("request-closed")
         }, phraseStore: MemoryPhraseStore("blue heron at noon"))
         m.russian = false
-        m.engineCheck = { _ in .systemOwned }
+        m.secretEngine = { SecretPromptTests.bundled }
         await m.readSecretRequests()
         await m.answerSecret(try XCTUnwrap(m.secretRequests.first), value: value)
         XCTAssertEqual(m.secretFailure?.code, "request-closed")
@@ -133,17 +133,63 @@ final class MemoryPhraseStore: PhraseStore {
         XCTAssertEqual(none.secretStage, .unavailable)
     }
 
-    func testAnEngineAnotherProgramCouldChangeGetsNoWindowAndNoValue() async {
+    nonisolated static let bundled = "/Applications/O.app/" + SecretEngine.relativePath
+
+    func testWithoutABundledEngineOrAValidSignatureNothingIsReadOrSent() async {
         var sent: [[String: String]] = []
         let m = Model(defaults: scratchDefaults(), transport: { _, input in
             sent.append(input)
-            return input["op"] == "list" ? ["requests": [self.request()]] : ["request": [:]]
+            return ["requests": [self.request()]]
         }, phraseStore: MemoryPhraseStore("blue heron at noon"))
-        m.engineCheck = { _ in .untrusted("outside-bundle-user-writable") }
+        m.secretEngine = { nil }
         await m.readSecretRequests()
-        XCTAssertEqual(sent, [["op": "list"], ["op": "unavailable", "requestId": rid, "reason": "engine-untrusted"]])
-        XCTAssertEqual(m.secretStage, .untrustedEngine)
-        XCTAssertEqual(m.secretRequests, [], "no window, so nothing can be typed into it")
+        XCTAssertEqual(sent, [], "no engine of its own, no call: the node already answered engine-untrusted")
+        XCTAssertEqual(m.secretRequests, [])
+        let r = try! XCTUnwrap(SecretRequest(request()))
+        await m.answerSecret(r, value: value)
+        XCTAssertEqual(sent, [], "a typed value never reaches any program")
+        XCTAssertEqual(m.secretFailure?.code, "engine-untrusted")
+    }
+
+    func testTheSecretCallNeverUsesTheExecutablePreference() async {
+        let d = scratchDefaults()
+        d.set("/usr/bin/git", forKey: "executable")
+        let m = Model(defaults: d, transport: nil, phraseStore: MemoryPhraseStore("blue heron at noon"))
+        m.secretEngine = { SecretPromptTests.bundled }
+        let backend = await m.secretBackend()
+        XCTAssertEqual(backend?.executable, SecretPromptTests.bundled)
+        XCTAssertNotEqual(backend?.executable, m.executable)
+        m.secretEngine = { nil }
+        let none = await m.secretBackend()
+        XCTAssertNil(none, "no bundled engine: no backend, never the preference")
+    }
+
+    func testTheSignatureIsCheckedAgainForEveryCall() async throws {
+        let checks = Counter()
+        let m = Model(defaults: scratchDefaults(), transport: { _, input in
+            input["op"] == "list" ? ["requests": [self.request()]] : ["request": ["outcome": "stored"]]
+        }, phraseStore: MemoryPhraseStore("blue heron at noon"))
+        m.secretEngine = { checks.bump(); return SecretPromptTests.bundled }
+        await m.readSecretRequests()
+        await m.answerSecret(try XCTUnwrap(m.secretRequests.first), value: value)
+        XCTAssertEqual(checks.value, 2, "list and store each resolve the engine and check the signature")
+    }
+
+    func testResolveRequiresThePinnedTeamTheSignatureAndTheEngineInside() {
+        let bundle = URL(fileURLWithPath: "/Applications/O.app")
+        var asked: [String] = []
+        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: nil, signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true }))
+        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "lower12345", signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true }))
+        XCTAssertEqual(asked, [], "no pinned team, no check and no engine")
+        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, _ in false }, isExecutable: { _ in true }),
+                     "a signature that does not check out starts nothing")
+        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, _ in true }, isExecutable: { _ in false }),
+                     "this release bundles no engine")
+        let path = SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true })
+        XCTAssertEqual(path, SecretPromptTests.bundled)
+        XCTAssertTrue(asked.last!.contains("identifier \"ai.passioncode.observatory\""))
+        XCTAssertTrue(asked.last!.contains("certificate leaf[subject.OU] = \"ABCDE12345\""))
+        XCTAssertTrue(asked.last!.hasPrefix("anchor apple generic"))
     }
 
     func testTheSecretDoorRunsWithAScrubbedEnvironment() {
@@ -156,43 +202,12 @@ final class MemoryPhraseStore: PhraseStore {
         XCTAssertEqual(env["HOME"], "/srv/example-ws/home")
         XCTAssertEqual(Backend.environment(for: "status", inherited: inherited), inherited, "other actions keep theirs")
     }
+}
 
-    /// A file system in memory: path -> (uid, mode, directory), children by folder, a first line per file.
-    private func fs(_ entries: [String: (UInt32, UInt16, Bool)], lines: [String: String] = [:]) -> EngineTrust.FileSystem {
-        let byDir = Dictionary(grouping: entries.keys.filter { $0 != "/" }) { ($0 as NSString).deletingLastPathComponent }
-            .mapValues { $0.map { ($0 as NSString).lastPathComponent } }
-        return EngineTrust.FileSystem(
-            realpath: { entries[$0] != nil ? $0 : nil },
-            lstat: { p in entries[p].map { EngineTrust.Entry(uid: $0.0, mode: $0.1, directory: $0.2) } },
-            children: { byDir[$0] ?? (entries[$0]?.2 == true ? [] : nil) },
-            firstLine: { lines[$0] })
-    }
-
-    func testOnlyAnEngineInsideTheAppOrSealedBySystemIsTrusted() {
-        let root: (UInt32, UInt16, Bool) = (0, 0o755, true)
-        let sealedFile: (UInt32, UInt16, Bool) = (0, 0o755, false)
-        let app = fs(["/": root, "/Applications": root, "/Applications/O.app": root, "/Applications/O.app/Contents": root,
-                      "/Applications/O.app/Contents/engine": sealedFile])
-        XCTAssertEqual(EngineTrust.verdict(executable: "/Applications/O.app/Contents/engine", bundle: "/Applications/O.app", fs: app), .bundled)
-        var system: [String: (UInt32, UInt16, Bool)] = ["/": root, "/opt": root, "/opt/obs": root, "/opt/obs/bin": root,
-                                                        "/opt/obs/bin/project-observatory": sealedFile, "/opt/obs/bin/python": sealedFile,
-                                                        "/opt/obs/lib": root, "/opt/obs/lib/engine.py": (0, 0o644, false)]
-        let script = ["/opt/obs/bin/project-observatory": "#!/opt/obs/bin/python"]
-        XCTAssertEqual(EngineTrust.verdict(executable: "/opt/obs/bin/project-observatory", bundle: "/Applications/O.app", fs: fs(system, lines: script)), .systemOwned)
-        // One file the user can write anywhere in the tree, and it is not vouched for.
-        system["/opt/obs/lib/engine.py"] = (501, 0o644, false)
-        XCTAssertFalse(EngineTrust.verdict(executable: "/opt/obs/bin/project-observatory", bundle: "/Applications/O.app", fs: fs(system, lines: script)).trusted)
-        system["/opt/obs/lib/engine.py"] = (0, 0o666, false)
-        XCTAssertFalse(EngineTrust.verdict(executable: "/opt/obs/bin/project-observatory", bundle: "/Applications/O.app", fs: fs(system, lines: script)).trusted)
-        // A per-user install, and a script whose interpreter comes from PATH.
-        let user = fs(["/": root, "/srv": root, "/srv/example-ws": root, "/srv/example-ws/home": (501, 0o755, true), "/srv/example-ws/home/venv": (501, 0o755, true),
-                       "/srv/example-ws/home/venv/bin": (501, 0o755, true), "/srv/example-ws/home/venv/bin/project-observatory": (501, 0o755, false)])
-        XCTAssertEqual(EngineTrust.verdict(executable: "/srv/example-ws/home/venv/bin/project-observatory", bundle: "/Applications/O.app", fs: user),
-                       .untrusted("outside-bundle-user-writable"))
-        system["/opt/obs/lib/engine.py"] = (0, 0o644, false)
-        XCTAssertEqual(EngineTrust.verdict(executable: "/opt/obs/bin/project-observatory", bundle: "/Applications/O.app",
-                                           fs: fs(system, lines: ["/opt/obs/bin/project-observatory": "#!/usr/bin/env python3"])),
-                       .untrusted("interpreter-unresolved"))
-        XCTAssertEqual(EngineTrust.verdict(executable: "/nowhere", bundle: "/Applications/O.app", fs: app), .untrusted("program-unresolved"))
-    }
+/// Counts calls from a `@Sendable` closure.
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func bump() { lock.lock(); n += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
 }

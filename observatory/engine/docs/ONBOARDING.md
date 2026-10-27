@@ -1237,15 +1237,16 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   and the local server sees only the slot's metadata afterwards. The child answers only when one
   of its parents, while running, satisfies the enrolled app's code requirement (its team and
   bundle id); a program that runs the same command on its own is refused `client-unverified`.
-- **Only with an engine no other program can change.** That parent check proves only that the
-  request came through the app's own process tree, and whatever the app runs is in that tree: a
-  program of your user that can change the engine the app runs (the program path in its
-  settings, a per-user install, its interpreter or its files) could read the queue, answer
-  requests and see what you type. So the app shows the window only when the engine is inside the
-  signed app or owned by the system and writable by nobody else, and runs it with a scrubbed
-  environment; otherwise it answers each request `no-client`, reason `engine-untrusted`, with your
-  `vault.py put` step. On an ordinary per-user install (a virtual environment, Homebrew,
-  `~/.local/bin`) that means no window in this release.
+- **Only through the engine inside the signed app, and none ships yet.** That parent check proves
+  only that the request came through the app's own process tree, and whatever the app runs is in
+  that tree: an engine named by the program path in its settings, PATH or a launcher could be
+  changed by any program of your user, which could then read the queue, answer requests and see
+  what you type. So the window never uses that program: it runs only an engine inside the app's
+  own bundle, by a path the app computes, after checking the app's own signature (resources
+  sealed, the pinned team) right before each call, with a scrubbed environment. **No release
+  bundles that engine yet, so today every request is answered `no-client`, reason
+  `engine-untrusted`, with your `vault.py put` step, before anything is filed and before the app
+  is opened.**
 - **Your phrase.** At the first request the window asks you to set a short phrase; change it in
   the app's Settings. Every genuine prompt shows it, so a window without it is not Observatory's:
   cancel it. It is kept in the data protection keychain, in the app's own access group, which no

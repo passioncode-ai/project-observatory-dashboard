@@ -45,16 +45,16 @@ does with it. What it keeps, and why:
   `client-unverified`. `client_store` writes the value into the slot here, as `vault.py put` (an empty slot) or
   `rotate` (a replacement) writes it, so the value travels only on the pipe between the app and its own child and
   never through the node, an argument, the environment, a log, the journal or an answer.
-- **The limits, stated plainly.** The parent check proves only that the request came through the app's own process
-  tree. Whatever the app runs is in that tree, so a program of the same user that can change what the app runs (the
-  engine executable the app's settings name, its interpreter or the engine's files) would pass it, read the queue,
-  answer requests and see a value typed into the window. The app therefore answers `engine-untrusted` and shows no
-  window unless the engine it runs is inside the signed app or owned by the system and writable by nobody else
-  (`EngineTrust` in the Mac app), and it runs that engine with a scrubbed environment. On an ordinary per-user
-  install that means no window. Beyond that: the queue file is owner-only, so another program of the same user can
-  read the requests' text on disk; and once stored, the slot is readable by any program of the same user, which is
-  D4's stated property (out of the chat, transcripts, logs and tool results, not out of reach of a program that goes
-  looking).
+- **Only through the engine inside the signed app.** The parent check proves only that the request came through the
+  app's own process tree, and whatever the app runs is in that tree; an engine named by a preference, PATH or a
+  launcher (a program of the same user can change any of them) could read the queue, answer requests and see a typed
+  value. So the app never runs the `executable` preference for this door: it runs only the engine inside its own
+  bundle (`BUNDLED_ENGINE`), by an absolute path it computes, after checking its own static signature (resources
+  sealed, the pinned team requirement) immediately before each call. **No release bundles that engine yet**, so the
+  node answers every request `no-client`, reason `engine-untrusted`, with the person's `vault.py put` step, before
+  filing it. Beyond that: the queue file is owner-only, so another program of the same user can read the requests'
+  text on disk; and once stored, the slot is readable by any program of the same user, which is D4's stated property
+  (out of the chat, transcripts, logs and tool results, not out of reach of a program that goes looking).
 """
 from __future__ import annotations
 
@@ -138,8 +138,8 @@ NO_CLIENT = {
     "phrase-store-unavailable": "this release of Observatory's app cannot keep the person's phrase yet (its "
                                 "signing carries no provisioning profile for the keychain group), and a window "
                                 "without the phrase is not shown",
-    "engine-untrusted": "Observatory's app shows a prompt only with an engine no other program of this user can "
-                        "change (one inside the app, or owned by the system), and this one can be changed",
+    "engine-untrusted": "Observatory's app takes a key only through the engine inside its own signed app, and this "
+                        "release's app carries none, so no window is shown",
 }
 #: The steps that make a genuine window possible, by reason code; shown beside the person's vault.py step.
 NO_CLIENT_FIX = {
@@ -151,7 +151,10 @@ NO_CLIENT_FIX = {
 #: Observatory's own Mac app, the only app the node opens for a prompt (macos/scripts/build-app.sh).
 OBSERVATORY_BUNDLE_ID = "ai.passioncode.observatory"
 #: What the app may say when it cannot show a genuine window (`client_unavailable`).
-CLIENT_REASONS = ("phrase-store-unavailable", "engine-untrusted")
+CLIENT_REASONS = ("phrase-store-unavailable",)
+#: Where the signed app carries its own engine (macos `SecretEngine.relativePath`). The window takes a key only through
+#: it; no release bundles one yet, so the node answers `engine-untrusted` before filing.
+BUNDLED_ENGINE = "Contents/Resources/engine/bin/project-observatory"
 
 
 class BindingsError(ValueError):
@@ -387,6 +390,14 @@ class BrokerPrompter:
             return None, "app-not-enrolled"
         if target.get("desiredState") == "held_off":
             return None, "app-held-off"
+        try:
+            bundled = (Path(str(target.get("path") or "")) / BUNDLED_ENGINE).is_file()
+        except OSError:
+            bundled = False
+        if not bundled:
+            # The app's window runs only the engine inside the signed app; without one it would read nothing, so
+            # nothing is filed and the agent hears it now, not after ten minutes (review of #382, L5 included).
+            return None, "engine-untrusted"
         return target, None
 
     def available(self, platform: str | None = None) -> Optional[str]:

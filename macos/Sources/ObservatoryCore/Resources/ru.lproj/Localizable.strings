@@ -66,7 +66,7 @@
 "Not connected" = "Нет подключения";
 "Not connected to an engine." = "Нет подключения к движку.";
 "Observatory is not installed yet" = "Observatory ещё не установлен";
-"Observatory shows a secret prompt only with an engine no other program can change: one inside the app, or owned by the system. Store a key yourself with vault.py put in your own shell." = "Observatory показывает запрос ключа, только если его движок не может изменить другая программа: движок внутри приложения или принадлежащий системе. Сохраните ключ сами командой vault.py put в своём терминале.";
+"Observatory takes a key only through the engine inside its own signed app, and this app has none yet. Store a key yourself with vault.py put in your own shell." = "Observatory принимает ключ только через движок внутри своего подписанного приложения, а в этом приложении его пока нет. Сохраните ключ сами командой vault.py put в своём терминале.";
 "Only Observatory's own signed app can answer a secret request." = "Ответить на запрос ключа может только подписанное приложение Observatory.";
 "Open System Settings" = "Открыть Системные настройки";
 "Open at login" = "Открывать при входе в систему";

@@ -898,8 +898,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "4f0bbbd8681a74040a98432900f61df603bc5536fab0b62c9dac1af767ea45a7",
-      "bytes": 27526,
+      "export_sha256": "369f8bceeed12dacc92e4833201bbcea2093c245e4fc5bc7c92f6f3ac55ae419",
+      "bytes": 27557,
       "upstream_modified": true
     },
     {
@@ -919,15 +919,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "1a92ccfe3286386bd0f381cf10de6febdc73bd2f8f52248ccdf2583b2203ecb5",
-      "bytes": 191795,
+      "export_sha256": "2884a1e8cc330144aaeb74abea25d895b1544f7f029bd4cd219469f0123d4f67",
+      "bytes": 191852,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "03db19e2486d0661a87c0f193e4b9afdcfbcb1ada95a1ac6620a1c33c4c5fffe",
-      "bytes": 172833,
+      "export_sha256": "e8713c68ee1497be16db43ec9023f09924991ac6bf394b6ce7dacc0838d3d2c7",
+      "bytes": 172881,
       "upstream_modified": true
     },
     {
@@ -3293,8 +3293,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b87508109525dee6014940717f6e19a5df48df653cf71909363ae821daed503e",
-      "bytes": 50013
+      "export_sha256": "dc4f7cd1b1a00955ced89c9290464fffbdea1c7d5bc3477500f8136424a745f8",
+      "bytes": 50787
     },
     {
       "path": "service_events.py",
@@ -3388,8 +3388,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "1c6ef5333f9825f581d83f0fc8f293d84e55373d4b0764674758aee7fb892026",
-      "bytes": 24327,
+      "export_sha256": "644fb50b296e4b6bb63fa5df4a37dbd850ada865542741962eae689c171e6092",
+      "bytes": 24358,
       "upstream_modified": true
     },
     {
@@ -5512,8 +5512,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "944c0fefe4dd1b9f7995e57aac042c6f7b437d9a2479535148bb8d0b6cfffc54",
-      "bytes": 38548
+      "export_sha256": "08bc4c5e80af2553a3ae08442bb02c961e420acf042f7ac0e02d8ab09c139606",
+      "bytes": 39888
     },
     {
       "path": "tests/test_secrets.py",

@@ -442,8 +442,20 @@ class FakeHost:
         return self._service
 
 
-def observatory_target(desired: str = "on_demand", bundle: str = SP.OBSERVATORY_BUNDLE_ID) -> dict:
+def app_bundle(engine: bool = True) -> str:
+    """A stand-in for the installed app: a folder, with the bundled engine inside or without it."""
+    root = Path(tmpdir.mkdtemp(prefix="observatory-app-")) / "Project Observatory.app"
+    target = root / SP.BUNDLED_ENGINE
+    target.parent.mkdir(parents=True)
+    if engine:
+        target.write_text("#!/bin/sh\n", encoding="utf-8")
+    return str(root)
+
+
+def observatory_target(desired: str = "on_demand", bundle: str = SP.OBSERVATORY_BUNDLE_ID,
+                       path: str | None = None) -> dict:
     return {"targetId": "observatory.app", "kind": "app", "approved": True, "desiredState": desired,
+            "path": path or app_bundle(),
             "identity": {"scheme": "designated-requirement/1", "bundleId": bundle, "teamId": "ABCDE12345",
                          "requirement": "x"}}
 
@@ -472,6 +484,8 @@ class TheBrokerOpensTheWindow(Base):
         self.assertEqual(self.broker_prompter(targets=other).available("darwin"), "app-not-enrolled")
         held = {"observatory.app": observatory_target(desired="held_off")}
         self.assertEqual(self.broker_prompter(targets=held).available("darwin"), "app-held-off")
+        bare = {"observatory.app": observatory_target(path=app_bundle(engine=False))}
+        self.assertEqual(self.broker_prompter(targets=bare).available("darwin"), "engine-untrusted")
         self.assertEqual(SP.BrokerPrompter(lambda: None).available("darwin"), "app-not-enrolled")
 
     def test_a_request_asks_the_broker_for_the_app_with_its_id_and_nothing_else(self):
@@ -505,6 +519,18 @@ class TheBrokerOpensTheWindow(Base):
         self.assertEqual((out["error"], out["reason"]), ("no-client", "app-not-enrolled"))
         self.assertIn("lifecycle enroll", out["fix"])
         self.assertIn("vault.py", out["step"])
+        self.assertEqual(SP.waiting(), [])
+
+    def test_an_app_without_its_own_engine_files_nothing_and_says_so_at_once(self):
+        # Today's release: the signed app carries no engine, so the window could take no key. The agent hears it now
+        # with the person's step, not after ten minutes of a window nobody shows.
+        bare = {"observatory.app": observatory_target(path=app_bundle(engine=False))}
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter(targets=bare)):
+            out = ask("alpha", "NO_ENGINE_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "engine-untrusted"))
+        self.assertIn("vault.py", out["step"])
+        self.assertNotIn("fix", out)
+        self.assertEqual(self.broker.opened, [], "the app is not even opened")
         self.assertEqual(SP.waiting(), [])
 
     def test_windows_has_no_window_in_this_release(self):
@@ -602,12 +628,10 @@ class TheAppsDoor(Base):
         self.assertEqual(self.door({"op": "store", "requestId": rid, "value": VALUE})[1], {"error": "value-unchanged"})
         self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
 
-    def test_an_engine_the_app_cannot_trust_is_answered_no_client(self):
+    def test_the_app_names_no_reason_but_its_phrase_store(self):
         rid = ask("alpha", "DOOR_ENGINE_KEY")["request"]["requestId"]
-        out = self.door({"op": "unavailable", "requestId": rid, "reason": "engine-untrusted"})[1]["request"]
-        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "engine-untrusted"))
-        self.assertIn("vault.py", out["step"])
-        self.assertNotIn("fix", out, "no step tells the person to install what they already run")
+        out = self.door({"op": "unavailable", "requestId": rid, "reason": "engine-untrusted"})[1]
+        self.assertEqual(out, {"error": "invalid-argument"}, "engine-untrusted is the node's answer, before filing")
 
     def test_decline_and_no_place_for_the_phrase(self):
         rid = ask("alpha", "DOOR_DECLINED_KEY")["request"]["requestId"]

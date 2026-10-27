@@ -311,9 +311,9 @@ Status: draft
 Product: unobserved
 Persona: P-01
 Traces: OSS-84 (the portable scenario, which owns the outcomes), PERSON-SURFACES.md D4 (OBS-260)
-Preconditions: a compatible engine (one that answers `full assistant secret`) inside the app or owned by the
-system and writable by nobody else; Observatory's app enrolled with the node's lifecycle broker; an app signed
-with the provisioning profile its keychain group needs (this release's app is not).
+Preconditions: an engine bundled inside the signed app (no release has one yet: today every request is answered
+`no-client`, reason `engine-untrusted`, before the app is opened); Observatory's app enrolled with the node's
+lifecycle broker; an app signed with the provisioning profile its keychain group needs (this release's is not).
 Trigger: an agent calls `observatory_secret_request`; the node asks the broker to start the app or finds it
 running; the app reads waiting requests every five seconds and brings the Secret request window forward.
 Steps: at the first request, Set your phrase (3 to 64 characters, one line) → the window shows the agent from
@@ -323,8 +323,8 @@ field → Save (or Replace) hands it to the app's own engine child on its stdin,
 answers declined.
 Expected result: the agent's job ends `stored` only after the slot shows the write; the value is never in an
 argument, the environment, a log, a notification or the agent's result.
-Errors & recovery: an engine another program could change (`engine-untrusted`) or a build that cannot keep
-the phrase shows no window and answers the request `no-client`
+Errors & recovery: an app without its own engine, or whose signature does not check out, reads nothing and shows
+no window (the node answered `engine-untrusted`); a build that cannot keep the phrase shows no window and answers the request `no-client`
 with the person's `vault.py put` step; a key with a line break is not sent; a request withdrawn or past its ten
 minutes reads "This request is no longer waiting."; a refusal from the door is named in a banner. The phrase is
 changed in Settings.
@@ -333,6 +333,7 @@ Coverage: `SecretPromptTests` (`testTheRequestIsReadAsTheDoorAnswersIt`, `testTh
 `testTheKeychainItemIsTheDataProtectionKeychainsNeverTheLoginOne`,
 `testAWaitingRequestWithoutAPlaceForThePhraseIsAnsweredNoClientAndShowsNoWindow`,
 `testSaveSendsTheValueOnlyToTheDoorAndCancelDeclines`, `testARefusalIsWordedAndAClosedRequestLeavesTheWindow`,
-`testThePhraseIsSavedOnlyWhereTheAppKeepsIt`, `testAnEngineAnotherProgramCouldChangeGetsNoWindowAndNoValue`,
-`testTheSecretDoorRunsWithAScrubbedEnvironment`, `testOnlyAnEngineInsideTheAppOrSealedBySystemIsTrusted`); the engine's door: `tests/test_secret_prompt.py` `TheAppsDoor`.
-Not yet walked on a real Mac: it needs an app signed with its provisioning profile and a system-owned engine.
+`testThePhraseIsSavedOnlyWhereTheAppKeepsIt`, `testWithoutABundledEngineOrAValidSignatureNothingIsReadOrSent`,
+`testTheSecretCallNeverUsesTheExecutablePreference`, `testTheSignatureIsCheckedAgainForEveryCall`,
+`testResolveRequiresThePinnedTeamTheSignatureAndTheEngineInside`, `testTheSecretDoorRunsWithAScrubbedEnvironment`); the engine's door: `tests/test_secret_prompt.py` `TheAppsDoor`.
+Not yet walked on a real Mac: it needs an app with its engine bundled and signed with its provisioning profile.

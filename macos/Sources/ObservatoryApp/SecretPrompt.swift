@@ -24,16 +24,17 @@ extension Model {
         }
     }
 
-    /// One read of the queue. A request appears: with an engine another program could change, or no place for the
-    /// phrase, it is answered `no-client` at once and no window is shown; otherwise the window comes forward. A
-    /// request that is gone from the queue (withdrawn, answered elsewhere, past its ten minutes) leaves the window.
+    /// One read of the queue, through the bundled engine only (`secretCall`): with none, or a signature that does not
+    /// check out, nothing is read and nothing is shown (the node already answered `engine-untrusted`). A request
+    /// appears: with no place for the phrase it is answered `no-client` at once and no window is shown; otherwise the
+    /// window comes forward. A request that is gone from the queue (withdrawn, answered elsewhere, past its ten
+    /// minutes) takes the window down.
     func readSecretRequests() async {
         guard let input = SecretRequest.input(op: "list"),
               let answer = try? await secretCall(input), let requests = SecretRequest.list(answer: answer) else { return }
-        var stage = SecretPromptStage.of(phraseStore)
-        if !requests.isEmpty, !secretEngineVerdict().trusted { stage = .untrustedEngine }
+        let stage = SecretPromptStage.of(phraseStore)
         secretStage = stage
-        let refusal = stage == .untrustedEngine ? "engine-untrusted" : stage == .unavailable ? "phrase-store-unavailable" : nil
+        let refusal = stage == .unavailable ? "phrase-store-unavailable" : nil
         if let refusal {
             for r in requests {
                 if let refuse = SecretRequest.input(op: "unavailable", requestId: r.requestId, reason: refusal) {
@@ -88,6 +89,7 @@ extension Model {
         switch f.code {
         case "client-unverified": return t("Only Observatory's own signed app can answer a secret request.")
         case "request-closed": return t("This request is no longer waiting.")
+        case "engine-untrusted": return t("Observatory takes a key only through the engine inside its own signed app, and this app has none yet. Store a key yourself with vault.py put in your own shell.")
         case "value-empty": return t("The key is empty. Nothing was saved.")
         case "value-multiline": return t("The key must be one line.")
         case "value-unchanged": return t("This is the value the slot already holds. Nothing was saved.")
@@ -101,11 +103,13 @@ extension Model {
 /// Keeps the window out of screen sharing and capture that honours `NSWindow.sharingType` (OBS-260, M2 of the review
 /// of #382): the phrase is the one thing an imitation would need.
 struct UnsharedWindow: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { view.window?.sharingType = .none }
-        return view
+    final class Marker: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.sharingType = .none
+        }
     }
+    func makeNSView(context: Context) -> NSView { Marker() }
     func updateNSView(_ view: NSView, context: Context) { view.window?.sharingType = .none }
 }
 
@@ -126,9 +130,6 @@ struct SecretPromptView: View {
             switch m.secretStage {
             case .unavailable:
                 Text(m.t("This release of Project Observatory cannot keep your phrase yet, so it shows no secret prompt. Store a key yourself with vault.py put in your own shell."))
-                    .foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            case .untrustedEngine:
-                Text(m.t("Observatory shows a secret prompt only with an engine no other program can change: one inside the app, or owned by the system. Store a key yourself with vault.py put in your own shell."))
                     .foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             case .needsPhrase:
                 phraseSetup
@@ -198,12 +199,13 @@ struct SecretPromptView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 220)
-            // The phrase is drawn for the eye only: the accessibility tree reads a neutral label, never the phrase.
+            // The phrase is drawn for the eye only: it is out of the accessibility tree, and the line below carries a
+            // neutral label in its place.
             Text(m.t("Your phrase: “{phrase}”", ["phrase": phrase])).font(.callout.weight(.semibold)).foregroundStyle(Tone.info.color)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(m.t("Your phrase is shown on screen"))
+                .accessibilityHidden(true)
             Text(m.t("If this window does not show your phrase, it is not Observatory. Cancel it."))
                 .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(m.t("Your phrase is shown on screen") + ". " + m.t("If this window does not show your phrase, it is not Observatory. Cancel it."))
             SecureField(m.t("Paste the key"), text: $value).focused($field, equals: "value").focusEffectDisabled()
                 .fieldChrome(focused: field == "value").accessibilityLabel(m.t("Paste the key"))
             if !value.isEmpty, SecretValue.problem(value) == .lineBreak {
@@ -242,7 +244,7 @@ struct PhraseSettings: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(m.t("Secret prompt phrase")).font(.callout.weight(.semibold)).foregroundStyle(Theme.text)
             switch SecretPromptStage.of(m.phraseStore) {
-            case .unavailable, .untrustedEngine:
+            case .unavailable:
                 Text(m.t("This release of Project Observatory cannot keep your phrase yet, so it shows no secret prompt. Store a key yourself with vault.py put in your own shell."))
                     .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             case .needsPhrase, .prompt:

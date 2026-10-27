@@ -444,9 +444,17 @@ window hands it to the engine process the app spawned, on that process's stdin; 
 into the slot with the vault's own writer (`vault.store_value`, as `put` or `rotate`) and drops it; the
 node reads only the slot's metadata. That pipe and child are inside the app's process tree, which is
 what the door's parent check proves; a program of the same user that can change what the app runs
-could pass it, so the app shows the window only when its engine is inside the signed app or owned by
-the system and writable by nobody else (`EngineTrust`), runs it with a scrubbed environment, and
-answers `no-client`, reason `engine-untrusted`, otherwise: on an ordinary per-user install, no window.
+would be in that tree too, and owning a file is not running Observatory's engine (the review of #382
+showed a system-owned `git` driven by a user `.gitconfig`). So the secret door never runs the
+`executable` preference, PATH or a launcher: only the engine inside the app's own bundle
+(`SecretEngine`, `Contents/Resources/engine/`), by an absolute path the app computes, after
+`SecStaticCodeCheckValidity` on the app itself (all architectures, strict, nested code, sealed
+resources, against the pinned team requirement read from the sealed Info.plist) immediately before
+each call, list and store alike, with a scrubbed environment. **No release bundles that engine yet:**
+the node checks for it in the enrolled app and answers every request `no-client`, reason
+`engine-untrusted`, with the person's `vault.py put` step, before filing and before opening the app.
+A drag-installed app is writable by its user; a program with App Management could change its
+contents, which the signature check then refuses.
 The window is excluded from sharing (`NSWindow.sharingType = .none`) and the phrase from the
 accessibility tree; a program with Screen Recording may still capture it on recent macOS. This
 release's app is not signed with the provisioning profile the keychain group needs, so it keeps no

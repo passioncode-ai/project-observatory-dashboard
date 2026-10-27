@@ -830,9 +830,9 @@ Status: partly built (OBS-260): the server half landed in #378; the Mac window, 
 door and the broker open are on branch feat/obs-260-windows. The Windows desktop window waits for
 the Windows lifecycle broker (OBS-277); Linux stays `no-client` with the `vault.py put` step. The
 released app is not yet signed with the provisioning profile the phrase's keychain group needs (the
-release will fetch or create it through the App Store Connect API), and the window is shown only with
-an engine inside the app or owned by the system (`engine-untrusted` otherwise), so no window appears
-on an ordinary install today; product outcome
+release will fetch or create it through the App Store Connect API), and the window takes a key only
+through an engine bundled inside the signed app, which no release carries yet: today every request is
+answered `no-client`, reason `engine-untrusted`, with the `vault.py put` step; product outcome
 unobserved.
 
 ### OSS-85: see which agents I have, and connect Switchboard

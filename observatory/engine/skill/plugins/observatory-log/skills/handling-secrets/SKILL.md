@@ -35,8 +35,8 @@ a request for the value. The MCP server needs `--agent NAME`, which `project-obs
 full agent-binding issue NAME` prints when the person connects the agent. The
 window is the Mac app's, which the node opens through its lifecycle broker and
 which shows the person's own phrase; on Windows and Linux, with the app not
-enrolled, or without a phrase store or a trusted engine, a request is answered
-`no-client` with that step.
+enrolled, or (as in every release so far) with no engine bundled inside the
+signed app, a request is answered `no-client` with that step.
 
 ## Start here
 

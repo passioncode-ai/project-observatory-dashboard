@@ -67,6 +67,11 @@ doc={'CFBundleName':'Project Observatory','CFBundleDisplayName':'Project Observa
      # The dashboard is served on 127.0.0.1 over plain http, loopback only.
      'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True},
      'NSHumanReadableCopyright':'AGPL-3.0-only OR LicenseRef-PassionCode-Commercial; see LICENSE.'}
+# The signing team the secret prompt pins its own signature check to (OBS-260, SecretEngine); the plist is sealed
+# by the signature, so the app reads it back only from a bundle that checks out.
+import os
+team=os.environ.get('OBSERVATORY_TEAM_ID','')
+if re.fullmatch(r'[A-Z0-9]{10}',team): doc['ObservatoryTeamID']=team
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(doc))
 PY
 # The person's phrase for the secret prompt (OBS-260, PERSON-SURFACES.md D4) is kept in the data protection
