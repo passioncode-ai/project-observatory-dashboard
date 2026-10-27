@@ -23,7 +23,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-os.environ['OBSERVATORY_HOME'] = str(Path(tempfile.mkdtemp(prefix='obs-cloud-')).resolve())
+_HOME = tempfile.TemporaryDirectory(prefix='obs-cloud-')          # removed when the module ends
+os.environ['OBSERVATORY_HOME'] = str(Path(_HOME.name).resolve())
 sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT))
 
@@ -120,7 +121,7 @@ class Deploy(unittest.TestCase):
         self.assertEqual(code, 0)
         plan = json.loads(out)
         self.assertEqual((plan['account'], plan['tokenSlot'], plan['tokenPresent']),
-                         ('example-account', 'observatory-cloud/prod/CLOUDFLARE_WORKERS_PLANTED', False))
+                         ('example-account', 'observatory-cloud/prod/CLOUDFLARE_WORKERS_TOKEN', False))
         self.assertEqual(self.cf.calls, [])
         self.assertEqual(self.issued, [])
 
@@ -176,6 +177,29 @@ class Deploy(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('another code or owner key', err)
         self.assertFalse(self.C.CONFIG.exists())
+
+    def test_a_dry_run_reads_the_doors_accounts_in_a_process_of_its_own(self):
+        """The door's metadata only (no admin value read), and the engine's `node` package found although the door
+        puts `tools/` (where `tools/node.py` lives) first on the path."""
+        held = tempfile.TemporaryDirectory(prefix='obs-cloud-dry-')
+        self.addCleanup(held.cleanup)
+        home = Path(held.name).resolve()
+        store = home / 'secrets' / 'cloudflare-admin'
+        store.mkdir(parents=True, mode=0o700)
+        for folder in (home / 'secrets', store):
+            folder.chmod(0o700)
+        for name, text in (('example-admin', 'not-read-by-a-dry-run'),
+                           ('example-admin.meta.json', json.dumps({'accounts': [
+                               {'id': ACCOUNT['id'], 'name': ACCOUNT['name'], 'can_issue': True}]}))):
+            fd = os.open(store / name, os.O_WRONLY | os.O_CREAT, 0o600)
+            os.write(fd, text.encode())
+            os.close(fd)
+        run = subprocess.run([sys.executable, str(ROOT / 'tools' / 'cloud_cli.py'), 'deploy', '--dry-run'],
+                             env={**os.environ, 'OBSERVATORY_HOME': str(home), 'HOME': str(home)},
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        plan = json.loads(run.stdout)
+        self.assertEqual((plan['account'], plan['dryRun'], plan['tokenPresent']), ('example-account', True, False))
 
     def test_status_without_a_deployment(self):
         code, out, _ = self.run_cli('status', '--json')

@@ -53,6 +53,18 @@ TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens"
 DOOR = 'python "$(project-observatory full-path)/tools/cloudflare.py"'
 
 
+def _node(name: str):
+    """`node.<name>` of the engine. The Cloudflare door and use_secret put `tools/` first on the path, where
+    `tools/node.py` (`full node`) would shadow the engine's `node` package; the engine is put back in front first."""
+    import importlib
+    if sys.path[0] != str(ROOT):
+        sys.path.insert(0, str(ROOT))
+    loaded = sys.modules.get("node")
+    if loaded is not None and not hasattr(loaded, "__path__"):
+        del sys.modules["node"]
+    return importlib.import_module("node." + name)
+
+
 class CloudError(Exception):
     """A refused or failed step. The message names the step and, for a person's step, its address; never a value."""
 
@@ -145,7 +157,7 @@ def read_token() -> str:
 
 def owner_jwk() -> dict:
     """This machine's owner key for its mailbox (made once under node/shares/owner/): only its public half leaves."""
-    from node import shares as SH
+    SH = _node("shares")
     jwk, _key = SH.Shares(paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node").resolve() / "shares").owner()
     return jwk
 
@@ -189,7 +201,7 @@ def multipart(meta: dict, code: bytes) -> tuple[bytes, str]:
 
 
 def well_known(origin: str, timeout: float = 15.0) -> dict:
-    from node import mailbox as MB
+    MB = _node("mailbox")
     request = urllib.request.Request(MB._resolved(origin + "/.well-known/observatory-cloud"),
                                      headers={"User-Agent": "project-observatory-cloud/1"})
     try:
@@ -211,7 +223,7 @@ def deploy(*, account_ref: str | None, script: str, new_token: bool, dry_run: bo
     code = worker_code()
     digest = digest_of(code)
     owner = owner_jwk()
-    from node import peer_share as PS
+    PS = _node("peer_share")
     plan = {"account": account["slug"], "script": script, "tokenSlot": "/".join(TOKEN_SLOT), "digest": digest,
             "owner": PS.peer_thumbprint(owner)}
     if dry_run:

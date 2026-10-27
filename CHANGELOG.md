@@ -7,6 +7,19 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Your share mailbox, deployed into your own Cloudflare account** (OBS-263, scenario OSS-83, `docs/ONBOARDING.md`
+  "Your share mailbox in your Cloudflare account", design `docs/design/PERSON-SURFACES.md` D8). `full cloud deploy`
+  uploads `observatory-cloud/1` as a Worker with one SQLite-backed Durable Object per share, through the Cloudflare
+  door's narrow `workers-edit` token (minted into the vault slot `observatory-cloud/prod/CLOUDFLARE_WORKERS_TOKEN`,
+  read in memory, never printed), binds this machine's owner key so only it files shares there, turns on its
+  workers.dev address and records it in `config/cloud.json` once it answers with this engine's code;
+  `full cloud status` and `full cloud url` read it back, and `full share create` uses it without `--mailbox`. The
+  Worker keeps the duties the contract gives a mailbox (PS-10) and nothing more, with `node/mailbox.py` as its
+  specification: signed requests under the share keys, one attempt per link, no envelope or lease for a burnt share,
+  leases of at most 24 hours, deliveries counted, every renewal refused after a revocation, and a share forgotten a
+  day after an unclaimed deadline or 30 days after its last sealed copy ends. The link's page runs no script. With no
+  admin token stashed, `deploy` names your step and its address before any call.
+
 - **Share a key with another person's Observatory, see its use, take it back** (OBS-264, OBS-276, scenarios OSS-79
   to OSS-81, `docs/ONBOARDING.md` "Share a key with another person's Observatory", design
   `docs/design/PERSON-SURFACES.md` D2, D3, D8). The command line first: `full share create PROJECT ENV SLOT --to
