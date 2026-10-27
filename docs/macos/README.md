@@ -138,6 +138,10 @@ tagged compatible engine and app artifact.
 `vX.Y.Z` tag in the protected `release` environment:
 - the organization's CI Developer ID, through `passioncode-ai/.github/actions/apple-signing@v1`;
 - notarization and staple, through `actions/notarize@v1`;
+- the lifecycle helper's check: the stapled app and its nested `Contents/Helpers/lifecycle-native` must satisfy the
+  requirements the engine evaluates before it runs that helper (the organization's team from `app_update.py`, the app's
+  bundle id, the helper's identifier `ai.passioncode.observatory.lifecycle-native`), or the release stops before its
+  zip is packaged (OBS-79 L2r, [LIFECYCLE.md](../design/LIFECYCLE.md#step-l2r-what-was-built));
 - Sigstore attestation, plus `SHA256SUMS` and its GPG signature, through `release-publish.yml@v1`.
 
 A person from `release-approvers` approves the run, and may be whoever pushed the tag; an agent
@@ -148,7 +152,8 @@ below is for debugging and for checking the scripts; its output is never attache
 Without `OBSERVATORY_SIGN_IDENTITY` the build script signs ad hoc
 (`codesign --sign -`), which touches no keychain. For Developer ID signing supply
 `OBSERVATORY_SIGN_IDENTITY` to the build script: `codesign` then signs with the hardened
-runtime and a secure timestamp, reading that identity's private key from the login
+runtime and a secure timestamp (the nested lifecycle helper first, under its own identifier, then the app),
+reading that identity's private key from the login
 Keychain (`macos/scripts/build-app.sh`). macOS can ask for the keychain password or for
 permission to use the key, unless the key already allows `codesign`. Signing is the
 release operator's explicit act, run by hand; nothing in Observatory signs on a schedule.

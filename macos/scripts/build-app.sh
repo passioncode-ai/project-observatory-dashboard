@@ -30,6 +30,40 @@ for arch in $ARCHS; do
   esac
 done
 
+# The lifecycle broker's NSWorkspace helper (OBS-79 step L2r, docs/design/LIFECYCLE.md "How the
+# helper is built"): the same native_app.swift a source install compiles, built for every architecture
+# of the app and placed where nested code goes, so it is signed before the app (nested code first) and
+# notarized with it. The engine runs it only while the installed app satisfies the organization's
+# requirement and the helper's own signature names HELPER_ID under the same team.
+HELPER_SRC="$ROOT/observatory/engine/node/lifecycle/native_app.swift"
+HELPER="$APP/Contents/Helpers/lifecycle-native"
+HELPER_ID=ai.passioncode.observatory.lifecycle-native
+SDK=$(xcrun --sdk macosx --show-sdk-path)
+mkdir -p "$APP/Contents/Helpers" "$SCRATCH/lifecycle-native"
+SLICES=()
+for arch in $ARCHS; do
+  xcrun --sdk macosx swiftc -O -sdk "$SDK" -target "$arch-apple-macos14" \
+    -o "$SCRATCH/lifecycle-native/$arch" "$HELPER_SRC"
+  SLICES+=("$SCRATCH/lifecycle-native/$arch")
+done
+lipo -create "${SLICES[@]}" -output "$HELPER"
+chmod 755 "$HELPER"
+BUILT=$(lipo -archs "$HELPER")
+for arch in $ARCHS; do
+  case " $BUILT " in
+    *" $arch "*) ;;
+    *) echo "build-app.sh: the lifecycle helper has slices '$BUILT', missing $arch (PL-01)" >&2; exit 1 ;;
+  esac
+done
+# The helper answers the version of the source it was built from; the engine runs no other.
+DECLARED=$(sed -n 's/^let helperVersion = "\([0-9a-f]*\)"$/\1/p' "$HELPER_SRC")
+case " $ARCHS " in
+  *" $(sysctl -n hw.machine) "*)
+    ANSWER=$("$HELPER" --version)
+    [[ "$ANSWER" == *"\"version\":\"$DECLARED\""* ]] \
+      || { echo "build-app.sh: the lifecycle helper answered '$ANSWER', not version $DECLARED" >&2; exit 1; } ;;
+esac
+
 # The icon is the product mark, rasterized at every size the iconset needs.
 ICONSET="$SCRATCH/AppIcon.iconset"
 swift "$ROOT/macos/scripts/make-icon.swift" "$ROOT/observatory/engine/dashboard/brand/observatory-mark.svg" "$ICONSET" >/dev/null
@@ -70,12 +104,16 @@ doc={'CFBundleName':'Project Observatory','CFBundleDisplayName':'Project Observa
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(doc))
 PY
 # Explicit Developer ID only when supplied by the release operator; default is QA.
+# The helper is nested code: signed first, with its own identifier, then sealed into the app's signature.
 if [[ -n "${OBSERVATORY_SIGN_IDENTITY:-}" ]]; then
+  codesign --force --options runtime --timestamp --identifier "$HELPER_ID" --sign "$OBSERVATORY_SIGN_IDENTITY" "$HELPER"
   codesign --force --options runtime --timestamp --sign "$OBSERVATORY_SIGN_IDENTITY" "$APP"
 else
+  codesign --force --identifier "$HELPER_ID" --sign - "$HELPER"
   codesign --force --sign - "$APP"
 fi
-codesign --verify --strict "$APP"
+codesign --verify --strict "$HELPER"
+codesign --verify --strict --deep "$APP"
 plutil -lint "$APP/Contents/Info.plist"
 # Builds clean up after themselves (LC-15): other bundles beside this one, release
 # files in dist/ older than the previous release, and a report of caches past their cap.

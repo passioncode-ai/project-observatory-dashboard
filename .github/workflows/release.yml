@@ -103,6 +103,19 @@ jobs:
           asc-key-id: ${{ secrets.ASC_KEY_ID }}
           asc-issuer-id: ${{ secrets.ASC_ISSUER_ID }}
           asc-key-p8-b64: ${{ secrets.ASC_API_KEY_P8_B64 }}
+      # OBS-79 L2r: the engine runs the app's lifecycle helper only when both checks below pass on the
+      # installed copy, against the team app_update.py pins; a release they refuse would ship a helper
+      # no engine ever runs, so the release stops here instead.
+      - name: The app and its lifecycle helper satisfy the requirements the engine checks
+        run: |
+          team=$(sed -n 's/^TEAM_ID = "\([A-Z0-9]\{10\}\)"$/\1/p' observatory/engine/app_update.py)
+          test -n "$team"
+          app="dist/macos/Project Observatory.app"
+          codesign --verify --deep --strict \
+            -R "=anchor apple generic and identifier \"ai.passioncode.observatory\" and certificate leaf[subject.OU] = \"$team\"" "$app"
+          codesign --verify --strict \
+            -R "=anchor apple generic and identifier \"ai.passioncode.observatory.lifecycle-native\" and certificate leaf[subject.OU] = \"$team\"" \
+            "$app/Contents/Helpers/lifecycle-native"
       - name: Package the stapled app
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)
