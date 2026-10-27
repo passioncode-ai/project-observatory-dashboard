@@ -111,6 +111,19 @@ class ScreensFromTheVectors(unittest.TestCase):
         self.assertEqual(screen['secondsLeft'], 480)
         self.assertEqual(screen['expiresAt'], '2026-10-15T09:10:00Z')
 
+    def test_a_revision_without_the_persons_confirmation_is_never_confirmed(self):
+        new, trusted = complete()[2], complete()[3]
+        case = next(c for c in vectors()['join']
+                    if c['answer']['ok'] and c['new'] == new and c['trusted'] == trusted)
+        for role in pairing.PAIRING_ROLES:
+            with self.subTest(role=role):
+                s = session(role, complete(), record=case['record'], recordAt='2026-10-15T09:03:00Z')
+                s.pop('confirmed', None)
+                if role == 'new':
+                    s['genesis'] = case['genesis']
+                screen = ceremony.pairing_screen(s, ms('2026-10-15T11:00:00Z'))
+                self.assertNotEqual(screen['state'], 'confirmed')
+
     def test_every_join_case_gives_confirmed_or_its_refusal(self):
         new, trusted = complete()[2], complete()[3]
         ran = 0

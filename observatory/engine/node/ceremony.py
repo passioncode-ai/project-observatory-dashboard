@@ -128,6 +128,9 @@ def pairing_screen(session: Any, at_ms: Any, hub: Any = 'not-ready') -> dict:
         verdict = rendezvous_verdict(opened_at, messages, record_ms) if record_ms is not None else None
         if verdict is None or verdict != {'state': 'complete'}:
             return _refused('malformed')
+        if session.get('confirmed') is not True:
+            # Nobody here compared the code: a revision alone never reads as paired (review of #380, M1).
+            return _refused('malformed')
         reveals = _find(messages, 'reveal', 'new'), _find(messages, 'reveal', 'trusted')
         genesis = session.get('genesis') if role == 'new' else own.get('genesis')
         joined = join_listed(session['record'], reveals[0], reveals[1], genesis)

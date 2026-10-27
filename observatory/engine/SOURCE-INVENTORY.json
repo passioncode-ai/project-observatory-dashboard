@@ -2791,8 +2791,8 @@
       "path": "node/ceremony.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ac099a35cd02a838bb2d212faaecbf8f9fd882410a8f4db4ee1d52c95d55863f",
-      "bytes": 15580
+      "export_sha256": "58c8ad9c29a63ed0b12d776aaa9b31fa85b48fae66e5fadcfbeab99f10ea2fa1",
+      "bytes": 15776
     },
     {
       "path": "node/device_keys.py",
@@ -4930,8 +4930,8 @@
       "path": "tests/test_node_ceremony.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "32ebe5a614dd0a4ccbbb80b152c53ade99df399c56002d495fa24694a1f77f8c",
-      "bytes": 19796
+      "export_sha256": "e023f21cb3c010268bd8a6ac0b2c00f0f894413fc6e88fc77fab377354b7ff4f",
+      "bytes": 20530
     },
     {
       "path": "tests/test_node_cli.py",

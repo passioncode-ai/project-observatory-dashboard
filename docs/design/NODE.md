@@ -313,7 +313,8 @@ own ceremony (DEC-0084).
 ## The estate ceremonies (OBS-133, slice 5)
 
 The contract decides how a machine joins and leaves an estate in DEC-0084 (fabric-agent-contract #113). The node ports
-its checks; the ceremony's screens and the passkey prompt are the ceremony surface below (OBS-197).
+its checks; the pairing screens and the passkey prompt are the ceremony surface below (OBS-197). The enroll-token
+surface (the bound key fingerprint, `reused` as an alarm) and the re-key and removal ceremonies have no screen yet.
 
 **Adding a machine by pairing** (`node/pairing.py`). The new machine and one trusted machine meet once at a relay
 rendezvous:
@@ -411,7 +412,7 @@ until the node service (slice 6) applies one.
 
 **What waits for the hub.** The rendezvous and the passkey page are the hub's side of DEC-0084 (Fabric CO-319 to
 CO-321). Until a hub runs them, `hub_state()` answers `not-ready`: a started session shows `hub-unreachable`, nothing
-is sent anywhere, `sign` is refused with `hub-not-ready`, and the screens past the code are reached only by the tests.
+is sent anywhere, `sign` is refused (`not-now`, since the passkey screen needs a hub; `hub-not-ready` once it is reached), and the screens past the code are reached only by the tests.
 `tests/test_node_ceremony.py` drives every screen with the contract's `pairing.json`: each rendezvous case that carries
 this machine's commitment (both roles) gives the screen its verdict implies, each join case gives `confirmed` or its
 refusal, and the code shown is the vectors' checked code; then the steps on a temporary workspace and the app protocol.
