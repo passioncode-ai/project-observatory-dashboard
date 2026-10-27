@@ -17,9 +17,17 @@ class FullLauncherTests(unittest.TestCase):
 
     def test_home_precedence_and_separate_default(self):
         # Only what names the home stays: on Windows that is USERPROFILE, not HOME.
-        home_only = {k: v for k, v in os.environ.items() if k in ('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')}
-        with patch.dict(os.environ, home_only, clear=True):
-            self.assertEqual(full_cli.full_home(), Path.home() / '.local/share/project-observatory-full')
+        # On Windows the default is %LOCALAPPDATA% unless a 0.21.0 workspace already sits under
+        # ~\.local\share (W7, osprivacy.default_home); a temporary profile has neither.
+        with tempfile.TemporaryDirectory() as profile:
+            names = {'HOME': profile, 'USERPROFILE': profile, 'LOCALAPPDATA': str(Path(profile, 'AppData', 'Local'))}
+            with patch.dict(os.environ, names, clear=True):
+                expected = (Path(profile, 'AppData', 'Local') if os.name == 'nt'
+                            else Path(profile, '.local', 'share')) / 'project-observatory-full'
+                self.assertEqual(full_cli.full_home(), expected)
+                legacy = Path(profile, '.local', 'share', 'project-observatory-full')
+                legacy.mkdir(parents=True)
+                self.assertEqual(full_cli.full_home(), legacy)
         # Absolute on this OS: on Windows a path without a drive is not.
         root = Path(tempfile.gettempdir()).resolve()
         old, new, explicit = (str(root / name) for name in ('old', 'new', 'explicit'))

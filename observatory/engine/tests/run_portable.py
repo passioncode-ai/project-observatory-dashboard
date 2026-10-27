@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -35,6 +34,19 @@ def _load_git_env():
 
 
 git_env = _load_git_env()
+
+
+def _load_osproc():
+    """The engine's `osproc.py`, by its path: a suite's process group and its stop on every OS
+    (`start_new_session` and `os.killpg` do not exist on Windows, OBS-277)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('observatory_runner_osproc', ROOT / 'osproc.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+osproc = _load_osproc()
 
 LEGACY = (
     'ledger', 'time', 'provider_boundary', 'provider_health', 'credential_doors',
@@ -433,6 +445,17 @@ def clean_env(base: Path) -> dict[str, str]:
     user, temporary = base / 'user', base / 'tmp'
     user.mkdir(); temporary.mkdir()
     runtime = base / 'runtime'
+    windows = {}
+    if os.name == 'nt':
+        # Windows reads the home from USERPROFILE (never HOME) and the temporary folder from TEMP and
+        # TMP; without them every suite read the runner's real profile or failed with "Could not
+        # determine home directory" (OBS-277). APPDATA and LOCALAPPDATA go inside the sandbox too, as
+        # HOME does on POSIX. A child's console encoding is the ANSI code page unless told otherwise:
+        # UTF-8 on its stdio, as this runner decodes it.
+        local = user / 'AppData' / 'Local'; roaming = user / 'AppData' / 'Roaming'
+        local.mkdir(parents=True); roaming.mkdir(parents=True)
+        windows = {'USERPROFILE': str(user), 'TEMP': str(temporary), 'TMP': str(temporary),
+                   'LOCALAPPDATA': str(local), 'APPDATA': str(roaming), 'PYTHONIOENCODING': 'utf-8'}
     # git_env: the operator's system and global git configuration shut out, and no background
     # `gc --auto` or maintenance that outlives a git command and races the suite's cleanup.
     return git_env.git_env({
@@ -449,6 +472,7 @@ def clean_env(base: Path) -> dict[str, str]:
         # The shared update log (update_events.py, LC-16) goes beside the suite, never into
         # ~/Library/Logs or ~/.local/state of the machine running it.
         'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
+        **windows,
     })
 
 
@@ -602,11 +626,11 @@ def _run_suite(name: str, work: Path, template: Path, timeout: int) -> dict:
                [sys.executable, 'tests/test_' + name + '.py'])
     process = subprocess.Popen(command, cwd=checkout, env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, start_new_session=True)
+                               text=True, encoding='utf-8', errors='replace', **osproc.new_group())
     try:
         output = process.communicate(timeout=timeout)[0]; code = process.returncode
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        osproc.stop_group(process.pid, 0)
         output = process.communicate()[0]; code = 124
     log = work / 'run.log'; log.write_text(output, encoding='utf-8'); log.chmod(0o600)
     result = {'file': 'tests/test_' + name + '.py',

@@ -252,7 +252,7 @@ jobs:
           python observatory/engine/tools/install_launchd.py install
           python observatory/engine/tools/install_launchd.py status
           python observatory/engine/tools/install_launchd.py uninstall
-          schtasks /Query /FO LIST | grep -c ProjectObservatory || true
+          MSYS_NO_PATHCONV=1 schtasks /Query /FO LIST | grep -c ProjectObservatory || true
       - id: ledgerlock
         name: The OpenRouter door's ledger lock across threads (J-11)
         continue-on-error: true
