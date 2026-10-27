@@ -174,7 +174,7 @@ struct WebViewHost: NSViewRepresentable {
     }
 }
 
-enum WindowID { static let dashboard = "dashboard"; static let assistant = "assistant"; static let pairing = "pairing" }
+enum WindowID { static let dashboard = "dashboard"; static let assistant = "assistant"; static let pairing = "pairing"; static let secret = "secret" }
 
 /// The main window: the workspace's dashboard, live when its server answers and from
 /// its built pages when it does not, with the assistant one click away.

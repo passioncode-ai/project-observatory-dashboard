@@ -110,6 +110,11 @@ def backup_script(root: pathlib.Path) -> pathlib.Path | None:
 class VaultBoundaryError(ValueError):
     """Safe static diagnostics, never interpolated secret or request values."""
 
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        #: A short reason a caller can word (`store_value`), or None.
+        self.code = code
+
 
 def die(msg: str) -> None:
     sys.exit(f"vault: {msg}")
@@ -329,6 +334,63 @@ def _stdin_value() -> str:
     return v
 
 
+def _write_put(slot: pathlib.Path, meta: dict, value: str, label: str, **journal_detail) -> None:
+    """The write half of `put`: the value, then its metadata, then one journal line naming the slot."""
+    _atomic_write(slot, value)
+    meta.setdefault("created", now())
+    meta["updated"] = now()
+    # A NEW VALUE'S EXPIRY IS NOT THE OLD ONE'S. A door that minted it records its own
+    # right after (`record_expiry`); a value put by hand reads "expiry not recorded".
+    key_expiry.clear(meta)
+    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+    journal("put", label, **journal_detail)
+
+
+def _write_rotate(slot: pathlib.Path, meta: dict, value: str, label: str, **journal_detail) -> pathlib.Path:
+    """The write half of `rotate`: the old value archived owner-only, the new one written, one journal line."""
+    old = _read_private(slot).strip()
+    stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
+    archive = slot.with_name(f"{slot.name}.retired-{stamp}")
+    _atomic_write(archive, old)
+    _atomic_write(slot, value)
+    meta["rotated"] = now()
+    meta.setdefault("rotations", 0)
+    meta["rotations"] += 1
+    key_expiry.clear(meta)
+    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+    journal("rotate", label, archived=archive.name, scope="local_slot", **journal_detail)
+    return archive
+
+
+@_serialized
+def store_value(project: str, env: str, name: str, value: str, *, replace: bool, tool: str) -> str:
+    """Write `value` into the slot from inside this process, as `put` (an empty slot) or `rotate` (`replace`)
+    writes it: the same owner-only files, metadata and journal line, never the value in an argument, the
+    environment, a message or the journal. Answers "put" or "rotate"; raises VaultBoundaryError, whose
+    message never quotes the value.
+
+    The native secret prompt's door (OBS-260, `secret_prompt.client_store`) calls it in the process the
+    signed app started, with the value that arrived on that process's stdin."""
+    slot = _slot(project, env, name)
+    value = (value or "").strip()
+    if not value:
+        raise VaultBoundaryError("the value is empty", "value-empty")
+    if "\n" in value or "\r" in value:
+        raise VaultBoundaryError("the value carries a line break; one secret per slot", "value-multiline")
+    meta = _read_meta(slot)
+    label = f"{project}/{env}/{name}"
+    if not slot.is_file():
+        _write_put(slot, meta, value, label, tool=tool)
+        return "put"
+    if not replace:
+        raise VaultBoundaryError("the slot already holds a value and the request did not ask to replace it",
+                                 "slot-filled-now")
+    if value == _read_private(slot).strip():
+        raise VaultBoundaryError("the new value equals the old one", "value-unchanged")
+    _write_rotate(slot, meta, value, label, tool=tool)
+    return "rotate"
+
+
 @_serialized
 def cmd_put(a) -> int:
     slot = _slot(a.project, a.env, a.name)
@@ -337,14 +399,7 @@ def cmd_put(a) -> int:
             f"it keeping history; `put --force` overwrites losing it.")
     meta = _read_meta(slot)
     value = _stdin_value()
-    _atomic_write(slot, value)
-    meta.setdefault("created", now())
-    meta["updated"] = now()
-    # A NEW VALUE'S EXPIRY IS NOT THE OLD ONE'S. A door that minted it records its own
-    # right after (`record_expiry`); a value put by hand reads "expiry not recorded".
-    key_expiry.clear(meta)
-    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
-    journal("put", f"{a.project}/{a.env}/{a.name}")
+    _write_put(slot, meta, value, f"{a.project}/{a.env}/{a.name}")
     print(f"stored {a.project}/{a.env}/{a.name}: length {len(value)}, "
           f"mode 600; value hidden")
     return 0
@@ -530,19 +585,9 @@ def cmd_rotate(a) -> int:
             f"--revocation-evidence \"…\" --consumer-evidence \"…\"`")
     meta = _read_meta(slot)
     value = _stdin_value()
-    old = _read_private(slot).strip()
-    if value == old:
+    if value == _read_private(slot).strip():
         die("the new value equals the old one — that is not a rotation")
-    stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
-    archive = slot.with_name(f"{slot.name}.retired-{stamp}")
-    _atomic_write(archive, old)
-    _atomic_write(slot, value)
-    meta["rotated"] = now()
-    meta.setdefault("rotations", 0)
-    meta["rotations"] += 1
-    key_expiry.clear(meta)
-    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
-    journal("rotate", f"{a.project}/{a.env}/{a.name}", archived=archive.name, scope="local_slot")
+    archive = _write_rotate(slot, meta, value, f"{a.project}/{a.env}/{a.name}")
     # A local replacement is not a settlement: the retired value still works
     # until it is revoked at its provider, so the leak register is left open.
     print(f"rotated {a.project}/{a.env}/{a.name}: old value archived as "

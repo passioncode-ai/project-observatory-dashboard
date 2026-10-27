@@ -457,11 +457,49 @@ sequenceDiagram
 
 ### D4. The native secret prompt is shown only by Observatory's own signed app
 
-Built so far (OBS-260, server half): the agent binding (`full agent-binding issue NAME`,
+Built so far (OBS-260): the server half (#378): the agent binding (`full agent-binding issue NAME`,
 `secret_prompt.py`), the node's queue with its limits and outcomes, `secret.request`, `secret.get` and
-`secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. The windows, the app's
-door to the queue and the person's phrase are not built: until they are, a request is answered
-`no-client` with the person's `vault.py put` step and nothing is filed. The queue's states and
+`secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. Then, on macOS: the node
+opens the enrolled app through the lifecycle broker (`BrokerPrompter`, the broker's own `secret-prompt`
+caller), the app's door (`full assistant secret`, run as the app's own child and answering only when a
+file lies inside the enrolled bundle and whose immediate parent, running, satisfies the enrolled app's
+code requirement; a grandparent is never enough, since the app runs other engines for other actions), the `SecureField` window and the
+person's phrase in the data protection keychain (the app's access group, signed in only with a
+provisioning profile; a build without it answers `no-client`). How the value moves, exactly: the
+window hands it to the engine process the app spawned, on that process's stdin; that process writes it
+into the slot with the vault's own writer (`vault.store_value`, as `put` or `rotate`) and drops it; the
+node reads only the slot's metadata. That pipe and child are inside the app's process tree, which is
+what the door's parent check proves; a program of the same user that can change what the app runs
+would be in that tree too, and owning a file is not running Observatory's engine (the review of #382
+showed a system-owned `git` driven by a user `.gitconfig`). So the secret door never runs the
+`executable` preference, PATH or a launcher: only the engine inside the app's own bundle
+(`SecretEngine`, `Contents/Resources/engine/`), by an absolute path the app computes, after
+`SecStaticCodeCheckValidity` on the app itself (all architectures, strict, nested code, sealed
+resources, against the team named in its sealed Info.plist, not a compiled-in team) immediately before
+each call, list and store alike, with a scrubbed environment. **No release bundles that engine yet:**
+the node checks for it in the enrolled app, and that the bundle still satisfies its enrolled code
+requirement, and otherwise answers every request `no-client`, reason `engine-untrusted`, with the
+person's `vault.py put` step, before filing and before opening the app.
+**What the check does not cover.** The signature check hashes the bundle once, and a Python engine
+then reads its `.py` files as it imports them (`client_store` imports the vault writer after the value
+arrived). A drag-installed app belongs to its user, so a program of that user with App Management can
+swap a file after the check and restore it afterwards: the check alone does not stop it. Before any
+engine is bundled it must be one that cannot change after the check (copied into storage only the app
+can write, or a hardened-runtime binary with library validation), or the bundle must be one the user
+cannot write; its workspace (`OBSERVATORY_HOME`, today from the app's settings), its interpreter and
+its dependencies must be inside the sealed bundle too; and it must run as the app's direct child, with no
+launcher process in between (today's `project-observatory full` starts the engine as its own child, so the
+door, which accepts only the app as its immediate parent, would refuse it). Whether the app is built with
+the hardened runtime and library validation, so that no program of the user can inject into it before the
+parent check, is checked at the same time.
+The window is excluded from sharing (`NSWindow.sharingType = .none`) and the phrase from the
+accessibility tree; a program with Screen Recording may still capture it on recent macOS. This
+release's app is not signed with the provisioning profile the keychain group needs, so it keeps no
+phrase and answers `no-client`, reason `phrase-store-unavailable`; the follow-up is that the release
+fetches or creates the Developer ID profile through the App Store Connect API with the key it already
+holds. Not built: the Windows desktop window (the node has no lifecycle
+broker on Windows yet, OBS-277, and the window is opened only through it), so Windows answers
+`no-client`, reason `broker-unsupported`; Linux stays `no-client` (DEC-0143 SP-2). The queue's states and
 outcomes are those of the contract's draft `secret.prompt` channel method (DEC-0143, SP-1 to SP-7), so
 the channel can replace the broker path below at the next contract pin without changing the agent's
 tool.
@@ -469,8 +507,11 @@ tool.
 - **The path of a request, until the contract decides a channel method.** The agent calls
   `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
   agent's process. That server shows nothing itself and never touches a value: it records the request
-  (agent from its binding, project, slot, provider, reason) in the node's request queue. Only the node
-  writes that queue, in its owner-only state. **This is new work (OBS-260):** today the stdio MCP
+  (agent from its binding, project, slot, provider, reason) in the node's request queue. The node is the
+  only Observatory process that writes the queue, but the queue is an owner-only file, so any program
+  running as the same user can read and write it: read every request's text, file a request under any
+  agent's name with any reason, or set an outcome, bypassing the binding and the `engine-untrusted`
+  gate. It cannot see a value typed into the genuine window. **This is new work (OBS-260):** today the stdio MCP
   server has no binding of its own (it is the built-in `local:stdio` principal shared by every local
   agent, `observatory/engine/access_binding.py`), and the node's `POST /mcp` serves only the
   `node.lifecycle` tools behind a lifecycle grant (`tools/serverd.py`). OBS-260 adds a binding per local
@@ -480,9 +521,10 @@ tool.
   name, the same limit as the phrase on Linux and Windows; the prompt still shows the slot and the
   reason, and nothing is stored without the person typing it. The node asks
   the lifecycle broker (OSS-76) to open Observatory's own code-signed app with the request id, never a
-  direct launch. The app reads the request from the node, shows the window, and writes the value into
-  the vault slot itself, in its own process, as `vault.py put` writes it: **the value never crosses the
-  local channel or any other process boundary.** The job then reads the outcome, `stored`,
+  direct launch. The app reads the request from the node, shows the window, and the value goes into the
+  vault slot without crossing the local channel or reaching the node: the window hands it on stdin to
+  the engine process the app itself spawned, which writes it as `vault.py put` writes it (the status
+  note above says exactly how, and what that does not protect against). The job then reads the outcome, `stored`,
   `declined` or `no answer`; no value is ever in an argument, an environment variable, a log, a
   notification or the result. When the node is down, the request fails with "Observatory is not
   running" and no window is shown by anyone.

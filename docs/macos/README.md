@@ -143,6 +143,14 @@ tagged compatible engine and app artifact.
   bundle id, the helper's identifier `ai.passioncode.observatory.lifecycle-native`), or the release stops before its
   zip is packaged (OBS-79 L2r, [LIFECYCLE.md](../design/LIFECYCLE.md#step-l2r-what-was-built));
 - Sigstore attestation, plus `SHA256SUMS` and its GPG signature, through `release-publish.yml@v1`.
+- the keychain group that keeps the secret prompt's phrase (OBS-260): `build-app.sh` signs
+  `macos/ProjectObservatory.entitlements` in only when `OBSERVATORY_PROVISIONING_PROFILE` (the path of a
+  Developer ID provisioning profile for the app's bundle id with keychain sharing) and
+  `OBSERVATORY_TEAM_ID` (from the repository variable `APPLE_TEAM_ID`) are both set. The release passes the
+  team id; no step provides the profile yet, so released apps keep no phrase and answer every secret
+  request `no-client` with the person's `vault.py put` step. The follow-up: the release fetches or creates
+  the Developer ID profile through the App Store Connect API with the key it already holds for
+  notarization, and passes its path.
 
 A person from `release-approvers` approves the run, and may be whoever pushed the tag; an agent
 never approves it. The local path

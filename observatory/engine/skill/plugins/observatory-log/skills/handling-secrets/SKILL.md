@@ -33,8 +33,10 @@ tool returns a job, and `fabric.job.get` ends with `output.outcome`: `stored`
 their own shell (`vault.py put`, the value on its stdin); relay that step, never
 a request for the value. The MCP server needs `--agent NAME`, which `project-observatory
 full agent-binding issue NAME` prints when the person connects the agent. The
-window ships in a later release; until then every request with a desktop is
-answered `no-client` with that step.
+window is the Mac app's, which the node opens through its lifecycle broker and
+which shows the person's own phrase; on Windows and Linux, with the app not
+enrolled, or (as in every release so far) with no engine bundled inside the
+signed app, a request is answered `no-client` with that step.
 
 ## Start here
 

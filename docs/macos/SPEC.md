@@ -38,7 +38,39 @@ any reconciled turn state; `job` polls and `cancel` stops **assistant jobs only*
 `delete` removes a conversation that has no open turn, with its request ids and job
 records; `list` lists conversations; `dashboard` verifies the selected workspace
 before returning a loopback URL; `ceremony` takes one step of the pairing ceremony
-(`{"op", "role"?}`, docs/design/NODE.md "The ceremony surface") and answers its screen.
+(`{"op", "role"?}`, docs/design/NODE.md "The ceremony surface") and answers its screen;
+`secret` is the secret prompt's door (OBS-260, docs/design/PERSON-SURFACES.md D4):
+`{"op": "list"}` answers the waiting requests (agent, project, slot, provider, the reason
+as the agent's words, whether it replaces a value), `{"op": "store", "requestId", "value"}`
+writes the value into the vault slot in that engine process, as `vault.py put` (or `rotate`
+for a replacement) writes it, and answers the request, `{"op": "decline", "requestId"}`
+answers Cancel, and `{"op": "unavailable", "requestId", "reason": "phrase-store-unavailable"}`
+answers `no-client` for a build that cannot keep the phrase. Every op but an empty list
+answers `client-unverified` unless a parent of the engine process, while running, satisfies
+the enrolled app's code requirement (team and bundle id, `codesign --verify -R` on its pid).
+The value travels only on the child's stdin; it is never in an argument, the environment, a
+log, the answer or the journal. The app reads `list` every five seconds and brings its
+`Secret request` window forward when a request appears; the window shows the person's
+phrase from the data protection keychain (the app's own access group; the signing setup
+applies `macos/ProjectObservatory.entitlements` only with a provisioning profile). With no
+place for the phrase the app shows no window and answers `unavailable` (`phrase-store-unavailable`).
+The `secret` action never uses the `executable` preference, PATH or a launcher: the app runs
+only the engine inside its own bundle (`SecretEngine.relativePath`), by the absolute path it
+computes, after `SecStaticCodeCheckValidity` on its own bundle (all architectures, strict,
+nested code, sealed resources, the team named by its sealed Info.plist key
+`ObservatoryTeamID`) immediately before each call, checking first that the engine exists so that
+no bundle is hashed while none is bundled. The door itself answers only when its own file lies
+inside the enrolled bundle and its immediate parent is the signed app (a grandparent is never
+enough: the engine the settings name, run for other actions, would find the app two levels up).
+What this does not cover: the signature is hashed once and a Python engine reads its files as it
+imports them, so a program with App Management could swap a file of a user-writable bundle after
+the check; an engine must not be bundled until it cannot change after the check, with its
+workspace, interpreter and dependencies inside the sealed bundle, run as the app's direct child with no launcher in between (OBS-260). With no such engine (every release so far)
+it reads nothing; the node has already answered the request `no-client`, reason
+`engine-untrusted`. The `secret` action runs with a scrubbed environment (system PATH, `PYTHONNOUSERSITE=1`, no
+`PYTHON*` or `DYLD_*` variables). The window has `sharingType = .none` (set as its view joins
+the window), the phrase is `accessibilityHidden` and a neutral label stands in for it, Return does not save, a new request clears
+the field, and a request that leaves the queue closes the window.
 Unknown actions/fields/ids fail closed. A full
 disk is `disk-full`, an unwritable workspace `workspace-unwritable`.
 
