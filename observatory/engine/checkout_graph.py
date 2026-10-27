@@ -68,19 +68,31 @@ def parse_counts(raw):
     return values
 
 
+MARKERS = (('shallow', 'shallow-history'), ('info/grafts', 'grafted-history'),
+           ('objects/info/alternates', 'alternate-object-store'),
+           ('objects/info/http-alternates', 'alternate-object-store'))
+
+
+def refuse_markers(directory):
+    """A history this graph cannot count is refused by its marker file, before git is asked anything: git warns
+    about a missing alternate on stderr, and that warning would otherwise be reported as `command-diagnostics`."""
+    for name, reason in MARKERS:
+        try: (directory / name).lstat()
+        except FileNotFoundError: pass
+        else: raise ValueError(reason)
+
+
 def binding(path, deadline):
+    dotgit = path / '.git'
+    if dotgit.is_dir() and not dotgit.is_symlink():
+        refuse_markers(dotgit)                       # a worktree's `.git` file is checked below, at its common dir
     if query(path, ['rev-parse', '--is-inside-work-tree'], deadline).strip() != b'true':
         raise ValueError('git-root-unresolved')
     top = Path(os.fsdecode(query(path, ['rev-parse', '--show-toplevel'], deadline).rstrip(b'\n')))
     if top.resolve() != path.resolve(): raise ValueError('identity-changed')
     gitdir = Path(os.fsdecode(query(path, ['rev-parse', '--absolute-git-dir'], deadline).rstrip(b'\n')))
     common = (path / os.fsdecode(query(path, ['rev-parse', '--git-common-dir'], deadline).rstrip(b'\n'))).resolve()
-    for name, reason in (('shallow', 'shallow-history'), ('info/grafts', 'grafted-history'),
-                         ('objects/info/alternates', 'alternate-object-store'),
-                         ('objects/info/http-alternates', 'alternate-object-store')):
-        try: (common / name).lstat()
-        except FileNotFoundError: pass
-        else: raise ValueError(reason)
+    refuse_markers(common)
     if query(path, ['rev-parse', '--is-shallow-repository'], deadline).strip() != b'false':
         raise ValueError('shallow-history')
     if query(path, ['config', '--includes', '--get-regexp', r'^(extensions\.partialclone|remote\..*\.promisor)$'], deadline, absent=True) is not None:

@@ -29,8 +29,11 @@ CLI whose signature it checked first.
   team, reports its runtime online).
 
 Linux and Windows have no adapter yet: `platform_adapter` answers `unsupported_platform` there for every call, never a
-silent success. The helper is built from `native_app.swift`: `build_helper` compiles it with `swiftc` for a source
-install (`python3 node/lifecycle/macos.py build-helper`); the release path is in the design document.
+silent success. The helper is built from `native_app.swift` two ways. The signed app carries a release build at
+`Contents/Helpers/lifecycle-native` (OBS-79 step L2r): the adapter prefers it while the installed app satisfies the
+organization's requirement, its own signature names the helper's identifier under the same team and it was built from
+the source this engine ships. Otherwise `build_helper` compiles it with `swiftc` for a source install (`python3
+node/lifecycle/macos.py build-helper`). `helper_choice` says which one runs and why.
 """
 from __future__ import annotations
 
@@ -51,7 +54,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, NamedTuple, Optional
 
 if __name__ == '__main__':                             # run as a script: `python3 node/lifecycle/macos.py ...`
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -123,6 +126,42 @@ _KILL = getattr(signal, 'SIGKILL', signal.SIGTERM)
 #: The fields of a helper answer the broker reads; anything else it says is dropped.
 HELPER_FIELDS = ('pid', 'bundleId', 'windows', 'active', 'hidden', 'inputIdleSeconds')
 WATCH_EVENTS = ('launched', 'terminated', 'activated')
+#: Where the release build of the helper sits inside the signed app (step L2r, `macos/scripts/build-app.sh`), and the
+#: code identifier it is signed with: its own signature is checked under the organization's team too, not only the
+#: app's seal over it.
+APP_HELPER = Path('Contents/Helpers') / HELPER_NAME
+APP_HELPER_IDENTIFIER = 'ai.passioncode.observatory.lifecycle-native'
+#: Why the app's helper is not the one in use (`helper_choice`, `full lifecycle status`, `full doctor`, and the
+#: `appHelper` field of a `setup_required` probe). Each is a fall back to the source-built helper, never a run of it.
+APP_HELPER_REASONS = {
+    'app_not_installed': 'no Project Observatory app is installed in /Applications or ~/Applications',
+    'app_helper_missing': 'the installed app carries no helper (it predates 0.30.0)',
+    'app_untrusted': 'the installed app or its helper is a link, or a file or folder others may change',
+    'app_signature_invalid': 'the installed app is not signed by the organization\'s team (a local QA build, or '
+                             'another team)',
+    'app_helper_signature_invalid': 'the helper inside the app is not signed as the app\'s helper by the '
+                                    'organization\'s team',
+    'app_verification_pending': 'the app\'s signature check has not finished yet',
+    'app_verification_failed': 'codesign could not check the app\'s signature',
+    'app_helper_outdated': 'the app\'s helper was built from another native_app.swift than this engine ships (the app '
+                           'and the engine are different releases)',
+}
+#: How long a call the source-built helper could serve waits for the app's first deep check before it falls back.
+APP_CHECK_GRACE_SECONDS = 2
+#: How long a bundle state whose helper was refused for a lasting reason (another team, an outdated helper) is not
+#: checked again. A changed bundle is checked at once: the refusal is keyed by its metadata.
+APP_REFUSAL_SECONDS = 300
+#: How a failed check of the app (`_app_matches`) reads as a reason. Anything else is `app_untrusted`.
+_APP_CHECK_REASONS = {
+    'verification_pending': 'app_verification_pending',
+    'verification_timeout': 'app_verification_failed',
+    'verification_unavailable': 'app_verification_failed',
+    'identity_changed_during_verification': 'app_verification_pending',
+}
+#: The adapter's default: the installed app is looked for only when no helper was injected (a test that pins a helper
+#: never reaches an installed app). `INSTALLED` asks for the installed app explicitly; `None` for no app at all.
+_DEFAULT_APP = object()
+INSTALLED = object()
 
 
 def default_helper() -> Path:
@@ -186,12 +225,15 @@ def helper_safe(helper) -> bool:
         return False
 
 
-def helper_version(helper, *, run) -> Optional[str]:
+def helper_version(helper, *, run, strict: bool = False) -> Optional[str]:
     """What `helper --version` says it was built from, or None: an older build that does not know the flag
-    (`invalid_argument`), a timeout, an exit code, or an answer of another shape. Nothing else is asked of it."""
+    (`invalid_argument`), a timeout, an exit code, or an answer of another shape. Nothing else is asked of it.
+    With `strict`, a run that did not answer (a timeout, a start that failed) raises instead of reading as None."""
     try:
         result = run([str(helper), '--version'], timeout=HELPER_VERSION_TIMEOUT)
     except LifecycleError:
+        if strict:
+            raise
         return None
     if result.returncode:
         return None
@@ -204,10 +246,10 @@ def helper_version(helper, *, run) -> Optional[str]:
     return answer['version']
 
 
-def helper_current(helper, *, run) -> bool:
+def helper_current(helper, *, run, strict: bool = False) -> bool:
     """The helper was built from the source this engine ships."""
     expected = expected_helper_version()
-    return expected is not None and helper_version(helper, run=run) == expected
+    return expected is not None and helper_version(helper, run=run, strict=strict) == expected
 
 
 def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> str:
@@ -226,6 +268,67 @@ def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> st
     if expected_helper_version() is None:
         return 'source_missing'
     return 'current' if helper_current(helper, run=run or Runner()) else 'outdated'
+
+
+class HelperChoice(NamedTuple):
+    """One call's choice of helper: the `path` it runs (None: `setup_required`), whether it is the signed `app`'s or
+    the `source`-built one, the source helper's `problem` when neither may run, and why the app's was not used."""
+    path: Optional[Path]
+    in_use: Optional[str]
+    problem: Optional[str]
+    app_reason: Optional[str]
+
+
+def app_identity() -> dict:
+    """The signed app as an enrolled target's identity: its bundle id and the organization's team, the pins
+    `app_update` holds (`requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)`), never what the bundle says."""
+    import app_update
+    return {'scheme': IDENTITY_SCHEME, 'bundleId': app_update.BUNDLE_ID, 'teamId': app_update.TEAM_ID,
+            'requirement': requirement_for(app_update.BUNDLE_ID, app_update.TEAM_ID)}
+
+
+def installed_app(home=None) -> Optional[Path]:
+    """The installed `Project Observatory.app` (/Applications, else ~/Applications), as `app_update` finds it; its
+    Info.plist names the bundle id, which proves nothing until its signature is checked."""
+    import app_update
+    return app_update.installed_app(Path(home) if home else None)
+
+
+def check_app_helper(app, *, run, verified: Callable[[], bool]) -> Path:
+    """The helper inside the installed `app`, when the adapter may run it; else `LifecycleError(<reason>)` with a key
+    of `APP_HELPER_REASONS`. In order, cheapest first: the helper is a regular file at a trusted place (every folder
+    above it root's or this account's, nobody else may write them, no link); `verified()` says the app satisfies the
+    organization's requirement (strict and deep, so the seal covers the nested helper); the helper's own signature
+    satisfies the requirement of its identifier under the same team; and only then is it asked `--version`, which must
+    be the version of the source this engine ships."""
+    try:
+        helper = trusted_path(Path(app) / APP_HELPER)
+    except LifecycleError as exc:
+        raise LifecycleError('app_helper_missing' if exc.code == 'not_installed' else 'app_untrusted') from None
+    except OSError:
+        raise LifecycleError('app_untrusted') from None
+    try:
+        ok = verified()
+    except LifecycleError as exc:
+        raise LifecycleError(_APP_CHECK_REASONS.get(exc.code, 'app_untrusted')) from None
+    except (OSError, ValueError, KeyError):
+        raise LifecycleError('app_untrusted') from None
+    if not ok:
+        raise LifecycleError('app_signature_invalid')
+    try:
+        signed = satisfies(helper, requirement_for(APP_HELPER_IDENTIFIER, app_identity()['teamId']), deep=False, run=run)
+    except LifecycleError as exc:
+        raise LifecycleError(_APP_CHECK_REASONS.get(exc.code, 'app_untrusted')) from None
+    if not signed:
+        raise LifecycleError('app_helper_signature_invalid')
+    try:
+        current = helper_current(helper, run=run, strict=True)
+    except LifecycleError:
+        # No answer in time (a first run slowed by the system's own check) is not a lasting reason: not cached.
+        raise LifecycleError('app_verification_failed') from None
+    if not current:
+        raise LifecycleError('app_helper_outdated')
+    return helper
 
 
 def default_cache() -> Path:
@@ -605,18 +708,37 @@ class MacAdapter:
     """The broker's adapter on macOS. Everything it touches can be injected, so its tests run no real tool:
 
     - `run`: the runner of `codesign`, `launchctl`, the helper and Switchboard's CLI (`Runner` by default);
-    - `helper`: the compiled NSWorkspace helper (`default_helper()` by default);
+    - `helper`: the source-built NSWorkspace helper (`default_helper()` by default);
+    - `app`: the signed app whose helper is preferred (`INSTALLED`: the installed one, found again on every choice;
+      a path; or None). By default the installed app is looked for only when `helper` is not injected;
     - `cache_path`: the owner-only verified-bundle cache (none: kept in memory only);
     - `fabric_hub_file`: Fabric's `hub.json` (its public place by default);
     - `home`: whose `~/Applications` and `~/Library/LaunchAgents` count;
     - `uid`: the launchd GUI domain, `gui/<uid>`."""
 
     def __init__(self, *, run=None, helper=None, cache_path=None, fabric_hub_file=None, home=None, uid=None,
-                 platform: Optional[str] = None):
+                 platform: Optional[str] = None, app=_DEFAULT_APP):
         self.home = Path(home) if home else Path.home()
         self.run = run if run is not None else Runner(self.home)
-        self.helper = Path(helper) if helper else default_helper()
+        self.source_helper = Path(helper) if helper else default_helper()
         self._helper_current_key = None                 # the file state that last answered the expected version
+        if app is _DEFAULT_APP:
+            app = None if helper else INSTALLED
+        if app is INSTALLED:
+            self._find_app: Optional[Callable[[], Optional[Path]]] = lambda: installed_app(self.home)
+        elif app is None:
+            self._find_app = None
+        else:
+            fixed = Path(app)
+            self._find_app = lambda: fixed if fixed.is_dir() else None
+        # The last choice, for reports and tests only: no code runs a helper from it (each call runs the path its own
+        # `_choose_helper` returned, so one thread never runs a helper another thread checked or refused).
+        self.last_choice: Optional[HelperChoice] = None
+        self._app_helper_key = None                     # (app path, bundle metadata hash) whose helper passed every check
+        # (app path, bundle metadata hash) -> (reason, monotonic expiry): a bundle state whose helper was refused for
+        # a lasting reason is not deep-checked again on every call (APP_REFUSAL_SECONDS).
+        self._app_refused: dict = {}
+        self._app_lock = threading.Lock()
         self.fabric_hub_file = Path(fabric_hub_file) if fabric_hub_file else _default_hub_file()
         self.cache_path = Path(cache_path) if cache_path else None
         self.roots = application_roots(self.home)
@@ -772,46 +894,116 @@ class MacAdapter:
 
     # -- observation -------------------------------------------------------------------------------------------------
 
-    def _helper_problem(self) -> Optional[str]:
-        """None when the helper may run, else why not: `helper_not_built` (no file), `helper_unsafe` (a link, or a
-        file or folder others may change), `helper_source_missing` (this engine's `native_app.swift` cannot be read,
-        so no version is known) or `helper_outdated` (built from another `native_app.swift`). All are
-        `setup_required`; `full lifecycle build-helper` repairs the first, the third needs the engine reinstalled.
+    def _choose_helper(self, *, wait: Optional[bool] = None) -> HelperChoice:
+        """Which helper this call runs: the signed app's (step L2r) while `_app_helper` finds every check passed, else
+        the source-built one, else none (`problem`, all `setup_required`). The caller runs `choice.path` and nothing
+        else, so a choice another thread made at the same time can never hand it a helper it did not check.
+
+        `wait`: whether the first deep check of the app may hold this call up to VERIFY_WAIT_SECONDS. By default it
+        does only when no source-built helper could run meanwhile; otherwise the deep check may take
+        APP_CHECK_GRACE_SECONDS and the source helper serves until it lands in the cache. Either way, once the deep
+        check passed, the helper's own plain signature check (up to PLAIN_VERIFY_TIMEOUT) and its `--version` (up to
+        HELPER_VERSION_TIMEOUT) run in this call, once per bundle state."""
+        reason = None
+        if self._find_app is not None:
+            helper, reason = self._app_helper(wait)
+            if helper is not None:
+                choice = HelperChoice(helper, 'app', None, None)
+                self.last_choice = choice
+                return choice
+        problem = self._source_problem()
+        choice = (HelperChoice(self.source_helper, 'source', None, reason) if problem is None
+                  else HelperChoice(None, None, problem, reason))
+        self.last_choice = choice
+        return choice
+
+    def _app_helper(self, wait: Optional[bool]) -> tuple:
+        """(the app's helper, None) when it may run, else (None, a key of `APP_HELPER_REASONS`).
+
+        Checked again whenever the app's bundle changes (the metadata walk over every entry, the helper's included);
+        an unchanged bundle whose helper passed is not checked again. A bundle that changes while it is checked is
+        `app_verification_pending`, and nothing is remembered."""
+        app = self._find_app()
+        if app is None:
+            return None, 'app_not_installed'
+        try:
+            state = bundle_metadata_hash(app)
+        except LifecycleError as exc:
+            return None, _APP_CHECK_REASONS.get(exc.code, 'app_untrusted')
+        except OSError:
+            return None, 'app_untrusted'
+        key = (str(app), state)
+        if self._app_helper_key == key:
+            return Path(app) / APP_HELPER, None
+        with self._app_lock:
+            refused = self._app_refused.get(key)
+        if refused and refused[1] > time.monotonic():
+            return None, refused[0]
+        if wait is None:
+            wait = self._source_problem() is not None
+        # A first deep check of the small app bundle usually lands within the grace; one that does not leaves the
+        # source helper serving this call while it finishes.
+        deadline = None if wait else time.time() + APP_CHECK_GRACE_SECONDS
+        target = {'kind': 'app', 'path': str(app), 'identity': app_identity()}
+        try:
+            helper = check_app_helper(app, run=self.run, verified=lambda: self._app_matches(target, deadline))
+            if bundle_metadata_hash(app) != state:
+                return None, 'app_verification_pending'
+        except LifecycleError as exc:
+            return None, self._refuse(key, exc.code if exc.code in APP_HELPER_REASONS else 'app_untrusted')
+        except OSError:
+            return None, self._refuse(key, 'app_untrusted')
+        self._app_helper_key = key
+        return helper, None
+
+    def _refuse(self, key, reason: str) -> str:
+        """Remember a lasting refusal of this bundle state for APP_REFUSAL_SECONDS (a changed bundle is a new key, so
+        an update is checked at once); a pending or failed check is not remembered: it decided nothing."""
+        if reason not in ('app_verification_pending', 'app_verification_failed'):
+            with self._app_lock:
+                self._app_refused[key] = (reason, time.monotonic() + APP_REFUSAL_SECONDS)
+                for stale in [k for k, (_, until) in self._app_refused.items() if until <= time.monotonic()]:
+                    del self._app_refused[stale]
+        return reason
+
+    def _source_problem(self) -> Optional[str]:
+        """None when the source-built helper may run, else why not: `helper_not_built` (no file), `helper_unsafe` (a
+        link, or a file or folder others may change), `helper_source_missing` (this engine's `native_app.swift` cannot
+        be read, so no version is known) or `helper_outdated` (built from another `native_app.swift`). `full lifecycle
+        build-helper` repairs the first, the third needs the engine reinstalled.
 
         A helper that answered the expected version is not asked again until its file changes (device, inode, size,
         modification and change times). A mismatch is never remembered: a rebuilt helper is current at once."""
-        if not self.helper.is_file() and not self.helper.is_symlink():
+        helper = self.source_helper
+        if not helper.is_file() and not helper.is_symlink():
             return 'helper_not_built'
-        if not helper_safe(self.helper):
+        if not helper_safe(helper):
             return 'helper_unsafe'
         if expected_helper_version() is None:
             return 'helper_source_missing'
         try:
-            info = self.helper.stat()
+            info = helper.stat()
         except OSError:
             return 'helper_not_built'
         key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
         if self._helper_current_key == key:
             return None
-        if not helper_current(self.helper, run=self.run):
+        if not helper_current(helper, run=self.run):
             return 'helper_outdated'
         self._helper_current_key = key
         return None
 
-    def _helper_ready(self) -> bool:
-        return self._helper_problem() is None
-
-    def _helper_answer(self, args, timeout: float = 10) -> dict:
+    def _helper_answer(self, helper: Path, args, timeout: float = 10) -> dict:
         try:
-            answer = json.loads(self.run([str(self.helper), *args], timeout=timeout).stdout)
+            answer = json.loads(self.run([str(helper), *args], timeout=timeout).stdout)
         except ValueError:
             raise LifecycleError('failed') from None
         if not isinstance(answer, dict) or not isinstance(answer.get('state'), str):
             raise LifecycleError('failed')
         return answer
 
-    def _helper_status(self, target: dict) -> dict:
-        return self._helper_answer(['status', target['path']])
+    def _helper_status(self, helper: Path, target: dict) -> dict:
+        return self._helper_answer(helper, ['status', target['path']])
 
     def _launchd_state(self, target: dict) -> dict:
         if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
@@ -966,11 +1158,12 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 return observation('login_required')
-            problem = self._helper_problem()
-            if problem:
-                return observation('setup_required', reason=problem)
+            choice = self._choose_helper()
+            if choice.problem:
+                extra = {'appHelper': choice.app_reason} if choice.app_reason else {}
+                return observation('setup_required', reason=choice.problem, **extra)
             try:
-                response = self._helper_status(target)
+                response = self._helper_status(choice.path, target)
             except LifecycleError:
                 return observation('failed')
             seen = observation(response['state'], **{k: response[k] for k in HELPER_FIELDS if k in response})
@@ -997,12 +1190,13 @@ class MacAdapter:
         if target['kind'] == 'app':
             if self.run([LAUNCHCTL, 'print', self.domain]).returncode:
                 raise LifecycleError('login_required')
-            if not self._helper_ready():
+            choice = self._choose_helper()
+            if choice.path is None:
                 raise LifecycleError('setup_required')
             args = ['open', target['path']]
             if target.get('backgroundLaunch') is True:
                 args.append('--background')             # only for a target the owner enrolled as understanding it
-            response = self._helper_answer(args, timeout=12)
+            response = self._helper_answer(choice.path, args, timeout=12)
             if response['state'] not in ('ready', 'accepted_by_os'):
                 raise LifecycleError(response['state'])
             return 'launch_services_open'
@@ -1034,13 +1228,14 @@ class MacAdapter:
         if not self.identity_matches(target):
             raise LifecycleError('identity_mismatch')
         if target['kind'] == 'app':
-            if not self._helper_ready():
+            helper = self._choose_helper().path
+            if helper is None:
                 raise LifecycleError('setup_required')
-            current = self._helper_status(target)
+            current = self._helper_status(helper, target)
             if current.get('state') != 'ready' or current.get('pid') != pid:
                 raise LifecycleError('identity_mismatch')
             if mode == 'quit' and not force:
-                response = self._helper_answer(['quit', target['path'], str(pid)])
+                response = self._helper_answer(helper, ['quit', target['path'], str(pid)])
                 if response.get('state') == 'quit_requested':
                     return 'quit_requested'
                 if response.get('state') == 'identity_mismatch':
@@ -1048,7 +1243,7 @@ class MacAdapter:
                     # `status` and `quit` (the pid is gone: the stop is done, `already_exited`), or the pid is someone
                     # else's process now. Probe again to tell them apart; nothing is signalled in either case.
                     try:
-                        again = self._helper_status(target)
+                        again = self._helper_status(helper, target)
                     except LifecycleError:
                         raise LifecycleError('identity_mismatch') from None
                     if again.get('state') == 'stopped':
@@ -1086,12 +1281,13 @@ class MacAdapter:
         helper that crashes is started again with backoff (5 s, doubling to 300 s, reset after a minute of life)."""
         backoff = 5
         while not stop_event.is_set():
-            if not self._helper_ready():
+            helper = self._choose_helper().path
+            if helper is None:
                 return
             started = time.monotonic()
             try:
                 proc = popen(
-                    [str(self.helper), 'watch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    [str(helper), 'watch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL, text=True, env={'PATH': SYSTEM_PATH, 'HOME': str(self.home)},
                     **osproc.new_group(),
                 )
@@ -1168,6 +1364,38 @@ def platform_adapter(platform: Optional[str] = None, **kwargs):
     return UnsupportedAdapter(platform)
 
 
+def helper_choice(*, run=None, home=None, helper=None, app=INSTALLED, platform: Optional[str] = None) -> dict:
+    """Which helper the adapter runs now and why, for `full lifecycle status`, `full doctor` and `macos.py helper`:
+
+    `{inUse: app | source | None, path, app: {path, state, reason}, source: {path, state}}`. `app.state` is `in_use`,
+    `not_installed` or `not_used` with `reason` (a key of `APP_HELPER_REASONS`); `source.state` is `helper_state`'s.
+    It waits for the app's signature check (a terminal or a report can), keeps no cache, writes nothing, and runs only
+    `codesign` and, after their checks pass, the helpers' `--version`."""
+    platform = platform or sys.platform
+    source = Path(helper) if helper else default_helper()
+    if platform != 'darwin':
+        return {'inUse': None, 'path': None, 'reason': 'unsupported_platform',
+                'app': {'path': None, 'state': 'unsupported_platform', 'reason': None},
+                'source': {'path': str(source), 'state': 'unsupported_platform'}}
+    adapter = MacAdapter(run=run, home=home, helper=source, app=app, platform=platform,
+                         fabric_hub_file=Path(os.devnull))
+    try:
+        choice = adapter._choose_helper(wait=True)
+        found = adapter._find_app() if adapter._find_app is not None else None
+        reason = choice.app_reason
+        return {
+            'inUse': choice.in_use,
+            'path': str(choice.path) if choice.path else None,
+            'app': {'path': str(found) if found else None,
+                    'state': ('in_use' if choice.in_use == 'app'
+                              else 'not_installed' if reason in (None, 'app_not_installed') else 'not_used'),
+                    'reason': reason},
+            'source': {'path': str(source), 'state': helper_state(source, run=adapter.run, platform=platform)},
+        }
+    finally:
+        adapter.close()
+
+
 # -- the helper, built for a source install --------------------------------------------------------------------------
 
 XCRUN = '/usr/bin/xcrun'
@@ -1234,8 +1462,8 @@ def build_helper(dest=None, *, swiftc: Optional[str] = None, sdk: Optional[str] 
 
 def main(argv=None) -> int:
     """`build-helper [--dest PATH]`: compile the helper for a source install. `helper`: where it is, whether it
-    exists and its `state` (`current`, `outdated`, `not_built`). Each prints one JSON document; a refusal prints its
-    code and exits 1."""
+    exists, its `state` (`current`, `outdated`, `not_built`) and `choice`, which helper runs and why (`helper_choice`).
+    Each prints one JSON document; a refusal prints its code and exits 1."""
     import argparse
 
     parser = argparse.ArgumentParser(prog='macos.py', description='The lifecycle broker\'s macOS helper.')
@@ -1250,7 +1478,7 @@ def main(argv=None) -> int:
         else:
             path = default_helper()
             print(json.dumps({'helper': str(path), 'built': path.is_file(), 'state': helper_state(path),
-                              'expectedVersion': expected_helper_version()}))
+                              'expectedVersion': expected_helper_version(), 'choice': helper_choice()}))
     except LifecycleError as exc:
         print(json.dumps({'error': exc.code, 'detail': getattr(exc, 'detail', '')}))
         return 1
