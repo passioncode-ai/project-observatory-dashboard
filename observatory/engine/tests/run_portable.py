@@ -481,6 +481,8 @@ def clean_env(base: Path) -> dict[str, str]:
         # The shared update log (update_events.py, LC-16) goes beside the suite, never into
         # ~/Library/Logs or ~/.local/state of the machine running it.
         'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
+        # Everything under this folder is the suite's own (tests/tmp.py keeps a workspace there).
+        'OBSERVATORY_TEST_SANDBOX': str(base),
         **windows,
     })
 

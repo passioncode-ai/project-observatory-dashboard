@@ -2986,8 +2986,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "d75df5e26720b0cebb555cee91eccd95aaa7bee5294148bce9c7f42a40ddb728",
-      "bytes": 96708,
+      "export_sha256": "334a1b1846eb553690bcb0a84e1743e08f0307eeb04cfd5599787a4c57e2587f",
+      "bytes": 97748,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3764,8 +3764,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "21c9f1a13a7a74960a76053111bd8ac9438dcd1c201d2c2057ff80e5f4d7428b",
-      "bytes": 49061,
+      "export_sha256": "c0266e66880728d19903baaaa47867cec4cae49b4303f995ea9bae8241462dae",
+      "bytes": 49206,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4212,8 +4212,8 @@
       "path": "tests/test_delegation_sealed.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56bccbb7d4c95466f08e16a60093dd10730f2c8472bb102d7ede4969b6c188c6",
-      "bytes": 27522
+      "export_sha256": "9ba257866b15c554f04677adfbbfc50a2339ae8039becec650ba47bf387a58bf",
+      "bytes": 27790
     },
     {
       "path": "tests/test_delivery.py",
@@ -5979,8 +5979,8 @@
     {
       "path": "tests/tmp.py",
       "source_sha256": "ec56e69cdfacbb885408fc4bdfd496928273b98ccb7caa0a245ab957f927f679",
-      "export_sha256": "20fb10b7bf67ed1d40549b41029c8451062b21daf2c81786a8ead4eb3c119f3c",
-      "bytes": 4576,
+      "export_sha256": "73a91f46a7bb347d12b2d94ee1cdc0edd4b9388297d3a81aee6ebfb6f92d2fdf",
+      "bytes": 5038,
       "python_comments_removed": 0,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,

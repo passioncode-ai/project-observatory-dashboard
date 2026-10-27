@@ -159,10 +159,12 @@ jobs:
           retention-days: 7
 
   windows:
-    timeout-minutes: 300
-    # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
-    # change. Historical informative steps remain explicitly allowed to fail.
-    # Holder safety is enforced at both step and job level; its failure fails this job.
+    # docs/design/WINDOWS-LINUX.md and OBS-277: what the engine does on Windows, enforced on every
+    # change. No step may fail: every step below fails this job. The portable engine set runs whole;
+    # a suite that does not pass on Windows is accepted only when tools/windows-known.json names it
+    # with its backlog row, and tools/check_windows_suites.py fails the job when an unlisted suite
+    # fails or skips, or a listed one passes (the list only shrinks).
+    timeout-minutes: 120
     runs-on: windows-latest
     defaults:
       run:
@@ -176,38 +178,37 @@ jobs:
           python-version: '3.14'
       - id: sqlite
         name: SQLite extension support
-        continue-on-error: true
         run: python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
       - id: install
         name: Install package
         run: python -m pip install -c requirements-full.lock '.[full]'
       - id: compile
         name: Compile every distributed Python module
-        continue-on-error: true
+        if: always()
         run: python -m compileall -q observatory
       - id: imports
         name: Every engine library module loads
-        continue-on-error: true
+        if: always()
         run: python tools/check_imports.py
       - id: oslocks
         name: One lock API on every OS (W1)
-        continue-on-error: true
+        if: always()
         run: python observatory/engine/tests/test_oslocks.py
       - id: osproc
         name: Process groups on every OS (W2)
-        continue-on-error: true
+        if: always()
         run: python observatory/engine/tests/test_osproc.py
       - id: osprivacy
         name: Who the engine runs as (W2b)
-        continue-on-error: true
+        if: always()
         run: python observatory/engine/tests/test_osprivacy.py
       - id: osschedule
         name: Background jobs under Task Scheduler (W4)
-        continue-on-error: true
+        if: always()
         run: python observatory/engine/tests/test_osschedule.py
       - id: cli
         name: The CLI answers
-        continue-on-error: true
+        if: always()
         run: |
           project-observatory --help
           demo_root="$(mktemp -d)"
@@ -215,7 +216,7 @@ jobs:
           project-observatory --home "$demo_root/state" doctor
       - id: tick
         name: A whole tick runs in a sandbox workspace (W3)
-        continue-on-error: true
+        if: always()
         run: |
           ws="$RUNNER_TEMP/tick-ws"
           mkdir -p "$RUNNER_TEMP/tick-projects/example"
@@ -228,19 +229,19 @@ jobs:
           python -c "import json, sys; d = json.load(open(sys.argv[1], encoding='utf-8')); print(d); sys.exit(1 if d['failed_steps'] else 0)" "$ws/store/raw/tick.json"
       - id: credentials
         name: The backup passphrase in the Credential Manager (W5)
-        continue-on-error: true
+        if: always()
         run: |
           cd observatory/engine
           python tests/test_maintenance.py -v Passphrase.test_the_real_credential_manager_round_trips Passphrase.test_windows_keeps_it_in_the_credential_manager
       - id: updates
         name: Updates replace the running launcher and drive the tasks (W6)
-        continue-on-error: true
+        if: always()
         run: |
           cd observatory/engine
           python tests/test_engine_update.py -v WindowsUpdates
       - id: jobs
         name: The server and the tick under Task Scheduler (W4b)
-        continue-on-error: true
+        if: always()
         run: |
           ws="$RUNNER_TEMP/jobs-ws"
           project-observatory --home "$ws" full init
@@ -255,13 +256,13 @@ jobs:
           MSYS_NO_PATHCONV=1 schtasks /Query /FO LIST | grep -c ProjectObservatory || true
       - id: ledgerlock
         name: The OpenRouter door's ledger lock across threads (J-11)
-        continue-on-error: true
+        if: always()
         run: |
           cd observatory/engine
           python tests/test_spend.py -v ProjectSpend.test_two_rotations_at_once_both_land ProjectSpend.test_the_rotate_command_reads_the_ledger_under_the_lock ProjectSpend.test_the_lock_refusal_names_every_locked_verb
       - id: tests
         name: Synthetic runtime and privacy tests
-        continue-on-error: true
+        if: always()
         run: python -m unittest discover -s tests
       - id: org
         # OBS-201: `full org enroll`, `org check-in` and `org rotate` against the fake organization server, the device
@@ -274,11 +275,9 @@ jobs:
           python -c "import cryptography"
           python tests/test_node_org.py -v
       - id: org_runner
-        # The same suite through the portable runner's sandbox, as `full check` runs it on the other rows. Informative
-        # until the runner itself is proven on Windows.
-        name: The organization suite through `full check` (informative)
+        # The same suite through the portable runner's sandbox, as `full check` runs it on the other rows.
+        name: The organization suite through `full check`
         if: always()
-        continue-on-error: true
         run: project-observatory full check --suite node_org --report-dir "$RUNNER_TEMP/org-full-check"
       - id: holder_safety
         name: Unknown Windows holders preserve paths; shared-delete rename is not evidence
@@ -286,30 +285,26 @@ jobs:
         run: |
           cd observatory/engine
           python tests/test_disk_guard.py -v WindowsHolderUnknown
-      - id: measure_portable
-        # OBS-277 measurement: every suite of the portable engine set on Windows, its receipt kept.
-        name: Every portable engine suite (OBS-277 measurement)
+      - id: portable
+        # OBS-277: every suite of the portable engine set, checked against the known list.
+        name: Every portable engine suite, held to tools/windows-known.json (OBS-277)
         if: always()
-        continue-on-error: true
-        timeout-minutes: 200
+        timeout-minutes: 60
         run: |
           cd observatory/engine
-          python tests/run_portable.py --jobs 4 --report-dir "$RUNNER_TEMP/windows-portable" > "$RUNNER_TEMP/windows-portable.json" || true
-          python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); rows=d.get('suites',[]); import collections; c=collections.Counter(r['status'] for r in rows); print(d.get('status'), dict(c)); [print(r['status'], r['file'], r.get('reason_code',''), r.get('error_type','')) for r in rows if r['status']!='PASS']" "$RUNNER_TEMP/windows-portable.json"
-      - id: measure_root
-        name: Root tests, verbose (OBS-277 measurement)
-        if: always()
-        continue-on-error: true
-        run: python -m unittest discover -s tests -v > "$RUNNER_TEMP/windows-root-tests.log" 2>&1; status=$?; tail -n 40 "$RUNNER_TEMP/windows-root-tests.log"; exit $status
+          status=0
+          python tests/run_portable.py --jobs 4 --report-dir "$RUNNER_TEMP/windows-portable" > "$RUNNER_TEMP/windows-portable.json" || status=$?
+          echo "run_portable exit $status (non-zero whenever any suite did not pass; the known list decides)"
+          cd ../..
+          python tools/check_windows_suites.py "$RUNNER_TEMP/windows-portable.json" --summary "$GITHUB_STEP_SUMMARY"
       - name: Keep the Windows measurement
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-measurement
+          name: windows-portable-receipt
           path: |
             ${{ runner.temp }}/windows-portable
             ${{ runner.temp }}/windows-portable.json
-            ${{ runner.temp }}/windows-root-tests.log
           if-no-files-found: warn
           retention-days: 14
       - name: Outcomes
@@ -332,7 +327,8 @@ jobs:
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| OpenRouter ledger lock | ${{ steps.ledgerlock.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
-            echo "| Organization enrollment (enforced) | ${{ steps.org.outcome }} |"
+            echo "| Organization enrollment | ${{ steps.org.outcome }} |"
             echo "| Organization suite through full check | ${{ steps.org_runner.outcome }} |"
-            echo "| Holder safety (enforced) | ${{ steps.holder_safety.outcome }} |"
+            echo "| Portable engine set against the known list | ${{ steps.portable.outcome }} |"
+            echo "| Holder safety | ${{ steps.holder_safety.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -54,6 +54,12 @@ tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
 os.environ["TMPDIR"] = tempfile.tempdir
 _TEMP_ROOTS = {os.path.realpath(p) for p in (tempfile.gettempdir(), "/tmp", "/private/tmp", "/var/folders",
                                               "/private/var/folders")}
+# The folder the portable runner made for this suite (OBS-277). On POSIX every such folder sits under
+# /tmp or /var/folders, both roots above; on Windows it sits under %LOCALAPPDATA%\Temp, which no fixed
+# root names once a suite has moved TEMP into its sandbox, and a synthetic workspace there was taken
+# for a real one and replaced.
+if os.environ.get("OBSERVATORY_TEST_SANDBOX"):
+    _TEMP_ROOTS.add(os.path.realpath(os.environ["OBSERVATORY_TEST_SANDBOX"]))
 
 
 def _inside_temp(path: str | None) -> bool:
