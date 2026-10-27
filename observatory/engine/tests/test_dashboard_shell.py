@@ -63,7 +63,7 @@ class DashboardShellTests(unittest.TestCase):
         template = next(ast.literal_eval(node.value) for node in source.body
                         if isinstance(node, ast.Assign)
                         and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
-        primary = {"index": "findings", "findings": "findings", "health": "observer"}
+        primary = {"index": "home", "findings": "findings", "health": "observer"}
         for page in shell.NAMES:
             with self.subTest(page=page):
                 parsed = Markup()
@@ -81,8 +81,9 @@ class DashboardShellTests(unittest.TestCase):
                 for group in ("work", "infrastructure", "access", "system"):
                     self.assertIn("nav-" + group, parsed.elements)
                 if page == "index":
-                    self.assertLess(parsed.ids.index("findings"), parsed.ids.index("tiles"))
-                    self.assertLess(parsed.ids.index("findings"), parsed.ids.index("work"))
+                    # Home (OSS-88) comes first in reading order, before activity.
+                    self.assertLess(parsed.ids.index("home"), parsed.ids.index("tiles"))
+                    self.assertLess(parsed.ids.index("home"), parsed.ids.index("work"))
 
     def test_warning_only_preview_is_not_empty_and_preserves_counts(self):
         payload = {"findings": findings([{"id": "w", "severity": "warning", "detail": "evidence", "folded": True}])}

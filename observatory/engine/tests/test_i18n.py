@@ -117,6 +117,12 @@ def agents_page_ids() -> set[str]:
     return ids | {x for x in agents_page.DYNAMIC if x}
 
 
+def home_page_ids() -> set[str]:
+    """Home's ids: its `t`/`mark` literals (dashboard/home_page.py)."""
+    ids, _ = _python_ids(DASH / "home_page.py")
+    return ids
+
+
 def source_ids() -> set[str]:
     """Every message id named in the dashboard's code and static markup."""
     ids, template = _python_ids(DASH / "build_dashboard.py")
@@ -124,6 +130,7 @@ def source_ids() -> set[str]:
     ids |= shell_ids
     ids |= machine_page_ids()
     ids |= agents_page_ids()
+    ids |= home_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))

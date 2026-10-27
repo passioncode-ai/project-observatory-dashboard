@@ -923,6 +923,9 @@ def build():
                      else ("multi" if project["owners"] else "—"),
             "owners": project["owners"],
             "ownership": project["ownership"],
+            # Which organization it belongs to (organizations.py), for Home's
+            # projects at a glance; absent when no organization is configured.
+            "organization": project.get("organization"),
             "anchor": project["anchor"],
             "lifecycle": project["lifecycle"],
             "description": project.get("description", ""),

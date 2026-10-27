@@ -7,6 +7,16 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Home replaces Overview: is everything fine, and what needs you first** (OBS-261, scenario OSS-88,
+  `docs/design/PERSON-SURFACES.md` decision D1). The first page now opens on six state tiles (sites, apps, disk and
+  memory, keys, agents, personal cloud), each with the time or period it was measured; a source that did not run says
+  "not measured" with its reason, never 0 and never green, and the personal cloud says "not connected" until it exists
+  (OBS-263). Below them sit the three problems to do first (by severity, then whether you can act now, then age, then
+  how many projects they touch; one row per kind with its count) and "All problems (N)" to the findings page, then your
+  projects at a glance grouped by organization, then activity and the section cards. A fresh install shows what to
+  connect first, with the commands, instead of a row of zeros; nothing open reads "Nothing needs you" with the time of
+  the last check. Home reads only what the pages already read; the eight-row findings preview no longer opens the page.
+
 - **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
   harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it
   is inside the scanned home, kept on this machine) and every Codex skill (`~/.codex/skills` and `~/.agents/skills`,

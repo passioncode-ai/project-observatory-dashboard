@@ -24,10 +24,10 @@ from i18n import LOCALE_NAMES, LOCALES, Translator
 
 #: (name, title, kind). `table` pages render one of the tab renderers into
 #: `#out`; the three others show the shell's own sections. Order is the nav
-#: order: the overview first, then what needs a person most often.
+#: order: Home first (OSS-88), then what needs a person most often.
 #: Titles are English message ids; `dashboard/locales/*.json` translates them.
 PAGES: tuple[tuple[str, str, str], ...] = (
-    ("index",    "Overview",  "index"),
+    ("index",    "Home",      "index"),
     ("findings", "Findings",  "findings"),
     ("projects", "Projects",  "table"),
     ("agents",   "Agents",    "agents"),
@@ -46,7 +46,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
 #: page said what it showed or over what scope. The sentence is the page's own
 #: heading; the measurement stamp follows it on every page.
 QUESTIONS: dict[str, str] = {
-    "index":    "What needs attention and what changed across your projects.",
+    "index":    "Is everything fine, and what needs you first.",
     "findings": "Problems, next actions and the history of silenced findings.",
     "projects": "Projects, their state, resources and latest changes.",
     "agents":   "Which agents are working, on what, and where their work moved.",
@@ -105,6 +105,12 @@ def _agents_line(payload: dict, t: Translator) -> str:
     needs = len((payload.get("agents") or {}).get("needsYou") or [])
     return (t.mark("{n} workflows open", n=c.get("workflowsOpen", 0)) + " · "
             + t.mark("{n} need you", n=needs))
+
+
+def _home(payload: dict, t: Translator) -> str:
+    """Home's body, rendered at build time (dashboard/home_page.py, OSS-88)."""
+    import home_page
+    return home_page.home_html(payload, t)
 
 
 def _machine(payload: dict, t: Translator) -> str:
@@ -200,7 +206,7 @@ def counts_of(payload: dict) -> dict[str, int | str]:
     creds = payload.get("creds") or {}
     # Navigation badges count what the destination shows when it opens — the
     # number its own "Showing N of …" line starts from — so a badge and the
-    # page it names never count two different units. Overview and Health
+    # page it names never count two different units. Home and Health
     # are summaries, not inventories; severity and review totals belong in
     # their labelled content rather than beside an unrelated route name.
     return {
@@ -416,14 +422,14 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
     # asks before writing a counter (`setN`), so the single page keeps its strip.
     template = re.sub(r'<nav class="tabs"[^>]*>.*?</nav>\s*', "", template, count=1, flags=re.S)
     if page == "index":
-        # Reading and keyboard order must match the visual attention-first
-        # layout. CSS order alone would leave assistive navigation behind the
-        # less important inventory and activity counters.
-        attention = '<section id="findings"></section>'
-        template = template.replace(attention, "", 1)
+        # HOME (OSS-88, OBS-261): the state band, the three problems to do first
+        # and the projects at a glance, server-rendered right under the heading,
+        # so reading and keyboard order are the visual order. The script's
+        # inventory counters and findings preview stay in the DOM for the single
+        # page and are hidden here (workspace.css); activity follows Home.
         template = template.replace('<div class="tiles" id="tiles">',
-                                    attention + '\n<div class="tiles" id="tiles">', 1)
-    # The table renderer owns #out, not the document's main landmark. Overview,
+                                    "__HOME__\n" + '<div class="tiles" id="tiles">', 1)
+    # The table renderer owns #out, not the document's main landmark. Home,
     # Findings and Health hide #out, so their primary content needs a shared
     # visible main as well. Scripts stay outside the content landmark.
     template = re.sub(r'<main(\s+id="out"[^>]*)></main>', r'<div\1></div>', template, count=1)
@@ -435,6 +441,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
             .replace("__H1__", t.mark(title, tag="h1"))
             .replace("__SUB__", t.mark(QUESTIONS[page]) if page in QUESTIONS else "")
             .replace("__NAV__", nav_html(page, counts, t))
+            .replace("__HOME__", _home(payload, t) if page == "index" else "")
             .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
             .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
             .replace("__AGENTS__", _agents(payload, t) if page == "agents" else "")
