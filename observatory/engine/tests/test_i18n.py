@@ -743,7 +743,7 @@ class BuiltPages(unittest.TestCase):
 
     def test_russian_pages_are_russian(self):
         text = self.page("ru")
-        for words in ("<title>Обзор — Project Observatory</title>", ">Обзор</h1>", ">Находки<", "Часть набора инструментов PassionCode"):
+        for words in ("<title>Главная — Project Observatory</title>", ">Главная</h1>", ">Находки<", "Часть набора инструментов PassionCode"):
             self.assertIn(words, text)
 
     def test_a_page_built_in_one_language_reads_in_the_other(self):

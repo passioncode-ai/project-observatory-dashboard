@@ -174,7 +174,8 @@ class NeedsYouFirst(unittest.TestCase):
     def test_never_built_findings_hand_over_the_command(self):
         out = home_page.needs_html({"runtime": {"home": "/example/workspace"}}, EN)
         self.assertIn("Problems not checked yet", text(out))
-        self.assertIn("data-copy=\"OBSERVATORY_HOME='/example/workspace' project-observatory full local\"", out)
+        self.assertIn("data-copy=\"OBSERVATORY_HOME='/example/workspace' project-observatory full local\"",
+                      html.unescape(out))
 
 
 class ProjectsAtAGlance(unittest.TestCase):
