@@ -5180,8 +5180,8 @@
     {
       "path": "tests/test_portable_mcp.py",
       "source_sha256": "29531dd637b57a80ec024ead797d65eb4497f2bf8194d56d7ae069d7b67d3e1b",
-      "export_sha256": "93b2bf08dd9190f5dc952ad2d88adbbae69f92ca36b9050e81393fdab0c5ff81",
-      "bytes": 5521,
+      "export_sha256": "554b00d6d4e5684d98d60cef98508383d9b7b924f4b6d85e7e6a6fbbdecdaa17",
+      "bytes": 5760,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

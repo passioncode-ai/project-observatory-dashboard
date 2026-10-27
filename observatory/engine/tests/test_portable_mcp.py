@@ -26,7 +26,10 @@ def setup():
     from git_env import git_env
     (base/'user').mkdir(); (base/'tmp').mkdir()
     env=git_env({**runtime_environment(),'PATH':os.environ['PATH'],**home_environment(base/'user'),'LANG':'en_US.UTF-8',
-                 'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime')})
+                 'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime'),
+                 # tests/tmp.py keeps a workspace only inside a temporary folder it knows; on Windows this
+                 # base is not under a fixed root, so it is named (OBS-277).
+                 'OBSERVATORY_TEST_SANDBOX':str(base)})
     os.environ.clear();os.environ.update(env)
     os.environ['TMPDIR']=str(base/'tmp'); tempfile.tempdir=str(base/'tmp')
     if os.name=='nt': os.environ['TEMP']=os.environ['TMP']=str(base/'tmp')
