@@ -168,5 +168,77 @@ class WorkerAgainstTheStores(unittest.TestCase):
         self.assertEqual((status, json.loads(raw)['error']['code']), (401, 'signature-replayed'))
 
 
+class _Raw:
+    """Requests the share stores never make: a GET carrying a body, many requests in a minute."""
+
+    @staticmethod
+    def send(method, url, headers, body):
+        import urllib.error
+        import urllib.request
+        from node import mailbox as MB
+        request = urllib.request.Request(MB._resolved(url), data=body, method=method,
+                                         headers={**headers, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as answer:
+                return answer.status, json.loads(answer.read() or b'{}')
+        except urllib.error.HTTPError as error:
+            try:
+                return error.code, json.loads(error.read() or b'{}')
+            finally:
+                error.close()
+
+
+@unittest.skipUnless(HAVE_NODE and HAVE_CRYPTO, 'needs Node 20 or later and cryptography')
+class WorkerReviewOf386(WorkerAgainstTheStores):
+    """The security review of #386: what a stranger who holds the share id can and cannot do to the Worker."""
+
+    # The parent's own tests run in the parent; this class adds the review's.
+    test_a_whole_share = test_a_second_machine_burns_the_link = test_a_claim_whose_mac_fails_spends_the_link = None
+    test_codes_that_differ_seal_nothing = test_a_stranger_files_no_share_and_a_request_is_not_replayed = None
+
+    def _stranger_claim(self, share_id):
+        from node import peer_share as PS
+        stranger, kem = PS.SharePrivateKey.generate(), PS.SharePrivateKey.generate()
+        keys = {'sig': stranger.jwk(), 'kem': kem.jwk()}
+        frame = {'schema': PS.PEER_FRAME_SCHEMA, 'step': 'claim', 'shareId': share_id, 'keys': keys,
+                 'mac': PS.new_nonce(), 'commit': 'sha256:' + '0' * 64}
+        return stranger, json.dumps(frame).encode()
+
+    def test_a_get_carrying_a_self_signed_claim_reads_nothing(self):
+        """M1: a GET whose body is a claim signed by its own keys is no party: no frame, no status."""
+        share_id, link = self._create()
+        self.recipient.accept(link)
+        stranger, body = self._stranger_claim(share_id)
+        for target in (f'/v1/shares/{share_id}/frames', f'/v1/shares/{share_id}'):
+            headers = self.MB.sign_request([(self.MB.LABEL, stranger.jwk(), stranger)], method='GET', origin=ORIGIN,
+                                           target=target, body=body)
+            status, doc = _Raw.send('GET', ORIGIN + target, headers, body)
+            self.assertNotEqual(status, 200, target)
+            self.assertNotIn('frames', doc)
+            self.assertNotIn('verdict', doc)
+
+    def test_strangers_and_a_hostile_recipient_cannot_keep_the_revocation_out(self):
+        """M2: unsigned requests are not counted against the parties; the recipient's own bucket filling up never
+        refuses the sender's revocation."""
+        share_id, sent, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        for _ in range(130):                                   # a stranger, unsigned
+            _Raw.send('GET', f'{ORIGIN}/v1/shares/{share_id}', {}, b'')
+        folder = self.recipient._received(share_id)
+        record, key = folder.record(), folder.key('sig')
+        refused = False
+        for _ in range(260):                                   # the recipient fills its own minute (two at worst)
+            headers = self.MB.sign_request([(self.MB.LABEL, record['keys']['sig'], key)], method='GET',
+                                           origin=ORIGIN, target=f'/v1/shares/{share_id}', body=b'')
+            if _Raw.send('GET', f'{ORIGIN}/v1/shares/{share_id}', headers, b'')[0] == 429:
+                refused = True
+                break
+        self.assertTrue(refused)
+        self.assertEqual(self.sender.sync_sent(share_id)['state'], 'active')   # the sender's own bucket is untouched
+        sent = self.sender.revoke(share_id)
+        self.assertTrue(sent['revocationObserved'])
+
+
 if __name__ == '__main__':
     unittest.main()

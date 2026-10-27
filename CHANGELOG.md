@@ -16,8 +16,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   `full cloud status` and `full cloud url` read it back, and `full share create` uses it without `--mailbox`. The
   Worker keeps the duties the contract gives a mailbox (PS-10) and nothing more, with `node/mailbox.py` as its
   specification: signed requests under the share keys, one attempt per link, no envelope or lease for a burnt share,
-  leases of at most 24 hours, deliveries counted, every renewal refused after a revocation, and a share forgotten a
-  day after an unclaimed deadline or 30 days after its last sealed copy ends. The link's page runs no script. With no
+  leases of at most 24 hours, deliveries counted, every renewal refused after a revocation (the sealed copies deleted
+  then), and a share forgotten a day after an unclaimed deadline or 30 days after the latest of its last sealed copy's
+  end, its revocation and its last renewal. Only the two sides' share keys read a share's frames, status and reports;
+  requests are limited per side once their signature holds, never the sender's revocation; a Worker without a
+  readable owner key files no share; `deploy` refuses to replace a Worker of that name that is not such a mailbox.
+  The link's page runs no script. With no
   admin token stashed, `deploy` names your step and its address before any call.
 
 - **Share a key with another person's Observatory, see its use, take it back** (OBS-264, OBS-276, scenarios OSS-79

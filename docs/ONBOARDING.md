@@ -1326,7 +1326,8 @@ The mailbox a share link names (`observatory-cloud/1`, contract DEC-0142 PS-10; 
 Cloudflare Worker with one Durable Object per share, deployed into your own account. It carries the
 code exchange, the sealed copies, the sealed usage reports and the revocations; it opens nothing
 and never holds a value or a private key. It forgets an unclaimed share a day after its claim
-deadline and a sealed one 30 days after its last sealed copy ends.
+deadline, and a sealed one 30 days after the latest of its last sealed copy's end, its
+revocation and its last renewal; a share taken back loses its sealed copies at once.
 
 ```sh
 project-observatory full cloud deploy --dry-run     # which account, Worker, token slot and code; no call is made
@@ -1354,8 +1355,11 @@ project-observatory full cloud url                  # the address `full share cr
 - **What it sees.** Ciphertext and names: share ids, the keys' public halves, the slot and provider
   names in sealed headers, the times of claims, renewals and reports, and both machines' IP
   addresses (Cloudflare's request logs keep those too). Anyone who learns a share id, which travels
-  in the link's path, can ask the mailbox whether a claim arrived yet, and can burn the link with a
-  claim of their own; never take it, because the six-digit code is compared.
+  in the link's path, can learn whether a claim arrived yet, and can burn the link with a claim of
+  their own; never take it, because the six-digit code is compared, and never read the share's frames,
+  status or reports, which answer only the sender's and the recipient's share keys. A share's
+  requests are limited per side (120 a minute), counted only once a signature holds, and the
+  sender's revocation is never refused for it.
 - **Cost.** The free plan's Workers and SQLite-backed Durable Objects cover a person's shares; the
   account's own limits apply.
 - **Opening a link in a browser.** The link's page tells the recipient to run

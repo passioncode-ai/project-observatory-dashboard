@@ -12,7 +12,8 @@
 
 WHAT IT HOLDS. Ciphertext and names: the frames of each share's code exchange, the sealed copies, the sealed usage
 reports, the revocations and deletion receipts. Never a value, never a private key. It forgets an unclaimed share a
-day after its claim deadline, and a sealed one 30 days after its last sealed copy ends.
+day after its claim deadline, and a sealed one 30 days after the latest of its last sealed copy's end, its revocation
+and its last renewal; a share taken back loses its sealed copies at once.
 
 THE TOKEN. Deploying uses the Cloudflare door's `workers-edit` preset: a token minted from the admin token you
 stashed once (`tools/cloudflare.py stash`), limited to Workers on one account, delivered into the vault slot
@@ -237,18 +238,26 @@ def deploy(*, account_ref: str | None, script: str, new_token: bool, dry_run: bo
     base = f"/accounts/{account['id']}/workers"
     listed = cf("GET", f"{base}/scripts", token).get("result") or []
     current = next((s for s in listed if isinstance(s, dict) and s.get("id") == script), None)
+    subdomain = ((cf("GET", f"{base}/subdomain", token).get("result") or {}).get("subdomain") or "")
+    if not subdomain:
+        raise CloudError("this account has no workers.dev subdomain yet, so the mailbox would have no address. Your "
+                         f"step, once: open https://dash.cloudflare.com/{account['id']}/workers-and-pages and choose a "
+                         f"workers.dev subdomain, then run `{PROG} deploy` again. Nothing was uploaded")
+    if current is not None:
+        # Never over another Worker: one of this name is replaced only when it answers as this kind of mailbox.
+        try:
+            well_known(f"https://{script}.{subdomain}.workers.dev")
+        except CloudError as error:
+            raise CloudError(f"a Worker called {script} already runs in this account and does not answer as an "
+                             f"observatory-cloud mailbox ({error}); nothing was uploaded. Choose another name with "
+                             f"--name") from None
     migrate = (current or {}).get("migration_tag") != MIGRATION_TAG
     body, content_type = multipart(metadata(owner, digest, migrate), code)
     print(f"uploading {script} ({len(code)} bytes, {digest[:19]}...) to account {account['slug']}")
     cf("PUT", f"{base}/scripts/{script}", token, body, content_type)
     cf("POST", f"{base}/scripts/{script}/subdomain", token,
        json.dumps({"enabled": True, "previews_enabled": False}).encode())
-    subdomain = ((cf("GET", f"{base}/subdomain", token).get("result") or {}).get("subdomain") or "")
     del token
-    if not subdomain:
-        raise CloudError("the Worker is uploaded, but this account has no workers.dev subdomain yet. Your step, once: "
-                         f"open https://dash.cloudflare.com/{account['id']}/workers-and-pages and choose a workers.dev "
-                         f"subdomain, then run `{PROG} deploy` again")
     origin = f"https://{script}.{subdomain}.workers.dev"
     deadline = now() + wait_seconds
     while True:

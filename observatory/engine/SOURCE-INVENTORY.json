@@ -136,15 +136,15 @@
       "path": "cloud/worker.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c0fed7c2d159741790bb82646629aee81fd5273d93e10c51451bda56f484aaed",
-      "bytes": 40946
+      "export_sha256": "92104655b8c36cce4710345510bc5e7f682331f9a1c6cdf973361798e10acc74",
+      "bytes": 41045
     },
     {
       "path": "cloud/worker.test.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5df77c32c5fee1123eaa2d4280e03f2bbd1714a9074b67d9ecf64bcea6855e0b",
-      "bytes": 5313
+      "export_sha256": "809b68312ae1d6a697e8ba9c6aa16a6d15207f7311610046ba7b7e1377a958b8",
+      "bytes": 8631
     },
     {
       "path": "code_freshness.py",
@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c3e925419dffce920df31780ec3d056e7b30f1655504e5013d3d739c138e86c4",
-      "bytes": 198339,
+      "export_sha256": "69d36bf476e4fe38c66bf2c6db2e06d41299e8171b55c1f85f289262085d0a1b",
+      "bytes": 198703,
       "upstream_modified": true
     },
     {
@@ -3162,8 +3162,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ea85556aac2b8657ee738c1a1e4a92d48216d851a13df0193447f43c45e09c09",
-      "bytes": 58565
+      "export_sha256": "04c7b8be51ec5f263d94905c9997b5fb6be85c18fa2cf31374836b3ea0f86244",
+      "bytes": 61728
     },
     {
       "path": "node/webauthn.py",
@@ -4245,15 +4245,15 @@
       "path": "tests/test_cloud_deploy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2c0777087f4f505aa4a35f2fcb618fc1f6e60ec3ca02dac88a4f02fb5d05f3e",
-      "bytes": 10271
+      "export_sha256": "c949651a15854816e20abf76a182467ca1a14d9a3437f43dc86a8d8d32640489",
+      "bytes": 10882
     },
     {
       "path": "tests/test_cloud_worker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a9b54e0df6f71105d3f3f84ab023a5d75f755800cbf84f7b6acb912edb002d5f",
-      "bytes": 8312
+      "export_sha256": "ac070de7758319e5015fe62efc6c56343b5260ac06a679aef25c783e416c2135",
+      "bytes": 12315
     },
     {
       "path": "tests/test_collector_state.py",
@@ -5799,8 +5799,8 @@
       "path": "tests/test_shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "de960fb4fe8c5ed0cafa016c15e49f9acadf306c462ddcfb046fe5dc3899d5f2",
-      "bytes": 29871
+      "export_sha256": "e69e7ce29661f80b1faaafe53c7f10ff7973ef609655c2e45e54934830acd35f",
+      "bytes": 32154
     },
     {
       "path": "tests/test_side_effect_attribution.py",
@@ -6402,8 +6402,8 @@
       "path": "tools/cloud_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2057d9b759e591dba8c8734e34274e58bafbbb072a5f2504bd0a2e46ead354ad",
-      "bytes": 17619
+      "export_sha256": "a2bd1e6605b96e42c45d4a2b60188f0432a48f99eeefbef892c5b88353a4e0bd",
+      "bytes": 18292
     },
     {
       "path": "tools/cloudflare.py",

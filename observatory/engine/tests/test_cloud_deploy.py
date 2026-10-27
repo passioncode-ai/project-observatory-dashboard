@@ -201,6 +201,16 @@ class Deploy(unittest.TestCase):
         plan = json.loads(run.stdout)
         self.assertEqual((plan['account'], plan['dryRun'], plan['tokenPresent']), ('example-account', True, False))
 
+    def test_another_worker_of_that_name_is_never_replaced(self):
+        """A Worker of this name that does not answer as an observatory-cloud mailbox is refused before any upload."""
+        self.cf.scripts = [{'id': 'observatory-cloud', 'migration_tag': None}]
+        os.environ['OBSERVATORY_CLOUD_RESOLVE'] = 'observatory-cloud.example-sub.workers.dev=127.0.0.1:9'
+        self.slot['present'] = True
+        code, _, err = self.run_cli('deploy')
+        self.assertEqual(code, 1)
+        self.assertIn('does not answer as an observatory-cloud mailbox', err)
+        self.assertEqual(self.cf.uploads, [])
+
     def test_status_without_a_deployment(self):
         code, out, _ = self.run_cli('status', '--json')
         self.assertEqual((code, json.loads(out)['state']), (1, 'not-deployed'))

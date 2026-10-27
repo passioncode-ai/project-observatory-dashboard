@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import worker, { peerExchangeVerdict, peerFrame, peerJwk, peerKeys, peerRecordStands, peerSealedShape, peerThumbprint,
-  instant, rfc8785, parseDictionary, ShareMailbox } from "./worker.mjs";
+  instant, rfc3339, rfc8785, parseDictionary, ShareMailbox } from "./worker.mjs";
 import { memoryEnv, MemoryStorage } from "./memory_env.mjs";
 
 const vectors = JSON.parse(readFileSync(new URL("../fabric/node-vectors/peer/peer-share.json", import.meta.url), "utf8"));
@@ -75,7 +75,7 @@ test("the well-known answer, and a landing page that runs no script", async () =
 });
 
 test("refusals before any share state: unknown routes, unknown shares, unsigned and oversized requests", async () => {
-  const env = memoryEnv();
+  const env = memoryEnv({ openCreation: true });
   const id = "b".repeat(32);
   assert.equal((await worker.fetch(new Request(ORIGIN + "/v1/nothing"), env)).status, 404);
   assert.equal((await (await worker.fetch(new Request(`${ORIGIN}/v1/shares/${id}`), env)).json()).error.code, "unknown-share");
@@ -96,4 +96,58 @@ test("the alarm forgets an unsealed share a day after its claim deadline", async
   now = Date.UTC(2026, 9, 29, 1);
   await box.alarm();
   assert.equal(await storage.get("share"), undefined);
+});
+
+test("a sealed share is forgotten 30 days after its last copy ends, its revocation or its last renewal, never later for being asked", async () => {
+  const storage = new MemoryStorage();
+  let now = Date.UTC(2026, 10, 1);
+  const box = new ShareMailbox(storage, { now: () => now });
+  const sealed = { shareId: "d".repeat(32), claimDeadline: "2026-10-28T00:00:00Z", createdAt: "2026-10-27T00:00:00Z",
+    sealed: true, envelopeEnds: { OPENROUTER_API_KEY: "2026-11-26T00:00:00Z" }, revocation: null, lastRenewal: "2026-11-01T00:00:00Z" };
+  assert.equal(box.keepUntil(sealed), Date.UTC(2026, 11, 26));
+  now = Date.UTC(2027, 5, 1);                                   // asked much later: the day does not move
+  assert.equal(box.keepUntil(sealed), Date.UTC(2026, 11, 26));
+  await storage.put("share", sealed);
+  await storage.put("env:OPENROUTER_API_KEY", { header: {} });
+  await box.alarm();
+  assert.equal(await storage.get("share"), undefined);
+  assert.equal(await storage.get("env:OPENROUTER_API_KEY"), undefined);
+  // Taken back: its copies are gone at once, and it is forgotten 30 days after the revocation.
+  const revoked = { ...sealed, envelopeEnds: {}, revocation: { at: "2026-11-02T00:00:00Z" }, lastRenewal: "2026-11-01T00:00:00Z" };
+  assert.equal(box.keepUntil(revoked), Date.UTC(2026, 11, 2));
+});
+
+test("a report too large to keep is refused, and reports are kept apart from the share", async () => {
+  const storage = new MemoryStorage();
+  const box = new ShareMailbox(storage);
+  const report = vectors.reports[0].report;
+  const share = { shareId: report.header.shareId, reportSeqs: [] };
+  const big = await box.report(share, "recipient", report, new Uint8Array(130 * 1024));
+  assert.equal(big.status, 413);
+  const ok = await box.report(share, "recipient", report, new Uint8Array(1000));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(share.reportSeqs, [report.header.sequence]);
+  assert.ok(await storage.get(`rep:${report.header.sequence}`));
+  assert.equal(Object.hasOwn(share, "reports"), false);
+});
+
+test("after sealing: one late claim per key, the recipient's abort apart", async () => {
+  const box = new ShareMailbox(new MemoryStorage());
+  const claim = vectors.claims[0].frame;
+  const share = { shareId: claim.shareId, sealed: true, frames: [], lateAbort: null, lateClaims: [] };
+  await box.frame(share, "claimant", claim, Date.now());
+  await box.frame(share, "claimant", claim, Date.now());
+  await box.frame(share, "recipient", { schema: "peer-share-frame/1", step: "abort", role: "recipient", shareId: claim.shareId }, Date.now());
+  assert.equal(share.lateClaims.length, 1);
+  assert.equal(box.lateFrames(share).length, 2);
+  assert.equal(box.lateFrames(share)[0].step, "abort");
+});
+
+test("a Worker with no readable owner key files no share", async () => {
+  const env = memoryEnv();                                       // no OWNER_JWK, and no trial flag
+  const id = "e".repeat(32);
+  const body = JSON.stringify({ shareId: id, sender: { sig: vectors.keys[0].jwk }, claimDeadline: rfc3339(Date.now() + 86_400_000) });
+  const answerOf = await worker.fetch(new Request(`${ORIGIN}/v1/shares/${id}`, { method: "PUT", body }), env);
+  assert.equal(answerOf.status, 503);
+  assert.equal((await answerOf.json()).error.code, "no-owner");
 });

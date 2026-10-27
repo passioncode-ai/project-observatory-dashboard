@@ -529,6 +529,10 @@ export class ShareMailbox {
   }
 
   async create(shareId, headers, sig, doc, now) {
+    // Fails closed: a mailbox whose owner key is missing or unreadable files no share for anyone.
+    if (this.ownerJwk === null && !this.openCreation) {
+      return refuse(503, "no-owner", "this mailbox has no owner key bound; it files no share until it is deployed again");
+    }
     if (!isObject(doc) || doc.shareId !== shareId || !isObject(doc.sender) || !peerJwk(doc.sender.sig)) {
       return refuse(400, "malformed", "a share names its id and the sender share #sig");
     }
@@ -540,9 +544,6 @@ export class ShareMailbox {
     if (!Number.isSafeInteger(lease) || lease < 60 || lease > MAX_LEASE_SECONDS) return refuse(400, "lease", "a lease is 60 s to 24 h");
     const read = await readSignature(headers, LABEL, sig);
     if (!(await signatureHolds(read, doc.sender.sig))) return refuse(401, read.code || "signature-invalid", "a share is created by its own #sig");
-    if (this.ownerJwk === null && !this.openCreation) {
-      return refuse(503, "no-owner", "this mailbox has no owner key bound; it files no share until it is deployed again");
-    }
     if (this.ownerJwk !== null) {
       const owner = await readSignature(headers, OWNER_LABEL, sig);
       if (!(await signatureHolds(owner, this.ownerJwk))) return refuse(403, "not-owner", "only the mailbox's owner files shares here");
