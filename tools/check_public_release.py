@@ -165,6 +165,9 @@ NATIVE_SOURCES = {
     "macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift",
     "macos/Sources/ObservatoryCore/AppLifecycle.swift", "macos/Sources/ObservatoryApp/Lifecycle.swift",
     "macos/Tests/ObservatoryCoreTests/AppLifecycleTests.swift",
+    # The pairing window (OBS-197): the engine's ceremony screen, its model and its tests.
+    "macos/Sources/ObservatoryCore/Ceremony.swift", "macos/Sources/ObservatoryApp/Pairing.swift",
+    "macos/Tests/ObservatoryCoreTests/CeremonyTests.swift",
     # The lifecycle broker's NSWorkspace helper (OBS-79 L2): shipped in the wheel as source, compiled on the Mac.
     "observatory/engine/node/lifecycle/native_app.swift",
 }
@@ -175,6 +178,9 @@ DESKTOP_SOURCES = {
     "desktop/ui/assistant.js",
     "desktop/ui/assistant.css",
     "desktop/ui/assistant.html",
+    "desktop/ui/ceremony.js",
+    "desktop/ui/ceremony.css",
+    "desktop/ui/ceremony.html",
     "desktop/.gitignore",
     "desktop/package-lock.json",
     "desktop/package.json",

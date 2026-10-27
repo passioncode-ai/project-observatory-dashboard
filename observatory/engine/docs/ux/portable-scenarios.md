@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-94`
+**Next free OSS id:** `OSS-95`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -956,3 +956,32 @@ checked", never "fine".
 
 Acceptance: one notification per change, never a repeat for the same state.
 Coverage: none yet. Status: planned (OBS-273); product outcome unobserved.
+
+## The node's ceremony surface (OBS-197, 2026-10-27)
+
+### OSS-94: add this machine to my network, and know what happened
+
+Trigger: "pair this machine with my other one" (the Mac app: File, then Pair this machine; the Windows and Linux
+app: the same item in its File menu).
+
+Funnel: the pairing window draws the one screen the engine answers for this machine's pairing session
+(`project-observatory full assistant ceremony`, `node/ceremony.py`), read through the ceremony checks of OBS-133.
+Not paired: Start pairing commits to this machine's device keys (created when it has none) and a fresh nonce. While
+the hub does not run pairing, the window says "Waiting for the hub": nothing was sent and no machine was added. With
+a hub: waiting for the other machine and the seconds left; the six-digit code and the network fingerprint once both
+reveals opened their commitments, with The codes match and They differ; on the trusted machine, the passkey prompt
+names the new machine and each of its key fingerprints before anything is signed; on the new machine, the wait for
+the revision that lists it; then Pairing complete when that revision lists the new machine with exactly its keys.
+
+Failure paths: They differ, a message that does not open its commitment, another network's revision, or a revision
+that does not list what was revealed: Pairing stopped with its sentence and the check's own reason; ten minutes
+without both reveals: The pairing expired; Sign with passkey stays disabled while the hub serves no passkey page, and
+pressing it anyway is refused (`hub-not-ready`). Start again drops the ended session.
+
+Acceptance: the window decides no ceremony rule, never shows progress the engine did not report, and never shows a
+code over reveals that did not open their commitments.
+Coverage: `tests/test_node_ceremony.py` (`ScreensFromTheVectors` over the contract's `pairing.json`,
+`ScreensAfterTheCodes`, `Steps`, `OverTheAppProtocol`); the Mac app `macos/Tests/ObservatoryCoreTests/CeremonyTests.swift`;
+the Windows and Linux app `desktop/src-tauri/src/main.rs` `the_pairing_window_sends_only_the_ceremonys_steps` and
+`tests/test_desktop_app.py`. Status: built against the contract fixtures (OBS-197); the live ceremony waits for the
+hub's side; product outcome unobserved.

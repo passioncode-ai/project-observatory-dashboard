@@ -148,6 +148,12 @@ extension DashboardReopen.Seen {
         .defaultSize(width: 1080, height: 760)
         .keyboardShortcut("a", modifiers: [.command, .shift])
 
+        // Adding this machine to the person's network (OBS-197): the engine's pairing screen, one state at a time.
+        Window(model.t("Pair this machine"), id: WindowID.pairing) {
+            PairingView().environmentObject(model).frame(minWidth: 480, minHeight: 440)
+        }
+        .defaultSize(width: 620, height: 560)
+
         Settings { SettingsView().environmentObject(model).environmentObject(appDelegate.loginItem) }
     }
 }
@@ -172,6 +178,10 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option]).disabled(model.conversations.isEmpty || model.busy)
             Button(model.t("Next Conversation")) { model.selectAdjacent(1) }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option]).disabled(model.conversations.isEmpty || model.busy)
+        }
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button(model.t("Pair this machine…")) { openWindow(id: WindowID.pairing) }
         }
         CommandMenu(model.t("Dashboard")) {
             Button(model.t("Overview")) { openWindow(id: WindowID.dashboard); web.home() }

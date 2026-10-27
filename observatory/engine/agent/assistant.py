@@ -435,8 +435,23 @@ def parser():
     ap=argparse.ArgumentParser(prog='project-observatory full assistant',
         description='The assistant protocol (observatory-assistant/1) the Mac app speaks: one action; '
                     'ask, get, job, cancel and delete read one JSON object on stdin; one JSON object on stdout.')
-    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build'])
+    # One line: the Mac app's BridgeTests read these choices from it as its allowlist's contract.
+    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build','ceremony'])
     return ap
+
+
+def ceremony(doc):
+    """One step of the pairing ceremony (node/ceremony.py, OBS-197): `{"op": status|start|confirm|differ|sign|cancel,
+    "role"?: new|trusted}` in, `{"screen", "hub"}` out. The session lives in the workspace's `node/` folder (or
+    `OBSERVATORY_NODE`), beside the device keys; nothing leaves this machine while the hub's side is not live."""
+    if not set(doc)<={'op','role'} or not isinstance(doc.get('op'),str) or not isinstance(doc.get('role','new'),str):
+        raise AssistantError('invalid-input')
+    from node import ceremony as cer
+    folder=paths.setting_path('OBSERVATORY_NODE',paths.HOME/'node')
+    try:
+        return cer.step(folder,folder/'device',doc['op'],doc.get('role'),int(time.time()*1000))
+    except cer.CeremonyRefused as exc:
+        raise AssistantError(str(exc)) from None
 
 
 def main(argv=None):
@@ -456,6 +471,7 @@ def main(argv=None):
         elif args.action=='list':result={'conversations':list_conversations(),
             'projects':project_choices()}
         elif args.action=='ask':result=ask(doc)
+        elif args.action=='ceremony':result=ceremony(doc)
         else:
             if set(doc)!={'id'} or not isinstance(doc['id'],str):raise AssistantError('invalid-input')
             if args.action=='get':result=get_conversation(doc['id'])

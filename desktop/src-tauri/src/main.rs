@@ -251,6 +251,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             .separator();
     }
     let file = file
+        .item(&MenuItem::with_id(app, "pairing", t("Pair this machine…"), true, None::<&str>)?)
         .item(&MenuItem::with_id(app, "settings", t("Settings…"), true, Some("CmdOrCtrl+,"))?)
         .separator()
         .item(&MenuItem::with_id(app, "quit", t("Quit"), true, Some("CmdOrCtrl+Q"))?)
@@ -334,11 +335,27 @@ fn open_assistant_window(app: &AppHandle) {
         .build();
 }
 
+/// The pairing window (NODE slice 5, OBS-197): the screen the engine answers for this machine's pairing session,
+/// drawn as it is; the window decides no ceremony rule of its own.
+fn open_ceremony_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("ceremony") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "ceremony", WebviewUrl::App("ceremony.html".into()))
+        .title(l10n::t(lang(app), "Pair this machine", &[]))
+        .inner_size(620.0, 560.0)
+        .min_inner_size(480.0, 440.0)
+        .build();
+}
+
 fn on_menu(app: &AppHandle, id: &str) {
     let main = app.get_webview_window("main");
     match id {
         "settings" => open_settings_window(app),
         "assistant" => open_assistant_window(app),
+        "pairing" => open_ceremony_window(app),
         "quit" => app.exit(0),
         "back" => { main.map(|w| w.eval("history.back()")); }
         "forward" => { main.map(|w| w.eval("history.forward()")); }
@@ -526,6 +543,32 @@ async fn assistant(app: AppHandle, action: String, input: Value) -> Result<Value
         .map_err(|e| bridge::BridgeError { code: "backend-failed".into(), detail: Some(e.to_string()) })?
 }
 
+/// One step of the pairing ceremony: `status`, `start` (role `new`), `confirm`, `differ`, `sign` or `cancel`, sent as
+/// `full assistant ceremony`. The answer is the engine's screen; a refusal is its code (`hub-not-ready`, `not-now`...).
+#[tauri::command]
+async fn ceremony(app: AppHandle, op: String, role: Option<String>) -> Result<Value, bridge::BridgeError> {
+    let input = ceremony_input(&op, role.as_deref())
+        .ok_or(bridge::BridgeError { code: "backend-configuration".into(), detail: None })?;
+    let b = backend(&app);
+    tauri::async_runtime::spawn_blocking(move || b.call("ceremony", &input, Duration::from_secs(30)))
+        .await
+        .map_err(|e| bridge::BridgeError { code: "backend-failed".into(), detail: Some(e.to_string()) })?
+}
+
+/// The only steps the window may send, each with the members the engine reads and nothing else.
+fn ceremony_input(op: &str, role: Option<&str>) -> Option<Value> {
+    const OPS: &[&str] = &["status", "start", "confirm", "differ", "sign", "cancel"];
+    if !OPS.contains(&op) {
+        return None;
+    }
+    match (op, role) {
+        ("start", Some(r)) if r == "new" || r == "trusted" => Some(json!({ "op": op, "role": r })),
+        ("start", _) => None,
+        (_, None) => Some(json!({ "op": op })),
+        _ => None,
+    }
+}
+
 #[tauri::command]
 fn open_settings(app: AppHandle) {
     open_settings_window(&app);
@@ -550,6 +593,7 @@ fn main() {
             show_dashboard_cmd,
             build_dashboard,
             assistant,
+            ceremony,
             open_settings,
             open_guide,
             set_launch_at_login
@@ -614,4 +658,21 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("Project Observatory could not start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pairing_window_sends_only_the_ceremonys_steps() {
+        assert_eq!(ceremony_input("status", None), Some(json!({ "op": "status" })));
+        assert_eq!(ceremony_input("start", Some("new")), Some(json!({ "op": "start", "role": "new" })));
+        assert_eq!(ceremony_input("cancel", None), Some(json!({ "op": "cancel" })));
+        assert_eq!(ceremony_input("start", None), None, "a start names its role");
+        assert_eq!(ceremony_input("start", Some("observer")), None);
+        assert_eq!(ceremony_input("confirm", Some("new")), None, "only a start carries a role");
+        assert_eq!(ceremony_input("ask", None), None, "the assistant's actions are not the window's");
+        assert_eq!(ceremony_input("serve", None), None);
+    }
 }

@@ -81,6 +81,10 @@ enum DashboardMode: Equatable {
     /// Bumped when the APP's language changes, so the dashboard adopts it once and
     /// a choice made inside the dashboard afterwards is not overwritten on reload.
     @Published var localeSeed = 0
+    /// The pairing window's state (OBS-197): the engine's last screen, and a step it refused.
+    @Published var pairing: CeremonyScreen?
+    @Published var pairingFailure: Failure?
+    @Published var pairingBusy = false
     var dashboardError: String? { dashboardFailure.map { message($0.code, $0.detail) } }
     var error: String? { failure.map { message($0.code, $0.detail) } }
 
@@ -235,6 +239,12 @@ enum DashboardMode: Equatable {
         failure = failure(of: error)
         if failure?.code == "unknown-project" { scope = "" }
     }
+
+    /// The pairing window's one engine call (OBS-197): a step `CeremonyScreen.input` allowed, never another action.
+    func ceremonyCall(_ input: [String: String]) async throws -> [String: Any] {
+        try await call("ceremony", input, timeout: 30)
+    }
+    func failureOf(_ error: Error) -> Failure { failure(of: error) }
 
     private func call(_ action: String, _ input: [String: String] = [:], timeout: TimeInterval = 20) async throws -> [String: Any] {
         if let transport { return try await transport(action, input) }

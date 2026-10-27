@@ -21,6 +21,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   stays text. The apps tile also carries a line each for DigitalOcean and Cloudflare once
   connected (in place of their counter tiles, which Home hides), worded as their section cards.
 
+- **Pair this machine: the ceremony screens and the passkey prompt** (OBS-197, `docs/design/NODE.md`, portable
+  scenario OSS-94). The Mac app and the Windows and Linux app have a Pair this machine window (File menu) that draws the
+  one screen the engine answers for this machine's pairing session, through the ceremony checks of 0.25.0: not paired,
+  waiting for the other machine, the six-digit code with the network fingerprint, the passkey prompt naming the new
+  machine and each key fingerprint before anything is signed, the wait for the revision, pairing complete, pairing
+  stopped with its reason, and expired. The engine answers it over the app protocol's new `ceremony` action
+  (`project-observatory full assistant ceremony`). No hub runs pairing yet, so a started pairing says "Waiting for the
+  hub", sends nothing and adds no machine, and Sign with passkey stays disabled; the live ceremony follows the hub's
+  side. Starting a pairing creates this machine's device keys when it has none, as `full node --init` does.
+
 - **DigitalOcean and Cloudflare pages beside Heroku** (OBS-235, OBS-271, `docs/ONBOARDING.md`). Two new pages
   under Infrastructure list every resource with the same six columns: resource, project, account, state, cost and
   findings. DigitalOcean shows Droplets, App Platform apps, managed databases and volumes, each team's

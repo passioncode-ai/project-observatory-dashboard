@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 pub const PROTOCOL: &str = "observatory-assistant/1";
 const MAX_OUTPUT: usize = 4 * 1024 * 1024;
-const ACTIONS: &[&str] = &["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build"];
+const ACTIONS: &[&str] = &["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build", "ceremony"];
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct BridgeError {

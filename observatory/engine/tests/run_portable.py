@@ -180,6 +180,8 @@ BOUNDARY += ('node_envelope',)
 BOUNDARY += ('node_cli',)
 # enroll-token/1, the headless join (DEC-0084): verify, single-use redemption, the token read only from stdin or a file.
 BOUNDARY += ('node_enroll', 'node_pairing')
+# The ceremony surface (OBS-197): the screen a desktop app draws for a pairing session, and its steps.
+BOUNDARY += ('node_ceremony',)
 # PB-163: the machine's SSH keys; the private key is never shown or moved.
 BOUNDARY += ('ssh_keys',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
