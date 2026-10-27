@@ -408,7 +408,10 @@ def http_transport(timeout: float = 20.0) -> Transport:
             with urllib.request.urlopen(request, timeout=timeout) as answer:
                 return answer.status, dict(answer.headers), answer.read(MAX_BODY_BYTES * 8)
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read(MAX_BODY_BYTES)
+            try:
+                return error.code, dict(error.headers or {}), error.read(MAX_BODY_BYTES)
+            finally:
+                error.close()
         except (urllib.error.URLError, OSError) as error:
             raise MailboxError('unreachable', f'the mailbox did not answer ({type(error).__name__})') from None
     return send

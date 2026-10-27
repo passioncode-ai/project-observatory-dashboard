@@ -3,9 +3,9 @@
 
 Sender:
 
-    project-observatory full share create PROJECT ENV SLOT --to LABEL --expires DAYS --mailbox URL
-        a share of vault slots (SLOT,SLOT for several) for one recipient machine; prints the link once,
-        to your terminal
+    project-observatory full share create PROJECT ENV SLOT --to LABEL --expires DAYS
+        a share of vault slots (SLOT,SLOT for several) for one recipient machine, through the mailbox
+        `full cloud deploy` recorded (or --mailbox URL); prints the link once, to your terminal
     project-observatory full share status ID
         what the recipient did; the six-digit code when it is ready
     project-observatory full share confirm ID CODE
@@ -19,8 +19,8 @@ Sender:
 
 Recipient:
 
-    project-observatory full share accept LINK
-        open a link the sender gave you; LINK `-` reads it from stdin (a terminal)
+    project-observatory full share accept
+        open a link the sender gave you: it asks for the link, which keeps it out of your shell history (a terminal)
     project-observatory full share status ID
         the code to read to the sender, then the keys you received
     python "$(project-observatory full-path)/tools/use_secret.py" run --share ID SLOT -- COMMAND
@@ -160,8 +160,8 @@ def cmd_create(args) -> int:
     SH, s = store()
     origin = mailbox_origin(args.mailbox)
     if origin is None:
-        print("share: no mailbox: pass --mailbox https://..., the mailbox you will name in the link (your own, "
-              "deployed into your Cloudflare account, comes in a later release, OBS-263)", file=sys.stderr)
+        print("share: no mailbox: deploy yours into your Cloudflare account with `project-observatory full cloud "
+              "deploy`, or pass --mailbox https://... for another one", file=sys.stderr)
         return 2
     if not (args.show_link or _is_terminal()):
         print("share: the link is printed once, to a person's terminal: run this yourself, or pass --show-link to "
@@ -295,7 +295,11 @@ def cmd_provider_ended(args) -> int:
 def cmd_accept(args) -> int:
     require_terminal("accept a share")
     SH, s = store()
-    link = sys.stdin.readline().strip() if args.link == "-" else args.link
+    if args.link in (None, "-"):
+        # Read, not taken from argv: a link on a command line stays in the shell's history.
+        link = input("Paste the link you were sent and press Enter: ").strip()
+    else:
+        link = args.link
     print(SH.REPORT_CONSENT)
     answer = input("Accept this share on this machine? Type yes to accept: ").strip().lower()
     if answer != "yes":
@@ -367,8 +371,9 @@ def parser() -> argparse.ArgumentParser:
         q = sub.add_parser(name, help=text)
         q.add_argument("id")
         q.set_defaults(fn=fn)
-    q = sub.add_parser("accept", help="open a link someone sent you (a terminal; - reads it from stdin)")
-    q.add_argument("link")
+    q = sub.add_parser("accept", help="open a link someone sent you (a terminal; without LINK, or with -, it asks "
+                                      "for the link)")
+    q.add_argument("link", nargs="?")
     q.add_argument("--label", help="your name for this share (default share-<id>)")
     q.set_defaults(fn=cmd_accept)
     q = sub.add_parser("mailbox-trial", help="a loopback mailbox for a trial between two workspaces on this machine")
