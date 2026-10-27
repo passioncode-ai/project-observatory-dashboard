@@ -443,6 +443,110 @@ class ShareFlow(unittest.TestCase):
             SH.PS.seal_peer_share = real
         self.assertEqual(sent['problem']['code'], 'seal-refused')
 
+    # ---- the confirming review of #385 ----------------------------------------------------------------------
+
+    def test_a_revocation_the_mailbox_missed_is_handed_again(self):
+        """M1': the mailbox is down at "They differ": the revocation waits in the record, the text says the mailbox did
+        not answer, and the next pass hands it again; the recipient is then refused within one lease."""
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        working = self.sender.transport
+
+        def down(*args, **kwargs):
+            raise MB.MailboxError('unreachable', 'the mailbox did not answer (planted)')
+        self.sender.transport = down
+        sent = self.sender.differ(share_id)
+        self.assertEqual(sent['state'], 'taking-back')
+        self.assertIsNotNone(sent['revocation'])
+        self.assertFalse(sent['revocationObserved'])
+        self.assertIn('did not answer', sent['warning'])
+        self.assertIsNone(self.box.shares[share_id]['revocation'])
+        self.sender.transport = working
+        sent = self.sender.sync_sent(share_id)
+        self.assertTrue(sent['revocationObserved'])
+        self.assertEqual(self.box.shares[share_id]['revocation'], sent['revocation'])
+        self.clock.advance(3601)
+        with self.assertRaises(SH.ShareError) as refused:
+            self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
+        self.assertEqual(refused.exception.code, 'revoked')
+
+    def test_a_share_mid_seal_is_taken_back_not_aborted(self):
+        """A share whose seal began (state sealing, a sequence used) is sealed for "They differ"."""
+        share_id, _, _, received = self._exchange()
+        folder = self.sender._sent(share_id)
+        record = folder.record()
+        record.update(state='sealing', confirmed=True)
+        record['slots'][0]['sequence'] = 1
+        folder.save(record)
+        sent = self.sender.differ(share_id)
+        self.assertEqual(sent['state'], 'taking-back')
+        self.assertIsNotNone(sent['revocation'])
+
+    def test_one_step_of_a_share_at_a_time(self):
+        """M2': a second writer (another process's pass, here another store over the same folder) holds the share's
+        lock; a person's step waits for it and re-reads what it wrote, never writing a stale copy over it."""
+        import threading
+        share_id, _, _, received = self._exchange()
+        other = SH.Shares(self.sender.root, transport=self.sender.transport, clock=self.clock, read_value=self._read)
+        holding, release = threading.Event(), threading.Event()
+
+        def hold():
+            folder = other._sent(share_id)
+            with other._locked(folder):
+                holding.set()
+                release.wait(10)
+                record = folder.record()
+                record['label'] = 'written by the other pass'
+                folder.save(record)
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(holding.wait(10))
+        done = threading.Event()
+        result = {}
+
+        def revoke():
+            result['record'] = self.sender.revoke(share_id)
+            done.set()
+        waiter = threading.Thread(target=revoke)
+        waiter.start()
+        self.assertFalse(done.wait(0.5))                      # it waits for the lock
+        release.set()
+        holder.join(10)
+        waiter.join(10)
+        self.assertTrue(done.is_set())
+        self.assertEqual(result['record']['label'], 'written by the other pass')
+        self.assertIsNotNone(result['record']['revocation'])
+        self.assertEqual(self.sender._sent(share_id).record()['label'], 'written by the other pass')
+
+    def test_a_use_waits_for_the_pass(self):
+        import threading
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        self.recipient.sync_received(share_id)
+        other = SH.Shares(self.recipient.root, transport=self.recipient.transport, clock=self.clock)
+        holding, release, done = threading.Event(), threading.Event(), threading.Event()
+
+        def hold():
+            with other._locked(other._received(share_id)):
+                holding.set()
+                release.wait(10)
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(holding.wait(10))
+        got = {}
+
+        def use():
+            got['value'] = self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
+            done.set()
+        user = threading.Thread(target=use)
+        user.start()
+        self.assertFalse(done.wait(0.5))
+        release.set()
+        holder.join(10)
+        user.join(10)
+        self.assertEqual(got.get('value'), VALUE)
+
     def test_a_metered_agent_cannot_use_a_share(self):
         """CT-187: until who pays for a share's use is decided, a delegated agent's use of a share is refused."""
         sys.path.insert(0, str(ROOT / 'tools'))

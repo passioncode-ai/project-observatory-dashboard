@@ -117,7 +117,8 @@ def _print(side: str, record: dict, SH, as_json: bool) -> None:
     if view.get("burnt"):
         print(f"  burnt: {view['burnt']['reason']}: {view['burnt']['why']}")
     if view.get("mailboxError"):
-        print(f"  the mailbox did not answer the last pass ({view['mailboxError']['error']}); retried on the next")
+        print(f"  the mailbox did not answer the last pass ({view['mailboxError']['error']}); the next pass tries "
+              f"again (the maintenance job's comes within the hour)")
     if view.get("problem"):
         print(f"  waiting: {view['problem']['code']}: {view['problem']['message']}")
     if view.get("warning"):

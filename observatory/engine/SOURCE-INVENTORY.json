@@ -919,8 +919,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "05d3605e2df018f66893398cdedc236621e74b17c5ebe1adef008de327b517d6",
-      "bytes": 194658,
+      "export_sha256": "8fb02d033f787dd3a20d6623a03f7f0a2fafd3eaf6419ad22813d1a3f0149c97",
+      "bytes": 195126,
       "upstream_modified": true
     },
     {
@@ -2851,8 +2851,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3c2d41a3b2694278d93f45cb2712b757a496a832768ef2dde5e8380588723f02",
-      "bytes": 101792
+      "export_sha256": "05b1949c0186a10382e85e7b74e9cc8e9e51813cdde6aff153993c0a2cef7662",
+      "bytes": 102221
     },
     {
       "path": "mcp/capability_tools.py",
@@ -3134,8 +3134,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6447a71b5cd917a629b4d14de96e9e9abfd7382e9df9c0e45535bcd7cfa29189",
-      "bytes": 55423
+      "export_sha256": "4cfb973c6d36c4b7e5249bfaad03ebb14b9e4febbc5935c5ebb2f750c4381b40",
+      "bytes": 58395
     },
     {
       "path": "node/webauthn.py",
@@ -5757,8 +5757,8 @@
       "path": "tests/test_shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a6e7fda0194a42124475f608970a1754c7c8804deb6d98ad5819dac200593b6d",
-      "bytes": 25052
+      "export_sha256": "de960fb4fe8c5ed0cafa016c15e49f9acadf306c462ddcfb046fe5dc3899d5f2",
+      "bytes": 29871
     },
     {
       "path": "tests/test_side_effect_attribution.py",
@@ -6879,8 +6879,8 @@
       "path": "tools/share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4d8c9df4a1f4af72cc521bb3d91d5fca6c14712826b74d0ee55aa549db577c4a",
-      "bytes": 20023
+      "export_sha256": "1d586555208c9a08202e221cd566d0a05a24a7d848e86dd72bc3538bd69ae16c",
+      "bytes": 20093
     },
     {
       "path": "tools/sign_credential.py",
@@ -7022,8 +7022,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "0f0c82f39879cddaba31d51fba222e3cf175389a7cc7923fedb250dc94894d54",
-      "bytes": 48979,
+      "export_sha256": "cc708cfa8f14097cbdc27242a0622570e7f47d9d8b87ec1bad779202527dc690",
+      "bytes": 49340,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
