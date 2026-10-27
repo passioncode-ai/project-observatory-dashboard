@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/mandate.schema.json",
+  "title": "The operator's mandate a task carries down a chain of agents (mandate/1, DEC-0125)",
+  "description": "The operator's instruction for one task, carried by the agent leading it and handed on, narrowed, to the agents it engages (docs/specification/delegation.md#the-operators-mandate). It travels in a request's _meta.mandate, a hub agent.call's or a sealed call's call.mandate, or a project-board request's body. A callee takes a call it covers from a T0 or T1 caller as the operator's decision (MD-3); a T2 caller's mandate changes nothing (MD-5). mandateCovers in src/mandate.ts is the reference; FAC-SEM-144 checks the document.",
+  "type": "object",
+  "required": [
+    "kind",
+    "by",
+    "task",
+    "instruction",
+    "at",
+    "expiresAt",
+    "scope",
+    "chain"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "mandate/1"
+    },
+    "by": {
+      "const": "operator"
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The task the operator gave, as the leading agent names it (a board task id, a backlog row, a title); the executor records it with the operator's words."
+    },
+    "instruction": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "The operator's words that gave the task, verbatim, in AP-3's form: their sentence, or the agent's question and their answer."
+    },
+    "at": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the operator gave it."
+    },
+    "source": {
+      "$ref": "#/$defs/source",
+      "description": "Where the operator said the words: the project, and the session or the board thread (DEC-0126 OA-2). The agent that first heard them sets it; it never changes down the chain (MD-2). Absent: the leading agent heard them in its own session."
+    },
+    "expiresAt": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "When the mandate ends: after at and at most 7 days after it (FAC-SEM-144)."
+    },
+    "scope": {
+      "$ref": "#/$defs/scope",
+      "description": "What the operator's words cover, as the leading agent states it from them; every hand-over narrows it (MD-2)."
+    },
+    "chain": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "description": "The agents that held the mandate, the leading agent first: every call under it appends the agent it calls (the receiver), with the scope it hands on when narrower. The callee takes it only when it is the last and, where it authenticated its caller's agent id, that id is the one before it; without such an id the chain's end alone binds it (MD-2, MD-3). At most four, as a delegation chain (DL-6).",
+      "items": {
+        "type": "object",
+        "required": [
+          "agent",
+          "at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "common.schema.json#/$defs/agentId",
+            "description": "The agent that held the mandate at this step: the one it was handed to."
+          },
+          "at": {
+            "$ref": "common.schema.json#/$defs/timestamp",
+            "description": "When it was handed to that agent."
+          },
+          "scope": {
+            "$ref": "#/$defs/scope",
+            "description": "The narrower scope it was handed; absent, the scope before it."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "required": [
+        "effects"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/capabilityName"
+          },
+          "description": "The capabilities (tool names) the task may call; absent, any capability for a read or a draft, and none named for an external effect or a relayed action (MD-3); a hand-over never adds it where the scope in force has none (DEC-0136 MD-2a)."
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "interop-common.schema.json#/$defs/requestKey"
+          },
+          "description": "The relayed actions (extensions/actions/0.1 ids) the task may take as the operator's decision; absent, a relayed action is covered only through a listed capability that is its tool (for a job's input request, the job's capability, DEC-0141 MJ-1); a hand-over adds it only where the scope in force lists capabilities (DEC-0136 MD-2a)."
+        },
+        "effects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/effectClass"
+          },
+          "description": "The effect ceiling, read as a grant's effectCeiling is (none below every class, draft below every external effect)."
+        },
+        "perCallMaxUsd": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "The most one call under the mandate may spend, USD, by the callee's own estimate; a call with no estimate is then outside it. Absent: the mandate sets no ceiling and the money limits decide (L0, the project's L1 with its per-task threshold, each key's ceiling), as the operator's rule reserves only spend above a limit (MD-3, MD-6)."
+        },
+        "projects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+          },
+          "description": "The projects the task may act in, by id or slug; absent, any of the operator's."
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "description": "Where the operator said the words an agent relays (DEC-0126 OA-2): their own project, and the session in which they said them or the project-board thread in which they wrote them. A receiver records it as the reason it acted (OA-6).",
+      "required": [
+        "project"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "session"
+          ],
+          "properties": {
+            "session": true
+          }
+        },
+        {
+          "required": [
+            "thread"
+          ],
+          "properties": {
+            "thread": true
+          }
+        }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "The operator's project whose agent heard the words, by id or slug."
+        },
+        "session": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "The session of that project's agent in which the operator said them, by the runner's session id."
+        },
+        "thread": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "The project-board thread in which the operator wrote the words, by id."
+        }
+      }
+    }
+  }
+}

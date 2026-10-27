@@ -1232,6 +1232,70 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
 
 Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D4.
 
+### Share a key with another person's Observatory
+
+You can give another person's machine a key from your vault, see how their agents use it, and take
+it back (contract DEC-0142 `fabric-peer-share/1`; OSS-79 to OSS-81; OBS-264, OBS-276). Neither of you
+needs an organization. The value is sealed to a key their machine made for this share alone; a
+**mailbox** you name carries the sealed copies, the codes' exchange and the usage reports, and sees
+only ciphertext and names. Your own mailbox in your Cloudflare account is `full cloud` (OBS-263, a
+later release); until it is deployed, pass a mailbox with `--mailbox https://...`.
+
+The sender, at their own terminal:
+
+```sh
+project-observatory full share create alpha-web prod OPENROUTER_API_KEY --to "Alex laptop" --mailbox https://MAILBOX
+#   prints the link once: https://MAILBOX/s/SHARE-ID#c=CODE&k=FINGERPRINT; send it to Alex yourself
+project-observatory full share status SHARE-ID      # once Alex accepted: the six-digit code
+project-observatory full share confirm SHARE-ID 123456    # the code Alex read to you matches: seal and send
+```
+
+The recipient, at their own terminal:
+
+```sh
+project-observatory full share accept -             # paste the link on stdin, read what the sender will see, type yes
+project-observatory full share status SHARE-ID      # the code to read to the sender, then the keys you received
+python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-ID OPENROUTER_API_KEY -- COMMAND
+```
+
+- **The code.** Both machines commit, then reveal, and show the same six digits only if nobody sat
+  in the middle. Compare them by a call or a thread you already trust; `confirm` with the digits
+  seals, a code that differs seals nothing and spends the link (`full share differ ID` says so from
+  either side). `confirm ID --without-comparing` seals anyway and the share reads "shared without
+  comparing": whoever claimed first may hold the value. One attempt per link: a second claim, a
+  link opened twice on one machine or an expired link (at most 7 days) burns the share, and a new
+  attempt is a new share.
+- **The person's acts.** `confirm`, `accept` and `provider-ended` need a terminal: an agent cannot
+  compare a code, consent to the reports or state that a provider ended a key for you. `create`
+  prints the link only to a terminal, or with `--show-link`.
+- **Using it.** The recipient's agents take the key through `use_secret.py run --share ID NAME`
+  (flags before the names; `--consumer NAME` names the agent in the report). The key stays sealed
+  on disk under `node/shares/received/`, apart from every vault, and is opened in memory for that
+  one command, under a lease the mailbox renews (one hour by default, `create --lease SECONDS`, at
+  most a day). Known values are removed from the command's printed output, as with every
+  `use_secret.py` run; a command can still print the key some other way, which is a use, not an
+  export. An agent that holds a Fabric delegation token is refused a shared key (`no-grant`): who
+  pays for a share's use is not decided yet (contract CT-187).
+- **What the sender sees.** `full share status ID`: uses per day and the agents, as reported by
+  their machine (sealed to you, unreadable by the mailbox); deliveries, as seen by your mailbox; and
+  exports with the export button (none in this release: there is no export button yet). Each
+  envelope lives at most 90 days and your machine seals it again before it ends, and again when the
+  vault value changes (a rotation reaches the recipient at their next renewal). `full share list`
+  and `full share sync` make one pass to the mailbox for every share.
+- **Taking it back.** `full share revoke ID` hands the mailbox a signed revocation, and it refuses
+  every renewal from then on; the recipient's machine deletes its copy at its next contact and
+  returns a signed receipt. A key that reached another machine can have been copied there, so
+  revoke a key minted for the share at its provider, or rotate your own (`vault.py rotate`), then
+  run `full share provider-ended ID`: only then does the share read "taken back".
+- **Trying it on one machine.** `project-observatory full share mailbox-trial` runs a mailbox on
+  loopback and prints the `OBSERVATORY_CLOUD_RESOLVE` line two workspaces (two `OBSERVATORY_HOME`s)
+  export to reach it. It never serves another machine.
+- **Files.** `node/shares/sent/ID/` and `node/shares/received/ID/` (owner-only): the share's own key
+  pair, the other side's public keys, the sealed copies and the use journal; never a value, and the
+  claim code only until the claim is read.
+
+Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D2, D3, D8.
+
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 
 An agent should never launch, quit or kill your desktop apps or background jobs itself. The

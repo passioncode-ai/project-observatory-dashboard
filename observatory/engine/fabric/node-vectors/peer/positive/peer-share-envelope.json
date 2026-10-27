@@ -1,0 +1,22 @@
+{
+  "header": {
+    "type": "fabric-peer-share-envelope/1",
+    "alg": "ES256",
+    "suite": [
+      16,
+      1,
+      1
+    ],
+    "recipient": "gIzibVDCRJZOBx8ZMmM-plOmb7gZMLkTFSyZppnXWqc",
+    "signer": "6FQ6dHA0zvjOeSrGS91a_UtmVZiSB7B8WZ5eTrHFlYE",
+    "shareId": "1cbbf01dbcb842d86e9b25c6cb286dbd",
+    "slot": "OPENROUTER_API_KEY",
+    "provider": "openrouter",
+    "sequence": 1,
+    "iat": "2026-10-27T09:59:00Z",
+    "exp": "2026-11-26T09:59:00Z",
+    "enc": "BE1naJwbRbSAgucV84qcSqf7h3foKgh9O3SVJ0W0naY8LFTlBGZ8IS_kChTzJ6yD4R6d0nfEkt6UMi2JDf4opGo"
+  },
+  "ct": "_aHWDplsk3OHZDcNCD6qaHvs4A-8LClXSA1sVsXwYiihN-LIDGbMOrm5ROs",
+  "sig": "hf4qgpNRw8HttRvGbH2JtV_vEL_BzNNRPSdjkALqmJIcj-jpYa0s7-rt96gSM4HOZeXR8wRc6lQq1HK_ShYZDA"
+}

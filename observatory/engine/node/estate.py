@@ -347,6 +347,10 @@ def dropped_findings(parent: dict, nxt: dict) -> list:
                 flag(f'{at}/id', 'a revision that drops a machine revokes it')
             if hub is not None and not revoked('hub-key', hub.get('kid')):
                 flag(f'{at}/hubKey/kid', "a removed machine's hub key is revoked in the same revision")
+            for key, c, _context in _context_keys(machine):
+                if not revoked('hub-key', key.get('kid')):
+                    flag(f'{at}/contextHubKeys/{c}/key/kid',
+                         "a removed machine's context hub key is revoked in the same revision (DEC-0128)")
             continue
         listed = {device_key_ref(k) for k in _list(kept.get('deviceKeys'))} - {None}
         for key, k in _indexed(machine.get('deviceKeys')):
@@ -360,7 +364,50 @@ def dropped_findings(parent: dict, nxt: dict) -> list:
             and next_hub.get('x') == hub.get('x')
         if hub is not None and not same_hub and not revoked('hub-key', hub.get('kid')):
             flag(f'{at}/hubKey/kid', 'a hub key no longer certified as it was is revoked; a re-certified one takes a new kid')
+        # DEC-0128: a context's hub key is kept only in its own context, with the same kid and key.
+        kept_context = {(_show(ctx), _show(k.get('kid')), _show(k.get('x'))) for k, _c, ctx in _context_keys(kept)}
+        for key, c, context in _context_keys(machine):
+            if (_show(context), _show(key.get('kid')), _show(key.get('x'))) not in kept_context \
+                    and not revoked('hub-key', key.get('kid')):
+                flag(f'{at}/contextHubKeys/{c}/key/kid',
+                     'a context hub key no longer certified as it was is revoked in the same revision (DEC-0128)')
     return findings
+
+
+def _context_keys(machine: dict) -> list:
+    """A machine's context hub keys that are objects, each with its index and the context it is certified for."""
+    return [(entry['key'], c, entry.get('context')) for entry, c in _indexed(machine.get('contextHubKeys'))
+            if isinstance(entry.get('key'), dict)]
+
+
+_ROOT_X = re.compile(r'[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]\Z')
+
+
+def _organization_pins(value: dict, flag) -> None:
+    """FAC-SEM-147: the organizations the person admitted (DEC-0127 OM-2), each once by its context, and no root of
+    small order (DEC-0045); each context issuer once and never containing the estate id (DEC-0128)."""
+    seen: list = []
+    issuers: list = []
+    estate_id = value.get('estate')
+    for pin, index in _indexed(value.get('organizations')):
+        at = f'/organizations/{index}'
+        org = _show(pin.get('org'))
+        if org in seen:
+            flag(f'{at}/org', f'organization {org} is pinned twice')
+        seen.append(org)
+        iss = pin.get('iss')
+        if isinstance(iss, str):
+            if iss in issuers:
+                flag(f'{at}/iss', f'context issuer {_show(iss)} is used by two organizations')
+            issuers.append(iss)
+        # Only the opaque part is the pin's own: the fixed prefix would match a short estate id by chance.
+        opaque = re.sub(r'^urn:fabric:context:', '', iss).lower() if isinstance(iss, str) else ''
+        if isinstance(estate_id, str) and len(estate_id) >= 8 and estate_id.lower() in opaque:
+            flag(f'{at}/iss', 'a context issuer never contains the estate id (DEC-0128)')
+        root = pin.get('root')
+        x = root.get('x') if isinstance(root, dict) else None
+        if isinstance(x, str) and _ROOT_X.fullmatch(x) and ed25519.is_small_order_key(webauthn.node_b64url(x)):
+            flag(f'{at}/root/x', "a root of small order lets anyone forge the organization's key sets (DEC-0045)")
 
 
 #: DEC-0106: what a machine of the estate may be. Absent is `full`, and a writer omits `full`.
@@ -396,6 +443,9 @@ def _machine_profiles(value: dict, flag) -> None:
             continue
         if profile != 'full' and 'hubKey' in machine:
             flag(f'/machines/{m}/hubKey', f"a {profile} machine is never the hub's: only a full machine carries a hub key")
+        if profile != 'full' and _list(machine.get('contextHubKeys')):
+            flag(f'/machines/{m}/contextHubKeys',
+                 f"a {profile} machine is never the hub's: only a full machine carries a context's hub key (DEC-0128)")
         if profile == 'view':
             views.append(machine.get('id'))
             if _list(machine.get('packages')):
@@ -541,8 +591,11 @@ def _node_base64(text: str) -> bytes:
 
 def _keys(value: dict, flag) -> None:
     """FAC-SEM-073: one `#sig` and at most one `#kem` per machine, each named by the machine and its role, valid, in one
-    role only; machine ids and hub kids unique, hub keys of full order; passkeys valid and listed once."""
+    role only; machine ids and hub kids unique, hub keys of full order; passkeys valid and listed once. A context hub
+    key (DEC-0128) is unique among every hub key of the record, of full order, once per context on its machine, in a
+    context the record pins, and held only by a machine that holds the personal hub key."""
     ids, hub_kids, hub_keys = [], [], []
+    pinned = [pin.get('org') for pin in _list(value.get('organizations'))]
     for machine, m in _indexed(value.get('machines')):
         at = f'/machines/{m}'
         if machine.get('id') in ids:
@@ -575,6 +628,29 @@ def _keys(value: dict, flag) -> None:
             hub_keys.append(hub.get('x'))
             if ed25519.is_small_order_key(webauthn.node_b64url(_show(hub.get('x') if hub.get('x') is not None else ''))):
                 flag(f'{at}/hubKey/x', 'a hub key of small order verifies forged tokens and is never certified')
+        # DEC-0128: a context's hub key is as unique as the personal one and belongs to a pinned organization; it lives
+        # with the personal hub key, so a hub move carries every context's key with it.
+        contexts: list = []
+        if _list(machine.get('contextHubKeys')) and not isinstance(hub, dict):
+            flag(f'{at}/contextHubKeys', "a context's hub key is held only by the machine that holds the personal hub key")
+        for entry, c in _indexed(machine.get('contextHubKeys')):
+            key_at = f'{at}/contextHubKeys/{c}'
+            if entry.get('context') in contexts:
+                flag(f'{key_at}/context', f"context {_show(entry.get('context'))} has two hub keys on one machine")
+            contexts.append(entry.get('context'))
+            if entry.get('context') not in pinned:
+                flag(f'{key_at}/context', f"context {_show(entry.get('context'))} is not an organization the record pins")
+            key = entry.get('key')
+            if not isinstance(key, dict):
+                continue
+            if key.get('kid') in hub_kids:
+                flag(f'{key_at}/key/kid', f"hub key {_show(key.get('kid'))} is certified twice: one kid per hub key")
+            hub_kids.append(key.get('kid'))
+            if key.get('x') in hub_keys:
+                flag(f'{key_at}/key/x', 'one public key is certified as two hub keys: a context key is its own key')
+            hub_keys.append(key.get('x'))
+            if ed25519.is_small_order_key(webauthn.node_b64url(_show(key.get('x') if key.get('x') is not None else ''))):
+                flag(f'{key_at}/key/x', 'a hub key of small order verifies forged tokens and is never certified')
     credentials = []
     for authority, index in _indexed(value.get('authorities')):
         if authority.get('credentialId') in credentials:
@@ -710,7 +786,8 @@ def _grants_and_revocations(value: dict, flag) -> None:
         # A kid and each listed key's own reference (DEC-0084): revoking either while listing it is refused.
         'device-key': [ref for m in machines for k in _list(m.get('deviceKeys'))
                        for ref in (k.get('kid'), device_key_ref(k)) if ref is not None],
-        'hub-key': [m['hubKey'].get('kid') for m in machines if isinstance(m.get('hubKey'), dict)],
+        'hub-key': [m['hubKey'].get('kid') for m in machines if isinstance(m.get('hubKey'), dict)]
+        + [e['key'].get('kid') for m in machines for e in _list(m.get('contextHubKeys')) if isinstance(e.get('key'), dict)],
         'publisher-key': [k.get('kid') for k in _list(value.get('publisherKeys'))],
         'package': [p.get('digest') for m in machines for p in _list(m.get('packages'))],
         'grant': grant_ids,
@@ -733,8 +810,8 @@ def _grants_and_revocations(value: dict, flag) -> None:
 
 def record_findings(value: dict) -> list:
     """FAC-SEM-072…076 over one record, FAC-SEM-092 on each passkey, FAC-SEM-110 on each share grant, FAC-SEM-111 on
-    each placement, FAC-SEM-122 on each partner's publisher key (DEC-0090) and FAC-SEM-134 on each machine's profile
-    (DEC-0106), in the reference's order."""
+    each placement, FAC-SEM-122 on each partner's publisher key (DEC-0090), FAC-SEM-134 on each machine's profile
+    (DEC-0106) and FAC-SEM-147 on the organizations it pins (DEC-0127, DEC-0128), in the reference's order."""
     findings: list = []
     _revision_whole(value, _flagger(findings, 'FAC-SEM-072'))
     _keys(value, _flagger(findings, 'FAC-SEM-073'))
@@ -752,6 +829,7 @@ def record_findings(value: dict) -> list:
             for suffix, message in _placement_grant_problems(value, placement):
                 flag111(f'/machines/{m}/packages/{p}{suffix}', message)
     _machine_profiles(value, _flagger(findings, 'FAC-SEM-134'))
+    _organization_pins(value, _flagger(findings, 'FAC-SEM-147'))
     for authority, index in _indexed(value.get('authorities')):
         findings.extend(webauthn.signing_credential_findings(authority, f'/authorities/{index}'))
     return findings

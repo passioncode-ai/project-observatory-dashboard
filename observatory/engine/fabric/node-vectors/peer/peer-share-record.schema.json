@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/peer-share-record.schema.json",
+  "title": "A share's revocation or deletion receipt, peer-share-revocation/1 and peer-share-deletion/1 (DEC-0142)",
+  "description": "The sender's revocation of a share, signed by the sender's share #sig, which the mailbox holds and refuses every renewal and delivery after; and the recipient's receipt that it deleted the share's envelopes and lease, signed by the recipient's share #sig and naming the revocation by digest (peerRecordStands). Neither ends a copy: only the provider's revocation or rotation does. docs/specification/peer-share.md#taking-a-share-back.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "shareId",
+        "at",
+        "signer",
+        "sig"
+      ],
+      "properties": {
+        "type": {
+          "const": "peer-share-revocation/1"
+        },
+        "shareId": {
+          "$ref": "peer-share-frame.schema.json#/$defs/shareId"
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "An RFC 3339 instant in UTC, ending in Z, as the relay family reads it."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "The RFC 7638 thumbprint of the signing share #sig."
+        },
+        "sig": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "ES256 over the RFC 8785 bytes of the record without sig."
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "shareId",
+        "at",
+        "revocation",
+        "signer",
+        "sig"
+      ],
+      "properties": {
+        "type": {
+          "const": "peer-share-deletion/1"
+        },
+        "shareId": {
+          "$ref": "peer-share-frame.schema.json#/$defs/shareId"
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "An RFC 3339 instant in UTC, ending in Z, as the relay family reads it."
+        },
+        "revocation": {
+          "$ref": "common.schema.json#/$defs/sha256",
+          "description": "sha256: over the RFC 8785 bytes of the revocation it answers."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "The RFC 7638 thumbprint of the signing share #sig."
+        },
+        "sig": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "ES256 over the RFC 8785 bytes of the record without sig."
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

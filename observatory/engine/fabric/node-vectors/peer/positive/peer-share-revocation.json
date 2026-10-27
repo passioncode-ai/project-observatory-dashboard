@@ -1,0 +1,7 @@
+{
+  "type": "peer-share-revocation/1",
+  "shareId": "1cbbf01dbcb842d86e9b25c6cb286dbd",
+  "at": "2026-10-28T10:00:00Z",
+  "signer": "6FQ6dHA0zvjOeSrGS91a_UtmVZiSB7B8WZ5eTrHFlYE",
+  "sig": "auTRBuqdwyyAp4c7rA5PPp40v5-o6CMkv4uuDbkV1jx_5Hsvnw90sXWyGvXdPHtrDZg0uR62P_V0HxE2F2va6w"
+}

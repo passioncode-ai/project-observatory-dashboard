@@ -37,6 +37,17 @@ that step, never a request for the value. `no-agent-binding` means your MCP serv
 without `--agent NAME`: tell me to run `project-observatory full agent-binding issue NAME`. The
 window ships in a later release; until then a request is answered `no-client`.
 
+## A key someone shared with me
+
+Another person's Observatory may share a key with my machine (`full share accept`). Use it only
+through `python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE NAME --
+COMMAND` (flags before the names, `--consumer YOUR-NAME` to name yourself in the sender's report); it
+is never in my vault and never in a file you can read. `full share list` names the shares and their
+slots. Each use is reported to the sender. A share that is not `active` needs me: I compare the
+six-digit code with the sender, or ask them for a new link. Never run `full share confirm`,
+`accept` or `provider-ended` for me: they are my acts and need my terminal. With a Fabric delegation
+token the use is refused (`no-grant`); say so rather than looking for the value elsewhere.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

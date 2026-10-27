@@ -1,7 +1,7 @@
 # fabric-relay/0.1 node vectors (vendored)
 
 Copied byte for byte from `passioncode-ai/fabric-agent-contract` at commit
-`de8cec30a443421ae5603dcfda7e4ff16ed00c45`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
+`759704b443078967c32ea3bb43588ea5f45cb9cd`, the engine's contract pin (`observatory/engine/fabric-contract.lock.json`),
 every file here: `fixtures/vectors/`, `schemas/`, and the `estate-*` fixtures of `fixtures/semantic/` in `semantic/`, all
 but one: `estate-secret-value-as-slot.json` names the AWS documentation's example access key id as a slot, a shape the
 public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`. They are the contract
@@ -21,10 +21,16 @@ names).
 `test_node_pairing.py` and `test_node_enroll.py` run the node's ports over every
 case; the first checks the digests below.
 
+A credential shared with another person's estate (DEC-0142, `fabric-peer-share/1`, OBS-264): `peer/peer-share.json`
+(the reference's vectors: keys, links, claims, pins, codes, exchanges, envelopes, reports and records), the four
+schemas of what crosses between the two estates (`peer/peer-share-*.schema.json`), and their positive and negative
+fixtures in `peer/positive/` and `peer/negative/`; `tests/test_node_peer_share.py` runs `node/peer_share.py` over
+every case.
+
 `http-signature.json` (the device transport binding, DEC-0056), `share-registration.json` (DEC-0086) and
 `device-enrollment.schema.json` (DEC-0031, DEC-0094), with the device fixtures in `device/` (`fixtures/positive/` and
 `fixtures/negative/`), are copied byte for byte (OBS-161 pin) from the contract at commit
-`de8cec30a443421ae5603dcfda7e4ff16ed00c45` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
+`759704b443078967c32ea3bb43588ea5f45cb9cd` (`fixtures/vectors/`, `schemas/`); `tests/test_node_org.py` runs the
 receiver's check over every transport case, the node's derivation and sender gate over every `derive`, `grantId` and
 `gate` case, and its enrollment request against the schema's `key` rules. One command re-vendors the whole folder at
 another commit, removes an `estate-*` fixture the commit no longer has, and rewrites every commit and the digests here:
@@ -127,3 +133,16 @@ the digests below.
 | `repair/negative/repair-result-refused-without-reason.json` | `fe6d7663891683d791d6b09f2d1947efec2d8c6eef7be8ff0add50a7c800760b` |
 | `repair/negative/repair-result-succeeded-unnotified.json` | `329567488c644013d73e70a12fba879ef86497f8046b205870a180a75c16468b` |
 | `repair/semantic/device-action-expired-remote-execution.json` | `5638ed124984182c3ebf9062697a080a885c6aa40ec0b01671930ccd57d13b51` |
+| `peer/peer-share.json` | `0675c503acb1ba8ec472945542a66174e743d83c7e8c2608561646fb421ff4cd` |
+| `peer/peer-share-envelope.schema.json` | `14251dc08088e973225ad7b0a0196f7ef37ed21defeed45e96e6c81cca3f7fac` |
+| `peer/peer-share-frame.schema.json` | `e2ff952dfe3d4df9a1f873a6942d266f108ce88796b469be3a5683c54b8c5500` |
+| `peer/peer-share-record.schema.json` | `ed21e9e9aa66c0b3ffb093e70ac9b70c1a89569fc669199671229a15e8190520` |
+| `peer/peer-share-report.schema.json` | `6c9c3d7b4c4167230cc456a1aee9b9c56cbed1444577729bef069ed263dfcf0b` |
+| `peer/positive/peer-share-envelope.json` | `63253fa2a01e28fbb0d8fac528515a19f8580becf990a0633beb21504c55c0a0` |
+| `peer/positive/peer-share-frame-claim.json` | `dbd4bd5f499c305b70e83cc029b680a125d26a3eb8bcb5cbfa32fdfe05d2569e` |
+| `peer/positive/peer-share-report.json` | `719478b25eb6c482cffd3322bb4a81066f90ad301dcdd3998f820345d77a9ffb` |
+| `peer/positive/peer-share-revocation.json` | `01fb6c7db48fe2a0c1b923c2c7f4cced923e800835c6bda51e618a71dff801c4` |
+| `peer/negative/peer-share-deletion-no-revocation.json` | `fc56d4ae4467a06dfaa8a6a2ee0f2966d0ee476063c59cb0d8a0dcee0506beba` |
+| `peer/negative/peer-share-envelope-value.json` | `6d01298a52f37c9e997184a0af45faa68797140f81b6e63554ff3104d7f20418` |
+| `peer/negative/peer-share-frame-claim-code.json` | `6a01a44eb91ff330a69c2acf49b75e9fa52c809b8488732f782e1ad47d4ba057` |
+| `peer/negative/peer-share-report-device-key.json` | `94a92c6cefa96e8d22cea51f526f2d76d80c3d214d278d762ae016869b15a4c7` |

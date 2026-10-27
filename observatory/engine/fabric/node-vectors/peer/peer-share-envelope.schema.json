@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/peer-share-envelope.schema.json",
+  "title": "A credential shared with another person's estate, fabric-peer-share-envelope/1 (DEC-0142)",
+  "description": "HPKE (RFC 9180) base mode, suite [16, 1, 1], to the recipient's share #kem, info the ASCII fabric-peer-share-envelope/1, the RFC 8785 bytes of the header the additional data; signed ES256 over the RFC 8785 bytes of {header, ct} by the sender's share #sig. The header names the share, the slot and the provider, never the value; it lives at most 90 days (checkPeerShareEnvelope). docs/specification/peer-share.md#the-envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "header",
+    "ct",
+    "sig"
+  ],
+  "properties": {
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "alg",
+        "suite",
+        "recipient",
+        "signer",
+        "shareId",
+        "slot",
+        "provider",
+        "sequence",
+        "iat",
+        "exp",
+        "enc"
+      ],
+      "properties": {
+        "type": {
+          "const": "fabric-peer-share-envelope/1"
+        },
+        "alg": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "ES256; another is unsupported-alg"
+        },
+        "suite": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": 16
+            },
+            {
+              "const": 1
+            },
+            {
+              "const": 1
+            }
+          ],
+          "items": false,
+          "minItems": 3
+        },
+        "recipient": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "The RFC 7638 thumbprint of the recipient's share #kem."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "The RFC 7638 thumbprint of the sender's share #sig."
+        },
+        "shareId": {
+          "$ref": "peer-share-frame.schema.json#/$defs/shareId"
+        },
+        "slot": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "description": "The credential's slot name, never its value."
+        },
+        "provider": {
+          "$ref": "common.schema.json#/$defs/slug"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "iat": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "An RFC 3339 instant in UTC, ending in Z, as the relay family reads it."
+        },
+        "exp": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "An RFC 3339 instant in UTC, ending in Z, as the relay family reads it."
+        },
+        "enc": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "The HPKE encapsulated key, unpadded base64url."
+        }
+      }
+    },
+    "ct": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "sig": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$",
+      "description": "ES256 over the RFC 8785 bytes of {header, ct}, raw r || s, low-S, unpadded base64url."
+    }
+  }
+}
