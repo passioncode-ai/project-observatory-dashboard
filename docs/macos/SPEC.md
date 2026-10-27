@@ -38,7 +38,22 @@ any reconciled turn state; `job` polls and `cancel` stops **assistant jobs only*
 `delete` removes a conversation that has no open turn, with its request ids and job
 records; `list` lists conversations; `dashboard` verifies the selected workspace
 before returning a loopback URL; `ceremony` takes one step of the pairing ceremony
-(`{"op", "role"?}`, docs/design/NODE.md "The ceremony surface") and answers its screen.
+(`{"op", "role"?}`, docs/design/NODE.md "The ceremony surface") and answers its screen;
+`secret` is the secret prompt's door (OBS-260, docs/design/PERSON-SURFACES.md D4):
+`{"op": "list"}` answers the waiting requests (agent, project, slot, provider, the reason
+as the agent's words, whether it replaces a value), `{"op": "store", "requestId", "value"}`
+writes the value into the vault slot in that engine process, as `vault.py put` (or `rotate`
+for a replacement) writes it, and answers the request, `{"op": "decline", "requestId"}`
+answers Cancel, and `{"op": "unavailable", "requestId", "reason": "phrase-store-unavailable"}`
+answers `no-client` for a build that cannot keep the phrase. Every op but an empty list
+answers `client-unverified` unless a parent of the engine process, while running, satisfies
+the enrolled app's code requirement (team and bundle id, `codesign --verify -R` on its pid).
+The value travels only on the child's stdin; it is never in an argument, the environment, a
+log, the answer or the journal. The app reads `list` every five seconds and brings its
+`Secret request` window forward when a request appears; the window shows the person's
+phrase from the data protection keychain (the app's own access group; the signing setup
+applies `macos/ProjectObservatory.entitlements` only with a provisioning profile). With no
+place for the phrase the app shows no window and answers `unavailable`.
 Unknown actions/fields/ids fail closed. A full
 disk is `disk-full`, an unwritable workspace `workspace-unwritable`.
 

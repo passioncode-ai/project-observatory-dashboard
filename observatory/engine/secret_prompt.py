@@ -25,22 +25,39 @@ does with it. What it keeps, and why:
   `no-client` (no genuine window could be shown) and `cancelled` (the agent withdrew it). Refusals that file
   nothing: `no-desktop` (a server or a remote shell, D4: the person runs `vault.py put` in their own shell),
   `no-client` before filing, `slot-filled`, `slot-busy`, `rate-limited`, `invalid-argument`.
-- **The window is not in this release yet.** The macOS app's `SecureField` window, the desktop app's window on
-  Windows and the person's phrase ship in a later change (the OBS-260 row says what remains). Until then `PROMPTER`
-  is `NotBuilt`, so every request with a desktop is answered `no-client` with the person's step, before anything is
-  filed: no window is faked. On Linux the node can never verify that a window is the signed app (DEC-0143 SP-2), so
-  the answer there stays `no-client`, reason `secret-ui-unavailable`, when the windows ship. The queue, its states and
-  its outcomes are already the ones the contract's `secret.prompt` channel method serves (draft DEC-0143), so the
-  channel can replace the broker path without changing the agent's tool.
+- **The window is the Mac app's, opened through the lifecycle broker.** The local server installs `BrokerPrompter`:
+  on macOS, when the person enrolled Observatory's own app (`ai.passioncode.observatory`) with the node's lifecycle
+  broker, a filed request asks the broker to start that app (or find it running), never a direct launch. The app
+  reads the waiting requests through its door below (`full assistant secret`), shows its `SecureField` window with
+  the person's phrase, and writes the value itself. Not enrolled, held off, or the broker not set up: `no-client`
+  with the person's step, before anything is filed. **Windows has no window in this release:** the node has no
+  lifecycle broker there yet (OBS-277), and D4 opens the window only through it, so the answer is `no-client`,
+  reason `broker-unsupported`. On Linux the node can never verify that a window is the signed app (DEC-0143 SP-2), so
+  the answer stays `no-client`, reason `secret-ui-unavailable`. Outside the local server `PROMPTER` stays
+  `NotBuilt`, which offers no window and fakes none. The queue, its states and its outcomes are already the ones
+  the contract's `secret.prompt` channel method serves (draft DEC-0143), so the channel can replace the broker path
+  without changing the agent's tool.
+- **The app's door reads and answers only for the signed app.** `client_requests`, `client_store`, `client_decline`
+  and `client_unavailable` run in the engine process the app itself started (`full assistant secret`, its JSON on
+  that process's stdin). Before any of them reads a request's text or touches a slot, `CLIENT_CHECK` walks this
+  process's parents and asks `codesign` whether one of them, while running, satisfies the pinned requirement of the
+  enrolled app (its team and bundle id): an agent that runs the same command has no such parent and is refused
+  `client-unverified`. `client_store` writes the value into the slot here, as `vault.py put` (an empty slot) or
+  `rotate` (a replacement) writes it, so the value travels only on the pipe between the app and its own child and
+  never through the node, an argument, the environment, a log, the journal or an answer. The limit, stated plainly:
+  the queue file itself is owner-only, so another program of the same user can read the requests' text on disk;
+  what it cannot do is answer a request or see a value.
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
 import secrets as _secrets
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +107,9 @@ MESSAGES = {
     "invalid-argument": "the arguments do not match the tool's input schema",
     "unknown-request": "no request of yours has that id (final requests are kept 7 days)",
     "unavailable": "the request queue cannot be read; nothing was filed",
+    "client-unverified": "only Observatory's own signed app may read or answer a secret request",
+    "request-closed": "the request is no longer waiting",
+    "not-stored": "the value was not written to the vault slot",
 }
 #: Why a window cannot be shown (`no-client`), by reason code.
 NO_CLIENT = {
@@ -97,7 +117,26 @@ NO_CLIENT = {
     "secret-ui-unavailable": "on this system the node cannot verify that a prompt window is Observatory's own "
                              "signed app, so it shows none",
     "app-not-started": "Observatory's app did not start",
+    "app-not-enrolled": "Observatory's app is not enrolled with this node's lifecycle broker, which is the only way "
+                        "the node opens it",
+    "app-held-off": "Observatory's app is held off with the lifecycle broker, so the node does not open it",
+    "broker-unsupported": "this release has no lifecycle broker on Windows (OBS-277), and the prompt window is opened "
+                          "only through it",
+    "phrase-store-unavailable": "Observatory's app cannot keep the person's phrase on this Mac (a build without the "
+                                "keychain entitlement), and a window without the phrase is not shown",
 }
+#: The steps that make a genuine window possible, by reason code; shown beside the person's vault.py step.
+NO_CLIENT_FIX = {
+    "app-not-enrolled": ("enroll the app once, at your terminal: project-observatory full lifecycle enroll "
+                         "observatory.app --kind app --path \"/Applications/Project Observatory.app\" --caller "
+                         "service:observatory --startup-effect \"shows Observatory's own windows\""),
+    "app-held-off": "release it at your terminal: project-observatory full lifecycle hold observatory.app --release",
+    "phrase-store-unavailable": "install the signed release of Project Observatory.app",
+}
+#: Observatory's own Mac app, the only app the node opens for a prompt (macos/scripts/build-app.sh).
+OBSERVATORY_BUNDLE_ID = "ai.passioncode.observatory"
+#: What the app may say when it cannot show a genuine window (`client_unavailable`).
+CLIENT_REASONS = ("phrase-store-unavailable",)
 
 
 class BindingsError(ValueError):
@@ -227,8 +266,13 @@ def agent_for(authorization: Optional[str]) -> Optional[str]:
     except BindingsError:
         return None
     wanted = digest(token)
-    row = next((b for b in doc["bindings"] if b["digest"] == wanted and b["revokedAt"] is None), None)
-    return row["name"] if row else None
+    # Every live binding is compared, each in constant time, so the answer's timing says nothing about which digest
+    # came closest (the review of #378).
+    found = None
+    for row in doc["bindings"]:
+        if hmac.compare_digest(row["digest"], wanted) and row["revokedAt"] is None:
+            found = row["name"]
+    return found
 
 
 # ── the desktop and the window ──────────────────────────────────────────────
@@ -283,14 +327,114 @@ class NotBuilt:
         return None
 
 
-#: Replaced by the change that ships the windows: `available()` None means a genuine window can be shown, `open`
-#: asks the lifecycle broker to start Observatory's signed app with the request id, `withdraw` closes it.
+def observatory_target(document: dict) -> Optional[dict]:
+    """The enrolled target that is Observatory's own app (by its bundle id), or None. `document` is the node's
+    lifecycle registry (`config/node-lifecycle.json`)."""
+    for target in (document.get("targets") or {}).values():
+        identity = target.get("identity") if isinstance(target, dict) else None
+        if target.get("kind") == "app" and isinstance(identity, dict) \
+                and identity.get("bundleId") == OBSERVATORY_BUNDLE_ID and target.get("approved") is True:
+            return target
+    return None
+
+
+class BrokerPrompter:
+    """The prompter the local server installs (D4): Observatory's signed app, opened through the node's lifecycle
+    broker and never directly. `host` answers the server's `node.lifecycle` Host (or None when it has none).
+
+    `open` asks the broker to start the enrolled app, or to find it running, idempotent per request. The app shows the
+    window when it reads the queue (it reads it at launch and every few seconds), so the request id travels through
+    the queue, not through an argument. A start the broker refuses, or that ends without the app running, closes the
+    request `no-client` (reason `app-not-started`). `withdraw` has nothing to close: the app reads the queue again and
+    takes down a window whose request is no longer waiting."""
+
+    #: How often the watch reads the broker's operation, and for how long at most.
+    WATCH_SECONDS = 1.0
+
+    def __init__(self, host: Callable[[], Any]) -> None:
+        self.host = host
+
+    def _service(self):
+        host = self.host()
+        try:
+            return host.service() if host is not None else None
+        except Exception:  # noqa: BLE001 - a broker that cannot start is "not set up", never a crash of a request
+            return None
+
+    def _target(self, service) -> tuple[Optional[dict], Optional[str]]:
+        if service is None:
+            return None, "app-not-enrolled"
+        try:
+            target = observatory_target(service.read())
+        except Exception:  # noqa: BLE001 - an unreadable registry opens nothing
+            return None, "app-not-enrolled"
+        if target is None:
+            return None, "app-not-enrolled"
+        if target.get("desiredState") == "held_off":
+            return None, "app-held-off"
+        return target, None
+
+    def available(self, platform: str | None = None) -> Optional[str]:
+        platform = platform or sys.platform
+        if platform == "win32":
+            return "broker-unsupported"
+        if platform != "darwin":
+            return "secret-ui-unavailable"
+        return self._target(self._service())[1]
+
+    def open(self, request: dict) -> bool:
+        service = self._service()
+        target, _why = self._target(service)
+        if target is None:
+            return False
+        try:
+            receipt = service.broker.open_for_prompt(target["targetId"], request["requestId"])
+        except Exception:  # noqa: BLE001 - a refused start (held_off, busy, denied) shows no window
+            return False
+        state = receipt.get("state")
+        if state in ("ready", "already_ready"):
+            return True
+        if state != "running":
+            return False
+        threading.Thread(target=self._watch, args=(service, receipt["operationId"], request["requestId"]),
+                         name="secret-prompt-open", daemon=True).start()
+        return True
+
+    def _watch(self, service, operation_id: str, request_id: str) -> None:
+        """Follow the broker's start; a start that fails closes the request at once instead of after ten minutes."""
+        end = time.monotonic() + MAX_DEADLINE_SECONDS
+        while time.monotonic() < end:
+            try:
+                state = service.broker.prompt_operation(operation_id).get("state")
+            except Exception:  # noqa: BLE001 - the broker closed: the request keeps its own deadline
+                return
+            if state in ("ready", "already_ready"):
+                return
+            if state != "running":
+                try:
+                    _finish(request_id, "no-client", why=NO_CLIENT["app-not-started"], reason="app-not-started")
+                except Refused:
+                    pass
+                return
+            time.sleep(self.WATCH_SECONDS)
+
+    def withdraw(self, request: dict) -> None:
+        return None
+
+
+#: The prompter in force: `NotBuilt` outside the local server, `BrokerPrompter` inside it (`tools/serverd.py`).
+#: `available()` None means a genuine window can be shown, `open` asks for it, `withdraw` takes it down.
 PROMPTER: Any = NotBuilt()
 #: How the node decides there is a desktop; tests replace it.
 DESKTOP: Callable[[], tuple[bool, str]] = desktop
 #: Whether a signed client can be verified on this system; tests replace it.
 VERIFIABLE: Callable[[], bool] = verifiable_client
 CLOCK: Callable[[], float] = time.time
+
+
+def fix(reason: Optional[str]) -> dict:
+    """The step that makes a genuine window possible next time, when there is one."""
+    return {"fix": NO_CLIENT_FIX[reason]} if reason in NO_CLIENT_FIX else {}
 
 
 def step(project: str, env: str, name: str) -> str:
@@ -336,16 +480,25 @@ def validate(arguments: Any) -> dict:
     try:
         # PROJECT as `vault.py put` takes it: the folder name, or the registry id normalised to that folder.
         project, _said = vault.project_folder(arguments["project"], arguments["env"], arguments["slot"], verb="put")
+        vault.validate_names(project)
+    except vault.VaultBoundaryError as exc:
+        raise Refused("invalid-argument", field="project", why=str(exc)) from None
+    try:
+        vault.validate_names(project, arguments["env"])
+    except vault.VaultBoundaryError as exc:
+        raise Refused("invalid-argument", field="env", why=str(exc)) from None
+    try:
         vault.validate_names(project, arguments["env"], arguments["slot"])
     except vault.VaultBoundaryError as exc:
         raise Refused("invalid-argument", field="slot", why=str(exc)) from None
+    import credential_shape
     provider = arguments.get("provider")
-    if provider is not None and (not isinstance(provider, str) or not PROVIDER.match(provider)):
+    if provider is not None and (not isinstance(provider, str) or not PROVIDER.match(provider)
+                                 or credential_shape.find(provider)):
         raise Refused("invalid-argument", field="provider")
     reason = arguments["why"].strip()
     if len(reason) > REASON_MAX or "\n" in reason or "\r" in reason:
         raise Refused("invalid-argument", field="why", why=f"one line of at most {REASON_MAX} characters")
-    import credential_shape
     if credential_shape.find(reason):
         raise Refused("invalid-argument", field="why", why="it looks like it carries a credential; say why the "
                                                           "key is needed, never a value")
@@ -430,6 +583,9 @@ def view(r: dict) -> dict:
             out["why"] = r["why"]
         if r["state"] in ("no-answer", "no-client", "unconfirmed"):
             out["step"] = step(r["project"], r["env"], r["name"])
+        if r.get("reason"):
+            out["reason"] = r["reason"]
+            out.update(fix(r["reason"]))
     return out
 
 
@@ -447,7 +603,13 @@ def file(agent: str, arguments: Any) -> dict:
     "joined": bool}`; raises `Refused` for anything it does not file."""
     if not AGENT_NAME.match(agent or ""):
         raise Refused("invalid-argument", field="agent")
-    args = validate(arguments)
+    try:
+        args = validate(arguments)
+    except Refused as exc:
+        # Journalled like every refusal (ONBOARDING): the agent and the field only, never the arguments' text,
+        # which may be what the shape check refused.
+        journal("refused", code=exc.code, agent=agent, field=exc.detail.get("field"))
+        raise
     where = {"agent": agent, "slot": f"{args['project']}/{args['env']}/{args['name']}"}
     try:
         return _file(agent, args, where)
@@ -463,7 +625,7 @@ def _file(agent: str, args: dict, where: dict) -> dict:
     blocked = "secret-ui-unavailable" if not VERIFIABLE() else PROMPTER.available()
     if blocked is not None:
         raise Refused("no-client", why=NO_CLIENT.get(blocked, blocked), reason=blocked,
-                      step=step(args["project"], args["env"], args["name"]))
+                      step=step(args["project"], args["env"], args["name"]), **fix(blocked))
     state = slot_state(args["project"], args["env"], args["name"])
     if state["filled"] and not args["replace"]:
         raise Refused("slot-filled", lastChange=state["lastChange"],
@@ -495,11 +657,12 @@ def _file(agent: str, args: dict, where: dict) -> dict:
         _write_queue(doc, now)
     journal("filed", requestId=request["id"], replaces=request["replaces"], **where)
     if not PROMPTER.open(prompt_view(request)):
-        request = _finish(request["id"], "no-client", why=NO_CLIENT["app-not-started"])
+        request = _finish(request["id"], "no-client", why=NO_CLIENT["app-not-started"], reason="app-not-started")
     return {"request": view(request), "joined": False}
 
 
-def _finish(request_id: str, outcome: str, *, why: str | None = None, agent: str | None = None) -> dict:
+def _finish(request_id: str, outcome: str, *, why: str | None = None, agent: str | None = None,
+            reason: str | None = None) -> dict:
     now = CLOCK()
     with _locked():
         doc = _read_queue()
@@ -510,6 +673,8 @@ def _finish(request_id: str, outcome: str, *, why: str | None = None, agent: str
         _reconcile(r, now)
         if r["state"] == OPEN:
             r.update(state=outcome, answeredAt=_stamp(now), why=why)
+            if reason is not None:
+                r["reason"] = reason
             journal("answered", requestId=r["id"], outcome=outcome, agent=r["agent"], slot=_slot_text(r))
         _write_queue(doc, now)
         return r
@@ -573,13 +738,144 @@ def waiting() -> list[dict]:
         return [prompt_view(r) for r in doc["requests"] if r["state"] == OPEN]
 
 
+# ── the signed app's door (`full assistant secret`) ─────────────────────────
+#: How many parents of this process are asked whether they are the signed app: the app runs the
+#: `project-observatory` launcher, which runs the engine as its own child, so the app is the second or third.
+CLIENT_ANCESTORS = 4
+
+
+def _parent_of(pid: int) -> Optional[int]:
+    """The parent of a running process, read by `/bin/ps` with the system's own PATH; None when it is gone."""
+    from node.lifecycle import macos
+    try:
+        done = macos.Runner()(["/bin/ps", "-o", "ppid=", "-p", str(pid)], timeout=5)
+    except Exception:  # noqa: BLE001 - a parent that cannot be read verifies nothing
+        return None
+    text = (done.stdout or "").strip()
+    return int(text) if done.returncode == 0 and text.isdigit() else None
+
+
+def signed_app_ancestor(platform: str | None = None, *, document: dict | None = None,
+                        parent_of: Callable[[int], Optional[int]] = _parent_of, run: Any = None,
+                        start: int | None = None) -> bool:
+    """Whether a parent of this process, while running, satisfies the pinned code requirement of the enrolled
+    Observatory app (an Apple-issued certificate of its team, its bundle id): `codesign --verify --strict -R` on the
+    parent's pid checks the running code, not a file on disk. macOS only; anywhere else nothing is verified.
+
+    The limit: a pid read here could in principle be reused between the read and the check; the app waits on the
+    child it started, so its pid cannot be reused while this process runs."""
+    if (platform or sys.platform) != "darwin":
+        return False
+    try:
+        from node.lifecycle import macos
+        from node.lifecycle import service as lifecycle
+        target = observatory_target(document if document is not None else lifecycle.read_config())
+        if target is None:
+            return False
+        requirement = macos.requirement_for(target["identity"]["bundleId"], target["identity"]["teamId"])
+        runner = run or macos.Runner()
+    except Exception:  # noqa: BLE001 - no registry, no team, no requirement: nothing is verified
+        return False
+    pid = os.getppid() if start is None else start
+    for _ in range(CLIENT_ANCESTORS):
+        if not pid or pid <= 1:
+            return False
+        try:
+            if macos.satisfies(str(pid), requirement, deep=False, run=runner):
+                return True
+        except Exception:  # noqa: BLE001 - a check that could not run is not a pass
+            return False
+        pid = parent_of(pid)
+    return False
+
+
+#: Whether the process asking is the signed app's own child; tests replace it.
+CLIENT_CHECK: Callable[[], bool] = signed_app_ancestor
+
+
+def _client() -> None:
+    if not CLIENT_CHECK():
+        raise Refused("client-unverified")
+
+
+def client_requests() -> list[dict]:
+    """The waiting requests, as the signed app shows them. An empty queue is answered without the check (it says
+    nothing); a request's text is read only for the verified app."""
+    if not waiting_count():
+        return []
+    _client()
+    return waiting()
+
+
+def waiting_count() -> int:
+    """How many requests wait, without their text."""
+    now = CLOCK()
+    with _locked():
+        doc = _read_queue()
+        return sum(1 for r in doc["requests"] if r["state"] == OPEN and now < (_seconds(r.get("deadline")) or 0))
+
+
+def _open_request(request_id: Any) -> dict:
+    if not isinstance(request_id, str) or not REQUEST_ID.match(request_id):
+        raise Refused("unknown-request")
+    now = CLOCK()
+    with _locked():
+        doc = _read_queue()
+        r = next((x for x in doc["requests"] if x["id"] == request_id), None)
+        if r is None:
+            raise Refused("unknown-request")
+        if _reconcile(r, now):
+            journal("answered", requestId=r["id"], outcome=r["state"], agent=r["agent"], slot=_slot_text(r))
+            _write_queue(doc, now)
+        if r["state"] != OPEN:
+            raise Refused("request-closed", outcome=r["state"])
+        return dict(r)
+
+
+def client_store(request_id: Any, value: Any) -> dict:
+    """The person pressed Save: the value goes into the slot here, in the process the app started, then the request
+    is answered (`stored` only when the slot shows the write). The value is never returned, logged or journalled."""
+    _client()
+    r = _open_request(request_id)
+    if not isinstance(value, str):
+        raise Refused("invalid-argument", field="value")
+    vault = _vault()
+    try:
+        vault.store_value(r["project"], r["env"], r["name"], value, replace=bool(r["replaces"]),
+                          tool="secret-prompt")
+    except vault.VaultBoundaryError as exc:
+        # The vault's messages name the rule and the slot, never the value.
+        raise Refused("not-stored", why=str(exc)) from None
+    finally:
+        value = None
+    return answer(r["id"], "stored")
+
+
+def client_decline(request_id: Any) -> dict:
+    """The person pressed Cancel or closed the window."""
+    _client()
+    r = _open_request(request_id)
+    return answer(r["id"], "declined")
+
+
+def client_unavailable(request_id: Any, reason: Any) -> dict:
+    """The app cannot show a genuine window (no place for the phrase): the request ends `no-client` with the
+    person's vault.py step, at once rather than after ten minutes."""
+    _client()
+    if reason not in CLIENT_REASONS:
+        raise Refused("invalid-argument", field="reason")
+    r = _open_request(request_id)
+    return view(_finish(r["id"], "no-client", why=NO_CLIENT[reason], reason=reason))
+
+
 # ── the MCP surface on the node's POST /mcp ─────────────────────────────────
 TOOL_DEFINITIONS = [
     {"name": "secret.request",
      "description": ("File a request for a key the vault does not hold; the person is asked in Observatory's own "
-                     "window (until it ships, answered no-client before filing) and the value is written into the slot without "
-                     "passing through you. Answers the "
-                     "request id; follow it with secret.get. The agent is named from your binding."),
+                     "window (the Mac app, opened through the node's lifecycle broker; elsewhere answered no-client "
+                     "with the person's vault.py step before filing) and the value is written into the slot without "
+                     "passing through you. Answers the request id; follow it with secret.get. The agent is named "
+                     "from your binding."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["project", "env", "slot", "why"],
                      "properties": {"project": {"type": "string"}, "env": {"enum": ["local", "stage", "prod"]},
                                     "slot": {"type": "string"}, "provider": {"type": "string"},

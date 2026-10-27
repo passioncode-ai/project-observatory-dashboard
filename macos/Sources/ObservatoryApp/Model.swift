@@ -85,6 +85,14 @@ enum DashboardMode: Equatable {
     @Published var pairing: CeremonyScreen?
     @Published var pairingFailure: Failure?
     @Published var pairingBusy = false
+    /// The secret prompt (OBS-260): the requests waiting for the person, what the window shows, a step it refused.
+    @Published var secretRequests: [SecretRequest] = []
+    @Published var secretStage: SecretPromptStage = .needsPhrase
+    @Published var secretFailure: Failure?
+    @Published var secretBusy = false
+    /// The phrase's store: the signed app's data protection keychain group, or a stand-in in tests.
+    let phraseStore: PhraseStore
+    var secretWatch: Task<Void, Never>?
     var dashboardError: String? { dashboardFailure.map { message($0.code, $0.detail) } }
     var error: String? { failure.map { message($0.code, $0.detail) } }
 
@@ -101,8 +109,10 @@ enum DashboardMode: Equatable {
     private let transport: ((String, [String: String]) async throws -> [String: Any])?
     init(defaults: UserDefaults = .standard,
          transport: ((String, [String: String]) async throws -> [String: Any])? = nil,
-         preferredLanguages: @escaping () -> [String] = Localization.systemPreferredLanguages) {
+         preferredLanguages: @escaping () -> [String] = Localization.systemPreferredLanguages,
+         phraseStore: PhraseStore = KeychainPhraseStore()) {
         self.defaults = defaults; self.transport = transport; self.preferredLanguages = preferredLanguages
+        self.phraseStore = phraseStore
         let (cli, home) = Self.configured(defaults)
         executable = cli; activeExecutable = cli; workspace = home; activeWorkspace = home
         // The 0.18 switch is read when no choice is stored; `bool(forKey:)` also reads
@@ -245,6 +255,10 @@ enum DashboardMode: Equatable {
         try await call("ceremony", input, timeout: 30)
     }
     func failureOf(_ error: Error) -> Failure { failure(of: error) }
+    /// The secret prompt's one engine call (OBS-260): an input `SecretRequest.input` allowed, never another action.
+    func secretCall(_ input: [String: String]) async throws -> [String: Any] {
+        try await call("secret", input, timeout: 30)
+    }
 
     private func call(_ action: String, _ input: [String: String] = [:], timeout: TimeInterval = 20) async throws -> [String: Any] {
         if let transport { return try await transport(action, input) }

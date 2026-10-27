@@ -432,11 +432,19 @@ sequenceDiagram
 
 ### D4. The native secret prompt is shown only by Observatory's own signed app
 
-Built so far (OBS-260, server half): the agent binding (`full agent-binding issue NAME`,
+Built so far (OBS-260): the server half (#378): the agent binding (`full agent-binding issue NAME`,
 `secret_prompt.py`), the node's queue with its limits and outcomes, `secret.request`, `secret.get` and
-`secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. The windows, the app's
-door to the queue and the person's phrase are not built: until they are, a request is answered
-`no-client` with the person's `vault.py put` step and nothing is filed. The queue's states and
+`secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. Then, on macOS: the node
+opens the enrolled app through the lifecycle broker (`BrokerPrompter`, the broker's own `secret-prompt`
+caller), the app's door (`full assistant secret`, run as the app's own child and answering only when a
+running parent satisfies the enrolled app's code requirement), the `SecureField` window and the
+person's phrase in the data protection keychain (the app's access group, signed in only with a
+provisioning profile; a build without it answers `no-client`). How the value moves, exactly: the
+window hands it to the engine process the app spawned, on that process's stdin; that process writes it
+into the slot with the vault's own writer (`vault.store_value`, as `put` or `rotate`) and drops it; the
+node reads only the slot's metadata. Not built: the Windows desktop window (the node has no lifecycle
+broker on Windows yet, OBS-277, and the window is opened only through it), so Windows answers
+`no-client`, reason `broker-unsupported`; Linux stays `no-client` (DEC-0143 SP-2). The queue's states and
 outcomes are those of the contract's draft `secret.prompt` channel method (DEC-0143, SP-1 to SP-7), so
 the channel can replace the broker path below at the next contract pin without changing the agent's
 tool.

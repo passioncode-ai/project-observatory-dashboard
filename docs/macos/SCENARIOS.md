@@ -24,6 +24,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-012 | The app opens at login unless the person turned it off | draft |
 | SCN-013 | A permission the app needs is missing at launch | draft |
 | SCN-014 | The person pairs this machine with their network | draft |
+| SCN-015 | An agent asks for a key and the person types it in Observatory's own window | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the three 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
@@ -304,3 +305,31 @@ expired; Start again drops the ended session; a step the engine refuses is named
 Coverage: `CeremonyTests` (`testEveryStateTheEngineAnswersIsReadAsIs`,
 `testEveryStateHasItsWordsAndOnlyTheButtonsItOffers`, `testTheWaitOnTheHubIsSaidAsSuchNeverAsProgress`,
 `testAStepGoesThroughTheBridgeAndARefusalIsWorded`). Not yet walked on a real Mac.
+
+## SCN-015: An agent asks for a key and the person types it in Observatory's own window
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: OSS-84 (the portable scenario, which owns the outcomes), PERSON-SURFACES.md D4 (OBS-260)
+Preconditions: a compatible engine (one that answers `full assistant secret`); Observatory's app enrolled
+with the node's lifecycle broker; the signed release, whose keychain group keeps the phrase.
+Trigger: an agent calls `observatory_secret_request`; the node asks the broker to start the app or finds it
+running; the app reads waiting requests every five seconds and brings the Secret request window forward.
+Steps: at the first request, Set your phrase (3 to 64 characters, one line) → the window shows the agent from
+its binding, the project, the slot, the provider, the reason quoted as the agent's words, Your phrase, and
+Replace with the last change when the slot already holds a value → the person pastes the key into the secure
+field → Save (or Replace) hands it to the app's own engine child on its stdin, which writes the slot; Cancel
+answers declined.
+Expected result: the agent's job ends `stored` only after the slot shows the write; the value is never in an
+argument, the environment, a log, a notification or the agent's result.
+Errors & recovery: a build that cannot keep the phrase shows no window and answers the request `no-client`
+with the person's `vault.py put` step; a key with a line break is not sent; a request withdrawn or past its ten
+minutes reads "This request is no longer waiting."; a refusal from the door is named in a banner. The phrase is
+changed in Settings.
+Coverage: `SecretPromptTests` (`testTheRequestIsReadAsTheDoorAnswersIt`, `testTheWindowSendsOnlyItsOwnInputs`,
+`testThePhraseIsOneShortLine`, `testNoPlaceForThePhraseMeansNoPromptAndAPhraseIsSetAtFirstUse`,
+`testTheKeychainItemIsTheDataProtectionKeychainsNeverTheLoginOne`,
+`testAWaitingRequestWithoutAPlaceForThePhraseIsAnsweredNoClientAndShowsNoWindow`,
+`testSaveSendsTheValueOnlyToTheDoorAndCancelDeclines`, `testARefusalIsWordedAndAClosedRequestLeavesTheWindow`,
+`testThePhraseIsSavedOnlyWhereTheAppKeepsIt`); the engine's door: `tests/test_secret_prompt.py` `TheAppsDoor`.
+Not yet walked on a real Mac: it needs the signed release with its provisioning profile.

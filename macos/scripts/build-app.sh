@@ -69,9 +69,21 @@ doc={'CFBundleName':'Project Observatory','CFBundleDisplayName':'Project Observa
      'NSHumanReadableCopyright':'AGPL-3.0-only OR LicenseRef-PassionCode-Commercial; see LICENSE.'}
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(doc))
 PY
+# The person's phrase for the secret prompt (OBS-260, PERSON-SURFACES.md D4) is kept in the data protection
+# keychain, in the app's own access group: the keychain-access-groups entitlement, which macOS honours only with a
+# Developer ID provisioning profile. Given the profile and its team, they are embedded and signed in; without them
+# the app carries no entitlements, keeps no phrase, and answers every secret request no-client with the vault step.
+ENTITLEMENTS=()
+if [[ -n "${OBSERVATORY_SIGN_IDENTITY:-}" && -n "${OBSERVATORY_PROVISIONING_PROFILE:-}" ]]; then
+  [[ "${OBSERVATORY_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]] || { echo "build-app.sh: OBSERVATORY_TEAM_ID must be the 10-character team id" >&2; exit 1; }
+  cp "$OBSERVATORY_PROVISIONING_PROFILE" "$APP/Contents/embedded.provisionprofile"
+  sed "s/TEAM_ID/$OBSERVATORY_TEAM_ID/g" "$ROOT/macos/ProjectObservatory.entitlements" > "$SCRATCH/ProjectObservatory.entitlements"
+  plutil -lint "$SCRATCH/ProjectObservatory.entitlements" >/dev/null
+  ENTITLEMENTS=(--entitlements "$SCRATCH/ProjectObservatory.entitlements")
+fi
 # Explicit Developer ID only when supplied by the release operator; default is QA.
 if [[ -n "${OBSERVATORY_SIGN_IDENTITY:-}" ]]; then
-  codesign --force --options runtime --timestamp --sign "$OBSERVATORY_SIGN_IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp ${ENTITLEMENTS[@]+"${ENTITLEMENTS[@]}"} --sign "$OBSERVATORY_SIGN_IDENTITY" "$APP"
 else
   codesign --force --sign - "$APP"
 fi

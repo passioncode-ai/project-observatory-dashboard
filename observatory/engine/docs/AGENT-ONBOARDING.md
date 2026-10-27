@@ -35,7 +35,8 @@ through `use_secret.py run --vault-only`), `declined` (do not ask again for the 
 `no-client` carry the step I run in my own shell (`vault.py put`, the value on its stdin); give me
 that step, never a request for the value. `no-agent-binding` means your MCP server was started
 without `--agent NAME`: tell me to run `project-observatory full agent-binding issue NAME`. The
-window ships in a later release; until then a request is answered `no-client`.
+window is the Mac app's, opened through the node's lifecycle broker; on Windows and Linux, or with
+the app not enrolled, a request is answered `no-client` with that step.
 
 ## SSH keys
 

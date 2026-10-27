@@ -37,7 +37,7 @@ public enum BridgeError: Error, LocalizedError, Equatable {
 
 public struct Backend: Sendable {
     public static let protocolName = "observatory-assistant/1"
-    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build", "ceremony"]
+    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build", "ceremony", "secret"]
     public let executable: String
     public let workspace: String
     public init(executable: String, workspace: String) {
