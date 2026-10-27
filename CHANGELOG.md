@@ -18,7 +18,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   the last check. Home reads only what the pages already read; the eight-row findings preview no longer opens the page. The disk tile
   takes the worse of the level the measured free space falls in (the disk guard's own lines) and a guard run no older
   than that measurement. Pages are now filled in one pass, so a title that names a placeholder such as `__DATA__`
-  stays text.
+  stays text. The apps tile also carries a line each for DigitalOcean and Cloudflare once
+  connected (in place of their counter tiles, which Home hides), worded as their section cards.
 
 - **DigitalOcean and Cloudflare pages beside Heroku** (OBS-235, OBS-271, `docs/ONBOARDING.md`). Two new pages
   under Infrastructure list every resource with the same six columns: resource, project, account, state, cost and
