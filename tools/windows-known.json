@@ -383,6 +383,11 @@
       "row": "OBS-278",
       "reason": "AttributeError: 'TaskSchedulerJob' object has no attribute 'units'"
     },
+    "share_cli": {
+      "expect": "SKIP",
+      "row": "OBS-278",
+      "reason": "every case needs a POSIX pseudo-terminal (`pty`), which Windows lacks, so the suite skips as a whole: `full share` at a terminal needs a Windows console driver for its test"
+    },
     "skill": {
       "expect": "FAIL",
       "row": "OBS-278",

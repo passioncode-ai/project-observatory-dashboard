@@ -521,7 +521,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'machine_backup': 300,
                  # 127 cases with real key generation: 34 s alone on windows-latest, 119 s and once past 120 s
                  # under the job's --jobs 4 there (runs 40573876802, 40579710612; OBS-277).
-                 'node_org': 300}
+                 'node_org': 300,
+                 # 68-72 s alone on windows-latest, past 120 s once each under the job's --jobs 4 there
+                 # (run 40594551136; OBS-277).
+                 'gate_purity': 300, 'search': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

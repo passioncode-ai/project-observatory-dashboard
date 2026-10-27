@@ -3939,8 +3939,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "e3cf70de08636df046f5e29ef2d091c911df2d053504ede7198ef4b844f77136",
-      "bytes": 49826,
+      "export_sha256": "19c0ae503991832a9a3c894beda139efbf84d927b0aaa13006b1a84616cbd2ab",
+      "bytes": 50029,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
