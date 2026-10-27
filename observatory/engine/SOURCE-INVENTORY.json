@@ -22,8 +22,8 @@
       "path": "agent/assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c6c79bc59cb5d1481cd6d7f63456db35313f25cacb2cec74547c1bf7e62801bb",
-      "bytes": 27800
+      "export_sha256": "d8db0e907be8bb33317500ee76661c886c0f656193e3a7f186c8a75dc549040c",
+      "bytes": 28735
     },
     {
       "path": "agent/observe.py",
@@ -898,8 +898,8 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "5e087c2a36a0fe7ce9c5e624e50074cb7f1aab15fe0dfed6dd0b60fe7a55adcb",
-      "bytes": 13823,
+      "export_sha256": "7b561e8b9406e67ee94cc1fe61e3b68112a8fc86554ee5a70af21080704d10ee",
+      "bytes": 13885,
       "upstream_modified": true
     },
     {
@@ -919,8 +919,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "3c3752e9807bcece087045648471f7a1456c1812c3e1663f2a3fc67f85b60ce1",
-      "bytes": 167672,
+      "export_sha256": "38173db09e77734cecc7a8126fb9270e008f473c9fe0b525422f403b9e89fa36",
+      "bytes": 169954,
       "upstream_modified": true
     },
     {
@@ -2781,6 +2781,13 @@
       "bytes": 6082
     },
     {
+      "path": "node/ceremony.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "25d69adf86bf53cf565ba86fb51dcf502eb5541c3536f18753290f7979f8fb65",
+      "bytes": 15381
+    },
+    {
       "path": "node/device_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -3736,8 +3743,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f37ec98013d83c32838565353b590c28a7e48cc6983f77d0056c24de3908546b",
-      "bytes": 46694,
+      "export_sha256": "51fe0b6c9c859dd95b998f137c2f93e4a6b852fa59bdced74b9793f45ad9b214",
+      "bytes": 46828,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -4904,6 +4911,13 @@
       "upstream_modified": true,
       "export_sha256": "db939ea762352d81e4aef79e8bb95c814046f8fd89fcc4ee92f53d841cea1991",
       "bytes": 12632
+    },
+    {
+      "path": "tests/test_node_ceremony.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "32ebe5a614dd0a4ccbbb80b152c53ade99df399c56002d495fa24694a1f77f8c",
+      "bytes": 19796
     },
     {
       "path": "tests/test_node_cli.py",
@@ -6853,7 +6867,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 915,
+  "file_count": 917,
   "excluded": [
     "git-history",
     "operator-registries",
