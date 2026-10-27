@@ -596,8 +596,8 @@
       "path": "dashboard/home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bbc82eb82bc475779a9dfe115fcc4d4959c1f4ecc194eee6a9d15883145a68a1",
-      "bytes": 19165
+      "export_sha256": "6dcc75535c2e44cb85870e61f61b458ed893e045fab2c81a06705d6a43cab960",
+      "bytes": 19269
     },
     {
       "path": "dashboard/i18n.py",
@@ -617,8 +617,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b7fe59de1a0bb9c4d23e72d8778e7c64c48dd6c0b723a5744fe241477b646a04",
-      "bytes": 186790
+      "export_sha256": "5ba5e1d587cce3269aad7142ceef5eab00f0cd004f51c5557547a8d4ad0792ab",
+      "bytes": 186744
     },
     {
       "path": "dashboard/machine_page.py",

@@ -177,7 +177,9 @@ def agents_tile(payload: dict, t: Translator) -> dict:
     if not counters:
         return _unmeasured("agents", name, t.mark("never measured"), _reason(a.get("degraded")), "agents.html", t)
     stalled = int(counters.get("stalled") or 0)
-    at = t.mark("last 24 hours · measured {date}", date=_stamp(a.get("measuredAt"))) if a.get("measuredAt") else ""
+    # The period only: the store is read when the page is built, so a time here would be the
+    # build's own clock (the header's "Measured"), and two builds a minute apart would differ.
+    at = t.mark("last 24 hours")
     return _tile("agents", name, "warn" if stalled else "ok",
                  t.mark("home@@{n} sessions working", n=int(counters.get("sessionsActive") or 0)),
                  t.mark("home@@{n} workflows stalled", n=stalled), at, "agents.html", t)
