@@ -225,6 +225,13 @@ def main():
             if z.get("product") and z["product"] not in pri: errors.append(f"zone names a product that does not exist: {z['id']} -> {z['product']}")
         zt=load("cloudflare-zones.json").get("totals") or {}
         if zt.get("zones")!=len(zones): errors.append("zone totals disagree with the list")
+    # DigitalOcean and Cloudflare in the Heroku shape (OBS-235, OBS-271): the rules live
+    # beside the transformer (`collectors/infra_registry.py`, `problems`).
+    for _prov in ("digitalocean", "cloudflare"):
+        if (INV/f"{_prov}-account.json").is_file():
+            sys.path.insert(0,str(ROOT/"collectors"))
+            import infra_registry
+            errors.extend(infra_registry.problems(_prov, load(f"{_prov}-account.json"), pi, si))
     mcps=load("mcp-servers.json")["servers"] if (INV/"mcp-servers.json").is_file() else []
     if mcps:
         uniq(mcps,"id","mcp-servers",errors)

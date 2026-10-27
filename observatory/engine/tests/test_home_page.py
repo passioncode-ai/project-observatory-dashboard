@@ -299,6 +299,22 @@ class ReviewFixes(unittest.TestCase):
         payload["findings"].pop("counts")
         self.assertIn("All problems (5)", text(home_page.needs_html(payload, EN)))
 
+    def test_digitalocean_and_cloudflare_join_the_apps_tile(self):
+        """#376's infrastructure pages land inside the state band, worded as their cards."""
+        payload = full_payload()
+        payload["heroku"]["apps"] = [{"name": "a", "state": "running", "crashed": False}]
+        out = text(tile(home_page.band_html(payload, EN), "apps"))
+        self.assertNotIn("DigitalOcean", out, "a provider never connected adds no line")
+        payload["infra_integrations"] = {"digitalocean": True, "cloudflare": True}
+        payload["digitalocean"] = {"scanned_on": "2026-10-27", "resources": [{}] * 4,
+                                   "totals": {"resources": 4, "by_state": {"off": 1}}}
+        payload["cloudflare"] = None
+        cell = tile(home_page.band_html(payload, EN), "apps")
+        self.assertIn("DigitalOcean: 4 resources · off or down: 1", text(cell))
+        self.assertIn("Cloudflare: not connected", text(cell))
+        self.assertIn('data-state="warn"', cell, "a resource off and billed warns")
+        payload["digitalocean"]["totals"]["by_state"] = {"down": 1}
+        self.assertIn('data-state="bad"', tile(home_page.band_html(payload, EN), "apps"))
 
 if __name__ == "__main__":
     unittest.main()

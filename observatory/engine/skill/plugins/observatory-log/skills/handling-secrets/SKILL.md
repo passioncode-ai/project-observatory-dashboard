@@ -225,6 +225,12 @@ where the analytics plugin reads it, never in a vault slot. An agent that measur
 `cloudflare.py issue --preset zone-analytics-read --zone <zone> --vault <project>/<env>/<NAME>`:
 Zone Read and Analytics Read on that zone only, verified by the plugin's own counter read.
 
+The Cloudflare page's reader is `cloudflare.py issue --preset inventory-read [--account <slug>]`:
+Workers Scripts, Pages, R2 Storage and D1 Read on the account, Zone, DNS and SSL and Certificates
+Read on its zones, nothing that writes. It is filed in `cloudflare-inventory.d/<account>` for
+`full scan-cloudflare-account` alone, once its new value lists the account's Workers; `rotate`,
+`revoke` and `ping` name it `inventory/<account>`.
+
 A project that must edit DNS in one zone (a custom domain, a CNAME to its host)
 gets `cloudflare.py issue --preset dns-edit --zone <zone> --vault <project>/<env>/<NAME>`:
 Zone Read and DNS Write on that zone only, verified against its records and

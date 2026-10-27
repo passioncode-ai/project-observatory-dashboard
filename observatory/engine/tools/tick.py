@@ -43,6 +43,7 @@ lease stand-down: another run holds the registry and the next tick is 30 minutes
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -88,6 +89,15 @@ READS_FROM: dict[str, tuple[str, ...]] = {
 
 def log(message: str) -> None:
     print(f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ} {message}", flush=True)
+
+
+def incomplete(path: Path) -> bool:
+    """True when a scan says the step's deadline cut it short (`"complete": false`), so the
+    next tick reads again instead of waiting for the file to age (OBS-271)."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("complete") is False
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def stale(path: Path, hours: float) -> bool:
@@ -570,6 +580,12 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     if stale(SCRATCH / "digitalocean.json", 24):
         log("digitalocean: refreshing (older than 24h or absent)")
         step("scan-digitalocean", PY, "collectors/scan_digitalocean.py", SCRATCH / "digitalocean.json")
+    # What each Cloudflare account holds for the Cloudflare page (OBS-271): daily, like DigitalOcean's.
+    # A scan the deadline cut (`complete: false`) is read again at the next tick, not a day later.
+    if stale(SCRATCH / "cloudflare_account.json", 24) or incomplete(SCRATCH / "cloudflare_account.json"):
+        log("cloudflare-account: refreshing (older than 24h, absent, or cut short by the deadline)")
+        step("scan-cloudflare-account", PY, "collectors/scan_cloudflare_account.py",
+             SCRATCH / "cloudflare_account.json")
     step("scan-mcp", PY, "collectors/scan_mcp.py", SCRATCH / "mcp.json", "--declarations-only")
     step("scan-agents", PY, "collectors/scan_agents.py", SCRATCH / "agents.json")
     # THE HARNESS: what every agent session loads, what it costs, which skills match a security rule

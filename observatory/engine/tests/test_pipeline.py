@@ -110,6 +110,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     # Reads the DigitalOcean door's stores and the API, neither written by a step (OBS-155).
     "scan-digitalocean": {"writes": ["store/raw/digitalocean.json"], "reads": []},
+    # Reads the Cloudflare door's inventory readers and the API, neither written by a step (OBS-271).
+    "scan-cloudflare-account": {"writes": ["store/raw/cloudflare_account.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
     # Reads the Fabric services directory and launchd, neither written by a step here.
     "scan-agents": {"writes": ["store/raw/agents.json"], "reads": []},
@@ -214,8 +216,12 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              # The analytics inventory, written here for the
                              # same reason as the rest: the project join needs
                              # the project list and only `emit` holds it.
-                             "registry/google-properties.json"],
-                  "reads": ["store/raw/google.json", "store/raw/remote-env.json", "store/raw/agents.json", "registry/agents.json",
+                             "registry/google-properties.json",
+                             # DigitalOcean and Cloudflare beside Heroku, for the same reason:
+                             # the project edge needs the repository list (OBS-235, OBS-271).
+                             "registry/digitalocean-account.json", "registry/cloudflare-account.json"],
+                  "reads": ["store/raw/digitalocean.json", "store/raw/cloudflare_account.json",
+                            "store/raw/google.json", "store/raw/remote-env.json", "store/raw/agents.json", "registry/agents.json",
                             "store/raw/cloudflare_zones.json", "store/raw/mcp.json", "collectors/products.json",
                             "collectors/host_boundary.json", "store/raw/model.json", "registry/domains.json", "store/raw/domains_live.json",
                             "store/raw/heroku.json", "collectors/heroku_links.json",
@@ -337,6 +343,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "registry/remote-env.json",
                             "registry/credentials.json",
                             "registry/heroku-apps.json",
+                            # the DigitalOcean and Cloudflare pages (OBS-235, OBS-271)
+                            "registry/digitalocean-account.json", "registry/cloudflare-account.json",
                             "registry/cloudflare-zones.json", "registry/products.json",
                             "registry/mcp-servers.json",
                             "registry/env-inventory.json",

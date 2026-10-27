@@ -590,6 +590,16 @@ def heroku_state(doc) -> str:
     return "unread" if not doc.get("apps") and doc.get("degraded") else "read"
 
 
+def infra_state(doc, on: bool = True) -> str:
+    """`unscanned`, `off` (switched off since its last read), `unread` (a scan that read
+    nothing and said why) or `read`."""
+    if not doc:
+        return "unscanned"
+    if not on:
+        return "off"
+    return "unread" if not doc.get("resources") and doc.get("degraded") else "read"
+
+
 def scanned(doc):
     """A registry document that a scan wrote, or None. `init` writes empty
     documents with `scanned_on: null` so every reader finds a file; the pages
@@ -752,6 +762,13 @@ def build():
     # NEVER A VALUE, and the document is built so it cannot hold one: a `label`
     # is what the provider calls a key. `tools/check_secrets.py` reads it on
     # every gate run, so the page inherits that guarantee rather than restating it.
+    # DIGITALOCEAN AND CLOUDFLARE BESIDE HEROKU (OBS-235, OBS-271): absent is
+    # "not connected", never "you run nothing there": the same rule as Heroku's.
+    _dod = paths.REGISTRY / "digitalocean-account.json"
+    DIGITALOCEAN = scanned(json.loads(_dod.read_text(encoding="utf-8"))) if _dod.is_file() else None
+    _cfa = paths.REGISTRY / "cloudflare-account.json"
+    CLOUDFLARE = scanned(json.loads(_cfa.read_text(encoding="utf-8"))) if _cfa.is_file() else None
+    _integrations = (__import__("configuration").load().get("integrations") or {})
     _cd = paths.REGISTRY / "credentials.json"
     CREDS = scanned(json.loads(_cd.read_text(encoding="utf-8"))) if _cd.is_file() else None
     # WHICH KEYS A PROJECT USES, for its panel. The credential document is
@@ -1052,6 +1069,15 @@ def build():
         "creds": len(CREDS["credentials"]) if CREDS else 0,
         "creds_leaked": (CREDS.get("totals", {}).get("leaked_unrotated", 0) if CREDS else 0),
         "creds_unclaimed": (CREDS.get("totals", {}).get("unclaimed", 0) if CREDS else 0),
+        # DigitalOcean and Cloudflare beside Heroku (OBS-235, OBS-271): a provider never
+        # read is not a provider holding nothing, so its state travels with its count.
+        "digitalocean_state": infra_state(DIGITALOCEAN, _integrations.get("digitalocean") is True),
+        "digitalocean_resources": ((DIGITALOCEAN or {}).get("totals") or {}).get("resources", 0),
+        # Null when no row states a price, never 0; `_partial` when the sum is a floor.
+        "digitalocean_cost": ((DIGITALOCEAN or {}).get("totals") or {}).get("monthly_cost"),
+        "digitalocean_cost_partial": bool(((DIGITALOCEAN or {}).get("totals") or {}).get("monthly_cost_partial")),
+        "cloudflare_state": infra_state(CLOUDFLARE, _integrations.get("cloudflare") is True),
+        "cloudflare_resources": ((CLOUDFLARE or {}).get("totals") or {}).get("resources", 0),
         "heroku_down": (sum(1 for a in HEROKU["apps"]
                             if a["state"] in ("down", "suspended") or a["crashed"])
                         if HEROKU else 0),
@@ -1127,6 +1153,11 @@ def build():
                           # (`OBS="2026-09-03"`) so the headline was a constant
                           #. Both are shown now, each labelled.
                           "heroku": HEROKU,
+                          "digitalocean": DIGITALOCEAN,
+                          "cloudflare": CLOUDFLARE,
+                          # Whether each page's integration is on: "switch it on" or "scan".
+                          "infra_integrations": {k: _integrations.get(k) is True
+                                                 for k in ("digitalocean", "cloudflare")},
                           "creds": CREDS,
                           "env": ENVD,
                           "mcp": MCP,
@@ -1172,7 +1203,7 @@ def build():
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__AGENTS__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1694,7 +1725,9 @@ body[data-page="index"] #out, body[data-page="findings"] #out, body[data-page="h
 body[data-page="machine"] #out, body[data-page="machine"] #list-tools,
 body[data-page="agents"] #out, body[data-page="agents"] #list-tools,
 body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
-body[data-page="machine"] #panel, body[data-page="agents"] #panel { display: none; }
+body[data-page="machine"] #panel, body[data-page="agents"] #panel,
+body[data-page="digitalocean"] #out, body[data-page="digitalocean"] #list-tools, body[data-page="digitalocean"] #panel,
+body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, body[data-page="cloudflare"] #panel { display: none; }
 /* The Agents page: server-rendered cards (dashboard/agents_page.py). */
 .agents-wf { margin-top: var(--space-2); }
 .agents-wf > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center;
@@ -1882,6 +1915,7 @@ __NAV__
 __CARDS__
 __MACHINE__
 __AGENTS__
+__INFRA__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 
@@ -2123,6 +2157,8 @@ const tile = (id, value) => [id.includes("{n}") ? pluralCaption(id, value) : T(i
 // A Heroku number is a count only when the scan read the applications (audit A09).
 const HK = n => S.heroku_state === "unread" ? T("not read")
   : S.heroku_state === "unscanned" ? T("not scanned") : n;
+const IN = (state, n) => state === "unread" ? T("not read")
+  : state === "unscanned" ? T("not connected") : state === "off" ? T("switched off") : n;
 const TILES_PRIMARY = [
   tile("tile@@{n} projects", S.projects), tile("tile@@{n} repositories", S.repositories),
   tile("tile@@{n} Heroku apps", HK(S.heroku_apps)), tile("tile@@{n} apps down", HK(S.heroku_down)),
@@ -2135,6 +2171,12 @@ const TILES_REST = [
   tile("tile@@{n} archived projects", S.archived), tile("tile@@{n} archived repos", S.archived_repos),
   tile("tile@@{n} inactive repos", S.inactive_repos), tile("tile@@{n} domains without a project", S.domains_no_row),
   tile("tile@@{n} Heroku apps without a project", HK(S.heroku_unlinked)),
+  // DigitalOcean and Cloudflare beside Heroku (OBS-235, OBS-271), by the same rule as HK.
+  tile("tile@@{n} DigitalOcean resources", IN(S.digitalocean_state, S.digitalocean_resources)),
+  tile("DigitalOcean $/mo", IN(S.digitalocean_state, S.digitalocean_cost == null ? T("not stated")
+    : S.digitalocean_cost_partial ? T("at least ${amount}", {amount: Math.round(S.digitalocean_cost)})
+    : Math.round(S.digitalocean_cost))),
+  tile("tile@@{n} Cloudflare resources", IN(S.cloudflare_state, S.cloudflare_resources)),
   // Local state of the working copies, and the credential counts.
   tile("tile@@{n} dirty working copies", S.dirty), tile("tile@@{n} keys in the registry", S.creds),
   tile("tile@@{n} keys leaked", S.creds_leaked), tile("tile@@{n} keys without a project", S.creds_unclaimed),

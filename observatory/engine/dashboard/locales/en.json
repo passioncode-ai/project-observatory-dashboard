@@ -56,6 +56,14 @@
   "one": "the analytics numbers are {n} day old",
   "other": "the analytics numbers are {n} days old"
  },
+ "tile@@{n} Cloudflare resources": {
+  "one": "{n} Cloudflare resource",
+  "other": "{n} Cloudflare resources"
+ },
+ "tile@@{n} DigitalOcean resources": {
+  "one": "{n} DigitalOcean resource",
+  "other": "{n} DigitalOcean resources"
+ },
  "{n} requests for a why went unanswered": {
   "one": "{n} request for a why went unanswered",
   "other": "{n} requests for a why went unanswered"
@@ -472,6 +480,10 @@
  "{n} repos need attention": {
   "one": "{n} repo needs attention",
   "other": "{n} repos need attention"
+ },
+ "{n} resources": {
+  "one": "{n} resource",
+  "other": "{n} resources"
  },
  "{n} retired secret values are over a month old and presumably never revoked": {
   "one": "{n} retired secret value is over a month old and presumably never revoked",

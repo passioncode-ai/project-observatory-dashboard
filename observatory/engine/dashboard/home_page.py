@@ -118,7 +118,42 @@ def sites_tile(payload: dict, t: Translator) -> dict:
                  t.mark("checked {date}", date=checked) if checked else "", "domains.html", t)
 
 
+#: The infrastructure pages beside Heroku (OBS-235, OBS-271), each a line on the apps tile.
+INFRA = (("digitalocean", "DigitalOcean"), ("cloudflare", "Cloudflare"))
+
+
+def infra_lines(payload: dict, t: Translator) -> tuple[list[str], str]:
+    """One line per infrastructure provider that was read or is switched on, in the words its
+    section card uses (`shell._infra_line`), and the worst state among them: `bad` when a
+    resource is down, `warn` when one is off. A provider never connected adds no line."""
+    import shell
+    lines, worst = [], "ok"
+    switches = payload.get("infra_integrations") or {}
+    for key, label in INFRA:
+        doc = payload.get(key)
+        if not doc and not switches.get(key):
+            continue
+        on = switches.get(key, True) if doc else True
+        lines.append(f"{label}: " + shell._infra_line(doc, t, on))
+        by = ((doc or {}).get("totals") or {}).get("by_state") or {}
+        if on and by.get("down"):
+            worst = "bad"
+        elif on and by.get("off") and worst == "ok":
+            worst = "warn"
+    return lines, worst
+
+
 def apps_tile(payload: dict, t: Translator) -> dict:
+    tile = _apps_heroku(payload, t)
+    lines, worst = infra_lines(payload, t)
+    tile["more"] = lines
+    if tile["state"] != "unmeasured":
+        rank = ("ok", "warn", "bad")
+        tile["state"] = max(tile["state"], worst, key=rank.index)
+    return tile
+
+
+def _apps_heroku(payload: dict, t: Translator) -> dict:
     name = t.mark("Apps")
     doc = payload.get("heroku")
     if doc is None:
@@ -228,6 +263,7 @@ def band_html(payload: dict, t: Translator) -> str:
     for tl in tiles(payload, t):
         inner = (f'<span class="home-k">{tl["name"]}</span><b>{tl["value"]}</b>'
                  + (f'<span class="home-sub">{tl["sub"]}</span>' if tl["sub"] else "")
+                 + "".join(f'<span class="home-sub">{line}</span>' for line in tl.get("more") or [])
                  + (f'<small class="home-at">{tl["at"]}</small>' if tl["at"] else ""))
         cls = f'tile home-tile home-{tl["state"]}'
         attrs = f' class="{cls}" data-tile="{tl["key"]}" data-state="{tl["state"]}"'

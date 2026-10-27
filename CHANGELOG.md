@@ -20,6 +20,26 @@ while the major version is 0, a minor release may change behaviour and says so h
   than that measurement. Pages are now filled in one pass, so a title that names a placeholder such as `__DATA__`
   stays text.
 
+- **DigitalOcean and Cloudflare pages beside Heroku** (OBS-235, OBS-271, `docs/ONBOARDING.md`). Two new pages
+  under Infrastructure list every resource with the same six columns: resource, project, account, state, cost and
+  findings. DigitalOcean shows Droplets, App Platform apps, managed databases and volumes, each team's
+  month-to-date usage, and the findings its door already raises (a Droplet off and still billed, an app with no
+  active deployment) on their rows; `emit` writes `registry/digitalocean-account.json` from the daily
+  `full scan-digitalocean`. Cloudflare shows Workers, Pages projects, R2 buckets, D1 databases and zones with their
+  plan, DNS record count and certificate expiry, from the new `full scan-cloudflare-account` (daily in the tick)
+  into `registry/cloudflare-account.json`. It reads through a new read-only door preset,
+  `tools/cloudflare.py issue --preset inventory-read --account <slug>`, filed in `secrets/cloudflare-inventory.d/`
+  and reached by `rotate`, `revoke`, `ping` and `list` as `inventory/<account>`. A cost the provider does not
+  state reads "not stated", never zero; a project is named only through a repository or a zone the registry
+  already ties to one, with its rule. A page never connected names the switch and the door's commands, a scan
+  that read nothing names why, and an empty account says so; switched off after a read, a page shows the last
+  read under "switched off" with its date. A monthly total no row states is "not stated", and one some rows
+  leave out is "at least $X". The overview has a card for each, and three more tiles (DigitalOcean resources
+  and $/mo, Cloudflare resources) that read "not connected", "switched off" or "not read" rather than 0. A
+  Cloudflare listing is followed by `total_pages`, else `total_count`, else to its first short page, and one
+  whose end no count confirms is named in `degraded`; the step's deadline is checked per zone, what was read
+  is written, and a scan cut short (`complete: false`) is read again at the next tick.
+
 - **The harness summary lists each project's own skills and Codex's skills** (OBS-192, `docs/design/NODE.md`). The
   harness scan now records every skill in a project's `.claude/skills` (name, digest, and the project's folder when it
   is inside the scanned home, kept on this machine) and every Codex skill (`~/.codex/skills` and `~/.agents/skills`,

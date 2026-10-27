@@ -4,6 +4,7 @@
     T="$(project-observatory full-path)/tools"          # the installed engine's tools
     python "$T/cloudflare.py" stash < token-file   # admin token on stdin from a protected file, once per account
     python "$T/cloudflare.py" issue --preset analytics [--project project:x]
+    python "$T/cloudflare.py" issue --preset inventory-read [--account <slug>]   # the Cloudflare page's reader
     python "$T/cloudflare.py" issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset zone-analytics-read --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
@@ -119,6 +120,9 @@ NO_EXPIRY_FLAG = "--no-token-expiry"
 
 API = "https://api.cloudflare.com/client/v4"
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / 'cloudflare-admin'
+#: Where the inventory-read tokens live, one per account (OBS-271): read by
+#: `collectors/scan_cloudflare_account.py` and nothing else, never by a plugin.
+INVENTORY_STORE = paths.source_path("secret_store", paths.SECRETS) / "cloudflare-inventory.d"
 #: The name every token this program issues carries, per preset. Finding it
 #: again is what makes a second issue ROLL one token instead of leaving a trail
 #: of orphans nobody can identify in the operator's account.
@@ -130,6 +134,24 @@ PRESETS: dict[str, dict] = {
         # from a domain to the thing that serves it, and from there to a project.
         "groups": ("Zone Read", "Analytics Read", "DNS Read"),
         "why": "reads zone request counters and DNS targets for the observatory's dashboard",
+    },
+    # WHAT AN ACCOUNT HOLDS, READ ONLY, FOR THE CLOUDFLARE PAGE (OBS-271). The
+    # page lists an account's Workers, Pages projects, R2 buckets, D1 databases
+    # and zones with their DNS record counts and certificate expiry; reading
+    # them needs four account-level Read groups and three zone-level ones, and
+    # nothing that writes. Not the analytics token (a request counter must not
+    # see buckets), not a vault slot (no project owns it): its own folder,
+    # `cloudflare-inventory.d/<account>`, read by the collector alone. Verified
+    # by listing the account's Workers with the NEW value before it is filed.
+    "inventory-read": {
+        "name": "observatory-inventory-read (managed)",
+        "groups": ("Workers Scripts Read", "Pages Read", "Workers R2 Storage Read", "D1 Read"),
+        "level": "account",
+        "zone_groups": ("Zone Read", "DNS Read", "SSL and Certificates Read"),
+        "why": ("lists one account's Workers, Pages projects, R2 buckets, D1 databases and zones "
+                "with their DNS record counts and certificates for the Cloudflare page; writes nothing"),
+        "scope": "inventory",
+        "probe": "/accounts/{account_id}/workers/scripts",
     },
     # DNS WRITE, ONE ZONE, INTO THE VAULT. A project that must point a hostname
     # at its host (a Pages custom domain, a CNAME to a PaaS) needs exactly
@@ -813,6 +835,9 @@ def install_issued(value: str, label: str, account: dict, preset_key: str,
                    expire_days: int | None = key_expiry.DEFAULT_DAYS,
                    expiry: dict | None = None) -> int:
     """Verify the issued token can do the job, then file it with its record."""
+    if PRESETS[preset_key].get("scope") == "inventory":
+        return install_inventory(value, label, account, rolled, stash=stash,
+                                 expire_days=expire_days, expiry=expiry)
     zs = zones_of(value)
     if not zs:
         print(f"  {label}: issued, but it sees no zone — not installed",
@@ -870,6 +895,12 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None,
               f"use --vault" + (" and --zone" if preset["scope"] == "zone" else ""),
               file=sys.stderr)
         return 2
+    if preset.get("scope") == "inventory":
+        if project:
+            print(f"refused: preset {preset_key!r} reads a whole account for the Cloudflare page; "
+                  f"--project does not apply", file=sys.stderr)
+            return 2
+        return cmd_issue_inventory(account_label, expire_days=expire_days)
     if project and not project.startswith("project:"):
         project = f"project:{project}"
     try:
@@ -892,6 +923,87 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None,
     return install_issued(value, slug(account["name"]), account, preset_key,
                           project, rolled, stash=stash_label,
                           expire_days=expire_days, expiry=answered(answer, expires_on))
+
+
+# ─────────────────────────── the inventory reader (OBS-271) ─────────────────
+
+def inventory_reason(value: str, account_id: str) -> str | None:
+    """None if the token can list what the Cloudflare page shows, else why not.
+
+    The Workers listing is the preset's probe; a token that lists zones but no
+    Workers was granted the zone half only, and is refused rather than filed."""
+    try:
+        _request(PRESETS["inventory-read"]["probe"].format(account_id=account_id), value)
+    except RuntimeError as exc:
+        return str(exc)
+    return None
+
+
+def install_inventory(value: str, label: str, account: dict, rolled: bool,
+                      stash: str | None = None,
+                      expire_days: int | None = key_expiry.DEFAULT_DAYS,
+                      expiry: dict | None = None, wait: float = 2.0) -> int:
+    """Prove the inventory token reads the account, then file it with its record.
+    The value goes to `cloudflare-inventory.d/<account>` at mode 600 and nowhere else."""
+    why = until_honoured(lambda: inventory_reason(value, account["id"]), wait)
+    if why is not None:
+        print(f"  inventory/{label}: issued, but it cannot list the account's Workers ({why}); "
+              f"nothing was installed", file=sys.stderr)
+        return 1
+    preset = PRESETS["inventory-read"]
+    dest = INVENTORY_STORE / label
+    prior = read_meta(dest)
+    write_secret(dest, value)
+    write_meta(dest, json.dumps({
+        "kind": "issued", "preset": "inventory-read",
+        "account_id": account["id"], "account_name": account["name"],
+        "stash": stash or prior.get("stash"),
+        "permission_groups": list(preset["groups"]) + list(preset["zone_groups"]),
+        "why": preset["why"],
+        "issued_on": prior.get("issued_on") or today(),
+        "rotated_on": today() if rolled else prior.get("rotated_on"),
+        "rotations": (prior.get("rotations") or 0) + (1 if rolled else 0),
+        "expire_days": expire_days,
+        **(expiry or key_expiry.fields(None, key_expiry.UNCONFIRMED)),
+        "issued_by": "tools/cloudflare.py",
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _journal("rotate" if rolled else "issue", f"cloudflare/{account['name']}/inventory/{label}",
+             preset="inventory-read")
+    print(f"  inventory/{label}: {'rolled' if rolled else 'issued'} and installed for the "
+          f"Cloudflare page ({', '.join(preset['groups'])} on account {account['name']}, "
+          f"{', '.join(preset['zone_groups'])} on its zones); "
+          f"{key_expiry.describe(expiry or key_expiry.fields(None, key_expiry.UNCONFIRMED))}")
+    return 0
+
+
+def cmd_issue_inventory(account_label: str | None,
+                        expire_days: int | None = key_expiry.DEFAULT_DAYS,
+                        wait: float = 2.0) -> int:
+    """Mint (or roll) one account's inventory reader and install it."""
+    preset = PRESETS["inventory-read"]
+    try:
+        expires_on, _why = lifetime(expire_days)
+    except key_expiry.ExpiryError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    admin, account, tid, rolled = None, None, None, False
+    try:
+        stash_label, admin, account = find_account(account_label)
+        dest = INVENTORY_STORE / slug(account["name"])
+        private_io.check(dest)
+        read_meta(dest)
+        rolled = existing_token(admin, account["id"], preset["name"]) is not None
+        tid, value, answer = mint_answered(admin, account["id"], preset, expires_on=expires_on)
+    except RuntimeError as exc:
+        print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
+              file=sys.stderr)
+        return 1
+    rc = install_inventory(value, slug(account["name"]), account, rolled, stash=stash_label,
+                           expire_days=expire_days, expiry=answered(answer, expires_on), wait=wait)
+    if rc:
+        # A token minted for nothing is deleted again; a rolled one keeps its readers.
+        print(f"  {discard_fresh(admin, account['id'], tid, rolled).lstrip('; ')}", file=sys.stderr)
+    return rc
 
 
 def zone_id_of(admin: str, account_id: str, zone: str) -> str:
@@ -1930,12 +2042,21 @@ def cmd_install(value: str) -> int:
 # ─────────────────────────── rotate, revoke, ping ───────────────────────────
 
 def issued() -> list[pathlib.Path]:
-    d = token_dir()
-    if not d.is_dir():
-        return []
-    return [p for p in sorted(d.iterdir())
-            if p.is_file() and not p.name.startswith(".")
-            and not p.name.endswith(".meta.json")]
+    """Every token this door filed for a reader: the analytics plugin's, then the
+    Cloudflare page's inventory readers (OBS-271)."""
+    out = []
+    for d in (token_dir(), INVENTORY_STORE):
+        if d.is_dir():
+            out += [p for p in sorted(d.iterdir())
+                    if p.is_file() and not p.name.startswith(".")
+                    and not p.name.endswith(".meta.json")]
+    return out
+
+
+def label_of(p: pathlib.Path) -> str:
+    """The name `rotate` and `revoke` take: the account slug for an analytics
+    token, `inventory/<slug>` for an inventory reader of the same account."""
+    return f"inventory/{p.name}" if p.parent == INVENTORY_STORE else p.name
 
 
 def cmd_rotate(label: str | None, leaked: bool) -> int:
@@ -1945,13 +2066,13 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
         if not names:
             print("no open leak names a Cloudflare token — nothing to rotate")
             return 0
-        targets = [p for p in targets if p.name in names]
+        targets = [p for p in targets if label_of(p) in names]
         if not targets:
             print(f"open leaks name {sorted(names)}, none of which is an issued "
                   f"token here — rotate them where they live", file=sys.stderr)
             return 1
     elif label:
-        targets = [p for p in targets if p.name == label]
+        targets = [p for p in targets if label_of(p) == label]
         if not targets:
             print(f"no issued token called {label!r}", file=sys.stderr)
             return 1
@@ -1962,7 +2083,7 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
     for p in targets:
         m = read_meta(p)
         if m.get("kind") == "external":
-            print(f"  {p.name}: minted outside this program — rotate it where it "
+            print(f"  {label_of(p)}: minted outside this program; rotate it where it "
                   f"was minted, or stash this account's admin token and `issue` a "
                   f"managed one over it", file=sys.stderr)
             bad += 1
@@ -1975,7 +2096,7 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
             _tid, value, answer = mint_answered(admin, m["account_id"], PRESETS[m["preset"]],
                                                 expires_on=expires_on)
         except (RuntimeError, KeyError, ValueError) as exc:
-            print(f"  {p.name}: could not rotate — {exc}", file=sys.stderr)
+            print(f"  {label_of(p)}: could not rotate: {exc}", file=sys.stderr)
             bad += 1
             continue
         bad += install_issued(value, p.name,
@@ -1989,6 +2110,39 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
     return 1 if bad else 0
 
 
+def _leak_words(row) -> set[str]:
+    """Every path-like word of a leak row's text, lowercased: `a/b/c`, a slug, a name."""
+    texts: list[str] = []
+
+    def walk(v):
+        if isinstance(v, str):
+            texts.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+    walk(row)
+    return {w.lower().strip("./") for t in texts for w in re.findall(r"[A-Za-z0-9._/-]+", t)}
+
+
+def names_label(words: set[str], label: str) -> bool:
+    """True when a word IS the label, or a path ending in it (`cloudflare/<account>/<label>`).
+    Exact, never a substring: `example` does not name `example-account`, and an analytics
+    token's label does not name the inventory reader of the same account."""
+    label = label.lower()
+    for w in words:
+        if w == label:
+            return True
+        if w.endswith("/" + label):
+            head = w[: -len(label) - 1]
+            if "/" not in label and (head == "inventory" or head.endswith("/inventory")):
+                continue
+            return True
+    return False
+
+
 def leaked_labels() -> set[str]:
     """Issued-token names that appear in an OPEN leak row.
 
@@ -2000,17 +2154,17 @@ def leaked_labels() -> set[str]:
     out: set[str] = set()
     try:
         for row in vault.open_leaks():
-            blob = json.dumps(row, ensure_ascii=False).lower()
+            words = _leak_words(row)
             for p in issued():
-                if p.name.lower() in blob:
-                    out.add(p.name)
+                if names_label(words, label_of(p)):
+                    out.add(label_of(p))
     except Exception as exc:                                                      
         print(f"  (the leak register could not be read: {exc})", file=sys.stderr)
     return out
 
 
 def cmd_revoke(label: str) -> int:
-    p = token_dir() / label
+    p = next((x for x in issued() if label_of(x) == label), token_dir() / label)
     if not p.is_file():
         print(f"no issued token called {label!r}", file=sys.stderr)
         return 1
@@ -2049,6 +2203,15 @@ def cmd_ping() -> int:
     for p in issued():
         m = read_meta(p)
         value = private_io.read(p).strip()
+        if p.parent == INVENTORY_STORE:
+            why = inventory_reason(value, m.get("account_id") or "")
+            if why:
+                print(f"  {label_of(p)}: CANNOT list the account's Workers: {why}", file=sys.stderr)
+                bad += 1
+            else:
+                print(f"  {label_of(p)}: alive, lists the account for the Cloudflare page "
+                      f"(last change {m.get('rotated_on') or m.get('issued_on') or '?'})")
+            continue
         try:
             zs = zones_of(value)
         except RuntimeError as exc:
@@ -2086,7 +2249,7 @@ def cmd_list() -> int:
     print(f"issued tokens ({len(i)}) — what the plugins read:")
     for p in i:
         m = read_meta(p)
-        print(f"  {p.name:28s} {m.get('preset', '?'):12s} "
+        print(f"  {label_of(p):28s} {m.get('preset', '?'):14s} "
               f"{m.get('project') or '(no project)':32s} "
               f"issued {m.get('issued_on', '?')} "
               f"rotated {m.get('rotated_on') or 'never'} x{m.get('rotations', 0)}  "

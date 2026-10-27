@@ -109,6 +109,8 @@ STEPS = {
     "scan-cloudflare": [PY, "collectors/scan_cloudflare.py", "store/raw/cloudflare_zones.json"],
     # What each DigitalOcean team runs and costs, through the door's tokens (OBS-155).
     "scan-digitalocean": [PY, "collectors/scan_digitalocean.py", "store/raw/digitalocean.json"],
+    # What each Cloudflare account holds for the Cloudflare page, through its inventory reader (OBS-271).
+    "scan-cloudflare-account": [PY, "collectors/scan_cloudflare_account.py", "store/raw/cloudflare_account.json"],
     "scan-mcp":  [PY, "collectors/scan_mcp.py", "store/raw/mcp.json"],
     # The agents installed here: Fabric service descriptors and launchd (OBS-83).
     "scan-agents": [PY, "collectors/scan_agents.py", "store/raw/agents.json"],
@@ -372,7 +374,7 @@ GROUPS = {
               "test", "test-ledger", "test-skill", "test-agent", "test-key", "test-install-key", "test-vault", "test-analytics", "test-doors", "test-surfaces", "test-mcp-inventory", "test-ack", "test-serverd", "test-skill-check", "test-index",
               "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-heroku-door", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
               "probes-check", "contract"],
-    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-digitalocean", "scan-mcp", "scan-agents", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
+    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-digitalocean", "scan-cloudflare-account", "scan-mcp", "scan-agents", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
               "scan-events", "plugins", "rollup", "corroborate", "export-ledger", "lost",
               # `index` BEFORE the page, and the position is a measurement: it
               # charges the wallet through the provider boundary, and the page
@@ -548,6 +550,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   scan-digitalocean            what each DigitalOcean team runs and costs (balance, Droplets, apps,
                                databases without credentials, volumes, domains) through the door's
                                tokens (tools/digitalocean.py; integration digitalocean; daily in the tick)
+  scan-cloudflare-account      what each Cloudflare account holds (Workers, Pages, R2, D1, zones with their
+                               plan, DNS record count and certificate expiry) through the read-only
+                               inventory-read token (tools/cloudflare.py; integration cloudflare; daily in the tick)
   google [--force]             GA4 and Search Console analytics, cached twelve hours; --force re-fetches
   plugins [--only ID] [--force]  run the metric plugins (each past its age gate with --force)
   plugins-check                validate the installed metric plugins' manifests; runs none
@@ -959,14 +964,14 @@ IGNORED_WRITES_ALLOWED = {
     # reason — generated, and regenerated by the gate that reads them.
     **{f"docs/dashboard/{_pg}.html": "a split page built by the dashboard step, "
        "read by smoke-pages and test-pages; gitignored, regenerated by the gate"
-       for _pg in ("index", "findings", "projects", "agents", "domains", "heroku", "creds", "env", "mcp", "traffic", "health", "machine")},
+       for _pg in ("index", "findings", "projects", "agents", "domains", "heroku", "digitalocean", "cloudflare", "creds", "env", "mcp", "traffic", "health", "machine")},
     "docs/dashboard/app.css": "the style every split page links to, written once "
     "by the dashboard step; gitignored and regenerated with the pages",
     "docs/dashboard/app.js": "the script every split page loads, written once by the "
     "dashboard step; gitignored and regenerated with the pages",
     **{f"docs/dashboard/{_pg}.smoke.json": "the smoke receipt beside a split page, "
        "written by whoever executed that build, for the same reason as the single page's"
-       for _pg in ("index", "findings", "projects", "agents", "domains", "heroku", "creds", "env", "mcp", "traffic", "health", "machine")},
+       for _pg in ("index", "findings", "projects", "agents", "domains", "heroku", "digitalocean", "cloudflare", "creds", "env", "mcp", "traffic", "health", "machine")},
     "docs/projects-dashboard.html":
         "built by the `dashboard` step, which `design` and `smoke` then read; "
         "gitignored, so a fresh clone has none and the gate must make it",

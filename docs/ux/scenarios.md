@@ -1,8 +1,9 @@
 # Product scenarios by runtime
 
 The [full dashboard redesign](DASHBOARD-REDESIGN.md) specified the ten original operator
-screens and acceptance UI-01–09; the Machine page, the eleventh, and the Agents page, the twelfth, came later
-(the twelve are `PAGES` in `observatory/engine/dashboard/shell.py`). Their behavior is recorded as
+screens and acceptance UI-01–09; the Machine page, the eleventh, the Agents page, the twelfth, and the DigitalOcean and Cloudflare pages,
+the thirteenth and fourteenth (OBS-235, OBS-271), came later (the fourteen are `PAGES` in
+`observatory/engine/dashboard/shell.py`). Their behavior is recorded as
 OSS-13–22 (Machine: OSS-21–22) and OSS-24–28 (Agents) in the full-engine scenario base linked below,
 alongside existing safety contracts. The suppression contract (PB-032) is OSS-40 (numbered OSS-13 until
 2026-10-06), and OSS-41–55 cover operating the engine: update, maintenance, backups, profile, the

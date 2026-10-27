@@ -53,6 +53,9 @@ LEGACY = (
     'recall', 'recount', 'release_cadence', 'remedy_fits', 'render_surface', 'review_queue',
     'serverd', 'stale_is_expected', 'store_modes', 'tick_standdown', 'trace_opens',
     'two_surfaces', 'work_tiles',
+    # OBS-235, OBS-271: DigitalOcean and Cloudflare beside Heroku (the inventory-read preset, the
+    # collector, the registry documents, the two pages); its chain case builds over the estate above.
+    'infra_pages',
 
     # Merged from the parallel port streams.
     'agent', 'agent_queue', 'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history', 'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure', 'temporary_block', 'traps', 'write_surface',
