@@ -7,6 +7,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Home replaces Overview: is everything fine, and what needs you first** (OBS-261, scenario OSS-88,
+  `docs/design/PERSON-SURFACES.md` decision D1). The first page now opens on six state tiles (sites, apps, disk and
+  memory, keys, agents, personal cloud), each with the time or period it was measured; a source that did not run says
+  "not measured" with its reason, never 0 and never green, and the personal cloud says "not connected" until it exists
+  (OBS-263). Below them sit the three problems to do first (by severity, then whether you can act now, then age, then
+  how many projects they touch; one row per kind with its count and the action its rule names) and "All problems (N)" to the findings page, then your
+  projects at a glance grouped by organization, then activity and the section cards. A fresh install shows what to
+  connect first, with the commands, instead of a row of zeros; nothing open reads "Nothing needs you" with the time of
+  the last check. Home reads only what the pages already read; the eight-row findings preview no longer opens the page. The disk tile
+  takes the worse of the level the measured free space falls in (the disk guard's own lines) and a guard run no older
+  than that measurement. Pages are now filled in one pass, so a title that names a placeholder such as `__DATA__`
+  stays text. The apps tile also carries a line each for DigitalOcean and Cloudflare once
+  connected (in place of their counter tiles, which Home hides), worded as their section cards.
+
 - **Pair this machine: the ceremony screens and the passkey prompt** (OBS-197, `docs/design/NODE.md`, portable
   scenario OSS-94). The Mac app and the Windows and Linux app have a Pair this machine window (File menu) that draws the
   one screen the engine answers for this machine's pairing session, through the ceremony checks of 0.25.0: not paired,

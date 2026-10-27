@@ -2289,7 +2289,10 @@ ENV open with rows visible. Search and filters narrow the list; sorting applies
 to the entire selection and has a separate control on narrow screens. Project
 names open full detail; closing it returns to the list.
 
-Overview previews eight open findings by severity and links to the full list.
+Home answers "is everything fine, and what needs me first": six state tiles (sites, apps, disk and
+memory, keys, agents, personal cloud) with the time each was measured, "not measured" for a source
+that did not run, the three problems to do first with "All problems (N)" to the findings page, and
+projects at a glance by organization.
 Each finding keeps its title visible; “Evidence and action” opens the evidence
 and next step. A direct finding link opens that evidence. Acknowledged history
 remains available even if no findings are open.

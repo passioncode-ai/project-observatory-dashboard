@@ -306,7 +306,6 @@
  "Origin": "Источник",
  "Original order": "Исходный порядок",
  "Outcome unknown: {reason}": "Результат неизвестен: {reason}",
- "Overview": "Обзор",
  "Owner": "Владелец",
  "Owner not stated": "Владелец не указан",
  "PID": "PID",
@@ -439,7 +438,6 @@
  "What is {name} for? One sentence:": "Для чего нужен {name}? Одним предложением:",
  "What it is": "Что это",
  "What it is made of": "Из чего состоит",
- "What needs attention and what changed across your projects.": "Что требует внимания и что изменилось в проектах.",
  "What runs on this machine, where memory and disk go, and what was cleaned.": "Что запущено на этой машине, куда уходят память и диск и что было очищено.",
  "What the observatory concluded": "Выводы Observatory",
  "What the plugins measured": "Что измерили плагины",
@@ -2347,5 +2345,75 @@
  "done": "выполнено",
  "the organization asks to run a repair of {agent}: {task}; it starts after {time} unless you decline": "организация просит выполнить ремонт пакетом {agent}: {task}; он начнётся после {time}, если вы не откажетесь",
  "a repair of {agent} is running: {task}": "идёт ремонт пакетом {agent}: {task}",
- "repair {outcome} on {date} ({reason}): {task}": "ремонт {outcome} {date} ({reason}): {task}"
+ "repair {outcome} on {date} ({reason}): {task}": "ремонт {outcome} {date} ({reason}): {task}",
+ "Home": "Главная",
+ "Is everything fine, and what needs you first.": "Всё ли в порядке и что требует вас в первую очередь.",
+ "State of the system": "Состояние системы",
+ "Sites": "Сайты",
+ "Apps": "Приложения",
+ "Disk and memory": "Диск и память",
+ "Personal cloud": "Личное облако",
+ "home@@{n} up": {
+  "one": "{n} работает",
+  "few": "{n} работают",
+  "many": "{n} работают",
+  "other": "{n} работают"
+ },
+ "home@@{n} down": {
+  "one": "{n} не работает",
+  "few": "{n} не работают",
+  "many": "{n} не работают",
+  "other": "{n} не работают"
+ },
+ "home@@{n} leaked, not rotated": {
+  "one": "{n} утёк и не сменён",
+  "few": "{n} утекли и не сменены",
+  "many": "{n} утекли и не сменены",
+  "other": "{n} утекли и не сменены"
+ },
+ "home@@{n} without a project": {
+  "one": "{n} без проекта",
+  "few": "{n} без проекта",
+  "many": "{n} без проекта",
+  "other": "{n} без проекта"
+ },
+ "home@@{n} sessions active in the last hour": {
+  "one": "{n} сессия активна за последний час",
+  "few": "{n} сессии активны за последний час",
+  "many": "{n} сессий активны за последний час",
+  "other": "{n} сессии активны за последний час"
+ },
+ "home@@{n} workflows stalled now": {
+  "one": "{n} задача стоит сейчас",
+  "few": "{n} задачи стоят сейчас",
+  "many": "{n} задач стоят сейчас",
+  "other": "{n} задачи стоят сейчас"
+ },
+ "never measured": "ещё не измерялось",
+ "not measured since {date}": "не измерено с {date}",
+ "checked {date}": "проверено {date}",
+ "read {date}": "прочитано {date}",
+ "as of this page's measurement": "на момент замера этой страницы",
+ "{gb} GB free": "свободно {gb} ГБ",
+ "memory {used} of {total} GB": "память: {used} из {total} ГБ",
+ "memory not measured": "память не измерена",
+ "not connected": "не подключено",
+ "connected": "подключено",
+ "Not set up on this machine yet.": "На этой машине ещё не настроено.",
+ "Needs you first": "Требует вас в первую очередь",
+ "Nothing needs you": "Ничего не требует вашего внимания",
+ "last checked {date}": "последняя проверка {date}",
+ "All problems ({n})": "Все проблемы ({n})",
+ "open: {n}": "открыто: {n}",
+ "Problems not checked yet. Measure this machine:": "Проблемы ещё не проверялись. Измерьте эту машину:",
+ "Projects at a glance": "Проекты одним взглядом",
+ "No organization": "Без организации",
+ "Others' code": "Чужой код",
+ "last activity {date}": "последняя активность {date}",
+ "no activity recorded": "активность не записана",
+ "Connect your first source": "Подключите первый источник",
+ "Name the folder that holds your project checkouts:": "Укажите папку с рабочими копиями проектов:",
+ "Measure this machine's projects:": "Измерьте проекты этой машины:",
+ "See which providers can connect:": "Посмотрите, какие провайдеры можно подключить:",
+ "Connect your coding agent:": "Подключите агента для программирования:"
 }

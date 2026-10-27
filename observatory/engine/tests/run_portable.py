@@ -159,6 +159,8 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('identifiers',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
+# Home: the state band, the three problems to do first, projects at a glance (OSS-88).
+BOUNDARY += ('home_page',)
 # Agents' credentials: the findings that report keys outside the vault.
 BOUNDARY += ('agent_secrets',)
 # The agent-memory evaluation set (tools/memory_eval.py).
