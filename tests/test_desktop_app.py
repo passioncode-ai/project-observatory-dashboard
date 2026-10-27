@@ -80,7 +80,7 @@ class DesktopApp(unittest.TestCase):
 
     def test_its_windows_may_only_pick_a_file(self):
         caps = json.loads((DESKTOP / "src-tauri/capabilities/main.json").read_text())
-        self.assertEqual(sorted(caps["windows"]), ["assistant", "main", "settings"])
+        self.assertEqual(sorted(caps["windows"]), ["assistant", "ceremony", "main", "settings"])
         self.assertEqual(sorted(caps["permissions"]), ["core:default", "dialog:allow-open"])
         self.assertNotIn("remote", caps)
 

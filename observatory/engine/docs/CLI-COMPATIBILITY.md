@@ -104,8 +104,9 @@ and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 `open`, `agent`, `onboard` and `version` are workspace commands too, and `assistant` is
 dispatched beside them: it speaks the `observatory-assistant/1` protocol, one JSON object on
 stdin and one on stdout, with the actions `status`, `ask`, `list`, `get`, `job`, `cancel`,
-`delete`, `dashboard`, `serve` and `build` (`agent/assistant.py`). The Mac app depends on that
-contract; nothing existing was renamed for any of them.
+`delete`, `dashboard`, `serve`, `build` and, since OBS-197, `ceremony`, one step of the pairing
+ceremony (`agent/assistant.py`). The Mac app depends on that contract; nothing existing was renamed
+for any of them.
 
 In 0.7.0 `update` and `profile` became workspace commands; nothing existing was
 renamed and `upgrade` keeps its meaning (the workspace half only). `update` previews

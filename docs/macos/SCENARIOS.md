@@ -23,6 +23,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-011 | The app speaks the person's language | draft |
 | SCN-012 | The app opens at login unless the person turned it off | draft |
 | SCN-013 | A permission the app needs is missing at launch | draft |
+| SCN-014 | The person pairs this machine with their network | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the three 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
@@ -284,3 +285,22 @@ Coverage: `AppLifecycleTests` (`testAMissingLoginItemApprovalIsNamedWithHowToGra
 `testNothingIsMissingWhenGrantedOrNotWanted`, `testARegistrationThatFailsIsShownAndLoggedNeverSilent`).
 Not yet walked on a real Mac: the banner on screen after switching the app off in Login Items, and the
 button opening System Settings there.
+
+## SCN-014: Pairing this machine with the network
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: OSS-94 (the portable scenario, which owns the states), NODE slice 5 (OBS-197)
+Preconditions: a compatible engine (one that answers `full assistant ceremony`).
+Trigger: File → Pair this machine….
+Steps: the Pair this machine window shows the engine's screen for this machine's pairing session and
+reads it again every five seconds while open: Start pairing → "Waiting for the hub" while no hub runs
+pairing (nothing sent, nothing added) → with a hub, the six-digit code and the network fingerprint, The
+codes match or They differ → the passkey prompt on the trusted machine (the new machine and its key
+fingerprints, Sign with passkey disabled while the hub serves no passkey page) → Pairing complete.
+Expected result: the window decides no ceremony rule and shows no progress the engine did not report.
+Errors & recovery: a refusal shows Pairing stopped with its sentence and reason, an expiry The pairing
+expired; Start again drops the ended session; a step the engine refuses is named in a banner.
+Coverage: `CeremonyTests` (`testEveryStateTheEngineAnswersIsReadAsIs`,
+`testEveryStateHasItsWordsAndOnlyTheButtonsItOffers`, `testTheWaitOnTheHubIsSaidAsSuchNeverAsProgress`,
+`testAStepGoesThroughTheBridgeAndARefusalIsWorded`). Not yet walked on a real Mac.

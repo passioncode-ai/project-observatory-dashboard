@@ -1,0 +1,8 @@
+/* The pairing window (OBS-197): one state at a time, the code large enough to compare across a room. */
+main.ceremony { max-width: 560px; margin: 48px auto; }
+.code { font: 600 44px/1.2 ui-monospace, "SF Mono", Consolas, monospace; letter-spacing: .18em; color: var(--pc-text);
+  margin: 8px 0 16px; user-select: text; }
+.keys { list-style: none; margin: 0 0 16px; padding: 0; }
+.keys li { font: 13px/1.5 ui-monospace, "SF Mono", Consolas, monospace; color: var(--pc-text); overflow-wrap: anywhere;
+  user-select: text; padding: 6px 0; border-bottom: 1px solid var(--pc-border-strong); }
+#fingerprint, #reason { user-select: text; }

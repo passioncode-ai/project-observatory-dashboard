@@ -37,7 +37,9 @@ conversation summaries without spending; a path that is not a workspace answers
 any reconciled turn state; `job` polls and `cancel` stops **assistant jobs only**;
 `delete` removes a conversation that has no open turn, with its request ids and job
 records; `list` lists conversations; `dashboard` verifies the selected workspace
-before returning a loopback URL. Unknown actions/fields/ids fail closed. A full
+before returning a loopback URL; `ceremony` takes one step of the pairing ceremony
+(`{"op", "role"?}`, docs/design/NODE.md "The ceremony surface") and answers its screen.
+Unknown actions/fields/ids fail closed. A full
 disk is `disk-full`, an unwritable workspace `workspace-unwritable`.
 
 `agent.ask` accepts question (1..6000 chars), optional conversation id, optional

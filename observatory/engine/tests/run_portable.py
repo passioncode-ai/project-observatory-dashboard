@@ -159,6 +159,8 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('identifiers',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
+# Home: the state band, the three problems to do first, projects at a glance (OSS-88).
+BOUNDARY += ('home_page',)
 # Agents' credentials: the findings that report keys outside the vault.
 BOUNDARY += ('agent_secrets',)
 # The agent-memory evaluation set (tools/memory_eval.py).
@@ -178,6 +180,8 @@ BOUNDARY += ('node_envelope',)
 BOUNDARY += ('node_cli',)
 # enroll-token/1, the headless join (DEC-0084): verify, single-use redemption, the token read only from stdin or a file.
 BOUNDARY += ('node_enroll', 'node_pairing')
+# The ceremony surface (OBS-197): the screen a desktop app draws for a pairing session, and its steps.
+BOUNDARY += ('node_ceremony',)
 # PB-163: the machine's SSH keys; the private key is never shown or moved.
 BOUNDARY += ('ssh_keys',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).

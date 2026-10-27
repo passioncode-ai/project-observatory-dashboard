@@ -666,5 +666,29 @@
  "partial survey: {n} checkouts carried from {date}": {
   "one": "partial survey: {n} checkout carried from {date}",
   "other": "partial survey: {n} checkouts carried from {date}"
+ },
+ "home@@{n} up": {
+  "one": "{n} up",
+  "other": "{n} up"
+ },
+ "home@@{n} down": {
+  "one": "{n} down",
+  "other": "{n} down"
+ },
+ "home@@{n} leaked, not rotated": {
+  "one": "{n} leaked, not rotated",
+  "other": "{n} leaked, not rotated"
+ },
+ "home@@{n} without a project": {
+  "one": "{n} without a project",
+  "other": "{n} without a project"
+ },
+ "home@@{n} sessions active in the last hour": {
+  "one": "{n} session active in the last hour",
+  "other": "{n} sessions active in the last hour"
+ },
+ "home@@{n} workflows stalled now": {
+  "one": "{n} workflow stalled now",
+  "other": "{n} workflows stalled now"
  }
 }

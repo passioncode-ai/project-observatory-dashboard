@@ -1,6 +1,7 @@
 # The person's surfaces: home, agents, access, sharing and the personal cloud (OBS-260 to OBS-274)
 
-Status: design, 2026-10-26. Nothing here is built yet; each part is a row of
+Status: design, 2026-10-26. Home (OBS-261) is built (`observatory/engine/dashboard/home_page.py`); the rest
+is not yet. Each part is a row of
 [the backlog](../backlog.md) (OBS-260 to OBS-274, and OBS-276 split from OBS-264) and a scenario of
 [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md#the-persons-surfaces-sharing-cloud-agents-access-home-2026-10-26)
 (OSS-79 to OSS-93).

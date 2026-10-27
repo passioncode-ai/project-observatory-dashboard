@@ -450,3 +450,37 @@ tr.hl > td { background: var(--accent-weak); }
   body[data-page="machine"] #machine tbody td::before { content: none; display: none; }
   body[data-page="machine"] #machine td.num { text-align: right; }
 }
+
+/* HOME (OSS-88, OBS-261): the state band, the three problems to do first and the
+ * projects at a glance, server-rendered by dashboard/home_page.py. The script's
+ * inventory counters and findings preview are the single page's; Home replaces
+ * them on the index page. A tile that did not measure keeps the neutral border:
+ * not measured is never green. */
+body[data-page="index"] #tiles,
+body[data-page="index"] #more-tiles,
+body[data-page="index"] #findings { display: none; }
+.home { display: flex; flex-direction: column; gap: var(--space-5); margin-top: var(--space-4); }
+.home-h { font: 600 var(--t-label) var(--font-ui); color: var(--muted); margin: 0 0 var(--space-2); }
+.home-band { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-2); }
+.home-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; color: inherit; text-decoration: none; }
+a.home-tile:hover, a.home-tile:focus-visible { border-color: var(--border-strong); }
+.home-tile b { font: 600 var(--t-section)/1.2 var(--font-data); font-variant-numeric: tabular-nums; }
+body[data-page] .home-tile span { text-transform: none; letter-spacing: 0; }
+.home-tile .home-k { font: 600 var(--t-label) var(--font-ui); color: var(--muted); }
+.home-tile .home-sub { color: var(--ink); font-size: var(--t-label); overflow-wrap: anywhere; }
+.home-at { color: var(--muted); font: 400 var(--t-chip) var(--font-data); overflow-wrap: anywhere; }
+.home-tile.home-bad { border-color: var(--danger); }
+.home-tile.home-warn { border-color: var(--warn); }
+.home-tile.home-unmeasured b { color: var(--muted); }
+.home-list { list-style: none; margin: 0; padding: 0; }
+.home-list .f .ftl .home-count { font-family: var(--font-data); }
+body[data-page="index"] .home-list .fdetail { margin-left: auto; white-space: nowrap; }
+.home-more { margin: var(--space-2) 0 0; }
+.home-calm { margin: 0; }
+.home-orgs { list-style: none; margin: 0; padding: 0; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-2); }
+.home-orgs li { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); min-width: 0; }
+.home-org { color: inherit; overflow-wrap: anywhere; }
+.home-orgs .home-n { color: var(--muted); font-family: var(--font-data); }
+.home-orgs .home-sub { color: var(--muted); font-size: var(--t-label); }

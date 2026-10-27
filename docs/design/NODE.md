@@ -313,7 +313,8 @@ own ceremony (DEC-0084).
 ## The estate ceremonies (OBS-133, slice 5)
 
 The contract decides how a machine joins and leaves an estate in DEC-0084 (fabric-agent-contract #113). The node ports
-its checks; the ceremony's screens and the passkey prompt belong to whatever surface runs it.
+its checks; the pairing screens and the passkey prompt are the ceremony surface below (OBS-197). The enroll-token
+surface (the bound key fingerprint, `reused` as an alarm) and the re-key and removal ceremonies have no screen yet.
 
 **Adding a machine by pairing** (`node/pairing.py`). The new machine and one trusted machine meet once at a relay
 rendezvous:
@@ -383,6 +384,41 @@ never at an earlier sequence or another hash at the same one; `estate.anchor_fin
 `verify_estate_record` with a parent too). Until OBS-171 the estate set
 was at #113's merge commit `1531f21`, and between the two only the `estate-*` fixtures changed: the five partner
 fixtures, and share grant ids rewritten to `urn:fabric:share:` form, with the record digests that follow, in seventeen others.
+
+## The ceremony surface (OBS-197, slice 5)
+
+`node/ceremony.py` reads one pairing session through the checks above and answers the one screen a desktop app draws
+(`node-ceremony/1`), so the Mac app and the Windows and Linux app show the same state for the same session and neither
+decides a ceremony rule:
+
+| State | When | What the person can do |
+|---|---|---|
+| `not-paired` | no session | Start pairing (as the new machine) |
+| `hub-unreachable` | a step needs the hub and the hub is `not-ready` (it runs no pairing yet) or `unreachable` | Cancel pairing; nothing was sent |
+| `waiting-for-hub` | the rendezvous is open (`step: other-side`), or the codes matched and the new machine waits for its revision (`step: revision`) | Cancel pairing |
+| `code-shown` | `rendezvous_verdict` is `complete` and `checked_comparison_code` gave the six digits | The codes match, They differ (this side aborts) |
+| `passkey` | the trusted machine's person confirmed the codes | Sign with passkey, enabled only when the hub is `ready`; the new machine and each key fingerprint are shown first |
+| `confirmed` | the revision that arrived inside the rendezvous passes `join_listed` | nothing; it stands after the 600 s |
+| `refused` | the rendezvous burned, the code could not be derived, or `join_listed` refused; `reason` is the check's own, `group` the sentence (`codes-differ`, `aborted`, `mismatch`, `other-estate`, `not-listed`, `trusted-not-listed`) | Start again |
+| `expired` | the rendezvous passed 600 s | Start again |
+
+The session lives in the workspace's `node/ceremony.json` (owner-only, beside `node/device/`). A desktop app reaches it
+through the app protocol's `ceremony` action (`project-observatory full assistant ceremony`, `{"op": status | start |
+confirm | differ | sign | cancel, "role"?}` on stdin, `{"screen", "hub"}` on stdout; refusals `not-now`,
+`ceremony-in-progress`, `no-estate`, `hub-not-ready`, `device-keys-refused`, `invalid-input`). `start` as the new
+machine creates the device keys when there are none, as `full node --init` does, and commits to them with a fresh
+nonce; `start` as the trusted machine is refused with `no-estate`, because the engine keeps no applied estate record
+until the node service (slice 6) applies one.
+
+**What waits for the hub.** The rendezvous and the passkey page are the hub's side of DEC-0084 (Fabric CO-319 to
+CO-321). Until a hub runs them, `hub_state()` answers `not-ready`: a started session shows `hub-unreachable`, nothing
+is sent anywhere, `sign` is refused (`not-now`, since the passkey screen needs a hub; `hub-not-ready` once it is reached), and the screens past the code are reached only by the tests.
+`tests/test_node_ceremony.py` drives every screen with the contract's `pairing.json`: each rendezvous case that carries
+this machine's commitment (both roles) gives the screen its verdict implies, each join case gives `confirmed` or its
+refusal, and the code shown is the vectors' checked code; then the steps on a temporary workspace and the app protocol.
+The Mac app's `PairingView` (`macos/Sources/ObservatoryApp/Pairing.swift`, tests `CeremonyTests`) and the Windows and
+Linux app's `ceremony` window (`desktop/ui/ceremony.js`, `main.rs` `ceremony_input`) draw it; the person's path is the
+portable scenario OSS-94. Live acceptance follows Fabric CO-321.
 
 ## The walking skeleton
 
@@ -823,5 +859,5 @@ signed app (L2r) and the operator's import with the identity migration (L5) foll
 
 | Slice | What |
 |---|---|
-| 5 | the ceremony surface: the pairing screens and the passkey prompt, in the app that runs them (the checks above are done) |
+| 5 | the ceremony surface: built against the contract fixtures (OBS-197, above); live acceptance when the hub's side (Fabric CO-319 to CO-321) runs the rendezvous and the passkey page |
 | 6 | the node service under the OS supervisor (`keep_connected` with the applied estate record), after slice 5; it runs inside the local server, which is the node ([MACHINE-UTILITY.md](MACHINE-UTILITY.md) D1) |
