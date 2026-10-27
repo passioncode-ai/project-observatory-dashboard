@@ -437,7 +437,8 @@ Built so far (OBS-260): the server half (#378): the agent binding (`full agent-b
 `secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. Then, on macOS: the node
 opens the enrolled app through the lifecycle broker (`BrokerPrompter`, the broker's own `secret-prompt`
 caller), the app's door (`full assistant secret`, run as the app's own child and answering only when a
-running parent satisfies the enrolled app's code requirement), the `SecureField` window and the
+file lies inside the enrolled bundle and whose immediate parent, running, satisfies the enrolled app's
+code requirement; a grandparent is never enough, since the app runs other engines for other actions), the `SecureField` window and the
 person's phrase in the data protection keychain (the app's access group, signed in only with a
 provisioning profile; a build without it answers `no-client`). How the value moves, exactly: the
 window hands it to the engine process the app spawned, on that process's stdin; that process writes it
@@ -449,12 +450,19 @@ showed a system-owned `git` driven by a user `.gitconfig`). So the secret door n
 `executable` preference, PATH or a launcher: only the engine inside the app's own bundle
 (`SecretEngine`, `Contents/Resources/engine/`), by an absolute path the app computes, after
 `SecStaticCodeCheckValidity` on the app itself (all architectures, strict, nested code, sealed
-resources, against the pinned team requirement read from the sealed Info.plist) immediately before
+resources, against the team named in its sealed Info.plist, not a compiled-in team) immediately before
 each call, list and store alike, with a scrubbed environment. **No release bundles that engine yet:**
-the node checks for it in the enrolled app and answers every request `no-client`, reason
-`engine-untrusted`, with the person's `vault.py put` step, before filing and before opening the app.
-A drag-installed app is writable by its user; a program with App Management could change its
-contents, which the signature check then refuses.
+the node checks for it in the enrolled app, and that the bundle still satisfies its enrolled code
+requirement, and otherwise answers every request `no-client`, reason `engine-untrusted`, with the
+person's `vault.py put` step, before filing and before opening the app.
+**What the check does not cover.** The signature check hashes the bundle once, and a Python engine
+then reads its `.py` files as it imports them (`client_store` imports the vault writer after the value
+arrived). A drag-installed app belongs to its user, so a program of that user with App Management can
+swap a file after the check and restore it afterwards: the check alone does not stop it. Before any
+engine is bundled it must be one that cannot change after the check (copied into storage only the app
+can write, or a hardened-runtime binary with library validation), or the bundle must be one the user
+cannot write; and its workspace (`OBSERVATORY_HOME`, today from the app's settings), its interpreter and
+its dependencies must be inside the sealed bundle too.
 The window is excluded from sharing (`NSWindow.sharingType = .none`) and the phrase from the
 accessibility tree; a program with Screen Recording may still capture it on recent macOS. This
 release's app is not signed with the provisioning profile the keychain group needs, so it keeps no
@@ -470,8 +478,11 @@ tool.
 - **The path of a request, until the contract decides a channel method.** The agent calls
   `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
   agent's process. That server shows nothing itself and never touches a value: it records the request
-  (agent from its binding, project, slot, provider, reason) in the node's request queue. Only the node
-  writes that queue, in its owner-only state. **This is new work (OBS-260):** today the stdio MCP
+  (agent from its binding, project, slot, provider, reason) in the node's request queue. The node is the
+  only Observatory process that writes the queue, but the queue is an owner-only file, so any program
+  running as the same user can read and write it: read every request's text, file a request under any
+  agent's name with any reason, or set an outcome, bypassing the binding and the `engine-untrusted`
+  gate. It cannot see a value typed into the genuine window. **This is new work (OBS-260):** today the stdio MCP
   server has no binding of its own (it is the built-in `local:stdio` principal shared by every local
   agent, `observatory/engine/access_binding.py`), and the node's `POST /mcp` serves only the
   `node.lifecycle` tools behind a lifecycle grant (`tools/serverd.py`). OBS-260 adds a binding per local

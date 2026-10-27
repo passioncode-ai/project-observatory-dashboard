@@ -465,10 +465,10 @@ class TheBrokerOpensTheWindow(Base):
 
     def setUp(self) -> None:
         super().setUp()
-        # The broker path is the Mac's; the tests run on every system as if on one.
-        p = mock.patch.object(sys, "platform", "darwin")
-        p.start()
-        self.addCleanup(p.stop)
+        # The broker path is the Mac's; the tests run on every system as if on one, with the enrolled app intact.
+        for p in (mock.patch.object(sys, "platform", "darwin"), mock.patch.object(SP, "APP_VERIFIED", lambda t: True)):
+            p.start()
+            self.addCleanup(p.stop)
 
     def broker_prompter(self, targets=None, broker=None) -> SP.BrokerPrompter:
         self.broker = broker or FakeBroker()
@@ -531,6 +531,15 @@ class TheBrokerOpensTheWindow(Base):
         self.assertIn("vault.py", out["step"])
         self.assertNotIn("fix", out)
         self.assertEqual(self.broker.opened, [], "the app is not even opened")
+        self.assertEqual(SP.waiting(), [])
+
+    def test_an_app_that_is_no_longer_the_signed_one_files_nothing(self):
+        # A planted engine in a user-writable bundle breaks its signature: answered at once, never ten minutes of silence.
+        with mock.patch.object(SP, "APP_VERIFIED", lambda t: False), \
+                mock.patch.object(SP, "PROMPTER", self.broker_prompter()):
+            out = ask("alpha", "PLANTED_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "engine-untrusted"))
+        self.assertEqual(self.broker.opened, [])
         self.assertEqual(SP.waiting(), [])
 
     def test_windows_has_no_window_in_this_release(self):
@@ -650,35 +659,45 @@ class TheAppsDoor(Base):
 
 
 class TheSignedAppCheck(unittest.TestCase):
-    """`signed_app_ancestor`: a parent of the engine process, while running, satisfies the pinned requirement."""
+    """`signed_app_parent`: the door runs from inside the enrolled bundle, and its immediate parent is the signed app."""
 
-    def document(self) -> dict:
-        return {"targets": {"observatory.app": observatory_target()}}
+    def setUp(self) -> None:
+        self.bundle = app_bundle()
+        self.inside = str(Path(self.bundle) / "Contents" / "Resources" / "engine" / "lib" / "secret_prompt.py")
+        self.document = {"targets": {"observatory.app": observatory_target(path=self.bundle)}}
+        self.asked: list[list[str]] = []
+
+    def run_codesign(self, signed: str):
+        def run(args, timeout=10):
+            self.asked.append(list(args))
+            return subprocess.CompletedProcess(args, 0 if args[-1] == signed else 3, "", "")
+        return run
 
     def test_only_macos_and_only_an_enrolled_app(self):
-        self.assertFalse(SP.signed_app_ancestor("linux", document=self.document()))
-        self.assertFalse(SP.signed_app_ancestor("win32", document=self.document()))
-        self.assertFalse(SP.signed_app_ancestor("darwin", document={"targets": {}}))
+        for platform in ("linux", "win32"):
+            self.assertFalse(SP.signed_app_parent(platform, document=self.document, run=self.run_codesign("100"),
+                                                  parent=100, source=self.inside))
+        self.assertFalse(SP.signed_app_parent("darwin", document={"targets": {}}, run=self.run_codesign("100"),
+                                              parent=100, source=self.inside))
 
-    def test_the_app_two_parents_up_is_found_by_its_pinned_requirement(self):
-        asked: list[list[str]] = []
+    def test_the_parent_is_checked_against_the_enrolled_requirement(self):
+        self.assertTrue(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("100"),
+                                             parent=100, source=self.inside))
+        requirement = self.asked[0][self.asked[0].index("-R") + 1]
+        self.assertIn('identifier "ai.passioncode.observatory"', requirement)
+        self.assertIn('"ABCDE12345"', requirement)
 
-        def run(args, timeout=10):
-            asked.append(list(args))
-            return subprocess.CompletedProcess(args, 0 if args[-1] == "300" else 3, "", "")
-        parents = {100: 200, 200: 300, 300: 1}
-        self.assertTrue(SP.signed_app_ancestor("darwin", document=self.document(), run=run,
-                                               parent_of=parents.get, start=100))
-        self.assertEqual([a[-1] for a in asked], ["100", "200", "300"])
-        self.assertIn('identifier "ai.passioncode.observatory"', asked[0][asked[0].index("-R") + 1])
-        self.assertIn('"ABCDE12345"', asked[0][asked[0].index("-R") + 1])
+    def test_a_grandparent_is_never_enough(self):
+        # The app runs the engine its settings name for other actions; that engine's child finds the app two levels up.
+        self.assertFalse(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("300"),
+                                              parent=200, source=self.inside))
+        self.assertEqual([a[-1] for a in self.asked], ["200"], "only the immediate parent is asked")
 
-    def test_no_signed_parent_is_no_client(self):
-        def run(args, timeout=10):
-            return subprocess.CompletedProcess(args, 3, "", "")
-        parents = {100: 200, 200: 300, 300: 400, 400: 500, 500: 1}
-        self.assertFalse(SP.signed_app_ancestor("darwin", document=self.document(), run=run,
-                                                parent_of=parents.get, start=100))
+    def test_a_door_outside_the_enrolled_bundle_is_refused_whoever_its_parent_is(self):
+        outside = str(ROOT / "secret_prompt.py")
+        self.assertFalse(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("100"),
+                                              parent=100, source=outside))
+        self.assertEqual(self.asked, [], "no codesign run for an engine the app does not carry")
 
 
 class ReviewFollowUps(Base):

@@ -37,24 +37,35 @@ does with it. What it keeps, and why:
   `NotBuilt`, which offers no window and fakes none. The queue, its states and its outcomes are already the ones
   the contract's `secret.prompt` channel method serves (draft DEC-0143), so the channel can replace the broker path
   without changing the agent's tool.
-- **The app's door reads and answers only for the signed app.** `client_requests`, `client_store`, `client_decline`
-  and `client_unavailable` run in the engine process the app itself started (`full assistant secret`, its JSON on
-  that process's stdin). Before any of them reads a request's text or touches a slot, `CLIENT_CHECK` walks this
-  process's parents and asks `codesign` whether one of them, while running, satisfies the pinned requirement of the
-  enrolled app (its team and bundle id): an agent that runs the same command has no such parent and is refused
-  `client-unverified`. `client_store` writes the value into the slot here, as `vault.py put` (an empty slot) or
-  `rotate` (a replacement) writes it, so the value travels only on the pipe between the app and its own child and
-  never through the node, an argument, the environment, a log, the journal or an answer.
-- **Only through the engine inside the signed app.** The parent check proves only that the request came through the
-  app's own process tree, and whatever the app runs is in that tree; an engine named by a preference, PATH or a
-  launcher (a program of the same user can change any of them) could read the queue, answer requests and see a typed
-  value. So the app never runs the `executable` preference for this door: it runs only the engine inside its own
-  bundle (`BUNDLED_ENGINE`), by an absolute path it computes, after checking its own static signature (resources
-  sealed, the pinned team requirement) immediately before each call. **No release bundles that engine yet**, so the
-  node answers every request `no-client`, reason `engine-untrusted`, with the person's `vault.py put` step, before
-  filing it. Beyond that: the queue file is owner-only, so another program of the same user can read the requests'
-  text on disk; and once stored, the slot is readable by any program of the same user, which is D4's stated property
-  (out of the chat, transcripts, logs and tool results, not out of reach of a program that goes looking).
+- **The app's door reads and answers only for the engine inside the app.** `client_requests`, `client_store`,
+  `client_decline` and `client_unavailable` run in the engine process the app itself started (`full assistant secret`,
+  its JSON on that process's stdin). Before any of them reads a request's text or touches a slot, `CLIENT_CHECK`
+  requires two things: this module's own file lies inside the enrolled app's bundle (the engine bundled in the app,
+  not one a preference names), and this process's immediate parent, while running, satisfies the code requirement of
+  the enrolled app (its team and bundle id, `codesign --verify -R` on the parent's pid). A grandparent is never
+  enough: the app also runs the engine its settings name for other actions, and that engine's own child would find
+  the app two levels up. Anything else is refused `client-unverified`. `client_store` writes the value into the slot
+  here, as `vault.py put` (an empty slot) or `rotate` (a replacement) writes it, so the value travels only on the pipe
+  between the app and its own child and never through the node, an argument, the environment, a log, the journal or
+  an answer.
+- **Only through the engine inside the signed app.** The app never runs the `executable` preference, PATH or a
+  launcher for this door: it runs only the engine inside its own bundle (`BUNDLED_ENGINE`), by an absolute path it
+  computes, after checking its own static signature (sealed resources, against the team its sealed Info.plist names)
+  immediately before each call. **No release bundles that engine yet**, so the node answers every request
+  `no-client`, reason `engine-untrusted`, with the person's `vault.py put` step, before filing it.
+- **What this does not protect against, stated plainly.**
+  - The signature check hashes the bundle once; the Python engine then reads its `.py` files as it imports them
+    (`client_store` imports the vault writer after the value arrived on stdin). A program of the same user that may
+    write the bundle (a drag-installed app is the user's; App Management grants it) could swap a file after the check
+    and restore it afterwards. Before an engine is bundled it must be one that cannot change after the check (copied
+    into storage only the app can write, or a hardened-runtime binary with library validation), or the bundle must
+    be one the user cannot write; and its workspace (`OBSERVATORY_HOME`, today from the app's settings), interpreter
+    and dependencies must be inside the sealed bundle too.
+  - The queue (`queue.json`) is an owner-only file, which means any program running as the same user can read it
+    and write it: it can read every request's text, file requests under any agent's name with any reason, and set
+    outcomes, bypassing the agent binding and the `engine-untrusted` gate. What it cannot do is see a value typed into
+    the genuine window. Once stored, the slot is readable by any program of the same user, which is D4's stated
+    property (out of the chat, transcripts, logs and tool results, not out of reach of a program that goes looking).
 """
 from __future__ import annotations
 
@@ -356,6 +367,23 @@ def observatory_target(document: dict) -> Optional[dict]:
     return None
 
 
+def enrolled_app_intact(target: dict) -> bool:
+    """The enrolled app's bundle, deep, satisfies its enrolled code requirement now (`codesign --verify --deep
+    --strict -R`): a file planted in it fails. macOS only; a check that cannot run is not a pass."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        from node.lifecycle import macos
+        requirement = macos.requirement_for(target["identity"]["bundleId"], target["identity"]["teamId"])
+        return macos.satisfies(str(target["path"]), requirement, deep=True, run=macos.Runner())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+#: Whether the enrolled app is still the signed app it was enrolled as; tests replace it.
+APP_VERIFIED: Callable[[dict], bool] = enrolled_app_intact
+
+
 class BrokerPrompter:
     """The prompter the local server installs (D4): Observatory's signed app, opened through the node's lifecycle
     broker and never directly. `host` answers the server's `node.lifecycle` Host (or None when it has none).
@@ -394,9 +422,10 @@ class BrokerPrompter:
             bundled = (Path(str(target.get("path") or "")) / BUNDLED_ENGINE).is_file()
         except OSError:
             bundled = False
-        if not bundled:
-            # The app's window runs only the engine inside the signed app; without one it would read nothing, so
-            # nothing is filed and the agent hears it now, not after ten minutes (review of #382, L5 included).
+        if not bundled or not APP_VERIFIED(target):
+            # The app's window runs only the engine inside the signed app; without one, or in a bundle that is no
+            # longer the enrolled signed app (a planted file), it would read nothing, so nothing is filed and the agent
+            # hears it now, not after ten minutes.
             return None, "engine-untrusted"
         return target, None
 
@@ -767,28 +796,17 @@ def waiting() -> list[dict]:
 
 
 # ── the signed app's door (`full assistant secret`) ─────────────────────────
-#: How many parents of this process are asked whether they are the signed app: the app runs the
-#: `project-observatory` launcher, which runs the engine as its own child, so the app is the second or third.
-CLIENT_ANCESTORS = 4
+def _running_ppid() -> int:
+    return os.getppid()
 
 
-def _parent_of(pid: int) -> Optional[int]:
-    """The parent of a running process, read by `/bin/ps` with the system's own PATH; None when it is gone."""
-    from node.lifecycle import macos
-    try:
-        done = macos.Runner()(["/bin/ps", "-o", "ppid=", "-p", str(pid)], timeout=5)
-    except Exception:  # noqa: BLE001 - a parent that cannot be read verifies nothing
-        return None
-    text = (done.stdout or "").strip()
-    return int(text) if done.returncode == 0 and text.isdigit() else None
-
-
-def signed_app_ancestor(platform: str | None = None, *, document: dict | None = None,
-                        parent_of: Callable[[int], Optional[int]] = _parent_of, run: Any = None,
-                        start: int | None = None) -> bool:
-    """Whether a parent of this process, while running, satisfies the pinned code requirement of the enrolled
-    Observatory app (an Apple-issued certificate of its team, its bundle id): `codesign --verify --strict -R` on the
-    parent's pid checks the running code, not a file on disk. macOS only; anywhere else nothing is verified.
+def signed_app_parent(platform: str | None = None, *, document: dict | None = None, run: Any = None,
+                      parent: int | None = None, source: str | None = None) -> bool:
+    """Whether this door runs as the engine bundled inside the enrolled Observatory app, started by that app: this
+    module's file lies inside the enrolled bundle, and the immediate parent, while running, satisfies the enrolled code
+    requirement (an Apple-issued certificate of its team, its bundle id; `codesign --verify --strict -R` on the pid
+    checks the running code, not a file on disk). Only the parent: the app runs other engines for other actions, and
+    their children would find it as a grandparent. macOS only; anywhere else nothing is verified.
 
     The limit: a pid read here could in principle be reused between the read and the check; the app waits on the
     child it started, so its pid cannot be reused while this process runs."""
@@ -800,25 +818,20 @@ def signed_app_ancestor(platform: str | None = None, *, document: dict | None = 
         target = observatory_target(document if document is not None else lifecycle.read_config())
         if target is None:
             return False
+        bundle = Path(str(target["path"])).resolve()
+        here = Path(source or __file__).resolve()
+        if bundle not in here.parents:
+            return False
         requirement = macos.requirement_for(target["identity"]["bundleId"], target["identity"]["teamId"])
         runner = run or macos.Runner()
-    except Exception:  # noqa: BLE001 - no registry, no team, no requirement: nothing is verified
+        pid = _running_ppid() if parent is None else parent
+        return bool(pid and pid > 1 and macos.satisfies(str(pid), requirement, deep=False, run=runner))
+    except Exception:  # noqa: BLE001 - no registry, no team, no requirement, a check that could not run: no pass
         return False
-    pid = os.getppid() if start is None else start
-    for _ in range(CLIENT_ANCESTORS):
-        if not pid or pid <= 1:
-            return False
-        try:
-            if macos.satisfies(str(pid), requirement, deep=False, run=runner):
-                return True
-        except Exception:  # noqa: BLE001 - a check that could not run is not a pass
-            return False
-        pid = parent_of(pid)
-    return False
 
 
 #: Whether the process asking is the signed app's own child; tests replace it.
-CLIENT_CHECK: Callable[[], bool] = signed_app_ancestor
+CLIENT_CHECK: Callable[[], bool] = signed_app_parent
 
 
 def _client() -> None:

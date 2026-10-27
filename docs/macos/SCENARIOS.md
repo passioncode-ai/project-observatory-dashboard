@@ -335,5 +335,5 @@ Coverage: `SecretPromptTests` (`testTheRequestIsReadAsTheDoorAnswersIt`, `testTh
 `testSaveSendsTheValueOnlyToTheDoorAndCancelDeclines`, `testARefusalIsWordedAndAClosedRequestLeavesTheWindow`,
 `testThePhraseIsSavedOnlyWhereTheAppKeepsIt`, `testWithoutABundledEngineOrAValidSignatureNothingIsReadOrSent`,
 `testTheSecretCallNeverUsesTheExecutablePreference`, `testTheSignatureIsCheckedAgainForEveryCall`,
-`testResolveRequiresThePinnedTeamTheSignatureAndTheEngineInside`, `testTheSecretDoorRunsWithAScrubbedEnvironment`); the engine's door: `tests/test_secret_prompt.py` `TheAppsDoor`.
+`testResolveRequiresTheSealedTeamTheEngineInsideAndTheSignature`, `testTheSecretDoorRunsWithAScrubbedEnvironment`); the engine's door: `tests/test_secret_prompt.py` `TheAppsDoor`.
 Not yet walked on a real Mac: it needs an app with its engine bundled and signed with its provisioning profile.

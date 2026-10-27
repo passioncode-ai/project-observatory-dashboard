@@ -28,8 +28,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   `no-client`. The app reads waiting requests through its own child (`full assistant secret`) and shows a window with
   the agent, the project, the slot, the reason in the agent's words, Replace for a filled slot and your phrase; Save
   writes the value into the slot in that child, from its stdin only, and Cancel answers `declined`. Only a child whose
-  running parent satisfies the enrolled app's code requirement reads or answers a request (`client-unverified`
-  otherwise). The phrase is set at the first request and changed in Settings, and kept in the data protection
+  own file lies inside the enrolled app's bundle and whose immediate parent satisfies the enrolled app's code
+  requirement reads or answers a request (`client-unverified` otherwise). The limits are stated in ONBOARDING: the
+  queue file can be read and written by any program running as you, and an engine will be bundled only once it
+  cannot change after the app's signature check. The phrase is set at the first request and changed in Settings, and kept in the data protection
   keychain in the app's own access group; the signing setup adds that entitlement only with a provisioning profile
   (`OBSERVATORY_PROVISIONING_PROFILE`, `OBSERVATORY_TEAM_ID`); this release's app is not signed with one yet, so it
   keeps no phrase, shows no window and answers `no-client` with your `vault.py put` step. The window takes a key only

@@ -1234,16 +1234,17 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   answers `declined`. Save hands the value to that child process on its stdin, and the child
   writes it into the slot the way `vault.py put` (or `rotate`, for Replace) writes it; the value
   is never in an argument, the environment, a log, a notification or anything the agent reads,
-  and the local server sees only the slot's metadata afterwards. The child answers only when one
-  of its parents, while running, satisfies the enrolled app's code requirement (its team and
-  bundle id); a program that runs the same command on its own is refused `client-unverified`.
+  and the local server sees only the slot's metadata afterwards. The child answers only when its
+  own file lies inside the enrolled app's bundle and its immediate parent, while running,
+  satisfies the enrolled app's code requirement (its team and bundle id); anything else, the
+  engine named in the app's settings included, is refused `client-unverified`.
 - **Only through the engine inside the signed app, and none ships yet.** That parent check proves
   only that the request came through the app's own process tree, and whatever the app runs is in
   that tree: an engine named by the program path in its settings, PATH or a launcher could be
   changed by any program of your user, which could then read the queue, answer requests and see
   what you type. So the window never uses that program: it runs only an engine inside the app's
   own bundle, by a path the app computes, after checking the app's own signature (resources
-  sealed, the pinned team) right before each call, with a scrubbed environment. **No release
+  sealed, the team its sealed Info.plist names) right before each call, with a scrubbed environment. **No release
   bundles that engine yet, so today every request is answered `no-client`, reason
   `engine-untrusted`, with your `vault.py put` step, before anything is filed and before the app
   is opened.**
@@ -1264,11 +1265,14 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   signed app, so the answer stays `no-client`. When the desktop app's window ships, its phrase is
   kept with DPAPI on Windows and the Secret Service on Linux, which any program running as your
   user can read: there the phrase only stops an agent that does not look for it.
-- **The limits, on the Mac too.** The request queue is an owner-only file, so another program of
-  your user can read the requests' text on disk. A stored value sits in the vault slot, which any
-  program of your user can read: the prompt keeps the value out of the agent's chat, transcript,
-  logs and tool results, not out of reach of a program that goes looking. Running agents as
-  another user, or in a container, is the stronger defence.
+- **The limits, on the Mac too.** The request queue is an owner-only file, so any program running as
+  your user can read and write it: read the requests' text, file a request under any agent's name,
+  or mark a request answered. It cannot see a value typed into the genuine window. The signature
+  check hashes the app once, and a Python engine reads its files as it imports them, so an engine
+  will be bundled only once it cannot change after the check. A stored value sits in the vault
+  slot, which any program of your user can read: the prompt keeps the value out of the agent's
+  chat, transcript, logs and tool results, not out of reach of a program that goes looking.
+  Running agents as another user, or in a container, is the stronger defence.
 
 Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D4.
 

@@ -175,16 +175,17 @@ final class MemoryPhraseStore: PhraseStore {
         XCTAssertEqual(checks.value, 2, "list and store each resolve the engine and check the signature")
     }
 
-    func testResolveRequiresThePinnedTeamTheSignatureAndTheEngineInside() {
+    func testResolveRequiresTheSealedTeamTheEngineInsideAndTheSignature() {
         let bundle = URL(fileURLWithPath: "/Applications/O.app")
         var asked: [String] = []
         XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: nil, signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true }))
         XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "lower12345", signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true }))
-        XCTAssertEqual(asked, [], "no pinned team, no check and no engine")
+        XCTAssertEqual(asked, [], "no team in the sealed Info.plist, no check and no engine")
         XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, _ in false }, isExecutable: { _ in true }),
                      "a signature that does not check out starts nothing")
-        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, _ in true }, isExecutable: { _ in false }),
+        XCTAssertNil(SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in false }),
                      "this release bundles no engine")
+        XCTAssertEqual(asked, [], "no engine inside, so the bundle is never hashed")
         let path = SecretEngine.resolve(bundle: bundle, team: "ABCDE12345", signatureValid: { _, r in asked.append(r); return true }, isExecutable: { _ in true })
         XCTAssertEqual(path, SecretPromptTests.bundled)
         XCTAssertTrue(asked.last!.contains("identifier \"ai.passioncode.observatory\""))

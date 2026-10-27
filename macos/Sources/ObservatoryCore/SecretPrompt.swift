@@ -169,7 +169,7 @@ public enum SecretPromptStage: Equatable, Sendable {
 
 /// The only engine the secret prompt ever runs (OBS-260, the review of #382): the one inside this app, started by an
 /// absolute path the app computes from its own bundle, and only after the app's own static code signature checks out,
-/// resources sealed, against its pinned requirement. The `executable` preference, PATH and any launcher are never
+/// resources sealed, against the team its sealed Info.plist names (`ObservatoryTeamID`). The `executable` preference, PATH and any launcher are never
 /// used for it: a program of the same user can change those, and whatever the app runs could read the queue, answer
 /// requests and see a typed value. No engine is bundled in this release, so `resolve` answers nil and the node answers
 /// every request `no-client`, reason `engine-untrusted`, before filing it.
@@ -186,17 +186,19 @@ public enum SecretEngine {
         return "anchor apple generic and identifier \"\(bundleId)\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"\(team)\""
     }
 
-    /// The engine's absolute path, or nil: no pinned team, a signature that does not check out, or no engine inside.
+    /// The engine's absolute path, or nil: no team in the sealed Info.plist, a signature that does not check out, or no engine inside.
     /// Called immediately before every secret call, off the main thread.
     public static func resolve(bundle: URL, team: String?, signatureValid: (URL, String) -> Bool,
                                isExecutable: (String) -> Bool) -> String? {
-        guard let requirement = requirement(team: team), signatureValid(bundle, requirement) else { return nil }
+        // The cheap checks first: with no team or no engine inside (every release so far), no bundle is hashed.
+        guard let requirement = requirement(team: team) else { return nil }
         let engine = bundle.appendingPathComponent(relativePath).path
-        return isExecutable(engine) ? engine : nil
+        guard isExecutable(engine), signatureValid(bundle, requirement) else { return nil }
+        return engine
     }
 
     /// This bundle's static signature: every architecture, strict validation, nested code and sealed resources, and
-    /// the pinned requirement.
+    /// the requirement built from the team in its sealed Info.plist (not compiled in: a re-signed bundle carries its own).
     public static func ownSignatureValid(_ bundle: URL, _ requirement: String) -> Bool {
         var code: SecStaticCode?
         guard SecStaticCodeCreateWithPath(bundle as CFURL, [], &code) == errSecSuccess, let code else { return false }
