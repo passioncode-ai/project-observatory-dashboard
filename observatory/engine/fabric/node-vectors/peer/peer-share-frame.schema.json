@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/peer-share-frame.schema.json",
+  "title": "A share's exchange frame, peer-share-frame/1 (DEC-0142)",
+  "description": "One frame of the exchange that confirms a person-to-person share (DEC-0142, docs/specification/peer-share.md): the recipient's claim (its share keys, the claim MAC under the link's code and its commitment), the sender's commit (its share keys and commitment), a side's reveal, or an abort. Both sides commit before either reveals; the comparison code is derived from both reveals (peerComparisonCode). The mailbox checks no claim MAC and opens nothing; it runs peerExchangeVerdict over a share's frames until the first envelope is stored (PS-6, PS-10).",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "step",
+        "shareId",
+        "keys",
+        "mac",
+        "commit"
+      ],
+      "properties": {
+        "schema": {
+          "const": "peer-share-frame/1"
+        },
+        "step": {
+          "const": "claim"
+        },
+        "shareId": {
+          "$ref": "#/$defs/shareId"
+        },
+        "keys": {
+          "$ref": "#/$defs/keys"
+        },
+        "mac": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "HMAC-SHA-256 keyed with the link's code over the RFC 8785 form of {type: fabric-peer-claim/1, shareId, keys, fpr} (claimMac): a filter for the link's holder, checked by the sender's node, never authentication against the mailbox."
+        },
+        "commit": {
+          "$ref": "common.schema.json#/$defs/sha256",
+          "description": "The recipient's commitment (peerCommit, role recipient)."
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "step",
+        "shareId",
+        "keys",
+        "commit"
+      ],
+      "properties": {
+        "schema": {
+          "const": "peer-share-frame/1"
+        },
+        "step": {
+          "const": "commit"
+        },
+        "shareId": {
+          "$ref": "#/$defs/shareId"
+        },
+        "keys": {
+          "$ref": "#/$defs/keys"
+        },
+        "commit": {
+          "$ref": "common.schema.json#/$defs/sha256",
+          "description": "The sender's commitment (peerCommit, role sender)."
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "step",
+        "role",
+        "shareId",
+        "nonce"
+      ],
+      "properties": {
+        "schema": {
+          "const": "peer-share-frame/1"
+        },
+        "step": {
+          "const": "reveal"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "shareId": {
+          "$ref": "#/$defs/shareId"
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$",
+          "description": "32 random bytes, unpadded base64url, sent only after the side holds the other's commitment."
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema",
+        "step",
+        "role",
+        "shareId"
+      ],
+      "properties": {
+        "schema": {
+          "const": "peer-share-frame/1"
+        },
+        "step": {
+          "const": "abort"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "shareId": {
+          "$ref": "#/$defs/shareId"
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "shareId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "The share's id: 16 random bytes the sender draws, as 32 lower-case hex digits; never derived from a name, a path or an id of either estate."
+    },
+    "jwk": {
+      "type": "object",
+      "required": [
+        "kty",
+        "crv",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "kty": {
+          "const": "EC"
+        },
+        "crv": {
+          "const": "P-256"
+        },
+        "x": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        },
+        "y": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A P-256 public key as a JWK (RFC 7517), named elsewhere by its RFC 7638 SHA-256 thumbprint; the point must be on the curve (peerJwk)."
+    },
+    "keys": {
+      "type": "object",
+      "required": [
+        "sig",
+        "kem"
+      ],
+      "properties": {
+        "sig": {
+          "$ref": "#/$defs/jwk",
+          "description": "The side's share signing key (ES256), made for this share only."
+        },
+        "kem": {
+          "$ref": "#/$defs/jwk",
+          "description": "The side's share key-agreement key (HPKE DHKEM P-256), made for this share only."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A side's key pair for one share, never its device keys (DEC-0142 PS-2); two different keys."
+    },
+    "role": {
+      "enum": [
+        "sender",
+        "recipient"
+      ]
+    }
+  }
+}

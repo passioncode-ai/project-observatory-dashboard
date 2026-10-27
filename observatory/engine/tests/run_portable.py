@@ -190,6 +190,9 @@ BOUNDARY += ('vault_digests',)
 BOUNDARY += ('access_binding',)
 # OBS-260: the secret prompt's server half: agent bindings, the node's request queue, the job, no value anywhere.
 BOUNDARY += ('secret_prompt',)
+# OBS-264, OBS-276: a key shared with another person's estate (contract DEC-0142): the protocol over the contract's
+# vectors, both nodes' stores against an in-process mailbox, and `full share` between two workspaces.
+BOUNDARY += ('node_peer_share', 'shares', 'share_cli')
 # ENG-018: a manifest never pins a tag its release does not have.
 BOUNDARY += ('manifest_urls',)
 # Vector namespaces: one index per pinned model identity, legacy quarantined (PB-137 N-005).
@@ -397,6 +400,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/device').glob('*.json'))     # OBS-161: the CT-65 device fixtures
     selected |= set((ROOT / 'fabric/node-vectors/summary').rglob('*.json'))    # OBS-192: node-summary/1 and the catalogue
     selected |= set((ROOT / 'fabric/node-vectors/repair').rglob('*.json'))     # OBS-193: the repair vectors and schemas
+    selected |= set((ROOT / 'fabric/node-vectors/peer').rglob('*.json'))       # OBS-264: fabric-peer-share/1
     out = []
     for source in sorted(selected):
         if not source.is_file():

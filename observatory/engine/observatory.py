@@ -470,7 +470,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "agent-binding",
-                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review")
+                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -543,6 +543,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                here, missing, unreachable), compared by keyed HMAC-SHA-256 digests under
                                the estate key, never values; mark a slot different on purpose; peers'
                                manifests are read from <state>/vault-digests/peers
+  share create|list|status|confirm|differ|revoke|provider-ended|accept|sync   share a vault key with another
+                               person's Observatory (fabric-peer-share/1): sealed to their machine, the link
+                               printed once, a six-digit code compared, usage reported back, taken back at the
+                               mailbox and the provider; accept opens a link sent to you and use_secret.py run
+                               --share gives an agent the key at use time. confirm, accept and provider-ended
+                               need a terminal
   org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
                                enrollments (fabric-device/0.1): enroll with a token from a vault slot,
                                signed check-ins, rotation, the activity outbox, share registrations
@@ -848,6 +854,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import org as org_cli
         return argparse_refusal(lambda: org_cli.parser().parse_args(rest))
+    if name == "share":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import share_cli
+        return argparse_refusal(lambda: share_cli.parser().parse_args(rest))
     if name == "memory-http":
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service
@@ -1282,6 +1292,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import org as org_cli
         return org_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "share":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import share_cli
+        return share_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])

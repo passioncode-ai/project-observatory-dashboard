@@ -632,7 +632,8 @@ design and its decisions are [PERSON-SURFACES.md](https://github.com/passioncode
 in [the backlog](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/backlog.md). **The rules throughout:** a credential's value
 never appears in a chat, an argument, a log, a URL or a report; an agent receives a value only at
 use time and only through Observatory; what a person set is never overwritten by an agent. They
-are OSS-79 to OSS-93. Every one is planned: Coverage none yet, product outcome unobserved.
+are OSS-79 to OSS-93. Each is planned unless its own Status says what is built; no product outcome
+is observed yet.
 
 ### OSS-79: share keys with another person
 
@@ -643,7 +644,8 @@ Funnel:
 1. Access, then Shares, then "New share". The screen asks three things in order: what to share
    (keys from the vault, or "mint a new narrow key" through a door: an OpenRouter key with a
    ceiling, a Cloudflare token with one preset, a Heroku or DigitalOcean preset), for how long
-   (an end date, at most 90 days), and a name for the recipient that only the sender sees.
+   (an end date; each sealed copy lives at most 90 days and the sender's machine seals it again before it
+   ends), and a name for the recipient that only the sender sees.
 2. Minting runs the door's own `issue` into a slot named for the share; the value goes from the
    provider into the vault and is never shown.
 3. "Create link" returns one link, `https://CLOUD-ORIGIN/s/SHARE-ID#c=CODE&k=FPR`, and a sentence to
@@ -674,7 +676,17 @@ Failure paths:
 
 Acceptance: no value in the link, the page, the cloud's storage or any journal; the share's
 record names keys by slot and provider only.
-Coverage: none yet. Status: planned (OBS-264, OBS-265); product outcome unobserved.
+
+Built so far, from a terminal (OBS-264): `project-observatory full share create PROJECT ENV SLOT --to
+LABEL --mailbox URL` registers the share at the mailbox and prints the link once; `full share status
+ID` shows the six-digit code once both sides revealed; `full share confirm ID CODE` (a terminal, the
+person's act) seals and sends, `full share confirm ID --without-comparing` seals and records
+`confirmed: false`, and a code that differs seals nothing and spends the link. The link follows the
+contract (DEC-0142): `https://MAILBOX/s/SHARE-ID#c=CODE&k=FPR`, a 16-byte code, a claim deadline of at
+most 7 days. Minting through a door and the screen are OBS-265.
+Coverage: `tests/test_node_peer_share.py` (the contract's vectors), `tests/test_shares.py`,
+`tests/test_share_cli.py`. Status: partly built (OBS-264, the command line); the screen planned
+(OBS-265); product outcome unobserved.
 
 ### OSS-80: open a share someone sent me
 
@@ -683,8 +695,8 @@ Trigger: a recipient opens a link a colleague sent.
 Funnel:
 1. The link opens a page served by the sender's personal cloud. It reads the code from the
    fragment in the browser, names the sender's label and the number of keys, and offers one button,
-   "Open in Project Observatory", which hands `project-observatory://share?origin=...&id=...#c=CODE`
-   to the installed app.
+   "Open in Project Observatory", which hands the app the share id in its path and `c` and `k` in its fragment only, never in a query
+   (contract DEC-0142 PS-4).
 2. No app: the page says what Observatory is in one sentence, links the installer on
    passioncode.ai, and keeps the button: "After installing, come back here and press the button".
 3. The app opens Access, Shares, "Received": the sender's label, each key's provider and purpose,
@@ -694,7 +706,7 @@ Funnel:
 4. Accepting makes a key pair for this share alone, sends its public keys with a proof made from the
    link's code (the claim), and shows a six-digit code to read to the sender; then "waiting for the
    sender's machine" until the sealed values arrive, then "ready" with the command an agent uses
-   (`use_secret.py run --vault-only shared/LABEL NAME -- COMMAND`).
+   (`use_secret.py run --share LABEL NAME -- COMMAND`).
 
 Failure paths:
 - The link was already claimed by another machine: "This link was already used on another
@@ -711,7 +723,17 @@ Failure paths:
 
 Acceptance: the claim proves possession of the code without sending it to any third party; the
 recipient's machine never writes a shared value to disk in the clear.
-Coverage: none yet. Status: planned (OBS-266); product outcome unobserved.
+
+Built so far, from a terminal (OBS-264): `project-observatory full share accept LINK` (or `-` to read
+it from stdin; a terminal, the person's act) prints what the sender will see and asks to accept,
+makes the share's key pair and claims; `full share status ID` shows the code to read to the sender,
+then the command an agent uses. A second accept of one link on one machine is refused; a link another
+machine claimed first, an expired link and a sender commit that does not name the link's key
+fingerprint each burn the share with that reason. A delegated (metered) agent is refused a shared key
+until contract CT-187 says who pays for its use.
+Coverage: `tests/test_shares.py`, `tests/test_share_cli.py`. Status: partly built (OBS-264, the
+command line); the landing page, the scheme and the screen planned (OBS-266); product outcome
+unobserved.
 
 ### OSS-81: see how my shared keys are used, and take them back
 
@@ -740,7 +762,15 @@ Failure paths:
 
 Acceptance: a usage report holds counts, dates and agent names, never a value, an argument or an
 output; "taken back" is shown only when the cloud refused service and the provider confirmed.
-Coverage: none yet. Status: planned (OBS-264, OBS-265, OBS-276); product outcome unobserved.
+
+Built so far, from a terminal (OBS-264, OBS-276): `full share status ID` shows uses in 7 days and the
+agents as reported by their machine, deliveries as seen by your mailbox, and exports with the button;
+`full share revoke ID` hands the signed revocation to the mailbox (observed at once), the recipient's
+machine deletes and returns a signed receipt at its next contact, and the share reads "taken back"
+only after `full share provider-ended ID` (a terminal) records that the key was revoked or rotated at
+its provider. The provider's spend and the door's revoke from the screen are OBS-265.
+Coverage: `tests/test_shares.py`, `tests/test_share_cli.py`. Status: partly built (OBS-264, OBS-276,
+the command line); the screen planned (OBS-265); product outcome unobserved.
 
 ### OSS-82: export a shared value on purpose
 
