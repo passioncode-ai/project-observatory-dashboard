@@ -2717,8 +2717,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "0843801368d947a8e6a7c4da32aedc3c600d77a05a17a7043ffedd91df78f756",
-      "bytes": 115326,
+      "export_sha256": "a42131b7cfd03b47e40ad2b8ee14b877bc3fa0e3d95d1e1507f2f8fba72f3ef4",
+      "bytes": 115391,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3279,8 +3279,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5634c3b9df81e3852c71dfa21d7c43d9e2805b88c5456a0a6f86e06b44064fbd",
-      "bytes": 33153
+      "export_sha256": "a973520d964f18b145b240706adbb757b09e5d3a9551dd0af1befb9466e4f1dc",
+      "bytes": 33228
     },
     {
       "path": "service_events.py",

@@ -93,7 +93,7 @@ project-observatory full scan-mcp
 
 Other agents take the same command line; [connect an agent](docs/ONBOARDING.md#connect-an-agent) has the details.
 
-So that an agent asks you for a key it lacks with `observatory_secret_request` instead of in its chat, connect it with a binding at your terminal: `project-observatory full agent-binding issue claude-code` writes its token to an owner-only file and prints the same `claude mcp add` line with `--agent claude-code`. This release files and limits the requests; the window that takes the value ships later, so each request is answered `no-client` with the `vault.py put` step you run in your own shell ([the secret prompt](docs/ONBOARDING.md#give-an-agent-a-key-without-pasting-it-into-a-chat-the-secret-prompt)).
+So that an agent asks you for a key it lacks with `observatory_secret_request` instead of in its chat, connect it with a binding at your terminal: `project-observatory full agent-binding issue claude-code` writes its token to an owner-only file and prints the same `claude mcp add` line with `--agent claude-code`. This release has the request queue and its limits but not the window that takes the value, so each request is answered `no-client` before anything is filed, with the `vault.py put` step you run in your own shell ([the secret prompt](docs/ONBOARDING.md#give-an-agent-a-key-without-pasting-it-into-a-chat-the-secret-prompt)).
 
 What agents write and read back is agent memory, and every write is a proposal (confidence 0.5) that the operator reviews or an independent check corroborates:
 

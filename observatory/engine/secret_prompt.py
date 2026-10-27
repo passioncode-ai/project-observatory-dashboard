@@ -577,7 +577,8 @@ def waiting() -> list[dict]:
 TOOL_DEFINITIONS = [
     {"name": "secret.request",
      "description": ("File a request for a key the vault does not hold; the person is asked in Observatory's own "
-                     "window and the value is written into the slot without passing through you. Answers the "
+                     "window (until it ships, answered no-client before filing) and the value is written into the slot without "
+                     "passing through you. Answers the "
                      "request id; follow it with secret.get. The agent is named from your binding."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["project", "env", "slot", "why"],
                      "properties": {"project": {"type": "string"}, "env": {"enum": ["local", "stage", "prod"]},
