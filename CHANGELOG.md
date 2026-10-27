@@ -7,6 +7,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A Cloudflare preset for one Access application** (OBS-281, Fabric board request 3bf4a84e): `cloudflare.py issue --preset access-app --account <slug> --vault PROJECT/ENV/NAME` mints one token on that account with Access: Apps and Policies Write and Access: Organizations, Identity Providers, and Groups Read (the organization is read, never written; no identity providers or service tokens), so a project puts Cloudflare Access in front of its own hostname and learns its team domain. It expires like every minted token, is named after its slot, and reaches the vault only after reading the account's Zero Trust organization with the new value; when that read fails the token is deleted and the refusal names the page where the account's owner enables Zero Trust.
 - **Share a key with another person's Observatory, see its use, take it back** (OBS-264, OBS-276, scenarios OSS-79
   to OSS-81, `docs/ONBOARDING.md` "Share a key with another person's Observatory", design
   `docs/design/PERSON-SURFACES.md` D2, D3, D8). The command line first: `full share create PROJECT ENV SLOT --to
