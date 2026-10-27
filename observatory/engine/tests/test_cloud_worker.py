@@ -160,12 +160,22 @@ class WorkerAgainstTheStores(unittest.TestCase):
         share_id, _ = self._create()
         folder = self.sender._sent(share_id)
         record, key = folder.record(), folder.key('sig')
+        send = self.MB.http_transport()
+        # A change played again is refused: the sender's revocation, signed once and sent twice.
+        revocation = PS.sign_peer_record({'type': PS.PEER_REVOCATION_TYPE, 'shareId': share_id,
+                                          'at': relay.rfc3339(int(time.time() * 1000))}, record['keys']['sig'], key)
+        body = json.dumps(revocation).encode()
+        target = f'/v1/shares/{share_id}/revocation'
+        headers = self.MB.sign_request([(self.MB.LABEL, record['keys']['sig'], key)], method='PUT', origin=ORIGIN,
+                                       target=target, body=body)
+        self.assertEqual(send('PUT', ORIGIN + target, headers, body)[0], 200)
+        status, _, raw = send('PUT', ORIGIN + target, headers, body)
+        self.assertEqual((status, json.loads(raw)['error']['code']), (401, 'signature-replayed'))
+        # A read played again changes nothing, and keeps no nonce (the confirming review of #386).
         headers = self.MB.sign_request([(self.MB.LABEL, record['keys']['sig'], key)], method='GET', origin=ORIGIN,
                                        target=f'/v1/shares/{share_id}', body=b'')
-        send = self.MB.http_transport()
         self.assertEqual(send('GET', f'{ORIGIN}/v1/shares/{share_id}', headers, b'')[0], 200)
-        status, _, raw = send('GET', f'{ORIGIN}/v1/shares/{share_id}', headers, b'')
-        self.assertEqual((status, json.loads(raw)['error']['code']), (401, 'signature-replayed'))
+        self.assertEqual(send('GET', f'{ORIGIN}/v1/shares/{share_id}', headers, b'')[0], 200)
 
 
 class _Raw:

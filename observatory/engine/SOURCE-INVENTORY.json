@@ -4252,8 +4252,8 @@
       "path": "tests/test_cloud_worker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ac070de7758319e5015fe62efc6c56343b5260ac06a679aef25c783e416c2135",
-      "bytes": 12315
+      "export_sha256": "b291ee0fcb9fe44efd1bef78baeeb4a4e9aa9417f581ac2d4d8390b472c67f40",
+      "bytes": 13160
     },
     {
       "path": "tests/test_collector_state.py",
