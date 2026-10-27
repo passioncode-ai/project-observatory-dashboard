@@ -91,6 +91,7 @@ class Base(unittest.TestCase):
         self.now = [time.time()]
         patches = [mock.patch.object(SP, "PROMPTER", self.prompter),
                    mock.patch.object(SP, "DESKTOP", lambda: (True, "test")),
+                   mock.patch.object(SP, "VERIFIABLE", lambda: True),
                    mock.patch.object(SP, "CLOCK", lambda: self.now[0])]
         for p in patches:
             p.start()
@@ -236,6 +237,17 @@ class Refusals(Base):
         self.assertEqual(SP.waiting(), [], "nothing is filed for a window that does not exist")
         self.assertEqual(SP.NotBuilt().available("linux"), "secret-ui-unavailable")
         self.assertEqual(SP.NotBuilt().available("darwin"), "window-not-built")
+
+    def test_linux_refuses_with_the_vault_step_even_with_a_window(self):
+        # DEC-0143 SP-2: no signed client can be verified on Linux, so no window, whatever the prompter offers.
+        with mock.patch.object(SP, "VERIFIABLE", lambda: SP.verifiable_client("linux")):
+            out = ask("alpha", "LINUX_KEY")
+        self.assertEqual(out["error"], "no-client")
+        self.assertEqual(out["reason"], "secret-ui-unavailable")
+        self.assertIn(f"put {PROJECT} {ENV} LINUX_KEY", out["step"])
+        self.assertEqual(self.prompter.opened, [])
+        self.assertEqual(SP.waiting(), [])
+        self.assertTrue(SP.verifiable_client("darwin") and SP.verifiable_client("win32"))
 
     def test_desktop_detection_by_platform(self):
         self.assertEqual(SP.desktop("linux", {})[0], False)

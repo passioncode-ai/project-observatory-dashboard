@@ -3279,8 +3279,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "132ca900c475d5337ce88dd0b192a30f26d6703d5a9168b3902098754a970341",
-      "bytes": 32493
+      "export_sha256": "5634c3b9df81e3852c71dfa21d7c43d9e2805b88c5456a0a6f86e06b44064fbd",
+      "bytes": 33153
     },
     {
       "path": "service_events.py",
@@ -5484,8 +5484,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "12cc14c7aa4abbc62088afafe8de2bbbba27fabf77121269e2bf2545bfa59bb7",
-      "bytes": 19938
+      "export_sha256": "4b9ed6efefc383c4e7ceb1abde2ae508cf644d260608fb6fcd1fff1703c451b9",
+      "bytes": 20697
     },
     {
       "path": "tests/test_secrets.py",

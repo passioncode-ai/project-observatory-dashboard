@@ -242,7 +242,8 @@ def desktop(platform: str | None = None, env: dict | None = None) -> tuple[bool,
     env = os.environ if env is None else env
     if platform == "darwin":
         try:
-            return os.stat("/dev/console").st_uid == os.getuid(), "console-owner"
+            import osprivacy
+            return osprivacy.owned_by_me("/dev/console"), "console-owner"
         except OSError:
             return False, "console-unreadable"
     if platform.startswith("linux"):
@@ -259,6 +260,13 @@ def desktop(platform: str | None = None, env: dict | None = None) -> tuple[bool,
         except (OSError, AttributeError):
             return False, "session-unreadable"
     return False, "unsupported-platform"
+
+
+def verifiable_client(platform: str | None = None) -> bool:
+    """Whether the node can check, by the operating system, that a prompt window is Observatory's own signed app
+    (contract draft DEC-0143 SP-2): macOS (audit token and designated requirement) and Windows (Authenticode on the
+    held process). On Linux and anything else it cannot, so it never shows a window there, whatever ships."""
+    return (platform or sys.platform) in ("darwin", "win32")
 
 
 class NotBuilt:
@@ -280,6 +288,8 @@ class NotBuilt:
 PROMPTER: Any = NotBuilt()
 #: How the node decides there is a desktop; tests replace it.
 DESKTOP: Callable[[], tuple[bool, str]] = desktop
+#: Whether a signed client can be verified on this system; tests replace it.
+VERIFIABLE: Callable[[], bool] = verifiable_client
 CLOCK: Callable[[], float] = time.time
 
 
@@ -450,7 +460,7 @@ def _file(agent: str, args: dict, where: dict) -> dict:
     ok, _how = DESKTOP()
     if not ok:
         raise Refused("no-desktop", step=step(args["project"], args["env"], args["name"]))
-    blocked = PROMPTER.available()
+    blocked = "secret-ui-unavailable" if not VERIFIABLE() else PROMPTER.available()
     if blocked is not None:
         raise Refused("no-client", why=NO_CLIENT.get(blocked, blocked), reason=blocked,
                       step=step(args["project"], args["env"], args["name"]))
