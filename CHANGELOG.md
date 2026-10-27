@@ -22,10 +22,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   requests are limited per side once their signature holds, never the sender's revocation; a Worker without a
   readable owner key files no share; `deploy` refuses to replace a Worker of that name that is not such a mailbox,
   and finishes one of its own that stopped half-way. Nonces are kept under their own keys, ordered by their
-  signature's time, only for accepted requests that change something, and purged once too old to be played again,
+  signature's time, only for accepted requests other than reads, and purged once too old to be played again,
   so no flood can grow what a share keeps; a repeated late claim or abort is refused, not carried again; a renewal
   is refused once every sealed copy has ended. A share's nonces from Worker 1.1.0 are dropped when 1.3.0 first
-  reads it (they could only refuse a replay within its five minutes).
+  reads it, and the few keyed without a time by the 1.2.0 review build stay until the share itself is forgotten (they
+  could only refuse a replay within its five minutes).
   The link's page runs no script. With no
   admin token stashed, `deploy` names your step and its address before any call.
 

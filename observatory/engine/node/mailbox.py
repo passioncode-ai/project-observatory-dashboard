@@ -32,7 +32,9 @@ The routes (every body JSON, every answer JSON; refusals `{"error": {"code", "me
 | `PUT /v1/shares/{id}/deletion` | recipient | hold the recipient's deletion receipt |
 | `GET /v1/shares/{id}` | either side | status: verdict, sealed, deliveries, last renewal, revocation, deletion |
 
-`FakeMailbox` is this module's in-process mailbox: the same rules, for tests and for a loopback mailbox a person can run
+`FakeMailbox` is this module's in-process mailbox: the same rules, except that it is stricter about nonces (it keeps one
+for every signed request, reads and refused ones included, and so refuses a replayed read the Worker answers), for tests
+and for a loopback mailbox a person can run
 to try a share between two workspaces on one machine. The deployed mailbox is the Worker under
 `observatory/engine/cloud/` (OBS-263).
 """

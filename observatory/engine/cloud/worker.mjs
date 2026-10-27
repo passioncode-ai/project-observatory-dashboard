@@ -15,7 +15,7 @@
 // Requests are signed with DEC-0056's construction (RFC 9421: `@method`, `@target-uri`, `content-digest`; `created`,
 // `nonce`, `keyid`, `alg`) under the label `fabric-peer-share`, keyid the RFC 7638 thumbprint of the signing share
 // #sig, `ecdsa-p256-sha256`; a share's creation also under `observatory-owner` by the owner key `full cloud deploy`
-// binds as OWNER_JWK. Each accepted request that changes something keeps its nonce under its own key
+// binds as OWNER_JWK. Each accepted request other than a read keeps its nonce under its own key
 // (`nonce:<created>:...`) until its signature is too old to be accepted again, when it is purged; a refused request or a
 // read stores none, so neither the share's record nor its keys grow from them.
 
