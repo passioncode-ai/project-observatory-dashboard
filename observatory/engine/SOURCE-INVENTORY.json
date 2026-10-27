@@ -919,8 +919,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c45b06338e25675f9526c0495e37d10e7ca6019a4809496e5ff086f2971726da",
-      "bytes": 199439,
+      "export_sha256": "25e245d3743bf02f7c55447b2fd554665d1b2b90b694a73cc20f0b69fff5fbd7",
+      "bytes": 199453,
       "upstream_modified": true
     },
     {
@@ -3563,8 +3563,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "70d4ef59108c9b72f51141a8a187843ea46cea7bbcbad019b6180eaf4a93ec87",
-      "bytes": 25429,
+      "export_sha256": "a48f9208bd74a13c2f0afa7aba10d07ea557f6f264e993f681ed3a379a826c76",
+      "bytes": 26155,
       "upstream_modified": true
     },
     {
@@ -4286,8 +4286,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "3f3a86900e64af55cef918a688cc64dd82b127b3283a86e8f135814407c6bf34",
-      "bytes": 206716,
+      "export_sha256": "65c8734cf7dff22d94a91c390459f700d61160405ba13d433790b2d1cec76d4b",
+      "bytes": 211682,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -6359,8 +6359,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "5e5574ecfdc79e3d561e794450d4fd1b4b3947e8dd7809c4b97644ec052ed3d7",
-      "bytes": 123201,
+      "export_sha256": "26139cab5ec065920ff0c29164651ad6f3b7b9cde79584a53b9196b6780fbdb1",
+      "bytes": 125407,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
