@@ -351,6 +351,9 @@ class FakeMailbox:
             if share['verdict']['state'] == 'burnt':
                 return _refuse(409, 'burnt', 'this exchange is burnt', reason=share['verdict']['reason'])
             return _refuse(409, 'not-sealed', 'the sender has not sealed the share yet')
+        ends = [relay.instant(e['header']['exp']) or 0 for e in share['envelopes'].values()]
+        if ends and now >= max(ends):
+            return _refuse(409, 'ended', "every sealed copy of this share has ended; the sender's machine seals it again")
         share['deliveries'] += 1
         share['lastRenewal'] = relay.rfc3339(now)
         lease = {'grantedAt': relay.rfc3339(now), 'expiresAt': relay.rfc3339(now + share['leaseSeconds'] * 1000)}

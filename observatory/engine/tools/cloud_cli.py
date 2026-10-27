@@ -220,6 +220,15 @@ def well_known(origin: str, timeout: float = 15.0) -> dict:
     return doc
 
 
+def is_ours(settings: dict) -> bool:
+    """Whether a Worker's settings are those `deploy` uploads: the ShareBox namespace and the code's digest bound."""
+    bindings = settings.get("bindings") if isinstance(settings.get("bindings"), list) else []
+    named = {b.get("name"): b for b in bindings if isinstance(b, dict)}
+    return (named.get("SHARES", {}).get("type") == "durable_object_namespace"
+            and named.get("SHARES", {}).get("class_name") == "ShareBox"
+            and named.get("WORKER_DIGEST", {}).get("type") == "plain_text")
+
+
 def deploy(*, account_ref: str | None, script: str, new_token: bool, dry_run: bool,
            wait_seconds: float = 120.0, now=time.time) -> dict:
     account = choose_account(account_ref)
@@ -244,13 +253,16 @@ def deploy(*, account_ref: str | None, script: str, new_token: bool, dry_run: bo
                          f"step, once: open https://dash.cloudflare.com/{account['id']}/workers-and-pages and choose a "
                          f"workers.dev subdomain, then run `{PROG} deploy` again. Nothing was uploaded")
     if current is not None:
-        # Never over another Worker: one of this name is replaced only when it answers as this kind of mailbox.
+        # Never over another Worker: one of this name is replaced only when it answers as this kind of mailbox, or
+        # when its own settings show it is one (a deploy of ours that stopped before its address answered).
         try:
             well_known(f"https://{script}.{subdomain}.workers.dev")
         except CloudError as error:
-            raise CloudError(f"a Worker called {script} already runs in this account and does not answer as an "
-                             f"observatory-cloud mailbox ({error}); nothing was uploaded. Choose another name with "
-                             f"--name") from None
+            if not is_ours(cf("GET", f"{base}/scripts/{script}/settings", token).get("result") or {}):
+                raise CloudError(f"a Worker called {script} already runs in this account and is not an "
+                                 f"observatory-cloud mailbox ({error}); nothing was uploaded. Choose another name "
+                                 f"with --name") from None
+            print(f"{script} is a mailbox of ours that did not finish deploying; deploying it again")
     migrate = (current or {}).get("migration_tag") != MIGRATION_TAG
     body, content_type = multipart(metadata(owner, digest, migrate), code)
     print(f"uploading {script} ({len(code)} bytes, {digest[:19]}...) to account {account['slug']}")

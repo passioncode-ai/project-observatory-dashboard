@@ -129,22 +129,22 @@
       "path": "cloud/memory_env.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5c2f7602334ffd0923369f561dbef028c8708840734cf86423007ffe1e200acc",
-      "bytes": 1900
+      "export_sha256": "e1cf7efd0b71fec28f5241b9c2c8351143333949f951c4a78a6b99dc44c0ccc4",
+      "bytes": 2216
     },
     {
       "path": "cloud/worker.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "92104655b8c36cce4710345510bc5e7f682331f9a1c6cdf973361798e10acc74",
-      "bytes": 41045
+      "export_sha256": "147e1cc4fcf6964c7e85a351937df295ff69a346f9b3c2069b1741da694ce4ed",
+      "bytes": 42689
     },
     {
       "path": "cloud/worker.test.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "809b68312ae1d6a697e8ba9c6aa16a6d15207f7311610046ba7b7e1377a958b8",
-      "bytes": 8631
+      "export_sha256": "4bd354e2a3045ac68a54b86125f0ceddfb2b8c82c9d5a329bc554f34cbc4642c",
+      "bytes": 13698
     },
     {
       "path": "code_freshness.py",
@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "69d36bf476e4fe38c66bf2c6db2e06d41299e8171b55c1f85f289262085d0a1b",
-      "bytes": 198703,
+      "export_sha256": "fe755f99e1f4398bf8ac4dacf54a490aee0b5cf66e74abb3cb45c83f1ea6352d",
+      "bytes": 198895,
       "upstream_modified": true
     },
     {
@@ -3085,8 +3085,8 @@
       "path": "node/mailbox.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "47dc9e551f61e285031fa370cd0827175810fea0c01fc03907a0a15ecf99c998",
-      "bytes": 31385
+      "export_sha256": "818dbb1a03d4c72e952608d1c25b363b375fb8ced2cd391853ccfc78851bac1c",
+      "bytes": 31639
     },
     {
       "path": "node/node_summary.py",
@@ -3162,8 +3162,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "04c7b8be51ec5f263d94905c9997b5fb6be85c18fa2cf31374836b3ea0f86244",
-      "bytes": 61728
+      "export_sha256": "05ba5dc32886d010b993a728d92c703eed3c6467685334be35b3ca3cca4b83ae",
+      "bytes": 61909
     },
     {
       "path": "node/webauthn.py",
@@ -4245,8 +4245,8 @@
       "path": "tests/test_cloud_deploy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c949651a15854816e20abf76a182467ca1a14d9a3437f43dc86a8d8d32640489",
-      "bytes": 10882
+      "export_sha256": "2e7cce2eac415a8ca6f7b3218233134e45758b13f1b1a4e4679097fcc016d6dc",
+      "bytes": 12268
     },
     {
       "path": "tests/test_cloud_worker.py",
@@ -6402,8 +6402,8 @@
       "path": "tools/cloud_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a2bd1e6605b96e42c45d4a2b60188f0432a48f99eeefbef892c5b88353a4e0bd",
-      "bytes": 18292
+      "export_sha256": "073284ed0a6769203b711c2abadc40227d8ad598813e38b9b7700d43ae19fa7c",
+      "bytes": 19157
     },
     {
       "path": "tools/cloudflare.py",

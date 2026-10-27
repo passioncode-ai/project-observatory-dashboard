@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import worker, { peerExchangeVerdict, peerFrame, peerJwk, peerKeys, peerRecordStands, peerSealedShape, peerThumbprint,
-  instant, rfc3339, rfc8785, parseDictionary, ShareMailbox } from "./worker.mjs";
+  instant, rfc3339, rfc8785, parseDictionary, ShareMailbox, b64urlEncode, contentDigest } from "./worker.mjs";
 import { memoryEnv, MemoryStorage } from "./memory_env.mjs";
 
 const vectors = JSON.parse(readFileSync(new URL("../fabric/node-vectors/peer/peer-share.json", import.meta.url), "utf8"));
@@ -113,7 +113,8 @@ test("a sealed share is forgotten 30 days after its last copy ends, its revocati
   assert.equal(await storage.get("share"), undefined);
   assert.equal(await storage.get("env:OPENROUTER_API_KEY"), undefined);
   // Taken back: its copies are gone at once, and it is forgotten 30 days after the revocation.
-  const revoked = { ...sealed, envelopeEnds: {}, revocation: { at: "2026-11-02T00:00:00Z" }, lastRenewal: "2026-11-01T00:00:00Z" };
+  const revoked = { ...sealed, envelopeEnds: {}, revocation: { at: "2026-11-02T00:00:00Z" }, revokedAt: "2026-11-02T00:00:00Z",
+    lastRenewal: "2026-11-01T00:00:00Z" };
   assert.equal(box.keepUntil(revoked), Date.UTC(2026, 11, 2));
 });
 
@@ -150,4 +151,81 @@ test("a Worker with no readable owner key files no share", async () => {
   const answerOf = await worker.fetch(new Request(`${ORIGIN}/v1/shares/${id}`, { method: "PUT", body }), env);
   assert.equal(answerOf.status, 503);
   assert.equal((await answerOf.json()).error.code, "no-owner");
+});
+
+// ---- Signed requests, as a node makes them, for the handler's own paths ------------------------------------------
+
+const N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+const toBig = (bytes) => bytes.reduce((acc, b) => (acc << 8n) | BigInt(b), 0n);
+const toBytes = (n, len) => Uint8Array.from({ length: len }, (_, i) => Number((n >> BigInt(8 * (len - 1 - i))) & 0xffn));
+
+async function shareKey() {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  return { pub: { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y }, priv: pair.privateKey };
+}
+
+async function es256(priv, text) {
+  const raw = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, priv, new TextEncoder().encode(text)));
+  const s = toBig(raw.slice(32));
+  if (s > N / 2n) raw.set(toBytes(N - s, 32), 32);              // low-S, as every node signs
+  return raw;
+}
+
+const random32 = () => b64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+
+async function signed(method, url, doc, signers, created) {
+  const bytes = doc === null ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(doc));
+  const digest = await contentDigest(bytes);
+  const inputs = [], sigs = [];
+  for (const [label, key] of signers) {
+    const nonce = b64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+    const params = `("@method" "@target-uri" "content-digest");created=${created};nonce="${nonce}";keyid="${await peerThumbprint(key.pub)}";alg="ecdsa-p256-sha256"`;
+    const base = `"@method": ${method}\n"@target-uri": ${url}\n"content-digest": ${digest}\n"@signature-params": ${params}`;
+    inputs.push(`${label}=${params}`);
+    sigs.push(`${label}=:${btoa(String.fromCharCode(...(await es256(key.priv, base))))}:`);
+  }
+  const headers = new Headers({ "content-digest": digest, "signature-input": inputs.join(", "), signature: sigs.join(", ") });
+  return { url, method, headers, arrayBuffer: async () => bytes.buffer };
+}
+
+test("a flood of self-signed claims never grows the share's record, and the revocation still lands", async () => {
+  const storage = new MemoryStorage({ maxValueBytes: 16_384 });   // far below a Durable Object's limit
+  const now = Date.UTC(2026, 9, 28, 12);
+  const box = new ShareMailbox(storage, { openCreation: true, now: () => now });
+  const id = "f".repeat(32), sender = await shareKey(), created = Math.floor(now / 1000);
+  const base = `${ORIGIN}/v1/shares/${id}`;
+  const made = await box.handle(await signed("PUT", base, { shareId: id, sender: { sig: sender.pub }, claimDeadline: rfc3339(now + 86_400_000),
+    leaseSeconds: 3600 }, [["fabric-peer-share", sender]], created), id, null);
+  assert.equal(made.status, 201);
+  const stranger = await shareKey(), kem = await shareKey();
+  const claim = { schema: "peer-share-frame/1", step: "claim", shareId: id, keys: { sig: stranger.pub, kem: kem.pub }, mac: random32(),
+    commit: "sha256:" + "0".repeat(64) };
+  const statuses = new Map();
+  for (let i = 0; i < 400; i++) {
+    // `created` 299 s ahead: each nonce would live about 600 s if it were kept.
+    const answered = await box.handle(await signed("POST", `${base}/frames`, claim, [["fabric-peer-share", stranger]], created + 299), id, "frames");
+    statuses.set(answered.status, (statuses.get(answered.status) || 0) + 1);
+  }
+  // The link's one claim, and the second that burns it (carried, so both sides learn why); the rest refused.
+  assert.equal(statuses.get(202), 2);
+  assert.equal((statuses.get(409) || 0) + (statuses.get(429) || 0), 398);
+  assert.ok(JSON.stringify(await storage.get("share")).length < 8_000);
+  assert.ok((await storage.list({ prefix: "nonce:" })).size <= 3);     // the creation's and the two carried claims
+  const unsigned = { type: "peer-share-revocation/1", shareId: id, at: rfc3339(now), signer: await peerThumbprint(sender.pub) };
+  const record = { ...unsigned, sig: b64urlEncode(await es256(sender.priv, rfc8785(unsigned))) };
+  const revoked = await box.handle(await signed("PUT", `${base}/revocation`, record, [["fabric-peer-share", sender]], created), id, "revocation");
+  assert.equal(revoked.status, 200);
+  assert.equal((await storage.get("share")).revokedAt, rfc3339(now));
+});
+
+test("a lease is refused once every sealed copy has ended, and nothing is counted", async () => {
+  const box = new ShareMailbox(new MemoryStorage(), { now: () => Date.UTC(2026, 11, 1) });
+  const share = { shareId: "a".repeat(32), sealed: true, revocation: null, verdict: { state: "complete" }, deliveries: 3, lastRenewal: null,
+    leaseSeconds: 3600, envelopeEnds: { OPENROUTER_API_KEY: "2026-11-30T00:00:00Z" } };
+  const answered = await box.lease(share, "recipient", Date.UTC(2026, 11, 1));
+  assert.equal(answered.status, 409);
+  assert.equal((await answered.json()).error.code, "ended");
+  assert.equal(share.deliveries, 3);
+  assert.equal(share.lastRenewal, null);
 });

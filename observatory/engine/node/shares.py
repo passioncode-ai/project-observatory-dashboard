@@ -340,6 +340,7 @@ class Shares:
         folder = self._sent(share_id)
         _private_dir(folder.path)
         # Under the share's lock from its first file on: a maintenance pass that finds it half-made waits.
+        refused = None
         with self._locked(folder):
             folder.put_key('sig', sig)
             folder.put_key('kem', kem)
@@ -350,8 +351,11 @@ class Shares:
                 self._client(origin, folder, record, owner=True).create(share_id, record['claimDeadline'],
                                                                         lease_seconds)
             except MB.MailboxError as error:
-                shutil.rmtree(folder.path, ignore_errors=True)
-                raise ShareError('mailbox', f'the mailbox refused the new share: {error.code}: {error}') from None
+                refused = error
+        if refused is not None:
+            # Removed after the lock is let go: Windows refuses to delete a folder that holds an open file.
+            shutil.rmtree(folder.path, ignore_errors=True)
+            raise ShareError('mailbox', f'the mailbox refused the new share: {refused.code}: {refused}')
         link = PS.share_link({'origin': origin, 'shareId': share_id, 'code': code, 'fpr': record['fpr']})
         return record, link
 

@@ -15,11 +15,12 @@
 // Requests are signed with DEC-0056's construction (RFC 9421: `@method`, `@target-uri`, `content-digest`; `created`,
 // `nonce`, `keyid`, `alg`) under the label `fabric-peer-share`, keyid the RFC 7638 thumbprint of the signing share
 // #sig, `ecdsa-p256-sha256`; a share's creation also under `observatory-owner` by the owner key `full cloud deploy`
-// binds as OWNER_JWK. Nonces are kept 300 s per share.
+// binds as OWNER_JWK. Each accepted request's nonce is kept under its own key (`nonce:`) until its signature's time plus
+// 300 s; a refused request stores none, so the share's own record never grows from them.
 
 export const PROTOCOL = "observatory-cloud/1";
 export const PEER_SHARE_PROTOCOL = "fabric-peer-share/1";
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 const LABEL = "fabric-peer-share";
 const OWNER_LABEL = "observatory-owner";
 const ALG = "ecdsa-p256-sha256";
@@ -28,6 +29,7 @@ const MAX_BODY_BYTES = 262_144;
 const DEFAULT_LEASE_SECONDS = 3600;
 const MAX_LEASE_SECONDS = 86_400;
 const MAX_CLAIM_DAYS = 7;
+const MAX_ENVELOPE_DAYS = 90;
 const DAY_MS = 86_400_000;
 const MAX_FRAMES = 16;
 const MAX_REPORTS = 1000;
@@ -453,8 +455,10 @@ export class ShareMailbox {
     // A claim is signed by its own keys, and only a claim being carried (a POST) may name its signer so: a body
     // sent with any other request is never a key this share admits.
     const claim = sub === "frames" && method === "POST" && isObject(doc) && doc.step === "claim" ? doc : null;
-    const signer = await this.signer(share, request.headers, sig, claim, now);
-    if (signer instanceof Response) return signer;               // nothing stored for a request no party signed
+    delete share.nonces;                                         // kept under their own keys since 1.2.0
+    const signed = await this.signer(share, request.headers, sig, claim, now);
+    if (signed instanceof Response) return signed;               // nothing stored for a request no party signed
+    const signer = signed.who;
     // Each party has its own minute bucket, counted only once its signature holds, and the sender taking a share back
     // is never refused for it: a stranger or a hostile recipient cannot keep the sender's revocation out.
     const revoking = sub === "revocation" && method === "PUT" && signer === "sender";
@@ -462,9 +466,11 @@ export class ShareMailbox {
     share.rates = share.rates && share.rates.minute === minute ? share.rates : { minute, counts: {} };
     share.rates.counts[signer] = (share.rates.counts[signer] || 0) + 1;
     if (!revoking && share.rates.counts[signer] > REQUESTS_PER_MINUTE) {
-      await this.storage.put("share", share);
+      await this.storage.put("share", share);                    // the counts only: a constant size, no nonce
       return refuse(429, "too-many", "too many requests from this key for this share; try again in a minute");
     }
+    const until = await this.storage.get(signed.nonceKey);
+    if (until !== undefined && until >= now) return refuse(401, "signature-replayed", "this nonce was used");
     let result;
     if (sub === "frames" && method === "POST") result = await this.frame(share, signer, doc, now);
     else if (sub === "frames" && method === "GET") {
@@ -497,8 +503,20 @@ export class ShareMailbox {
       }
     } else result = refuse(405, "method-not-allowed", "no such method on this route");
     await this.storage.put("share", share);
+    if (result.status < 400) {
+      // Only an accepted request's nonce is kept, under its own key: a flood of refused requests stores nothing.
+      await this.storage.put(signed.nonceKey, signed.until);
+      await this.purgeNonces(now);
+    }
     await this.storage.setAlarm(this.keepUntil(share));
     return result;
+  }
+
+  /** Forgets nonces past their window, a few at a time. Their number is bounded anyway: accepted requests only, at most
+   * REQUESTS_PER_MINUTE a minute per side, each kept at most 600 s. */
+  async purgeNonces(now) {
+    const held = await this.storage.list({ prefix: "nonce:", limit: 64 });
+    for (const [key, until] of held) if (until < now) await this.storage.delete(key);
   }
 
   async signer(share, headers, sig, claim, now) {
@@ -520,12 +538,8 @@ export class ShareMailbox {
       }
       return failed(refuse(401, "signature-invalid", "the signature is not by a key of this share"));
     }
-    share.nonces = Object.fromEntries(Object.entries(share.nonces || {}).filter(([, until]) => until >= now));
-    const held = `${read.keyid} ${read.nonce}`;
-    if (Object.hasOwn(share.nonces, held)) return refuse(401, "signature-replayed", "this nonce was used");
     // Kept as long as a signature made at `created` is fresh (created + 300 s): a clock ahead of ours included.
-    share.nonces[held] = Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000;
-    return who;
+    return { who, nonceKey: `nonce:${read.keyid}:${read.nonce}`, until: Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000 };
   }
 
   async create(shareId, headers, sig, doc, now) {
@@ -556,10 +570,10 @@ export class ShareMailbox {
     const share = {
       shareId, senderSig: doc.sender.sig, claimDeadline: doc.claimDeadline, leaseSeconds: lease, createdAt: rfc3339(now),
       frames: [], lateAbort: null, lateClaims: [], verdict: { state: "open" }, recipientSig: null, sealed: false,
-      envelopeEnds: {}, revocation: null, deletion: null, reportSeqs: [], deliveries: 0, lastRenewal: null,
-      nonces: { [`${read.keyid} ${read.nonce}`]: Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000 },
+      envelopeEnds: {}, revocation: null, deletion: null, reportSeqs: [], deliveries: 0, lastRenewal: null, revokedAt: null,
     };
     await this.storage.put("share", share);
+    await this.storage.put(`nonce:${read.keyid}:${read.nonce}`, Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000);
     await this.storage.setAlarm(this.keepUntil(share));
     return answer(201, { created: true });
   }
@@ -619,7 +633,8 @@ export class ShareMailbox {
     if (body.length > MAX_ITEM_BYTES) return refuse(413, "too-large", "an envelope is larger than the mailbox keeps");
     if (!Object.hasOwn(share.envelopeEnds, slot) && Object.keys(share.envelopeEnds).length >= 64) return refuse(429, "too-many", "a share carries at most 64 slots");
     await this.storage.put(`env:${slot}`, env);
-    share.envelopeEnds[slot] = env.header.exp;
+    // Kept by the mailbox's own clock: an `exp` past the contract's 90 days is read as 90 days from now.
+    share.envelopeEnds[slot] = rfc3339(Math.min(instant(env.header.exp), now + MAX_ENVELOPE_DAYS * DAY_MS));
     share.sealed = true;
     return answer(200, { stored: true });
   }
@@ -631,6 +646,10 @@ export class ShareMailbox {
     if (!share.sealed) {
       if (share.verdict.state === "burnt") return refuse(409, "burnt", "this exchange is burnt", { reason: share.verdict.reason });
       return refuse(409, "not-sealed", "the sender has not sealed the share yet");
+    }
+    const ends = Object.values(share.envelopeEnds).map((exp) => instant(exp) ?? 0);
+    if (ends.length && now >= Math.max(...ends)) {
+      return refuse(409, "ended", "every sealed copy of this share has ended; the sender's machine seals it again");
     }
     share.deliveries += 1;
     share.lastRenewal = rfc3339(now);
@@ -663,6 +682,8 @@ export class ShareMailbox {
     }
     if (share.revocation === null) {
       share.revocation = record;
+      // When it was taken back, by the mailbox's own clock: a revocation dated in the future cannot keep a share.
+      share.revokedAt = rfc3339(Math.min(this.now(), Math.max(instant(record.at) ?? 0, instant(share.createdAt) ?? 0)));
       // Taken back: no sealed copy is ever served again, so none is kept.
       for (const slot of Object.keys(share.envelopeEnds)) await this.storage.delete(`env:${slot}`);
       share.envelopeEnds = {};
@@ -694,7 +715,7 @@ export class ShareMailbox {
   keepUntil(share) {
     if (!share.sealed) return (instant(share.claimDeadline) ?? 0) + DAY_MS;
     const times = [...Object.values(share.envelopeEnds || {}).map((exp) => instant(exp) ?? 0),
-      instant(share.revocation?.at) ?? 0, instant(share.lastRenewal) ?? 0, instant(share.createdAt) ?? 0];
+      instant(share.revokedAt) ?? 0, instant(share.lastRenewal) ?? 0, instant(share.createdAt) ?? 0];
     return Math.max(...times) + 30 * DAY_MS;
   }
 

@@ -4,13 +4,17 @@
 import { ShareBox } from "./worker.mjs";
 
 export class MemoryStorage {
-  constructor() { this.map = new Map(); this.alarmAt = null; }
+  /** `maxValueBytes`: refuse a value larger than this, as a Durable Object refuses one past its limit. */
+  constructor({ maxValueBytes = Infinity } = {}) { this.map = new Map(); this.alarmAt = null; this.maxValueBytes = maxValueBytes; }
   async get(key) { const v = this.map.get(key); return v === undefined ? undefined : structuredClone(v); }
-  async put(key, value) { this.map.set(key, structuredClone(value)); }
+  async put(key, value) {
+    if (JSON.stringify(value).length > this.maxValueBytes) throw new RangeError("value too large");
+    this.map.set(key, structuredClone(value));
+  }
   async delete(key) { return this.map.delete(key); }
   async deleteAll() { this.map.clear(); this.alarmAt = null; }
-  async list({ prefix = "" } = {}) {
-    return new Map([...this.map].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)]));
+  async list({ prefix = "", limit = Infinity } = {}) {
+    return new Map([...this.map].filter(([k]) => k.startsWith(prefix)).slice(0, limit).map(([k, v]) => [k, structuredClone(v)]));
   }
   async setAlarm(ms) { this.alarmAt = ms; }
   async getAlarm() { return this.alarmAt; }

@@ -20,7 +20,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   then), and a share forgotten a day after an unclaimed deadline or 30 days after the latest of its last sealed copy's
   end, its revocation and its last renewal. Only the two sides' share keys read a share's frames, status and reports;
   requests are limited per side once their signature holds, never the sender's revocation; a Worker without a
-  readable owner key files no share; `deploy` refuses to replace a Worker of that name that is not such a mailbox.
+  readable owner key files no share; `deploy` refuses to replace a Worker of that name that is not such a mailbox,
+  and finishes one of its own that stopped half-way. Nonces are kept under their own keys and only for accepted
+  requests, so no flood can grow a share's record past what storage takes; a renewal is refused once every sealed
+  copy has ended.
   The link's page runs no script. With no
   admin token stashed, `deploy` names your step and its address before any call.
 

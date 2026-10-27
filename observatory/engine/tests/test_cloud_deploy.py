@@ -51,6 +51,7 @@ def node_ok() -> bool:
 class FakeCloudflare:
     def __init__(self, scripts=()):
         self.calls, self.uploads, self.scripts, self.subdomain = [], [], list(scripts), 'example-sub'
+        self.bindings = [{'type': 'plain_text', 'name': 'GREETING', 'text': 'hello'}]
 
     def __call__(self, method, path, token, body=None, content_type='application/json'):
         assert token == PLANTED
@@ -63,6 +64,8 @@ class FakeCloudflare:
             return {'success': True, 'result': {}}
         if method == 'POST' and path.endswith('/subdomain'):
             return {'success': True, 'result': {'enabled': True}}
+        if method == 'GET' and path.endswith('/settings'):
+            return {'success': True, 'result': {'bindings': self.bindings}}
         if method == 'GET' and path.endswith('/workers/subdomain'):
             return {'success': True, 'result': {'subdomain': self.subdomain}}
         raise AssertionError((method, path))
@@ -208,8 +211,32 @@ class Deploy(unittest.TestCase):
         self.slot['present'] = True
         code, _, err = self.run_cli('deploy')
         self.assertEqual(code, 1)
-        self.assertIn('does not answer as an observatory-cloud mailbox', err)
+        self.assertIn('is not an observatory-cloud mailbox', err)
         self.assertEqual(self.cf.uploads, [])
+
+    @unittest.skipUnless(node_ok(), 'needs Node 20 or later')
+    def test_a_deploy_of_ours_that_stopped_halfway_is_finished(self):
+        """A Worker of this name that does not answer yet, but whose settings are ours, is deployed again."""
+        self.serve()
+        self.cf.scripts = [{'id': 'observatory-cloud', 'migration_tag': 'v1'}]
+        self.cf.bindings = [{'type': 'durable_object_namespace', 'name': 'SHARES', 'class_name': 'ShareBox'},
+                            {'type': 'plain_text', 'name': 'WORKER_DIGEST', 'text': 'sha256:' + '1' * 64}]
+        self.slot['present'] = True
+        real, calls = self.C.well_known, []
+
+        def first_fails(origin, timeout=15.0):
+            calls.append(origin)
+            if len(calls) == 1:
+                raise self.C.CloudError('the mailbox did not answer (planted)')
+            return real(origin, timeout)
+        self.C.well_known = first_fails
+        try:
+            code, out, err = self.run_cli('deploy')
+        finally:
+            self.C.well_known = real
+        self.assertEqual(code, 0, err)
+        self.assertIn('did not finish deploying', out)
+        self.assertEqual(len(self.cf.uploads), 1)
 
     def test_status_without_a_deployment(self):
         code, out, _ = self.run_cli('status', '--json')
