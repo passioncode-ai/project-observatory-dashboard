@@ -1236,8 +1236,10 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   is never in an argument, the environment, a log, a notification or anything the agent reads,
   and the local server sees only the slot's metadata afterwards. The child answers only when its
   own file lies inside the enrolled app's bundle and its immediate parent, while running,
-  satisfies the enrolled app's code requirement (its team and bundle id); anything else, the
-  engine named in the app's settings included, is refused `client-unverified`.
+  satisfies the enrolled app's code requirement (its team and bundle id); anything else is
+  refused `client-unverified`. A program of your user that deliberately runs as the app's direct
+  child (the engine named in the app's settings, for one) can still pass, which the limits below
+  already allow: it can read and write the queue and the vault slots anyway.
 - **Only through the engine inside the signed app, and none ships yet.** That parent check proves
   only that the request came through the app's own process tree, and whatever the app runs is in
   that tree: an engine named by the program path in its settings, PATH or a launcher could be

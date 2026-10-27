@@ -461,8 +461,12 @@ arrived). A drag-installed app belongs to its user, so a program of that user wi
 swap a file after the check and restore it afterwards: the check alone does not stop it. Before any
 engine is bundled it must be one that cannot change after the check (copied into storage only the app
 can write, or a hardened-runtime binary with library validation), or the bundle must be one the user
-cannot write; and its workspace (`OBSERVATORY_HOME`, today from the app's settings), its interpreter and
-its dependencies must be inside the sealed bundle too.
+cannot write; its workspace (`OBSERVATORY_HOME`, today from the app's settings), its interpreter and
+its dependencies must be inside the sealed bundle too; and it must run as the app's direct child, with no
+launcher process in between (today's `project-observatory full` starts the engine as its own child, so the
+door, which accepts only the app as its immediate parent, would refuse it). Whether the app is built with
+the hardened runtime and library validation, so that no program of the user can inject into it before the
+parent check, is checked at the same time.
 The window is excluded from sharing (`NSWindow.sharingType = .none`) and the phrase from the
 accessibility tree; a program with Screen Recording may still capture it on recent macOS. This
 release's app is not signed with the provisioning profile the keychain group needs, so it keeps no

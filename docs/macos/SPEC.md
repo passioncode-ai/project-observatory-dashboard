@@ -65,7 +65,7 @@ enough: the engine the settings name, run for other actions, would find the app 
 What this does not cover: the signature is hashed once and a Python engine reads its files as it
 imports them, so a program with App Management could swap a file of a user-writable bundle after
 the check; an engine must not be bundled until it cannot change after the check, with its
-workspace, interpreter and dependencies inside the sealed bundle (OBS-260). With no such engine (every release so far)
+workspace, interpreter and dependencies inside the sealed bundle, run as the app's direct child with no launcher in between (OBS-260). With no such engine (every release so far)
 it reads nothing; the node has already answered the request `no-client`, reason
 `engine-untrusted`. The `secret` action runs with a scrubbed environment (system PATH, `PYTHONNOUSERSITE=1`, no
 `PYTHON*` or `DYLD_*` variables). The window has `sharingType = .none` (set as its view joins
