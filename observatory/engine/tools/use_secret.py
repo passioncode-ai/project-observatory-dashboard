@@ -451,6 +451,9 @@ def shares_store():
     sys.path.insert(0, str(ROOT))
     from node import shares as share_store
     root = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node") / "shares"
+    if any(p.is_symlink() for p in (root, *root.parents)):
+        raise LookupError("the share store's path holds a symbolic link; a shared key is opened only where no link "
+                          "can redirect it")
     return share_store, share_store.Shares(root.resolve())
 
 
