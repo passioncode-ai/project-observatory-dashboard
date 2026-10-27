@@ -6402,8 +6402,8 @@
       "path": "tools/cloud_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c2c2a2e61440ef387593f69f42680715853e07d0e650453b545cc099c278a3b1",
-      "bytes": 17487
+      "export_sha256": "2057d9b759e591dba8c8734e34274e58bafbbb072a5f2504bd0a2e46ead354ad",
+      "bytes": 17619
     },
     {
       "path": "tools/cloudflare.py",

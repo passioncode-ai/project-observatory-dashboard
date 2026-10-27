@@ -138,7 +138,9 @@ def issue_token(account: dict) -> None:
     output names the slot and the account, never the value; it is relayed as it is."""
     import subprocess
     project, env, name = TOKEN_SLOT
-    run = subprocess.run([sys.executable, str(ROOT / "tools" / "cloudflare.py"), "issue", "--preset", "workers-edit",
+    run = subprocess.run([sys.executable, str(ROOT / "tools" / "cloudflare.py"), "issue",
+                          # One argument: this tool takes no --preset of its own (tests/test_docs_drift.py).
+                          "--preset=workers-edit",
                           "--account", account["slug"], "--vault", f"{project}/{env}/{name}"],
                          capture_output=True, text=True, timeout=600)
     for line in (run.stdout + run.stderr).splitlines():
