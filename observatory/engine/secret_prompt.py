@@ -128,8 +128,8 @@ NO_CLIENT = {
 #: The steps that make a genuine window possible, by reason code; shown beside the person's vault.py step.
 NO_CLIENT_FIX = {
     "app-not-enrolled": ("enroll the app once, at your terminal: project-observatory full lifecycle enroll "
-                         "observatory.app --kind app --path \"/Applications/Project Observatory.app\" --caller "
-                         "service:observatory --startup-effect \"shows Observatory's own windows\""),
+                         "observatory.app --kind app --path PATH --caller service:observatory --startup-effect TEXT, "
+                         "with PATH the installed Project Observatory.app"),
     "app-held-off": "release it at your terminal: project-observatory full lifecycle hold observatory.app --release",
     "phrase-store-unavailable": "install the signed release of Project Observatory.app",
 }

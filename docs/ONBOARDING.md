@@ -1224,7 +1224,8 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   request, and no scripted dialog (`osascript`, `zenity`, `kdialog`): any program of your user could
   draw an identical one.
 - **The window, on a Mac.** Enroll Observatory's app with the node's lifecycle broker once:
-  `project-observatory full lifecycle enroll observatory.app --kind app --path "/Applications/Project Observatory.app" --caller service:observatory --startup-effect "shows Observatory's own windows"`.
+  `project-observatory full lifecycle enroll observatory.app --kind app --path PATH --caller service:observatory --startup-effect TEXT`,
+  with PATH the installed app (usually `/Applications/Project Observatory.app`, quoted in your shell).
   A request then asks the broker to start the app (or finds it running); the local server never
   launches it itself. The app reads waiting requests every five seconds through its own child
   process (`project-observatory full assistant secret`), brings its window forward and shows the

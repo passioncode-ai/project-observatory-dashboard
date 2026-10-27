@@ -451,6 +451,13 @@ def observatory_target(desired: str = "on_demand", bundle: str = SP.OBSERVATORY_
 class TheBrokerOpensTheWindow(Base):
     """The prompter the local server installs (D4): the enrolled app, through the lifecycle broker, never directly."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        # The broker path is the Mac's; the tests run on every system as if on one.
+        p = mock.patch.object(sys, "platform", "darwin")
+        p.start()
+        self.addCleanup(p.stop)
+
     def broker_prompter(self, targets=None, broker=None) -> SP.BrokerPrompter:
         self.broker = broker or FakeBroker()
         service = FakeService({"observatory.app": observatory_target()} if targets is None else targets, self.broker)

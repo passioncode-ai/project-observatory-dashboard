@@ -919,8 +919,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c5197290c1379f2f3e7112adea64b94d189607ee3cafcde30297414b736a6364",
-      "bytes": 190282,
+      "export_sha256": "56f0a2ec89a1297d5ceeda30fd74255ddb0cee638e6ee7310e4402b3f440cf69",
+      "bytes": 190321,
       "upstream_modified": true
     },
     {
@@ -3293,8 +3293,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b3cd9c767712780b5e8a5869416e03bc2b8ef248712deab5a6fe9130d0a5c213",
-      "bytes": 48208
+      "export_sha256": "ee3016459d33360fbdb9c851969f8a3062eae02f5498ede987bc031715d6cad6",
+      "bytes": 48189
     },
     {
       "path": "service_events.py",
@@ -5512,8 +5512,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "176560a142e34495f747a2f610ef4acb64e0521961403ba73bb809a76a6032a1",
-      "bytes": 36942
+      "export_sha256": "ca14734861c8f6261bfbde82bd2d3722afeb4c7ea2177b217f5e26e749081542",
+      "bytes": 37187
     },
     {
       "path": "tests/test_secrets.py",
