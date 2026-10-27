@@ -290,6 +290,22 @@ class HelperSelectionTests(Fixture):
             a.probe(APP_TARGET)
         self.assertEqual(len(self.tools.ran(self.app_helper)), 2, 'asked again once the window passed')
 
+    def test_a_helper_that_does_not_answer_in_time_is_not_remembered_as_outdated(self):
+        # Review of #383 (confirming round, LOW 1): a slow first run is not a lasting reason.
+        real = macos.helper_version
+
+        def slow(helper, *, run, strict=False):
+            if strict:
+                raise broker.LifecycleError('delivery_unknown')
+            return real(helper, run=run, strict=strict)
+
+        a = self.adapter()
+        with mock.patch.object(macos, 'helper_version', side_effect=slow):
+            a.probe(APP_TARGET)
+        self.assertEqual(a.last_choice.app_reason, 'app_verification_failed')
+        a.probe(APP_TARGET)
+        self.assertEqual(a.last_choice.in_use, 'app', 'asked again at once, not refused for 300 s')
+
     def test_a_pending_check_is_not_remembered_as_a_refusal(self):
         a = self.adapter()
         with mock.patch.object(macos, 'check_app_helper',

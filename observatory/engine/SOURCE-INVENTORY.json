@@ -2875,8 +2875,8 @@
       "path": "node/lifecycle/macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e8ef245b6051ada2b871ddbf5cc72fd8321e5b99261cdb075c4ed2c598e93f9f",
-      "bytes": 75938
+      "export_sha256": "59bd8b6105970a8b65a9d0c7c55f5e0e6e410ee59f9409506875b840a95555ba",
+      "bytes": 76400
     },
     {
       "path": "node/lifecycle/native_app.swift",
@@ -4993,8 +4993,8 @@
       "path": "tests/test_node_lifecycle_helper.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "53ba7acede4a235a127b37b6d5f8d388a22a723d3bb8d6d3394581ed84b744e6",
-      "bytes": 25666
+      "export_sha256": "d726eccf875be93884ce4b05d54f877a344c582b1828c7b500609647a1c0da62",
+      "bytes": 26418
     },
     {
       "path": "tests/test_node_lifecycle_import.py",

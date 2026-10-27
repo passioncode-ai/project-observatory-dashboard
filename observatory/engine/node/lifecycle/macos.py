@@ -225,12 +225,15 @@ def helper_safe(helper) -> bool:
         return False
 
 
-def helper_version(helper, *, run) -> Optional[str]:
+def helper_version(helper, *, run, strict: bool = False) -> Optional[str]:
     """What `helper --version` says it was built from, or None: an older build that does not know the flag
-    (`invalid_argument`), a timeout, an exit code, or an answer of another shape. Nothing else is asked of it."""
+    (`invalid_argument`), a timeout, an exit code, or an answer of another shape. Nothing else is asked of it.
+    With `strict`, a run that did not answer (a timeout, a start that failed) raises instead of reading as None."""
     try:
         result = run([str(helper), '--version'], timeout=HELPER_VERSION_TIMEOUT)
     except LifecycleError:
+        if strict:
+            raise
         return None
     if result.returncode:
         return None
@@ -243,10 +246,10 @@ def helper_version(helper, *, run) -> Optional[str]:
     return answer['version']
 
 
-def helper_current(helper, *, run) -> bool:
+def helper_current(helper, *, run, strict: bool = False) -> bool:
     """The helper was built from the source this engine ships."""
     expected = expected_helper_version()
-    return expected is not None and helper_version(helper, run=run) == expected
+    return expected is not None and helper_version(helper, run=run, strict=strict) == expected
 
 
 def helper_state(helper=None, *, run=None, platform: Optional[str] = None) -> str:
@@ -318,7 +321,12 @@ def check_app_helper(app, *, run, verified: Callable[[], bool]) -> Path:
         raise LifecycleError(_APP_CHECK_REASONS.get(exc.code, 'app_untrusted')) from None
     if not signed:
         raise LifecycleError('app_helper_signature_invalid')
-    if not helper_current(helper, run=run):
+    try:
+        current = helper_current(helper, run=run, strict=True)
+    except LifecycleError:
+        # No answer in time (a first run slowed by the system's own check) is not a lasting reason: not cached.
+        raise LifecycleError('app_verification_failed') from None
+    if not current:
         raise LifecycleError('app_helper_outdated')
     return helper
 
