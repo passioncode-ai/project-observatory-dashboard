@@ -81,7 +81,7 @@ class Base(unittest.TestCase):
         self.home = self.base / "workspace"
         self.data = self.base / "data"
         self.data.mkdir()
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base)}, clear=True)
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base), "USERPROFILE": str(self.base)}, clear=True)
         self.env.start()
         workspace.initialize(self.home)
         doc = json.loads((self.home / "config/settings.json").read_text())

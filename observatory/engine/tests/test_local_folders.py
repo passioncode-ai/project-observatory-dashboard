@@ -35,7 +35,7 @@ def _environment(base: pathlib.Path) -> dict[str, str]:
     """Only what the collectors need: no inherited workspace, credential or Git config."""
     user = base / "user"
     user.mkdir()
-    return git_env({"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(user),
+    return git_env({"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(user), "USERPROFILE": str(user),
                     "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
                     "OBSERVATORY_HOME": str(base / "home")})
 

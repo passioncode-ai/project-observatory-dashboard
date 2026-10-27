@@ -35,6 +35,17 @@ class FullLauncherTests(unittest.TestCase):
             self.assertEqual(full_cli.full_home(), Path(new))
             self.assertEqual(full_cli.full_home(explicit), Path(explicit))
 
+    def test_the_engine_runs_in_utf8_mode_on_windows(self):
+        home, root = Path('ws'), Path('engine')
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('PYTHONUTF8', None)
+            self.assertEqual(full_cli.engine_environment(home, root, nt=True)['PYTHONUTF8'], '1')
+            self.assertNotIn('PYTHONUTF8', full_cli.engine_environment(home, root, nt=False))
+            env = full_cli.engine_environment(home, root, nt=True)
+            self.assertEqual((env['OBSERVATORY_HOME'], env['OBSERVATORY_ROOT']), (str(home), str(root)))
+        with patch.dict(os.environ, {'PYTHONUTF8': '0'}):
+            self.assertEqual(full_cli.engine_environment(home, root, nt=True)['PYTHONUTF8'], '0')
+
     def test_portable_state_refused_without_modification(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve()

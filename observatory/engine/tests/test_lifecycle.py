@@ -82,7 +82,7 @@ class Workspace(unittest.TestCase):
         self.user = self.base / "user"
         self.user.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(OBSERVATORY_HOME=str(self.home), HOME=str(self.user),
+        env.update(OBSERVATORY_HOME=str(self.home), HOME=str(self.user), USERPROFILE=str(self.user),
                    FABRIC_SERVICES_DIR=str(self.base / "services"))
         self.env = patch.dict(os.environ, env, clear=True)
         self.env.start()

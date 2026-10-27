@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "about": "Portable engine suites that do not pass on windows-latest, each with the backlog row that makes it pass. tools/check_windows_suites.py fails the windows job when a suite outside this list fails or skips, or a suite on it passes. The list only shrinks.",
+  "suites": {}
+}

@@ -22,7 +22,7 @@ class RotationSafety(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name).resolve()
-        self.env = patch.dict(os.environ, {'HOME': str(self.home),
+        self.env = patch.dict(os.environ, {'HOME': str(self.home), 'USERPROFILE': str(self.home),
             'OBSERVATORY_HOME': str(self.home / 'workspace'), 'PATH': '/usr/bin:/bin'}, clear=True)
         self.env.start(); self.addCleanup(self.env.stop)
         sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]

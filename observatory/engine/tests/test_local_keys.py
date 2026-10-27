@@ -28,7 +28,7 @@ class LocalKeys(unittest.TestCase):
         self.state.mkdir()
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith(("OBSERVATORY_", "CLAUDE_MEM_", "OPENAI_", "OPENROUTER_"))}
-        self.env.update(HOME=str(base / "user"), OBSERVATORY_HOME=str(self.home),
+        self.env.update(HOME=str(base / "user"), USERPROFILE=str(base / "user"), OBSERVATORY_HOME=str(self.home),
                         OBSERVATORY_STATE=str(self.state), PYTHONDONTWRITEBYTECODE="1")
 
     def put(self, where: Path) -> None:

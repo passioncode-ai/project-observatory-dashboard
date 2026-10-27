@@ -441,25 +441,31 @@ def runtime_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
+def home_environment(user: Path) -> dict[str, str]:
+    """The variables that name a home folder `user`, on this OS. POSIX reads HOME; Windows reads
+    USERPROFILE (never HOME: `Path.home()` raises "Could not determine home directory" without it)
+    and keeps its per-user data in LOCALAPPDATA and APPDATA, which go inside that home too (OBS-277).
+    Every engine entry point on Windows runs Python in UTF-8 mode (`full_cli.run`, the scheduled
+    tasks of `osschedule`), so a suite's interpreter does as well."""
+    names = {'HOME': str(user)}
+    if os.name == 'nt':
+        local, roaming = user / 'AppData' / 'Local', user / 'AppData' / 'Roaming'
+        local.mkdir(parents=True, exist_ok=True); roaming.mkdir(parents=True, exist_ok=True)
+        names.update(USERPROFILE=str(user), LOCALAPPDATA=str(local), APPDATA=str(roaming),
+                     PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    return names
+
+
 def clean_env(base: Path) -> dict[str, str]:
     user, temporary = base / 'user', base / 'tmp'
     user.mkdir(); temporary.mkdir()
     runtime = base / 'runtime'
-    windows = {}
-    if os.name == 'nt':
-        # Windows reads the home from USERPROFILE (never HOME) and the temporary folder from TEMP and
-        # TMP; without them every suite read the runner's real profile or failed with "Could not
-        # determine home directory" (OBS-277). APPDATA and LOCALAPPDATA go inside the sandbox too, as
-        # HOME does on POSIX. A child's console encoding is the ANSI code page unless told otherwise:
-        # UTF-8 on its stdio, as this runner decodes it.
-        local = user / 'AppData' / 'Local'; roaming = user / 'AppData' / 'Roaming'
-        local.mkdir(parents=True); roaming.mkdir(parents=True)
-        windows = {'USERPROFILE': str(user), 'TEMP': str(temporary), 'TMP': str(temporary),
-                   'LOCALAPPDATA': str(local), 'APPDATA': str(roaming), 'PYTHONIOENCODING': 'utf-8'}
+    # Windows reads the temporary folder from TEMP and TMP, not TMPDIR (OBS-277).
+    windows = {'TEMP': str(temporary), 'TMP': str(temporary)} if os.name == 'nt' else {}
     # git_env: the operator's system and global git configuration shut out, and no background
     # `gc --auto` or maintenance that outlives a git command and races the suite's cleanup.
     return git_env.git_env({
-        **runtime_environment(), 'PATH': os.environ.get('PATH', ''), 'HOME': str(user),
+        **runtime_environment(), 'PATH': os.environ.get('PATH', ''), **home_environment(user),
         'TMPDIR': str(temporary), 'LANG': 'C.UTF-8', 'LC_ALL': 'C',
         'PYTHONDONTWRITEBYTECODE': '1', 'OBSERVATORY_HOME': str(runtime),
         'OBSERVATORY_REGISTRY': str(runtime / 'registry'),

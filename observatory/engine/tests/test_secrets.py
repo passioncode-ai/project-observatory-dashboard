@@ -396,7 +396,7 @@ def test_round6_files_are_read_as_bytes_and_an_unreadable_one_fails() -> None:
         (d / "locked.txt").chmod(0o600)
     check("a key in a non-UTF-8 file is refused", any(h["where"].startswith("latin.txt") for h in creds), str(creds)[:200])
     check("an unreadable file is reported as a failure, never skipped",
-          os.geteuid() == 0 or [u["path"] for u in unreadable] == ["locked.txt"], str(unreadable))
+          os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0) or [u["path"] for u in unreadable] == ["locked.txt"], str(unreadable))
 
 
 def test_round6_generator_crlf_and_non_utf8() -> None:

@@ -26,7 +26,7 @@ class StageReceipts(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="observatory-stage-")
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name).resolve()
-        self.env = patch.dict(os.environ, {"HOME": str(self.base), "OBSERVATORY_HOME": str(self.base / "workspace"),
+        self.env = patch.dict(os.environ, {"HOME": str(self.base), "USERPROFILE": str(self.base), "OBSERVATORY_HOME": str(self.base / "workspace"),
                           "OBSERVATORY_TICK_RUN_ID": "a" * 32})
         self.env.start(); self.addCleanup(self.env.stop)
         self.tick = load_tick()
@@ -249,7 +249,7 @@ class ProbeSteps(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="observatory-probe-")
         self.addCleanup(self.tmp.cleanup)
         base = Path(self.tmp.name).resolve()
-        self.env = patch.dict(os.environ, {"HOME": str(base), "OBSERVATORY_HOME": str(base / "workspace"),
+        self.env = patch.dict(os.environ, {"HOME": str(base), "USERPROFILE": str(base), "OBSERVATORY_HOME": str(base / "workspace"),
                                            "OBSERVATORY_TICK_RUN_ID": "c" * 32})
         self.env.start(); self.addCleanup(self.env.stop)
         self.tick = load_tick()

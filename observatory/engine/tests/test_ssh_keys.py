@@ -271,7 +271,7 @@ if os.environ.get("FAKE_SSH_WORDS_LIE"):   # a login shell that broke the script
     sys.stdin.read(); print("added"); sys.exit(1)
 if os.environ.get("FAKE_SSH_SWALLOW"):   # a server whose sshd reads keys from elsewhere
     sys.stdin.read(); print("added"); sys.exit(0)
-env = dict(os.environ, HOME=str(remote))
+env = dict(os.environ, HOME=str(remote), USERPROFILE=str(remote))
 p = subprocess.run(["/bin/sh", "-c", " ".join(command)], env=env, stdin=sys.stdin)
 sys.exit(p.returncode)
 '''
@@ -313,7 +313,7 @@ class Door(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith(("OBSERVATORY_", "SSH_AUTH_SOCK", "GH_", "GITHUB_"))}
         self.env.update({
-            "HOME": str(self.home), "USER": "tester",
+            "HOME": str(self.home), "USERPROFILE": str(self.home), "USER": "tester",
             "OBSERVATORY_HOME": str(self.root / "workspace"),
             "OBSERVATORY_SCRATCH": str(self.scratch), "OBSERVATORY_STATE": str(self.root / "state"),
             "OBSERVATORY_VAULT_DIR": str(self.vault),

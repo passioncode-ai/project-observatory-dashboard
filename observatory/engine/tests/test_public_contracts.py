@@ -15,7 +15,7 @@ class PublicContracts(unittest.TestCase):
         self.base=Path(self.tmp.name).resolve(); self.home=self.base/'runtime'
         self.registry=self.home/'registry'; self.registry.mkdir(parents=True)
         self.env={k:v for k,v in os.environ.items() if not k.startswith(('OBSERVATORY_','CLAUDE_MEM_'))}
-        self.env.update(HOME=str(self.base/'user'),OBSERVATORY_HOME=str(self.home),PYTHONDONTWRITEBYTECODE='1')
+        self.env.update(HOME=str(self.base/'user'), USERPROFILE=str(self.base/'user'),OBSERVATORY_HOME=str(self.home),PYTHONDONTWRITEBYTECODE='1')
         (self.home/'config').mkdir()
         (self.home/'config/activity_tiers.json').write_text((ROOT/'defaults/activity_tiers.json').read_text())
         for filename,key in [('domains','domains'),('domain-exclusions','domains'),('projects','projects'),('repositories','repositories'),('sources','sources')]:

@@ -3764,8 +3764,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "704afd23e381d16c15514e9ec366ecd91fafd4bba77c24a41e645fb5620872ee",
-      "bytes": 47246,
+      "export_sha256": "f686e656ec6c2e5ae4faf2684f0d6550c169bdae3dd2a9ac3a53aeb8557b2d47",
+      "bytes": 48572,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5091,8 +5091,8 @@
       "path": "tests/test_oslocks.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "06aa59c22d7ef681f1207ef318441da8ed6296a25ea8fbfdc1dba534afef5879",
-      "bytes": 4820
+      "export_sha256": "51ce201e6bc8df7c1ec6155dae2fc6604c7446c0aac0f778b3d8bc271312e01d",
+      "bytes": 6256
     },
     {
       "path": "tests/test_osprivacy.py",

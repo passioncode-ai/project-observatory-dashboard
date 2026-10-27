@@ -97,7 +97,7 @@ class Sandbox(unittest.TestCase):
         self.services = self.base / "services"
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(HOME=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
+        env.update(HOME=str(self.base / "user"), USERPROFILE=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
                    FABRIC_SERVICES_DIR=str(self.services), PYTHONDONTWRITEBYTECODE="1")
         (self.base / "user").mkdir()
         self.env = env
@@ -746,7 +746,7 @@ class Installer(Sandbox):
 
 def sandbox_env(base: Path, home: Path, **extra) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-    env.update(HOME=str(base / "user"), OBSERVATORY_HOME=str(home), PYTHONDONTWRITEBYTECODE="1", **extra)
+    env.update(HOME=str(base / "user"), USERPROFILE=str(base / "user"), OBSERVATORY_HOME=str(home), PYTHONDONTWRITEBYTECODE="1", **extra)
     return env
 
 

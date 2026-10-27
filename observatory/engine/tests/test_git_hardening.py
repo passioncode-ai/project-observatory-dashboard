@@ -205,7 +205,7 @@ class Fixture:
 
     def environ(self) -> dict[str, str]:
         # The hostile global file stays: it is read from this HOME (global_config=None).
-        return git_env(drop_git=True, global_config=None, HOME=str(self.home), XDG_CONFIG_HOME=str(self.d / "xdg"),
+        return git_env(drop_git=True, global_config=None, HOME=str(self.home), USERPROFILE=str(self.home), XDG_CONFIG_HOME=str(self.d / "xdg"),
                        PATH=f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}")
 
 

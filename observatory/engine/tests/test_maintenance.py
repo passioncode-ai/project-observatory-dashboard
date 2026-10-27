@@ -130,7 +130,7 @@ class Base(unittest.TestCase):
         self.root = self.base / "cloud" / "Backups"
         self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home),
                                            "OBSERVATORY_BACKUPS": str(self.root),
-                                           "HOME": str(self.base / "user"),
+                                           "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"),
                                            "XDG_CONFIG_HOME": str(self.base / "xdg-config"),
                                            "OBSERVATORY_PRODUCT_LOG_DIR": str(self.base / "product-logs")},
                               clear=True)
@@ -1773,7 +1773,7 @@ class Schedule(Base):
         try:
             p = subprocess.run([sys.executable, "-c", probe, str(work / "runtime")], cwd=ROOT, stdin=secondary,
                                capture_output=True, text=True, timeout=60,
-                               env={"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.getuid()).pw_dir,
+                               env={"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.getuid()).pw_dir, "USERPROFILE": pwd.getpwuid(os.getuid()).pw_dir,
                                     "TMPDIR": str(work / "tmp"), "PYTHONDONTWRITEBYTECODE": "1"})
         finally:
             os.close(primary)
@@ -2441,7 +2441,7 @@ class Bridge(Base):
             doc = config.load(self.home)
             doc["updates"] = {"auto": settings_auto}
             workspace.write_json(self.home / "config/settings.json", doc)
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         subprocess.run(["/bin/bash", str(HOOK)], input="", env=env, capture_output=True, timeout=30, check=True)
 
@@ -2479,7 +2479,7 @@ class Bridge(Base):
     def test_sessions_starting_together_start_one_bridge(self):
         # Review F6: the claim is atomic.
         root, log = self.fake_install(with_maintain=False)
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         procs = [subprocess.Popen(["/bin/bash", str(HOOK)], stdin=subprocess.DEVNULL, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)]
@@ -2499,7 +2499,7 @@ class Bridge(Base):
         stamp.write_text("")
         old = time.time() - 2 * 86400
         os.utime(stamp, (old, old))
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         procs = [subprocess.Popen(["/bin/bash", str(HOOK)], stdin=subprocess.DEVNULL, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)]
