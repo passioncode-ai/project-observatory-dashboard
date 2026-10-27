@@ -1359,8 +1359,9 @@ project-observatory full cloud url                  # the address `full share cr
   their own; never take it, because the six-digit code is compared, and never read the share's frames,
   status or reports, which answer only the sender's and the recipient's share keys. A share's
   requests are limited per side (120 a minute), counted only once a signature holds, and the
-  sender's revocation is never refused for it; a refused request stores nothing, so a flood cannot
-  grow what the mailbox keeps for a share. A renewal is refused once every sealed copy has ended,
+  sender's revocation is never refused for it. A refused request, a repeated one and a read store
+  nothing; an accepted change keeps its signature's nonce only for the five minutes it could be
+  played again, then it is purged, so a flood cannot grow what the mailbox keeps for a share. A renewal is refused once every sealed copy has ended,
   until your machine seals the key again.
 - **Cost.** The free plan's Workers and SQLite-backed Durable Objects cover a person's shares; the
   account's own limits apply.

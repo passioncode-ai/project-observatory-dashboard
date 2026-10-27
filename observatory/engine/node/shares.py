@@ -352,6 +352,8 @@ class Shares:
                                                                         lease_seconds)
             except MB.MailboxError as error:
                 refused = error
+                # Unlisted while the lock is held (a pass lists only folders with a record), so nothing reads it after.
+                folder.drop('share.json')
         if refused is not None:
             # Removed after the lock is let go: Windows refuses to delete a folder that holds an open file.
             shutil.rmtree(folder.path, ignore_errors=True)

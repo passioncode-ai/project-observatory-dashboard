@@ -129,22 +129,22 @@
       "path": "cloud/memory_env.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e1cf7efd0b71fec28f5241b9c2c8351143333949f951c4a78a6b99dc44c0ccc4",
-      "bytes": 2216
+      "export_sha256": "6e82753cacb03e1533fbe82043a7012ba461a33f81829c71d68c6a71b630cb2d",
+      "bytes": 2431
     },
     {
       "path": "cloud/worker.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "147e1cc4fcf6964c7e85a351937df295ff69a346f9b3c2069b1741da694ce4ed",
-      "bytes": 42689
+      "export_sha256": "d52886bc0179197bd2b2be9eba68ed5a57ba5b471e1d8dcb526ab73c32b09d62",
+      "bytes": 43792
     },
     {
       "path": "cloud/worker.test.mjs",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4bd354e2a3045ac68a54b86125f0ceddfb2b8c82c9d5a329bc554f34cbc4642c",
-      "bytes": 13698
+      "export_sha256": "f1744aaeab7eb99d488b6094cf57cb02286da0e2398f60c2fc06a26e0e42db17",
+      "bytes": 17210
     },
     {
       "path": "code_freshness.py",
@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "fe755f99e1f4398bf8ac4dacf54a490aee0b5cf66e74abb3cb45c83f1ea6352d",
-      "bytes": 198895,
+      "export_sha256": "af9ff72202778dc468491b2e769db7b8591e1c01f6834602a16e759cb2be5dc7",
+      "bytes": 199041,
       "upstream_modified": true
     },
     {
@@ -3085,8 +3085,8 @@
       "path": "node/mailbox.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "818dbb1a03d4c72e952608d1c25b363b375fb8ced2cd391853ccfc78851bac1c",
-      "bytes": 31639
+      "export_sha256": "324a2f791ba0fad4ed98ca3380eea8266778c37bea364d89595cd44ec2df8440",
+      "bytes": 32190
     },
     {
       "path": "node/node_summary.py",
@@ -3162,8 +3162,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "05ba5dc32886d010b993a728d92c703eed3c6467685334be35b3ca3cca4b83ae",
-      "bytes": 61909
+      "export_sha256": "a0dcb14dc972e90eba8ce58e9a7aad3709d9d4d311180e5a8f3278ebacfbca44",
+      "bytes": 62071
     },
     {
       "path": "node/webauthn.py",

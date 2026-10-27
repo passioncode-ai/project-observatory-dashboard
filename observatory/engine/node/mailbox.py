@@ -301,16 +301,20 @@ class FakeMailbox:
             # After the first envelope: no verdict; a later claim or abort is carried to the sender as a warning.
             # One abort (the recipient's own) and one claim per claiming key, at most MAX_LATE_CLAIMS keys: strangers
             # cannot crowd the recipient's abort out.
+            # A repeat is answered without being accepted (the Worker then keeps no nonce for it).
             if step == 'abort':
-                share['lateAbort'] = share.get('lateAbort') or frame
+                if share.get('lateAbort'):
+                    return _refuse(409, 'repeated', "the recipient's abort was already carried")
+                share['lateAbort'] = frame
                 return _answer(202, {'carried': True, 'late': True})
             if step == 'claim':
                 key = (frame['keys']['sig']['x'], frame['keys']['sig']['y'])
                 claims = share.setdefault('lateClaims', [])
-                if not any(k == key for k, _ in claims):
-                    if len(claims) >= MAX_LATE_CLAIMS:
-                        return _refuse(429, 'too-many', 'this share carries no more late claims')
-                    claims.append((key, frame))
+                if any(k == key for k, _ in claims):
+                    return _refuse(409, 'repeated', "this key's claim was already carried")
+                if len(claims) >= MAX_LATE_CLAIMS:
+                    return _refuse(429, 'too-many', 'this share carries no more late claims')
+                claims.append((key, frame))
                 return _answer(202, {'carried': True, 'late': True})
             return _refuse(409, 'sealed', 'the share is sealed; only a claim or an abort is carried now')
         self._expire(share, now)
@@ -338,6 +342,7 @@ class FakeMailbox:
                 or env['header']['slot'] != slot:
             return _refuse(400, 'malformed', 'not an envelope of this share and slot')
         share['envelopes'][slot] = env
+        share.setdefault('storedAt', {})[slot] = now
         share['sealed'] = True
         return _answer(200, {'stored': True})
 
@@ -351,7 +356,9 @@ class FakeMailbox:
             if share['verdict']['state'] == 'burnt':
                 return _refuse(409, 'burnt', 'this exchange is burnt', reason=share['verdict']['reason'])
             return _refuse(409, 'not-sealed', 'the sender has not sealed the share yet')
-        ends = [relay.instant(e['header']['exp']) or 0 for e in share['envelopes'].values()]
+        # Each copy's end by the mailbox's own clock: no further than 90 days after it was stored, as the Worker keeps it.
+        ends = [min(relay.instant(e['header']['exp']) or 0, share.get('storedAt', {}).get(slot, now) + 90 * 86_400_000)
+                for slot, e in share['envelopes'].items()]
         if ends and now >= max(ends):
             return _refuse(409, 'ended', "every sealed copy of this share has ended; the sender's machine seals it again")
         share['deliveries'] += 1

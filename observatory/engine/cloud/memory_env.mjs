@@ -13,8 +13,10 @@ export class MemoryStorage {
   }
   async delete(key) { return this.map.delete(key); }
   async deleteAll() { this.map.clear(); this.alarmAt = null; }
-  async list({ prefix = "", limit = Infinity } = {}) {
-    return new Map([...this.map].filter(([k]) => k.startsWith(prefix)).slice(0, limit).map(([k, v]) => [k, structuredClone(v)]));
+  /** As a Durable Object lists: keys in sorted order, `end` exclusive, at most `limit`. */
+  async list({ prefix = "", start = "", end = null, limit = Infinity } = {}) {
+    return new Map([...this.map].filter(([k]) => k.startsWith(prefix) && k >= start && (end === null || k < end))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, limit).map(([k, v]) => [k, structuredClone(v)]));
   }
   async setAlarm(ms) { this.alarmAt = ms; }
   async getAlarm() { return this.alarmAt; }

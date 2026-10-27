@@ -15,12 +15,13 @@
 // Requests are signed with DEC-0056's construction (RFC 9421: `@method`, `@target-uri`, `content-digest`; `created`,
 // `nonce`, `keyid`, `alg`) under the label `fabric-peer-share`, keyid the RFC 7638 thumbprint of the signing share
 // #sig, `ecdsa-p256-sha256`; a share's creation also under `observatory-owner` by the owner key `full cloud deploy`
-// binds as OWNER_JWK. Each accepted request's nonce is kept under its own key (`nonce:`) until its signature's time plus
-// 300 s; a refused request stores none, so the share's own record never grows from them.
+// binds as OWNER_JWK. Each accepted request that changes something keeps its nonce under its own key
+// (`nonce:<created>:...`) until its signature is too old to be accepted again, when it is purged; a refused request or a
+// read stores none, so neither the share's record nor its keys grow from them.
 
 export const PROTOCOL = "observatory-cloud/1";
 export const PEER_SHARE_PROTOCOL = "fabric-peer-share/1";
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";
 const LABEL = "fabric-peer-share";
 const OWNER_LABEL = "observatory-owner";
 const ALG = "ecdsa-p256-sha256";
@@ -413,6 +414,10 @@ this link.</p>
 
 // ---- One share's mailbox, over a storage the Durable Object or a test provides -------------------------------------
 
+/** A nonce's key: its signature's creation time first (zero-padded, so keys sort by it), then the key and the nonce. */
+const nonceTime = (seconds) => String(Math.max(0, seconds)).padStart(12, "0");
+const nonceKey = (read) => `nonce:${nonceTime(read.created)}:${read.keyid}:${read.nonce}`;
+
 /** The most a sealed envelope or report may weigh as stored: under a Durable Object's value limit, so one padded
  * message can never make the share's own record (and with it a revocation) fail to store. */
 const MAX_ITEM_BYTES = 120 * 1024;
@@ -503,20 +508,26 @@ export class ShareMailbox {
       }
     } else result = refuse(405, "method-not-allowed", "no such method on this route");
     await this.storage.put("share", share);
-    if (result.status < 400) {
-      // Only an accepted request's nonce is kept, under its own key: a flood of refused requests stores nothing.
+    if (result.status < 400 && method !== "GET") {
+      // Only an accepted request that changes something keeps its nonce (a read played again changes nothing), under
+      // its own key: a flood of refused requests or of reads stores nothing.
       await this.storage.put(signed.nonceKey, signed.until);
-      await this.purgeNonces(now);
     }
+    await this.purgeNonces(now);
     await this.storage.setAlarm(this.keepUntil(share));
     return result;
   }
 
-  /** Forgets nonces past their window, a few at a time. Their number is bounded anyway: accepted requests only, at most
-   * REQUESTS_PER_MINUTE a minute per side, each kept at most 600 s. */
+  /** Forgets every nonce whose signature is too old to be accepted again (readSignature refuses one created more than
+   * WINDOW_SECONDS ago). Keys begin with the zero-padded creation time, so a listing up to that time returns exactly the
+   * stale ones, oldest first, however many are live after them. */
   async purgeNonces(now) {
-    const held = await this.storage.list({ prefix: "nonce:", limit: 64 });
-    for (const [key, until] of held) if (until < now) await this.storage.delete(key);
+    const end = `nonce:${nonceTime(Math.floor(now / 1000) - WINDOW_SECONDS)}`;
+    for (let round = 0; round < 8; round++) {
+      const stale = await this.storage.list({ prefix: "nonce:", end, limit: 256 });
+      for (const key of stale.keys()) await this.storage.delete(key);
+      if (stale.size < 256) break;
+    }
   }
 
   async signer(share, headers, sig, claim, now) {
@@ -539,7 +550,7 @@ export class ShareMailbox {
       return failed(refuse(401, "signature-invalid", "the signature is not by a key of this share"));
     }
     // Kept as long as a signature made at `created` is fresh (created + 300 s): a clock ahead of ours included.
-    return { who, nonceKey: `nonce:${read.keyid}:${read.nonce}`, until: Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000 };
+    return { who, nonceKey: nonceKey(read), until: Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000 };
   }
 
   async create(shareId, headers, sig, doc, now) {
@@ -573,7 +584,7 @@ export class ShareMailbox {
       envelopeEnds: {}, revocation: null, deletion: null, reportSeqs: [], deliveries: 0, lastRenewal: null, revokedAt: null,
     };
     await this.storage.put("share", share);
-    await this.storage.put(`nonce:${read.keyid}:${read.nonce}`, Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000);
+    await this.storage.put(nonceKey(read), Math.max(now, read.created * 1000) + WINDOW_SECONDS * 1000);
     await this.storage.setAlarm(this.keepUntil(share));
     return answer(201, { created: true });
   }
@@ -596,16 +607,17 @@ export class ShareMailbox {
     if (share.sealed) {
       // After the first envelope: no verdict; a later claim or abort is carried to the sender as a warning. One abort
       // (the recipient's own) and one claim per claiming key, so strangers cannot crowd the recipient's abort out.
+      // A repeat is answered without being accepted, so it stores no nonce.
       if (step === "abort") {
-        if (share.lateAbort === null) share.lateAbort = frame;
+        if (share.lateAbort !== null) return refuse(409, "repeated", "the recipient's abort was already carried");
+        share.lateAbort = frame;
         return answer(202, { carried: true, late: true });
       }
       if (step === "claim") {
         const key = `${frame.keys.sig.x}.${frame.keys.sig.y}`;
-        if (!share.lateClaims.some((c) => c.key === key)) {
-          if (share.lateClaims.length >= MAX_LATE_CLAIMS) return refuse(429, "too-many", "this share carries no more late claims");
-          share.lateClaims.push({ key, frame });
-        }
+        if (share.lateClaims.some((c) => c.key === key)) return refuse(409, "repeated", "this key's claim was already carried");
+        if (share.lateClaims.length >= MAX_LATE_CLAIMS) return refuse(429, "too-many", "this share carries no more late claims");
+        share.lateClaims.push({ key, frame });
         return answer(202, { carried: true, late: true });
       }
       return refuse(409, "sealed", "the share is sealed; only a claim or an abort is carried now");
@@ -715,7 +727,9 @@ export class ShareMailbox {
   keepUntil(share) {
     if (!share.sealed) return (instant(share.claimDeadline) ?? 0) + DAY_MS;
     const times = [...Object.values(share.envelopeEnds || {}).map((exp) => instant(exp) ?? 0),
-      instant(share.revokedAt) ?? 0, instant(share.lastRenewal) ?? 0, instant(share.createdAt) ?? 0];
+      // A share revoked under 1.1.0 has no revokedAt: its revocation's own date stands in, clamped to now.
+      instant(share.revokedAt) ?? Math.min(instant(share.revocation?.at) ?? 0, this.now()),
+      instant(share.lastRenewal) ?? 0, instant(share.createdAt) ?? 0];
     return Math.max(...times) + 30 * DAY_MS;
   }
 

@@ -229,3 +229,52 @@ test("a lease is refused once every sealed copy has ended, and nothing is counte
   assert.equal(share.deliveries, 3);
   assert.equal(share.lastRenewal, null);
 });
+
+test("on a sealed share, repeated late claims and a recipient's reads store no nonce, and the revocation lands", async () => {
+  const storage = new MemoryStorage({ maxValueBytes: 16_384 });
+  const now = Date.UTC(2026, 9, 28, 12);
+  const box = new ShareMailbox(storage, { now: () => now });
+  const id = "c".repeat(32), sender = await shareKey(), recipient = await shareKey(), created = Math.floor(now / 1000);
+  const base = `${ORIGIN}/v1/shares/${id}`;
+  await storage.put("share", { shareId: id, senderSig: sender.pub, claimDeadline: rfc3339(now + 86_400_000), leaseSeconds: 3600,
+    createdAt: rfc3339(now - 3_600_000), frames: [], lateAbort: null, lateClaims: [], verdict: { state: "complete" },
+    recipientSig: recipient.pub, sealed: true, envelopeEnds: { OPENROUTER_API_KEY: rfc3339(now + 86_400_000) }, revocation: null,
+    deletion: null, reportSeqs: [], deliveries: 0, lastRenewal: null, revokedAt: null });
+  const stranger = await shareKey(), kem = await shareKey();
+  const claim = { schema: "peer-share-frame/1", step: "claim", shareId: id, keys: { sig: stranger.pub, kem: kem.pub }, mac: random32(),
+    commit: "sha256:" + "0".repeat(64) };
+  const statuses = new Map();
+  for (let i = 0; i < 300; i++) {
+    const answered = await box.handle(await signed("POST", `${base}/frames`, claim, [["fabric-peer-share", stranger]], created + 299), id, "frames");
+    statuses.set(answered.status, (statuses.get(answered.status) || 0) + 1);
+  }
+  assert.equal(statuses.get(202), 1);                            // carried once, as a warning to the sender
+  assert.equal((statuses.get(409) || 0) + (statuses.get(429) || 0), 299);
+  for (let i = 0; i < 200; i++) await box.handle(await signed("GET", base, null, [["fabric-peer-share", recipient]], created), id, null);
+  assert.equal((await storage.list({ prefix: "nonce:" })).size, 1);
+  assert.ok(JSON.stringify(await storage.get("share")).length < 8_000);
+  const unsigned = { type: "peer-share-revocation/1", shareId: id, at: rfc3339(now), signer: await peerThumbprint(sender.pub) };
+  const record = { ...unsigned, sig: b64urlEncode(await es256(sender.priv, rfc8785(unsigned))) };
+  const revoked = await box.handle(await signed("PUT", `${base}/revocation`, record, [["fabric-peer-share", sender]], created), id, "revocation");
+  assert.equal(revoked.status, 200);
+});
+
+test("every nonce too old to be accepted again is purged, however many younger ones sort after it", async () => {
+  const storage = new MemoryStorage();
+  const now = Date.UTC(2026, 9, 28, 12), seconds = Math.floor(now / 1000);
+  const box = new ShareMailbox(storage, { now: () => now });
+  const pad = (n) => String(n).padStart(12, "0");
+  for (let i = 0; i < 600; i++) await storage.put(`nonce:${pad(seconds - 400)}:k:${String(i).padStart(4, "0")}`, 0);
+  for (let i = 0; i < 10; i++) await storage.put(`nonce:${pad(seconds + i)}:k:fresh${i}`, now + 300_000);
+  await box.purgeNonces(now);
+  const left = [...(await storage.list({ prefix: "nonce:" })).keys()];
+  assert.equal(left.length, 10);
+  assert.ok(left.every((k) => k.includes("fresh")));
+});
+
+test("a share revoked before revokedAt existed is forgotten 30 days after its revocation", () => {
+  const now = Date.UTC(2026, 11, 20);
+  const box = new ShareMailbox(new MemoryStorage(), { now: () => now });
+  const old = { sealed: true, envelopeEnds: {}, revocation: { at: "2026-10-28T00:00:00Z" }, lastRenewal: null, createdAt: "2026-10-27T00:00:00Z" };
+  assert.equal(box.keepUntil(old), Date.UTC(2026, 10, 27));
+});
