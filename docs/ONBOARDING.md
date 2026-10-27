@@ -1269,9 +1269,11 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   expired link (at most 7 days) burns the share, and a new attempt is a new share.
 - **They differ.** `full share differ ID` on either side. Before the key is sealed, nothing is
   sealed and the link is spent. After it is sealed, the sender's `differ` takes the share back (as
-  `revoke` does): the mailbox refuses it at once and the recipient's machine stops at its next
-  renewal, within one lease. The recipient's `differ` deletes its own copies at once and warns the
-  sender.
+  `revoke` does): once the mailbox holds the revocation it refuses every renewal, and the recipient's
+  machine stops at its next renewal, within one lease. If the mailbox does not answer, `status`
+  says so, and every later pass (by hand, or the maintenance job's within the hour) hands it the
+  revocation again until it shows it. The recipient's `differ` deletes its own copies at once and
+  warns the sender.
 - **The link.** `accept` asks for the link rather than taking it as an argument, which keeps it out
   of your shell history; it is opened once on one machine, and a second machine needs its own share.
 - **The person's acts, and their limit.** `confirm`, `accept` and `provider-ended` need a terminal,
@@ -1309,7 +1311,10 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   export to reach it. It never serves another machine.
 - **Files.** `node/shares/sent/ID/` and `node/shares/received/ID/` (owner-only): the share's own key
   pair, the other side's public keys, the sealed copies, the comparison code and the use journal;
-  never a value, and the claim code only until the claim is read. Owner-only means any program
+  never a value, and the claim code only until the claim is read. One step of a share runs at a time
+  (`share.lock`), so the maintenance pass and your own command never write over each other. A
+  workspace or `node/` folder reached through a symbolic link is refused: shares are kept only where
+  no link can redirect them. Owner-only means any program
   running as you can read them, the recipient's share key and its sealed copies included: a program
   that holds both can open the key without the use path.
 

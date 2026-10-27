@@ -20,7 +20,12 @@ timer on Linux — and each pass does only what is due:
 4. once a day: a full encrypted snapshot of the workspace (settings, registry, vault,
    store), with this workspace's tick and server stopped for the copy;
 5. once a day: the machine's agent setup into one encrypted `.obmachine` bundle in the same
-   root (machine_backup.py, OBS-157), with every job running.
+   root (machine_backup.py, OBS-157), with every job running;
+6. once an hour, where this node holds a share with another person's machine (OBS-264):
+   `full share sync --due`, in a process of its own (`step_shares`): the sender reads reports,
+   seals again before a sealed copy ends or after a rotation, and hands the mailbox a revocation
+   it did not take; the recipient renews and reports at least daily. A failed pass is recorded as
+   `shares.unsynced` and retried at the next hour.
 
 The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the

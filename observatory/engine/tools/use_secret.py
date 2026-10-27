@@ -472,6 +472,11 @@ def resolve_shared(ref: str, names: list[str], consumer: str) -> tuple[dict[str,
         except share_store.ShareError as exc:
             values.clear()
             raise LookupError(f"share {ref}: {exc}") from None
+        except (RuntimeError, OSError) as exc:
+            # A share file or its lock that is not a private regular file (a link, another owner): nothing is opened.
+            values.clear()
+            raise LookupError(f"share {ref}: its files could not be read safely ({type(exc).__name__}); nothing "
+                              f"was opened") from None
         wheres[n] = f"share:{ref}/{n}"
     return values, wheres
 

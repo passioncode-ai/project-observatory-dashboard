@@ -23,7 +23,10 @@ Nothing here prints, logs or journals a value or a claim code: records carry nam
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import functools
+import threading
 import hashlib
 import hmac
 import json
@@ -162,6 +165,19 @@ class _Folder:
 
 # ---- The store -------------------------------------------------------------------------------------------------------
 
+def _one_share_at_a_time(method):
+    """Runs a step of one share under that share's lock (`share.lock` in its folder), re-reading its record inside it:
+    the hourly maintenance pass and a person's command (confirm, differ, revoke, a use) are two writers, and a stale
+    copy written last could undo a seal, reuse a sequence or wipe a revocation. Re-entrant within one process, so a
+    step that calls another (confirm, then sync) takes it once."""
+    @functools.wraps(method)
+    def locked(self, share_id, *args, **kwargs):
+        folder = self._sent(share_id) if self._sent(share_id).exists() else self._received(share_id)
+        with self._locked(folder):
+            return method(self, share_id, *args, **kwargs)
+    return locked
+
+
 class Shares:
     """Both stores of one node. `transport` reaches the mailbox (`mailbox.http_transport()` by default); `clock`
     answers milliseconds; `read_value(project, env, slot)` answers a vault slot's value on the sender's side;
@@ -174,6 +190,28 @@ class Shares:
         self.transport = transport or MB.http_transport()
         self.clock = clock or _now_ms
         self.read_value = read_value
+        self._held = threading.local()
+
+    @contextlib.contextmanager
+    def _locked(self, folder: '_Folder'):
+        held = self._held.__dict__.setdefault('paths', {})
+        key = str(folder.path)
+        if held.get(key):
+            held[key] += 1
+            try:
+                yield
+            finally:
+                held[key] -= 1
+            return
+        try:
+            with private_io.lock(folder.path / 'share.lock'):
+                held[key] = 1
+                try:
+                    yield
+                finally:
+                    del held[key]
+        except RuntimeError as error:                          # a link or a foreign file where the lock lives
+            raise ShareError('unsafe-path', f'the share lock could not be taken: {error}') from None
 
     # -- folders --
     def _sent(self, share_id: str) -> _Folder:
@@ -295,6 +333,7 @@ class Shares:
         key = bytes.fromhex(folder.text('mac-key') or '')
         return 'hmac-sha256:' + hmac.new(key, value.encode('utf-8'), hashlib.sha256).hexdigest()
 
+    @_one_share_at_a_time
     def sync_sent(self, share_id: str) -> dict:
         """One pass of the sender's side against the mailbox; answers the record."""
         folder = self._sent(share_id)
@@ -384,6 +423,7 @@ class Shares:
                 return
             record.update(code=code['code'], state='comparing')
 
+    @_one_share_at_a_time
     def confirm(self, share_id: str, *, code: Optional[str] = None, without_comparing: bool = False) -> dict:
         """The sender's comparison (PS-6 step 4, `gate: human`): the code the person read from the recipient matches
         (sealed, `confirmed: true`), or "Share without comparing" (sealed, `confirmed: false`, trust on first use). A
@@ -403,6 +443,7 @@ class Shares:
         folder.save(record)
         return self.sync_sent(share_id)
 
+    @_one_share_at_a_time
     def differ(self, share_id: str) -> dict:
         """"They differ" on either side (PS-6). Before the sender sealed, the side posts its one `abort` and nothing is
         sealed. After it sealed, an abort no longer stops the recipient's machine (the mailbox carries it to the sender
@@ -413,14 +454,18 @@ class Shares:
         folder = self._sent(share_id) if side == 'sent' else self._received(share_id)
         record = folder.record()
         now = self.clock()
-        if side == 'sent' and record['sealed']:
+        sealed = record['sealed'] or record['state'] == 'sealing' or any(e['sequence'] > 0 for e in record['slots'])
+        if side == 'sent' and sealed:
             record['differedAt'] = _iso(now)
             folder.save(record)
             record = self.revoke(share_id)
-            record['warning'] = ("you said the codes differ after the key was sealed: the share is being taken back. "
-                                 "The mailbox refuses it now; the recipient's machine stops at its next renewal, "
-                                 "within one lease; whoever received it may have copied it, so revoke or rotate the "
-                                 "key at its provider")
+            refuses = ("The mailbox refuses it now; the recipient's machine stops at its next renewal, within one lease"
+                       if record['revocationObserved'] else
+                       "The mailbox did not answer: every later pass (the maintenance job's comes within an hour) hands "
+                       "it the revocation again, and the recipient's machine stops at its next renewal after that")
+            record['warning'] = (f"you said the codes differ after the key was sealed: the share is being taken back. "
+                                 f"{refuses}. Whoever received it may have copied it, so revoke or rotate the key at "
+                                 f"its provider")
             folder.save(record)
             return record
         role = 'sender' if side == 'sent' else 'recipient'
@@ -465,6 +510,10 @@ class Shares:
                                      f"{share_id[:8]}` if you did not expect it")
         record['late'] = late
         deletion = status.get('deletion')
+        if record['revocation'] is not None and status.get('revocation') != record['revocation']:
+            # A revocation the mailbox does not show yet (it was down when it was taken back): handed again, as often
+            # as it takes; the mailbox keeps the first it holds.
+            status['revocation'] = client.revoke(record['revocation']).get('revocation')
         if record['revocation'] is not None:
             record['revocationObserved'] = status.get('revocation') == record['revocation']
             if isinstance(deletion, dict) and record['recipientKeys'] is not None \
@@ -532,6 +581,7 @@ class Shares:
             usage['lastSequence'] = opened['sequence']
             usage['lastReportAt'] = _iso(now)
 
+    @_one_share_at_a_time
     def revoke(self, share_id: str) -> dict:
         """Takes a share back (PS-9): signs `peer-share-revocation/1` with the share `#sig` and hands it to the mailbox,
         which refuses every renewal from then on (step 1, observed against the mailbox). Step 2 is the recipient's
@@ -556,6 +606,7 @@ class Shares:
         folder.save(record)
         return record
 
+    @_one_share_at_a_time
     def provider_ended(self, share_id: str) -> dict:
         """Step 3 of PS-9, the person's statement that the provider revoked a key minted for the share or the sender
         rotated their own: only then, with step 1 observed, does a screen say "taken back"."""
@@ -621,6 +672,7 @@ class Shares:
         folder.save(record)
         return self.sync_received(share_id) if record['state'] == 'exchanging' else record
 
+    @_one_share_at_a_time
     def sync_received(self, share_id: str, *, due_only: bool = False) -> dict:
         """One pass of the recipient's side against the mailbox; answers the record. `due_only` (the maintenance job)
         renews an active share only when its lease ended or its last report is older than REPORT_EVERY_MS, so the
@@ -807,6 +859,12 @@ class Shares:
         reported (that day again, as it grows), the consumers since the last report; never a value or a command."""
         if record['senderKeys'] is None:
             return
+        with private_io.lock(folder.path / 'uses.lock'):
+            self._report_locked(folder, record, client, now)
+
+    def _report_locked(self, folder: _Folder, record: dict, client: MB.MailboxClient, now: int) -> None:
+        """The report and the journal's rewrite under the journal's lock: no use lands between the read and the
+        rewrite, so none is dropped."""
         uses = self._uses(folder)
         since_day = record['lastReportDay'] or '0000-01-01'
         since_at = relay.instant(record['lastReportAt']) or 0
@@ -839,9 +897,8 @@ class Shares:
             client.post_report(report)
         record.update(lastReportDay=today, lastReportAt=_iso(now))
         # The journal keeps what the next report still needs: today's uses, which it reports again as they grow.
-        with private_io.lock(folder.path / 'uses.lock'):
-            kept = [json.dumps(u, sort_keys=True) + '\n' for u in self._uses(folder) if u['at'][:10] >= today]
-            _write(folder.path / 'uses.jsonl', ''.join(kept))
+        kept = [json.dumps(u, sort_keys=True) + '\n' for u in uses if u['at'][:10] >= today]
+        _write(folder.path / 'uses.jsonl', ''.join(kept))
 
     def open_value(self, ref: str, slot: str, *, agent: str) -> str:
         """The use path (PS-3, PS-7): the slot's value, opened in memory for one use, under a live lease (renewed here
@@ -850,36 +907,37 @@ class Shares:
         if side != 'received':
             raise ShareError('not-received', 'this share was sent from this machine; its value is in your vault')
         folder = self._received(share_id)
-        record = folder.record()
-        if not PS.SLOT.fullmatch(slot or ''):
-            raise ShareError('bad-slot', 'a slot is an upper-case variable name')
-        agent = agent if PS.AGENT_NAME.fullmatch(agent or '') else 'unknown'
-        now = self.clock()
-        if record['state'] != 'active' or not self._lease_live(record, now):
-            record = self.sync_received(share_id)
+        with self._locked(folder):
+            record = folder.record()
+            if not PS.SLOT.fullmatch(slot or ''):
+                raise ShareError('bad-slot', 'a slot is an upper-case variable name')
+            agent = agent if PS.AGENT_NAME.fullmatch(agent or '') else 'unknown'
             now = self.clock()
-        if record['state'] == 'removed':
-            raise ShareError('revoked', 'the sender took this share back; its keys were removed from this machine')
-        if record['state'] == 'burnt':
-            raise ShareError('burnt', f"this share burnt ({record['burnt']['reason']}); ask the sender for a new link")
-        if record['state'] != 'active':
-            raise ShareError('not-active', f"this share is {record['state']}: compare the code with the sender, then "
-                                           f"`full share status {share_id[:8]}`")
-        if not self._lease_live(record, now):
-            raise ShareError('no-lease', "the share's lease ended and its mailbox did not renew it; nothing is opened")
-        path = folder.path / 'envelopes' / f'{slot}.json'
-        if not path.is_file():
-            raise ShareError('no-slot', f"this share carries no {slot}: {', '.join(s['slot'] for s in record['slots'])}")
-        env = json.loads(_read(path))
-        ctx = {'at': _iso(now), 'shareId': share_id, 'ownKem': record['keys']['kem'],
-               'senderSig': record['senderKeys']['sig'], 'marks': record['marks'], 'revoked': False}
-        opened = PS.open_peer_share(env, ctx, folder.key('kem'))
-        if not opened['ok']:
-            raise ShareError(opened['refusal'], f'the envelope for {slot} was refused: {opened["refusal"]}')
-        with private_io.lock(folder.path / 'uses.lock'):
-            _append(folder.path / 'uses.jsonl', json.dumps({'at': _iso(now), 'slot': slot, 'agent': agent},
-                                                           sort_keys=True) + '\n')
-        return opened['secret'].decode('utf-8')
+            if record['state'] != 'active' or not self._lease_live(record, now):
+                record = self.sync_received(share_id)
+                now = self.clock()
+            if record['state'] == 'removed':
+                raise ShareError('revoked', 'the sender took this share back; its keys were removed from this machine')
+            if record['state'] == 'burnt':
+                raise ShareError('burnt', f"this share burnt ({record['burnt']['reason']}); ask the sender for a new link")
+            if record['state'] != 'active':
+                raise ShareError('not-active', f"this share is {record['state']}: compare the code with the sender, then "
+                                               f"`full share status {share_id[:8]}`")
+            if not self._lease_live(record, now):
+                raise ShareError('no-lease', "the share's lease ended and its mailbox did not renew it; nothing is opened")
+            path = folder.path / 'envelopes' / f'{slot}.json'
+            if not path.is_file():
+                raise ShareError('no-slot', f"this share carries no {slot}: {', '.join(s['slot'] for s in record['slots'])}")
+            env = json.loads(_read(path))
+            ctx = {'at': _iso(now), 'shareId': share_id, 'ownKem': record['keys']['kem'],
+                   'senderSig': record['senderKeys']['sig'], 'marks': record['marks'], 'revoked': False}
+            opened = PS.open_peer_share(env, ctx, folder.key('kem'))
+            if not opened['ok']:
+                raise ShareError(opened['refusal'], f'the envelope for {slot} was refused: {opened["refusal"]}')
+            with private_io.lock(folder.path / 'uses.lock'):
+                _append(folder.path / 'uses.jsonl', json.dumps({'at': _iso(now), 'slot': slot, 'agent': agent},
+                                                               sort_keys=True) + '\n')
+            return opened['secret'].decode('utf-8')
 
     # ================================================================================================================
     # Both
