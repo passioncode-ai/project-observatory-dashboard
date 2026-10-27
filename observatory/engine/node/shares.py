@@ -454,7 +454,9 @@ class Shares:
         folder = self._sent(share_id) if side == 'sent' else self._received(share_id)
         record = folder.record()
         now = self.clock()
-        sealed = record['sealed'] or record['state'] == 'sealing' or any(e['sequence'] > 0 for e in record['slots'])
+        # The sender's record only: a recipient's slots carry no sequence of the sender's and it seals nothing.
+        sealed = side == 'sent' and (record['sealed'] or record['state'] == 'sealing'
+                                     or any(e['sequence'] > 0 for e in record['slots']))
         if side == 'sent' and sealed:
             record['differedAt'] = _iso(now)
             folder.save(record)
