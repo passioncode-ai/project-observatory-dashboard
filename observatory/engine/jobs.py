@@ -20,7 +20,9 @@ at once, and the caller follows it with `fabric.job.get {id}` and may stop it wi
   runner finishing just after a cancel cannot overwrite `cancelled`.
 - **One at a time per capability.** A second start while a job of the same
   capability still runs JOINS it — the answer is the running job's handle — since
-  two refreshes of one inventory race for one file and prove nothing more.
+  two refreshes of one inventory race for one file and prove nothing more. A
+  capability whose jobs follow different things (a secret request each) starts
+  with `exclusive=False` and never joins.
 
 Records keep the trace of the request that started the job, so every later answer
 about it carries the same trace id (C3.4). Assistant jobs retain bounded user questions in the private workspace;
@@ -231,17 +233,23 @@ class JobBusy(ValueError):
 
 def start(capability: str, span_record: dict, *, arguments: dict | None = None,
           prepared: Callable[[dict], None] | None = None,
-          spawn: Callable[[list[str], dict], subprocess.Popen] | None = None) -> tuple[dict, bool]:
+          spawn: Callable[[list[str], dict], subprocess.Popen] | None = None,
+          exclusive: bool = True) -> tuple[dict, bool]:
     # Serialize the scan and reservation across all callers/processes.
     with _locked("start"):
-        return _start(capability, span_record, arguments=arguments, prepared=prepared, spawn=spawn)
+        return _start(capability, span_record, arguments=arguments, prepared=prepared, spawn=spawn,
+                      exclusive=exclusive)
 
 
 def _start(capability: str, span_record: dict, *, arguments: dict | None = None,
            prepared: Callable[[dict], None] | None = None,
-           spawn: Callable[[list[str], dict], subprocess.Popen] | None = None) -> tuple[dict, bool]:
-    """(job record, joined): a new job for `capability`, or the one already running."""
-    running = _running(capability)
+           spawn: Callable[[list[str], dict], subprocess.Popen] | None = None,
+           exclusive: bool = True) -> tuple[dict, bool]:
+    """(job record, joined): a new job for `capability`, or the one already running.
+
+    `exclusive=False` is for a capability whose jobs follow separate things (each secret request is its own job,
+    OBS-260): no join, no busy, every start is a new job."""
+    running = _running(capability) if exclusive else None
     if running is not None:
         if arguments is not None and running.get("arguments") != arguments:
             raise JobBusy("assistant-busy")

@@ -94,7 +94,10 @@ def refresh(job: dict) -> dict:
 
 
 from agent import assistant
-WORK = {"machine.mcp.refresh": refresh, "agent.ask": assistant.run_question}
+import secret_client                                                # noqa: E402
+WORK = {"machine.mcp.refresh": refresh, "agent.ask": assistant.run_question,
+        # OBS-260: follow one secret request to its outcome; never a value (secret_client.follow).
+        secret_client.CAPABILITY: secret_client.follow}
 
 
 def main(argv: list[str]) -> int:

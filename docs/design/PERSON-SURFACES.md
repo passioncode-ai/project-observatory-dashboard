@@ -431,6 +431,15 @@ sequenceDiagram
 
 ### D4. The native secret prompt is shown only by Observatory's own signed app
 
+Built so far (OBS-260, server half): the agent binding (`full agent-binding issue NAME`,
+`secret_prompt.py`), the node's queue with its limits and outcomes, `secret.request`, `secret.get` and
+`secret.cancel` on `POST /mcp`, and `observatory_secret_request` with its job. The windows, the app's
+door to the queue and the person's phrase are not built: until they are, a request is answered
+`no-client` with the person's `vault.py put` step and nothing is filed. The queue's states and
+outcomes are those of the contract's draft `secret.prompt` channel method (DEC-0143, SP-1 to SP-7), so
+the channel can replace the broker path below at the next contract pin without changing the agent's
+tool.
+
 - **The path of a request, until the contract decides a channel method.** The agent calls
   `observatory_secret_request` (a `fabric.job.*` job) on the MCP server, which is a child of the
   agent's process. That server shows nothing itself and never touches a value: it records the request

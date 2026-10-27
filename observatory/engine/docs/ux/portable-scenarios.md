@@ -809,7 +809,15 @@ naming its last rotation.
 Acceptance: the value is never in an argument, an environment the agent's own process can read, a
 log, a notification or the request's result; no scripted dialog (`osascript`, `zenity`, `kdialog`) is
 ever used; the request and its outcome are journalled by name.
-Coverage: none yet. Status: planned (OBS-260); product outcome unobserved.
+Coverage: `tests/test_secret_prompt.py` (the agent named from its binding, a text claiming another
+agent included; one open request per slot and five per agent per hour; the replace refusal and the
+prompt's replace flag; `stored` only after a slot write, `unconfirmed`, `declined`, `no-answer` with
+a late answer ignored, `cancelled` from the job, `no-client`; the node down and no desktop with no
+window and no filing; no value in an argument, an environment, the queue, the journal, the runner's
+log or the job's result), `tests/test_mcp_wire.py` (the tool is published).
+Status: partly built (OBS-260): the agent binding, the node's queue, the tool and its job, the
+limits and every refusal; the windows and the person's phrase are not built yet, so every request
+with a desktop is answered `no-client` with the `vault.py put` step; product outcome unobserved.
 
 ### OSS-85: see which agents I have, and connect Switchboard
 

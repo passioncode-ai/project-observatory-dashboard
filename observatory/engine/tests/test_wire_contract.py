@@ -254,7 +254,8 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # Twenty-three with `observatory_resolve`, the tool `project.resolve` requires;
     # twenty-four with `observatory_lesson`, which the WRITE line names; twenty-five with
     # `observatory_ssh_keys` (PB-163), which the "Also" line names.
-    check("the server serves twenty-five observatory tools (observatory_ssh_keys)", tools == 25, str(tools))
+    check("the server serves twenty-six observatory tools (observatory_secret_request, OBS-260)", tools == 26,
+          str(tools))
     check("the instructions name observatory_ssh_keys", "observatory_ssh_keys" in src.split("instructions=(", 1)[1][:2500])
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))

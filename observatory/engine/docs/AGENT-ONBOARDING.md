@@ -25,6 +25,18 @@ rest waits for me. You may run `full review batch prepare`, read the file it wri
 `policy disable` and `undo-policy` are mine, at my terminal. Never try to apply a batch or enable
 the policy for me.
 
+## A key the vault does not hold
+
+Never ask me for a token, a key or a password in the chat. Call `observatory_secret_request`
+(project, env, slot, why; `replace: true` when the slot already holds a value I should replace). It
+returns a job: follow it with `fabric.job.get` until `output.outcome` is `stored` (then use the slot
+through `use_secret.py run --vault-only`), `declined` (do not ask again for the same reason),
+`no-answer`, `unconfirmed` or `no-client`. A refusal comes at once: `not-running`, `no-desktop` and
+`no-client` carry the step I run in my own shell (`vault.py put`, the value on its stdin); give me
+that step, never a request for the value. `no-agent-binding` means your MCP server was started
+without `--agent NAME`: tell me to run `project-observatory full agent-binding issue NAME`. The
+window ships in a later release; until then a request is answered `no-client`.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

@@ -22,6 +22,20 @@ compatibility: >-
 Keep values on the user's machine. Work with project, environment and variable
 names. Never ask the user to paste a credential into the conversation.
 
+**A key the vault does not hold: ask Observatory, not the person.** Call the MCP
+tool `observatory_secret_request` (`project`, `env`, `slot`, `why`, optional
+`provider` and `replace`). Observatory asks the person in its own signed app's
+window and the value is written into the slot without passing through you; the
+tool returns a job, and `fabric.job.get` ends with `output.outcome`: `stored`
+(then use the slot through `use_secret.py`), `declined`, `no-answer`,
+`unconfirmed` or `no-client`. A refusal comes at once and names its step:
+`not-running`, `no-desktop` and `no-client` carry the command the person runs in
+their own shell (`vault.py put`, the value on its stdin); relay that step, never
+a request for the value. The MCP server needs `--agent NAME`, which `project-observatory
+full agent-binding issue NAME` prints when the person connects the agent. The
+window ships in a later release; until then every request with a desktop is
+answered `no-client` with that step.
+
 ## Start here
 
 1. Locate the installed full engine. Use the operator's explicit
@@ -49,6 +63,7 @@ for it. A name or note shaped like a credential is refused, never stored.
 
 | Need | Command |
 |---|---|
+| Ask the person for a key the vault lacks | MCP `observatory_secret_request` (a job; never ask in chat) |
 | Store a credential supplied locally | `vault.py put PROJECT ENV NAME`, value on stdin |
 | List slots | `vault.py list PROJECT ENV` |
 | Run a command using a slot | `use_secret.py run [--env ENV] [--vault-only] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
@@ -103,7 +118,8 @@ name.** That holds for a one-shot agent, a long-running agent service and code a
 agent writes for one. Concretely:
 
 - **Issue or store it here.** A provider door issues straight into a slot; a value
-  the user has goes in with `vault.py put PROJECT ENV NAME` (value on stdin).
+  the user has goes in with `vault.py put PROJECT ENV NAME` (value on stdin), or,
+  when an agent needs it, through `observatory_secret_request`.
 - **Discover it by name.** `observatory_credentials` (MCP) or `use_secret.py names
   PROJECT` list what exists; neither returns a value.
 - **Inject it at run time, from the vault only.** A command: `use_secret.py run

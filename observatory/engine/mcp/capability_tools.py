@@ -351,9 +351,10 @@ class InteropServer(MCPServer):
                 return CallToolResult(content=[_text(refused)], is_error=True)
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
         is_assistant = name == "observatory_assistant_ask"
+        is_secret = name == "observatory_secret_request"
         if name in self._memory:
             return await self._memory_call(name, arguments or {})
-        if name not in self._definitions and not is_job_tool and not is_assistant:
+        if name not in self._definitions and not is_job_tool and not is_assistant and not is_secret:
             return await self._sdk_call(name, arguments, context)
         meta = None
         try:
@@ -376,9 +377,31 @@ class InteropServer(MCPServer):
             record = jobs.get(out["job"]["id"])
             job_span = interop.Span.from_record(record["trace"]) if record else span
             return CallToolResult(content=[_text(out)], structured_content=out, _meta=job_span.meta())
+        if is_secret:
+            return await anyio.to_thread.run_sync(self._secret_call, arguments or {}, span)
         if is_job_tool:
             return await anyio.to_thread.run_sync(self._job_call, name, arguments or {}, span)
         return await self._capability_call(name, arguments or {}, span)
+
+    def _secret_call(self, arguments: dict, span: interop.Span) -> CallToolResult:
+        """`observatory_secret_request` (OBS-260): the node files it and the answer is a job handle, or a typed
+        refusal that is an answer, not an error (`not-running`, `no-desktop`, `no-client`, ...). Malformed input is
+        isError, as for every tool. The value never reaches this process: there is no argument to carry one."""
+        import secret_client
+        known = {"project", "slot", "env", "why", "provider", "replace"}
+        if not isinstance(arguments, dict) or set(arguments) - known:
+            extra = sorted(set(arguments) - known) if isinstance(arguments, dict) else ["arguments"]
+            return _error("invalid-input", f"unknown argument {credential_shape.echo(extra[0])}; the agent comes "
+                                           f"from this server's binding, never from an argument", span)
+        if arguments.get("provider") is None:
+            arguments = {k: v for k, v in arguments.items() if k != "provider"}
+        out = secret_client.request(arguments, span.record())
+        if out.get("error") == "invalid-argument":
+            return CallToolResult(content=[_text(out)], structured_content=out, is_error=True, _meta=span.meta())
+        if "job" in out:
+            record = jobs.get(out["job"]["id"])
+            span = interop.Span.from_record(record["trace"]) if record and record.get("trace") else span
+        return CallToolResult(content=[_text(out)], structured_content=out, _meta=span.meta())
 
     async def _sdk_call(self, name: str, arguments: dict[str, Any], context: Any) -> Any:
         """An SDK-described tool, with its refusals typed like the capability tools'.

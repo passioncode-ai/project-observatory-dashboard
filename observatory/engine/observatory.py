@@ -469,8 +469,8 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
-OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "memory-http", "forget",
-                       "ssh-keys", "vault-digests", "org", "lifecycle", "review")
+OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "agent-binding",
+                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -525,6 +525,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                grant and revoke need a terminal
   access-binding show|issue|revoke  which agent may reach memory over HTTP; issue writes the
                                bearer to a new owner-only file; issue and revoke need a terminal
+  agent-binding show|issue|revoke  connect a local agent so the node can name it when it asks you for a key
+                               (observatory_secret_request); issue writes its token to an owner-only file and
+                               prints the MCP line with --agent NAME; issue and revoke need a terminal
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
   lifecycle status|enroll|allow|policy|hold|revoke|import|build-helper   which enrolled apps and background
                                jobs the node may wake, stop and restart, and for which caller (an access
@@ -837,6 +840,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import access_binding_cli
         return argparse_refusal(lambda: access_binding_cli.parser().parse_args(rest))
+    if name == "agent-binding":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import agent_binding_cli
+        return argparse_refusal(lambda: agent_binding_cli.parser().parse_args(rest))
     if name == "org":
         sys.path.insert(0, str(ROOT / "tools"))
         import org as org_cli
@@ -1241,6 +1248,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import access_binding_cli
         return access_binding_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "agent-binding":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import agent_binding_cli
+        return agent_binding_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] == "lifecycle":
         sys.path.insert(0, str(ROOT / "tools"))
         import lifecycle_cli

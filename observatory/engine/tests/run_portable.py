@@ -184,6 +184,8 @@ BOUNDARY += ('ssh_keys',)
 BOUNDARY += ('vault_digests',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
+# OBS-260: the secret prompt's server half: agent bindings, the node's request queue, the job, no value anywhere.
+BOUNDARY += ('secret_prompt',)
 # ENG-018: a manifest never pins a tag its release does not have.
 BOUNDARY += ('manifest_urls',)
 # Vector namespaces: one index per pinned model identity, legacy quarantined (PB-137 N-005).
@@ -310,6 +312,8 @@ ROOT_FILES = (
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
+    # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
+    'secret_prompt.py', 'secret_client.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.

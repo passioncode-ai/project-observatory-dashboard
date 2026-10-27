@@ -19,7 +19,8 @@ person or an agent between pulses talks to files. This daemon is the third shape
     http://127.0.0.1:47311/skills    shipped skill versions vs what sessions report
     http://127.0.0.1:47311/.well-known/fabric-service   who answers, which build, is it healthy
     http://127.0.0.1:47311/fabric/v1/events             what happened, as sentences (token)
-    POST http://127.0.0.1:47311/mcp                     node.lifecycle's six tools (an access binding)
+    POST http://127.0.0.1:47311/mcp                     node.lifecycle's six tools (an access binding), and
+                                                        the secret-request tools (an agent binding, OBS-260)
 
 A FABRIC SERVICE. The last two routes are the `fabric-service/0.1` protocol of
 the Fabric Agent Contract, which lets a host such as Fabric Dashboards find,
@@ -81,7 +82,11 @@ tools (OBS-79 step L3, `node/lifecycle/service.py`), which wake, stop and
 restart the apps the operator enrolled, and only for a caller holding an access
 binding the operator issued AND a lifecycle grant (`full lifecycle allow`).
 Without `config/node-lifecycle.json` nothing is built and every caller is
-refused. Any other POST is 405. The events token opens the events feed and
+refused. The same route serves `secret.request`, `secret.get` and
+`secret.cancel` (OBS-260, `secret_prompt.py`) to a caller holding an agent
+binding the person issued (`full agent-binding issue NAME`): it files a request
+for a key in the node's queue and reads its outcome, and no value ever crosses
+it. Any other POST is 405. The events token opens the events feed and
 nothing else, never the tools; it never travels in a URL, an argument or the
 plist.
 """
@@ -113,6 +118,7 @@ import service_events  # noqa: E402
 import service_health  # noqa: E402
 import service_identity  # noqa: E402
 from node.lifecycle import service as lifecycle  # noqa: E402
+import secret_prompt  # noqa: E402  OBS-260: the secret-request queue served on POST /mcp to agent bindings
 
 PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 RECEIPT = paths.SCRATCH / "serverd.json"
@@ -728,7 +734,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):                                    # noqa: N802
         if self.path.split("?", 1)[0] != lifecycle.MCP_PATH:
-            self._json({"error": "GET only, except POST /mcp (node.lifecycle); nothing else here changes anything"},
+            self._json({"error": "GET only, except POST /mcp (node.lifecycle and secret requests); nothing else "
+                                 "here changes anything"},
                        405)
             return
         note_request()
@@ -758,6 +765,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         presented = self.headers.get_all("Authorization") or []
         if len(presented) > 1:
             self._refuse(400, {"error": "Send one Authorization header."})
+            return
+        # An agent binding's bearer (OBS-260) opens the secret-request tools and nothing else; any other bearer
+        # goes on to node.lifecycle's own check below. The bearer is hashed in `agent_for` and goes no further.
+        agent = secret_prompt.agent_for(presented[0]) if presented else None
+        if agent is not None:
+            self._secret_mcp(agent)
             return
         host = LIFECYCLE
         try:
@@ -804,6 +817,46 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                "detail": "one JSON-RPC object whose params, _meta and arguments are objects"})
             return
         response = service.handle(principal, message)
+        if response is None:
+            self.send_response(202)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._json(response)
+
+
+    def _read_message(self) -> dict | None:
+        """One JSON-RPC body of at most MAX_BODY_BYTES, or None after answering 413 or 400."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if not 1 <= length <= lifecycle.MAX_BODY_BYTES or self.headers.get("Transfer-Encoding"):
+            self._refuse(413, {"error": "invalid_body", "detail": f"one JSON body of 1 to "
+                                                                  f"{lifecycle.MAX_BODY_BYTES} bytes"})
+            return None
+        try:
+            message = json.loads(self.rfile.read(length))
+            params = message.get("params", {}) if isinstance(message, dict) else None
+            if not isinstance(params, dict) or not isinstance(params.get("arguments", {}), dict):
+                raise ValueError
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            self._refuse(400, {"error": "invalid_request",
+                               "detail": "one JSON-RPC object whose params and arguments are objects"})
+            return None
+        return message
+
+    def _secret_mcp(self, agent: str) -> None:
+        """The secret-request tools for the agent its binding named (`secret_prompt.handle`)."""
+        note_client(lifecycle.MCP_PATH)
+        message = self._read_message()
+        if message is None:
+            return
+        try:
+            response = secret_prompt.handle(agent, message)
+        except Exception as exc:  # noqa: BLE001 - one failed call must not take the server down; named by kind only
+            response = {"jsonrpc": "2.0", "id": message.get("id"),
+                        "error": {"code": -32603, "message": f"the secret queue failed ({type(exc).__name__})"}}
         if response is None:
             self.send_response(202)
             self.send_header("Content-Length", "0")

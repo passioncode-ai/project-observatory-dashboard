@@ -48,6 +48,16 @@ def _home_argument(argv: list[str]) -> None:
             raise SystemExit("--home needs an absolute workspace path")
         import os
         os.environ["OBSERVATORY_HOME"] = argv[at + 1]
+    # `--agent NAME`: the agent binding this server presents to the node for `observatory_secret_request`
+    # (OBS-260). It comes from the agent's MCP configuration, which the person wrote when connecting the agent,
+    # never from a tool argument; `full agent-binding issue NAME` prints the line.
+    if "--agent" in argv:
+        at = argv.index("--agent")
+        name = argv[at + 1] if at + 1 < len(argv) else ""
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", name):
+            raise SystemExit("--agent needs an agent name: lowercase letters, digits, '.', '_' or '-'")
+        import os
+        os.environ["OBSERVATORY_AGENT"] = name
 
 
 if __name__ == "__main__":
@@ -100,8 +110,8 @@ server = InteropServer(
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one.\n"
-        "SECRETS: `observatory_credentials` names keys and CANNOT return a value; use only "
-        "its handed-back command, never open a file.\n"
+        "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
+        "open no file. Missing key: `observatory_secret_request`, no chat.\n"
         "DEGRADED: every read carries `degraded`: empty means full coverage, otherwise "
         "it names gaps; treat a read without one as a bug (writes/job handles have none). "
         "Refusals are typed `error` answers; isError means malformed input, unknown tool "
@@ -110,7 +120,7 @@ server = InteropServer(
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
         "START with `observatory_overview` (counts, tiers, recent projects, worst findings, "
         "disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
-        "local pass; no grants or direct registry writes.\n"
+        "local pass; no grants or registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the whole "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` filters by `projectId`; "
@@ -218,6 +228,25 @@ def observatory_assistant_ask(question: str, request_id: str,
     # the caller's trace. A second body here would be a second implementation that
     # drifts from the first; it is unreachable and says so if that ever changes.
     raise RuntimeError("observatory_assistant_ask is answered by InteropServer.call_tool")
+
+
+@server.tool()
+def observatory_secret_request(
+    project: Annotated[str, Field(description="The project's vault folder (or its registry id).")],
+    slot: Annotated[str, Field(description="The slot NAME, UPPER_SNAKE_CASE, e.g. STRIPE_KEY.")],
+    env: Annotated[Literal["local", "stage", "prod"], Field(description="The slot's environment.")],
+    why: Annotated[str, Field(description="One line, quoted to the person as your words: what the key is for.")],
+    provider: Annotated[str | None, Field(description="Who issues the key, e.g. stripe.")] = None,
+    replace: Annotated[bool, Field(description="The slot holds a value and you ask the person to replace it.")] = False,
+) -> dict:
+    """Ask the person for a key the vault lacks, instead of asking in chat. Observatory's own window takes it and
+    writes the slot; you never see the value. Returns a job: follow with fabric.job.get; output.outcome is stored,
+    declined, no-answer, unconfirmed or no-client. Refusals come at once: not-running, no-desktop, no-client (with
+    the person's vault.py step), slot-filled, slot-busy, rate-limited. Needs --agent NAME on this server.
+    """
+    # DECLARATION ONLY, like observatory_assistant_ask: `InteropServer.call_tool` answers it, where the caller's
+    # trace is in reach for the job (secret_client.request).
+    raise RuntimeError("observatory_secret_request is answered by InteropServer.call_tool")
 
 
 @server.tool()

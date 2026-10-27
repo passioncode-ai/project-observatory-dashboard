@@ -1187,6 +1187,51 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
 
 Rules and reasons: [design/ACCESS-BINDING.md](design/ACCESS-BINDING.md).
 
+### Give an agent a key without pasting it into a chat: the secret prompt
+
+An agent that needs a key the vault does not hold calls `observatory_secret_request` (project, env,
+slot, why, and optionally the provider and `replace`) instead of asking you in its chat (OSS-84,
+OBS-260). Observatory files the request with its local server and asks you in its own window; the
+agent learns only the outcome (`stored`, `declined`, `no-answer`, `unconfirmed` or `no-client`),
+never the value. The node names the agent from a **binding** you issue when you connect it, never
+from text the agent wrote:
+
+```sh
+project-observatory full agent-binding issue claude-code     # at your terminal; prints the MCP line with --agent claude-code
+project-observatory full agent-binding show                  # connected agents, never a token
+project-observatory full agent-binding revoke claude-code    # refused from the agent's next request
+```
+
+- `issue` writes a random token to the owner-only file `config/agent-bindings/NAME.token` and keeps
+  only its SHA-256 in `config/agent-bindings.json`. It prints the `claude mcp add` line with
+  `--agent NAME`; an existing registration only needs `--agent NAME` added after `server.py`.
+  Issuing again for a connected agent keeps its token.
+- **The limit.** The token file is owner-only, so any agent running as your user can read another
+  agent's token and file a request under its name. The window still shows the project, the slot and
+  the reason, and nothing is stored unless you type it. Running agents as another user, or in a
+  container, is the stronger defence.
+- The local server keeps the queue in `<state>/secret-requests/` (owner-only): one open request per
+  slot (the same agent asking again joins it; another agent is told the slot is busy), five new
+  requests per agent per hour, ten minutes for you to answer. A slot that already holds a value is
+  refused until the agent asks with `replace: true`; the window then asks whether to replace it and
+  names its last change. Each filing, answer and refusal is one line in `events.jsonl` there, names
+  only. `stored` is reported only when the slot shows a write after the request; otherwise the
+  request reads `unconfirmed`.
+- **Refusals that file nothing.** The local server is down: "Observatory is not running", and no
+  window appears. No desktop session (a server, a remote shell): "no desktop to ask the person on",
+  with the step for you: `python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV
+  NAME < FILE` in your own shell, the value on its stdin. There is no terminal answer to an agent's
+  request, and no scripted dialog (`osascript`, `zenity`, `kdialog`): any program of your user could
+  draw an identical one.
+- **Not in this release yet.** The window (the Mac app's own window with a secure field, the
+  desktop app's on Windows) and the phrase you set at first use, which every genuine window shows,
+  ship in a later release. Until then every request on a machine with a desktop is answered
+  `no-client` with the same `vault.py put` step, before anything is filed: no window is imitated.
+  On Linux the local server cannot verify that a window is Observatory's own signed app, so the
+  answer there stays `no-client` when the windows ship.
+
+Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D4.
+
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 
 An agent should never launch, quit or kill your desktop apps or background jobs itself. The
