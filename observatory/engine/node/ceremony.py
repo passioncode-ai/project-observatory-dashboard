@@ -203,18 +203,21 @@ def read_session(folder) -> Optional[dict]:
 
 
 def _write_session(folder, session: dict) -> None:
+    """The session, owner-only, written whole or not at all; a link in its place is refused, never followed."""
     import json
     import os
     from pathlib import Path
+    import osprivacy
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = folder / SESSION_FILE
     temporary = folder / (SESSION_FILE + '.tmp')
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    descriptor = osprivacy.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
         json.dump(session, handle, ensure_ascii=False, indent=1)
         handle.flush()
         os.fsync(handle.fileno())
+    osprivacy.make_private(temporary)
     os.replace(temporary, target)
 
 

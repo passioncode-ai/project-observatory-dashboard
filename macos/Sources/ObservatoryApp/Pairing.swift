@@ -7,7 +7,7 @@ struct PairingAction: Equatable {
     let label: String
     let op: String
     var role: String? = nil
-    var primary = false
+    var prominent = false
     var enabled = true
 }
 
@@ -77,15 +77,15 @@ extension Model {
     /// the start again.
     func pairingActions(_ s: CeremonyScreen) -> [PairingAction] {
         switch s.state {
-        case .notPaired: return [PairingAction(label: t("Start pairing"), op: "start", role: "new", primary: true)]
+        case .notPaired: return [PairingAction(label: t("Start pairing"), op: "start", role: "new", prominent: true)]
         case .hubUnreachable, .waitingForHub: return [PairingAction(label: t("Cancel pairing"), op: "cancel")]
         case .codeShown:
-            return [PairingAction(label: t("The codes match"), op: "confirm", primary: true),
+            return [PairingAction(label: t("The codes match"), op: "confirm", prominent: true),
                     PairingAction(label: t("They differ"), op: "differ")]
         case .passkey:
-            return [PairingAction(label: t("Sign with passkey"), op: "sign", primary: true, enabled: s.canSign),
+            return [PairingAction(label: t("Sign with passkey"), op: "sign", prominent: true, enabled: s.canSign),
                     PairingAction(label: t("Cancel pairing"), op: "cancel")]
-        case .refused, .expired: return [PairingAction(label: t("Start again"), op: "cancel", primary: true)]
+        case .refused, .expired: return [PairingAction(label: t("Start again"), op: "cancel", prominent: true)]
         case .confirmed, .unknown: return []
         }
     }
@@ -140,7 +140,7 @@ struct PairingView: View {
                 }
                 HStack(spacing: 10) {
                     ForEach(m.pairingActions(s), id: \.op) { action in
-                        if action.primary {
+                        if action.prominent {
                             Button(action.label) { Task { await m.pairingStep(action.op, role: action.role) } }
                                 .buttonStyle(PrimaryButtonStyle()).disabled(!action.enabled || m.pairingBusy)
                         } else {

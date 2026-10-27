@@ -22,8 +22,8 @@
       "path": "agent/assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d8db0e907be8bb33317500ee76661c886c0f656193e3a7f186c8a75dc549040c",
-      "bytes": 28735
+      "export_sha256": "08587a574703bcdafce7f1e785a2e636775eec9dc2221f2e451a98074b913d1b",
+      "bytes": 28794
     },
     {
       "path": "agent/observe.py",
@@ -2791,8 +2791,8 @@
       "path": "node/ceremony.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "25d69adf86bf53cf565ba86fb51dcf502eb5541c3536f18753290f7979f8fb65",
-      "bytes": 15381
+      "export_sha256": "ac099a35cd02a838bb2d212faaecbf8f9fd882410a8f4db4ee1d52c95d55863f",
+      "bytes": 15580
     },
     {
       "path": "node/device_keys.py",
