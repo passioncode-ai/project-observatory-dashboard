@@ -3134,8 +3134,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4cfb973c6d36c4b7e5249bfaad03ebb14b9e4febbc5935c5ebb2f750c4381b40",
-      "bytes": 58395
+      "export_sha256": "ea85556aac2b8657ee738c1a1e4a92d48216d851a13df0193447f43c45e09c09",
+      "bytes": 58565
     },
     {
       "path": "node/webauthn.py",
