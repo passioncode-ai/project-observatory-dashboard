@@ -159,6 +159,7 @@ jobs:
           retention-days: 7
 
   windows:
+    timeout-minutes: 300
     # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
     # change. Historical informative steps remain explicitly allowed to fail.
     # Holder safety is enforced at both step and job level; its failure fails this job.
@@ -285,6 +286,32 @@ jobs:
         run: |
           cd observatory/engine
           python tests/test_disk_guard.py -v WindowsHolderUnknown
+      - id: measure_portable
+        # OBS-277 measurement: every suite of the portable engine set on Windows, its receipt kept.
+        name: Every portable engine suite (OBS-277 measurement)
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 200
+        run: |
+          cd observatory/engine
+          python tests/run_portable.py --jobs 4 --report-dir "$RUNNER_TEMP/windows-portable" > "$RUNNER_TEMP/windows-portable.json" || true
+          python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); rows=d.get('suites',[]); import collections; c=collections.Counter(r['status'] for r in rows); print(d.get('status'), dict(c)); [print(r['status'], r['file'], r.get('reason_code',''), r.get('error_type','')) for r in rows if r['status']!='PASS']" "$RUNNER_TEMP/windows-portable.json"
+      - id: measure_root
+        name: Root tests, verbose (OBS-277 measurement)
+        if: always()
+        continue-on-error: true
+        run: python -m unittest discover -s tests -v > "$RUNNER_TEMP/windows-root-tests.log" 2>&1; status=$?; tail -n 40 "$RUNNER_TEMP/windows-root-tests.log"; exit $status
+      - name: Keep the Windows measurement
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-measurement
+          path: |
+            ${{ runner.temp }}/windows-portable
+            ${{ runner.temp }}/windows-portable.json
+            ${{ runner.temp }}/windows-root-tests.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Outcomes
         if: always()
         run: |
