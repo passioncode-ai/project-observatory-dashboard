@@ -87,9 +87,9 @@ informative. On every change, on windows-latest with Python 3.14:
 | The CLI, a whole tick, the server and the tick as tasks | `--help`, `demo`, `doctor`; `tools/tick.py` end to end with no failed step; `serverd.py --install` answering `/.well-known/fabric-service`, `install_launchd.py install, status, uninstall` |
 | Credential Manager, updates, the OpenRouter ledger lock, holder safety, organization enrollment | W5, W6, J-11, the disk guard's Windows holder rule, OBS-201 |
 | The root tests | `python -m unittest discover -s tests`, every case |
-| Every suite of the portable engine set | `tests/run_portable.py`, the same 293 suites `full check` runs on macOS and Linux, held to `tools/windows-known.json` by `tools/check_windows_suites.py` |
+| Every suite of the portable engine set | `tests/run_portable.py`, the same 296 suites `full check` runs on macOS and Linux, held to `tools/windows-known.json` by `tools/check_windows_suites.py` |
 
-The portable set: 198 of 293 suites pass on Windows. The other 95 are listed in
+The portable set: 200 of 296 suites pass on Windows. The other 96 are listed in
 [`tools/windows-known.json`](../../tools/windows-known.json), each with the backlog row that makes it pass and
 what it showed in CI: OBS-278 for suites whose test assumes POSIX (mode bits as the privacy proof, `pty` and
 `termios`, `select` on a pipe, `os.mkfifo`, `os.getuid`, an environment built without `SYSTEMROOT` or with a
