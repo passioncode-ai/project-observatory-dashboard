@@ -275,7 +275,12 @@ def infra_html(page: str, payload: dict, t: Translator | None = None) -> str:
         parts.insert(0, '<section class="card panel empty not-scanned">'
                      + t.mark(spec["switched_off"], tag="p", date=str(doc.get("scanned_on") or ""))
                      + _command(spec["integration"], t) + "</section>")
-    if doc.get("resources") or doc.get("accounts"):
+    unread = [k for a in doc.get("accounts") or [] for k in a.get("unread") or []]
+    if not doc.get("resources") and unread:
+        # Connected but not read (a refused token, a deadline before the first listing): the
+        # accounts say what was not read; tiles of zeros and "no resources" would claim a read.
+        parts += [_accounts(doc, page, t), _other_findings(findings, doc, t)]
+    elif doc.get("resources") or doc.get("accounts"):
         parts += [_tiles(doc, page, t), _accounts(doc, page, t), _resources(doc, findings, names, t),
                   _other_findings(findings, doc, t)]
     stamp = t.mark("Scanned {date}", date=str(doc.get("scanned_on") or ""), tag="p", attrs=' class="machine-at"')

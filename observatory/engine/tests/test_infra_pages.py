@@ -523,6 +523,20 @@ class Pages(unittest.TestCase):
         self.assertNotIn("No resources in the connected accounts", body)
         self.assertEqual(shell.counts_of(payload_with(digitalocean=doc))["digitalocean"], "")
 
+    def test_a_connected_account_that_read_nothing_is_never_no_resources(self):
+        # A refused token: the account is there, every listing unread (review M1, PR #376).
+        scan = {"scanned_on": "2026-10-26", "degraded": [{"source": "cloudflare:example-account", "reason": "HTTP 401"}],
+                "accounts": [{"label": "example-account", "account_id": "acc1", "account_name": "Example Account",
+                              "workers": None, "pages": None, "r2": None, "d1": None, "zones": None}]}
+        doc = infra_registry.cloudflare_document(scan, [], REPOS, RELATIONS, "2026-10-26")
+        on = dict(payload_with(cloudflare=doc), infra_integrations={"digitalocean": True, "cloudflare": True})
+        body = infra_page.infra_html("cloudflare", on, Translator())
+        self.assertIn("Nothing was read", body)
+        self.assertIn("Example Account", body)
+        self.assertIn("workers, pages, r2, d1, zones", body)
+        self.assertNotIn("No resources in the connected accounts", body)
+        self.assertNotIn("Stated monthly cost", body)
+
     def test_switched_off_shows_the_last_read_with_its_date(self):
         doc = infra_registry.digitalocean_document(DO_SCAN, REPOS, RELATIONS, "2026-10-26")
         off = payload_with(digitalocean=doc)            # the integration is off in payload_with
@@ -537,7 +551,8 @@ class Pages(unittest.TestCase):
 
     def test_read_and_empty_says_so(self):
         doc = infra_registry.digitalocean_document(
-            {"scanned_on": "2026-10-26", "teams": [{"label": "t", "team_name": "Empty Team"}], "degraded": []},
+            {"scanned_on": "2026-10-26", "teams": [{"label": "t", "team_name": "Empty Team", "droplets": [],
+                                                "apps": [], "databases": [], "volumes": []}], "degraded": []},
             [], [], "2026-10-26")
         body = infra_page.infra_html("digitalocean", payload_with(digitalocean=doc), Translator())
         self.assertIn("No resources in the connected accounts.", body)

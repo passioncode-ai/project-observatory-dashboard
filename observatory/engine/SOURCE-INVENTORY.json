@@ -617,8 +617,8 @@
       "path": "dashboard/infra_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9a8f5cb683ef9c2d547fd445290c69a11b0ea018e1cd2f7f7fab728a03639b0",
-      "bytes": 15455
+      "export_sha256": "58cca45be4a54e959fde54edb52f73a63eb13d923290d426d7c3bdd300e7ab37",
+      "bytes": 15851
     },
     {
       "path": "dashboard/locales/en.json",
@@ -4589,8 +4589,8 @@
       "path": "tests/test_infra_pages.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "88295b82e22c69a3d822522a4718051b3ec7955cc0f0b768e7b720825823a3fa",
-      "bytes": 37001
+      "export_sha256": "732398f9deb988a7872adeb1f9de04c93733d914b800b6161c5ff7be695c0d8a",
+      "bytes": 38362
     },
     {
       "path": "tests/test_install_key.py",
