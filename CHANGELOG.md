@@ -208,7 +208,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **Windows is verified on every change, and what does not pass yet is named** (OBS-277, OBS-278, OBS-279,
   `docs/design/WINDOWS-LINUX.md`). The `windows` CI job no longer lets a step fail unseen: locks (with the path
   behind a descriptor, OBS-98), owner-only ACLs, process groups, a whole tick, the server and the tick as Task
-  Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 200 of 296 suites
+  Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 202 of 298 suites
   pass on windows-latest, and the other 96 are listed in `tools/windows-known.json`, each with its backlog row and
   what it showed; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
   passes. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
