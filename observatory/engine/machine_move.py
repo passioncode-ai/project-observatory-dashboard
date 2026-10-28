@@ -32,8 +32,9 @@ import subprocess
 import sys
 
 import machine_identity as mi
+import osprivacy
 
-PROG = "project-observatory full machine-move"
+PROG = "project-observatory full"
 
 
 class MachineMoveError(ValueError):
@@ -133,7 +134,7 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     if not mi.LABEL_SHAPE.fullmatch(label or ""):
         raise MachineMoveError("a label is letters, digits or . _ @ : -")
     system = _system(platform)
-    uid = os.getuid() if uid is None else uid
+    uid = int(osprivacy.account()) if uid is None else uid
     staging, folder = mi.staging_dir(home, system), job_folder(home, system)
     staged = _find(staging, system, label)
     live = _find(folder, system, label)
@@ -177,7 +178,7 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
     if not mi.valid_id(to):
         raise MachineMoveError("--to takes the other machine's id (`full machine-move show` prints it there)")
     system = _system(platform)
-    uid = os.getuid() if uid is None else uid
+    uid = int(osprivacy.account()) if uid is None else uid
     me = mi.machine_id(home)
     if to == me:
         raise MachineMoveError("--to names this machine; run `leave` on the machine the job leaves")
@@ -205,7 +206,7 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog=PROG, description="move one background job between two machines, so it "
+    ap = argparse.ArgumentParser(prog=f"{PROG} machine-move", description="move one background job between two machines, so it "
                                                         "never runs on both (the placement file says where it runs)")
     sub = ap.add_subparsers(dest="action", required=True)
     sub.add_parser("show", help="this machine's id, the placement file and the jobs staged here")

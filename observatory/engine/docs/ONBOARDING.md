@@ -2172,7 +2172,7 @@ of that:
   jobs (`org.project-observatory.*`, `project-observatory-*` off macOS) are `withheld` instead:
   every machine installs its own with `full maintain ensure`.
 - **The workspace.** `full restore` leaves out `node/device/`, `node/orgs/`, `node/records/`
-  and `store/maintenance.json`, turns `features.scheduler` off and gives the workspace its own
+  and `<home>/store/maintenance.json`, turns `features.scheduler` off and gives the workspace its own
   `instance_id`, so the second machine's daily backups go to their own folder of the backups
   root and never rotate the first machine's. The vault and everything else are restored.
 
@@ -2194,7 +2194,7 @@ Then move each job that should run on the second machine, **one at a time, the o
 first**:
 
 ```sh
-project-observatory full machine-move leave LABEL --to SECOND_MACHINE_ID   # on the old machine: stop it, stage it
+project-observatory full machine-move leave LABEL --to MACHINE_ID          # on the old machine, with the second's id: stop it, stage it
 project-observatory full machine-move cutover LABEL                        # on the second machine: load it here
 ```
 

@@ -763,6 +763,11 @@ def job_rel():
             else f'.config/systemd/user/{JOB_LABEL}.service')
 
 
+def job_label():
+    """The label a job is named by: launchd's `Label`, or the systemd unit's file name."""
+    return JOB_LABEL if sys.platform == 'darwin' else f'{JOB_LABEL}.service'
+
+
 def job_bytes():
     if sys.platform == 'darwin':
         import plistlib
@@ -789,7 +794,7 @@ class SecondMachine(Machine):
                    b'synthetic own job')
         self.write('fabric-services/alpha-bot.default.json', json.dumps(
             {'protocol': 'fabric-service/0.1', 'id': 'alpha-bot', 'instance': 'default',
-             'lifecycle': {'manager': 'launchd', 'label': JOB_LABEL}}))
+             'lifecycle': {'manager': 'launchd', 'label': job_label()}}))
         self.take(at=AT)
         self.bundle = MB.newest(self.ws)
         self.fresh = self.base / 'fresh-user'
@@ -849,10 +854,10 @@ class SecondMachine(Machine):
         doc = json.loads(placement.read_text())
         self.assertEqual((doc['schema'], doc['machine']), ('observatory-placement/1', BETA))
         self.assertEqual([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']],
-                         [{'label': JOB_LABEL, 'serviceId': 'alpha-bot.default', 'placedOn': ALPHA,
+                         [{'label': job_label(), 'serviceId': 'alpha-bot.default', 'placedOn': ALPHA,
                            'by': 'machine-restore'}])
         self.assertTrue(doc['updatedAt'] and doc['elsewhere'][0]['since'])
-        self.assertEqual(applied['placement']['elsewhere'], [JOB_LABEL])
+        self.assertEqual(applied['placement']['elsewhere'], [job_label()])
         self.assertFalse([p for p in placement.parent.iterdir() if p.name.endswith('.tmp')], 'written atomically')
 
     def test_the_same_machine_keeps_todays_behaviour(self):
@@ -891,7 +896,7 @@ class SecondMachine(Machine):
         self.write_to(self.fresh, job_rel(), job_bytes())
         with self.on(BETA):
             applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
-        self.assertEqual((applied['placement']['elsewhere'], applied['placement']['already_here']), ([], [JOB_LABEL]))
+        self.assertEqual((applied['placement']['elsewhere'], applied['placement']['already_here']), ([], [job_label()]))
 
     def write_to(self, home, rel, data):
         p = home / rel

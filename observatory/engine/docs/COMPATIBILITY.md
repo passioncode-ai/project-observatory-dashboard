@@ -254,7 +254,7 @@ were taken on (`m-` and 24 hex digits of a SHA-256 over the platform's own machi
 An older engine ignores the field, and restores a bundle or snapshot whole wherever it runs. This release restores
 one that names another machine, or none (taken before 0.30.1), as a second machine's: a bundle writes no private SSH
 key and stages its jobs, and a snapshot leaves out `node/device/`, `node/orgs/`, `node/records/` and
-`store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
+`<home>/store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
 `--same-machine` at a terminal restores either whole, as before. An update's own rollback restores its snapshot whole.
 
 Three files live outside the workspace, in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/` on every

@@ -21,7 +21,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   (schema `observatory-placement/1`: `machine`, `updatedAt`, `elsewhere[]` of `label`, `serviceId`, `placedOn`,
   `since`, `by`; owner-only, written atomically), which Fabric Dashboards reads (FD-132) to show such an agent as
   placed on the other machine. `full restore` of a snapshot taken on another machine, or naming none, leaves out
-  `node/device/`, `node/orgs/`, `node/records/` and `store/maintenance.json`, turns `features.scheduler` off and
+  `node/device/`, `node/orgs/`, `node/records/` and `<home>/store/maintenance.json`, turns `features.scheduler` off and
   gives the workspace its own `instance_id`, so `full node --init` makes this machine's own device id, a tick never
   runs on both machines, and the two machines' daily backups (which may share one iCloud folder) never rotate each
   other's files; a same-machine restore and an update's own rollback are unchanged. Tests:

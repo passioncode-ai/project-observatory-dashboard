@@ -398,8 +398,7 @@ def _as_another_machine(stage: Path) -> dict:
     workspace.write_json(marker_file, marker)
     return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True,
             'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
-            'next': ['project-observatory full node --init  (this machine\'s own device id)',
-                     'project-observatory full org enroll ...  (each organization this machine should join)']}
+            'next': ['project-observatory full node --init  (this machine\'s own device id)']}
 
 
 def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None) -> dict:
