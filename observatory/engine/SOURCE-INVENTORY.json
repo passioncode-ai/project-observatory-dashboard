@@ -5238,8 +5238,8 @@
       "path": "tests/test_node_session.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "070bbf3514ef5cb0d9bef92959168086c9e61694bf97810e9bcbb983ebd59cbd",
-      "bytes": 65672
+      "export_sha256": "8e927766574cb4e32488a1f69b747c35e46e6723f4673cd874f93cb0b0837f94",
+      "bytes": 65949
     },
     {
       "path": "tests/test_node_summary.py",
