@@ -436,7 +436,7 @@ def parser():
         description='The assistant protocol (observatory-assistant/1) the Mac app speaks: one action; '
                     'ask, get, job, cancel and delete read one JSON object on stdin; one JSON object on stdout.')
     # One line: the Mac app's BridgeTests read these choices from it as its allowlist's contract.
-    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build','ceremony'])
+    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build','ceremony','secret'])
     return ap
 
 
@@ -452,6 +452,30 @@ def ceremony(doc):
         return cer.step(folder,folder/'device',doc['op'],doc.get('role'),int(time.time()*1000))
     except cer.CeremonyRefused as exc:
         raise AssistantError(str(exc)) from None
+
+
+def secret(doc):
+    """The signed app's door to the secret prompt (secret_prompt.py, OBS-260; PERSON-SURFACES.md D4):
+    `{"op": "list"}` answers the waiting requests, `{"op": "store", "requestId", "value"}` writes the value into the
+    slot in THIS process and answers the request, `{"op": "decline", "requestId"}` and
+    `{"op": "unavailable", "requestId", "reason"}` answer it without a value. Every op but an empty list requires
+    that a parent of this process is the signed app (`client-unverified` otherwise). The value arrives on stdin only,
+    and nothing here prints, logs or returns it."""
+    import secret_prompt as SP
+    op=doc.get('op')
+    shapes={'list':{'op'},'store':{'op','requestId','value'},'decline':{'op','requestId'},
+            'unavailable':{'op','requestId','reason'}}
+    if op not in shapes or set(doc)!=shapes[op] or not all(isinstance(v,str) for v in doc.values()):
+        raise AssistantError('invalid-input')
+    try:
+        if op=='list':return {'requests':SP.client_requests()}
+        if op=='store':return {'request':SP.client_store(doc['requestId'],doc['value'])}
+        if op=='decline':return {'request':SP.client_decline(doc['requestId'])}
+        return {'request':SP.client_unavailable(doc['requestId'],doc['reason'])}
+    except SP.Refused as exc:
+        raise AssistantError(exc.code) from None
+    finally:
+        doc.pop('value',None)
 
 
 def main(argv=None):
@@ -472,6 +496,7 @@ def main(argv=None):
             'projects':project_choices()}
         elif args.action=='ask':result=ask(doc)
         elif args.action=='ceremony':result=ceremony(doc)
+        elif args.action=='secret':result=secret(doc)
         else:
             if set(doc)!={'id'} or not isinstance(doc['id'],str):raise AssistantError('invalid-input')
             if args.action=='get':result=get_conversation(doc['id'])

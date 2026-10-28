@@ -85,6 +85,17 @@ enum DashboardMode: Equatable {
     @Published var pairing: CeremonyScreen?
     @Published var pairingFailure: Failure?
     @Published var pairingBusy = false
+    /// The secret prompt (OBS-260): the requests waiting for the person, what the window shows, a step it refused.
+    @Published var secretRequests: [SecretRequest] = []
+    @Published var secretStage: SecretPromptStage = .needsPhrase
+    @Published var secretFailure: Failure?
+    @Published var secretBusy = false
+    /// The phrase's store: the signed app's data protection keychain group, or a stand-in in tests.
+    let phraseStore: PhraseStore
+    /// The secret prompt's engine (`SecretEngine`): inside this app, after its own signature checks out; nil otherwise.
+    /// Never the `executable` preference. Asked off the main thread before every secret call; tests replace it.
+    var secretEngine: @Sendable () -> String? = { SecretEngine.live() }
+    var secretWatch: Task<Void, Never>?
     var dashboardError: String? { dashboardFailure.map { message($0.code, $0.detail) } }
     var error: String? { failure.map { message($0.code, $0.detail) } }
 
@@ -101,8 +112,10 @@ enum DashboardMode: Equatable {
     private let transport: ((String, [String: String]) async throws -> [String: Any])?
     init(defaults: UserDefaults = .standard,
          transport: ((String, [String: String]) async throws -> [String: Any])? = nil,
-         preferredLanguages: @escaping () -> [String] = Localization.systemPreferredLanguages) {
+         preferredLanguages: @escaping () -> [String] = Localization.systemPreferredLanguages,
+         phraseStore: PhraseStore = KeychainPhraseStore()) {
         self.defaults = defaults; self.transport = transport; self.preferredLanguages = preferredLanguages
+        self.phraseStore = phraseStore
         let (cli, home) = Self.configured(defaults)
         executable = cli; activeExecutable = cli; workspace = home; activeWorkspace = home
         // The 0.18 switch is read when no choice is stored; `bool(forKey:)` also reads
@@ -245,6 +258,22 @@ enum DashboardMode: Equatable {
         try await call("ceremony", input, timeout: 30)
     }
     func failureOf(_ error: Error) -> Failure { failure(of: error) }
+    /// The secret prompt's one engine call (OBS-260): an input `SecretRequest.input` allowed, never another action.
+    /// The engine is resolved, and this app's signature checked, again for every call (list and store alike), and the
+    /// exact path it answers is the one started: a file swapped since the last call fails the check instead.
+    func secretCall(_ input: [String: String]) async throws -> [String: Any] {
+        guard let backend = await secretBackend() else { throw BridgeError.backend("engine-untrusted") }
+        if let transport { return try await transport("secret", input) }
+        let data = try await backend.call("secret", input: input, timeout: 30)
+        guard let doc = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw BridgeError.invalidResponse }
+        return doc
+    }
+    /// The bridge the secret prompt uses: the bundled engine and this workspace, or nil. Never `activeExecutable`.
+    func secretBackend() async -> Backend? {
+        let resolve = secretEngine
+        guard let engine = await Task.detached(operation: { resolve() }).value else { return nil }
+        return Backend(executable: engine, workspace: activeWorkspace)
+    }
 
     private func call(_ action: String, _ input: [String: String] = [:], timeout: TimeInterval = 20) async throws -> [String: Any] {
         if let transport { return try await transport(action, input) }

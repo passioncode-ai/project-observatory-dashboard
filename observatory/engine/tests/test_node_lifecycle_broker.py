@@ -693,6 +693,23 @@ class ControlTests(BrokerFixture, unittest.TestCase):
         receipt = self.wait(self.broker.stop(self.agent, self.args('stop-1')), self.agent)
         self.assertEqual((receipt['state'], receipt['reason']), ('in_use_by_person', 'taken_over_by_person'))
 
+    def test_the_secret_prompt_opens_an_enrolled_app_once_per_request_and_holds_no_credential(self):
+        # OBS-260: the node's prompt is an internal caller of its own; a retry of one request is one operation.
+        first = self.broker.open_for_prompt('alpha.app', 'sreq_' + '0' * 24)
+        again = self.broker.open_for_prompt('alpha.app', 'sreq_' + '0' * 24)
+        self.assertEqual(first['operationId'], again['operationId'])
+        end = time.monotonic() + 10
+        while self.broker.prompt_operation(first['operationId'])['state'] == 'running' and time.monotonic() < end:
+            time.sleep(0.01)
+        self.assertEqual(self.broker.prompt_operation(first['operationId'])['state'], 'ready')
+        self.assertEqual(self.adapter.effects, [('start', 'alpha.app')])
+        with self.assertRaises(broker.LifecycleError):
+            self.broker.open_for_prompt('beta.app', 'sreq_' + '1' * 24)
+        self.assertIn('secret-prompt', broker.RESERVED_CALLERS)
+        # Another caller never reads the prompt's operation.
+        with self.assertRaises(broker.LifecycleError):
+            self.broker.get(self.agent, first['operationId'])
+
     def test_owner_stops_anything(self):
         self.adapter.run_as_person('alpha.app', windows=2)
         receipt = self.wait(self.broker.stop(self.owner, self.args('stop-1')), self.owner)

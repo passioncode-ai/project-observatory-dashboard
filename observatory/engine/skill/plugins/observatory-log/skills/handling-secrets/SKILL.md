@@ -33,8 +33,10 @@ tool returns a job, and `fabric.job.get` ends with `output.outcome`: `stored`
 their own shell (`vault.py put`, the value on its stdin); relay that step, never
 a request for the value. The MCP server needs `--agent NAME`, which `project-observatory
 full agent-binding issue NAME` prints when the person connects the agent. The
-window ships in a later release; until then every request with a desktop is
-answered `no-client` with that step.
+window is the Mac app's, which the node opens through its lifecycle broker and
+which shows the person's own phrase; on Windows and Linux, with the app not
+enrolled, or (as in every release so far) with no engine bundled inside the
+signed app, a request is answered `no-client` with that step.
 
 ## Start here
 
@@ -324,6 +326,15 @@ The other-account token makes no storage and no sign-in there.
 Reading one account's Worker logs is `cloudflare.py issue --preset workers-observability-read
 --account <slug> --vault <project>/<env>/<NAME>`: Workers Observability Read
 only, verified by the telemetry-keys query with the new value.
+
+Putting Cloudflare Access (Zero Trust sign-in) in front of a project's own hostname is
+`cloudflare.py issue --preset access-app --account <slug> --vault <project>/<env>/<NAME>`:
+Access: Apps and Policies Write and Access: Organizations, Identity Providers, and Groups Read
+on that one account, enough to create and keep one Access application with its policies and to
+read the team domain (`<team>.cloudflareaccess.com`). It cannot change the organization, add an
+identity provider or make service tokens. It is verified by reading the account's Zero Trust
+organization with the new value; on an account where Zero Trust was never enabled that read
+fails, and the refusal names the page where the account's owner enables it.
 
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`

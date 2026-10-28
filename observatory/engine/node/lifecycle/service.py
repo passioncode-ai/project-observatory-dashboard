@@ -310,6 +310,9 @@ EVENT_TEXT = {
     ('stop', None, False): ('lifecycle.stop_failed', '{name} could not be stopped.'),
     ('restart', None, True): ('lifecycle.restarted', '{name} was restarted on request.'),
     ('restart', None, False): ('lifecycle.restart_failed', '{name} could not be restarted.'),
+    ('ensure', 'secret-prompt', True): ('lifecycle.prompt_opened', '{name} is running to show a secret prompt.'),
+    ('ensure', 'secret-prompt', False): ('lifecycle.prompt_failed',
+                                         '{name} could not be started to show a secret prompt.'),
     ('ensure', None, True): ('lifecycle.completed', '{name} is running.'),
     ('ensure', None, False): ('lifecycle.failed', '{name} could not be started.'),
 }
@@ -424,7 +427,8 @@ class Service:
     def operation_admitted(self, info: dict) -> None:
         name = self.target_name(info.get('targetId'))
         verb = {'ensure': 'start', 'stop': 'stop', 'restart': 'restart'}.get(info.get('kind'), 'act on')
-        by = 'the supervisor' if info.get('caller') == 'supervisor' else 'a caller'
+        by = {'supervisor': 'the supervisor', 'secret-prompt': "the node's secret prompt"}.get(info.get('caller'),
+                                                                                               'a caller')
         self.events.append('lifecycle.admitted', 'info', f'Asked to {verb} {name} ({by}).',
                            subject={'kind': 'target', 'id': info['targetId']}, **trace_ids(info.get('traceparent')))
         self.note('operation.admitted', **{('trigger' if k == 'reason' else k): v

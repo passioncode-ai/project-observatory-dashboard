@@ -1628,6 +1628,9 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/accounts/a1/email/sending/suppressions", "send-value-"),
         ("workers-edit", "account", ("Workers Scripts Write", "Workers KV Storage Write"),
          "/accounts/a1/workers/scripts", "wk-value-"),
+        ("access-app", "account", ("Access: Apps and Policies Write",
+                                   "Access: Organizations, Identity Providers, and Groups Read"),
+         "/accounts/a1/access/organizations", "acc-value-"),
         ("email-routing", "zone", ("Zone Read", "Email Routing Rules Write"),
          "/zones/z1/email/routing/rules", "rt-value-"),
         ("redirect-rules", "zone", ("Zone Read", "Dynamic URL Redirects Write"),
@@ -1676,13 +1679,16 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
     delivers anything."""
     groups = {"email-send": ("Email Sending Write", "Email Sending Read"),
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
+              "access-app": ("Access: Apps and Policies Write",
+                             "Access: Organizations, Identity Providers, and Groups Read"),
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
               "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
               "workers-routes": ("Zone Read", "Workers Routes Write"),
               "cache-purge": ("Zone Read", "Cache Purge"),
               "zone-edge-rules": ("Zone Read", "Cache Settings Write", "Config Settings Write",
                                   "Bot Management Write")}
-    level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
+    level = {"email-send": "account", "workers-edit": "account", "access-app": "account",
+             "email-routing": "zone",
              "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone",
              "zone-edge-rules": "zone"}
     for preset in groups:
@@ -1724,6 +1730,76 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
         m.deliver_to_vault = lambda value, p, e, n, d=delivered2: d.append(value)
         check(f"{preset}: a token that cannot do its read is not delivered",
               issue("proj/prod/CF_X") == 1 and not delivered2 and not delivered, str(delivered2))
+
+
+def test_cf_access_app_preset_reads_the_team_domain_and_changes_no_organization() -> None:
+    """access-app (Fabric board request 3bf4a84e): one Access application and its
+    policies on one account, plus the Zero Trust organization READ that names the
+    team domain. Two account-level groups in one policy on the account, no zone
+    half, nothing that writes the organization, identity providers or service
+    tokens; verified by reading the organization with the NEW value, minted with
+    an expiry, named after its slot; and a token whose read fails (Zero Trust
+    never enabled) is deleted, with the refusal naming the owner's consent page."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    preset = m.PRESETS["access-app"]
+    check("access-app grants exactly its two account-level Access groups",
+          preset["groups"] == ("Access: Apps and Policies Write",
+                               "Access: Organizations, Identity Providers, and Groups Read")
+          and preset["level"] == "account" and preset["scope"] == "account-vault"
+          and not preset.get("zone_groups") and not preset.get("account_groups"), str(preset))
+    check("access-app writes no organization, identity provider or service token",
+          not [g for g in preset["groups"]
+               if ("Organizations" in g or "Service Tokens" in g) and g.endswith("Write")], "")
+    log, delivered = [], []
+    offered = [(g, "account") for g in preset["groups"]] + [(g, "zone") for g in preset["groups"]]
+    _preset_fake(m, log, offered, "/accounts/a1/access/organizations", "acc-value-")
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    m.record_slot_expiry = lambda *a, **k: "expires"
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_account("access-app", "site/prod/CF_ACCESS_TOKEN", None, wait=0)
+    create = [pl for _m, p, _t, pl in log if p == "/accounts/a1/tokens" and pl]
+    pols = create[0]["policies"] if create else []
+    check("access-app issues", rc == 0, str(rc))
+    check("access-app is one policy on the one account, account-level ids only",
+          [[g["id"] for g in pol["permission_groups"]] for pol in pols]
+          == [[f"id-account-{g}" for g in preset["groups"]]]
+          and pols[0]["resources"] == {"com.cloudflare.api.account.a1": "*"}, str(pols))
+    check("access-app is named after its slot",
+          create and create[0]["name"]
+          == "observatory-access-app site/prod/CF_ACCESS_TOKEN (managed)", str(create))
+    check("access-app is minted with an expiry", create and bool(create[0].get("expires_on")), str(create))
+    check("access-app proves the organization read with the NEW value",
+          any(v == "GET" and p == "/accounts/a1/access/organizations" and t.startswith("acc-value-")
+              for v, p, t, _pl in log), str(log[-2:]))
+    check("access-app lands in the named slot and the value is never printed",
+          [d[1:] for d in delivered] == [("site", "prod", "CF_ACCESS_TOKEN")]
+          and "acc-value-" not in out.getvalue(), out.getvalue())
+
+    m = cf(); _cf_with_admin(m)
+    log2, delivered2 = [], []
+    _preset_fake(m, log2, [(g, "account") for g in preset["groups"]], "/never", "acc-value-")
+    inner = m._request
+
+    def no_organization(path, token, payload=None, method=None, inner=inner):
+        if token.startswith("acc-value-"):
+            raise RuntimeError("cloudflare answered HTTP 404; provider response withheld")
+        return inner(path, token, payload, method)
+    m._request = no_organization
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered2: d.append(value)
+    m._journal = lambda *a, **k: None
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_account("access-app", "proj/prod/CF_ACCESS_TOKEN", None, wait=0)
+    check("access-app: no organization means nothing is delivered", rc == 1 and not delivered2, str(rc))
+    check("access-app: the refusal names the owner's Zero Trust page for that account",
+          "https://one.dash.cloudflare.com/a1/" in err.getvalue() and "Zero Trust" in err.getvalue(),
+          err.getvalue())
+    check("access-app: the token that never proved its read is deleted",
+          any(v == "DELETE" and p == "/accounts/a1/tokens/t-new" for v, p, _t, _pl in log2)
+          and "acc-value-" not in err.getvalue(), err.getvalue())
 
 
 def test_cf_sending_domain_preset_grants_one_zone_and_its_account_sending() -> None:
@@ -3567,6 +3643,7 @@ if __name__ == "__main__":
                test_cf_zone_analytics_preset_reads_one_zone_into_the_vault,
                test_cf_cache_purge_proves_itself_with_one_harmless_purge,
                test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules,
+               test_cf_access_app_preset_reads_the_team_domain_and_changes_no_organization,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,

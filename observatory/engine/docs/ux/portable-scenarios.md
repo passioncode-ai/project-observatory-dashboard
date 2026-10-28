@@ -844,10 +844,26 @@ agent included; one open request per slot and five per agent per hour; the repla
 prompt's replace flag; `stored` only after a slot write, `unconfirmed`, `declined`, `no-answer` with
 a late answer ignored, `cancelled` from the job, `no-client`; the node down and no desktop with no
 window and no filing; no value in an argument, an environment, the queue, the journal, the runner's
-log or the job's result), `tests/test_mcp_wire.py` (the tool is published).
-Status: partly built on branch feat/obs-260-secret-prompt, pull request #378 (OBS-260): the agent binding, the node's queue, the tool and its job, the
-limits and every refusal; the windows and the person's phrase are not built yet, so every request
-with a desktop is answered `no-client` with the `vault.py put` step; product outcome unobserved.
+log or the job's result; the review of #378: the constant-time bearer compare, the project field,
+the provider's shape check, invalid arguments journalled, a request withdrawn when its job cannot
+start or its runner is refused; the broker opens the enrolled app with the request id and a failed
+start closes the request `no-client`; Windows `broker-unsupported`; the app's door: only a verified
+signed parent reads or answers, `store` writes the slot in the app's own child with the value on
+its stdin only and rotates on Replace, `decline`, `unavailable` without a phrase store),
+`tests/test_node_lifecycle_broker.py` (the prompt's own internal caller, one operation per request),
+`tests/test_mcp_wire.py` (the tool is published), and in the Mac app
+`macos/Tests/ObservatoryCoreTests/SecretPromptTests.swift` (the request as the door answers it, the
+window's only inputs, the phrase, no window and `no-client` without a phrase store, Save and Cancel
+through the bridge).
+Status: partly built (OBS-260): the server half landed in #378; the Mac window, the person's phrase
+(data protection keychain, the app's access group, applied with a provisioning profile), the app's
+door and the broker open are on branch feat/obs-260-windows. The Windows desktop window waits for
+the Windows lifecycle broker (OBS-277); Linux stays `no-client` with the `vault.py put` step. The
+released app is not yet signed with the provisioning profile the phrase's keychain group needs (the
+release will fetch or create it through the App Store Connect API), and the window takes a key only
+through an engine bundled inside the signed app, which no release carries yet: today every request is
+answered `no-client`, reason `engine-untrusted`, with the `vault.py put` step; product outcome
+unobserved.
 
 ### OSS-85: see which agents I have, and connect Switchboard
 

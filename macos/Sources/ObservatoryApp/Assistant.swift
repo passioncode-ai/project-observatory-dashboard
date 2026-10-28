@@ -278,6 +278,7 @@ struct SettingsView: View {
                 Text(m.t("Project Observatory opens when you log in and keeps working with its window closed. Quit it from its menu (⌘Q)."))
                     .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
+            PhraseSettings()
             HStack(spacing: 10) {
                 Button(m.t("Save and check connection")) { Task { await m.saveSettings() } }
                     .buttonStyle(PrimaryButtonStyle()).disabled(m.connecting).keyboardShortcut(.defaultAction)
