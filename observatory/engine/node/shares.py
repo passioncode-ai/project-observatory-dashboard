@@ -51,6 +51,8 @@ DEFAULT_LEASE_SECONDS = 3600
 RESEAL_BEFORE_MS = 7 * PS.DAY_MS
 #: A received share reports at least this often when the maintenance job runs (PS-8: at each renewal and daily).
 REPORT_EVERY_MS = 20 * 3600 * 1000
+#: How long a step waits for another step of the same share (a sync talking to the mailbox) before it gives up.
+LOCK_WAIT_SECONDS = 120
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,63}')
 
 #: What the recipient's "Accept" names (PS-8): accepting is the recipient's consent to it.
@@ -185,12 +187,14 @@ class Shares:
 
     def __init__(self, root: Path, *, transport: Optional[MB.Transport] = None,
                  clock: Optional[Callable[[], int]] = None,
-                 read_value: Optional[Callable[[str, str, str], str]] = None):
+                 read_value: Optional[Callable[[str, str, str], str]] = None,
+                 on_wait: Optional[Callable[[str], None]] = None):
         self.root = Path(root)
         self.transport = transport or MB.http_transport()
         self.clock = clock or _now_ms
         self.read_value = read_value
         self._held = threading.local()
+        self.on_wait = on_wait or (lambda message: print(message, file=__import__('sys').stderr, flush=True))
 
     @contextlib.contextmanager
     def _locked(self, folder: '_Folder'):
@@ -203,15 +207,45 @@ class Shares:
             finally:
                 held[key] -= 1
             return
+        with self._share_lock(folder):
+            held[key] = 1
+            try:
+                yield
+            finally:
+                del held[key]
+
+    @contextlib.contextmanager
+    def _share_lock(self, folder: '_Folder'):
+        """The share's lock file, taken without waiting first; when another step holds it (the maintenance pass talking
+        to the mailbox), `on_wait` says so once and the lock is waited for up to LOCK_WAIT_SECONDS. Only taking the
+        lock is translated into a lock refusal: an error inside the step stays that step's own (the review of #386)."""
+        import oslocks
+        path = folder.path / 'share.lock'
         try:
-            with private_io.lock(folder.path / 'share.lock'):
-                held[key] = 1
-                try:
-                    yield
-                finally:
-                    del held[key]
-        except RuntimeError as error:                          # a link or a foreign file where the lock lives
+            private_io.check(path)
+            private_io.parent(path.parent)
+            fd = osprivacy.open(path, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW | osprivacy.NONBLOCK, 0o600)
+        except (RuntimeError, OSError) as error:               # a link or a foreign file where the lock lives
             raise ShareError('unsafe-path', f'the share lock could not be taken: {error}') from None
+        try:
+            os.fchmod(fd, 0o600)
+            deadline, told = time.monotonic() + LOCK_WAIT_SECONDS, False
+            while True:
+                try:
+                    oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                    break
+                except (BlockingIOError, PermissionError):
+                    if not told:
+                        self.on_wait(f'share {folder.path.name[:8]}: waiting for its other step (a sync with its '
+                                     f'mailbox) to finish')
+                        told = True
+                    if time.monotonic() >= deadline:
+                        raise ShareError('busy', f'share {folder.path.name[:8]} is held by another step for over '
+                                                 f'{LOCK_WAIT_SECONDS} s; try again') from None
+                    time.sleep(0.1)
+            yield
+        finally:
+            os.close(fd)
 
     # -- folders --
     def _sent(self, share_id: str) -> _Folder:
@@ -305,16 +339,25 @@ class Shares:
             'updatedAt': _iso(now)}
         folder = self._sent(share_id)
         _private_dir(folder.path)
-        folder.put_key('sig', sig)
-        folder.put_key('kem', kem)
-        folder.put_text('claim-code', code)
-        folder.put_text('mac-key', secrets.token_hex(32))
-        folder.save(record)
-        try:
-            self._client(origin, folder, record, owner=True).create(share_id, record['claimDeadline'], lease_seconds)
-        except MB.MailboxError as error:
+        # Under the share's lock from its first file on: a maintenance pass that finds it half-made waits.
+        refused = None
+        with self._locked(folder):
+            folder.put_key('sig', sig)
+            folder.put_key('kem', kem)
+            folder.put_text('claim-code', code)
+            folder.put_text('mac-key', secrets.token_hex(32))
+            folder.save(record)
+            try:
+                self._client(origin, folder, record, owner=True).create(share_id, record['claimDeadline'],
+                                                                        lease_seconds)
+            except MB.MailboxError as error:
+                refused = error
+                # Unlisted while the lock is held (a pass lists only folders with a record), so nothing reads it after.
+                folder.drop('share.json')
+        if refused is not None:
+            # Removed after the lock is let go: Windows refuses to delete a folder that holds an open file.
             shutil.rmtree(folder.path, ignore_errors=True)
-            raise ShareError('mailbox', f'the mailbox refused the new share: {error.code}: {error}') from None
+            raise ShareError('mailbox', f'the mailbox refused the new share: {refused.code}: {refused}')
         link = PS.share_link({'origin': origin, 'shareId': share_id, 'code': code, 'fpr': record['fpr']})
         return record, link
 
@@ -512,12 +555,24 @@ class Shares:
                                      f"{share_id[:8]}` if you did not expect it")
         record['late'] = late
         deletion = status.get('deletion')
-        if record['revocation'] is not None and status.get('revocation') != record['revocation']:
-            # A revocation the mailbox does not show yet (it was down when it was taken back): handed again, as often
-            # as it takes; the mailbox keeps the first it holds.
-            status['revocation'] = client.revoke(record['revocation']).get('revocation')
         if record['revocation'] is not None:
-            record['revocationObserved'] = status.get('revocation') == record['revocation']
+            def stands(held) -> bool:
+                return PS.peer_record_stands(held, PS.PEER_REVOCATION_TYPE, share_id, record['keys']['sig'])['ok']
+            held = status.get('revocation')
+            if not stands(held):
+                # A revocation the mailbox does not show yet (it was down when it was taken back): handed again, as
+                # often as it takes.
+                held = client.revoke(record['revocation']).get('revocation')
+            # Any revocation this share's #sig signed is the share taken back; the mailbox keeps the first it held,
+            # and the recipient's receipt names that one, so the record follows it.
+            record['revocationObserved'] = stands(held)
+            if record['revocationObserved']:
+                record['revocation'] = held
+                if record.get('differedAt'):
+                    record['warning'] = ("you said the codes differ after the key was sealed, and the share is taken "
+                                         "back at the mailbox: the recipient's machine stops at its next renewal, "
+                                         "within one lease. Whoever received it may have copied it, so revoke or "
+                                         "rotate the key at its provider")
             if isinstance(deletion, dict) and record['recipientKeys'] is not None \
                     and PS.peer_record_stands(deletion, PS.PEER_DELETION_TYPE, share_id,
                                               record['recipientKeys']['sig'])['ok'] \
@@ -657,22 +712,24 @@ class Shares:
                   'slots': [], 'revocation': None, 'deletion': None, 'reportSequence': 0, 'lastReportDay': None,
                   'lastReportAt': None, 'consent': REPORT_CONSENT, 'acceptedAt': _iso(now), 'updatedAt': _iso(now)}
         _private_dir(folder.path)
-        folder.put_key('sig', sig)
-        folder.put_key('kem', kem)
-        folder.save(record)                                    # kept before the claim is sent: never a second claim
-        client = self._client(link['origin'], folder, record)
-        try:
-            client.post_frame(self._claim_frame(record))
-            record['state'] = 'exchanging'
-        except MB.MailboxError as error:
-            if error.code in ('burnt', 'sealed', 'unknown-share'):
-                self._burn(record, 'link-used' if error.code != 'unknown-share' else 'unknown-share',
-                           'the link was used elsewhere, expired or is unknown to its mailbox: ask the sender for a '
-                           'new one')
-            else:
-                record['mailbox'] = {'error': error.code, 'at': _iso(now)}
-        folder.save(record)
-        return self.sync_received(share_id) if record['state'] == 'exchanging' else record
+        # Under the share's lock from its first file on: a maintenance pass cannot post this claim a second time.
+        with self._locked(folder):
+            folder.put_key('sig', sig)
+            folder.put_key('kem', kem)
+            folder.save(record)                                    # kept before the claim is sent: never a second claim
+            client = self._client(link['origin'], folder, record)
+            try:
+                client.post_frame(self._claim_frame(record))
+                record['state'] = 'exchanging'
+            except MB.MailboxError as error:
+                if error.code in ('burnt', 'sealed', 'unknown-share'):
+                    self._burn(record, 'link-used' if error.code != 'unknown-share' else 'unknown-share',
+                               'the link was used elsewhere, expired or is unknown to its mailbox: ask the sender for a '
+                               'new one')
+                else:
+                    record['mailbox'] = {'error': error.code, 'at': _iso(now)}
+            folder.save(record)
+            return self.sync_received(share_id) if record['state'] == 'exchanging' else record
 
     @_one_share_at_a_time
     def sync_received(self, share_id: str, *, due_only: bool = False) -> dict:

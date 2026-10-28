@@ -3,9 +3,9 @@
 
 Sender:
 
-    project-observatory full share create PROJECT ENV SLOT --to LABEL --expires DAYS --mailbox URL
-        a share of vault slots (SLOT,SLOT for several) for one recipient machine; prints the link once,
-        to your terminal
+    project-observatory full share create PROJECT ENV SLOT --to LABEL --expires DAYS
+        a share of vault slots (SLOT,SLOT for several) for one recipient machine, through the mailbox
+        `full cloud deploy` recorded (or --mailbox URL); prints the link once, to your terminal
     project-observatory full share status ID
         what the recipient did; the six-digit code when it is ready
     project-observatory full share confirm ID
@@ -173,8 +173,8 @@ def cmd_create(args) -> int:
     SH, s = store()
     origin = mailbox_origin(args.mailbox)
     if origin is None:
-        print("share: no mailbox: pass --mailbox https://..., the mailbox you will name in the link (your own, "
-              "deployed into your Cloudflare account, comes in a later release, OBS-263)", file=sys.stderr)
+        print("share: no mailbox: deploy yours into your Cloudflare account with `project-observatory full cloud "
+              "deploy`, or pass --mailbox https://... for another one", file=sys.stderr)
         return 2
     if not (args.show_link or _is_terminal()):
         print("share: the link is printed once, to a person's terminal: run this yourself, or pass --show-link to "

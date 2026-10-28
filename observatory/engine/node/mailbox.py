@@ -32,7 +32,9 @@ The routes (every body JSON, every answer JSON; refusals `{"error": {"code", "me
 | `PUT /v1/shares/{id}/deletion` | recipient | hold the recipient's deletion receipt |
 | `GET /v1/shares/{id}` | either side | status: verdict, sealed, deliveries, last renewal, revocation, deletion |
 
-`FakeMailbox` is this module's in-process mailbox: the same rules, for tests and for a loopback mailbox a person can run
+`FakeMailbox` is this module's in-process mailbox: the same rules, except that it is stricter about nonces (it keeps one
+for every signed request, reads and refused ones included, and so refuses a replayed read the Worker answers), for tests
+and for a loopback mailbox a person can run
 to try a share between two workspaces on one machine. The deployed mailbox is the Worker under
 `observatory/engine/cloud/` (OBS-263).
 """
@@ -57,6 +59,8 @@ ALG = 'ecdsa-p256-sha256'
 WINDOW_SECONDS = 300
 MAX_BODY_BYTES = 262_144
 DEFAULT_LEASE_SECONDS = 3600
+#: Late claims carried after sealing: one per claiming key, at most this many keys; the recipient's abort apart.
+MAX_LATE_CLAIMS = 16
 #: A loopback mailbox for a trial between two workspaces: `host=127.0.0.1:PORT`, read only for a loopback target.
 RESOLVE_ENV = 'OBSERVATORY_CLOUD_RESOLVE'
 
@@ -190,14 +194,20 @@ class FakeMailbox:
         share = self.shares.get(share_id)
         if share is None:
             return _refuse(404, 'unknown-share', 'the mailbox holds no such share')
-        signer = self._signer(share, headers, method, target, body, now, doc if sub == 'frames' else None)
+        # Only a claim being carried (a POST) may name its own signer: a body sent with any other request is never a
+        # key this share admits (the review of #386, M1).
+        claim = doc if sub == 'frames' and method == 'POST' and isinstance(doc, dict) and doc.get('step') == 'claim' \
+            else None
+        signer = self._signer(share, headers, method, target, body, now, claim)
         if isinstance(signer, tuple):
             return signer
         if sub == 'frames' and method == 'POST':
             return self._frame(share, signer, doc, now)
         if sub == 'frames' and method == 'GET':
             self._expire(share, now)
-            return _answer(200, {'frames': share['frames'], 'verdict': share['verdict'], 'late': share['late'],
+            if signer not in ('sender', 'recipient'):
+                return _refuse(403, 'forbidden', 'only the two sides read the frames')
+            return _answer(200, {'frames': share['frames'], 'verdict': share['verdict'], 'late': self._late(share),
                                  'sealed': share['sealed']})
         if sub and sub.startswith('envelopes/') and method == 'PUT':
             return self._envelope(share, signer, sub.split('/', 1)[1], doc, now)
@@ -241,7 +251,8 @@ class FakeMailbox:
             del held[key]
         if (read['keyid'], read['nonce']) in held:
             return _refuse(401, 'signature-replayed', 'this nonce was used')
-        held[(read['keyid'], read['nonce'])] = now + WINDOW_SECONDS * 1000
+        # Kept as long as a signature made at `created` is fresh: a clock ahead of ours included.
+        held[(read['keyid'], read['nonce'])] = max(now, read['created'] * 1000) + WINDOW_SECONDS * 1000
         return who
 
     # -- routes --
@@ -268,10 +279,10 @@ class FakeMailbox:
             return _answer(200, {'created': False}) if same else _refuse(409, 'exists', 'the share id is taken')
         self.shares[share_id] = {
             'shareId': share_id, 'senderSig': doc['sender']['sig'], 'claimDeadline': doc['claimDeadline'],
-            'leaseSeconds': int(lease), 'createdAt': relay.rfc3339(now), 'frames': [], 'late': [],
+            'leaseSeconds': int(lease), 'createdAt': relay.rfc3339(now), 'frames': [], 'lateAbort': None, 'lateClaims': [],
             'verdict': {'state': 'open'}, 'recipientSig': None, 'sealed': False, 'envelopes': {}, 'revocation': None,
             'deletion': None, 'reports': [], 'deliveries': 0, 'lastRenewal': None,
-            'nonces': {(read['keyid'], read['nonce']): now + WINDOW_SECONDS * 1000}}
+            'nonces': {(read['keyid'], read['nonce']): max(now, read['created'] * 1000) + WINDOW_SECONDS * 1000}}
         return _answer(201, {'created': True})
 
     def _expire(self, share: dict, now: int) -> None:
@@ -290,8 +301,22 @@ class FakeMailbox:
             return _refuse(403, 'forbidden', 'a side posts only its own frames')
         if share['sealed']:
             # After the first envelope: no verdict; a later claim or abort is carried to the sender as a warning.
-            if step in ('claim', 'abort'):
-                share['late'].append(frame)
+            # One abort (the recipient's own) and one claim per claiming key, at most MAX_LATE_CLAIMS keys: strangers
+            # cannot crowd the recipient's abort out.
+            # A repeat is answered without being accepted (the Worker then keeps no nonce for it).
+            if step == 'abort':
+                if share.get('lateAbort'):
+                    return _refuse(409, 'repeated', "the recipient's abort was already carried")
+                share['lateAbort'] = frame
+                return _answer(202, {'carried': True, 'late': True})
+            if step == 'claim':
+                key = (frame['keys']['sig']['x'], frame['keys']['sig']['y'])
+                claims = share.setdefault('lateClaims', [])
+                if any(k == key for k, _ in claims):
+                    return _refuse(409, 'repeated', "this key's claim was already carried")
+                if len(claims) >= MAX_LATE_CLAIMS:
+                    return _refuse(429, 'too-many', 'this share carries no more late claims')
+                claims.append((key, frame))
                 return _answer(202, {'carried': True, 'late': True})
             return _refuse(409, 'sealed', 'the share is sealed; only a claim or an abort is carried now')
         self._expire(share, now)
@@ -319,6 +344,7 @@ class FakeMailbox:
                 or env['header']['slot'] != slot:
             return _refuse(400, 'malformed', 'not an envelope of this share and slot')
         share['envelopes'][slot] = env
+        share.setdefault('storedAt', {})[slot] = now
         share['sealed'] = True
         return _answer(200, {'stored': True})
 
@@ -332,6 +358,11 @@ class FakeMailbox:
             if share['verdict']['state'] == 'burnt':
                 return _refuse(409, 'burnt', 'this exchange is burnt', reason=share['verdict']['reason'])
             return _refuse(409, 'not-sealed', 'the sender has not sealed the share yet')
+        # Each copy's end by the mailbox's own clock: no further than 90 days after it was stored, as the Worker keeps it.
+        ends = [min(relay.instant(e['header']['exp']) or 0, share.get('storedAt', {}).get(slot, now) + 90 * 86_400_000)
+                for slot, e in share['envelopes'].items()]
+        if ends and now >= max(ends):
+            return _refuse(409, 'ended', "every sealed copy of this share has ended; the sender's machine seals it again")
         share['deliveries'] += 1
         share['lastRenewal'] = relay.rfc3339(now)
         lease = {'grantedAt': relay.rfc3339(now), 'expiresAt': relay.rfc3339(now + share['leaseSeconds'] * 1000)}
@@ -354,6 +385,7 @@ class FakeMailbox:
             return _refuse(400, 'malformed', "not a revocation the sender's share #sig signed")
         if share['revocation'] is None:
             share['revocation'] = record
+            share['envelopes'] = {}                            # taken back: no sealed copy is served or kept
         return _answer(200, {'held': True, 'revocation': share['revocation']})
 
     def _deletion(self, share: dict, signer: str, record: Any):
@@ -369,7 +401,11 @@ class FakeMailbox:
                 'leaseSeconds': share['leaseSeconds'], 'verdict': share['verdict'], 'sealed': share['sealed'],
                 'deliveries': share['deliveries'], 'lastRenewal': share['lastRenewal'],
                 'revocation': share['revocation'], 'deletion': share['deletion'], 'reports': len(share['reports']),
-                'late': len(share['late'])}
+                'late': len(self._late(share))}
+
+    @staticmethod
+    def _late(share: dict) -> list:
+        return ([share['lateAbort']] if share.get('lateAbort') else []) + [f for _, f in share.get('lateClaims', [])]
 
 
 # ---- Transports and the client ---------------------------------------------------------------------------------------
@@ -408,7 +444,10 @@ def http_transport(timeout: float = 20.0) -> Transport:
             with urllib.request.urlopen(request, timeout=timeout) as answer:
                 return answer.status, dict(answer.headers), answer.read(MAX_BODY_BYTES * 8)
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read(MAX_BODY_BYTES)
+            try:
+                return error.code, dict(error.headers or {}), error.read(MAX_BODY_BYTES)
+            finally:
+                error.close()
         except (urllib.error.URLError, OSError) as error:
             raise MailboxError('unreachable', f'the mailbox did not answer ({type(error).__name__})') from None
     return send

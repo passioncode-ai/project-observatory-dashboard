@@ -534,7 +534,8 @@ class ShareFlow(unittest.TestCase):
         holder = threading.Thread(target=hold)
         holder.start()
         self.assertTrue(holding.wait(10))
-        got = {}
+        got, said = {}, []
+        self.recipient.on_wait = said.append                   # L1: a use behind a sync says that it waits
 
         def use():
             got['value'] = self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
@@ -546,6 +547,39 @@ class ShareFlow(unittest.TestCase):
         holder.join(10)
         user.join(10)
         self.assertEqual(got.get('value'), VALUE)
+        self.assertEqual(len(said), 1)
+        self.assertIn('waiting for its other step', said[0])
+
+    def test_a_get_carrying_a_self_signed_claim_reads_nothing(self):
+        """The review of #386, M1, in the specification: only a claim being carried names its own signer."""
+        share_id, link = self._create()
+        self.recipient.accept(link)
+        stranger, kem = PS.SharePrivateKey.generate(), PS.SharePrivateKey.generate()
+        body = json.dumps({'schema': PS.PEER_FRAME_SCHEMA, 'step': 'claim', 'shareId': share_id,
+                           'keys': {'sig': stranger.jwk(), 'kem': kem.jwk()}, 'mac': PS.new_nonce(),
+                           'commit': 'sha256:' + '0' * 64}).encode()
+        for target in (f'/v1/shares/{share_id}/frames', f'/v1/shares/{share_id}'):
+            headers = MB.sign_request([(MB.LABEL, stranger.jwk(), stranger)], method='GET', origin=ORIGIN,
+                                      target=target, body=body, created=self.clock() // 1000)
+            status, _, raw = self.box.handle('GET', target, headers, body)
+            self.assertNotEqual(status, 200, target)
+            self.assertNotIn(b'"frames"', raw)
+
+    def test_a_revocation_the_mailbox_holds_from_this_share_counts(self):
+        """L5: the mailbox keeps the first revocation it held; any signed by this share's #sig is the share taken
+        back, and the record follows the mailbox's so the recipient's receipt matches it."""
+        share_id, _, _, received = self._exchange()
+        self.sender.confirm(share_id, code=received['code'])
+        first = self.sender.revoke(share_id)['revocation']
+        folder = self.sender._sent(share_id)
+        record = folder.record()
+        record['revocation'] = PS.sign_peer_record({'type': PS.PEER_REVOCATION_TYPE, 'shareId': share_id,
+                                                    'at': SH._iso(self.clock() + 1000)},
+                                                   record['keys']['sig'], folder.key('sig'))
+        folder.save(record)
+        sent = self.sender.sync_sent(share_id)
+        self.assertTrue(sent['revocationObserved'])
+        self.assertEqual(sent['revocation'], first)
 
     def test_a_metered_agent_cannot_use_a_share(self):
         """CT-187: until who pays for a share's use is decided, a delegated agent's use of a share is refused."""

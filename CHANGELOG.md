@@ -7,6 +7,29 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Your share mailbox, deployed into your own Cloudflare account** (OBS-263, scenario OSS-83, `docs/ONBOARDING.md`
+  "Your share mailbox in your Cloudflare account", design `docs/design/PERSON-SURFACES.md` D8). `full cloud deploy`
+  uploads `observatory-cloud/1` as a Worker with one SQLite-backed Durable Object per share, through the Cloudflare
+  door's narrow `workers-edit` token (minted into the vault slot `observatory-cloud/prod/CLOUDFLARE_WORKERS_TOKEN`,
+  read in memory, never printed), binds this machine's owner key so only it files shares there, turns on its
+  workers.dev address and records it in `config/cloud.json` once it answers with this engine's code;
+  `full cloud status` and `full cloud url` read it back, and `full share create` uses it without `--mailbox`. The
+  Worker keeps the duties the contract gives a mailbox (PS-10) and nothing more, with `node/mailbox.py` as its
+  specification: signed requests under the share keys, one attempt per link, no envelope or lease for a burnt share,
+  leases of at most 24 hours, deliveries counted, every renewal refused after a revocation (the sealed copies deleted
+  then), and a share forgotten a day after an unclaimed deadline or 30 days after the latest of its last sealed copy's
+  end, its revocation and its last renewal. Only the two sides' share keys read a share's frames, status and reports;
+  requests are limited per side once their signature holds, never the sender's revocation; a Worker without a
+  readable owner key files no share; `deploy` refuses to replace a Worker of that name that is not such a mailbox,
+  and finishes one of its own that stopped half-way. Nonces are kept under their own keys, ordered by their
+  signature's time, only for accepted requests other than reads, and purged once too old to be played again,
+  so no flood can grow what a share keeps; a repeated late claim or abort is refused, not carried again; a renewal
+  is refused once every sealed copy has ended. A share's nonces from Worker 1.1.0 are dropped when 1.3.0 first
+  reads it, and the few keyed without a time by the 1.2.0 review build stay until the share itself is forgotten (they
+  could only refuse a replay within its five minutes).
+  The link's page runs no script. With no
+  admin token stashed, `deploy` names your step and its address before any call.
+
 - **A Cloudflare preset for one Access application** (OBS-281, Fabric board request 3bf4a84e): `cloudflare.py issue --preset access-app --account <slug> --vault PROJECT/ENV/NAME` mints one token on that account with Access: Apps and Policies Write and Access: Organizations, Identity Providers, and Groups Read (the organization is read, never written; no identity providers or service tokens), so a project puts Cloudflare Access in front of its own hostname and learns its team domain. It expires like every minted token, is named after its slot, and reaches the vault only after reading the account's Zero Trust organization with the new value; when that read fails the token is deleted and the refusal names the page where the account's owner enables Zero Trust.
 - **Share a key with another person's Observatory, see its use, take it back** (OBS-264, OBS-276, scenarios OSS-79
   to OSS-81, `docs/ONBOARDING.md` "Share a key with another person's Observatory", design

@@ -682,6 +682,19 @@ tool.
   Durable Object binding it needs) minted from the stashed admin into a slot, the script uploaded
   through Cloudflare's API, the token kept for updates and revocable on disconnect. An engine update
   that ships a new service version redeploys it after the person's next confirmation.
+- **Built (OBS-263).** `observatory/engine/cloud/worker.mjs`, a Worker with one SQLite-backed Durable
+  Object per share (`ShareBox`), deployed by `full cloud deploy` through the door's `workers-edit`
+  preset (Workers Scripts and KV on one account; its token in the vault slot
+  `observatory-cloud/prod/CLOUDFLARE_WORKERS_TOKEN`). Its specification is the engine's in-process
+  mailbox (`node/mailbox.py`), and `tests/test_cloud_worker.py` runs both share stores against it.
+  Decided at build, from the review of #385: the mailbox answers `no-claim` to a frames read before
+  any claim, which tells whoever holds the share id that the link is still unclaimed; that id already
+  lets them burn the link, so nothing new is exposed, and a claimant whose claim answer was lost
+  needs it. Only a claim being carried names its own signer: a frames or status read answers only
+  the two sides' share keys, so the share id alone reads no frame (fixed after the review of #386).
+  `OBSERVATORY_CLOUD_RESOLVE` stays a loopback-only trial and test hook: a process that can set a
+  node's environment can already read its files. Live since 2026-10-27 in the operator's account
+  (`https://observatory-cloud.<subdomain>.workers.dev`).
 - **Later.** When the person has the PassionCode personal cloud, the node running there serves the same
   `observatory-cloud/1`. Moving copies the ciphertexts and metadata as they are (they are sealed to
   machines, not to the host) and leaves a signed forwarding record at the old address for 90 days. The

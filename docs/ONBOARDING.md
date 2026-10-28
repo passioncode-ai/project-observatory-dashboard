@@ -1284,13 +1284,14 @@ You can give another person's machine a key from your vault, see how their agent
 it back (contract DEC-0142 `fabric-peer-share/1`; OSS-79 to OSS-81; OBS-264, OBS-276). Neither of you
 needs an organization. The value is sealed to a key their machine made for this share alone; a
 **mailbox** you name carries the sealed copies, the codes' exchange and the usage reports, and sees
-only ciphertext and names. Your own mailbox in your Cloudflare account is `full cloud` (OBS-263, a
-later release); until it is deployed, pass a mailbox with `--mailbox https://...`.
+only ciphertext and names. Deploy your own into your Cloudflare account once with `full cloud
+deploy` (below); `full share create` then uses it, or `--mailbox https://...` names another.
 
 The sender, at their own terminal:
 
 ```sh
-project-observatory full share create alpha-web prod OPENROUTER_API_KEY --to Alex --mailbox https://MAILBOX
+project-observatory full cloud deploy               # once: your mailbox in your Cloudflare account
+project-observatory full share create alpha-web prod OPENROUTER_API_KEY --to Alex
 #   prints the link once: https://MAILBOX/s/SHARE-ID#c=CODE&k=FINGERPRINT; send it to Alex yourself
 project-observatory full share status SHARE-ID      # once Alex accepted: a code is ready
 project-observatory full share confirm SHARE-ID     # type the six digits Alex reads to you: a match seals and sends
@@ -1364,6 +1365,56 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   that holds both can open the key without the use path.
 
 Design: [design/PERSON-SURFACES.md](design/PERSON-SURFACES.md), D2, D3, D8.
+
+### Your share mailbox in your Cloudflare account: full cloud
+
+The mailbox a share link names (`observatory-cloud/1`, contract DEC-0142 PS-10; OSS-83; OBS-263) is a
+Cloudflare Worker with one Durable Object per share, deployed into your own account. It carries the
+code exchange, the sealed copies, the sealed usage reports and the revocations; it opens nothing
+and never holds a value or a private key. It forgets an unclaimed share a day after its claim
+deadline, and a sealed one 30 days after the latest of its last sealed copy's end, its
+revocation and its last renewal; a share taken back loses its sealed copies at once.
+
+```sh
+project-observatory full cloud deploy --dry-run     # which account, Worker, token slot and code; no call is made
+project-observatory full cloud deploy               # deploy, or update to this engine's code
+project-observatory full cloud status               # current, outdated, unreachable or not deployed
+project-observatory full cloud url                  # the address `full share create` uses
+```
+
+- **The token.** `deploy` asks the Cloudflare door for a narrow token (its `workers-edit` preset:
+  Workers on one account), delivered into the vault slot
+  `observatory-cloud/prod/CLOUDFLARE_WORKERS_TOKEN` and read from there in memory for the API calls;
+  `--new-token` rolls it. It never reaches an argument, a log or the command's output. The door
+  mints it from the admin token you stashed once; with none stashed, `deploy` stops before any call
+  and names your step: create a token that can create tokens at
+  <https://dash.cloudflare.com/profile/api-tokens>, save it to a file only you can read, and run
+  `python "$(project-observatory full-path)/tools/cloudflare.py" stash < FILE`. With several
+  accounts stashed, name one with `--account`.
+- **The owner key.** Only this machine files shares on your mailbox: `deploy` binds the public half
+  of an owner key made once under `node/shares/owner/`, and a share's creation is signed with it.
+  Another machine of yours deploys its own mailbox, or passes `--mailbox`.
+- **The address.** `https://observatory-cloud.<your workers.dev subdomain>.workers.dev`, recorded in
+  `config/cloud.json`. An account with no workers.dev subdomain yet gets the step with its address
+  (the account's Workers and Pages page) and nothing is recorded. `deploy` records the address only
+  after it answers with this engine's code and this machine's owner key.
+- **What it sees.** Ciphertext and names: share ids, the keys' public halves, the slot and provider
+  names in sealed headers, the times of claims, renewals and reports, and both machines' IP
+  addresses (Cloudflare's request logs keep those too). Anyone who learns a share id, which travels
+  in the link's path, can learn whether a claim arrived yet, and can burn the link with a claim of
+  their own; never take it, because the six-digit code is compared, and never read the share's frames,
+  status or reports, which answer only the sender's and the recipient's share keys. A share's
+  requests are limited per side (120 a minute), counted only once a signature holds, and the
+  sender's revocation is never refused for it. A refused request, a repeated late claim and a read
+  store nothing; every other accepted request keeps its signature's nonce until the signature is too
+  old to be played again (at most about ten minutes) and the next request purges it, so a stranger's
+  flood cannot grow what the mailbox keeps for a share. A renewal is refused once every sealed copy has ended,
+  until your machine seals the key again.
+- **Cost.** The free plan's Workers and SQLite-backed Durable Objects cover a person's shares; the
+  account's own limits apply.
+- **Opening a link in a browser.** The link's page tells the recipient to run
+  `project-observatory full share accept` and paste the link. It runs no script, so it reads
+  nothing of the link's code.
 
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 

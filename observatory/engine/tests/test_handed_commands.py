@@ -103,6 +103,8 @@ SAMPLES = {
     # A share (OBS-264): a link read from stdin, a comparison code, a vault slot.
     "LINK": "-", "CODE": "123456", "SLOT": "OPENROUTER_API_KEY", "OPENROUTER_API_KEY": "OPENROUTER_API_KEY",
     "DAYS": "30", "URL": "https://mailbox.example",
+    # The mailbox's Cloudflare account and Worker name (OBS-263).
+    "ACCOUNT": "example-account", "SCRIPT": "observatory-cloud",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

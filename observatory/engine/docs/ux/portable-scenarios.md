@@ -807,7 +807,13 @@ the account refuses (plan limits): the refusal verbatim and nothing half deploye
 not answer later: shares stop at their lease (OSS-80) and Home shows "personal cloud unreachable".
 
 Acceptance: the cloud's storage, logs and responses never hold a value or a private key.
-Coverage: none yet. Status: planned (OBS-263); product outcome unobserved.
+
+Built so far, from a terminal (OBS-263): `project-observatory full cloud deploy` (the door's narrow
+token into the vault, the Worker uploaded, its workers.dev address recorded once it answers with this
+engine's code), `full cloud status` and `full cloud url`. With no admin token stashed it names the
+person's step and its address before any call. The Settings page is OBS-265's.
+Coverage: `tests/test_cloud_worker.py`, `tests/test_cloud_deploy.py`, `cloud/worker.test.mjs`.
+Status: partly built (OBS-263, the command line); the page planned; product outcome unobserved.
 
 ### OSS-84: give an agent a token without pasting it into a chat
 
