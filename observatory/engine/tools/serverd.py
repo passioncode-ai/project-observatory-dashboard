@@ -916,6 +916,8 @@ def serve(port: int) -> int:
     # over. Builds nothing until the operator enrolled a target (`config/node-lifecycle.json`); a failure is a
     # degraded row, never a crash.
     LIFECYCLE = lifecycle.Host()
+    # The secret prompt's window (OBS-260, D4): Observatory's own app, opened only through this node's broker.
+    secret_prompt.PROMPTER = secret_prompt.BrokerPrompter(lambda: LIFECYCLE)
     try:
         LIFECYCLE.start()
     except Exception as exc:  # noqa: BLE001 - the dashboard, /health and the events feed stay up

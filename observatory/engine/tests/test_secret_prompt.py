@@ -407,6 +407,370 @@ class TheAgentsSide(Base):
         self.assertEqual(state, "cancelled")
 
 
+class FakeBroker:
+    def __init__(self, states=("ready",), refuse=None) -> None:
+        self.states = list(states)
+        self.refuse = refuse
+        self.opened: list[tuple[str, str]] = []
+
+    def open_for_prompt(self, target_id: str, key: str) -> dict:
+        if self.refuse:
+            raise RuntimeError(self.refuse)
+        self.opened.append((target_id, key))
+        return {"operationId": "op-1", "state": self.states[0]}
+
+    def prompt_operation(self, operation_id: str) -> dict:
+        if len(self.states) > 1:
+            self.states.pop(0)
+        return {"operationId": operation_id, "state": self.states[0]}
+
+
+class FakeService:
+    def __init__(self, targets: dict, broker: FakeBroker) -> None:
+        self.targets = targets
+        self.broker = broker
+
+    def read(self) -> dict:
+        return {"targets": self.targets}
+
+
+class FakeHost:
+    def __init__(self, service) -> None:
+        self._service = service
+
+    def service(self):
+        return self._service
+
+
+def app_bundle(engine: bool = True) -> str:
+    """A stand-in for the installed app: a folder, with the bundled engine inside or without it."""
+    root = Path(tmpdir.mkdtemp(prefix="observatory-app-")) / "Project Observatory.app"
+    target = root / SP.BUNDLED_ENGINE
+    target.parent.mkdir(parents=True)
+    if engine:
+        target.write_text("#!/bin/sh\n", encoding="utf-8")
+    return str(root)
+
+
+def observatory_target(desired: str = "on_demand", bundle: str = SP.OBSERVATORY_BUNDLE_ID,
+                       path: str | None = None) -> dict:
+    return {"targetId": "observatory.app", "kind": "app", "approved": True, "desiredState": desired,
+            "path": path or app_bundle(),
+            "identity": {"scheme": "designated-requirement/1", "bundleId": bundle, "teamId": "ABCDE12345",
+                         "requirement": "x"}}
+
+
+class TheBrokerOpensTheWindow(Base):
+    """The prompter the local server installs (D4): the enrolled app, through the lifecycle broker, never directly."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The broker path is the Mac's; the tests run on every system as if on one, with the enrolled app intact.
+        for p in (mock.patch.object(sys, "platform", "darwin"), mock.patch.object(SP, "APP_VERIFIED", lambda t: True)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def broker_prompter(self, targets=None, broker=None) -> SP.BrokerPrompter:
+        self.broker = broker or FakeBroker()
+        service = FakeService({"observatory.app": observatory_target()} if targets is None else targets, self.broker)
+        return SP.BrokerPrompter(lambda: FakeHost(service))
+
+    def test_available_only_on_macos_with_the_app_enrolled(self):
+        self.assertIsNone(self.broker_prompter().available("darwin"))
+        self.assertEqual(self.broker_prompter().available("win32"), "broker-unsupported")
+        self.assertEqual(self.broker_prompter().available("linux"), "secret-ui-unavailable")
+        self.assertEqual(self.broker_prompter(targets={}).available("darwin"), "app-not-enrolled")
+        other = {"other.app": observatory_target(bundle="com.example.alpha")}
+        self.assertEqual(self.broker_prompter(targets=other).available("darwin"), "app-not-enrolled")
+        held = {"observatory.app": observatory_target(desired="held_off")}
+        self.assertEqual(self.broker_prompter(targets=held).available("darwin"), "app-held-off")
+        bare = {"observatory.app": observatory_target(path=app_bundle(engine=False))}
+        self.assertEqual(self.broker_prompter(targets=bare).available("darwin"), "engine-untrusted")
+        self.assertEqual(SP.BrokerPrompter(lambda: None).available("darwin"), "app-not-enrolled")
+
+    def test_a_request_asks_the_broker_for_the_app_with_its_id_and_nothing_else(self):
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter()):
+            out = ask("alpha", "BROKER_KEY")
+        rid = out["request"]["requestId"]
+        self.assertEqual(self.broker.opened, [("observatory.app", rid)])
+        self.assertEqual(out["request"]["state"], "waiting")
+
+    def test_a_start_that_fails_closes_the_request_no_client(self):
+        prompter = self.broker_prompter(broker=FakeBroker(states=("running", "failed")))
+        prompter.WATCH_SECONDS = 0.01
+        with mock.patch.object(SP, "PROMPTER", prompter):
+            rid = ask("alpha", "FAILED_START_KEY")["request"]["requestId"]
+            end = time.monotonic() + 10
+            while time.monotonic() < end and call("alpha", "secret.get", {"requestId": rid})["request"]["state"] == "waiting":
+                time.sleep(0.02)
+        out = call("alpha", "secret.get", {"requestId": rid})["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "app-not-started"))
+        self.assertIn("vault.py", out["step"])
+
+    def test_a_refused_start_answers_no_client_at_once(self):
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter(broker=FakeBroker(refuse="held_off"))):
+            out = ask("alpha", "REFUSED_START_KEY")["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "app-not-started"))
+
+    def test_not_enrolled_files_nothing_and_names_the_enroll_step(self):
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter(targets={})), \
+                mock.patch.object(sys, "platform", "darwin"):
+            out = ask("alpha", "UNENROLLED_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "app-not-enrolled"))
+        self.assertIn("lifecycle enroll", out["fix"])
+        self.assertIn("vault.py", out["step"])
+        self.assertEqual(SP.waiting(), [])
+
+    def test_an_app_without_its_own_engine_files_nothing_and_says_so_at_once(self):
+        # Today's release: the signed app carries no engine, so the window could take no key. The agent hears it now
+        # with the person's step, not after ten minutes of a window nobody shows.
+        bare = {"observatory.app": observatory_target(path=app_bundle(engine=False))}
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter(targets=bare)):
+            out = ask("alpha", "NO_ENGINE_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "engine-untrusted"))
+        self.assertIn("vault.py", out["step"])
+        self.assertNotIn("fix", out)
+        self.assertEqual(self.broker.opened, [], "the app is not even opened")
+        self.assertEqual(SP.waiting(), [])
+
+    def test_an_app_that_is_no_longer_the_signed_one_files_nothing(self):
+        # A planted engine in a user-writable bundle breaks its signature: answered at once, never ten minutes of silence.
+        with mock.patch.object(SP, "APP_VERIFIED", lambda t: False), \
+                mock.patch.object(SP, "PROMPTER", self.broker_prompter()):
+            out = ask("alpha", "PLANTED_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "engine-untrusted"))
+        self.assertEqual(self.broker.opened, [])
+        self.assertEqual(SP.waiting(), [])
+
+    def test_windows_has_no_window_in_this_release(self):
+        with mock.patch.object(SP, "PROMPTER", self.broker_prompter()), mock.patch.object(sys, "platform", "win32"):
+            out = ask("alpha", "WINDOWS_KEY")
+        self.assertEqual((out["error"], out["reason"]), ("no-client", "broker-unsupported"))
+        self.assertEqual(self.broker.opened, [])
+
+
+class TheAppsDoor(Base):
+    """`full assistant secret`: only the signed app's own child reads or answers, and the value stays in it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.verified = [True]
+        p = mock.patch.object(SP, "CLIENT_CHECK", lambda: self.verified[0])
+        p.start()
+        self.addCleanup(p.stop)
+
+    def door(self, doc: dict) -> tuple[int, dict, str]:
+        """The action as the app runs it: one JSON object on stdin, one on stdout."""
+        from agent import assistant
+        raw = json.dumps(doc).encode("utf-8")
+        stdin = mock.Mock()
+        stdin.buffer = io.BytesIO(raw)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, "stdin", stdin), mock.patch.object(assistant, "require_workspace", lambda: None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = assistant.main(["secret"])
+        return code, json.loads(out.getvalue()), out.getvalue() + err.getvalue()
+
+    def test_an_unverified_caller_reads_no_request_and_answers_none(self):
+        rid = ask("alpha", "DOOR_KEY")["request"]["requestId"]
+        self.verified[0] = False
+        for doc in ({"op": "list"}, {"op": "store", "requestId": rid, "value": VALUE},
+                    {"op": "decline", "requestId": rid},
+                    {"op": "unavailable", "requestId": rid, "reason": "phrase-store-unavailable"}):
+            code, answer, text = self.door(doc)
+            self.assertEqual((code, answer), (1, {"error": "client-unverified"}), doc["op"])
+            self.assertNotIn(VALUE, text)
+            self.assertNotIn("deploy the webhook handler", text)
+        self.assertFalse(SP.slot_state(PROJECT, ENV, "DOOR_KEY")["filled"])
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_an_empty_queue_is_answered_without_the_check(self):
+        self.verified[0] = False
+        self.assertEqual(self.door({"op": "list"})[1], {"requests": []})
+
+    def test_the_app_reads_the_request_as_the_window_shows_it(self):
+        rid = ask("alpha", "SHOWN_KEY", provider="stripe")["request"]["requestId"]
+        shown = self.door({"op": "list"})[1]["requests"]
+        self.assertEqual([r["requestId"] for r in shown], [rid])
+        self.assertEqual((shown[0]["agent"], shown[0]["reason"], shown[0]["provider"], shown[0]["replaces"]),
+                         ("alpha", "deploy the webhook handler", "stripe", False))
+        self.assertEqual(shown[0]["slot"], {"env": ENV, "name": "SHOWN_KEY"})
+
+    def test_store_writes_the_slot_in_this_process_and_the_value_goes_nowhere_else(self):
+        rid = ask("alpha", "DOOR_STORED_KEY")["request"]["requestId"]
+        code, answer, text = self.door({"op": "store", "requestId": rid, "value": VALUE + "\n"})
+        self.assertEqual(code, 0, text)
+        self.assertEqual(answer["request"]["outcome"], "stored")
+        self.assertNotIn(VALUE, text)
+        self.assertNotIn(VALUE, self.files_text())
+        vault = SP._vault()
+        self.assertEqual(vault._read_private(vault._slot(PROJECT, ENV, "DOOR_STORED_KEY")).strip(), VALUE)
+        moves = vault.MOVES.read_text(encoding="utf-8")
+        self.assertIn("DOOR_STORED_KEY", moves)
+        self.assertNotIn(VALUE, moves)
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["outcome"], "stored")
+        # The same request cannot be answered twice.
+        self.assertEqual(self.door({"op": "store", "requestId": rid, "value": VALUE})[1], {"error": "request-closed"})
+
+    def test_a_replacement_rotates_and_keeps_the_old_value_archived(self):
+        app_writes("DOOR_REPLACED_KEY")
+        rid = ask("alpha", "DOOR_REPLACED_KEY", replace=True)["request"]["requestId"]
+        newer = VALUE + "-newer"
+        self.assertEqual(self.door({"op": "store", "requestId": rid, "value": newer})[1]["request"]["outcome"],
+                         "stored")
+        vault = SP._vault()
+        slot = vault._slot(PROJECT, ENV, "DOOR_REPLACED_KEY")
+        self.assertEqual(vault._read_private(slot).strip(), newer)
+        self.assertTrue(list(slot.parent.glob("DOOR_REPLACED_KEY.retired-*")))
+
+    def test_a_value_with_a_line_break_or_nothing_is_not_stored(self):
+        rid = ask("alpha", "DOOR_BAD_KEY")["request"]["requestId"]
+        for value, why in (("", "value-empty"), ("   ", "value-empty"), ("first\nsecond", "value-multiline")):
+            code, answer, text = self.door({"op": "store", "requestId": rid, "value": value})
+            self.assertEqual((code, answer), (1, {"error": why}), "the vault's reason reaches the window")
+        self.assertFalse(SP.slot_state(PROJECT, ENV, "DOOR_BAD_KEY")["filled"])
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_an_unchanged_value_says_so(self):
+        app_writes("DOOR_SAME_KEY")
+        rid = ask("alpha", "DOOR_SAME_KEY", replace=True)["request"]["requestId"]
+        self.assertEqual(self.door({"op": "store", "requestId": rid, "value": VALUE})[1], {"error": "value-unchanged"})
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_the_app_names_no_reason_but_its_phrase_store(self):
+        rid = ask("alpha", "DOOR_ENGINE_KEY")["request"]["requestId"]
+        out = self.door({"op": "unavailable", "requestId": rid, "reason": "engine-untrusted"})[1]
+        self.assertEqual(out, {"error": "invalid-argument"}, "engine-untrusted is the node's answer, before filing")
+
+    def test_decline_and_no_place_for_the_phrase(self):
+        rid = ask("alpha", "DOOR_DECLINED_KEY")["request"]["requestId"]
+        self.assertEqual(self.door({"op": "decline", "requestId": rid})[1]["request"]["outcome"], "declined")
+        rid = ask("alpha", "DOOR_PHRASE_KEY")["request"]["requestId"]
+        out = self.door({"op": "unavailable", "requestId": rid, "reason": "phrase-store-unavailable"})[1]["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "phrase-store-unavailable"))
+        self.assertIn("vault.py", out["step"])
+        self.assertEqual(self.door({"op": "unavailable", "requestId": "sreq_" + "a" * 24, "reason": "other"})[1],
+                         {"error": "invalid-argument"})
+
+    def test_the_door_takes_only_its_own_shapes(self):
+        for doc in ({"op": "list", "extra": "x"}, {"op": "store", "requestId": "x"}, {"op": "drop"},
+                    {"op": "decline", "requestId": 3}):
+            self.assertEqual(self.door(doc)[1], {"error": "invalid-input"})
+
+
+class TheSignedAppCheck(unittest.TestCase):
+    """`signed_app_parent`: the door runs from inside the enrolled bundle, and its immediate parent is the signed app."""
+
+    def setUp(self) -> None:
+        self.bundle = app_bundle()
+        self.inside = str(Path(self.bundle) / "Contents" / "Resources" / "engine" / "lib" / "secret_prompt.py")
+        self.document = {"targets": {"observatory.app": observatory_target(path=self.bundle)}}
+        self.asked: list[list[str]] = []
+
+    def run_codesign(self, signed: str):
+        def run(args, timeout=10):
+            self.asked.append(list(args))
+            return subprocess.CompletedProcess(args, 0 if args[-1] == signed else 3, "", "")
+        return run
+
+    def test_only_macos_and_only_an_enrolled_app(self):
+        for platform in ("linux", "win32"):
+            self.assertFalse(SP.signed_app_parent(platform, document=self.document, run=self.run_codesign("100"),
+                                                  parent=100, source=self.inside))
+        self.assertFalse(SP.signed_app_parent("darwin", document={"targets": {}}, run=self.run_codesign("100"),
+                                              parent=100, source=self.inside))
+
+    def test_the_parent_is_checked_against_the_enrolled_requirement(self):
+        self.assertTrue(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("100"),
+                                             parent=100, source=self.inside))
+        requirement = self.asked[0][self.asked[0].index("-R") + 1]
+        self.assertIn('identifier "ai.passioncode.observatory"', requirement)
+        self.assertIn('"ABCDE12345"', requirement)
+
+    def test_a_grandparent_is_never_enough(self):
+        # The app runs the engine its settings name for other actions; that engine's child finds the app two levels up.
+        self.assertFalse(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("300"),
+                                              parent=200, source=self.inside))
+        self.assertEqual([a[-1] for a in self.asked], ["200"], "only the immediate parent is asked")
+
+    def test_a_door_outside_the_enrolled_bundle_is_refused_whoever_its_parent_is(self):
+        outside = str(ROOT / "secret_prompt.py")
+        self.assertFalse(SP.signed_app_parent("darwin", document=self.document, run=self.run_codesign("100"),
+                                              parent=100, source=outside))
+        self.assertEqual(self.asked, [], "no codesign run for an engine the app does not carry")
+
+
+class ReviewFollowUps(Base):
+    """The review of #378: what it found, held."""
+
+    def test_the_bearer_is_compared_in_constant_time(self):
+        SP.issue("epsilon")
+        import hmac
+        with mock.patch.object(hmac, "compare_digest", wraps=hmac.compare_digest) as compared:
+            SP.agent_for("Bearer " + "w" * 40)
+        self.assertGreater(compared.call_count, 0)
+
+    def test_a_reason_with_a_line_separator_or_a_bidi_control_is_refused(self):
+        for bad in ("deploy\u2028the handler", "deploy\u2029x", "pay \u202eredli", "x\u2066y\u2069", "a\x07b"):
+            out = ask("alpha", "BIDI_KEY", why=bad)
+            self.assertEqual((out["error"], out["field"]), ("invalid-argument", "why"), repr(bad))
+        self.assertEqual(SP.waiting(), [])
+
+    def test_a_bad_project_is_reported_as_the_project_field(self):
+        out = call("alpha", "secret.request", {"project": "../up", "env": ENV, "slot": "FIELD_KEY", "why": "x"})
+        self.assertEqual((out["error"], out["field"]), ("invalid-argument", "project"))
+        out = call("alpha", "secret.request", {"project": PROJECT, "env": ENV, "slot": "lower", "why": "x"})
+        self.assertEqual((out["error"], out["field"]), ("invalid-argument", "slot"))
+
+    def test_a_provider_that_carries_a_credential_is_refused(self):
+        shaped = "ghp" + "_" + "b" * 36
+        out = ask("alpha", "PROVIDER_KEY", provider=shaped.lower())
+        self.assertEqual((out["error"], out["field"]), ("invalid-argument", "provider"))
+        self.assertNotIn(shaped.lower(), self.files_text())
+
+    def test_an_invalid_argument_is_journalled_by_its_field_only(self):
+        call("alpha", "secret.request", {"project": PROJECT, "env": ENV, "slot": "J_KEY", "why": "x", "agent": "z"})
+        lines = [json.loads(line) for line in (SP.state_dir() / "events.jsonl").read_text().splitlines()]
+        self.assertEqual((lines[-1]["event"], lines[-1]["code"], lines[-1]["field"], lines[-1]["agent"]),
+                         ("refused", "invalid-argument", "agent", "alpha"))
+
+    def test_a_request_filed_before_a_failed_job_start_is_withdrawn(self):
+        withdrawn: list[str] = []
+        filed = {"request": {"requestId": "sreq_" + "c" * 24, "slot": "a/prod/B", "agent": "alpha",
+                             "replaces": False, "deadline": "x"}, "joined": False}
+        with mock.patch.object(SC, "call", lambda tool, args, **kw: filed if tool == "secret.request"
+                               else withdrawn.append(args["requestId"]) or {}), \
+                mock.patch.object(jobs, "start", side_effect=OSError(28, "full")):
+            with self.assertRaises(OSError):
+                SC.request({"project": PROJECT, "env": ENV, "slot": "B", "why": "x"}, {})
+        self.assertEqual(withdrawn, ["sreq_" + "c" * 24])
+        # A joined request belongs to the job already following it.
+        withdrawn.clear()
+        filed["joined"] = True
+        with mock.patch.object(SC, "call", lambda tool, args, **kw: filed if tool == "secret.request"
+                               else withdrawn.append(args["requestId"]) or {}), \
+                mock.patch.object(jobs, "start", side_effect=OSError(28, "full")):
+            with self.assertRaises(OSError):
+                SC.request({"project": PROJECT, "env": ENV, "slot": "B", "why": "x"}, {})
+        self.assertEqual(withdrawn, [])
+
+    def test_the_runner_withdraws_its_request_when_the_binding_is_refused(self):
+        withdrawn: list[str] = []
+
+        def node(tool, args, **kw):
+            if tool == "secret.cancel":
+                withdrawn.append(args["requestId"])
+                return {}
+            raise SC.ClientRefused("binding-refused", "revoked")
+        import interop
+        job = {"id": "job-x", "trace": interop.span_for(None).record(),
+               "arguments": {"requestId": "sreq_" + "d" * 24, "slot": "a/prod/B", "agent": "alpha"}}
+        with mock.patch.object(SC, "call", node), mock.patch.object(jobs, "update", lambda *a, **k: None):
+            with self.assertRaises(RuntimeError):
+                SC.follow(job)
+        self.assertEqual(withdrawn, ["sreq_" + "d" * 24])
+
+
 class WhatAgentsAreTold(unittest.TestCase):
     """The tool, the instructions and the skill all send an agent to the prompt instead of the chat."""
 

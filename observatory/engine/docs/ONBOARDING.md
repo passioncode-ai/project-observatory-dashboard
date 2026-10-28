@@ -1223,12 +1223,58 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   NAME < FILE` in your own shell, the value on its stdin. There is no terminal answer to an agent's
   request, and no scripted dialog (`osascript`, `zenity`, `kdialog`): any program of your user could
   draw an identical one.
-- **Not in this release yet.** The window (the Mac app's own window with a secure field, the
-  desktop app's on Windows) and the phrase you set at first use, which every genuine window shows,
-  ship in a later release. Until then every request on a machine with a desktop is answered
-  `no-client` with the same `vault.py put` step, before anything is filed: no window is imitated.
-  On Linux the local server cannot verify that a window is Observatory's own signed app, so the
-  answer there stays `no-client` when the windows ship.
+- **The window, on a Mac.** Enroll Observatory's app with the node's lifecycle broker once:
+  `project-observatory full lifecycle enroll observatory.app --kind app --path PATH --caller service:observatory --startup-effect TEXT`,
+  with PATH the installed app (usually `/Applications/Project Observatory.app`, quoted in your shell).
+  A request then asks the broker to start the app (or finds it running); the local server never
+  launches it itself. The app reads waiting requests every five seconds through its own child
+  process (`project-observatory full assistant secret`), brings its window forward and shows the
+  agent from its binding, the project, the slot, the reason quoted as the agent's words, whether
+  the slot already holds a value (Replace), and **your phrase**. Cancel or closing the window
+  answers `declined`. Save hands the value to that child process on its stdin, and the child
+  writes it into the slot the way `vault.py put` (or `rotate`, for Replace) writes it; the value
+  is never in an argument, the environment, a log, a notification or anything the agent reads,
+  and the local server sees only the slot's metadata afterwards. The child answers only when its
+  own file lies inside the enrolled app's bundle and its immediate parent, while running,
+  satisfies the enrolled app's code requirement (its team and bundle id); anything else is
+  refused `client-unverified`. A program of your user that deliberately runs as the app's direct
+  child (the engine named in the app's settings, for one) can still pass, which the limits below
+  already allow: it can read and write the queue and the vault slots anyway.
+- **Only through the engine inside the signed app, and none ships yet.** That parent check proves
+  only that the request came through the app's own process tree, and whatever the app runs is in
+  that tree: an engine named by the program path in its settings, PATH or a launcher could be
+  changed by any program of your user, which could then read the queue, answer requests and see
+  what you type. So the window never uses that program: it runs only an engine inside the app's
+  own bundle, by a path the app computes, after checking the app's own signature (resources
+  sealed, the team its sealed Info.plist names) right before each call, with a scrubbed environment. **No release
+  bundles that engine yet, so today every request is answered `no-client`, reason
+  `engine-untrusted`, with your `vault.py put` step, before anything is filed and before the app
+  is opened.**
+- **Your phrase.** At the first request the window asks you to set a short phrase; change it in
+  the app's Settings. Every genuine prompt shows it, so a window without it is not Observatory's:
+  cancel it. It is kept in the data protection keychain, in the app's own access group, which no
+  other program of your user can read, and never in a vault slot or a tool result. The window is
+  kept out of screen sharing and of capture that honours a window's sharing setting, and the
+  phrase is left out of the accessibility tree (a neutral label stands in for it). The limit: a
+  program you granted Screen Recording may still capture the window on recent macOS, so do not
+  grant it to an agent's host. That keychain group needs the app signed with a provisioning
+  profile, and **this release's app is not**: it keeps no phrase, shows no window and answers each
+  request `no-client` with your `vault.py put` step (the release will fetch the profile through
+  the App Store Connect API in a follow-up).
+- **Not on Windows or Linux yet.** Windows has no lifecycle broker in this release (OBS-277), and
+  the window is opened only through it, so a request there is answered `no-client`, reason
+  `broker-unsupported`. On Linux the local server cannot verify that a window is Observatory's own
+  signed app, so the answer stays `no-client`. When the desktop app's window ships, its phrase is
+  kept with DPAPI on Windows and the Secret Service on Linux, which any program running as your
+  user can read: there the phrase only stops an agent that does not look for it.
+- **The limits, on the Mac too.** The request queue is an owner-only file, so any program running as
+  your user can read and write it: read the requests' text, file a request under any agent's name,
+  or mark a request answered. It cannot see a value typed into the genuine window. The signature
+  check hashes the app once, and a Python engine reads its files as it imports them, so an engine
+  will be bundled only once it cannot change after the check. A stored value sits in the vault
+  slot, which any program of your user can read: the prompt keeps the value out of the agent's
+  chat, transcript, logs and tool results, not out of reach of a program that goes looking.
+  Running agents as another user, or in a container, is the stronger defence.
 
 Design: [design/PERSON-SURFACES.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/PERSON-SURFACES.md), D4.
 

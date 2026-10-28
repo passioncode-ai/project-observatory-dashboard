@@ -89,9 +89,12 @@ KIND_TOOL = {
 #: The broker's own supervision pass (always_on, idle stop). It has no credential and no grant: it acts only on
 #: enrolled, approved targets, never with owner rights.
 SUPERVISOR = {'caller': 'supervisor', 'internal': True, 'grantRevision': 0, 'tokenHash': ''}
-#: Caller names a credential can never take: `supervisor` is the broker's own pass, and a caller of that name would
-#: read its operations.
-RESERVED_CALLERS = frozenset(('supervisor',))
+#: The node's own secret prompt (OBS-260, `secret_prompt.BrokerPrompter`): it asks for Observatory's own enrolled app
+#: and nothing else, with no credential and no owner rights, and its starts never count against a supervision budget.
+SECRET_PROMPT = {'caller': 'secret-prompt', 'internal': True, 'grantRevision': 0, 'tokenHash': ''}
+#: Caller names a credential can never take: `supervisor` is the broker's own pass and `secret-prompt` the node's
+#: prompt, and a caller of either name would read their operations.
+RESERVED_CALLERS = frozenset(('supervisor', 'secret-prompt'))
 IDLE_MINUTES = (5, 1440)
 #: An app the broker launched often brings itself forward in its first seconds (Electron apps do, even when opened
 #: without activation). An activation later than this is the person taking the app over.
@@ -1440,6 +1443,19 @@ class Broker:
             'grantRevision': 0,
         }
         return self._admit(SUPERVISOR, args, kind, reason=reason)['operationId']
+
+    def open_for_prompt(self, target_id: str, key: str) -> dict:
+        """Start (or find running) one enrolled, approved app for the node's secret prompt (OBS-260): an `ensure` as
+        the `secret-prompt` caller, idempotent per `key` (the request id), refused like any start (`held_off`,
+        `not_enrolled`, `denied`, `busy`). Answers the operation's receipt."""
+        target = self._target(SECRET_PROMPT, KIND_TOOL['ensure'], valid_id(target_id))
+        args = {'targetId': target_id, 'requestId': valid_id(f'secret-prompt:{key}'),
+                'expectedPolicyRevision': target['policyRevision'], 'grantRevision': 0}
+        return self._admit(SECRET_PROMPT, args, 'ensure', reason='secret-prompt')
+
+    def prompt_operation(self, operation_id: str) -> dict:
+        """One of the secret prompt's own operations, as `open_for_prompt` answered it, read again."""
+        return self._view(SECRET_PROMPT, valid_id(operation_id))
 
     def supervise(self, only=None) -> list:
         """One supervision pass; returns the operation ids it admitted. Step L4 runs it on a cadence.

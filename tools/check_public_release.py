@@ -168,6 +168,10 @@ NATIVE_SOURCES = {
     # The pairing window (OBS-197): the engine's ceremony screen, its model and its tests.
     "macos/Sources/ObservatoryCore/Ceremony.swift", "macos/Sources/ObservatoryApp/Pairing.swift",
     "macos/Tests/ObservatoryCoreTests/CeremonyTests.swift",
+    # The secret prompt's window (OBS-260): the request, the phrase and its keychain store, and the signed app's
+    # entitlements (applied only with a provisioning profile).
+    "macos/Sources/ObservatoryCore/SecretPrompt.swift", "macos/Sources/ObservatoryApp/SecretPrompt.swift",
+    "macos/Tests/ObservatoryCoreTests/SecretPromptTests.swift", "macos/ProjectObservatory.entitlements",
     # The lifecycle broker's NSWorkspace helper (OBS-79 L2): shipped in the wheel as source, compiled on the Mac.
     "observatory/engine/node/lifecycle/native_app.swift",
 }

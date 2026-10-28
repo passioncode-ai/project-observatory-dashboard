@@ -69,6 +69,28 @@ while the major version is 0, a minor release may change behaviour and says so h
   `no-client` with that step and nothing is filed. The limit: any agent running as your user can read another
   agent's token file and file a request under its name; the window will still show the slot and the reason.
 
+- **The secret prompt's window on a Mac, and your phrase** (OBS-260, OSS-84, D4). With Observatory's app enrolled
+  with the node's lifecycle broker (`full lifecycle enroll observatory.app --kind app --path ...`), a request asks
+  the broker to start the app or find it running, never a direct launch, and a start that fails closes the request
+  `no-client`. The app reads waiting requests through its own child (`full assistant secret`) and shows a window with
+  the agent, the project, the slot, the reason in the agent's words, Replace for a filled slot and your phrase; Save
+  writes the value into the slot in that child, from its stdin only, and Cancel answers `declined`. Only a child whose
+  own file lies inside the enrolled app's bundle and whose immediate parent satisfies the enrolled app's code
+  requirement reads or answers a request (`client-unverified` otherwise). The limits are stated in ONBOARDING: the
+  queue file can be read and written by any program running as you, and an engine will be bundled only once it
+  cannot change after the app's signature check. The phrase is set at the first request and changed in Settings, and kept in the data protection
+  keychain in the app's own access group; the signing setup adds that entitlement only with a provisioning profile
+  (`OBSERVATORY_PROVISIONING_PROFILE`, `OBSERVATORY_TEAM_ID`); this release's app is not signed with one yet, so it
+  keeps no phrase, shows no window and answers `no-client` with your `vault.py put` step. The window takes a key only
+  through the engine inside the signed app, started by a path the app computes from its own bundle after its own
+  signature checks out, never the engine named in Settings; **no release bundles that engine yet, so every request
+  is answered `no-client`, reason `engine-untrusted`, with your `vault.py put` step, before anything is filed**. The
+  engine runs with a scrubbed environment, the window is kept out of screen sharing, the phrase out of the accessibility tree, Save needs a
+  click (not Return), and a reason carrying a line separator or a bidi control is refused. Windows answers `no-client`, reason `broker-unsupported`, until it has a lifecycle broker (OBS-277);
+  Linux stays `no-client`. Fixed from the review of #378: the bearer is compared in constant time, a bad project is
+  reported as the project field, the provider goes through the credential-shape check, invalid arguments are
+  journalled, and a request is withdrawn when its job cannot start or its runner is refused.
+
 - **Home replaces Overview: is everything fine, and what needs you first** (OBS-261, scenario OSS-88,
   `docs/design/PERSON-SURFACES.md` decision D1). The first page now opens on six state tiles (sites, apps, disk and
   memory, keys, agents, personal cloud), each with the time or period it was measured; a source that did not run says

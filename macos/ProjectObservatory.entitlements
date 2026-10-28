@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The signed app's entitlements, applied by scripts/build-app.sh only with a Developer ID provisioning profile
+     (OBSERVATORY_PROVISIONING_PROFILE) and its team (OBSERVATORY_TEAM_ID, written over TEAM_ID below). The
+     keychain access group keeps the person's phrase for the secret prompt (OBS-260, PERSON-SURFACES.md D4) in the
+     data protection keychain, where no other program of the same user can read it. macOS refuses to launch an app
+     that claims this group without the profile, so a build without one carries no entitlements at all. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.application-identifier</key>
+	<string>TEAM_ID.ai.passioncode.observatory</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>TEAM_ID</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>TEAM_ID.ai.passioncode.observatory</string>
+	</array>
+</dict>
+</plist>

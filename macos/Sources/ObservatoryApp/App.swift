@@ -131,6 +131,8 @@ extension DashboardReopen.Seen {
             // the window's chrome matches them instead of framing them in light grey.
             DashboardView().environmentObject(model).environmentObject(web).environmentObject(appDelegate.updates)
                 .environmentObject(appDelegate.loginItem)
+                // The secret prompt's watch (OBS-260): started once, it outlives this window.
+                .onAppear { model.startSecretWatch() }
         }
         .defaultSize(width: 1320, height: 860)
         .keyboardShortcut("1")
@@ -153,6 +155,12 @@ extension DashboardReopen.Seen {
             PairingView().environmentObject(model).frame(minWidth: 480, minHeight: 440)
         }
         .defaultSize(width: 620, height: 560)
+
+        // An agent's request for a key (OBS-260, OSS-84): brought forward by the watch when one waits.
+        Window(model.t("Secret request"), id: WindowID.secret) {
+            SecretPromptView().environmentObject(model).frame(minWidth: 520, minHeight: 460)
+        }
+        .defaultSize(width: 600, height: 520)
 
         Settings { SettingsView().environmentObject(model).environmentObject(appDelegate.loginItem) }
     }

@@ -106,12 +106,27 @@ def request(arguments: dict, span_record: dict) -> dict:
     if "error" in answer:
         return answer
     filed = answer["request"]
-    doc, _ = jobs.start(CAPABILITY, span_record, exclusive=False,
-                        arguments={"requestId": filed["requestId"], "slot": filed["slot"],
-                                   "agent": filed["agent"]})
+    try:
+        doc, _ = jobs.start(CAPABILITY, span_record, exclusive=False,
+                            arguments={"requestId": filed["requestId"], "slot": filed["slot"],
+                                       "agent": filed["agent"]})
+    except BaseException:
+        # No job will follow this request, so it is withdrawn before the error goes on: the person is never shown a
+        # window nobody waits for (the review of #378). A joined request belongs to the job already following it.
+        if not answer.get("joined"):
+            withdraw(filed["requestId"])
+        raise
     return {"job": jobs.view(doc), "requestId": filed["requestId"], "agent": filed["agent"],
             "slot": filed["slot"], "replaces": filed["replaces"], "joined": bool(answer.get("joined")),
             "deadline": filed["deadline"]}
+
+
+def withdraw(request_id: str) -> None:
+    """Best effort: `secret.cancel` on a request this server filed; a node that cannot be asked keeps its deadline."""
+    try:
+        call("secret.cancel", {"requestId": request_id}, timeout=3)
+    except ClientRefused:
+        pass
 
 
 def follow(job: dict) -> dict:
@@ -129,6 +144,9 @@ def follow(job: dict) -> dict:
                 answer = call("secret.get", {"requestId": args["requestId"]})
             except ClientRefused as exc:
                 if exc.answer["error"] != "not-running":
+                    # A refused binding or a node error ends this runner: the request is withdrawn first, so the
+                    # window does not wait for a job that is gone (the review of #378).
+                    withdraw(args["requestId"])
                     raise RuntimeError(exc.answer["message"]) from None
                 give_up = give_up or (time.monotonic() + SP.MAX_DEADLINE_SECONDS + GRACE_SECONDS)
                 if time.monotonic() > give_up:
@@ -143,10 +161,7 @@ def follow(job: dict) -> dict:
             time.sleep(POLL_SECONDS)
     except SystemExit:
         # fabric.job.cancel: withdraw the request before this runner stops, so no window waits for nobody.
-        try:
-            call("secret.cancel", {"requestId": args["requestId"]}, timeout=3)
-        except ClientRefused:
-            pass
+        withdraw(args["requestId"])
         raise
     output = {"outcome": r["outcome"], "message": r["message"], "requestId": r["requestId"], "agent": r["agent"],
               "slot": r["slot"], "replaces": r["replaces"], "answeredAt": r.get("answeredAt")}

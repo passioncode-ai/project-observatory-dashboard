@@ -37,7 +37,7 @@ public enum BridgeError: Error, LocalizedError, Equatable {
 
 public struct Backend: Sendable {
     public static let protocolName = "observatory-assistant/1"
-    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build", "ceremony"]
+    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build", "ceremony", "secret"]
     public let executable: String
     public let workspace: String
     public init(executable: String, workspace: String) {
@@ -58,7 +58,7 @@ public struct Backend: Sendable {
         guard FileManager.default.fileExists(atPath: executable) else { throw BridgeError.missing(executable) }
         guard FileManager.default.isExecutableFile(atPath: executable) else { throw BridgeError.configuration }
         let payload = try JSONSerialization.data(withJSONObject: input)
-        var env = ProcessInfo.processInfo.environment
+        var env = Self.environment(for: action, inherited: ProcessInfo.processInfo.environment)
         env["OBSERVATORY_HOME"] = workspace
         let result = try child.spawn([executable, "full", "assistant", action], env: env, stdin: payload, timeout: timeout)
         if result.tooLarge { throw BridgeError.oversized }
@@ -77,6 +77,16 @@ public struct Backend: Sendable {
             throw BridgeError.incompatible("protocol \(doc["protocol"] as? String ?? "missing"), expected \(Self.protocolName)")
         }
         return result.stdout
+    }
+
+    /// The child's environment. The secret prompt's door (OBS-260) gets only what it needs, and Python's user site
+    /// switched off: `launchctl setenv PYTHONPATH` or a `.pth` in the user's site folder would otherwise run another
+    /// program's code inside the process that receives the typed value.
+    public static func environment(for action: String, inherited: [String: String]) -> [String: String] {
+        guard action == "secret" else { return inherited }
+        var env = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"]
+        for key in ["HOME", "USER", "LOGNAME", "LANG", "TMPDIR"] { env[key] = inherited[key] }
+        return env
     }
 
     static func looksIncompatible(_ line: String) -> Bool {

@@ -239,8 +239,9 @@ def observatory_secret_request(
     provider: Annotated[str | None, Field(description="Who issues the key, e.g. stripe.")] = None,
     replace: Annotated[bool, Field(description="The slot holds a value and you ask the person to replace it.")] = False,
 ) -> dict:
-    """Ask the person for a key the vault lacks, instead of asking in chat. Observatory's own window will take it
-    and write the slot (you never see the value); until that window ships every request is answered no-client. Returns a job: follow with fabric.job.get; output.outcome is stored,
+    """Ask the person for a key the vault lacks, instead of asking in chat. Observatory's own window takes it and
+    writes the slot (you never see the value); on macOS with the app enrolled with the node's lifecycle broker, else
+    answered no-client with the person's vault.py step. Returns a job: follow with fabric.job.get; output.outcome is stored,
     declined, no-answer, unconfirmed or no-client. Refusals come at once: not-running, no-desktop, no-client (with
     the person's vault.py step), slot-filled, slot-busy, rate-limited. Needs --agent NAME on this server.
     """
