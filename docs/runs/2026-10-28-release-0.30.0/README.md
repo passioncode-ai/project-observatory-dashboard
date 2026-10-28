@@ -55,8 +55,24 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python`:
 - The engine's own suite (`observatory/engine/tests`) was not run locally (the disk had about 5 GB free); the pull
   request's checks run it on macOS, Linux and Windows.
 
+## Receipts
+
+- Release PR #390 merged as `93362ed6`; tag `v0.30.0` (annotated) pushed on it.
+- Release run `40627499222`: every job green after one repair. The first attempt failed in `windows (x64,
+  windows-latest)` at the signing step with `Invoke-ArtifactSigning is not recognized` (OBS-225: a cached signing
+  module); the cache entry `ArtifactSigning-0.1.8` of `refs/tags/v0.30.0` was deleted (`gh cache delete`) and the job
+  re-run with `gh run rerun --failed`; then manifest, guard, wheel, macos, both linux, both windows, feed and publish
+  succeeded. Published 2026-10-28T07:59:31Z with the wheel, the Mac zip, the Linux AppImages and debs, the Windows
+  installers, their receipts and signatures, `SHA256SUMS` and `SHA256SUMS.asc`.
+- Verified after publishing: `shasum -a 256 -c` OK on the wheel; `gpg --verify SHA256SUMS.asc SHA256SUMS`: good
+  signature from the PassionCode.ai releases key; `gh attestation verify` on the wheel with `--signer-repo
+  passioncode-ai/.github`: exit 0.
+- Installed on the operator's machine with `project-observatory full update --version 0.30.0 --apply`: the package
+  reads 0.30.0 and `full doctor` reports version 0.30.0 with nothing failing; session MCP servers move themselves at
+  their next request.
+- Board: the `access-app` requester told the preset is installed (thread `db5cd8a1`, message `3bd0ab80`).
+
 ## Next
 
-Merge this pull request, tag `v0.30.0` on the merge commit, verify the release (sums, attestation, GPG), install it
-with `project-observatory full update --apply`, post on Fabric board thread `db5cd8a1` that the `access-app` preset is
-installed, and record the receipts here in a follow-up pull request.
+Release 0.30.1 with OBS-277 (#387, after its review fixes), OBS-283 and OBS-284 (the second-machine protection) by
+2026-10-30, before the operator starts a restore on the second machine.
