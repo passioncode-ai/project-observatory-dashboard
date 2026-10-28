@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-28: release 0.30.0](runs/2026-10-28-release-0.30.0/README.md): engine and plugin 0.30.0: sharing a key
+with another person's Observatory (`full share`, `full cloud deploy`, OBS-263, OBS-264, OBS-276), the secret prompt's
+server half and Mac window (OBS-260, answered `no-client` until an engine is bundled), Home (OBS-261), DigitalOcean
+and Cloudflare pages (OBS-235, OBS-271), pairing screens (OBS-197), lifecycle L2r, L4 and L5 (OBS-79) and the
+`access-app` preset (OBS-281). Next: merge, tag `v0.30.0`, verify, install, record the receipts.
+
 [2026-10-26: release 0.29.2](runs/2026-10-26-release-0.29.2/README.md): engine 0.29.2 (`observatory-log` stays
 0.28.0, unchanged since), carrying the standing review policy (OBS-227, #357), session MCP servers that move past an
 open listen stream and updates that keep `OBSERVATORY_SYSTEM_SETUP=0` (OBS-228, OBS-229, #359), a check-in that
