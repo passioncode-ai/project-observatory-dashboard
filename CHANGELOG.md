@@ -5,6 +5,35 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **Windows is verified on every change, and what does not pass yet is named** (OBS-277, OBS-278, OBS-279,
+  `docs/design/WINDOWS-LINUX.md`). The `windows` CI job no longer lets a step fail unseen: locks (with the path
+  behind a descriptor, OBS-98), owner-only ACLs, process groups, a whole tick, the server and the tick as Task
+  Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 202 of 298 suites
+  pass on windows-latest, and the other 96 are listed in `tools/windows-known.json`, each with its backlog row and
+  what it showed; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
+  passes. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
+  person runs to check install, the node, the tick, the desktop app and an agent's MCP connection on a real Windows
+  machine. Two fixes reach every Windows user: `project-observatory full` and a direct `observatory.py` run the engine
+  in UTF-8 mode on Windows (step headings and non-Latin-1 text no longer fail under the cp1252 code page), and the
+  portable runner gives each suite a Windows home, temporary folder and UTF-8 console and stops a timed-out suite's
+  whole process tree.
+
+## 0.30.0 (2026-10-28)
+
+A minor release. You can share a vault key with another person's Observatory from the command line and take it
+back: `full cloud deploy` puts your own share mailbox into your Cloudflare account once, `full share create` prints
+a link you send yourself, the two of you compare a six-digit code, and the recipient's agents use the key only at the
+moment of use through `use_secret.py run --share`; `full share revoke` takes it back, and the maintenance job syncs
+shares every hour. An agent can ask Observatory for a key instead of asking you in its chat
+(`observatory_secret_request`); the Mac window that takes the value ships in this release but stays off until an
+engine is bundled inside the signed app, so every request is answered for now with the `vault.py put` step you run in
+your own shell. Home replaces Overview, DigitalOcean and Cloudflare get pages beside Heroku, the Mac and desktop apps
+show the pairing screens, and the node supervises the apps you enrolled; the Mac app carries its lifecycle helper.
+After installing: to move off another lifecycle broker, run `project-observatory full lifecycle import --from PATH`
+once at a terminal, check `full lifecycle status`, then uninstall that broker. The skills plugin moves to 0.30.0.
+
 ### Added
 
 - **Your share mailbox, deployed into your own Cloudflare account** (OBS-263, scenario OSS-83, `docs/ONBOARDING.md`
@@ -204,19 +233,6 @@ while the major version is 0, a minor release may change behaviour and says so h
   `degraded` without hiding the other peers, and a lost estate key is never replaced silently.
 
 ### Changed
-
-- **Windows is verified on every change, and what does not pass yet is named** (OBS-277, OBS-278, OBS-279,
-  `docs/design/WINDOWS-LINUX.md`). The `windows` CI job no longer lets a step fail unseen: locks (with the path
-  behind a descriptor, OBS-98), owner-only ACLs, process groups, a whole tick, the server and the tick as Task
-  Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 202 of 298 suites
-  pass on windows-latest, and the other 96 are listed in `tools/windows-known.json`, each with its backlog row and
-  what it showed; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
-  passes. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
-  person runs to check install, the node, the tick, the desktop app and an agent's MCP connection on a real Windows
-  machine. Two fixes reach every Windows user: `project-observatory full` and a direct `observatory.py` run the engine
-  in UTF-8 mode on Windows (step headings and non-Latin-1 text no longer fail under the cp1252 code page), and the
-  portable runner gives each suite a Windows home, temporary folder and UTF-8 console and stops a timed-out suite's
-  whole process tree.
 
 - **The contract pin moves to `v0.1.0+2026-10-27.3`** (`759704b4`, contract DEC-0142 and DEC-0143): the node
   vendors `fabric-peer-share/1`'s vectors, schemas and fixtures (`fabric/node-vectors/peer/`), and the estate
