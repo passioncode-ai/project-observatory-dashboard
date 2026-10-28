@@ -1016,12 +1016,13 @@
     "node_lifecycle_broker": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: LifecycleError not raised",
+      "reason": "AssertionError: LifecycleError not raised; and, intermittently, a registry read that lands while the file is being replaced fails with a Windows sharing violation, which the broker reports as unsafe_config (run 40668380475): node.lifecycle is not built for Windows yet (OBS-257)",
       "statuses": [
         "FAIL"
       ],
       "failing": [
         "BrokerTests.test_private_authority_and_no_symlink",
+        "BrokerTests.test_registry_substitution_before_effect_is_denied",
         "EngineTests.test_a_dispatch_recovered_hours_later_is_delivery_unknown_not_a_second_start",
         "EngineTests.test_a_restart_recovered_after_its_stop_does_not_stop_again",
         "EngineTests.test_a_restart_recovered_past_its_deadline_still_runs_its_start_half",
