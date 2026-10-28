@@ -20,12 +20,21 @@ import uuid
 
 import backup_vault
 import configuration as config
+import machine_identity
 import workspace
 from store import compatibility
 
 SNAPSHOT_FORMAT = 1
 JOURNAL = 'upgrade-in-progress.json'
 EXCLUDED_DIRS = {'.git', '__pycache__', '.venv', 'backups', 'migration-backups'}
+#: What a snapshot restored on ANOTHER machine never takes (OBS-284): this machine's agent-network
+#: identity (`node/device/` from `full node --init`), its organization enrollments with their own
+#: keys (`node/orgs/`), the estate state it verified (`node/records/`), and the record of its own
+#: maintenance runs. The new machine makes its own with `full node --init` and `full org enroll`.
+#: Its scheduler (`features.scheduler`) is turned off and the workspace gets its own `instance_id`,
+#: so a tick never runs on two machines at once and the two machines' daily backups, which may share
+#: one iCloud folder, never rotate each other's files.
+ANOTHER_MACHINE_LEAVES = ('node/device', 'node/orgs', 'node/records', 'store/maintenance.json')
 
 
 def digest(file: Path) -> str:
@@ -259,6 +268,7 @@ def _snapshot(base: Path, output: Path) -> dict:
         manifest = {'format_version':SNAPSHOT_FORMAT, 'application_version':config.VERSION,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    'machine_id':machine_identity.machine_id(),
                     'files':entries, 'directories':sorted(before_dirs), 'external_sources_included':False,
                     'excluded':['backup collections', 'runtime locks', 'Git metadata', 'Python environments/caches']}
         workspace.write_json(stage / 'manifest.json', manifest)
@@ -358,24 +368,68 @@ def verify_snapshot(source: Path) -> dict:
     return manifest
 
 
-def restore(source: Path, destination: Path, *, secret: str | None = None) -> dict:
+def _left_out(name: str) -> bool:
+    return any(name == p or name.startswith(p + '/') for p in ANOTHER_MACHINE_LEAVES)
+
+
+def _as_another_machine(stage: Path) -> dict:
+    """Make a restored copy this machine's own (OBS-284): leave out the other machine's identity
+    and schedule state, turn its scheduler off, and give the workspace its own instance id."""
+    left = []
+    for name in ANOTHER_MACHINE_LEAVES:
+        path = stage / name
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+            left.append(name + '/')
+        elif os.path.lexists(path):
+            path.unlink()
+            left.append(name)
+    settings_file = stage / 'config' / 'settings.json'
+    doc = config.read_json(settings_file)
+    scheduler = 'off'
+    if (doc.get('features') or {}).get('scheduler') is True:
+        doc['features']['scheduler'] = False
+        workspace.write_json(settings_file, doc)
+        scheduler = 'turned off: `project-observatory full configure features scheduler true` on the one machine that runs it'
+    marker_file = stage / 'workspace.json'
+    marker = config.read_json(marker_file)
+    previous = marker.get('instance_id')
+    marker['instance_id'] = str(uuid.uuid4())
+    workspace.write_json(marker_file, marker)
+    return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True,
+            'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
+            'next': ['project-observatory full node --init  (this machine\'s own device id)']}
+
+
+def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home;
     the passphrase is `secret` when the caller found it (the OS credential store,
     `maintenance.restore_latest`), else OBSERVATORY_BACKUP_PASSPHRASE or a terminal
-    prompt, because a new machine has no workspace to keep it in yet."""
+    prompt, because a new machine has no workspace to keep it in yet.
+
+    The snapshot's `machine_id` against this machine's decides how (OBS-284): taken here, the
+    copy is restored whole, as before; taken on another machine, or naming none (before 0.30.1),
+    it is restored without `ANOTHER_MACHINE_LEAVES` (`_as_another_machine`). `same_machine=True`
+    is the person's override at a terminal; the command line checks the terminal."""
     if source.is_file() and not source.is_symlink():
         secret = secret or backup_vault.require_passphrase(destination, prompt=True)
         stage = backup_vault.extract_tree(source.resolve(), destination.resolve().parent, secret)
         try:
-            return restore(stage, destination)
+            return restore(stage, destination, same_machine=same_machine)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
     workspace.reject_symlinks(source)
     workspace.reject_symlinks(destination)
     source, destination = source.resolve(), destination.resolve()
     manifest = verify_snapshot(source)
+    try:
+        placing = machine_identity.restore_mode(manifest.get('machine_id'),
+                                                asked='same' if same_machine else None)
+    except machine_identity.MachineIdentityError as exc:
+        raise config.ConfigurationError(str(exc)) from None
+    another = placing['mode'] == 'second-machine'
     if destination == source or destination in source.parents or source in destination.parents:
         raise config.ConfigurationError('Restore source and destination must be separate')
     if destination.exists() and any(destination.iterdir()):
@@ -390,6 +444,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None) -> di
             for row in manifest['files']:
                 if digest(stage / row['path']) != row['sha256']:
                     raise config.ConfigurationError('Restored file hash mismatch')
+            machine = _as_another_machine(stage) if another else None
             preflight(stage)
             sync_tree(stage)
             if destination.exists():
@@ -399,8 +454,9 @@ def restore(source: Path, destination: Path, *, secret: str | None = None) -> di
         except BaseException:
             shutil.rmtree(stage,ignore_errors=True)
             raise
-    return {'status':'restored','files':len(manifest['files']),'scheduler_activated':False,
-            'external_sources_included':False}
+    restored = len(manifest['files']) - (sum(1 for row in manifest['files'] if _left_out(row['path'])) if another else 0)
+    return {'status':'restored','files':restored,'scheduler_activated':False,
+            'external_sources_included':False, 'machine':{**placing, **(machine or {})}}
 
 
 def add_missing(current: dict, defaults: dict) -> dict:
@@ -575,6 +631,9 @@ def parser() -> argparse.ArgumentParser:
                      help='the newest backup a workspace at this path left, opened with the passphrase '
                           'kept in the OS credential store')
     res.add_argument('--label',help='with --latest: which workspace\'s backups, when several exist')
+    res.add_argument('--same-machine',action='store_true',
+                     help='restore a snapshot taken on another machine, or one that names none, whole: its '
+                          'device identity, enrollments and schedule state included; only at a terminal')
     return ap
 
 
@@ -595,18 +654,21 @@ def main(argv: list[str]) -> int:
                     result['maintenance'] = maintenance.ensure(base)
                 except Exception as exc:  # noqa: BLE001 — the upgrade is done either way
                     result['maintenance'] = {'result':'unscheduled','detail':f'{type(exc).__name__}: {exc}'[:300]}
+        elif getattr(args, 'same_machine', False) and not (sys.stdin is not None and sys.stdin.isatty()):
+            raise config.ConfigurationError('--same-machine restores the other machine\'s device identity and '
+                                            'enrollments here, so it is a person\'s choice at a terminal')
         elif args.latest:
             if args.snapshot is not None:
                 raise config.ConfigurationError('Give a snapshot or --latest, not both')
             import maintenance
-            result = maintenance.restore_latest(base, label=args.label)
+            result = maintenance.restore_latest(base, label=args.label, same_machine=args.same_machine or None)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2
         else:
             if args.snapshot is None:
                 raise config.ConfigurationError('Name a snapshot, or pass --latest')
-            result = restore(args.snapshot,base)
+            result = restore(args.snapshot,base,same_machine=args.same_machine or None)
         print(json.dumps(result,indent=2))
         return 0
     # The same voice as every other command: `Observatory: <reason>`. A refusal

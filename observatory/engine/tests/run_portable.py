@@ -324,6 +324,8 @@ ROOT_FILES = (
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
+    # The machine id, the placement file and a job's move between two machines (OBS-283, OBS-284).
+    'machine_identity.py', 'machine_move.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
     # The organization's signature on a release, checked before any update (audit A04).

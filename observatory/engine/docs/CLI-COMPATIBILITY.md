@@ -97,7 +97,7 @@ Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
 passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning.
 `backups` and `backup-passphrase` are new workspace commands; nothing existing
 was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
-`--apply` only writes the plan. `machine-backup` and `machine-restore` (OBS-157) are new workspace commands as well; `machine-restore` without `--apply`, `--packages` or `--clone` only prints the plan. [`backup_vault.py`](../backup_vault.py) implements the root and format.
+`--apply` only writes the plan. `machine-backup` and `machine-restore` (OBS-157) are new workspace commands as well; `machine-restore` without `--apply`, `--packages` or `--clone` only prints the plan. Since 0.30.1 `machine-restore` takes `--second-machine` and `--same-machine` (terminal only), `restore` takes `--same-machine` (terminal only), and `machine-move` (`show`, `cutover LABEL`, `leave LABEL --to MACHINE_ID`) is a new workspace command (OBS-283, OBS-284); a bundle or snapshot from another machine, or naming none, now restores as a second machine's. [`backup_vault.py`](../backup_vault.py) implements the root and format.
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 

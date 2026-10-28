@@ -3,6 +3,47 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **A restore on a second machine never copies this machine's identity or starts its jobs** (OBS-283, OBS-284;
+  `docs/ONBOARDING.md` "Moving to a second machine that runs beside this one"). A machine bundle and a workspace
+  snapshot now name the machine they were taken on (`machine_id`: `m-` and 24 hex digits of a SHA-256 over the
+  platform's own machine identifier, never the identifier itself and never a device key; `machine_identity.py`).
+  `full machine-restore` compares it with this machine's: on another machine, or for a bundle that names none, it
+  restores as a second machine (`--second-machine` asks for it anywhere; `--same-machine` restores whole and is
+  accepted only at a terminal). A second machine gets `~/.ssh/config`, `known_hosts`, `authorized_keys`,
+  `allowed_signers` and every `*.pub`, and never a private key: every other file of `~/.ssh` is withheld whatever its
+  name, and a file whose text is a private key is withheld under any name. Every launchd plist (a systemd user unit
+  off macOS) but this engine's own, which each machine installs for itself, goes to `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/`, where nothing loads it at
+  login, and is named in the new placement file `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`
+  (schema `observatory-placement/1`: `machine`, `updatedAt`, `elsewhere[]` of `label`, `serviceId`, `placedOn`,
+  `since`, `by`; owner-only, written atomically), which Fabric Dashboards reads (FD-132) to show such an agent as
+  placed on the other machine. `full restore` of a snapshot taken on another machine, or naming none, leaves out
+  `node/device/`, `node/orgs/`, `node/records/` and `<home>/store/maintenance.json`, turns `features.scheduler` off and
+  gives the workspace its own `instance_id`, so `full node --init` makes this machine's own device id, a tick never
+  runs on both machines, and the two machines' daily backups (which may share one iCloud folder) never rotate each
+  other's files; a same-machine restore and an update's own rollback are unchanged. Tests:
+  `tests/test_machine_backup.py` SecondMachine, MachineMove, MachineId; `tests/test_workspace_upgrade.py`
+  `test_another_machine_never_takes_the_node_identity_or_the_schedules`,
+  `test_then_node_init_makes_this_machines_own_device_id`,
+  `test_the_same_machine_restores_the_whole_snapshot_as_before`,
+  `test_a_snapshot_naming_no_machine_is_another_machines_unless_asked`, `test_same_machine_is_a_choice_at_a_terminal`.
+- **`full machine-move`** moves one background job between two machines so it never runs on both (OBS-283): `show`
+  prints this machine's id, the placement file and the staged jobs; `leave LABEL --to MACHINE_ID`, on the machine the
+  job leaves, stops it, stages its definition and names it as running on the other machine; `cutover LABEL`, on the
+  machine it moves to, moves the staged definition into `~/Library/LaunchAgents` (or `~/.config/systemd/user`),
+  enables and loads it and removes it from `elsewhere`. A load that fails puts the definition back in staging. The
+  full checklist of a move is OBS-286.
+
+### Before you restore on a second machine
+
+Install this release on both machines first. A 0.30.0 or earlier engine restores a bundle whole, private SSH keys
+and launchd jobs included, and a snapshot whole, device identity included. Bundles and snapshots taken before this
+release name no machine, so this release restores them as a second machine's unless you pass `--same-machine` at a
+terminal.
+
 ## 0.30.0 (2026-10-28)
 
 A minor release. You can share a vault key with another person's Observatory from the command line and take it
