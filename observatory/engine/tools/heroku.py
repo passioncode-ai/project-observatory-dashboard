@@ -1171,7 +1171,7 @@ def main() -> int:
             except RuntimeError as exc:
                 print(f"refused: {exc}", file=sys.stderr)
                 return 1
-        if sys.stdin.isatty():
+        if osprivacy.is_terminal(sys.stdin):
             print("pipe the admin token on stdin: `heroku auth:token | python heroku.py stash`, "
                   "or use --from-cli", file=sys.stderr)
             return 2

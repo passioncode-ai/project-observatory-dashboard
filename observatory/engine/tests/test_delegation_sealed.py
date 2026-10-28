@@ -131,7 +131,7 @@ class SmallOrder(unittest.TestCase):
         import subprocess
         code = "import delegation, release_signature, meter; print(delegation.is_small_order_key(bytes(32)))"
         # os.pathsep: `;` on Windows, where `:` is part of a drive name (OBS-277); SYSTEMROOT lets Windows' crypto load.
-        env = {"PYTHONPATH": os.pathsep.join((str(ROOT / 'tools'), str(ROOT))), "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        env = {"PYTHONPATH": os.pathsep.join((str(ROOT / 'tools'), str(ROOT))), "PATH": os.environ["PATH"] if os.name == "nt" else "/usr/bin:/bin",
                **{k: os.environ[k] for k in ("SYSTEMROOT", "WINDIR") if k in os.environ}}
         out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, cwd=ROOT / "tools")
         self.assertEqual((out.returncode, out.stdout.strip()), (0, "True"), out.stderr[-400:])

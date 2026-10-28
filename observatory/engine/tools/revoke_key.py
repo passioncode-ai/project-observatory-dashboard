@@ -47,7 +47,7 @@ def call(method: str, url: str, key: str) -> tuple[int, dict]:
 
 def load_or_store() -> str:
     """A key on stdin is stored; otherwise the stored one is used, if it is safe."""
-    piped = "" if sys.stdin.isatty() else sys.stdin.read().strip()
+    piped = "" if osprivacy.is_terminal(sys.stdin) else sys.stdin.read().strip()
     if piped:                                                                      
         key = piped                                                                
         if not key.startswith("sk-or-v1-"):

@@ -27,15 +27,16 @@ def known(**entries):
 
 
 class KnownList(unittest.TestCase):
-    def problems(self, rec, kn):
-        return C.check(rec, kn, ROWS, SUITES)[0]
+    def problems(self, rec, kn, closed=frozenset(), logs=None):
+        return C.check(rec, kn, ROWS, SUITES, closed, logs)[0]
 
     def test_all_pass_and_an_empty_list_is_clean(self):
         self.assertEqual(self.problems(receipt(alpha="PASS", beta="PASS", gamma="PASS"), known()), [])
 
     def test_a_listed_failure_is_accepted(self):
-        self.assertEqual(self.problems(receipt(alpha="FAIL", beta="ERROR", gamma="PASS"),
-                                       known(alpha=("FAIL", "OBS-10"), beta=("FAIL", "OBS-11"))), [])
+        kn = known(alpha=("FAIL", "OBS-10"), beta=("FAIL", "OBS-11"))
+        kn["suites"]["beta"]["statuses"] = ["ERROR"]
+        self.assertEqual(self.problems(receipt(alpha="FAIL", beta="ERROR", gamma="PASS"), kn), [])
 
     def test_an_unlisted_failure_fails(self):
         found = self.problems(receipt(alpha="TIMEOUT", beta="PASS", gamma="PASS"), known())
@@ -46,6 +47,44 @@ class KnownList(unittest.TestCase):
         found = self.problems(receipt(alpha="PASS", beta="PASS", gamma="PASS"), known(alpha=("FAIL", "OBS-10")))
         self.assertEqual(len(found), 1)
         self.assertIn("passes now", found[0])
+
+    def test_a_listed_suite_must_fail_with_a_recorded_outcome(self):
+        kn = known(alpha=("FAIL", "OBS-10"))
+        found = self.problems(receipt(alpha="TIMEOUT", beta="PASS", gamma="PASS"), kn)
+        self.assertIn("the list records only FAIL", found[0])
+        kn["suites"]["alpha"]["statuses"] = ["FAIL", "TIMEOUT"]
+        self.assertEqual(self.problems(receipt(alpha="TIMEOUT", beta="PASS", gamma="PASS"), kn), [])
+
+    def test_a_new_failing_check_inside_a_listed_suite_fails(self):
+        kn = known(alpha=("FAIL", "OBS-10"), beta=("FAIL", "OBS-11"))
+        kn["suites"]["alpha"]["failing"] = ["Case.test_known"]
+        kn["suites"]["beta"]["failing"] = ["the file is mode N", "a second check"]
+        with tempfile.TemporaryDirectory() as tmp:
+            logs = Path(tmp)
+            (logs / "alpha").mkdir(); (logs / "beta").mkdir()
+            (logs / "alpha" / "run.log").write_text(
+                "FAIL: test_known (__main__.Case.test_known)\nERROR: test_new (__main__.Case.test_new)\n", encoding="utf-8")
+            (logs / "beta" / "run.log").write_text("  PASS  fine\n  FAIL  the file is mode 600 \u2014 0o666\n",
+                                                   encoding="utf-8")
+            found = self.problems(receipt(alpha="FAIL", beta="FAIL", gamma="PASS"), kn, logs=logs)
+            self.assertEqual(found, ["alpha: new failing check(s): Case.test_new"])
+            lines = C.check(receipt(alpha="FAIL", beta="FAIL", gamma="PASS"), kn, ROWS, SUITES, frozenset(), logs)[1]
+            self.assertIn("passing now, can leave the entry: a second check", lines[1]["verdict"])
+            (logs / "alpha" / "run.log").unlink()
+            self.assertIn("its log is missing", self.problems(receipt(alpha="FAIL", beta="FAIL", gamma="PASS"), kn,
+                                                              logs=logs)[0])
+
+    def test_a_suite_that_stops_without_naming_a_check_is_an_exit(self):
+        self.assertEqual(C.failing_checks("Traceback (most recent call last):\nOSError: no\n"), {"<exit>"})
+        self.assertEqual(C.failing_checks("ERROR: setUpClass (__main__.Case)\n"), {"Case.setUpClass"})
+
+    def test_a_closed_row_cannot_hold_a_failure(self):
+        found = self.problems(receipt(alpha="FAIL", beta="PASS", gamma="PASS"), known(alpha=("FAIL", "OBS-10")),
+                              closed=frozenset({"OBS-10"}))
+        self.assertIn("OBS-10 is closed", found[0])
+        board = ("| OBS-10 | x | done in 0.30.0 (#1) | y |\n| OBS-11 | x | open: partly done: z | y |\n"
+                 "| OBS-12 | x | superseded by OBS-11 | y |\n")
+        self.assertEqual(C.closed_rows(board), {"OBS-10", "OBS-12"})
 
     def test_a_whole_suite_skip_must_be_listed_as_a_skip(self):
         self.assertIn("skipped as a whole", self.problems(receipt(alpha="SKIP", beta="PASS", gamma="PASS"), known())[0])
@@ -69,9 +108,14 @@ class KnownList(unittest.TestCase):
         kn = json.loads((ROOT / "tools/windows-known.json").read_text(encoding="utf-8"))
         rows = C.backlog_rows((ROOT / "docs/backlog.md").read_text(encoding="utf-8"))
         suites = C.runner_suites()
+        board = (ROOT / "docs/backlog.md").read_text(encoding="utf-8")
+        closed = C.closed_rows(board)
         for name, entry in kn["suites"].items():
             self.assertIn(name, suites, name)
             self.assertIn(entry["row"], rows, name)
+            self.assertNotIn(entry["row"], closed, name)
+            if entry["expect"] == "FAIL":
+                self.assertTrue(entry.get("statuses"), name)
             self.assertIn(entry["expect"], ("FAIL", "SKIP"), name)
             self.assertTrue(entry["reason"].strip(), name)
 

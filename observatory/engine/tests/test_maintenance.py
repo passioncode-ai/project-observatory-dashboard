@@ -1735,13 +1735,14 @@ class Schedule(Base):
         run.assert_called_once()
 
     def test_system_setup_needs_a_person_or_the_flag_and_never_a_temporary_home(self):
-        with patch.object(M.sys, "stdin") as stdin, patch.object(M, "_real_home", return_value=True):
-            stdin.isatty.return_value = True
+        # A person at a terminal is `osprivacy.is_terminal` (OBS-279: on Windows `isatty` is true for NUL).
+        with patch.object(M.osprivacy, "is_terminal", return_value=True) as terminal, \
+                patch.object(M, "_real_home", return_value=True):
             self.assertFalse(M.system_setup_allowed(self.home), "a temporary home is a test's")
             real = Path("/opt/synthetic-observatory-home")  # outside every temporary directory
             with patch.object(M.tempfile, "gettempdir", return_value=str(self.base / "elsewhere")):
                 self.assertTrue(M.system_setup_allowed(real))
-                stdin.isatty.return_value = False
+                terminal.return_value = False
                 self.assertFalse(M.system_setup_allowed(real))
         with patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "1"}):
             self.assertTrue(M.system_setup_allowed(self.home))
@@ -1787,9 +1788,8 @@ class Schedule(Base):
         # Audit A07: a test or sandbox points $HOME elsewhere; launchd and the Keychain are
         # still the account's, so a terminal is not enough.
         self.assertFalse(M._real_home(), "Base points $HOME into its temporary directory")
-        with patch.object(M.sys, "stdin") as stdin, \
+        with patch.object(M.osprivacy, "is_terminal", return_value=True), \
                 patch.object(M.tempfile, "gettempdir", return_value=str(self.base / "elsewhere")):
-            stdin.isatty.return_value = True
             self.assertFalse(M.system_setup_allowed(Path("/opt/synthetic-observatory-home")))
         self.assertFalse(M.probes_allowed())
         with patch.object(M, "_real_home", return_value=True):

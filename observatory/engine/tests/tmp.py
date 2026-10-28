@@ -58,8 +58,26 @@ _TEMP_ROOTS = {os.path.realpath(p) for p in (tempfile.gettempdir(), "/tmp", "/pr
 # /tmp or /var/folders, both roots above; on Windows it sits under %LOCALAPPDATA%\Temp, which no fixed
 # root names once a suite has moved TEMP into its sandbox, and a synthetic workspace there was taken
 # for a real one and replaced.
-if os.environ.get("OBSERVATORY_TEST_SANDBOX"):
-    _TEMP_ROOTS.add(os.path.realpath(os.environ["OBSERVATORY_TEST_SANDBOX"]))
+# It is trusted only while it is an existing folder that is not itself a workspace (no workspace.json,
+# config/settings.json, registry or store at its top): a variable that named a real workspace would make
+# that workspace look like a test's (review of #387).
+def _sandbox_root(value: str | None) -> str | None:
+    if not value:
+        return None
+    real = os.path.realpath(value)
+    markers = ("workspace.json", os.path.join("config", "settings.json"), "registry", "store")
+    if not os.path.isabs(real) or not os.path.isdir(real) or any(os.path.exists(os.path.join(real, m)) for m in markers):
+        return None
+    return real
+
+
+_SANDBOX = _sandbox_root(os.environ.get("OBSERVATORY_TEST_SANDBOX"))
+if _SANDBOX:
+    _TEMP_ROOTS.add(_SANDBOX)
+elif os.environ.get("OBSERVATORY_TEST_SANDBOX"):
+    import sys as _sys
+    print("tests/tmp.py: OBSERVATORY_TEST_SANDBOX names a workspace or no folder; it is not trusted",
+          file=_sys.stderr)
 
 
 def _inside_temp(path: str | None) -> bool:

@@ -279,5 +279,27 @@ class HelpCoversTheDispatcher(unittest.TestCase):
                 self.assertTrue(self.described(name), f"`full {name}` has no line in the help")
 
 
+class Utf8Mode(unittest.TestCase):
+    """observatory.py restarts itself in UTF-8 mode on Windows (OBS-277), with the caller's interpreter options."""
+
+    def test_only_windows_without_utf8_mode_runs_again(self):
+        self.assertIsNone(cli.utf8_mode_argv(["observatory.py", "local"], nt=False, utf8=False))
+        self.assertIsNone(cli.utf8_mode_argv(["observatory.py", "local"], nt=True, utf8=True))
+        self.assertEqual(cli.utf8_mode_argv(["observatory.py", "local"], nt=True, utf8=False, flags=[]),
+                         [sys.executable, "-X", "utf8", "observatory.py", "local"])
+
+    def test_the_callers_interpreter_options_go_with_it(self):
+        again = cli.utf8_mode_argv(["observatory.py", "doctor"], nt=True, utf8=False, flags=["-I", "-X", "dev"])
+        self.assertEqual(again, [sys.executable, "-I", "-X", "dev", "-X", "utf8", "observatory.py", "doctor"])
+
+    def test_ctrl_c_waits_for_the_child_and_answers_its_code(self):
+        child = MagicMock()
+        child.wait.side_effect = [KeyboardInterrupt(), 130]
+        with patch.object(cli.subprocess, "Popen", return_value=child) as popen:
+            self.assertEqual(cli.run_again(["x"]), 130)
+        popen.assert_called_once_with(["x"])
+        self.assertEqual(child.wait.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

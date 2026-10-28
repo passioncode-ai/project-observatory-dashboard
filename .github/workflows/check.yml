@@ -253,7 +253,10 @@ jobs:
           python observatory/engine/tools/install_launchd.py install
           python observatory/engine/tools/install_launchd.py status
           python observatory/engine/tools/install_launchd.py uninstall
-          MSYS_NO_PATHCONV=1 schtasks /Query /FO LIST | grep -c ProjectObservatory || true
+          # Uninstall is asserted: no task of this engine is left (MSYS_NO_PATHCONV keeps Git Bash from rewriting /Query).
+          left="$(MSYS_NO_PATHCONV=1 schtasks /Query /FO LIST | grep -c ProjectObservatory || true)"
+          echo "tasks left: $left"
+          test "$left" = 0
       - id: ledgerlock
         name: The OpenRouter door's ledger lock across threads (J-11)
         if: always()
@@ -296,7 +299,7 @@ jobs:
           python tests/run_portable.py --jobs 4 --report-dir "$RUNNER_TEMP/windows-portable" > "$RUNNER_TEMP/windows-portable.json" || status=$?
           echo "run_portable exit $status (non-zero whenever any suite did not pass; the known list decides)"
           cd ../..
-          python tools/check_windows_suites.py "$RUNNER_TEMP/windows-portable.json" --summary "$GITHUB_STEP_SUMMARY"
+          python tools/check_windows_suites.py "$RUNNER_TEMP/windows-portable.json" --logs "$RUNNER_TEMP/windows-portable" --summary "$GITHUB_STEP_SUMMARY"
       - name: Keep the Windows measurement
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

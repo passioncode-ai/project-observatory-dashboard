@@ -1629,22 +1629,36 @@ def _run_group(name: str, steps: list[str], expect_skipped: list[str] | None,
     return 0
 
 
-def utf8_mode_argv(argv: list[str], *, nt: bool | None = None, utf8: bool | None = None) -> list[str] | None:
+def utf8_mode_argv(argv: list[str], *, nt: bool | None = None, utf8: bool | None = None,
+                   flags: list[str] | None = None) -> list[str] | None:
     """The command that runs this one again in UTF-8 mode, or None when it already runs that way.
 
     The engine reads and writes UTF-8 throughout; on Windows Python's default is the ANSI code page
     (cp1252), under which the step headings this command prints and every child's UTF-8 output fail to
     encode or decode. `project-observatory full` and the scheduled tasks start it in UTF-8 mode; a host
     that runs `observatory.py` itself (an MCP client, the desktop app, a person) may not, so it starts
-    again as a waited child with `-X utf8`, which also reaches every step it runs (OBS-277)."""
+    again as a waited child with `-X utf8`, which also reaches every step it runs (OBS-277). The caller's
+    own interpreter options (`-I`, `-O`, `-X dev`, warnings and the rest) go with it."""
     if not (os.name == "nt" if nt is None else nt) or (sys.flags.utf8_mode if utf8 is None else utf8):
         return None
-    return [sys.executable, "-X", "utf8", *argv]
+    options = subprocess._args_from_interpreter_flags() if flags is None else flags
+    return [sys.executable, *options, "-X", "utf8", *argv]
+
+
+def run_again(argv: list[str]) -> int:
+    """Run `argv` and answer its exit code. Ctrl+C at a console reaches the child as well as this process,
+    so this one keeps waiting and the child decides how it ends; nothing is left running behind it."""
+    child = subprocess.Popen(argv)
+    while True:
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            continue
 
 
 if __name__ == "__main__":
     again = utf8_mode_argv(sys.argv)
     if again is not None:
         os.environ["PYTHONUTF8"] = "1"
-        raise SystemExit(subprocess.call(again))
+        raise SystemExit(run_again(again))
     raise SystemExit(main(sys.argv))

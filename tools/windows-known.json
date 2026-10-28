@@ -1,387 +1,1342 @@
 {
   "schema_version": 1,
-  "about": "Portable engine suites that do not pass on windows-latest, each with the backlog row that makes it pass and what it showed in CI. tools/check_windows_suites.py fails the windows job when a suite outside this list fails or skips, or a suite on it passes: the list only shrinks.",
-  "measured": "windows-latest, Python 3.14, run 40573876802 (2026-10-27)",
+  "about": "Portable engine suites that do not pass on windows-latest, each with the backlog row that makes it pass, what it showed in CI, the outcomes it was seen with (statuses) and the checks seen failing in it (failing). tools/check_windows_suites.py fails the windows job when a suite outside this list fails or skips, when a listed suite fails with another outcome or another check, or when a listed suite passes: the list only shrinks.",
+  "measured": "windows-latest, Python 3.14: statuses and failing checks from runs 40625473237, 40625478667, 40629425959, 40629431729 (2026-10-28)",
   "suites": {
     "action_outcomes": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FAIL  [ru] success: the button stays locked until a rescan: {}"
+      "reason": "FAIL  [ru] success: the button stays locked until a rescan: {}",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "[en] dropped",
+        "[en] provider refused",
+        "[en] refused",
+        "[en] server fault",
+        "[en] success",
+        "[en] the page's click handler was driven for every case",
+        "[en] timeout",
+        "[en] unreadable success",
+        "[ru] dropped",
+        "[ru] provider refused",
+        "[ru] refused",
+        "[ru] server fault",
+        "[ru] success",
+        "[ru] the page's click handler was driven for every case",
+        "[ru] timeout",
+        "[ru] unreadable success",
+        "a timeout names its wait",
+        "dropped reads as uncertain",
+        "in Russian the timeout still reads as uncertain and names its wait",
+        "provider refused reads as refused",
+        "refused reads as refused",
+        "server fault reads as uncertain",
+        "success reads as ok",
+        "the page carries call()",
+        "timeout reads as uncertain",
+        "unreadable success reads as uncertain"
+      ]
     },
     "agent_plugin": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "`full agent install` runs a script Windows cannot execute directly ([WinError 193]), and the server's log stays open after its stop"
+      "reason": "`full agent install` runs a script Windows cannot execute directly ([WinError 193]), and the server's log stays open after its stop",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "AgentPluginTests.test_a_directory_marketplace_is_replaced_by_the_github_one",
+        "AgentPluginTests.test_a_disabled_copy_elsewhere_does_not_stop_the_engine_installing_its_own",
+        "AgentPluginTests.test_an_older_installed_plugin_is_updated_to_the_shipped_version",
+        "AgentPluginTests.test_install_does_not_claim_a_plugin_claude_did_not_install",
+        "AgentPluginTests.test_install_reports_the_version_claude_actually_installed",
+        "AgentPluginTests.test_install_turns_auto_update_on_and_points_hooks_at_this_workspace",
+        "AgentPluginTests.test_missing_claude_and_invalid_settings_are_refused_without_writes",
+        "AgentPluginTests.test_opt_out_keeps_auto_update_off_and_status_says_so",
+        "AgentPluginTests.test_reinstall_updates_instead_of_failing",
+        "AgentPluginTests.test_status_is_ok_when_the_launcher_manages_the_plugin",
+        "AgentPluginTests.test_uninstall_keeps_the_hook_env_a_launcher_managed_plugin_needs",
+        "AgentPluginTests.test_uninstall_leaves_settings_exactly_as_before_install",
+        "AgentPluginTests.test_uninstall_removes_only_what_install_added",
+        "AgentPluginTests.test_uninstall_without_claude_cleans_settings_and_says_what_is_left",
+        "AgentPluginTests.test_without_claude_the_manual_route_names_the_hook_environment",
+        "OpenDashboardTests.test_open_builds_missing_pages_and_prints_a_file_url",
+        "OpenDashboardTests.test_open_refuses_without_a_workspace",
+        "OpenDashboardTests.test_serve_starts_a_loopback_server_then_reuses_it"
+      ]
     },
     "api_listings": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "the run reports the refusal"
+      ]
     },
     "ask_why": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError"
+      "reason": "AssertionError",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "AskOncePerRecord.test_a_promoted_record_is_continued_once",
+        "AskOncePerRecord.test_a_record_another_project_took_is_continued_once",
+        "AskOncePerRecord.test_a_rejected_record_is_continued_once",
+        "AskOncePerRecord.test_an_explained_record_is_never_asked_about",
+        "AskOncePerRecord.test_answering_the_ask_does_not_stop_the_recording",
+        "AskOncePerRecord.test_in_the_real_order_the_second_prompt_gets_nothing",
+        "AskOncePerRecord.test_the_next_prompt_gets_it_once_and_another_session_never",
+        "AskOncePerRecord.test_two_changed_turns_of_one_session_ask_exactly_once",
+        "FailOpen.test_a_quiet_turn_is_not_a_fault_on_the_wire",
+        "FailOpen.test_a_real_fault_reaches_the_stop_hook",
+        "FailOpen.test_an_unreadable_journal_still_asks",
+        "FailOpen.test_an_unwritable_pending_store_falls_back_to_the_stop_notice",
+        "Measured.test_a_delivered_unanswered_ask_counts",
+        "Measured.test_a_headless_session_adds_nothing_to_the_denominator",
+        "NotARationale.test_a_common_heading_in_a_pull_request_body",
+        "NotARationale.test_a_failed_write_to_the_register",
+        "NotARationale.test_a_freshly_written_register_that_is_a_symlink_inside",
+        "NotARationale.test_a_freshly_written_register_that_is_a_symlink_outside",
+        "NotARationale.test_a_heredoc_over_the_scan_limit_into_the_register",
+        "NotARationale.test_a_ledger_line_found_only_in_a_call_that_wrote_elsewhere",
+        "NotARationale.test_a_ledger_that_is_a_symlink",
+        "NotARationale.test_a_read_only_grep_of_the_register",
+        "NotARationale.test_a_read_only_sed_of_the_register",
+        "NotARationale.test_a_shell_write_to_another_file_with_the_same_text",
+        "NotARationale.test_a_small_edit_to_a_register_another_session_wrote",
+        "NotARationale.test_a_subagents_write_to_the_register",
+        "NotARationale.test_a_vendored_libraries_adr",
+        "NotARationale.test_a_whitespace_only_edit",
+        "NotARationale.test_an_empty_untracked_register",
+        "NotARationale.test_an_ignored_ledger_line_this_session_did_not_write",
+        "NotARationale.test_another_sessions_register_edit_in_the_same_checkout",
+        "NotARationale.test_deleting_the_register",
+        "NotARationale.test_heading_syntax_the_scanner_rejects_is_never_matched_by_lines",
+        "NotARationale.test_no_transcript_means_no_attribution",
+        "NotARationale.test_reading_the_register_is_not_writing_it",
+        "OnlyThisTurnsChanges.test_a_commit_made_in_the_turn_is_tracked_content_and_old_ones_are_not",
+        "OnlyThisTurnsChanges.test_a_new_untracked_file_is_recorded_but_not_asked_about",
+        "OnlyThisTurnsChanges.test_a_real_tracked_edit_asks_exactly_once",
+        "OnlyThisTurnsChanges.test_pre_existing_untracked_files_never_ask",
+        "OnlyThisTurnsChanges.test_repeated_turns_supersede_one_record",
+        "OnlyThisTurnsChanges.test_the_state_names_no_path",
+        "PendingStoreHygiene.test_an_abandoned_ask_is_pruned_by_either_hook",
+        "PendingStoreHygiene.test_the_pending_ask_is_private_and_holds_no_value",
+        "SkipWhenThisSessionWroteTheRationale.test_a_register_with_several_headings_anchors_on_the_newest",
+        "SkipWhenThisSessionWroteTheRationale.test_a_shell_heredoc_into_the_register_counts",
+        "SkipWhenThisSessionWroteTheRationale.test_a_task_pipeline_decision_line_counts_and_any_other_line_does_not",
+        "SkipWhenThisSessionWroteTheRationale.test_a_turn_editing_the_decision_register_is_not_asked_about",
+        "SkipWhenThisSessionWroteTheRationale.test_an_adr_in_an_unpushed_commit_counts_too",
+        "SkipWhenThisSessionWroteTheRationale.test_an_edit_to_a_tracked_register_counts",
+        "SkipWhenThisSessionWroteTheRationale.test_an_ignored_run_ledger_is_read_from_disk",
+        "SkipWhenThisSessionWroteTheRationale.test_one_revision_per_changed_turn_once_linked",
+        "SkipWhenThisSessionWroteTheRationale.test_sed_in_place_on_a_later_line_of_the_command",
+        "SkipWhenThisSessionWroteTheRationale.test_the_link_survives_a_commit_and_push_and_a_later_turn",
+        "SkipWhenThisSessionWroteTheRationale.test_the_link_survives_the_write_scrolling_out_of_the_tail",
+        "SkipWhenThisSessionWroteTheRationale.test_the_rationale_is_a_follow_up_revision_of_the_same_record",
+        "TheCarriedLinkIsRechecked.test_a_backtick_fence_with_an_info_string",
+        "TheCarriedLinkIsRechecked.test_a_comment_opened_with_the_short_form",
+        "TheCarriedLinkIsRechecked.test_a_drop_is_remembered_for_every_later_turn",
+        "TheCarriedLinkIsRechecked.test_a_duplicated_anchor_is_not_still_true",
+        "TheCarriedLinkIsRechecked.test_a_fifo_in_place_of_the_register",
+        "TheCarriedLinkIsRechecked.test_a_hard_linked_register",
+        "TheCarriedLinkIsRechecked.test_a_heading_indented_as_code",
+        "TheCarriedLinkIsRechecked.test_a_heading_longer_than_the_link_limit_is_never_linked",
+        "TheCarriedLinkIsRechecked.test_a_line_ending_change_drops_the_carried_link",
+        "TheCarriedLinkIsRechecked.test_a_line_separator_does_not_split_a_line",
+        "TheCarriedLinkIsRechecked.test_a_link_another_writer_put_in_the_evidence_is_not_carried",
+        "TheCarriedLinkIsRechecked.test_a_link_from_before_the_byte_check_is_not_carried",
+        "TheCarriedLinkIsRechecked.test_a_link_still_true_is_carried",
+        "TheCarriedLinkIsRechecked.test_a_list_item_comment_around_the_heading",
+        "TheCarriedLinkIsRechecked.test_a_list_item_fence_around_the_heading",
+        "TheCarriedLinkIsRechecked.test_a_list_item_opened_above_the_heading",
+        "TheCarriedLinkIsRechecked.test_a_madr_entry_checked_out",
+        "TheCarriedLinkIsRechecked.test_a_new_decision_replaces_a_stale_anchor",
+        "TheCarriedLinkIsRechecked.test_a_one_character_body_edit",
+        "TheCarriedLinkIsRechecked.test_a_register_linked_outside_the_checkout",
+        "TheCarriedLinkIsRechecked.test_a_register_over_the_read_limit_asks",
+        "TheCarriedLinkIsRechecked.test_a_register_replaced_by_a_symlink",
+        "TheCarriedLinkIsRechecked.test_a_setext_duplicate_of_the_heading",
+        "TheCarriedLinkIsRechecked.test_a_struck_withdrawn_heading",
+        "TheCarriedLinkIsRechecked.test_a_symlinked_parent_directory",
+        "TheCarriedLinkIsRechecked.test_after_a_drop_only_a_later_write_links_again",
+        "TheCarriedLinkIsRechecked.test_an_anchor_near_the_end_of_a_large_register",
+        "TheCarriedLinkIsRechecked.test_an_append_after_an_unclosed_fence_is_not_carried",
+        "TheCarriedLinkIsRechecked.test_an_append_of_a_deeper_heading_asks",
+        "TheCarriedLinkIsRechecked.test_an_append_without_a_heading_asks",
+        "TheCarriedLinkIsRechecked.test_an_edit_below_a_hash_line_in_a_comment",
+        "TheCarriedLinkIsRechecked.test_an_edit_below_a_hash_line_in_a_python_fence",
+        "TheCarriedLinkIsRechecked.test_an_edit_below_a_hash_line_in_a_sh_fence",
+        "TheCarriedLinkIsRechecked.test_an_edit_to_another_entry_above_asks",
+        "TheCarriedLinkIsRechecked.test_an_html_block_around_the_heading",
+        "TheCarriedLinkIsRechecked.test_an_unchanged_entry_with_a_later_entry_appended_stays_carried",
+        "TheCarriedLinkIsRechecked.test_an_unclosed_fence_runs_to_the_end",
+        "TheCarriedLinkIsRechecked.test_committed_then_reverted",
+        "TheCarriedLinkIsRechecked.test_the_addition_checked_out",
+        "TheCarriedLinkIsRechecked.test_the_anchor_left_only_in_a_code_fence",
+        "TheCarriedLinkIsRechecked.test_the_anchor_left_only_in_a_comment",
+        "TheCarriedLinkIsRechecked.test_the_anchor_left_only_in_an_index_line",
+        "TheCarriedLinkIsRechecked.test_the_heading_inside_a_multi_line_comment",
+        "TheCarriedLinkIsRechecked.test_the_heading_inside_a_nested_four_backtick_fence",
+        "TheCarriedLinkIsRechecked.test_the_heading_inside_a_tilde_fence",
+        "TheCarriedLinkIsRechecked.test_the_heading_rewritten_by_another_writer",
+        "TheCarriedLinkIsRechecked.test_the_register_deleted",
+        "TheCarriedLinkIsRechecked.test_the_same_session_in_another_repository",
+        "TheCarriedLinkIsRechecked.test_tildes_do_not_close_a_backtick_fence",
+        "TheCarriedLinkIsRechecked.test_withdrawn_appended_past_the_display_length",
+        "WithinTheBudget.test_a_1500_line_register_and_a_large_transcript",
+        "WithinTheBudget.test_a_400_line_ignored_ledger",
+        "WithinTheBudget.test_a_heading_with_a_long_whitespace_run",
+        "WithinTheBudget.test_a_long_single_line_command_dense_with_sed",
+        "WithinTheBudget.test_the_descriptor_is_checked_not_only_the_path",
+        "WithinTheBudget.test_the_read_gate_on_a_fifo_and_a_hard_link"
+      ]
     },
     "ask_why_reach": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 1 != 0 :"
+      "reason": "AssertionError: 1 != 0 :",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "TheHooksUseTheModelChannel.test_a_real_ask_lands_in_the_model_channel_and_nowhere_else"
+      ]
     },
     "assistant": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "AssistantTests.test_cancel_during_spawn_stops_new_process",
+        "AssistantTests.test_completed_answer_archives_and_cancel_is_terminal",
+        "AssistantTests.test_job_and_cancel_answer_only_for_assistant_jobs",
+        "AssistantTests.test_serve_restarts_an_installed_server_through_launchd",
+        "AssistantTests.test_stop_ends_a_runner_started_with_sigterm_blocked",
+        "AssistantTests.test_valid_answer_and_conversation_survive_reload"
+      ]
     },
     "backup_vault": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 1 != 0"
+      "reason": "AssertionError: 1 != 0",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "BeforeUpdateInventory.test_local_update_is_counted_with_and_without_passphrase",
+        "BeforeUpdateInventory.test_update_migrates_encrypted_and_restores_while_foreign_kind_stays",
+        "Format.test_ciphertext_does_not_contain_plaintext",
+        "Format.test_dropping_whole_final_chunks_refused",
+        "Format.test_rewritten_header_field_refused",
+        "Format.test_roundtrip_multi_chunk_and_empty",
+        "Format.test_truncation_tamper_and_append_refused",
+        "Format.test_wrong_passphrase_refused",
+        "Migration.test_a_local_before_update_snapshot_is_exported_verified_and_removed",
+        "Migration.test_every_kind_a_snapshot_is_written_as_is_rotated",
+        "Migration.test_moves_newest_legacy_and_removes_the_rest",
+        "Passphrase.test_set_status_and_modes",
+        "Snapshots.test_decrypt_takes_the_bare_name_backups_status_prints",
+        "Snapshots.test_encrypted_rotation_keeps_newest",
+        "Snapshots.test_encrypted_snapshot_restores_identically",
+        "Snapshots.test_export_failure_keeps_local_copy",
+        "Snapshots.test_restore_without_passphrase_refused_cleanly",
+        "Snapshots.test_upgrade_exports_before_upgrade_snapshot",
+        "Snapshots.test_upgrade_survives_export_failure",
+        "Snapshots.test_without_passphrase_stays_local_and_rotates",
+        "StoreCopies.test_encrypted_daily_copy_and_rotation",
+        "StoreCopies.test_encrypted_stamp_older_than_the_kept_window_is_refused",
+        "StoreCopies.test_if_due_skips_a_fresh_copy"
+      ]
     },
     "checkout_inventory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Candidates.test_clone_linked_and_bare_are_inventory_only",
+        "Candidates.test_git_metadata_or_inherited_parent_is_not_a_checkout_root"
+      ]
     },
     "checkout_state": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+      "reason": "FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CheckoutState.test_bare_and_unborn_do_not_claim_clean",
+        "CheckoutState.test_incomplete_command_does_not_publish_zero_counts",
+        "CheckoutState.test_index_and_worktree_not_changed_by_probe",
+        "GraphPhase.test_actual_scan_publishes_bound_positive_graph_for_saved_reader",
+        "GraphPhase.test_failed_graph_keeps_published_local_state_and_advances_cursor",
+        "GraphPhase.test_graph_query_bounds_and_identity_drifts_stay_unknown",
+        "OfflineGitObservation.test_offline_local_positive_and_explicit_remote_default",
+        "OfflineGitObservation.test_offline_missing_objects_refuse_without_object_writes",
+        "OfflineGitObservation.test_transport_fallback_refuses_missing_object_even_without_lazy_fetch_variable",
+        "UpstreamGraph.test_detached_unborn_and_missing_upstream_are_unknown",
+        "UpstreamGraph.test_graph_drift_and_bad_counts_are_unknown",
+        "UpstreamGraph.test_local_equal_ahead_behind_and_diverged",
+        "UpstreamGraph.test_saved_graph_counts_reject_stale_future_bool_and_wrong_source",
+        "UpstreamGraph.test_shallow_promisor_replacement_graft_and_alternates_refuse",
+        "UpstreamGraph.test_stale_remote_tracking_cannot_claim_remote_durability"
+      ]
     },
     "companion": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "`not a git repository` is not a fault: {'recorded': False, 'reason': 'cwd does not exist', 'fault': True, 'at': '2026-10-27T20:08:40Z', 'session': 's-3'}"
+      "reason": "`not a git repository` is not a fault: {'recorded': False, 'reason': 'cwd does not exist', 'fault': True, 'at': '2026-10-27T20:08:40Z', 'session': 's-3'}",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "`not a git repository` is not a fault",
+        "a re-entrant Stop hook does nothing",
+        "and a row landed",
+        "and it exits clean",
+        "nothing is said about an unwatched directory",
+        "the hook records from a flattened install"
+      ]
     },
     "companion_faults": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "and a neighbour's quiet turn takes it: if this ever passes with fault=True the slot stopped being a slot, and the log below is no longer the only durable record"
+      "reason": "and a neighbour's quiet turn takes it: if this ever passes with fault=True the slot stopped being a slot, and the log below is no longer the only durable record",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "and a neighbour's quiet turn takes it",
+        "and adds nothing to the fault log",
+        "and none is torn in half",
+        "every line of both survives (N)",
+        "the fault survives in the durable log"
+      ]
     },
     "companion_hook": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "no observatory checkout: exits 0: 1"
+      "reason": "no observatory checkout: exits 0: 1",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "and says nothing",
+        "no observatory checkout"
+      ]
     },
     "credential_doors": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "times out on windows-latest at 601 s"
+      "reason": "times out on windows-latest at 601 s",
+      "statuses": [
+        "TIMEOUT"
+      ]
     },
     "curation_paths": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "ModuleNotFoundError: No module named 'termios'"
+      "reason": "ModuleNotFoundError: No module named 'termios'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "dashboard_portability": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: \"<path> chars]5b9\\project folders/project's folder/secrets/key file.json\" != \"<path> chars]5b9\\project folders\\project's folder\\secrets\\key file.json\""
+      "reason": "AssertionError: \"<path> chars]5b9\\project folders/project's folder/secrets/key file.json\" != \"<path> chars]5b9\\project folders\\project's folder\\secrets\\key file.json\"",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "DashboardPortabilityTests.test_credential_annotation_quotes_identifier",
+        "DashboardPortabilityTests.test_env_action_resolves_project_and_never_copies_a_reveal_command",
+        "DashboardPortabilityTests.test_movement_evidence_is_one_quoted_argument",
+        "DashboardPortabilityTests.test_project_secret_paths_resolve_against_configured_root",
+        "DashboardPortabilityTests.test_provider_actions_preserve_full_name_as_one_argument",
+        "DashboardPortabilityTests.test_tool_command_preserves_workspace_interpreter_and_arbitrary_arguments"
+      ]
     },
     "dashboard_stop": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 1 is not None : the server exited before answering"
+      "reason": "AssertionError: 1 is not None : the server exited before answering",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "DashboardStop.test_an_always_on_server_is_refused_with_the_command_that_stops_it",
+        "DashboardStop.test_another_workspaces_server_is_left_running",
+        "DashboardStop.test_stop_ends_this_workspaces_server_and_is_idempotent",
+        "DashboardStop.test_stop_without_a_port_finds_the_port_this_workspace_serves_on"
+      ]
     },
     "digitalocean_door": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "ValueError: list.index(x): x not in list"
+      "reason": "ValueError: list.index(x): x not in list",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "rotate succeeds through two transient Ns"
+      ]
     },
     "disk_guard": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "times out on windows-latest at 123 s"
+      "reason": "times out on windows-latest at 123 s",
+      "statuses": [
+        "TIMEOUT"
+      ]
     },
     "docs_current": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "docs/AGENT_SYNC.md describes configuration 39b8f406fdd2, the live one is 8b3aa2f8e1ae: regenerate with `agent_sync.py setup`"
+      "reason": "docs/AGENT_SYNC.md describes configuration 39b8f406fdd2, the live one is 8b3aa2f8e1ae: regenerate with `agent_sync.py setup`",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a snapshot matching its config passes",
+        "so the run stays green",
+        "the checker passes on a complete synthetic documentation set",
+        "the same phrase QUOTED in its own retirement does not"
+      ]
     },
     "domain_probe": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "each carries the reason: {'checked_at': '2026-10-27T20:17:46Z', 'nameservers': [], 'a': [], 'cname': [], 'registrable': 'example.com', 'resolves': None, 'unmeasured': 'dig is not instal"
+      "reason": "each carries the reason: {'checked_at': '2026-10-27T20:17:46Z', 'nameservers': [], 'a': [], 'cname': [], 'registrable': 'example.com', 'resolves': None, 'unmeasured': 'dig is not instal",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "each carries the reason",
+        "http_status does too",
+        "naming curl"
+      ]
     },
     "engine_update": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "times out on windows-latest at 123 s"
+      "reason": "times out on windows-latest at 123 s",
+      "statuses": [
+        "TIMEOUT"
+      ]
     },
     "env_inventory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "KeyError: 'wants/.env'"
+      "reason": "KeyError: 'wants/.env'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "fabric_service": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Installer.test_install_writes_the_descriptor_then_the_plist",
+        "Installer.test_uninstall_removes_the_plist_and_the_descriptor_and_keeps_the_data",
+        "RunningServer.test_conformance_reports_a_missing_lsof_dependency",
+        "RunningServer.test_events_need_the_token_in_the_header_and_only_there",
+        "RunningServer.test_the_conformance_probe_passes",
+        "Shutdown.test_sigterm_drains_and_releases_the_lock",
+        "StartupOrder.test_a_start_refreshes_a_stale_per_install_manifest_and_creates_none"
+      ]
     },
     "forget_receipt": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "WhatIsRefusedOrKept.test_the_journal_names_the_erasure_and_holds_no_text"
+      ]
     },
     "git_hardening": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']"
+      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CleanupNeverLosesWork.test_a_diff_that_fails_removes_nothing",
+        "CleanupNeverLosesWork.test_added_untracked_file_after_tar_write_refuses_removal",
+        "Collectors.test_plugins_and_identity",
+        "Collectors.test_remote_probe_honours_insteadof_and_refuses_helpers",
+        "Collectors.test_scan_events_scan_env_hygiene_and_secret_files",
+        "Collectors.test_scan_filesystem_the_ticks_first_step",
+        "Control.test_the_fixture_is_live_bare_git_runs_the_planted_programs",
+        "HookAndTools.test_cleanup_archives_and_removes_without_running_anything",
+        "HookAndTools.test_commits_carry_the_operators_author_and_run_no_hook_or_signer",
+        "HookAndTools.test_corroborate_and_service_identity",
+        "HookAndTools.test_the_stop_hook_and_the_session_start_hook",
+        "MissingRegistrationReceipt.test_a_directory_that_reappears_at_the_last_moment_loses_nothing",
+        "MissingRegistrationReceipt.test_a_failed_move_never_reports_pruned_or_leaks_its_error",
+        "MissingRegistrationReceipt.test_a_renamed_volume_is_unknown_and_its_registration_stays",
+        "MissingRegistrationReceipt.test_a_symbolic_archive_ref_is_not_retention",
+        "MissingRegistrationReceipt.test_a_timeout_has_uncertain_effect_and_no_raw_exception",
+        "MissingRegistrationReceipt.test_an_absent_branch_worktree_is_kept_by_its_branch",
+        "MissingRegistrationReceipt.test_an_absent_detached_worktree_keeps_its_commit_under_an_archive_ref",
+        "MissingRegistrationReceipt.test_the_survey_marks_an_unknown_directory_unreadable_not_missing",
+        "MissingRegistrationReceipt.test_unknown_or_changed_head_prunes_nothing",
+        "TheDoor.test_an_unreadable_configuration_refuses_rather_than_runs",
+        "TheDoor.test_reads_and_writes_run_nothing",
+        "TheDoor.test_render_round_trips_awkward_values",
+        "TheDoor.test_the_forwarded_file_holds_values_only_and_is_private",
+        "TheDoor.test_the_global_excludes_file_still_decides_ignored"
+      ]
     },
     "harness": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '~\\.claude\\CLAUDE.md' != '~/.claude/CLAUDE.md'"
+      "reason": "AssertionError: '~\\.claude\\CLAUDE.md' != '~/.claude/CLAUDE.md'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Harness.test_instructions_and_the_deferral_setting_are_read"
+      ]
     },
     "heroku": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a checkout INSIDE a project's folder links it too"
+      "reason": "a checkout INSIDE a project's folder links it too",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a checkout INSIDE a project's folder links it too"
+      ]
     },
     "heroku_door": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "at mode 600: 0o100666"
+      "reason": "at mode 600: 0o100666",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "at mode N",
+        "the ledger is owner-only"
+      ]
     },
     "infra_pages": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Door.test_issue_files_the_token_after_the_new_value_lists_workers"
+      ]
     },
     "install_key": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "the companion's destination is a .env file, the only file its worker reads: <path>"
+      "reason": "the companion's destination is a .env file, the only file its worker reads: <path>",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a group-readable existing file is refused",
+        "and left byte for byte as it was",
+        "and the file is mode N",
+        "mode N",
+        "the companion's destination is a .env file, the only file its worker reads"
+      ]
     },
     "interop": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 'completed' != 'cancelled'"
+      "reason": "AssertionError: 'completed' != 'cancelled'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CapabilitiesAsTools.test_the_inventory_answer_validates_and_holds_no_planted_value",
+        "InstalledManifest.test_the_per_install_manifest_starts_a_server_for_its_own_workspace",
+        "Jobs.test_a_job_outlives_the_server_that_started_it",
+        "Jobs.test_a_job_runs_to_a_result_envelope_on_the_callers_trace",
+        "SlowJobs.test_a_cancel_stops_the_work_and_stays_cancelled",
+        "SlowJobs.test_a_runner_killed_mid_work_reads_as_interrupted",
+        "SlowJobs.test_a_second_start_joins_the_running_job"
+      ]
     },
     "key": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "PermissionError: [WinError 5] Access is denied: '<path>'"
+      "reason": "PermissionError: [WinError 5] Access is denied: '<path>'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "mode N is refused"
+      ]
     },
     "keyserver": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a group-readable token is refused by the real reader"
+      "reason": "a group-readable token is refused by the real reader",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a group-readable token is refused by the real reader",
+        "refusal leaves bytes and permissions unchanged"
+      ]
     },
     "keyserver_boundary": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "KeyserverBoundaryTests.test_annotation_audit_does_not_copy_free_text_or_value",
+        "KeyserverBoundaryTests.test_empty_and_publicly_readable_token_files_refused",
+        "KeyserverBoundaryTests.test_startup_lines_reach_a_redirected_stdout_at_once",
+        "KeyserverBoundaryTests.test_token_created_private_reused_and_symlinks_refused"
+      ]
     },
     "leak_coverage": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 'scanned' != 'unreadable'"
+      "reason": "AssertionError: 'scanned' != 'unreadable'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Coverage.test_a_listed_env_file_that_is_a_fifo_is_a_hole_not_a_hang",
+        "Coverage.test_a_rotated_value_is_not_covered_by_the_old_decision",
+        "Coverage.test_a_suppression_with_reason_and_expiry_moves_the_sighting_aside",
+        "Coverage.test_an_expired_or_incomplete_rule_is_not_applied_and_is_reported",
+        "Coverage.test_an_unreadable_vault_slot_or_env_file_is_a_hole",
+        "Coverage.test_env_json_that_is_a_fifo_is_a_hole_not_a_hang",
+        "Coverage.test_expiry_rechecks_old_file_and_sqlite_content_on_incremental_scan",
+        "Coverage.test_legacy_unversioned_rules_do_not_suppress",
+        "Coverage.test_malformed_json_shapes_are_reported_without_crashing",
+        "Coverage.test_missing_or_changed_salt_never_reuses_a_decision",
+        "Coverage.test_new_value_rechecks_old_file_content_without_full_flag",
+        "Coverage.test_read_never_opens_a_fifo_or_follows_a_link",
+        "Coverage.test_the_read_is_checked_by_the_open_descriptor_not_a_path_check",
+        "Coverage.test_two_values_with_the_same_name_are_distinct_in_files_and_sqlite",
+        "Coverage.test_vault_discovery_boundaries_are_explicit_without_reading",
+        "TranscriptHomes.test_a_bulk_update_past_the_digest_cap_is_reported_once",
+        "TranscriptHomes.test_a_column_name_that_is_not_utf8_leaves_the_rest_of_the_table_read",
+        "TranscriptHomes.test_a_column_named_rowid_does_not_shadow_the_real_rowid",
+        "TranscriptHomes.test_a_damaged_hermes_state_db_is_unreadable_end_to_end",
+        "TranscriptHomes.test_a_damaged_page_is_a_hole_not_a_clean_table",
+        "TranscriptHomes.test_a_generated_column_does_not_blind_its_table",
+        "TranscriptHomes.test_a_hermes_session_updated_in_place_is_read_again",
+        "TranscriptHomes.test_a_hole_never_carries_the_error_message",
+        "TranscriptHomes.test_a_home_the_deadline_cut_is_partial_not_scanned",
+        "TranscriptHomes.test_a_partial_store_note_says_read_in_part_with_the_table_and_type",
+        "TranscriptHomes.test_a_quote_inside_a_name_is_doubled",
+        "TranscriptHomes.test_a_real_without_rowid_table_is_still_read",
+        "TranscriptHomes.test_a_reused_rowid_of_the_deleted_newest_row_is_read",
+        "TranscriptHomes.test_a_rewritten_session_file_is_read_again_whole",
+        "TranscriptHomes.test_a_schema_error_quoting_a_value_never_reaches_the_report",
+        "TranscriptHomes.test_a_shadowed_rowid_at_max_set_is_read_once_and_edits_are_seen",
+        "TranscriptHomes.test_a_store_larger_than_a_page_is_read_to_the_end",
+        "TranscriptHomes.test_a_store_path_with_uri_characters_is_read_read_only",
+        "TranscriptHomes.test_a_store_that_raises_anything_is_a_hole_and_the_report_is_written",
+        "TranscriptHomes.test_a_store_that_stops_midway_keeps_its_sightings_and_says_so",
+        "TranscriptHomes.test_a_store_that_will_not_open_is_named",
+        "TranscriptHomes.test_a_stored_generated_column_is_read",
+        "TranscriptHomes.test_a_symlinked_profile_and_a_link_loop_are_named",
+        "TranscriptHomes.test_a_table_name_that_is_not_utf8_is_a_hole_not_a_crash",
+        "TranscriptHomes.test_a_table_shadowing_every_rowid_alias_is_read_whole",
+        "TranscriptHomes.test_a_text_mark_from_an_old_state_file_is_read_from_the_start",
+        "TranscriptHomes.test_a_trailing_comment_does_not_hide_without_rowid",
+        "TranscriptHomes.test_a_varchar_column_is_read",
+        "TranscriptHomes.test_an_open_error_quoting_a_value_never_reaches_the_report",
+        "TranscriptHomes.test_codex_sqlite_home_and_hermes_data_dir_suffix_are_followed",
+        "TranscriptHomes.test_dot_dot_after_a_symlink_names_the_file_a_plain_open_names",
+        "TranscriptHomes.test_each_page_is_its_own_bounded_statement",
+        "TranscriptHomes.test_hermes_state_db_session_files_and_profiles_are_read",
+        "TranscriptHomes.test_r3_an_unchanged_json_is_not_read_again",
+        "TranscriptHomes.test_r4_a_second_incremental_pass_reads_no_row_and_repeats_no_sighting",
+        "TranscriptHomes.test_without_a_zstd_decoder_a_compressed_rollout_is_a_named_hole"
+      ]
     },
     "lifecycle": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '<path>' not found in ['']"
+      "reason": "fails (a case expects a path the Windows run reports as empty) or, under the job's load, times out near its 120 s limit; its failing checks are not recorded because every measured run timed out first",
+      "statuses": [
+        "FAIL",
+        "TIMEOUT"
+      ]
     },
     "lifecycle_watch": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: Lists differ: [('log-over-cap', 'serverd.err')] != [('log-over-cap', 'serverd.err'), ('log-readable', 'gate.log')]"
+      "reason": "AssertionError: Lists differ: [('log-over-cap', 'serverd.err')] != [('log-over-cap', 'serverd.err'), ('log-readable', 'gate.log')]",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Catalogue.test_the_engine_names_itself_from_its_own_paths",
+        "Logs.test_a_log_past_its_cap_and_a_readable_log_are_reported"
+      ]
     },
     "local_folders": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable"
+      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "lost_projects": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a JSON array yields the estate-relative folders: set()"
+      "reason": "a JSON array yields the estate-relative folders: set()",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a JSON array yields the estate-relative folders",
+        "a bare string that is not JSON is still considered",
+        "several rows joined by `|` are read as one"
+      ]
     },
     "machine": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None)"
+      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None)",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ApfsFrees.test_a_reader_sleeping_past_the_deadline_keeps_the_last_figures_and_names_the_place",
+        "ApfsFrees.test_no_file_answering_is_not_measured_rather_than_zero",
+        "ApfsFrees.test_the_sum_is_each_files_private_size_and_unread_files_count_in_full",
+        "Estate.test_a_checkout_with_no_remote_is_surveyed_too",
+        "Estate.test_a_pass_the_deadline_cuts_short_carries_the_last_measurement_and_resumes",
+        "Estate.test_auto_off_removes_nothing_and_plans",
+        "Estate.test_auto_removes_only_what_loses_nothing",
+        "Estate.test_classes",
+        "Estate.test_idle_threshold_protects_fresh_work",
+        "Estate.test_manual_archives_before_removing",
+        "Estate.test_recheck_skips_what_changed_since_the_survey",
+        "WorktreeRegistration.test_a_source_error_keeps_other_source_and_marks_partial",
+        "WorktreeRegistration.test_cursor_checkpoint_survives_interruption_inside_git",
+        "WorktreeRegistration.test_failed_repository_preserves_peer_registration_and_prior_time",
+        "WorktreeRegistration.test_full_survey_missing_sources_carries_prior_rows_instead_of_clean_empty",
+        "WorktreeRegistration.test_full_survey_reports_source_failure_while_retaining_survivor",
+        "WorktreeRegistration.test_full_survey_unreadable_worktree_list_is_partial_and_stale",
+        "WorktreeRegistration.test_full_survey_unresolved_default_preserves_old_classification_as_stale",
+        "WorktreeRegistration.test_linked_only_registry_lists_worktrees_without_expensive_calls",
+        "WorktreeRegistration.test_malformed_prior_registration_rows_are_named_and_not_carried",
+        "WorktreeRegistration.test_short_pass_rotates_after_failed_root_and_bounds_each_call",
+        "WorktreeRegistration.test_step_deadline_shorter_than_local_budget_prevents_git",
+        "WorktreeRegistration.test_unresolved_default_does_not_hide_registered_worktrees",
+        "WorktreeRegistration.test_zero_budget_keeps_previous_registration_explicitly_stale"
+      ]
     },
     "machine_backup": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "PermissionError: [Errno 13] Permission denied: '<path>'"
+      "reason": "PermissionError: [Errno 13] Permission denied: '<path>'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Refusals.test_transcripts_are_carried_only_when_asked",
+        "Restore.test_a_backup_sweeps_what_a_killed_one_left",
+        "Restore.test_a_conflict_is_kept_unless_overwrite_moves_it_aside",
+        "Restore.test_a_destination_never_leaves_its_home",
+        "Restore.test_a_detached_worktree_joins_a_main_checkout_already_here",
+        "Restore.test_a_missing_carried_file_fails_by_name_and_the_command_exits_1",
+        "Restore.test_a_record_from_a_bundle_is_validated_before_use",
+        "Restore.test_a_refused_run_leaves_a_live_restores_stage_alone",
+        "Restore.test_a_restore_killed_by_sigterm_or_sighup_leaves_no_plaintext",
+        "Restore.test_a_restore_killed_outright_is_swept_by_the_next_run",
+        "Restore.test_a_restore_never_starts_a_background_gc",
+        "Restore.test_a_wrong_passphrase_or_kind_is_refused",
+        "Restore.test_clone_brings_back_every_checkout_with_its_carried_work",
+        "Restore.test_no_decrypted_copy_is_left_in_the_home",
+        "Restore.test_packages_installs_each_inventory_with_its_tool",
+        "Restore.test_round_trip_into_an_empty_home",
+        "Restore.test_the_command_line_plans_by_default_and_refuses_overwrite_alone",
+        "Restore.test_the_stage_used_before_a_workspace_exists_is_swept_too",
+        "Taking.test_a_bundle_carries_the_manifest_and_names_what_it_did_not",
+        "Taking.test_a_bundle_over_its_cap_is_named_before_it_is_written",
+        "Taking.test_a_carried_bundle_is_streamed_from_its_file_never_read_whole",
+        "Taking.test_checkouts_carry_unpushed_commits_changes_and_untracked_files",
+        "Taking.test_everything_not_carried_says_how_to_carry_it_and_commits_come_first",
+        "Taking.test_files_a_cap_leaves_out_are_named_once_per_folder",
+        "Taking.test_no_value_reaches_the_manifest_the_state_or_the_answer",
+        "Taking.test_rotation_keeps_three",
+        "Taking.test_untracked_files_are_spooled_by_number_never_by_name"
+      ]
     },
     "machine_mcp_inventory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: Items in the first set but not the second:"
+      "reason": "AssertionError: Items in the first set but not the second:",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Coverage.test_absent_and_unreadable_sources_are_named_in_degraded",
+        "TheAnswer.test_a_project_scoped_declaration_keeps_its_scope",
+        "TheAnswer.test_servers_are_grouped_by_name_and_transport_with_every_declaration"
+      ]
     },
     "maintenance": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "App.test_an_app_that_is_absent_current_or_unwritable_is_left_alone",
+        "App.test_only_this_users_running_app_is_waited_for",
+        "ApplyProcess.test_output_that_is_not_json_reads_as_empty",
+        "ApplyProcess.test_the_apply_runs_in_its_own_session_and_its_answer_is_read_back",
+        "Bridge.test_a_new_engine_gets_its_maintenance_hook_with_the_setup_flag",
+        "Bridge.test_an_old_engine_is_updated_by_the_plugin_once_a_day",
+        "Bridge.test_an_old_engine_with_automatic_updates_off_is_left_alone",
+        "Bridge.test_an_up_to_date_old_engine_is_only_checked",
+        "Bridge.test_sessions_starting_together_after_the_window_start_one_bridge",
+        "Bridge.test_sessions_starting_together_start_one_bridge",
+        "Bridge.test_the_bridge_says_there_is_nothing_to_stop_where_launchd_is_absent",
+        "CheckJob.test_a_check_and_a_pass_at_the_same_moment_both_run",
+        "CheckJob.test_the_check_job_is_its_own_five_minute_job_on_every_scheduler",
+        "ConcurrentWriter.test_a_copy_taken_while_another_process_writes_is_never_torn",
+        "ConcurrentWriter.test_a_writer_that_arrives_after_the_reader_chose_immutable_never_tears_the_snapshot",
+        "ForeignDatabase.test_a_copy_of_another_database_stays_beside_it",
+        "Guard.test_on_runs_the_auto_tier_and_records_the_disk",
+        "Pass.test_a_failed_snapshot_is_said_and_cleared_by_the_next_good_one",
+        "Pass.test_a_running_tick_defers_the_backup_instead_of_killing_it",
+        "Pass.test_a_torn_database_copy_is_retried_not_fatal",
+        "Pass.test_an_update_cannot_start_while_the_snapshot_has_the_jobs_down",
+        "Pass.test_daily_backups_never_rotate_away_a_persons_snapshot",
+        "Pass.test_the_state_file_is_owner_only_and_holds_no_secret",
+        "Pass.test_the_switch_set_to_off_stops_checks_downloads_and_installs_the_apps_too",
+        "Pass.test_turned_off_means_no_check_and_the_backup_still_runs",
+        "Pass.test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup",
+        "Passphrase.test_one_is_generated_by_default_and_kept_outside",
+        "Passphrase.test_the_file_store_is_owner_only_outside_the_workspace",
+        "Reinstall.test_a_backup_taken_before_a_passphrase_change_still_restores",
+        "Reinstall.test_a_damaged_newest_backup_falls_back_to_an_older_one",
+        "Reinstall.test_a_wrong_passphrase_moves_on_and_never_restores_garbage",
+        "Reinstall.test_another_workspace_with_a_longer_name_or_another_path_is_never_restored",
+        "Reinstall.test_backups_of_two_workspaces_are_listed_not_chosen",
+        "Reinstall.test_init_restores_when_it_may_touch_the_machine_and_fresh_skips",
+        "Reinstall.test_restore_latest_by_hand_and_its_refusals",
+        "Reinstall.test_the_locked_hint_is_a_command_a_person_can_run",
+        "Reinstall.test_the_newest_backup_of_this_path_comes_back_after_the_workspace_is_deleted",
+        "Reinstall.test_without_the_passphrase_init_names_the_backup_and_the_command",
+        "Schedule.test_a_childs_home_beside_its_own_temporary_directory_is_still_a_tests",
+        "Schedule.test_the_installed_path_is_kept_whoever_runs_the_installer",
+        "Schedule.test_the_launchd_job_is_written_owner_only_and_loaded",
+        "Schedule.test_the_systemd_timer_runs_every_quarter_hour_persistent_and_quoted",
+        "Switch.test_an_update_a_reinstall_or_an_uninstall_never_writes_the_switch",
+        "Switch.test_automatic_updates_are_on_until_a_person_turns_them_off",
+        "UpdateLog.test_one_line_per_event_codes_only_owner_only"
+      ]
     },
     "mcp_inventory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a stdio server records its executable's NAME and whether it exists: {\"name\": \"local\", \"transport\": \"stdio\", \"wire\": \"stdio\", \"target\": \"env\", \"command\": \"env\", \"args_count\": 2, \"key_in_url\": false, \"key_in_header\": false"
+      "reason": "a stdio server records its executable's NAME and whether it exists: {\"name\": \"local\", \"transport\": \"stdio\", \"wire\": \"stdio\", \"target\": \"env\", \"command\": \"env\", \"args_count\": 2, \"key_in_url\": false, \"key_in_header\": false",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a project-scoped Claude server keeps its scope, home-relative",
+        "a source names its file home-relative, never the absolute home",
+        "a stdio server records its executable's NAME and whether it exists",
+        "an unreadable config degrades the scan, naming the file",
+        "both servers are heard and nothing is degraded",
+        "servers reported before the cut keep their verdict",
+        "the one it reached is connected",
+        "the reason names the limit and the variable that raises it"
+      ]
     },
     "memory_access": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "OperatorCli.test_issue_show_and_revoke"
+      ]
     },
     "merge_membership": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FileNotFoundError: [Errno 2] No such file or directory: '<path>'"
+      "reason": "FileNotFoundError: [Errno 2] No such file or directory: '<path>'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "and STILL keeps the phantoms out",
+        "and it follows the transfers",
+        "naming the carried answers",
+        "so no phantom is in the model"
+      ]
     },
     "meter": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "grant files are named by their URN (`urn:grant:...json`), and ':' cannot be in a Windows file name: the hub's grant projection needs a Windows name"
+      "reason": "grant files are named by their URN (`urn:grant:...json`), and ':' cannot be in a Windows file name: the hub's grant projection needs a Windows name",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Meter.test_L0_the_estate_total_and_the_keys_ceiling",
+        "Meter.test_a_malformed_request_is_an_error_not_a_refusal",
+        "Meter.test_a_malformed_task_claim_is_an_unproven_principal",
+        "Meter.test_a_reservation_is_refused_at_the_window",
+        "Meter.test_an_allowed_check_reserves_and_answers_what_remains",
+        "Meter.test_an_unproven_principal_is_denied_before_anything_is_read",
+        "Meter.test_concurrent_checks_cannot_overrun_a_limit",
+        "Meter.test_grant_states",
+        "Meter.test_measured_provider_spend_counts_against_L0",
+        "Meter.test_settlement_counts_what_was_spent_and_a_reservation_lapses",
+        "Meter.test_the_credential_source_must_be_the_projects_key_or_a_capability",
+        "Meter.test_the_keys_are_cached_and_reread_on_an_unknown_kid",
+        "Meter.test_the_ledger_is_private_and_holds_no_identity",
+        "Meter.test_the_per_call_maximum_is_window_call_at_L3",
+        "Meter.test_the_planted_grant_is_a_valid_standing_grant",
+        "Meter.test_the_projection_is_read_strictly",
+        "Meter.test_the_projection_missing_or_unreadable",
+        "Meter.test_the_task_window_keys_on_task_then_session_then_grant",
+        "Meter.test_the_vendored_schemas_are_the_contracts",
+        "Meter.test_total_project_week_and_month_windows",
+        "Meter.test_which_grant",
+        "Meter.test_without_task_or_session_the_task_window_is_the_whole_grant"
+      ]
     },
     "meter_wire": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "GrantCheckOverHttp.test_a_binding_bearer_does_not_reach_the_meter",
+        "GrantCheckOverHttp.test_an_allowed_check_then_the_window",
+        "GrantCheckOverHttp.test_an_unproven_token_and_a_present_invalid_header",
+        "GrantCheckOverHttp.test_malformed_requests",
+        "GrantCheckOverHttp.test_the_token_opens_grant_check_alone"
+      ]
     },
     "node_ceremony": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "OverTheAppProtocol.test_status_start_and_cancel_over_the_protocol",
+        "Steps.test_start_commits_to_this_machines_keys_and_says_the_hub_is_the_wait"
+      ]
     },
     "node_cli": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '0o777' != '0o700'"
+      "reason": "AssertionError: '0o777' != '0o700'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "NodeCommand.test_a_folder_others_may_write_is_refused_by_name",
+        "NodeCommand.test_init_then_show"
+      ]
     },
     "node_enroll": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: ValueError not raised"
+      "reason": "AssertionError: ValueError not raised",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ReadToken.test_a_file_others_may_read_is_refused"
+      ]
     },
     "node_foundation": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384 : device.json"
+      "reason": "AssertionError: 438 != 384 : device.json",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "AdversarialRound.test_a_folder_others_may_write_is_refused",
+        "ConfirmingRound.test_a_folder_others_may_write_is_refused_before_the_lock",
+        "DeviceKeyStore.test_saved_owner_only_and_loaded_back"
+      ]
     },
     "node_lifecycle_broker": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: LifecycleError not raised"
+      "reason": "AssertionError: LifecycleError not raised",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "BrokerTests.test_private_authority_and_no_symlink",
+        "EngineTests.test_a_dispatch_recovered_hours_later_is_delivery_unknown_not_a_second_start",
+        "EngineTests.test_a_restart_recovered_after_its_stop_does_not_stop_again",
+        "EngineTests.test_a_restart_recovered_past_its_deadline_still_runs_its_start_half",
+        "EngineTests.test_a_start_recovered_after_its_dispatch_is_still_the_brokers",
+        "RegistryTests.test_a_registry_is_a_private_regular_file"
+      ]
     },
     "node_lifecycle_helper": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "the macOS adapter's launchd domain reads os.getuid (node/lifecycle/macos.py), so choosing the helper raises on Windows instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work"
+      "reason": "the macOS adapter's launchd domain reads os.getuid (node/lifecycle/macos.py), so choosing the helper raises on Windows instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ChoiceReportTests.test_the_choice_keeps_no_cache_and_writes_nothing",
+        "ChoiceReportTests.test_the_choice_names_the_apps_helper_when_it_serves",
+        "ChoiceReportTests.test_the_choice_says_why_the_app_is_not_used",
+        "ChoiceReportTests.test_the_choice_with_no_app_and_no_build",
+        "DefaultsTests.test_the_default_adapter_looks_for_the_installed_app_in_its_home",
+        "HelperSelectionTests.test_a_call_runs_the_helper_it_checked_whatever_another_call_chose_meanwhile",
+        "HelperSelectionTests.test_a_helper_others_may_change_is_untrusted_and_never_run",
+        "HelperSelectionTests.test_a_helper_signed_under_another_identifier_falls_back_without_running_it",
+        "HelperSelectionTests.test_a_helper_that_does_not_answer_in_time_is_not_remembered_as_outdated",
+        "HelperSelectionTests.test_a_pending_check_is_not_remembered_as_a_refusal",
+        "HelperSelectionTests.test_a_pending_deep_check_does_not_hold_a_call_the_source_helper_can_serve",
+        "HelperSelectionTests.test_a_refusal_lasts_only_its_window",
+        "HelperSelectionTests.test_a_refused_app_is_not_deep_checked_on_every_call",
+        "HelperSelectionTests.test_a_released_install_without_swiftc_runs_the_apps_helper",
+        "HelperSelectionTests.test_a_signed_app_that_passes_every_check_drives_apps_and_the_source_helper_is_not_run",
+        "HelperSelectionTests.test_an_ad_hoc_qa_build_falls_back",
+        "HelperSelectionTests.test_an_app_helper_from_another_source_falls_back",
+        "HelperSelectionTests.test_an_app_signed_by_another_team_falls_back_and_its_helper_never_runs",
+        "HelperSelectionTests.test_an_app_that_carries_no_helper_is_not_verified_at_all",
+        "HelperSelectionTests.test_an_unchanged_app_is_not_checked_again_and_a_changed_one_is",
+        "HelperSelectionTests.test_neither_helper_is_setup_required_naming_both_reasons",
+        "HelperSelectionTests.test_the_app_is_checked_deep_and_the_helper_under_its_own_identifier",
+        "HelperSelectionTests.test_the_watcher_runs_the_chosen_helper"
+      ]
     },
     "node_lifecycle_import": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: {'runningOperations': 1, 'startedProcesses': 1} is not None"
+      "reason": "AssertionError: {'runningOperations': 1, 'startedProcesses': 1} is not None",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CliTests.test_bad_arguments_and_an_unsafe_source_are_refused",
+        "ImportTests.test_the_report_names_ids_and_counts_never_a_path_a_hash_or_a_team",
+        "SourceFolderTests.test_a_document_others_may_read_or_a_linked_document_is_refused",
+        "SourceFolderTests.test_a_folder_others_may_write_is_refused",
+        "SourceFolderTests.test_the_detail_never_carries_a_value_of_the_source",
+        "StoreTests.test_a_store_others_may_read_is_not_opened",
+        "StoreTests.test_a_store_that_moved_while_copied_is_copied_again_once",
+        "StoreTests.test_a_write_ahead_log_others_may_read_makes_the_counts_degraded",
+        "StoreTests.test_the_store_is_counted_read_only_and_left_as_it_was"
+      ]
     },
     "node_lifecycle_macos": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "the macOS adapter calls os.getuid while it decides a path is trusted (node/lifecycle/macos.py trusted_path), so on Windows it raises instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work"
+      "reason": "the macOS adapter calls os.getuid while it decides a path is trusted (node/lifecycle/macos.py trusted_path), so on Windows it raises instead of answering unsupported_platform; fixed with the adapter's open OBS-79 work",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "DesignatedRequirementTests.test_adhoc_signature_is_refused_at_enrollment_and_at_match",
+        "DesignatedRequirementTests.test_an_identity_of_another_scheme_is_a_mismatch_without_codesign",
+        "DesignatedRequirementTests.test_bundle_changing_during_verification_is_not_trusted_or_cached",
+        "DesignatedRequirementTests.test_different_team_is_refused",
+        "DesignatedRequirementTests.test_enrollment_records_requirement_and_no_volatile_metadata",
+        "DesignatedRequirementTests.test_other_bundle_id_from_the_same_team_is_refused",
+        "DesignatedRequirementTests.test_outside_installed_application_roots_is_not_installed",
+        "DesignatedRequirementTests.test_same_team_rebuild_and_update_still_match",
+        "DesignatedRequirementTests.test_signature_without_team_is_refused_before_any_requirement_check",
+        "DesignatedRequirementTests.test_signing_identifier_must_equal_info_plist_bundle_id",
+        "DesignatedRequirementTests.test_unchanged_bundle_is_deep_verified_once",
+        "DesignatedRequirementTests.test_unsigned_or_broken_seal_is_refused",
+        "DesignatedRequirementTests.test_verification_timeout_is_not_a_false_identity_mismatch",
+        "SwitchboardProbeTests.test_a_replaced_cli_is_refused_before_it_runs",
+        "SwitchboardProbeTests.test_a_stopped_app_with_its_runtime_offline_may_be_started",
+        "SwitchboardProbeTests.test_an_offline_runtime_of_a_running_app_is_capability_missing_not_ready",
+        "SwitchboardProbeTests.test_an_online_runtime_needs_the_enrolled_app_running",
+        "SwitchboardProbeTests.test_an_updated_cli_of_the_same_team_is_trusted_and_checked_once_per_file",
+        "SwitchboardProbeTests.test_the_enrollment_of_switchboard_records_its_cli",
+        "VerificationCacheTests.test_a_walk_that_runs_out_of_time_is_pending_not_terminal",
+        "VerificationCacheTests.test_the_walk_sees_an_in_place_write_and_refuses_a_link_out_of_the_bundle"
+      ]
     },
     "node_lifecycle_service": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CliTests.test_a_re_enrolled_id_never_reuses_a_policy_revision",
+        "CliTests.test_enroll_verifies_the_named_path_and_records_what_starting_it_does",
+        "ConfigTests.test_a_document_others_may_read_or_a_link_is_refused_whole",
+        "ObservabilityTests.test_obs2_the_machine_log_is_private_rotated_and_structured"
+      ]
     },
     "node_repair": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable"
+      "reason": "TypeError: argument of type 'NoneType' is not a container or iterable",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Config.test_what_runs_nothing"
+      ]
     },
     "pipeline": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "every path handed on a command line was checked (0): 0: the sweep is only as wide as the commands"
-    },
-    "policy_residue": {
-      "expect": "FAIL",
-      "row": "OBS-278",
-      "reason": "it refuses with no terminal: review: nothing to fold for project:x on 2026-09-05: 0 waiting record(s), no (project, kind, owner, day) group holds more than one"
+      "reason": "every path handed on a command line was checked (0): 0: the sweep is only as wide as the commands",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "every path handed on a command line was checked (N)"
+      ]
     },
     "private_sources": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError"
+      "reason": "AssertionError",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "PrivateSources.test_both_remediation_stores_get_backups"
+      ]
     },
     "project_secrets": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "the mode is carried as it is:"
+      "reason": "the mode is carried as it is:",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "the mode is carried as it is"
+      ]
     },
     "provider_secret_boundaries": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ProviderBoundaryTests.test_admin_reads_refuse_symlinks_and_public_permissions",
+        "ProviderBoundaryTests.test_writers_replace_complete_files_with_owner_only_permissions"
+      ]
     },
     "public_contracts": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError"
+      "reason": "AssertionError",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "PublicContracts.test_private_requirements_reject_traversal_and_symlink_escape"
+      ]
     },
     "recovery": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'"
+      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "retrieval_audit": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Receipts.test_a_search_names_its_receipt_and_the_log_holds_no_text"
+      ]
     },
     "review_policy": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 0 == 0"
-    },
-    "review_queue": {
-      "expect": "FAIL",
-      "row": "OBS-278",
-      "reason": "promoting without a terminal is refused: promoted mem:test0000: proposed -> observed (revision 2, owner operator)"
+      "reason": "AssertionError: 0 == 0",
+      "statuses": [
+        "FAIL",
+        "TIMEOUT"
+      ],
+      "failing": [
+        "Batch.test_a_declined_launch_applies_nothing",
+        "Batch.test_a_malformed_file_is_refused_whole",
+        "Batch.test_an_item_listed_twice_refuses_the_batch_whole",
+        "Batch.test_prepare_recommends_and_apply_asks_once_at_a_terminal",
+        "BatchOnlyDecidesPending.test_an_item_already_decided_is_not_decided_again",
+        "BatchOnlyDecidesPending.test_an_item_the_engine_did_not_prepare_is_refused",
+        "BatchShowsWhatChanged.test_every_departure_from_the_engine_is_listed_before_the_question",
+        "Crash.test_a_kill_after_the_file_write_is_reverted_and_decided_again",
+        "Crash.test_a_kill_after_the_statuses_is_reverted_by_the_next_writer",
+        "CrashThenAPerson.test_accept_proposal_after_a_crash_keeps_the_resource_once_as_the_persons",
+        "CrashThenAPerson.test_reject_proposal_after_a_crash_removes_what_the_run_wrote",
+        "ThePolicyFile.test_a_refused_confirmation_writes_nothing",
+        "ThePolicyFile.test_enable_and_disable_need_a_terminal",
+        "Undo.test_a_proposal_decided_again_since_is_left_alone",
+        "Undo.test_undo_needs_a_terminal_and_restores_exactly_what_the_decision_added",
+        "Undo.test_undo_since_reverts_a_new_row_and_an_alias_and_a_fold"
+      ]
     },
     "runtime_identity": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AttributeError: module 'os' has no attribute 'mkfifo'"
+      "reason": "AttributeError: module 'os' has no attribute 'mkfifo'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "scan_agents": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: False is not true : <path>"
+      "reason": "AssertionError: False is not true : <path>",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "FixCycle1.test_absolute_home_paths_are_written_with_a_tilde",
+        "FixCycle4.test_a_file_name_shaped_like_a_url_is_not_read_and_not_named",
+        "FixCycle5.test_a_name_only_the_whole_stem_rule_flags_is_not_read",
+        "FixCycle7.test_a_home_form_the_sanitiser_leaves_makes_the_document_unusable",
+        "FixCycle7.test_problems_checks_every_string_independently",
+        "FixCycle7.test_the_four_forms_reach_neither_registry_nor_wiki",
+        "FixCycle8.test_the_forms_reach_neither_registry_nor_wiki"
+      ]
     },
     "schema_compatibility": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 292 != 256"
+      "reason": "AssertionError: 292 != 256",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "SchemaCompatibility.test_fresh_store_and_repeat",
+        "SchemaCompatibility.test_legacy_upgrade_preserves_event_and_backup",
+        "SchemaCompatibility.test_readonly_database_is_not_made_writable"
+      ]
     },
     "scrub": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a backup of claude-mem.db was taken first, at mode 600: [<path>]"
+      "reason": "a backup of claude-mem.db was taken first, at mode 600: [<path>]",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a backup of claude-mem.db was taken first, at mode N"
+      ]
     },
     "secret_header": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "ModuleNotFoundError: No module named 'termios'"
+      "reason": "ModuleNotFoundError: No module named 'termios'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "secret_prompt": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 'waiting' != 'cancelled'"
+      "reason": "AssertionError: 'waiting' != 'cancelled'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "TheAgentsSide.test_cancelling_the_job_withdraws_the_request"
+      ]
     },
     "secrets": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "serverd": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AttributeError: 'TaskSchedulerJob' object has no attribute 'units'"
+      "reason": "AttributeError: 'TaskSchedulerJob' object has no attribute 'units'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     },
     "share_cli": {
       "expect": "SKIP",
@@ -391,97 +1346,332 @@
     "skill": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "the hook ran under `bash`, which on windows-latest resolves to the WSL launcher (it answered in UTF-16 that no Linux distribution is installed), not Git Bash"
+      "reason": "the hook ran under `bash`, which on windows-latest resolves to the WSL launcher (it answered in UTF-16 that no Linux distribution is installed), not Git Bash",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "TN with nothing pending it prints nothing and exits N ('')",
+        "TN with nothing pending it prints nothing and exits N ('not json')",
+        "TN with nothing pending it prints nothing and exits N ('{\"session_id')",
+        "a changed watched repository produces a request for the why",
+        "silent for a directory that is not a repository",
+        "silent for a re-entrant Stop",
+        "silent for a third-party clone",
+        "silent when there is no observatory checkout",
+        "the Stop hook itself says nothing to the person"
+      ]
     },
     "ssh_keys": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 2 != 1"
+      "reason": "AssertionError: 2 != 1",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "CopyPublic.test_a_pub_swapped_for_a_link_after_the_check_is_not_read",
+        "CopyPublic.test_copy_puts_exactly_the_public_line_on_the_clipboard",
+        "Create.test_a_failed_ssh_keygen_leaves_nothing",
+        "Create.test_a_host_block_is_appended_and_a_taken_alias_refused_before_generation",
+        "Create.test_a_passphrase_is_never_an_argument",
+        "Create.test_a_passphrase_without_a_terminal_is_refused",
+        "Create.test_a_race_loser_keeps_the_other_writers_file",
+        "Create.test_creates_ed25519_with_modes_and_an_empty_passphrase_only_when_asked",
+        "Findings.test_a_group_readable_key_is_flagged",
+        "HeaderReadIsBounded.test_a_pem_key_reads_only_the_header_line_and_the_next_ten_bytes",
+        "HeaderReadIsBounded.test_an_openssh_header_stops_before_the_private_section",
+        "Inventory.test_a_fifo_or_huge_include_is_refused_not_read",
+        "Inventory.test_a_host_dependent_identity_file_is_not_offered_for_deletion",
+        "Inventory.test_a_key_in_an_agent_the_config_names_is_not_offered_for_deletion",
+        "Inventory.test_a_linked_key_is_not_offered_for_deletion",
+        "Inventory.test_a_tilde_user_identity_file_is_resolved_or_unseen",
+        "Inventory.test_agent_keys_loaded_and_agent_only",
+        "Inventory.test_an_escape_sequence_in_a_file_name_never_reaches_the_terminal",
+        "Inventory.test_empty_home_names_the_next_step",
+        "Inventory.test_github_registration_by_fingerprint_and_orphans",
+        "Inventory.test_github_unreadable_is_degraded_with_scope_command",
+        "Inventory.test_list_never_crashes_on_an_unreadable_identity_file_or_include",
+        "Inventory.test_list_saves_an_owner_only_inventory_without_the_home_path",
+        "Inventory.test_no_ssh_keys_yet_is_not_said_while_the_config_is_unread",
+        "Inventory.test_pairs_are_listed_with_fingerprint_type_comment_and_passphrase",
+        "Inventory.test_the_mcp_answer_carries_no_delete_for_a_github_key",
+        "SendGithub.test_a_missing_scope_is_refused_before_anything_is_sent",
+        "SendGithub.test_a_provider_refusal_is_shown_without_credentials_and_receipted",
+        "SendGithub.test_a_second_send_is_already_registered_and_adds_nothing",
+        "SendGithub.test_a_title_that_looks_like_an_option_stays_a_title",
+        "SendGithub.test_adds_through_stdin_with_type_and_title_and_writes_a_receipt",
+        "SendGithub.test_both_uses",
+        "SendServer.test_a_failed_verification_says_the_key_was_added",
+        "SendServer.test_a_fresh_server_gets_private_modes",
+        "SendServer.test_a_jump_host_keeps_its_user_and_port",
+        "SendServer.test_a_key_already_present_with_options_is_already",
+        "SendServer.test_a_password_prompt_in_batch_mode_names_interactive",
+        "SendServer.test_a_proven_key_with_a_passphrase_may_use_the_agent",
+        "SendServer.test_a_proxy_command_host_is_not_verified_blind",
+        "SendServer.test_added_is_decided_by_the_exit_code_not_the_words",
+        "SendServer.test_an_agent_key_is_not_offered_during_verify",
+        "SendServer.test_an_unreachable_server_names_ssh_reason",
+        "SendServer.test_appends_once_and_a_second_send_is_a_no_op",
+        "SendServer.test_the_words_added_with_a_failing_exit_code_are_a_failure",
+        "SendServer.test_verify_cannot_pass_on_another_key_from_the_config",
+        "SendServer.test_verify_logs_in_with_the_new_key_alone",
+        "SendServer.test_verify_never_lets_the_agent_sign_for_an_unproven_private_file",
+        "SendServer.test_verify_requires_the_server_to_name_the_new_key",
+        "SendServer.test_verify_without_the_servers_word_on_the_key_is_not_verified"
+      ]
     },
     "store_faults": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'"
+      "reason": "PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '<path>'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "an unwritable log returns None instead of raising"
+      ]
     },
     "store_modes": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "directories become 700: 0o777 0o777 0o777"
+      "reason": "directories become 700: 0o777 0o777 0o777",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "and it reports what it changed",
+        "directories become N",
+        "launchd's own log is not touched either",
+        "nothing under the live store is readable beyond its owner",
+        "scan caches under raw, nested too, become N",
+        "the Cloudflare door writes its meta file at N",
+        "the OpenRouter door writes its meta file at N",
+        "the database and the journals become N",
+        "the keyserver journal is N after an append to a loose file",
+        "the secret-use journal is N after an append to a loose file",
+        "tracked configuration is not touched"
+      ]
     },
     "tick_budget": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "times out on windows-latest at 122 s"
+      "reason": "times out on windows-latest at 122 s",
+      "statuses": [
+        "TIMEOUT"
+      ]
     },
     "tick_progress": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "OSError: [WinError 10106] The requested service provider could not be loaded or initialized"
+      "reason": "OSError: [WinError 10106] The requested service provider could not be loaded or initialized",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "StageReceipts.test_supervisor_stop_keeps_silent_stage_unknown_and_correlated"
+      ]
     },
     "trace_opens": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "a percent-encoded URI (paths.sqlite_uri) is recorded as its plain path, read-only: [['w', 'tests/_traced/t.db'], ['r', 'tests/_traced/t.db'], ['w', 'tests/_traced/t two.db']]"
+      "reason": "a percent-encoded URI (paths.sqlite_uri) is recorded as its plain path, read-only: [['w', 'tests/_traced/t.db'], ['r', 'tests/_traced/t.db'], ['w', 'tests/_traced/t two.db']]",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "a percent-encoded URI (paths.sqlite_uri) is recorded as its plain path, read-only"
+      ]
     },
     "traps": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "T27 old/fixture-a is not recorded as its own repository: ['example-org/fixture-a', 'example-org/fixture-b', 'example-org/fixture-module-a', 'example-org/fixture-module-b', 'example-org/fixture-parent', 'old/fixture-a', '"
+      "reason": "T27 old/fixture-a is not recorded as its own repository: ['example-org/fixture-a', 'example-org/fixture-b', 'example-org/fixture-module-a', 'example-org/fixture-module-b', 'example-org/fixture-parent', 'old/fixture-a', '",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "TN old/fixture-a is not recorded as its own repository",
+        "TN old/fixture-b is not recorded as its own repository"
+      ]
     },
     "use_secret": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name"
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "`where` names the file",
+        "and it IS the process serve was (exec, no pump in between)",
+        "the refusal names the environment searched and the file that holds it",
+        "with no --env the unlabeled file still answers"
+      ]
     },
     "vault": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "the file is mode 600: 0o666"
+      "reason": "the file is mode 600: 0o666",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "at mode N",
+        "every directory from the store down is mode N",
+        "the archive exists at mode N",
+        "the file is mode N"
+      ]
     },
     "vault_boundaries": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: ValueError not raised"
+      "reason": "AssertionError: ValueError not raised",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "VaultBoundaryTests.test_atomic_write_ignores_predictable_tmp_symlink",
+        "VaultBoundaryTests.test_concurrent_atomic_writes_are_complete_and_private",
+        "VaultBoundaryTests.test_pipe_filters_both_streams_and_preserves_child_exit",
+        "VaultBoundaryTests.test_private_slot_symlink_or_permissions_refused"
+      ]
     },
     "vault_digests": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ReviewFindings.test_l12_a_peer_claiming_this_machine_is_named_as_such",
+        "ReviewFindings.test_l14_the_digest_folder_is_owner_only",
+        "ReviewFindings.test_l5_export_never_follows_or_replaces",
+        "ReviewFindings.test_l8_the_all_match_line_counts_differences_on_purpose",
+        "ReviewFindings.test_l9_peer_file_names_are_screened",
+        "ReviewFindings.test_m1_a_non_hex_key_id_is_refused_into_degraded",
+        "ReviewFindings.test_m2_rotated_at_and_on_purpose_are_validated",
+        "ReviewFindings.test_m3_a_future_answer_is_unreachable_naming_the_clock",
+        "ReviewFindings.test_m4_deeply_nested_json_is_refused",
+        "ReviewFindings.test_r2_1_an_extreme_rotation_time_never_crashes_the_view",
+        "VaultDigestsTests.test_a_rotation_marks_the_other_copies_stale",
+        "VaultDigestsTests.test_a_slot_marked_different_on_purpose",
+        "VaultDigestsTests.test_all_matching_is_one_line",
+        "VaultDigestsTests.test_an_old_answer_is_unreachable_with_its_time",
+        "VaultDigestsTests.test_an_unreadable_manifest_is_named_and_never_reads_as_all_matching",
+        "VaultDigestsTests.test_credentials_name_the_machines_holding_a_slot",
+        "VaultDigestsTests.test_same_differs_only_here_and_missing",
+        "VaultDigestsTests.test_write_creates_the_key_in_the_vault_and_a_manifest_without_values"
+      ]
     },
     "workflow_memory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FAILED (errors=1)"
+      "reason": "FAILED (errors=1)",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "ReviewFindings.test_h10_references_survive_and_the_report_names_fields"
+      ]
     },
     "workspace": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "WorkspaceTests.test_init_creates_runtime_identities_once_and_never_replaces_them",
+        "WorkspaceTests.test_init_preserves_settings_and_unknown_optional_fields"
+      ]
     },
     "workspace_boundaries": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 420"
+      "reason": "AssertionError: 438 != 420",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "WorkspaceBoundaryTests.test_a_copy_keeps_each_files_modification_time",
+        "WorkspaceBoundaryTests.test_migration_refuses_wal_change_after_database_backup",
+        "WorkspaceBoundaryTests.test_migration_without_identities_creates_them_once",
+        "WorkspaceBoundaryTests.test_permission_tightening_does_not_follow_directory_symlink"
+      ]
     },
     "workspace_profile": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '0o666' != '0o600'"
+      "reason": "AssertionError: '0o666' != '0o600'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "Profile.test_a_failed_write_restores_every_file",
+        "Profile.test_export_to_file_is_private_and_never_overwrites"
+      ]
     },
     "workspace_scheduler": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384"
+      "reason": "AssertionError: 438 != 384",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "WorkspaceScheduler.test_gate_logs_and_exit_code_are_workspace_scoped",
+        "WorkspaceScheduler.test_launch_path_keeps_safe_user_directories",
+        "WorkspaceScheduler.test_plist_is_instance_scoped_and_contains_no_credentials",
+        "WorkspaceScheduler.test_private_git_commits_only_registry",
+        "WorkspaceScheduler.test_private_log_permissions_and_symlink_refusal",
+        "WorkspaceScheduler.test_tick_is_valid_and_runtime_paths_come_from_the_workspace",
+        "WorkspaceScheduler.test_workspace_lock_blocks_parallel_tick"
+      ]
     },
     "workspace_upgrade": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: [] is not true"
+      "reason": "AssertionError: [] is not true",
+      "statuses": [
+        "FAIL",
+        "TIMEOUT"
+      ],
+      "failing": [
+        "WorkspaceUpgrade.test_a_failed_live_migration_puts_the_files_back",
+        "WorkspaceUpgrade.test_a_settings_file_changed_while_staged_still_refuses",
+        "WorkspaceUpgrade.test_a_write_while_the_upgrade_is_staged_is_kept_not_refused",
+        "WorkspaceUpgrade.test_backup_does_not_recurse",
+        "WorkspaceUpgrade.test_commit_failure_rolls_back_previous_files",
+        "WorkspaceUpgrade.test_compatible_newer_producer_is_not_an_automatic_break",
+        "WorkspaceUpgrade.test_empty_runtime_directories_survive_restore",
+        "WorkspaceUpgrade.test_future_snapshot_floor_refused",
+        "WorkspaceUpgrade.test_logs_and_databases_written_during_a_snapshot_do_not_abort_it",
+        "WorkspaceUpgrade.test_manifest_traversal_refused",
+        "WorkspaceUpgrade.test_modified_snapshot_refused_before_destination_creation",
+        "WorkspaceUpgrade.test_restore_refuses_existing_data",
+        "WorkspaceUpgrade.test_snapshot_extra_file_refused",
+        "WorkspaceUpgrade.test_snapshot_restore_preserves_private_files_and_modes",
+        "WorkspaceUpgrade.test_snapshot_retains_committed_wal_data",
+        "WorkspaceUpgrade.test_snapshot_symlink_target_refused",
+        "WorkspaceUpgrade.test_staging_failure_leaves_original_unchanged",
+        "WorkspaceUpgrade.test_the_session_hooks_receipts_may_change_while_staged",
+        "WorkspaceUpgrade.test_upgrade_adds_defaults_preserves_custom_values",
+        "WorkspaceUpgrade.test_vector_database_integrity_when_extension_installed"
+      ]
     },
     "write_surface": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "ModuleNotFoundError: No module named 'termios'"
+      "reason": "ModuleNotFoundError: No module named 'termios'",
+      "statuses": [
+        "FAIL"
+      ],
+      "failing": [
+        "<exit>"
+      ]
     }
   }
 }

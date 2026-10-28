@@ -11,14 +11,20 @@ while the major version is 0, a minor release may change behaviour and says so h
   `docs/design/WINDOWS-LINUX.md`). The `windows` CI job no longer lets a step fail unseen: locks (with the path
   behind a descriptor, OBS-98), owner-only ACLs, process groups, a whole tick, the server and the tick as Task
   Scheduler tasks and the root tests all fail the job, and it runs the whole portable engine set: 202 of 298 suites
-  pass on windows-latest, and the other 96 are listed in `tools/windows-known.json`, each with its backlog row and
-  what it showed; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
-  passes. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
+  pass on windows-latest, and the others are listed in `tools/windows-known.json`, each with its backlog row, what
+  it showed, its outcomes and the checks seen failing; `tools/check_windows_suites.py` fails the job when an unlisted suite fails or skips, or a listed one
+  passes or a new check fails inside a listed suite. `docs/COMPATIBILITY.md` now claims exactly that for Windows, and the design document has the commands a
   person runs to check install, the node, the tick, the desktop app and an agent's MCP connection on a real Windows
   machine. Two fixes reach every Windows user: `project-observatory full` and a direct `observatory.py` run the engine
   in UTF-8 mode on Windows (step headings and non-Latin-1 text no longer fail under the cp1252 code page), and the
   portable runner gives each suite a Windows home, temporary folder and UTF-8 console and stops a timed-out suite's
   whole process tree.
+
+- **On Windows a command meant for a person no longer takes NUL for one** (OBS-279). Operator-only commands
+  (`review.py promote`, the binding, policy, lifecycle, workflow, share and forget commands) and every secret prompt
+  decided a person is at a terminal with `isatty()`, which Windows answers true for the NUL device: a script could
+  run `review.py promote <id> < NUL` and mint a record owned by `operator`. They now require a real console there
+  (`osprivacy.is_terminal`); macOS and Linux keep `isatty()`.
 
 ## 0.30.0 (2026-10-28)
 
