@@ -740,9 +740,10 @@
     "machine": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None)",
+      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None); it also timed out at its limit under the job's load (run 40668387839)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "ApfsFrees.test_a_reader_sleeping_past_the_deadline_keeps_the_last_figures_and_names_the_place",
@@ -774,9 +775,10 @@
     "machine_backup": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "PermissionError: [Errno 13] Permission denied: '<path>'",
+      "reason": "PermissionError: [Errno 13] Permission denied: '<path>'; it also timed out at its limit under the job's load (run 40668387839)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "Refusals.test_transcripts_are_carried_only_when_asked",
@@ -824,9 +826,10 @@
     "maintenance": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384",
+      "reason": "AssertionError: 438 != 384; it also timed out at its limit under the job's load (run 40668387839)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "App.test_an_app_that_is_absent_current_or_unwritable_is_left_alone",
@@ -1017,9 +1020,10 @@
     "node_lifecycle_broker": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: LifecycleError not raised; and, intermittently, a registry read that lands while the file is being replaced fails with a Windows sharing violation, which the broker reports as unsafe_config (run 40668380475): node.lifecycle is not built for Windows yet (OBS-257)",
+      "reason": "AssertionError: LifecycleError not raised; and, intermittently, a registry read that lands while the file is being replaced fails with a Windows sharing violation, which the broker reports as unsafe_config (run 40668380475): node.lifecycle is not built for Windows yet (OBS-257); it also timed out at its limit under the job's load (run 40668387839)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "BrokerTests.test_private_authority_and_no_symlink",
