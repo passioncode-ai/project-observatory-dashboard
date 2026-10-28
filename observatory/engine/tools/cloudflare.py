@@ -24,6 +24,7 @@
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-observability-read --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset access-app --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue ... [--token-expire-days 90 | --no-token-expiry]   # any preset
     python "$T/cloudflare.py" list
     python "$T/cloudflare.py" groups --account <slug> --match "email sending"
@@ -377,6 +378,34 @@ PRESETS: dict[str, dict] = {
         "scope": "account-vault",
         "probe": "/accounts/{account_id}/workers/observability/telemetry/keys",
         "probe_body": {},
+    },
+    # ONE ACCESS APPLICATION IN FRONT OF A PROJECT'S OWN HOSTNAME, INTO THE VAULT.
+    # A project that puts Cloudflare Access (Zero Trust sign-in) in front of its
+    # own hostname creates and keeps one self-hosted Access application and its
+    # policies, and reads the account's Zero Trust organization to learn the team
+    # domain (`<team>.cloudflareaccess.com`) its login and JWT issuer live on.
+    # That is two account-level groups (the catalogue's names, `groups --match
+    # access` on 2026-10-27): Apps and Policies Write, and the Organizations,
+    # Identity Providers and Groups READ group, never its Write: the holder cannot
+    # change the team domain, add an identity provider or mint service tokens,
+    # which the Fabric Inbox server's own token can. Account-scoped Access apps
+    # need the account-level group; the same-named zone-level one is never taken.
+    # Verified by reading the organization with the NEW value, the read the
+    # holder needs first; an account where Zero Trust was never enabled has no
+    # organization, and the refusal names the owner's consent page. Requested on
+    # the Fabric board (request 3bf4a84e).
+    "access-app": {
+        "name": "observatory-access-app {slot} (managed)",
+        "groups": ("Access: Apps and Policies Write",
+                   "Access: Organizations, Identity Providers, and Groups Read"),
+        "level": "account",
+        "why": ("creates and keeps one Cloudflare Access application and its policies on one account, "
+                "and reads its Zero Trust team domain, for the project named by the vault slot"),
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/access/organizations",
+        "refusal_hint": ("if Zero Trust was never enabled on this account, its owner enables it at "
+                         "https://one.dash.cloudflare.com/{account_id}/ (a consent in the dashboard), "
+                         "then issue again"),
     },
     # ONE MORE ACCOUNT FOR A FABRIC INBOX SERVER, INTO THE VAULT. A Fabric Inbox
     # server runs in one account and reads another account's domains with a token
@@ -1234,8 +1263,10 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
             except RuntimeError as exc:
                 return str(exc)
         if until_honoured(read_account, wait) is not None:
+            hint = preset.get("refusal_hint")
             raise RuntimeError("the issued token cannot do its read on this account "
-                               f"({probe.split('?')[0].replace(account['id'], '<account>')})")
+                               f"({probe.split('?')[0].replace(account['id'], '<account>')})"
+                               + (f"; {hint.format(account_id=account['id'])}" if hint else ""))
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",

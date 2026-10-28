@@ -328,6 +328,15 @@ Reading one account's Worker logs is `cloudflare.py issue --preset workers-obser
 --account <slug> --vault <project>/<env>/<NAME>`: Workers Observability Read
 only, verified by the telemetry-keys query with the new value.
 
+Putting Cloudflare Access (Zero Trust sign-in) in front of a project's own hostname is
+`cloudflare.py issue --preset access-app --account <slug> --vault <project>/<env>/<NAME>`:
+Access: Apps and Policies Write and Access: Organizations, Identity Providers, and Groups Read
+on that one account, enough to create and keep one Access application with its policies and to
+read the team domain (`<team>.cloudflareaccess.com`). It cannot change the organization, add an
+identity provider or make service tokens. It is verified by reading the account's Zero Trust
+organization with the new value; on an account where Zero Trust was never enabled that read
+fails, and the refusal names the page where the account's owner enables it.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
