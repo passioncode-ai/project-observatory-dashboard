@@ -3,7 +3,19 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.30.0 (2026-10-28)
+
+A minor release. You can share a vault key with another person's Observatory from the command line and take it
+back: `full cloud deploy` puts your own share mailbox into your Cloudflare account once, `full share create` prints
+a link you send yourself, the two of you compare a six-digit code, and the recipient's agents use the key only at the
+moment of use through `use_secret.py run --share`; `full share revoke` takes it back, and the maintenance job syncs
+shares every hour. An agent can ask Observatory for a key instead of asking you in its chat
+(`observatory_secret_request`); the Mac window that takes the value ships in this release but stays off until an
+engine is bundled inside the signed app, so every request is answered for now with the `vault.py put` step you run in
+your own shell. Home replaces Overview, DigitalOcean and Cloudflare get pages beside Heroku, the Mac and desktop apps
+show the pairing screens, and the node supervises the apps you enrolled; the Mac app carries its lifecycle helper.
+After installing: to move off another lifecycle broker, run `project-observatory full lifecycle import --from PATH`
+once at a terminal, check `full lifecycle status`, then uninstall that broker. The skills plugin moves to 0.30.0.
 
 ### Added
 
