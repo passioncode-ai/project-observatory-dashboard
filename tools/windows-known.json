@@ -1375,7 +1375,6 @@
         "Create.test_a_failed_ssh_keygen_leaves_nothing",
         "Create.test_a_host_block_is_appended_and_a_taken_alias_refused_before_generation",
         "Create.test_a_passphrase_is_never_an_argument",
-        "Create.test_a_passphrase_without_a_terminal_is_refused",
         "Create.test_a_race_loser_keeps_the_other_writers_file",
         "Create.test_creates_ed25519_with_modes_and_an_empty_passphrase_only_when_asked",
         "Findings.test_a_group_readable_key_is_flagged",
