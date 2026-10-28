@@ -742,6 +742,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
         import machine_backup
         return (machine_backup.backup_parser() if name == "machine-backup"
                 else machine_backup.restore_parser()).parse_args(rest)
+    if name == "machine-move":
+        import machine_move
+        return machine_move.parser().parse_args(rest)
     return _parser().parse_args(argv)
 
 
@@ -769,6 +772,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] in {"machine-backup", "machine-restore"}:
         import machine_backup
         return (machine_backup.backup_main if argv[0] == "machine-backup" else machine_backup.restore_main)(argv[1:])
+    if argv and argv[0] == "machine-move":
+        import machine_move
+        return machine_move.main(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()

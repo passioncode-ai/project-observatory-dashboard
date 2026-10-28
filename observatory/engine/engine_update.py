@@ -1249,7 +1249,9 @@ def restore_in_place(base: Path, snapshot: Path) -> Path:
     labels derived from it) stays the same. `backups/` is not in a snapshot and
     moves across with the swap, so no backup is left behind in the failed copy."""
     stage = base.parent / f".{base.name}.update-restore-{uuid.uuid4().hex[:12]}"
-    workspace_upgrade.restore(snapshot, stage)
+    # The snapshot this update took a moment ago on this machine: restored whole, whatever machine
+    # id it names (a snapshot from before 0.30.1 names none, OBS-284).
+    workspace_upgrade.restore(snapshot, stage, same_machine=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     failed = base.parent / f"{base.name}.failed-update-{stamp}-{uuid.uuid4().hex[:6]}"
     if (base / "backups").is_dir():

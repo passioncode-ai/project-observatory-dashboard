@@ -1797,7 +1797,7 @@ def status(base: Path, *, schedule=None) -> dict:
 
 # --- a reinstall restores ------------------------------------------------------------
 
-def restore_latest(base: Path, *, store=None, label: str | None = None) -> dict:
+def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
@@ -1837,7 +1837,8 @@ def restore_latest(base: Path, *, store=None, label: str | None = None) -> dict:
         for secret in secrets_for(candidate["label"]):
             tried_any = True
             try:
-                result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret)
+                result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret,
+                                                   same_machine=same_machine)
             except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
                 # A wrong passphrase, a damaged copy or one that needs a newer release: try
                 # the next passphrase, then the next older backup (review F10).

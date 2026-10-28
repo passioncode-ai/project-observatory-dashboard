@@ -18,12 +18,15 @@ import configuration as config
 import workspace
 import workspace_upgrade as upgrade
 
+#: The machine a snapshot is taken on, and another one it is restored on (OBS-284).
+ALPHA,BETA='m-machine-alpha-0001','m-machine-beta-0002'
+
 class WorkspaceUpgrade(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.base=Path(self.tmp.name).resolve()
         self.home=self.base/'private workspace'
-        self.env=patch.dict(os.environ,{'OBSERVATORY_HOME':str(self.home)},clear=True)
+        self.env=patch.dict(os.environ,{'OBSERVATORY_HOME':str(self.home),'OBSERVATORY_MACHINE_ID':ALPHA},clear=True)
         self.env.start()
         workspace.initialize(self.home)
         import paths
@@ -450,6 +453,112 @@ class WorkspaceUpgrade(unittest.TestCase):
                                ('store/logs/notes.txt', False), ('store/logs.log', False),
                                ('secrets/demo-slot', False)):
             self.assertEqual(upgrade.volatile(name, dbs), expected, name)
+
+    # --- OBS-284: a snapshot restored on another machine ------------------------------------
+
+    def identity(self):
+        """This machine's agent-network identity, enrollment, verified estate state and schedule."""
+        for rel,text in (('node/device/device.json','{"device": "synthetic"}'),
+                         ('node/orgs/org_example/enrollment.json','{"org": "synthetic"}'),
+                         ('node/orgs/org_example/keys/sig.pem','synthetic key material'),
+                         ('node/records/estate-record.json','{"revision": 1}'),
+                         ('node/shares/owner/note.txt','kept'),
+                         ('store/maintenance.json','{"last": "synthetic"}')):
+            path=self.home/rel
+            path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            path.write_text(text)
+            path.chmod(0o600)
+        settings=config.read_json(self.home/'config/settings.json')
+        settings.setdefault('features',{})['scheduler']=True
+        workspace.write_json(self.home/'config/settings.json',settings)
+
+    def test_a_snapshot_names_the_machine_it_was_taken_on(self):
+        self.assertEqual(config.read_json(self.snapshot()/'manifest.json')['machine_id'],ALPHA)
+
+    def test_another_machine_never_takes_the_node_identity_or_the_schedules(self):
+        self.identity()
+        source=self.snapshot()
+        dest=self.base/'second machine'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=upgrade.restore(source,dest)
+        for rel in ('node/device','node/orgs','node/records','store/maintenance.json'):
+            self.assertFalse((dest/rel).exists(),rel)
+        self.assertEqual((dest/'node/shares/owner/note.txt').read_text(),'kept')
+        self.assertEqual((dest/'secrets/demo-slot').read_text(),'synthetic opaque private value','the vault moves')
+        self.assertFalse(config.read_json(dest/'config/settings.json')['features']['scheduler'])
+        self.assertNotEqual(config.read_json(dest/'workspace.json')['instance_id'],
+                            config.read_json(self.home/'workspace.json')['instance_id'],
+                            'its own backup label, so the two machines never rotate each other\'s backups')
+        machine=result['machine']
+        self.assertEqual((machine['mode'],machine['why'],machine['taken_on'],machine['this_machine']),
+                         ('second-machine','another-machine',ALPHA,BETA))
+        self.assertEqual(machine['left_out'],['node/device/','node/orgs/','node/records/','store/maintenance.json'])
+        self.assertIn('turned off',machine['scheduler'])
+        self.assertIn('project-observatory full node --init',machine['next'][0])
+        manifest=config.read_json(source/'manifest.json')
+        self.assertEqual(result['files'],len(manifest['files'])-5)
+        for file in dest.rglob('*'):
+            self.assertEqual(file.stat().st_mode & 0o777,0o700 if file.is_dir() else 0o600,str(file))
+        upgrade.preflight(dest)
+
+    def test_then_node_init_makes_this_machines_own_device_id(self):
+        try:
+            from node.device_keys import DeviceKeys
+            first=DeviceKeys.load_or_create(self.home/'node'/'device')
+        except RuntimeError as exc:
+            self.skipTest(f'the full extra is not installed: {exc}')
+        source=self.snapshot()
+        dest=self.base/'second machine'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            upgrade.restore(source,dest)
+        own=DeviceKeys.load_or_create(dest/'node'/'device')
+        self.assertNotEqual(own.device_id,first.device_id)
+
+    def test_the_same_machine_restores_the_whole_snapshot_as_before(self):
+        self.identity()
+        source=self.snapshot()
+        dest=self.base/'same machine'
+        result=upgrade.restore(source,dest)
+        for rel in ('node/device/device.json','node/orgs/org_example/keys/sig.pem','node/records/estate-record.json',
+                    'store/maintenance.json'):
+            self.assertTrue((dest/rel).is_file(),rel)
+        self.assertTrue(config.read_json(dest/'config/settings.json')['features']['scheduler'])
+        self.assertEqual(config.read_json(dest/'workspace.json'),config.read_json(self.home/'workspace.json'))
+        self.assertEqual((result['machine']['mode'],result['files']),
+                         ('same-machine',len(config.read_json(source/'manifest.json')['files'])))
+        self.assertNotIn('left_out',result['machine'])
+
+    def test_a_snapshot_naming_no_machine_is_another_machines_unless_asked(self):
+        self.identity()
+        source=self.snapshot()
+        manifest=config.read_json(source/'manifest.json')
+        del manifest['machine_id']
+        workspace.write_json(source/'manifest.json',manifest)
+        dest=self.base/'old snapshot'
+        result=upgrade.restore(source,dest)
+        self.assertEqual((result['machine']['mode'],result['machine']['why']),('second-machine','names-no-machine'))
+        self.assertFalse((dest/'node/device').exists())
+        whole=self.base/'old snapshot, whole'
+        result=upgrade.restore(source,whole,same_machine=True)
+        self.assertEqual((result['machine']['mode'],result['machine']['why']),('same-machine','asked'))
+        self.assertTrue((whole/'node/device/device.json').is_file())
+
+    def test_same_machine_is_a_choice_at_a_terminal(self):
+        source=self.snapshot()
+        dest=self.base/'refused'
+        import io
+        err=io.StringIO()
+        with patch.dict(os.environ,{'OBSERVATORY_HOME':str(dest)}),patch.object(sys,'stdin',io.StringIO('')), \
+                contextlib.redirect_stderr(err),contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(upgrade.main(['restore',str(source),'--same-machine']),2)
+        self.assertIn('a terminal',err.getvalue())
+        self.assertFalse(dest.exists())
+        with patch.object(sys,'stdin') as tty:
+            tty.isatty.return_value=True
+            with patch.dict(os.environ,{'OBSERVATORY_HOME':str(dest),'OBSERVATORY_MACHINE_ID':BETA}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(upgrade.main(['restore',str(source),'--same-machine']),0)
+        self.assertTrue((dest/'workspace.json').is_file())
 
     def test_vector_database_integrity_when_extension_installed(self):
         try:
