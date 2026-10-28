@@ -484,13 +484,14 @@
     "git_hardening": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']",
+      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']; and, intermittently, the two after-tar-write cases: archiving an untracked file fails on the runner before the test's wrapper writes its newer copy, so cleanup refuses and removes nothing (no work is lost) but the case reads the older content (run 40674950582)",
       "statuses": [
         "FAIL"
       ],
       "failing": [
         "CleanupNeverLosesWork.test_a_diff_that_fails_removes_nothing",
         "CleanupNeverLosesWork.test_added_untracked_file_after_tar_write_refuses_removal",
+        "CleanupNeverLosesWork.test_untracked_edit_after_tar_write_refuses_removal",
         "Collectors.test_plugins_and_identity",
         "Collectors.test_remote_probe_honours_insteadof_and_refuses_helpers",
         "Collectors.test_scan_events_scan_env_hygiene_and_secret_files",
