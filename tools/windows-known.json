@@ -1497,7 +1497,7 @@
     "use_secret": {
       "expect": "FAIL",
       "row": "OBS-279",
-      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name",
+      "reason": "grant files are named by their URN, and ':' cannot be in a Windows file name; and `use_secret.py serve` hands over with os.execv, which on Windows starts a new process and exits, so the service is not the process serve was and its output sometimes arrives after serve has returned (run 40661117762)",
       "statuses": [
         "FAIL"
       ],
@@ -1505,6 +1505,7 @@
         "`where` names the file",
         "and it IS the process serve was (exec, no pump in between)",
         "the refusal names the environment searched and the file that holds it",
+        "the service starts with the key",
         "with no --env the unlabeled file still answers"
       ]
     },
