@@ -2015,9 +2015,9 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
 
 #: What a person does after a second-machine restore, in order (ONBOARDING, "A second machine").
 SECOND_MACHINE_NEXT = (
-    "project-observatory full node --init  (after `full restore --latest`: this machine's own device id)",
     "project-observatory full ssh-keys create NAME, then full ssh-keys send NAME --to github  "
-    "(this machine's own SSH key; the other machine's private key was not written)",
+    "(this machine's own SSH key, before --clone; the other machine's private key was not written)",
+    "project-observatory full node --init  (after `full restore --latest`: this machine's own device id)",
     "project-observatory full machine-move show  (the jobs staged here, each named as running on the other machine)",
     "on the other machine: project-observatory full machine-move leave LABEL --to MACHINE_ID (this machine's id), then here: "
     "project-observatory full machine-move cutover LABEL  (moves one job, so it never runs on both)",

@@ -2182,13 +2182,16 @@ On the second machine, in order:
 project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
 project-observatory full machine-restore --latest --apply         # no private key written, jobs staged
 project-observatory full machine-restore --latest --packages
+project-observatory full ssh-keys create NAME                     # this machine's own SSH key
+project-observatory full ssh-keys send NAME --to github           # before --clone: SSH remotes need it
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity
 project-observatory full node --init                              # this machine's own device id
-project-observatory full ssh-keys create NAME                     # this machine's own SSH key
-project-observatory full ssh-keys send NAME --to github
 project-observatory full machine-move show                        # this machine's id and the staged jobs
 ```
+
+The key comes before `--clone` because the other machine's private key was not written: a
+checkout whose remote is `git@github.com:…` clones only once GitHub knows this machine's key.
 
 Then move each job that should run on the second machine, **one at a time, the old machine
 first**:

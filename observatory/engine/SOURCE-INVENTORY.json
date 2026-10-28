@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "68871eb0abc9d9cd66f8deb56a90e10ca6a6f834c4083c0514dadc052fd0c3f8",
-      "bytes": 208519,
+      "export_sha256": "53c72c2b20aad24389377540990e8c939d8053b5dd5a391f4d41b80b34763db2",
+      "bytes": 208754,
       "upstream_modified": true
     },
     {
@@ -2865,8 +2865,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b9d96f14cf63d923bba8795daa65f5f230ca3e4c439ae0e322391c8125c50fc0",
-      "bytes": 110568
+      "export_sha256": "8bb62ccfe3dcc6dcdc5e692b3e8d999b9296a8aa24f4356ca0bd5b30fc44ac21",
+      "bytes": 110584
     },
     {
       "path": "machine_identity.py",
