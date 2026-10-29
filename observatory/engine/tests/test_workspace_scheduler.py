@@ -60,12 +60,16 @@ class WorkspaceScheduler(unittest.TestCase):
         with patch.dict(os.environ, {'PROVIDER_TOKEN':'synthetic-secret-never-copy'}):
             tick = self.launch.build(1800)
             server = self.server.build_plist()
-        for plan, extra in ((tick, {'OBSERVATORY_TICK_CEILING_SECONDS'}), (server, set())):
+        # The server is a KeepAlive service: FABRIC_SERVICE_SUPERVISOR=launchd makes a copy that finds
+        # the instance lock held back off instead of exiting 75 into a respawn every ThrottleInterval
+        # (the fabric-service/0.1 probe `lifecycle.supervisor-marker`). The tick holds no such lock.
+        for plan, extra in ((tick, {'OBSERVATORY_TICK_CEILING_SECONDS'}), (server, {'FABRIC_SERVICE_SUPERVISOR'})):
             self.assertEqual(set(plan['EnvironmentVariables']), {'HOME','PATH','OBSERVATORY_HOME','OBSERVATORY_PYTHON'} | extra)
             self.assertEqual(plan['EnvironmentVariables']['OBSERVATORY_HOME'],str(self.home))
             self.assertNotIn(b'synthetic-secret',plistlib.dumps(plan))
             self.assertTrue(plan['StandardOutPath'].startswith(str(self.home)))
             self.assertEqual(plan['Umask'],0o077)
+        self.assertEqual(server['EnvironmentVariables']['FABRIC_SERVICE_SUPERVISOR'],'launchd')
         self.assertEqual(server['ProcessType'],'Standard','the server answers hosts and agents; Background starves it under load')
         self.assertNotIn('Nice',server)
         self.assertNotIn('LowPriorityIO',server)

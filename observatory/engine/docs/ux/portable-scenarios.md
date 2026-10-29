@@ -372,6 +372,20 @@ timed out. The last completed `tick.json` top-level report stays available durin
 a new run. Coverage: `tests/test_tick_progress.py` (silent tail, supervisor stop,
 write failures, stale input and exit preservation).
 
+### A frozen registry and a job that cannot start say why
+
+A person or agent asking why the dashboard has not moved reads `degraded`: while the newest
+ticks keep stopping at the emit's wholesale-change guard, a `registry-refused` row names the counts
+(`projects.json would go from 94 to 52`) and the one command that lets a genuine change through
+(`OBSERVATORY_ALLOW_BULK=1 project-observatory full local`); `store/logs/tick.log` and `tick.json`
+`registry_note` carry the emit's own line. A job launchd keeps loaded while every start fails is no
+longer "loaded" alone: `full doctor` `jobs` and `maintenance.warnings` (`job-exit`, on Health in the
+reader's language) give its last exit, and 78 names a missing interpreter. `tools/tick.sh` with an
+`OBSERVATORY_PYTHON` that is gone writes one stamped line naming it and the Python its environment
+was made from, exits 78 and never runs another `python3`. Coverage: `tests/test_tick_health.py`,
+`tests/test_tick_py.py` (`TickWrapper`, `TailBail`), `tests/test_maintenance.py` (`Schedule`),
+`tests/test_fabric_service.py`.
+
 ### Offline verification reports executed tests
 
 A person or agent running `full check` receives an ERROR when a suite exits zero

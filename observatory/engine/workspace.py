@@ -487,6 +487,23 @@ def _tick_health(base: Path, doc: dict) -> dict:
                               scheduler_enabled=bool((doc.get("features") or {}).get("scheduler")))
 
 
+def _jobs() -> list[dict] | dict:
+    if sys.platform != "darwin":
+        return {"probed": False, "detail": "launchd jobs are read on macOS; `full maintain status` covers the timers"}
+    if not __import__("maintenance").probes_allowed():
+        # The same rule as `maintenance.status`: a sandboxed or OBSERVATORY_SYSTEM_SETUP=0 process
+        # does not ask launchd about a machine it must not touch (audit A25).
+        return {"probed": False, "detail": "OBSERVATORY_SYSTEM_SETUP=0 or a sandbox home: launchd not asked"}
+    try:
+        tools = str(config.SOURCE / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import install_launchd
+        return install_launchd.job_report()
+    except Exception as exc:  # noqa: BLE001 — a status never fails doctor
+        return {"probed": False, "detail": f"launchd not read: {type(exc).__name__}"}
+
+
 def _switches(doc: dict, section: str) -> dict:
     """{name: on} for every known name, sorted; a switch is on only when `true`,
     the rule `configuration.enabled` applies."""
@@ -524,6 +541,9 @@ def doctor(base: Path) -> dict:
             "maintenance": __import__("maintenance").status(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
+            # The tick and server jobs as launchd holds them: loaded, running, and the last exit with
+            # its meaning when one cannot start (78: the interpreter its plist names is gone).
+            "jobs": _jobs(),
             # OBS-159: which session MCP servers moved onto an installed release by
             # themselves, and which were refused (they answer `stale-server` with the reason).
             "session_servers": __import__("session_reload").summary(base),

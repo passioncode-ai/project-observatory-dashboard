@@ -143,6 +143,52 @@ class TickHealth(unittest.TestCase):
         self.assertIn("did not finish or did not refresh the registry", h["history_warning"])
         self.assertIn("partial: 2", h["history_warning"])
 
+    REFUSAL = ("the tick stopped at `emit`: emit REFUSED: projects.json would go from 94 to 52 "
+               "(-45%, limit ±25% and more than 1 lost). Nothing was written. If you removed those "
+               "projects on purpose, re-run with OBSERVATORY_ALLOW_BULK=1.")
+
+    def test_a_registry_the_emit_keeps_refusing_is_named_with_its_command(self):
+        # 2026-10-29: ten days of ticks stopped at the emit's wholesale-change guard, and Health said
+        # only "10 of the last 10 ticks did not finish or did not refresh the registry".
+        self.receipts(NOW - timedelta(minutes=40), NOW - timedelta(minutes=10))
+        self.runs(*(["finished"] * 9))
+        T.record(self.raw, {"started_at": z(NOW - timedelta(minutes=40)), "ended_at": z(NOW - timedelta(minutes=10)),
+                            "outcome": "partial", "exit": 0, "reason": self.REFUSAL})
+        T.record(self.raw, {"outcome": "partial", "exit": 0, "reason": self.REFUSAL})
+        h = T.health(self.state, self.raw, now=NOW)
+        said = h["registry_refused"]
+        self.assertIn("projects.json would go from 94 to 52", said)
+        self.assertIn("last 2 ticks", said)
+        self.assertIn("`OBSERVATORY_ALLOW_BULK=1 project-observatory full local`", said)
+        self.assertLessEqual(len(said), 300, "a card's reason is clipped at 300 characters; the command is last")
+        [d] = [d for d in T.degraded(self.state, self.raw) if d["source"] == "registry-refused"]
+        self.assertEqual(d["reason"], said)
+
+    def test_a_refusal_the_person_already_answered_is_not_named(self):
+        # Review: `full local` with OBSERVATORY_ALLOW_BULK=1 records no tick run, so the streak ends at a
+        # registry written after the newest refused run; and with the scheduler off nothing is named.
+        # A workspace of its own: the registry sits beside `store/`, never in the shared temp folder.
+        state = self.state / "workspace" / "store"
+        raw = state / "raw"
+        raw.mkdir(parents=True)
+        T.record(raw, {"outcome": "partial", "exit": 0, "reason": self.REFUSAL,
+                       "ended_at": z(datetime.now(timezone.utc) - timedelta(hours=1))})
+        self.assertIn("registry_refused", T.health(state, raw, now=NOW))
+        self.assertNotIn("registry_refused", T.health(state, raw, now=NOW, scheduler_enabled=False))
+        registry = state.parent / "registry"
+        registry.mkdir()
+        (registry / "projects.json").write_text('{"projects": []}')
+        self.assertNotIn("registry_refused", T.health(state, raw, now=NOW))
+
+    def test_a_refusal_the_next_tick_got_past_is_not_named(self):
+        self.receipts(NOW - timedelta(minutes=40), NOW - timedelta(minutes=10))
+        T.record(self.raw, {"outcome": "partial", "exit": 0, "reason": self.REFUSAL})
+        T.record(self.raw, {"outcome": "finished", "exit": 0, "reason": ""})
+        self.assertNotIn("registry_refused", T.health(self.state, self.raw, now=NOW))
+        T.record(self.raw, {"outcome": "partial", "exit": 0, "reason": "the tick stopped at `merge`: merge failed"})
+        self.assertNotIn("registry_refused", T.health(self.state, self.raw, now=NOW),
+                         "only the emit's guard is a refusal with a command; other stops stay in the history")
+
     def test_the_history_keeps_the_last_fifty_runs(self):
         self.runs(*(["finished"] * 60))
         lines = (self.raw / T.RUNS_FILE).read_text().splitlines()

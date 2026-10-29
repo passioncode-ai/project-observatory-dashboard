@@ -985,7 +985,12 @@ def build_plist() -> dict:
         "ProcessType": "Standard",
         "StandardErrorPath": str(paths.STATE / "logs/serverd.err"),
         "StandardOutPath": str(paths.STATE / "logs/serverd.out"),
-        "EnvironmentVariables": install_launchd.environment(),
+        # FABRIC_SERVICE_SUPERVISOR=launchd: a copy KeepAlive starts while the instance lock is still
+        # held (the previous one draining) backs off in-process instead of exiting 75 into a respawn
+        # every ThrottleInterval (`fs.hold_single_instance`). `fs.launchd_plist` sets it; this plist
+        # is built here, so it never had it, and the fabric-service/0.1 probe
+        # `lifecycle.supervisor-marker` failed on every installed server.
+        "EnvironmentVariables": {**install_launchd.environment(), fs.SUPERVISOR_ENV: "launchd"},
         "Umask": 0o077,
     }
 

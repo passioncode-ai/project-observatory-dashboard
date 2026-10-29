@@ -1816,6 +1816,70 @@ class Schedule(Base):
         self.assertTrue(doc["scheduled"])
         self.assertEqual(doc["versions"]["engine"], config.VERSION)
 
+    # 2026-10-29: the interpreter the jobs name was removed by a package manager; launchd kept
+    # both jobs loaded and every start exited 78, while `doctor` read "installed, loaded".
+    PRINTED = ("gui/501/org.project-observatory.0123456789abcdef.maintain = {\n\tactive count = 0\n"
+               "\tstate = spawn scheduled\n\truns = 1\n\tlast exit code = 78: EX_CONFIG\n}\n")
+
+    def test_the_launchd_job_reports_its_last_exit(self):
+        sched = M.LaunchdSchedule(self.home)
+        with patch.object(sched.launch, "_launchctl", lambda *a, **k: (0, self.PRINTED)):
+            self.assertEqual(sched.launch.job_state(sched.label), {"loaded": True, "pid": None, "last_exit": 78})
+            self.assertEqual(sched.status()["last_exit"], 78)
+        running = self.PRINTED.replace("\tstate = spawn scheduled\n", "\tstate = running\n\tpid = 4242\n")
+        with patch.object(sched.launch, "_launchctl", lambda *a, **k: (0, running)):
+            self.assertEqual(sched.launch.job_state(sched.label)["pid"], 4242)
+        never = self.PRINTED.replace("\tlast exit code = 78: EX_CONFIG\n", "\tlast exit code = (never exited)\n")
+        with patch.object(sched.launch, "_launchctl", lambda *a, **k: (0, never)):
+            self.assertIsNone(sched.launch.job_state(sched.label)["last_exit"])
+        with patch.object(sched.launch, "_launchctl", lambda *a, **k: (113, "Could not find service")):
+            self.assertEqual(sched.launch.job_state(sched.label), {"loaded": False, "pid": None, "last_exit": None})
+
+    def test_a_job_that_cannot_start_is_a_warning_with_its_exit(self):
+        class Failing(FakeSchedule):
+            def status(self):
+                return {"kind": "fake", "installed": True, "loaded": True, "last_exit": 78,
+                        "check": {"installed": True, "loaded": True, "last_exit": 0}}
+        doc = M.status(self.home, schedule=Failing())
+        [item] = [i for i in doc["warning_items"] if i["code"] == "job-exit"]
+        self.assertEqual((item["job"], item["exit"]), ("maintain", 78))
+        self.assertIn("could not start", item["text"])
+        self.assertIn("interpreter", item["text"])
+
+        class Signalled(FakeSchedule):
+            def status(self):
+                # `launchctl kickstart -k` leaves -9: a stop, not a failure to start.
+                return {"kind": "fake", "installed": True, "loaded": True, "last_exit": -9,
+                        "check": {"installed": True, "loaded": True, "last_exit": None}}
+        self.assertFalse([i for i in M.status(self.home, schedule=Signalled())["warning_items"] if i["code"] == "job-exit"])
+
+    def test_a_failing_pass_job_is_named_while_the_check_job_is_not_loaded(self):
+        # Review: the merged `loaded` (pass AND check) hid the pass job's 78 behind "not scheduled".
+        class Job:
+            def __init__(self, state):
+                self.kind, self.state = "fake", state
+
+            def status(self):
+                return self.state
+        sched = M.Schedules(Job({"kind": "fake", "installed": True, "loaded": True, "pid": None, "last_exit": 78}),
+                            Job({"kind": "fake", "installed": True, "loaded": False, "pid": None, "last_exit": None}))
+        doc = M.status(self.home, schedule=sched)
+        self.assertEqual([i["job"] for i in doc["warning_items"] if i["code"] == "job-exit"], ["maintain"])
+
+    def test_doctor_names_a_tick_or_server_job_that_cannot_start(self):
+        launch = M.LaunchdSchedule(self.home).launch
+        server = self.PRINTED.replace(".maintain = {", ".server = {")
+        answers = {"tick": (0, self.PRINTED.replace("78: EX_CONFIG", "0")), "server": (0, server)}
+        jobs = [{"name": "tick", "label": "synthetic.tick", "plist": "t"},
+                {"name": "server", "label": "synthetic.server", "plist": "s"}]
+        with patch.object(launch, "managed_jobs", lambda: jobs), \
+                patch.object(launch, "_launchctl", lambda *a, **k: answers["tick" if a[1].endswith("tick") else "server"]):
+            tick, srv = launch.job_report()
+        self.assertNotIn("problem", tick)
+        self.assertEqual(srv["last_exit"], 78)
+        self.assertIn("the server job's last run exited 78", srv["problem"])
+        self.assertIn("interpreter", srv["problem"])
+
     def test_init_here_says_how_scheduling_will_happen_and_touches_nothing(self):
         fresh = self.base / "another home"
         with patch.dict(os.environ, {"OBSERVATORY_HOME": str(fresh)}), \

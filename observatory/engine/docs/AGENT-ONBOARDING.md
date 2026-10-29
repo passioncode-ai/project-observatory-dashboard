@@ -236,7 +236,12 @@ last 20 runs plus 25 %, at least 300 s, at most 40 % of the ceiling), and each o
 leaves the steps that must finish after it theirs, never less than a minimum (validate
 10 s, findings 30 s, dashboard 20 s, the others 5 s). A merge, emit or validator out of
 time still yields findings and a dashboard over the registry as it stands: `tick.json`
-`registry_refreshed: false`, the run `partial` in `tick-runs.jsonl`.
+`registry_refreshed: false`, the run `partial` in `tick-runs.jsonl`. A tick the emit's
+wholesale-change guard stopped carries the emit's own line in `registry_note`, and while the newest
+ticks keep stopping there `degraded` has a `registry-refused` row with the counts and the command
+(`OBSERVATORY_ALLOW_BULK=1 project-observatory full local`); running it is the person's call, since the
+guard cannot tell a regrouping engine update from a collector failure. `full doctor` `jobs` gives the
+tick and server jobs' `last_exit`; 78 is an interpreter launchd could not start.
 `tick.step_over_share` names a step that used 95 % of its share in 3 of the
 last 5 ticks (resumable steps excepted); `collector.degraded_persistent` a collector whose same
 non-structural degraded reason lasted over 24 hours (a reason another system

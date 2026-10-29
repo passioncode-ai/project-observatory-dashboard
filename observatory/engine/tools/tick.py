@@ -495,11 +495,18 @@ class Tick:
         not retry a state that has been reported. `first` is what the step printed (its first line
         decides `not_started` from `stopped` under the watchdog's 124)."""
         log(message)
+        # A step that REFUSED says why and what lets it through on a line of its own (the emit's
+        # wholesale-change guard names the counts and OBSERVATORY_ALLOW_BULK=1). The log and the
+        # report carry that line, not only this generic message: for ten days in 2026-10 every
+        # tick logged "emit failed or REFUSED" and nothing said which, or what to run.
+        refusal = next((line.strip() for line in (first or "").splitlines() if " REFUSED: " in line), "")
+        if refusal:
+            log(refusal)
         self.failed.append((name, rc))
         self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
         self.registry_refreshed = False
         self.registry_went_on = []
-        self.registry_note = f"the tick stopped at `{name}`: {message}"
+        self.registry_note = f"the tick stopped at `{name}`: {refusal or message}"
         self.write_report()
         log(f"tick stopped at {name}")
         raise SystemExit(0)

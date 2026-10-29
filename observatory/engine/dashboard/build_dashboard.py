@@ -2355,6 +2355,11 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
                                      toolCommand("serverd.py", ["--install"])],
     "app-refused": w => [T("the Mac app update was refused: {detail}", {detail: w.detail || ""}), status],
     "needs-person": () => [T("the last automatic update needs a person"), fullCommand("update")],
+    // A loaded job whose every start fails (78: the interpreter its plist names is gone, 2026-10-29).
+    "job-exit": w => [w.exit === 78
+      ? T("the {job} job cannot start (exit 78): the interpreter its plist names is missing", {job: w.job || "?"})
+      : T("the {job} job's last run exited {code}; its .err log under store/logs says why",
+          {job: w.job || "?", code: w.exit}), status],
     // A held release (LC-16): verified, not installed by the job; the step is the person's.
     "needs-migration": w => [T("release {version} needs a step by a person before it is installed: {step}",
                                {version: w.version || "?", step: w.step || ""}), fullCommand("update --apply")],

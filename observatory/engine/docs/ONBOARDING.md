@@ -102,7 +102,12 @@ Adding a project or two to a small workspace, or removing one, passes. When the 
 genuine (you pointed `projects` at a new folder of many checkouts, or deleted several on
 purpose), run it once with `OBSERVATORY_ALLOW_BULK=1 project-observatory full local`; the
 next run compares against the new registry. The first emit into an empty workspace is never
-refused.
+refused. An engine update that regroups projects is such a change too (0.25.0 folded remoteless
+worktrees into their main checkout's project), and the guard does not tell it from a failure, so a
+person decides. A scheduled tick that stops at the guard logs the emit's own line (the counts and
+the command) in `store/logs/tick.log` and in `tick.json` `registry_note`, and while the newest
+ticks keep stopping there `full doctor` (`tick.registry_refused`), `/health`, the service card and
+every MCP answer's `degraded` list carry a `registry-refused` row naming the counts and the command.
 
 A workspace path must not pass through a symbolic link (on macOS `/tmp` is one):
 `init` refuses such a path and prints the resolved `OBSERVATORY_HOME` to use instead.
@@ -155,7 +160,17 @@ so even if the last one did. A run that reached its end without refreshing the r
 at a step, or its merge or emit ran out of time and the findings and the dashboard were built over
 the registry as it stood) is recorded as `partial` and counted with them.
 The dashboard server's `/health`, the service card and every MCP answer's `degraded` list say the
-same (`tick` and `tick-history` rows). Its findings cannot: they are built by the tick itself, so a
+same (`tick` and `tick-history` rows, and `registry-refused` while the emit's wholesale-change guard
+keeps stopping the ticks). On macOS `full doctor` also lists the tick and server jobs as launchd holds
+them (`jobs`: `loaded`, `pid`, `last_exit`), with a `problem` when a loaded job is not running and its
+last run exited above 0; exit 78 means launchd could not start the interpreter the plist names (a
+package manager removed the Python the virtual environment was made from). The maintenance and
+update-check jobs say the same in `maintenance.warnings` (`job-exit`) and on Health. When
+`OBSERVATORY_PYTHON` names an interpreter that is gone, `tools/tick.sh` writes one line to
+`store/logs/tick.err` naming it and the Python its virtual environment was made from, and exits 78;
+it no longer runs the first `python3` on `PATH`, which lacks the engine's dependencies. Reinstall
+that Python (with Homebrew, `brew install python@3.X` for the version `pyvenv.cfg` names), or
+recreate the environment and install the jobs again. Its findings cannot: they are built by the tick itself, so a
 dead tick leaves the last report looking current.
 
 The old 0.1 commands remain available without `full`. They use their previous
@@ -1037,8 +1052,11 @@ descriptor (`project-observatory.<instance>.json`, in
 `~/Library/Application Support/ai.passioncode.fabric/services/` or
 `FABRIC_SERVICES_DIR`) so a local host such as Fabric Dashboards can find the
 server; `--uninstall` removes it. The server keeps one copy per workspace
-(`service.lock`; a second copy exits 75) and creates `service.token` for its
-events feed. See the [service design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-SERVICE.md).
+(`service.lock`; a second copy started by hand exits 75) and creates `service.token` for its
+events feed. Its plist sets `FABRIC_SERVICE_SUPERVISOR=launchd`, so a copy launchd starts while
+the previous one still holds the lock waits for it in-process instead of exiting 75 into a respawn
+every ten seconds. A server installed before this marker existed keeps its old plist (an update
+restarts the job, it does not rewrite it): run `serverd.py --install` once to write the new one. See the [service design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-SERVICE.md).
 
 ```sh
 project-observatory full configure features scheduler true

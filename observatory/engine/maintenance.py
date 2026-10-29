@@ -1445,7 +1445,11 @@ class LaunchdSchedule:
         return {"schedule": self.kind, "label": self.label, "removed": True}
 
     def status(self) -> dict:
-        return {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
+        # One `launchctl print` answers loaded, pid and the last exit: a job launchd keeps loaded
+        # while every start exits 78 read as scheduled (2026-10-29).
+        state = self.launch.job_state(self.label)
+        return {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": state["loaded"],
+                "pid": state["pid"], "last_exit": state["last_exit"]}
 
 
 class SystemdSchedule:
@@ -1624,7 +1628,9 @@ class Schedules:
 
     def status(self) -> dict:
         main, check = self.main.status(), self.check.status()
-        out = {**main, "check": check}
+        # `maintain` keeps the pass job's own state: the merged `loaded` is false while the check job
+        # is not loaded, and would hide a pass job whose every start exits 78 (review of the job-exit row).
+        out = {**main, "check": check, "maintain": main}
         for key in ("installed", "loaded", "active"):
             if key in main and main[key] is not None:
                 out[key] = bool(main[key]) and bool(check.get(key))
@@ -1714,6 +1720,13 @@ def status(base: Path, *, schedule=None) -> dict:
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
+    for job, part in (("maintain", sched.get("maintain") or sched), ("check", sched.get("check") or {})):
+        last = part.get("last_exit")
+        if isinstance(last, int) and last > 0:
+            problem = _install_launchd().job_problem(job, {"loaded": part.get("loaded"), "pid": part.get("pid"),
+                                                           "last_exit": last})
+            if problem:
+                warn("job-exit", problem, job=job, exit=last)
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
     update = state.get("update") or {}

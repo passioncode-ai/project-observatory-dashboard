@@ -2156,6 +2156,8 @@
  "installed": "установлено",
  "a background job did not start again after the last backup or update": "фоновое задание не запустилось после последней резервной копии или обновления",
  "the Mac app update was refused: {detail}": "обновление приложения для Mac отклонено: {detail}",
+ "the {job} job cannot start (exit 78): the interpreter its plist names is missing": "задание {job} не может запуститься (код 78): интерпретатора из его plist нет",
+ "the {job} job's last run exited {code}; its .err log under store/logs says why": "последний запуск задания {job} завершился с кодом {code}; причина — в его .err-журнале в store/logs",
  "the last automatic update needs a person": "последнему автоматическому обновлению нужен человек",
  "the last automatic update did not complete ({result}: {detail}); tried again within 15 minutes": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор в течение 15 минут",
  "the last automatic update did not complete ({result}: {detail}); tried again within six hours": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор в течение шести часов",
