@@ -484,13 +484,14 @@
     "git_hardening": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']; and, intermittently, the two after-tar-write cases: archiving an untracked file fails on the runner before the test's wrapper writes its newer copy, so cleanup refuses and removes nothing (no work is lost) but the case reads the older content (run 40674950582)",
+      "reason": "AssertionError: '<path>' not found in ['<path>', '<path>']; and, intermittently, the two after-tar-write cases: archiving an untracked file fails on the runner before the test's wrapper writes its newer copy, so cleanup refuses and removes nothing (no work is lost) but the case reads the older content (run 40674950582); intermittently also the manual untracked-content case: the archive reads an untracked file whose timestamps move under Windows while it is read, so cleanup answers 'an untracked file changed while reading it; nothing removed' (no work is lost; run 40691709123)",
       "statuses": [
         "FAIL"
       ],
       "failing": [
         "CleanupNeverLosesWork.test_a_diff_that_fails_removes_nothing",
         "CleanupNeverLosesWork.test_added_untracked_file_after_tar_write_refuses_removal",
+        "CleanupNeverLosesWork.test_manual_regular_untracked_content_is_verified_and_restorable",
         "CleanupNeverLosesWork.test_untracked_edit_after_tar_write_refuses_removal",
         "Collectors.test_plugins_and_identity",
         "Collectors.test_remote_probe_honours_insteadof_and_refuses_helpers",
@@ -620,11 +621,12 @@
     "keyserver_boundary": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384",
+      "reason": "AssertionError: 438 != 384; intermittently the delegated-caller POST: the loopback server resets the connection before the status line under load on the runner (ConnectionResetError in http.client, run 40691709123)",
       "statuses": [
         "FAIL"
       ],
       "failing": [
+        "DelegatedCallers.test_agents_mode_demands_a_token_and_leaves_the_page_alone",
         "KeyserverBoundaryTests.test_annotation_audit_does_not_copy_free_text_or_value",
         "KeyserverBoundaryTests.test_empty_and_publicly_readable_token_files_refused",
         "KeyserverBoundaryTests.test_startup_lines_reach_a_redirected_stdout_at_once",
