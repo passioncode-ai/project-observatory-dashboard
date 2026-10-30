@@ -28,7 +28,7 @@ class WorkspaceScheduler(unittest.TestCase):
         (self.home / 'workspace.json').write_text(json.dumps({'format_version':1,'minimum_reader':'0.2.0','minimum_writer':'0.2.0'}))
         self.settings = {'schema_version':1,'sources':{},'integrations':{},'features':{}}
         self.save()
-        self.env = patch.dict(os.environ, {'HOME':str(self.base / 'user'),'OBSERVATORY_HOME':str(self.home)}, clear=True)
+        self.env = patch.dict(os.environ, {'HOME':str(self.base / 'user'), 'USERPROFILE': str(self.base / 'user'),'OBSERVATORY_HOME':str(self.home)}, clear=True)
         self.env.start()
         import paths
         importlib.reload(paths)

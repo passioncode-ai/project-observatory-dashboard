@@ -110,6 +110,7 @@ SETTLE_HINT = ("the leaked values are dead; close each row the register names wi
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 sys.path.insert(0, str(ROOT / "plugins"))
 import private_io
 import paths                                                                    
@@ -2344,13 +2345,13 @@ def main() -> int:
     p_rev.add_argument("label")
     a = ap.parse_args()
     if a.cmd == "stash":
-        if sys.stdin.isatty():
+        if osprivacy.is_terminal(sys.stdin):
             print("paste the admin token on stdin, e.g. "
                   "run cloudflare stash with a protected file redirected to stdin", file=sys.stderr)
             return 2
         return cmd_stash(sys.stdin.read().strip())
     if a.cmd == "install":
-        if sys.stdin.isatty():
+        if osprivacy.is_terminal(sys.stdin):
             print("paste the narrow token on stdin", file=sys.stderr)
             return 2
         return cmd_install(sys.stdin.read().strip())

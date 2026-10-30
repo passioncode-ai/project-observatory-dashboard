@@ -31,11 +31,12 @@ from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import embedding_policy as EP                                                       # noqa: E402
 
 
 def _is_terminal() -> bool:
-    return sys.stdin.isatty()
+    return osprivacy.is_terminal(sys.stdin)
 
 
 def require_terminal(action: str) -> None:

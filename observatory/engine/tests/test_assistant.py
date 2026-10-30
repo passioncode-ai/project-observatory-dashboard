@@ -14,7 +14,7 @@ class AssistantTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve()
-        self.env = patch.dict(os.environ, {'HOME': str(self.home), 'OBSERVATORY_HOME': str(self.home/'ws')}, clear=True)
+        self.env = patch.dict(os.environ, {'HOME': str(self.home), 'USERPROFILE': str(self.home), 'OBSERVATORY_HOME': str(self.home/'ws')}, clear=True)
         self.env.start()
         import workspace
         workspace.initialize(self.home/'ws')

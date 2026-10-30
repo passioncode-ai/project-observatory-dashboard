@@ -56,7 +56,7 @@ class Base(unittest.TestCase):
         self.bin = self.base / 'fake-bin'
         # The global git file is the temporary HOME's (global_config=None), as a person's would be.
         self.env = patch.dict(os.environ, git_env({
-            'HOME': str(self.user), 'OBSERVATORY_HOME': str(self.ws), 'OBSERVATORY_BACKUPS': str(self.root),
+            'HOME': str(self.user), 'USERPROFILE': str(self.user), 'OBSERVATORY_HOME': str(self.ws), 'OBSERVATORY_BACKUPS': str(self.root),
             'FABRIC_SERVICES_DIR': str(self.user / 'fabric-services'), 'PATH': os.environ.get('PATH', ''),
             'OBSERVATORY_SYSTEM_SETUP': '0', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir())},
             global_config=None), clear=True)
@@ -642,7 +642,7 @@ class Restore(Machine):
         def lossy(bundle, secret, dest, want):
             return real(bundle, secret, dest, lambda n: want(n) and not n.endswith('unpushed.bundle'))
         out, err = io.StringIO(), io.StringIO()
-        with patch.object(MB, 'extract', lossy), patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS}), \
+        with patch.object(MB, 'extract', lossy), patch.dict(os.environ, {'HOME': str(self.fresh), 'USERPROFILE': str(self.fresh), vault.PASS_ENV: PASS}), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = MB.restore_main(['--latest', '--clone'])
         self.assertEqual(code, 1)
@@ -735,7 +735,7 @@ class Restore(Machine):
 
     def test_the_command_line_plans_by_default_and_refuses_overwrite_alone(self):
         out, err = io.StringIO(), io.StringIO()
-        with patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS}), \
+        with patch.dict(os.environ, {'HOME': str(self.fresh), 'USERPROFILE': str(self.fresh), vault.PASS_ENV: PASS}), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(MB.restore_main(['--latest']), 0, err.getvalue())
             self.assertEqual(MB.restore_main(['--latest', '--overwrite']), 2)

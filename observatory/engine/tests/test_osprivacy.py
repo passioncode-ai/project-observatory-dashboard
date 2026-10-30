@@ -204,6 +204,61 @@ class DefaultHome(unittest.TestCase):
         self.assertEqual(self.place(True), self.home / ".local/share/project-observatory-full")
 
 
+class Terminal(unittest.TestCase):
+    """`is_terminal`: a person at a console, never a pipe, a file or NUL (OBS-279). On Windows `isatty()` is
+    true for NUL, and `< NUL` minted an operator's record through `tools/review.py promote` (review of #387)."""
+
+    #: The Win32 answers of a console, NUL, a pipe and a file, as GetFileType and GetConsoleMode give them.
+    HANDLES = {"console": (osprivacy.FILE_TYPE_CHAR, True), "nul": (osprivacy.FILE_TYPE_CHAR, False),
+               "pipe": (osprivacy.FILE_TYPE_PIPE, False), "file": (osprivacy.FILE_TYPE_DISK, False)}
+
+    def ask(self, name):
+        kind, mode = self.HANDLES[name]
+        return osprivacy.console_handle(name, lambda h: kind, lambda h: mode)
+
+    def test_only_a_console_is_a_terminal_by_the_win32_rule(self):
+        self.assertEqual({name: self.ask(name) for name in self.HANDLES},
+                         {"console": True, "nul": False, "pipe": False, "file": False})
+
+    def test_a_failing_win32_call_is_not_a_terminal(self):
+        def fails(handle):
+            raise OSError("invalid handle")
+        self.assertFalse(osprivacy.console_handle(1, fails, lambda h: True))
+        self.assertFalse(osprivacy.console_handle(1, lambda h: osprivacy.FILE_TYPE_CHAR, fails))
+
+    def test_missing_closed_and_fake_streams_are_not_terminals(self):
+        self.assertFalse(osprivacy.is_terminal(object()))
+        with mock.patch.object(sys, "stdin", None):
+            self.assertFalse(osprivacy.is_terminal())
+        closed = open(os.devnull, "rb")
+        closed.close()
+        self.assertFalse(osprivacy.is_terminal(closed))
+        quiet = mock.Mock()
+        quiet.isatty.return_value = False
+        self.assertFalse(osprivacy.is_terminal(quiet))
+
+    def test_nul_a_pipe_and_a_file_are_not_terminals(self):
+        with open(os.devnull, "rb") as nul:
+            if os.name == "nt":
+                self.assertTrue(nul.isatty(), "the trap this guards: Windows calls NUL a tty")
+            self.assertFalse(osprivacy.is_terminal(nul))
+        read, write = os.pipe()
+        try:
+            with os.fdopen(read, "rb", closefd=False) as pipe:
+                self.assertFalse(osprivacy.is_terminal(pipe))
+        finally:
+            os.close(read)
+            os.close(write)
+        with tempfile.TemporaryFile() as file:
+            self.assertFalse(osprivacy.is_terminal(file))
+
+    def test_a_child_with_stdin_from_nul_is_not_at_a_terminal(self):
+        code = "import sys; sys.path.insert(0, sys.argv[1]); import osprivacy; print(osprivacy.is_terminal())"
+        out = subprocess.run([sys.executable, "-c", code, str(ROOT)], stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "False", out.stderr)
+
+
 class Boundary(unittest.TestCase):
     #: Modules that only run on macOS, under launchd or for the Mac app — W4 gives them a
     #: scheduler per OS; until then `os.getuid` there names a launchd domain.
@@ -234,6 +289,10 @@ class Boundary(unittest.TestCase):
     def test_every_privacy_decision_goes_through_osprivacy(self):
         # Windows keeps no mode bits and no uid: a check of either is a refusal there.
         self.assertEqual(self.offenders(self.MODES, self.MACOS_ONLY), [])
+
+    def test_every_terminal_question_goes_through_osprivacy(self):
+        # `sys.stdin.isatty()` is true for NUL on Windows: an operator-only gate asks `is_terminal` (OBS-279).
+        self.assertEqual(self.offenders(re.compile(r"(?<!`)\bsys\.stdin\.isatty\(")), [])
 
     def test_the_uid_is_read_only_on_the_macos_paths(self):
         self.assertEqual(self.offenders(re.compile(r"\bos\.getuid\(\)"), self.MACOS_ONLY), [])

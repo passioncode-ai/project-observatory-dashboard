@@ -15,7 +15,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -35,6 +34,19 @@ def _load_git_env():
 
 
 git_env = _load_git_env()
+
+
+def _load_osproc():
+    """The engine's `osproc.py`, by its path: a suite's process group and its stop on every OS
+    (`start_new_session` and `os.killpg` do not exist on Windows, OBS-277)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('observatory_runner_osproc', ROOT / 'osproc.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+osproc = _load_osproc()
 
 LEGACY = (
     'ledger', 'time', 'provider_boundary', 'provider_health', 'credential_doors',
@@ -439,14 +451,31 @@ def runtime_environment() -> dict[str, str]:
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
+def home_environment(user: Path) -> dict[str, str]:
+    """The variables that name a home folder `user`, on this OS. POSIX reads HOME; Windows reads
+    USERPROFILE (never HOME: `Path.home()` raises "Could not determine home directory" without it)
+    and keeps its per-user data in LOCALAPPDATA and APPDATA, which go inside that home too (OBS-277).
+    Every engine entry point on Windows runs Python in UTF-8 mode (`full_cli.run`, the scheduled
+    tasks of `osschedule`), so a suite's interpreter does as well."""
+    names = {'HOME': str(user)}
+    if os.name == 'nt':
+        local, roaming = user / 'AppData' / 'Local', user / 'AppData' / 'Roaming'
+        local.mkdir(parents=True, exist_ok=True); roaming.mkdir(parents=True, exist_ok=True)
+        names.update(USERPROFILE=str(user), LOCALAPPDATA=str(local), APPDATA=str(roaming),
+                     PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+    return names
+
+
 def clean_env(base: Path) -> dict[str, str]:
     user, temporary = base / 'user', base / 'tmp'
     user.mkdir(); temporary.mkdir()
     runtime = base / 'runtime'
+    # Windows reads the temporary folder from TEMP and TMP, not TMPDIR (OBS-277).
+    windows = {'TEMP': str(temporary), 'TMP': str(temporary)} if os.name == 'nt' else {}
     # git_env: the operator's system and global git configuration shut out, and no background
     # `gc --auto` or maintenance that outlives a git command and races the suite's cleanup.
     return git_env.git_env({
-        **runtime_environment(), 'PATH': os.environ.get('PATH', ''), 'HOME': str(user),
+        **runtime_environment(), 'PATH': os.environ.get('PATH', ''), **home_environment(user),
         'TMPDIR': str(temporary), 'LANG': 'C.UTF-8', 'LC_ALL': 'C',
         'PYTHONDONTWRITEBYTECODE': '1', 'OBSERVATORY_HOME': str(runtime),
         'OBSERVATORY_REGISTRY': str(runtime / 'registry'),
@@ -459,6 +488,9 @@ def clean_env(base: Path) -> dict[str, str]:
         # The shared update log (update_events.py, LC-16) goes beside the suite, never into
         # ~/Library/Logs or ~/.local/state of the machine running it.
         'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
+        # Everything under this folder is the suite's own (tests/tmp.py keeps a workspace there).
+        'OBSERVATORY_TEST_SANDBOX': str(base),
+        **windows,
     })
 
 
@@ -489,7 +521,13 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'ask_why': 600,
                  # 36 cases with real git checkouts, restores and three killed subprocesses:
                  # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner.
-                 'machine_backup': 300}
+                 'machine_backup': 300,
+                 # 127 cases with real key generation: 34 s alone on windows-latest, 119 s and once past 120 s
+                 # under the job's --jobs 4 there (runs 40573876802, 40579710612; OBS-277).
+                 'node_org': 300,
+                 # 68-72 s alone on windows-latest, past 120 s once each under the job's --jobs 4 there
+                 # (run 40594551136; OBS-277).
+                 'gate_purity': 300, 'search': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
@@ -612,11 +650,11 @@ def _run_suite(name: str, work: Path, template: Path, timeout: int) -> dict:
                [sys.executable, 'tests/test_' + name + '.py'])
     process = subprocess.Popen(command, cwd=checkout, env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, start_new_session=True)
+                               text=True, encoding='utf-8', errors='replace', **osproc.new_group())
     try:
         output = process.communicate(timeout=timeout)[0]; code = process.returncode
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        osproc.stop_group(process.pid, 0)
         output = process.communicate()[0]; code = 124
     log = work / 'run.log'; log.write_text(output, encoding='utf-8'); log.chmod(0o600)
     result = {'file': 'tests/test_' + name + '.py',

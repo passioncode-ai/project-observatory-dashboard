@@ -419,7 +419,7 @@ def system_setup_allowed(base: Path) -> bool:
             return False
     except OSError:
         return False
-    return sys.stdin is not None and sys.stdin.isatty()
+    return sys.stdin is not None and osprivacy.is_terminal(sys.stdin)
 
 
 #: Where the operating system keeps temporary directories, whatever TMPDIR this process was

@@ -154,7 +154,7 @@ def test_publishing_is_refused_and_the_local_copy_stays_private() -> None:
 
     base = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-publish-home-")).resolve()
     home = base / "home"
-    env = {**os.environ, "OBSERVATORY_HOME": str(home), "HOME": str(base)}
+    env = {**os.environ, "OBSERVATORY_HOME": str(home), "HOME": str(base), "USERPROFILE": str(base)}
     p = subprocess.run([PY, "observatory.py", "init"], cwd=ROOT, env=env,
                        capture_output=True, text=True, timeout=120)
     check("a synthetic workspace initializes", p.returncode == 0, (p.stdout + p.stderr)[-300:])

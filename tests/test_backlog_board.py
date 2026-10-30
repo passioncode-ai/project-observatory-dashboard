@@ -261,9 +261,9 @@ class BoardLint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             b, c, d = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md"), Path(tmp, "deny.json")
             b.write_text(board({"OBS-01": "done in 0.24.0 (#1)"}, next_free=3,
-                               extra="| OBS-02 | quiet-heron-agent | open | parent: PB-140 |\n"), encoding="utf-8")
-            c.write_text(CHANGELOG, encoding="utf-8")
-            d.write_text(json.dumps(["quiet-heron-agent"]), encoding="utf-8")
+                               extra="| OBS-02 | quiet-heron-agent | open | parent: PB-140 |\n"), encoding="utf-8", newline="")
+            c.write_text(CHANGELOG, encoding="utf-8", newline="")
+            d.write_text(json.dumps(["quiet-heron-agent"]), encoding="utf-8", newline="")
             run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
                                   "--changelog", str(c), "--private-denylist", str(d)],
                                  capture_output=True, text=True, timeout=60)
@@ -433,7 +433,7 @@ class Hardening(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             b, c = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md")
             b.write_bytes(board(CORRECTED).replace("\n", "\r\n").encode("utf-8"))
-            c.write_text(CHANGELOG, encoding="utf-8")
+            c.write_text(CHANGELOG, encoding="utf-8", newline="")
             env = {**os.environ}
             env.pop("OBSERVATORY_PRIVATE_DENYLIST", None)
             run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
@@ -599,8 +599,8 @@ class StaleAtMerge(unittest.TestCase):
     def test_the_command_says_when_the_history_was_not_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             b, c = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md")
-            b.write_text(board({"OBS-01": "open"}, next_free=2), encoding="utf-8")
-            c.write_text(CHANGELOG, encoding="utf-8")
+            b.write_text(board({"OBS-01": "open"}, next_free=2), encoding="utf-8", newline="")
+            c.write_text(CHANGELOG, encoding="utf-8", newline="")
             env = {**os.environ}
             env.pop("OBSERVATORY_PRIVATE_DENYLIST", None)
             run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
@@ -666,7 +666,7 @@ def git_repo(tmp: str):
         stamp = f"@{int(time.time()) - days_ago * 86400} +0000"
         if board is not None:
             Path(tmp, "docs").mkdir(exist_ok=True)
-            Path(tmp, "docs/backlog.md").write_text(board, encoding="utf-8")
+            Path(tmp, "docs/backlog.md").write_text(board, encoding="utf-8", newline="")
             subprocess.run(["git", "-C", tmp, "add", "-A"], check=True, env=env)
         subprocess.run(["git", "-C", tmp, "commit", "-q", "--allow-empty", "-m", subject], check=True,
                        env=git_env.git_env(**IDENTITY, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp))

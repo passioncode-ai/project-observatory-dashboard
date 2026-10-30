@@ -111,7 +111,7 @@ class Environment(unittest.TestCase):
 
     def test_drop_git_removes_every_inherited_git_variable_first(self):
         env = git_env.git_env({"GIT_DIR": "/elsewhere", "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "a.b",
-                               "GIT_CONFIG_VALUE_0": "c", "HOME": "/h"}, drop_git=True, GIT_AUTHOR_NAME="Fixture")
+                               "GIT_CONFIG_VALUE_0": "c", "HOME": "/h", "USERPROFILE": "/h"}, drop_git=True, GIT_AUTHOR_NAME="Fixture")
         self.assertNotIn("GIT_DIR", env)
         self.assertEqual(entries(env), [("gc.auto", "0"), ("maintenance.auto", "false")])
         self.assertEqual((env["HOME"], env["GIT_AUTHOR_NAME"]), ("/h", "Fixture"))
@@ -137,12 +137,12 @@ class WhatGitReads(unittest.TestCase):
         self.assertEqual(effective(env, "maintenance.auto", self.tmp.name), "false")
 
     def test_an_inherited_outer_option_does_not_win(self):
-        env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name,
+        env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name, "USERPROFILE": self.tmp.name,
                                "GIT_CONFIG_PARAMETERS": "'gc.auto'='50'"})
         self.assertEqual(effective(env, "gc.auto", self.tmp.name), "0")
 
     def test_the_helpers_environment_turns_maintenance_off(self):
-        env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name})
+        env = git_env.git_env({"PATH": os.environ.get("PATH", ""), "HOME": self.tmp.name, "USERPROFILE": self.tmp.name})
         self.assertEqual(effective(env, "gc.auto", self.tmp.name), "0")
         self.assertEqual(effective(env, "maintenance.auto", self.tmp.name), "false")
 

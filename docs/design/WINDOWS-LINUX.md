@@ -26,7 +26,7 @@ desktop app.
 ## Modules, in order
 
 Each module lands as its own pull request with tests that were red first; the Windows CI row
-turns from informative to required once W1–W3 are in.
+turns from informative to required once W1–W3 are in (it did with OBS-277: [Verified on Windows in CI](#verified-on-windows-in-ci-obs-277)).
 
 | # | Module | Windows | Linux |
 |---|---|---|---|
@@ -73,6 +73,94 @@ After W2b (PR #187, run 38010490756): every step green — 76/76 modules load, `
 the macOS notarization script). Two Windows facts the run taught: SDDL names the built-in
 Administrator account `LA` rather than by its SID, and a folder created inside the profile
 inherits an OWNER RIGHTS (`OW`) entry — both are compared as the SIDs they stand for.
+
+## Verified on Windows in CI (OBS-277)
+
+Since OBS-277 every step of the `windows` job of `.github/workflows/check.yml` fails the job: none is
+informative. On every change, on windows-latest with Python 3.14:
+
+| Step | What it proves |
+|---|---|
+| SQLite extension support, install, compile, every engine library module loads | the wheel installs and every module imports |
+| `test_oslocks` | `oslocks.flock` (shared, exclusive, non-blocking, released by close, data still readable and writable) and `oslocks.fd_path`, the path behind a descriptor (OBS-98) |
+| `test_osproc`, `test_osprivacy`, `test_osschedule` | process groups, owner-only files by ACL, and a real Task Scheduler task |
+| The CLI, a whole tick, the server and the tick as tasks | `--help`, `demo`, `doctor`; `tools/tick.py` run directly end to end with no failed step; `serverd.py --install` as a task answering `/.well-known/fabric-service`, then `--uninstall`; `install_launchd.py install, status, uninstall` for the tick task, then no task of the engine left. CI does not let Task Scheduler start a tick, does not install the maintenance task and does not race two scheduled ticks: the live check does |
+| Credential Manager, updates, the OpenRouter ledger lock, holder safety, organization enrollment | W5, W6, J-11, the disk guard's Windows holder rule, OBS-201 |
+| The root tests | `python -m unittest discover -s tests`, every case |
+| Every suite of the portable engine set | `tests/run_portable.py`, the same 298 suites `full check` runs on macOS and Linux, held to `tools/windows-known.json` by `tools/check_windows_suites.py` |
+
+The portable set: 204 of 298 suites pass on Windows (run 40655254380; `review_queue` and `policy_residue` since the console fix below). The other 94 are listed in [`tools/windows-known.json`](../../tools/windows-known.json), each with the backlog row that makes it pass, what it showed in CI, the outcomes it was seen with (`statuses`: FAIL, TIMEOUT) and the checks seen failing in it (`failing`, read from each suite's log): OBS-278 for suites whose test, as measured, assumes POSIX (mode bits as the privacy proof, `pty` and `termios`, `select` on a pipe, `os.mkfifo`, `os.getuid`, an environment built without `SYSTEMROOT` or with a POSIX `PATH`, a systemd unit where Windows has a task), OBS-279 for engine defects the run found (a grant file named by its URN, which Windows cannot name; `full agent install` running a script Windows cannot execute; the macOS lifecycle adapter reading `os.getuid`). The check fails the job when a suite outside the list fails or skips as a whole, when a listed suite fails with an outcome or a failing check its entry does not record, when an entry's row is closed, and when a suite on the list passes, so the list only shrinks.
+
+**Fixed in OBS-279: a person at a terminal.** Every operator-only command (`review.py promote`, the binding, policy, lifecycle, workflow, share and forget commands) and every secret prompt decided "a person is typing" with `sys.stdin.isatty()`. On Windows that is true for the NUL device, so `review.py promote <id> < NUL` minted an `owner operator` record (the `review_queue` suite caught it). They now ask `osprivacy.is_terminal`, which on Windows requires a console handle (`GetFileType` = `FILE_TYPE_CHAR` and `GetConsoleMode` succeeding) and on POSIX keeps `isatty()`; `test_osprivacy` holds the rule for NUL, a pipe and a file and refuses a direct `sys.stdin.isatty()` anywhere else in the engine. A case skipped inside a suite that passes is not held to the list: some skip because the behaviour does not exist on Windows (a systemd unit, a POSIX device file, the POSIX holder inventory, which Windows reports as unknown by design), others because the test still needs a Windows counterpart, which is OBS-278's work (the mode-000 cases of `test_leak_coverage` name it). Every such skip is counted in the receipt (`skipped_checks`) and shown in the job summary.
+
+What CI does not prove, and the live check below does: an interactive install from the README, the tasks
+running under a real logon session across a sign-out and a restart, the desktop app's window, tray and update,
+and an agent's MCP host connecting. The named pipe of the local channel (OBS-256) and `node.lifecycle` on
+Windows (OBS-257) are not built yet: every lifecycle tool answers `unsupported_platform` there.
+
+## Windows live check
+
+What a person runs on a real Windows 10 or 11 machine to confirm what CI cannot (PowerShell, as the account
+that will use it, no administrator rights). Each step names what it must print; a step that prints anything
+else is the finding to report, with its output.
+
+1. **Install** the latest release as the README's Windows block does, then:
+
+   ```powershell
+   project-observatory --version                      # the release you downloaded
+   project-observatory full init
+   project-observatory full configure sources projects "$env:USERPROFILE\projects"
+   project-observatory full local                     # ends with: ok
+   project-observatory full doctor                    # no "error" line
+   project-observatory full check --suite oslocks --suite osprivacy --suite osschedule --suite tick_py
+   ```
+
+   The last line runs four suites on this machine and must report `"status": "PASS"`.
+
+2. **The workspace is owner-only.** `icacls "$env:LOCALAPPDATA\project-observatory-full"` lists only this
+   account, `SYSTEM` and `Administrators`, and `(OI)(CI)` inheritance; no `Users` or `Everyone` line.
+
+3. **The node.** `project-observatory full node --init` prints a device id and two public keys; run again, the
+   same. `icacls "$env:LOCALAPPDATA\project-observatory-full\node\device"` shows the same owner-only list.
+
+4. **The tick as a task.**
+
+   ```powershell
+   project-observatory full configure features scheduler true
+   $ENGINE = project-observatory full-path
+   python "$ENGINE\tools\install_launchd.py" install     # installed: the tick every 30 min
+   python "$ENGINE\tools\install_launchd.py" run-now
+   Get-ScheduledTask -TaskPath "\ProjectObservatory\" | Get-ScheduledTaskInfo   # the tick task: LastTaskResult 0
+   project-observatory full doctor                         # tick.verdict alive
+   ```
+
+   Then sign out, sign back in, wait 30 minutes: the same command shows a newer LastRunTime, still result 0. Run
+   `install_launchd.py run-now` twice at once: the second stands down (the tick's single-writer lock), and
+   `store\logs\tick.log` shows one tick, not two interleaved.
+
+5. **The server as a task.** `python "$ENGINE\tools\serverd.py" --install`, then
+   `Invoke-RestMethod http://127.0.0.1:47311/.well-known/fabric-service` answers with the service id and status;
+   a second `serverd.py` started by hand exits 75 (one copy per workspace). After a restart of the machine and
+   a sign-in, the same request answers again within two minutes.
+
+6. **The desktop app.** Install `ProjectObservatory-<version>-windows-x64-setup.exe` (no administrator prompt).
+   It opens on the live dashboard; closing the window keeps it in the tray; **Start server** and Ctrl+Shift+A
+   (the assistant) work; the app's menu shows **Restart to update** only when a newer release exists.
+
+7. **An agent's MCP connection** (Claude Code, Git Bash or PowerShell):
+
+   ```powershell
+   claude mcp add observatory --scope user -e OBSERVATORY_HOME="$env:LOCALAPPDATA\project-observatory-full" -e PYTHONUTF8=1 -- `
+     "$env:LOCALAPPDATA\project-observatory-venv\Scripts\python.exe" "$ENGINE\mcp\server.py"
+   claude mcp list                                    # observatory: ... Connected
+   claude -p "Call observatory_status once and reply OK with the number of projects and its degraded list" `
+     --allowedTools mcp__observatory__observatory_status
+   ```
+
+   The answer names the projects found in step 1 and an empty or explained `degraded` list.
+
+8. **Uninstall leaves nothing running.** `serverd.py --uninstall`, `install_launchd.py uninstall`, then
+   `Get-ScheduledTask -TaskPath "\ProjectObservatory\"` finds no task and port 47311 answers nothing.
 
 ## Known differences on Windows
 

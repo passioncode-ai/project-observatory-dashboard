@@ -578,7 +578,7 @@ def cmd_key(args) -> int:
             source = given.parent.resolve() / given.name
             vault._no_symlinks(source)
             text = vault._read_private(source, private=False)[:256].strip()
-        elif sys.stdin.isatty():
+        elif osprivacy.is_terminal(sys.stdin):
             raise Refused("the key arrives in the file `key export` wrote, or on stdin; never in an argument")
         else:
             text = sys.stdin.read(256).strip()

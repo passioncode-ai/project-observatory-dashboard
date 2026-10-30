@@ -564,7 +564,7 @@ def require_passphrase(base: Path | None = None, *, prompt: bool = False) -> str
     value = passphrase(base)
     if value:
         return value
-    if prompt and sys.stdin.isatty():
+    if prompt and osprivacy.is_terminal(sys.stdin):
         import getpass
         value = getpass.getpass("Backup passphrase: ")
         if value:

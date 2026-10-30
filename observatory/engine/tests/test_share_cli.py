@@ -61,7 +61,7 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
     def env(self, who: str) -> dict:
         home = self.homes[who]
         keep = {k: v for k, v in os.environ.items() if k in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SYSTEMROOT')}
-        return {**keep, 'HOME': str(home), 'OBSERVATORY_HOME': str(home),
+        return {**keep, 'HOME': str(home), 'USERPROFILE': str(home), 'OBSERVATORY_HOME': str(home),
                 'OBSERVATORY_VAULT_DIR': str(home / 'secrets' / 'projects'),
                 'OBSERVATORY_SECRETS': str(home / 'secrets'),
                 'OBSERVATORY_CLOUD_RESOLVE': f'mailbox.localhost=127.0.0.1:{self.server.server_port}'}

@@ -137,6 +137,9 @@ class RelayStub:
                 body = json.dumps({'error': {'code': error, 'message': error}}).encode()
             conn.sock.sendall(b'HTTP/1.1 %d X\r\nContent-Length: %d\r\nConnection: close\r\n\r\n' % (status, len(body))
                               + body)
+        # The body is read before any answer, as an HTTP server does: a socket closed with unread bytes resets
+        # the connection on Windows, and the client then sees WinError 10054 instead of the refusal (OBS-277).
+        body = conn.read(int(headers.get('content-length', 0))) if method == 'PUT' else b''
         parsed = relay.parse_relay_request(headers.get('fabric-relay-request'))
         if not parsed['ok']:
             return answer(parsed['status'], error=parsed['code'])
@@ -152,7 +155,7 @@ class RelayStub:
         if method == 'PUT':
             if not all(r in self.admitted for r in request['recipients']):
                 return answer(403, error='unknown-recipient')
-            data = conn.read(int(headers['content-length']))
+            data = body
             if digest_of(data) != digest:
                 return answer(422, error='digest-mismatch')
             if stored is not None and stored[0] != request['recipients']:

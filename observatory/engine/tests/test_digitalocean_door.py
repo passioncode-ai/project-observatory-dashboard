@@ -104,7 +104,7 @@ def setup(tmp: pathlib.Path, flaky: dict | None = None, **extra) -> dict:
     state.update(extra)
     (tmp / "state.json").write_text(json.dumps(state))
     (tmp / "vault").mkdir()
-    return {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "OBSERVATORY_HOME": str(tmp / "workspace"),
+    return {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "USERPROFILE": str(tmp), "OBSERVATORY_HOME": str(tmp / "workspace"),
             "PYTHONDONTWRITEBYTECODE": "1", "DOCTL": str(fake), "FAKE_DO_STATE": str(tmp / "state.json"),
             "OBSERVATORY_VAULT_DIR": str(tmp / "vault"), "OBSERVATORY_DO_RETRY_DELAY": "0",
             "OBSERVATORY_DO_POLL": "0"}

@@ -1006,7 +1006,7 @@ def _passphrase_command(base: Path, action: str) -> int:
             return 2
         print(value)
         return 0
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         import getpass
         value = getpass.getpass("New backup passphrase: ")
         if value != getpass.getpass("Repeat it: "):

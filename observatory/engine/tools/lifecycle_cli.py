@@ -47,6 +47,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import access_binding as AB                                                         # noqa: E402
 from node.lifecycle import broker                                                   # noqa: E402
 from node.lifecycle import service as S                                             # noqa: E402
@@ -57,7 +58,7 @@ READINESS = ("process", "fabric-service", "fabric-hub", "switchboard-runtime")
 
 
 def _is_terminal() -> bool:
-    return sys.stdin.isatty()
+    return osprivacy.is_terminal(sys.stdin)
 
 
 def require_terminal(action: str) -> None:

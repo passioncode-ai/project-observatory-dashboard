@@ -25,7 +25,7 @@ def git_repo(path: Path) -> None:
     path.mkdir(parents=True)
     from git_env import git_env
     env = git_env({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
-                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "HOME": str(path)})
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid", "HOME": str(path), "USERPROFILE": str(path)})
     subprocess.run(["git", "init", "-q"], cwd=path, check=True, env=env)
     (path / "f").write_text("x")
     subprocess.run(["git", "add", "f"], cwd=path, check=True, env=env)

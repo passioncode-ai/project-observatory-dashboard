@@ -198,7 +198,7 @@ class Deploy(unittest.TestCase):
             os.write(fd, text.encode())
             os.close(fd)
         run = subprocess.run([sys.executable, str(ROOT / 'tools' / 'cloud_cli.py'), 'deploy', '--dry-run'],
-                             env={**os.environ, 'OBSERVATORY_HOME': str(home), 'HOME': str(home)},
+                             env={**os.environ, 'OBSERVATORY_HOME': str(home), 'HOME': str(home), 'USERPROFILE': str(home)},
                              capture_output=True, text=True, timeout=120)
         self.assertEqual(run.returncode, 0, run.stderr)
         plan = json.loads(run.stdout)
