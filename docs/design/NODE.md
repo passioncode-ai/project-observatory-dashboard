@@ -899,9 +899,10 @@ own). It reuses the node's checks and adds what only a relay does:
   `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
   queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
   2 MiB), one page per machine at once. A newcomer refused on arrival, before its request was read, gets its 503
-  and a clean close: the relay half-closes and drains what it still sends for up to a second (16 at once) before
-  closing, since a close over unread input is a reset and a Windows caller then drops the answer unread. A failed
-  accept is retried with a backoff and logged; `health` reports an
+  and a clean close: the relay half-closes and drains what it still sends for up to a second (16 at once, past that
+  closed at once; `stop` ends every drain) before closing, since a close over unread input is a reset and a Windows
+  caller then drops the answer unread. A connection that no thread can be started for is closed and its slot given
+  back, never the end of the accept loop. A failed accept is retried with a backoff and logged; `health` reports an
   accept loop that ended or keeps failing, which the local server shows as its `relay` row.
 
 `tests/test_relay_server.py` runs the contract's `admit` vectors and drives the node's own `RelaySession` against the

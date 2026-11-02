@@ -34,8 +34,8 @@ machines. A newcomer refused on arrival is answered 503, half-closed and drained
 close (`MAX_LINGERING` at once), so the answer reaches it: a close over unread input is a reset, and a Windows caller
 drops what it has not read. Each session writes from its own thread through a bounded queue: a machine that stops
 reading stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its
-socket. A failed accept (out of descriptors) is retried with a backoff and logged, and `health` names an accept loop
-that ended or keeps failing.
+socket. A connection no thread can be started for is closed and its slot given back. A failed accept (out of
+descriptors) is retried with a backoff and logged, and `health` names an accept loop that ended or keeps failing.
 
 Every open session is checked against the current admission set before any frame it sends or accepts and every two
 seconds: a machine the record or a delta no longer admits, or under another key, is closed `not-admitted` (4403), and
@@ -109,7 +109,8 @@ ACCEPT_FAILING_SECONDS = 1.0
 ACCEPT_BACKOFF_SECONDS = 1.0
 #: A connection refused before its request was read is half-closed and drained this long, at most this many bytes,
 #: before it is closed: a close with unread input is a reset, and a Windows caller drops the 503 it has not read yet.
-#: At most `MAX_LINGERING` drain at once (within `FD_RESERVE`); past it a refused connection is closed at once.
+#: At most `MAX_LINGERING` drain at once (within `FD_RESERVE`); past it a refused connection is closed at once
+#: (`relay.refused` says `drained`), and `stop` ends every drain.
 LINGER_SECONDS = 1.0
 LINGER_BYTES = 64 * 1024
 MAX_LINGERING = 16
@@ -1138,7 +1139,7 @@ class RelayServer:
         self._stop = threading.Event()
         self._accepting = threading.Event()
         self._accept_failing: Optional[Tuple[float, str]] = None
-        self._lingering = threading.BoundedSemaphore(MAX_LINGERING)
+        self._lingering: set = set()                       # refused sockets being drained (`_linger`), under `_lock`
         self._listener: Any = None
         self.port: Optional[int] = None
 
@@ -1178,11 +1179,20 @@ class RelayServer:
         with self._lock:
             sessions = [s for group in self._sessions.values() for s in group]
             pending = list(self._pending.values())
+            lingering = list(self._lingering)
         for session in sessions:
             session.ws.abort(CLOSE_GOING_AWAY)
         for entry in pending:
             _shut(entry)
+        for sock in lingering:                             # wakes its drain, which closes it
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
         self.log({'event': 'relay.stopped', 'sessions': len(sessions)})
+
+    def lingering(self) -> int:
+        """How many refused connections are being drained before their close (at most `MAX_LINGERING`)."""
+        with self._lock:
+            return len(self._lingering)
 
     def health(self) -> Optional[str]:
         """None while the relay listens and accepts, else why not, for the node's `degraded`."""
@@ -1219,7 +1229,12 @@ class RelayServer:
                 if self._accept_failing is not None:
                     self.log({'event': 'relay.accept.recovered', 'error': self._accept_failing[1]})
                     self._accept_failing = None
-                self._admit_connection(sock, address[0] if isinstance(address, tuple) else str(address))
+                try:
+                    self._admit_connection(sock, address[0] if isinstance(address, tuple) else str(address))
+                except Exception as error:                 # noqa: BLE001 - one connection's fault never ends the loop
+                    self.log({'event': 'relay.accept.fault', 'error': type(error).__name__})
+                    with contextlib.suppress(OSError):
+                        sock.close()
         finally:
             self._accepting.clear()
 
@@ -1295,14 +1310,32 @@ class RelayServer:
         """Answers 503 and closes. `unread`: the caller's request was never read (refused on arrival), so the socket
         is half-closed and drained before it closes (`_linger`), else the close would reset the connection and a
         Windows caller would lose the answer."""
-        self.log({'event': 'relay.refused', 'reason': refusal})
         sock.setblocking(False)
         _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
-        if unread and self._lingering.acquire(blocking=False):
-            threading.Thread(target=self._linger, args=(sock,), name='relay-linger', daemon=True).start()
-            return
-        with contextlib.suppress(OSError):
-            sock.close()
+        drain = False
+        if unread:
+            with self._lock:
+                if len(self._lingering) < MAX_LINGERING:
+                    self._lingering.add(sock)
+                    drain = True
+        if drain and not self._spawn(self._linger, sock, name='relay-linger'):
+            drain = False
+            with self._lock:
+                self._lingering.discard(sock)
+        self.log(dict({'event': 'relay.refused', 'reason': refusal}, **({'drained': drain} if unread else {})))
+        if not drain:
+            with contextlib.suppress(OSError):
+                sock.close()
+
+    def _spawn(self, target: Callable[..., None], *args: Any, name: str) -> bool:
+        """Runs `target(*args)` on a daemon thread; False, logged, when no thread can be started (the process is out
+        of threads or memory), so the caller cleans up and the accept loop goes on."""
+        try:
+            threading.Thread(target=target, args=args, name=name, daemon=True).start()
+            return True
+        except RuntimeError as error:
+            self.log({'event': 'relay.thread.unavailable', 'thread': name, 'error': type(error).__name__})
+            return False
 
     def _linger(self, sock: socket.socket) -> None:
         """Sends FIN after the answer, then reads and discards what the caller still sends until it closes, for at
@@ -1326,7 +1359,8 @@ class RelayServer:
         finally:
             with contextlib.suppress(OSError):
                 sock.close()
-            self._lingering.release()
+            with self._lock:
+                self._lingering.discard(sock)
 
     def _admit_connection(self, sock: socket.socket, peer: str) -> None:
         entry = _Pending(sock, peer)
@@ -1335,7 +1369,10 @@ class RelayServer:
         self._evicted(evicted, fair)
         if refusal is not None:
             return self._refuse(sock, refusal, unread=True)
-        threading.Thread(target=self._connection, args=(entry,), name='relay-conn', daemon=True).start()
+        if not self._spawn(self._connection, entry, name='relay-conn'):
+            self._release_pending(entry)
+            with contextlib.suppress(OSError):
+                sock.close()
 
     def _readdress(self, entry: _Pending, headers: Dict[str, str]) -> Optional[str]:
         """After the head: the connection has answered (`progress` 1), and behind a trusted terminator on this machine

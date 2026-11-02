@@ -3134,8 +3134,8 @@
       "path": "node/relay_server.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c8f295466f8828456f2d4d5a49e2923d47b3bd5d98dc35547dea113c26904817",
-      "bytes": 85324
+      "export_sha256": "bd91610743d71a50e330cce2ba5161cfb8434d195eee3bebb8f4fbbb942a1c9f",
+      "bytes": 87263
     },
     {
       "path": "node/repair.py",
@@ -5587,8 +5587,8 @@
       "path": "tests/test_relay_server.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a1208f558fe06a72c93663390da7f851d095fc80cf2fb1e62b972da1371f171e",
-      "bytes": 64412
+      "export_sha256": "d756433d47da7a10091f835796f9bf11d07e69306936bb0f153dcb842e45bfef",
+      "bytes": 69197
     },
     {
       "path": "tests/test_release_cadence.py",

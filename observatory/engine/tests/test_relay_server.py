@@ -846,7 +846,80 @@ class Relay(unittest.TestCase):
             first.close()
         self.assertTrue(data.startswith(b'HTTP/1.1 503 '), data[:40])
         self.assertEqual(json.loads(data.split(b'\r\n\r\n', 1)[1])['error']['code'], 'rate-limited')
-        self.assertTrue(eventually(lambda: self.server._lingering._value == rs.MAX_LINGERING))   # every slot back
+        self.assertTrue(eventually(lambda: self.logged('relay.refused') == 1))
+        self.assertTrue(any(r['event'] == 'relay.refused' and r.get('drained') for r in self.logs))
+        self.assertTrue(eventually(lambda: self.server.lingering() == 0))          # the drain ended with the caller
+
+    def refused_on_arrival(self):
+        """A connection the relay refuses on arrival (an answering caller holds the address's only slot): its whole
+        503 and a clean close. It sends nothing, so drained or not it never resets."""
+        sock = socket.create_connection(('127.0.0.1', self.server.port))
+        sock.settimeout(WAIT)
+        data = b''
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        self.assertTrue(data.startswith(b'HTTP/1.1 503 '), data[:40])
+        return sock
+
+    def answering(self):
+        """A caller that sent its request and holds its address's only pending slot (`max_pending_per_source=1`)."""
+        first = self.upgrade()
+        self.addCleanup(first.close)
+        self.assertTrue(eventually(lambda: self.progress() == [1]))
+        return first
+
+    def test_past_max_lingering_a_refusal_closes_at_once_and_stop_ends_the_drains(self):
+        self.start(max_pending_per_source=1)
+        with mock.patch.object(rs, 'MAX_LINGERING', 1), mock.patch.object(rs, 'LINGER_SECONDS', 10 * WAIT):
+            self.answering()
+            drained = self.refused_on_arrival()
+            self.assertEqual(self.server.lingering(), 1)                 # held open, reading, after its 503
+            closed = self.refused_on_arrival()
+            self.assertEqual(self.server.lingering(), 1)                 # the only slot was taken: closed at once
+            self.assertEqual([r['drained'] for r in self.logs if r['event'] == 'relay.refused'], [True, False])
+            drained.close()                                              # the caller closing ends its drain
+            self.assertTrue(eventually(lambda: self.server.lingering() == 0))
+            held = self.refused_on_arrival()
+            self.assertEqual(self.server.lingering(), 1)
+            started = time.monotonic()
+            self.server.stop()
+            self.assertTrue(eventually(lambda: self.server.lingering() == 0))
+            self.assertLess(time.monotonic() - started, PROMPT)          # stop ended it, long before LINGER_SECONDS
+            for sock in (closed, held):
+                sock.close()
+
+    def test_a_thread_that_cannot_start_never_ends_the_accept_loop(self):
+        """Out of threads: a connection the relay cannot hand to a thread is closed and its slot given back, a refusal
+        it cannot drain is closed at once, and the accept loop goes on to serve the next caller."""
+        self.start(max_pending_per_source=1)
+        real, failing = threading.Thread.start, threading.Event()
+
+        def start(thread):
+            if failing.is_set() and thread.name in ('relay-conn', 'relay-linger'):
+                raise RuntimeError("can't start new thread")
+            return real(thread)
+        with mock.patch.object(threading.Thread, 'start', start):
+            failing.set()
+            lost = socket.create_connection(('127.0.0.1', self.server.port))
+            lost.settimeout(WAIT)
+            self.assertEqual(lost.recv(64), b'')                         # closed, never served
+            lost.close()
+            self.assertTrue(eventually(lambda: self.progress() == []))   # its slot given back
+            failing.clear()
+            first = self.answering()
+            failing.set()
+            self.refused_on_arrival().close()
+            self.assertEqual(self.server.lingering(), 0)
+            failing.clear()
+        self.assertEqual([r['thread'] for r in self.logs if r['event'] == 'relay.thread.unavailable'],
+                         ['relay-conn', 'relay-linger'])
+        first.close()
+        self.assertTrue(eventually(lambda: self.progress() == []))
+        self.assertTrue(eventually(lambda: _answers(self.server.port)))  # the accept loop goes on
+        self.assertIsNone(self.server.health())
 
     def test_address_counts_are_dropped_at_zero(self):
         self.start(max_pending=1, trusted_proxy=True)
@@ -861,6 +934,18 @@ class Relay(unittest.TestCase):
         self.assertTrue(eventually(lambda: self.server._per_source == {}))
 
     def test_pongs_are_counted_and_coalesced(self):
+        # A ping that arrives while the previous pong still waits to be written is one the relay coalesced: the
+        # writer is backed up. The test sends until a thousand did, so the bound below is never met vacuously, on a
+        # host whose send buffer grows to megabytes too.
+        real, coalesced = rs.Session._ping, [0]
+
+        def counting(session, payload):
+            with session.cond:
+                coalesced[0] += session.pong is not None
+            return real(session, payload)
+        patcher = mock.patch.object(rs.Session, '_ping', counting)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.start()
         sock = self.upgrade()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
@@ -875,15 +960,18 @@ class Relay(unittest.TestCase):
         self.assertTrue(eventually(held))
         session = sessions[0]
         pings = (bytes([0x89, 0x80 | 125]) + b'\0\0\0\0' + b'p' * 125) * 512
-        # 12 288 pings, a fixed count: their pongs (1.5 MB) are far more than the caller's 1 KiB receive buffer and
-        # the relay's send buffer hold, so the answers back up whatever the machine's speed.
+        # 512 pings a round, at most 400 rounds (26 MB of pongs, past any send buffer), until 1000 were coalesced:
+        # counted in pings, never in seconds.
         sock.settimeout(WAIT)
-        for _ in range(24):
+        for _ in range(400):
+            if coalesced[0] >= 1000:
+                break
             try:
                 sock.sendall(pings)
             except OSError:                                 # closed for overflow, or no longer read: the bound
                 break
         sock.close()
+        self.assertGreaterEqual(coalesced[0], 1000, 'the pongs never backed up, so nothing was coalesced')
         self.assertLessEqual(len(session.outbox), 2)
         self.assertLessEqual(session.outbox_bytes, rs.OUTBOX_BYTES)
 
