@@ -18,7 +18,7 @@ class PrivateSources(unittest.TestCase):
         self.home = self.base / 'runtime'
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith(('OBSERVATORY_', 'CLAUDE_MEM_', 'OPENAI_', 'OPENROUTER_'))}
-        self.env.update(HOME=str(self.base / 'user'), OBSERVATORY_HOME=str(self.home),
+        self.env.update(HOME=str(self.base / 'user'), USERPROFILE=str(self.base / 'user'), OBSERVATORY_HOME=str(self.home),
                         PYTHONDONTWRITEBYTECODE='1')
 
     def run_python(self, source):

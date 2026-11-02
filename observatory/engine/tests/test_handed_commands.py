@@ -403,7 +403,7 @@ class SubcommandHelp(unittest.TestCase):
         base = Path(cls.temp.name).resolve()
         (base / "user").mkdir()
         cls.home = base / "workspace"
-        cls.env = {**runtime_environment(), "PATH": os.environ.get("PATH", ""), "HOME": str(base / "user"),
+        cls.env = {**runtime_environment(), "PATH": os.environ.get("PATH", ""), "HOME": str(base / "user"), "USERPROFILE": str(base / "user"),
                    "OBSERVATORY_HOME": str(cls.home), "PYTHONDONTWRITEBYTECODE": "1", "LC_ALL": "C",
                    "TMPDIR": str(base / "user")}
         init = cls.run_cli("init")

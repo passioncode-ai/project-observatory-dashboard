@@ -45,7 +45,7 @@ class MaintainApp(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name).resolve()
         self.home = base / "workspace"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(base / "user"),
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(base / "user"), "USERPROFILE": str(base / "user"),
                                            "OBSERVATORY_SYSTEM_SETUP": "0"}, clear=True)
         self.env.start()
         workspace.initialize(self.home)

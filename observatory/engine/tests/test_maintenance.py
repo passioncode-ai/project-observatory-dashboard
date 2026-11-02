@@ -130,7 +130,7 @@ class Base(unittest.TestCase):
         self.root = self.base / "cloud" / "Backups"
         self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home),
                                            "OBSERVATORY_BACKUPS": str(self.root),
-                                           "HOME": str(self.base / "user"),
+                                           "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"),
                                            "XDG_CONFIG_HOME": str(self.base / "xdg-config"),
                                            "OBSERVATORY_PRODUCT_LOG_DIR": str(self.base / "product-logs")},
                               clear=True)
@@ -1735,13 +1735,14 @@ class Schedule(Base):
         run.assert_called_once()
 
     def test_system_setup_needs_a_person_or_the_flag_and_never_a_temporary_home(self):
-        with patch.object(M.sys, "stdin") as stdin, patch.object(M, "_real_home", return_value=True):
-            stdin.isatty.return_value = True
+        # A person at a terminal is `osprivacy.is_terminal` (OBS-279: on Windows `isatty` is true for NUL).
+        with patch.object(M.osprivacy, "is_terminal", return_value=True) as terminal, \
+                patch.object(M, "_real_home", return_value=True):
             self.assertFalse(M.system_setup_allowed(self.home), "a temporary home is a test's")
             real = Path("/opt/synthetic-observatory-home")  # outside every temporary directory
             with patch.object(M.tempfile, "gettempdir", return_value=str(self.base / "elsewhere")):
                 self.assertTrue(M.system_setup_allowed(real))
-                stdin.isatty.return_value = False
+                terminal.return_value = False
                 self.assertFalse(M.system_setup_allowed(real))
         with patch.dict(os.environ, {"OBSERVATORY_SYSTEM_SETUP": "1"}):
             self.assertTrue(M.system_setup_allowed(self.home))
@@ -1773,7 +1774,7 @@ class Schedule(Base):
         try:
             p = subprocess.run([sys.executable, "-c", probe, str(work / "runtime")], cwd=ROOT, stdin=secondary,
                                capture_output=True, text=True, timeout=60,
-                               env={"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.getuid()).pw_dir,
+                               env={"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.getuid()).pw_dir, "USERPROFILE": pwd.getpwuid(os.getuid()).pw_dir,
                                     "TMPDIR": str(work / "tmp"), "PYTHONDONTWRITEBYTECODE": "1"})
         finally:
             os.close(primary)
@@ -1787,9 +1788,8 @@ class Schedule(Base):
         # Audit A07: a test or sandbox points $HOME elsewhere; launchd and the Keychain are
         # still the account's, so a terminal is not enough.
         self.assertFalse(M._real_home(), "Base points $HOME into its temporary directory")
-        with patch.object(M.sys, "stdin") as stdin, \
+        with patch.object(M.osprivacy, "is_terminal", return_value=True), \
                 patch.object(M.tempfile, "gettempdir", return_value=str(self.base / "elsewhere")):
-            stdin.isatty.return_value = True
             self.assertFalse(M.system_setup_allowed(Path("/opt/synthetic-observatory-home")))
         self.assertFalse(M.probes_allowed())
         with patch.object(M, "_real_home", return_value=True):
@@ -2441,7 +2441,7 @@ class Bridge(Base):
             doc = config.load(self.home)
             doc["updates"] = {"auto": settings_auto}
             workspace.write_json(self.home / "config/settings.json", doc)
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         subprocess.run(["/bin/bash", str(HOOK)], input="", env=env, capture_output=True, timeout=30, check=True)
 
@@ -2479,7 +2479,7 @@ class Bridge(Base):
     def test_sessions_starting_together_start_one_bridge(self):
         # Review F6: the claim is atomic.
         root, log = self.fake_install(with_maintain=False)
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         procs = [subprocess.Popen(["/bin/bash", str(HOOK)], stdin=subprocess.DEVNULL, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)]
@@ -2499,7 +2499,7 @@ class Bridge(Base):
         stamp.write_text("")
         old = time.time() - 2 * 86400
         os.utime(stamp, (old, old))
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"), "OBSERVATORY_ROOT": str(root),
                "OBSERVATORY_HOME": str(self.home), "XDG_STATE_HOME": str(self.base / "state")}
         procs = [subprocess.Popen(["/bin/bash", str(HOOK)], stdin=subprocess.DEVNULL, env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for _ in range(8)]

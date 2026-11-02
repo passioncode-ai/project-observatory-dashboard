@@ -62,11 +62,19 @@ class WindowsHolderWorkflow(unittest.TestCase):
         self.assertLess(strict.index('python -c "import cryptography"'), strict.index("python tests/test_node_org.py -v"))
         self.assertIn("steps.org.outcome", self.body)
 
-    def test_historical_informative_steps_remain_separately_labelled(self):
-        for name in ("tests", "compile", "oslocks"):
-            self.assertRegex(self.step(name), r"continue-on-error:\s*true")
+    def test_no_windows_step_may_fail_unseen(self):
+        # OBS-277: every step of the windows job is enforced; none is informative any more.
+        self.assertIsNone(re.search(r"continue-on-error", self.body))
+        for name in ("tests", "compile", "oslocks", "osproc", "osprivacy", "osschedule", "tick", "jobs", "portable"):
+            self.assertIn("if: always()", self.step(name), name)
         self.assertIn("steps.holder_safety.outcome", self.body)
 
+    def test_the_portable_set_is_held_to_the_known_list(self):
+        portable = self.step("portable")
+        self.assertIn("python tests/run_portable.py", portable)
+        self.assertIn("python tools/check_windows_suites.py", portable)
+        self.assertNotIn("|| true", portable)
+        self.assertIn("steps.portable.outcome", self.body)
 
 if __name__ == "__main__":
     unittest.main()

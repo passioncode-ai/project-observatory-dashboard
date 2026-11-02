@@ -1097,7 +1097,7 @@ def cmd_create(args) -> int:
                           f"or rotate (OSS-67)")
     block = host_block(args, name)
     passphrase = not args.no_passphrase
-    if passphrase and not sys.stdin.isatty():
+    if passphrase and not osprivacy.is_terminal(sys.stdin):
         raise Refused("a passphrase is typed by a person, into ssh-keygen's own prompt; run this in a "
                       "terminal, or pass --no-passphrase for an unattended key (the findings will list it)")
     keygen = tool("ssh-keygen")

@@ -95,6 +95,34 @@ class Flock(unittest.TestCase):
     def test_unlocking_what_is_not_locked_is_quiet(self):
         oslocks.flock(self.open(), oslocks.LOCK_UN)
 
+    def test_fd_path_names_the_real_file_behind_a_descriptor(self):
+        # OBS-98: the leak scan proves a file it opened lies inside the data folder by this path
+        # (macOS F_GETPATH, Linux /proc/self/fd, Windows GetFinalPathNameByHandleW).
+        reported = oslocks.fd_path(self.open())
+        self.assertIsNotNone(reported)
+        self.assertFalse(reported.startswith("\\\\?\\"), reported)
+        self.assertEqual(os.path.normcase(reported), os.path.normcase(os.path.realpath(self.path)))
+        self.assertTrue(os.path.samefile(reported, self.path))
+
+    def test_fd_path_follows_a_link_to_its_target(self):
+        target_dir = Path(self.tmp.name) / "real"
+        target_dir.mkdir()
+        (target_dir / "file").write_bytes(b"x")
+        link = Path(self.tmp.name) / "link"
+        try:
+            link.symlink_to(target_dir, target_is_directory=True)
+        except OSError as exc:  # Windows without the symlink privilege
+            self.skipTest(f"this account may not create a symbolic link: {exc}")
+        fd = os.open(link / "file", os.O_RDONLY)
+        self.addCleanup(os.close, fd)
+        reported = oslocks.fd_path(fd)
+        self.assertEqual(os.path.normcase(reported), os.path.normcase(os.path.realpath(target_dir / "file")))
+
+    def test_fd_path_of_a_closed_descriptor_is_none(self):
+        fd = os.open(self.path, os.O_RDONLY)
+        os.close(fd)
+        self.assertIsNone(oslocks.fd_path(fd))
+
     def test_no_engine_module_imports_fcntl_directly(self):
         # Every lock goes through oslocks; a direct `import fcntl` is what stopped the engine
         # from importing on Windows.

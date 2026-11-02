@@ -17,15 +17,34 @@ class FullLauncherTests(unittest.TestCase):
 
     def test_home_precedence_and_separate_default(self):
         # Only what names the home stays: on Windows that is USERPROFILE, not HOME.
-        home_only = {k: v for k, v in os.environ.items() if k in ('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')}
-        with patch.dict(os.environ, home_only, clear=True):
-            self.assertEqual(full_cli.full_home(), Path.home() / '.local/share/project-observatory-full')
+        # On Windows the default is %LOCALAPPDATA% unless a 0.21.0 workspace already sits under
+        # ~\.local\share (W7, osprivacy.default_home); a temporary profile has neither.
+        with tempfile.TemporaryDirectory() as profile:
+            names = {'HOME': profile, 'USERPROFILE': profile, 'LOCALAPPDATA': str(Path(profile, 'AppData', 'Local'))}
+            with patch.dict(os.environ, names, clear=True):
+                expected = (Path(profile, 'AppData', 'Local') if os.name == 'nt'
+                            else Path(profile, '.local', 'share')) / 'project-observatory-full'
+                self.assertEqual(full_cli.full_home(), expected)
+                legacy = Path(profile, '.local', 'share', 'project-observatory-full')
+                legacy.mkdir(parents=True)
+                self.assertEqual(full_cli.full_home(), legacy)
         # Absolute on this OS: on Windows a path without a drive is not.
         root = Path(tempfile.gettempdir()).resolve()
         old, new, explicit = (str(root / name) for name in ('old', 'new', 'explicit'))
         with patch.dict(os.environ, {'OBSERVATORY_HOME': old, 'OBSERVATORY_FULL_HOME': new}, clear=True):
             self.assertEqual(full_cli.full_home(), Path(new))
             self.assertEqual(full_cli.full_home(explicit), Path(explicit))
+
+    def test_the_engine_runs_in_utf8_mode_on_windows(self):
+        home, root = Path('ws'), Path('engine')
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('PYTHONUTF8', None)
+            self.assertEqual(full_cli.engine_environment(home, root, nt=True)['PYTHONUTF8'], '1')
+            self.assertNotIn('PYTHONUTF8', full_cli.engine_environment(home, root, nt=False))
+            env = full_cli.engine_environment(home, root, nt=True)
+            self.assertEqual((env['OBSERVATORY_HOME'], env['OBSERVATORY_ROOT']), (str(home), str(root)))
+        with patch.dict(os.environ, {'PYTHONUTF8': '0'}):
+            self.assertEqual(full_cli.engine_environment(home, root, nt=True)['PYTHONUTF8'], '0')
 
     def test_portable_state_refused_without_modification(self):
         with tempfile.TemporaryDirectory() as tmp:

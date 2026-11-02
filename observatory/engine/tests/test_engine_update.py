@@ -276,7 +276,7 @@ class UpdateTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
         self.home = self.base / "workspace"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base / "user"),
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"),
                                            "OBSERVATORY_PRODUCT_LOG_DIR": str(self.base / "product-logs")},
                               clear=True)
         self.env.start()
@@ -1244,7 +1244,7 @@ class RealSeams(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve() / "ws"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": self.tmp.name,
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": self.tmp.name, "USERPROFILE": self.tmp.name,
                                            "PYTHONPATH": "/synthetic/checkout"}, clear=True)
         self.env.start()
         import paths
@@ -1355,7 +1355,7 @@ class CliRoute(unittest.TestCase):
     def test_workspace_command_is_routed_and_degrades_offline(self):
         with tempfile.TemporaryDirectory() as tmp:
             s = socket.socket(); s.bind(("127.0.0.1", 0)); closed = s.getsockname()[1]; s.close()
-            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tmp,
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tmp, "USERPROFILE": tmp,
                    "OBSERVATORY_HOME": str(Path(tmp) / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
             p = subprocess.run([sys.executable, str(ROOT / "observatory.py"), "update", "--check",
                                 "--repository", REPO, "--api-url", f"http://127.0.0.1:{closed}"],

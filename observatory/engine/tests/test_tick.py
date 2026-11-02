@@ -69,7 +69,7 @@ def fake_repo(history: bool = True) -> pathlib.Path:
     home = d / "workspace"
     env = {k: v for k, v in os.environ.items()
            if k not in ("OBSERVATORY_REGISTRY", "OBSERVATORY_DB", "OBSERVATORY_STATE", "OBSERVATORY_SCRATCH")}
-    env.update(OBSERVATORY_HOME=str(home), HOME=str(d))
+    env.update(OBSERVATORY_HOME=str(home), HOME=str(d), USERPROFILE=str(d))
     p = subprocess.run([PY, str(ROOT / "observatory.py"), "init"], cwd=ROOT, env=env,
                        capture_output=True, text=True, timeout=120)
     if p.returncode:

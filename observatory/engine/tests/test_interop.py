@@ -99,7 +99,7 @@ class Workspace(unittest.TestCase):
         bin_dir = fx.stub_claude(self.base / "bin").parent
         self.trace_file = self.base / "claude-trace.txt"
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(HOME=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
+        env.update(HOME=str(self.base / "user"), USERPROFILE=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
                    PYTHONDONTWRITEBYTECODE="1", PATH=f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
                    OBSERVATORY_TEST_TRACE_FILE=str(self.trace_file),
                    OBSERVATORY_TEST_CLAUDE_SLEEP=self.claude_sleep,

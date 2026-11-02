@@ -40,6 +40,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import private_io
 import paths                                                                    
 from agent.providers import KEY_SHAPES
@@ -139,7 +140,7 @@ def main(argv: list[str]) -> int:
                 f"is {paths.STATE}. Remove the legacy file (after checking it is not the only "
                 f"copy you have), then install again.")
 
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         die("the key must arrive on stdin, never in an argument — an argument "
             "lands in the shell history and in the process list.\n"
             f"    run install_key with --for {a.consumer or 'CONSUMER'} and redirect a protected file to stdin")
