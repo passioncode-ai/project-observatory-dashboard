@@ -867,6 +867,73 @@ class SentryDoor(unittest.TestCase):
         self.assertNotIn("Traceback", e)
         self.assertTrue(no_value(o + e))
 
+    # ── review of #401, round 4: narrow tokens and the minting credential keep the same rule ─────────
+
+    def sent(self, value):
+        return [r for r in self.state.requests if r[3] == value]
+
+    def test_status_never_sends_a_replaced_narrow_value(self):
+        self.narrow_installed(80)                         # round 4, finding 1
+        other = fake_org_token(81, self.state.control, self.state.region)
+        put(NARROW_SLOT, self.state.add(other, "org", ("org:ci",)))
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("no longer holds the token recorded", e)
+        self.assertEqual(self.sent(other), [], "nothing sent")
+        self.assertTrue(no_value(o + e))
+
+    def test_a_narrow_org_token_naming_another_sentry_is_never_sent(self):
+        self.narrow_installed(82)
+        foreign = fake_org_token(83, "https://sentry.example.com", "https://sentry.example.com")
+        put(NARROW_SLOT, foreign)
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("belongs to https://sentry.example.com", e)
+        self.assertEqual(self.sent(foreign), [])
+
+    def test_revoke_from_does_not_send_a_replaced_narrow_value(self):
+        admin = self.personal_admin()
+        self.narrow_installed(84)
+        other = fake_org_token(85, self.state.control, self.state.region)
+        put(NARROW_SLOT, self.state.add(other, "org", ("org:ci",)))
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("no narrow token verified now", e)
+        self.assertEqual(self.sent(other), [])
+        self.assertEqual(slot_value(ADMIN_SLOT), admin)
+
+    def test_revoke_of_a_replaced_narrow_slot_sends_nothing(self):
+        self.oauth_admin()                                # round 4, finding 2
+        self.assertEqual(self.issue()[0], 0)
+        other = fake_org_token(86, self.state.control, self.state.region)
+        put(NARROW_SLOT, self.state.add(other, "org", ("org:ci",)))
+        rc, o, e = run(self.m.cmd_revoke, "/".join(NARROW_SLOT), None, None, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertEqual(self.sent(other), [])
+        self.assertFalse([r for r in self.state.requests if r[1] == "DELETE"], "no deletion")
+        self.assertEqual(slot_value(NARROW_SLOT), other)
+
+    def test_revoke_never_sends_a_replaced_minting_credential(self):
+        self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        rotated = self.state.add(fake("sntrya_", "rotated-minter"), "oauth-app",
+                                 ("org:read", "org:tokens", "org:write"))
+        put(ADMIN_SLOT, rotated)
+        rc, o, e = run(self.m.cmd_revoke, "/".join(NARROW_SLOT), None, None, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("no longer holds the credential that minted token 1", e)
+        self.assertIn("revoke --from example-site/prod/SENTRY_ADMIN_TOKEN --base-url", e)
+        self.assertEqual(self.sent(rotated), [])
+        self.assertFalse([r for r in self.state.requests if r[1] == "DELETE"])
+        self.assertIsNotNone(slot_value(NARROW_SLOT), "kept")
+
+    def test_the_default_sentry_is_named_when_no_base_is_given(self):
+        self.personal_admin()                             # round 4, LOW
+        rc, o, e = self.issue(base_url=None, org=ORG)
+        self.assertEqual(rc, 3, o + e)
+        self.assertIn("no --base-url: using the default Sentry https://sentry.io", e)
+        self.assertEqual(self.state.requests, [])
+
     @unittest.skipIf(os.name == "nt", "POSIX file modes")
     def test_the_ledger_is_owner_only(self):
         self.oauth_admin()

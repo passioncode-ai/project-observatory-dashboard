@@ -460,9 +460,14 @@ owner-only beside the ledger, never a plain hash), so a slot whose value was rep
 recorded Sentry, and a 401 to it needs a new proof. A base named with `--base-url` for the first time is said so,
 and so is a `--base-url` that replaces a recorded Sentry whose proof no longer holds for the value; a value still
 proved on one Sentry is never sent to another. `sentry.py status` follows the same rule: it asks about a broad token
-only when the slot still holds the proved value, and otherwise reports it as unproven or changed without sending it. `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
+only when the slot still holds the proved value, and otherwise reports it as unproven or changed without sending it.
+Narrow tokens follow the same rule: `issue` and `install` record each one's keyed digest, `status` and both kinds of
+`revoke` send a narrow slot's value only while it is still that value, and `revoke PROJECT/ENV/NAME` sends the
+minting credential only while its slot holds the value proved on that Sentry (otherwise it names the `revoke --from
+... --base-url` step that proves it again). `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
 person made, waits for that person), proves it dead and removes the slot; `list` and `status` say what exists and
-whether it still works. `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
+whether it still works. Without `--base-url`, `issue` and `install` use `https://sentry.io` and say so on
+stderr; `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
 `de.sentry.io`) is read from the organization, or given with `--region us|de` or `--region-host`. A region read from a
 token or an answer must be the base itself or one of its documented region hosts, by exact name; any other host is
 used only when you name it with `--region-host`. Redirects are never followed, so a token never travels to a host

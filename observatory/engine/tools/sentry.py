@@ -68,6 +68,12 @@ WHAT SENTRY'S API LETS A TOKEN MINT, and so where this door refuses:
   recorded base whose proof no longer holds for the value (a value still proved there is refused for any
   other Sentry). `status` keeps the same rule: it asks a recorded base about a broad token only when the
   slot still holds the proved value, and reports an `unproven` or changed entry without sending it.
+  Narrow tokens follow the same rule: `issue` and `install` record each one's kind and keyed digest,
+  and `status`, `revoke --from` and `revoke SLOT` send a narrow slot's value only while it is still
+  that value (and an organization token only to the Sentry it names). `revoke SLOT` sends the minting
+  credential only while its slot holds the value proved on that Sentry; otherwise it refuses with the
+  `revoke --from ... --base-url` step that proves it again. Without --base-url, `issue` and `install`
+  use https://sentry.io and say so.
 * Service accounts (`/api/0/organizations/{org}/service-accounts/`, project-scoped) are being
   built behind a feature flag and issue no token yet; when they do, they are the route for a
   project-scoped token.
@@ -651,11 +657,21 @@ def recipe(preset_key: str, target: str, base: str, org: str | None, project: st
 
 # ─────────────────────────── issue and install ──────────────────────────────
 
+def _say_default_base(base_url: str | None, base: str) -> None:
+    """Without --base-url the door uses sentry.io: said, as a first trust is, because it is where the value goes
+    (an organization token that names another Sentry is still refused by `check_base`)."""
+    if not base_url:
+        print(f"  no --base-url: using the default Sentry {base}, the only host a token is sent to here",
+              file=sys.stderr)
+
+
 def _row(preset_key: str, org: str, project: str | None, base: str, region: str, proof: dict, *,
          minted_by: str, token_id, name: str | None, from_slot: str | None, prior: dict | None,
-         expiry_reason: str) -> dict:
+         expiry_reason: str, value: str) -> dict:
     preset = PRESETS[preset_key]
-    return {"preset": preset_key, "kind": preset["kind"], "scopes": proof["scopes"] or list(preset["scopes"]),
+    # The value this row describes, as `proof_holds` reads it: a later `status` or `revoke` sends the slot's
+    # value to this row's Sentry only while it is still this one.
+    return {"proved_on": today(), "proved_kind": kind_of(value), "proof_digest": proof_digest(value),"preset": preset_key, "kind": preset["kind"], "scopes": proof["scopes"] or list(preset["scopes"]),
             "scopes_confirmed": proof["scopes_confirmed"], "org": org, "project": project,
             "base_url": base, "region_url": region, "token_id": token_id, "name": name,
             "minted_by": minted_by, "from": from_slot,
@@ -686,6 +702,7 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
         raise Refusal("issue needs --from PROJECT/ENV/NAME (the credential that mints) and --vault "
                       "PROJECT/ENV/NAME (where the new token goes)", 2)
     base = origin(base_url or API_DEFAULT)
+    _say_default_base(base_url, base)
     to = parse_slot(target, "--vault")
     frm = parse_slot(source, "--from")
     slot, from_slot = "/".join(to), "/".join(frm)
@@ -737,7 +754,7 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
             doc = ledger()
             doc["issued"][slot] = _row(preset_key, org, project, base, reg, proof, minted_by="door",
                                        token_id=token_id, name=name, from_slot=from_slot, prior=prior,
-                                       expiry_reason=ORG_NO_EXPIRY)
+                                       expiry_reason=ORG_NO_EXPIRY, value=value)
             # The minting credential answered on this base: the proof `revoke --from` needs before a 401
             # can count as its revocation.
             doc["broad"][from_slot] = {**(doc["broad"].get(from_slot) or {}), "kind": kind, "base_url": base,
@@ -793,6 +810,7 @@ def cmd_install(preset_key: str, target: str | None, org: str | None, project: s
     if not target:
         raise Refusal("install needs --vault PROJECT/ENV/NAME, the slot that holds the token", 2)
     base = origin(base_url or API_DEFAULT)
+    _say_default_base(base_url, base)
     to = parse_slot(target, "--vault")
     slot = "/".join(to)
     value = read_slot(*to)
@@ -816,7 +834,8 @@ def cmd_install(preset_key: str, target: str | None, org: str | None, project: s
         expiry = record_slot_expiry(*to, reason)
         doc = ledger()
         doc["issued"][slot] = _row(preset_key, org, project, base, reg, proof, minted_by="installed",
-                                   token_id=None, name=None, from_slot=None, prior=prior, expiry_reason=reason)
+                                   token_id=None, name=None, from_slot=None, prior=prior, expiry_reason=reason,
+                                   value=value)
         save_ledger(doc)
     _journal("install", slot, preset=preset_key, org=org, project=project)
     print(f"  {slot}: installed {KIND_WORDS[kind]} for {org}, scopes {', '.join(proof['scopes'] or preset['scopes'])}, "
@@ -827,9 +846,21 @@ def cmd_install(preset_key: str, target: str | None, org: str | None, project: s
 
 # ─────────────────────────── revoke ─────────────────────────────────────────
 
+def _narrow_value_ok(slot: str, row: dict, value: str) -> None:
+    """A narrow slot's value is sent to its row's Sentry only while it is the value the row recorded (same
+    kind, same keyed digest) and, for an organization token, only to the Sentry it names. Raises Refusal
+    before any send."""
+    check_base(value, row["base_url"])
+    if not proof_holds(row, value, kind_of(value)):
+        raise Refusal(f"{slot} no longer holds the token recorded for it on {row['base_url']} (replaced, or no "
+                      f"digest was recorded); nothing sent. `sentry.py install --preset {row['preset']} --vault "
+                      f"{slot}` records the value it holds now, or `sentry.py issue` mints a new one", 1)
+
+
 def _verify_row(slot: str, row: dict, wait: float) -> tuple[bool, str]:
     try:
         value = read_slot(*slot.split("/"))
+        _narrow_value_ok(slot, row, value)
         proof = verify(value, row["preset"], row["org"], row.get("project"), row["base_url"],
                        row.get("region_url") or row["base_url"], wait)
     except (Refusal, SentryError) as exc:
@@ -851,9 +882,21 @@ def cmd_revoke(target: str | None, source: str | None, org: str | None, base_url
         project, env, name = slot.split("/")
         base, org_ = row["base_url"], row["org"]
         value = read_slot(project, env, name) if slot_held(project, env, name) else None
+        if value is not None:
+            _narrow_value_ok(slot, row, value)
         said = ""
         if row.get("minted_by") == "door" and row.get("token_id") is not None and row.get("from"):
             minter = read_slot(*row["from"].split("/"))
+            known = doc["broad"].get(row["from"]) or {}
+            # The minting credential goes only to the Sentry it was proved on, and only while the slot still
+            # holds that value: a rotated or foreign token is never sent to delete anything.
+            check_base(minter, base)
+            if known.get("base_url") != base or not proof_holds(known, minter, kind_of(minter)):
+                raise Refusal(f"{slot}: {row['from']} no longer holds the credential that minted token "
+                              f"{row['token_id']} on {base} (replaced, or never proved there); nothing was sent "
+                              f"and nothing removed. While it is alive, `sentry.py revoke --from {row['from']} "
+                              f"--base-url {base}` proves it again; or a person deletes token {row['token_id']} "
+                              f"at {pages(base, org_)['org']}, then `sentry.py revoke {slot}` again", 1)
             said = _delete_token(minter, base, org_, row["token_id"])
             if "could NOT" in said:
                 raise Refusal(f"{slot}: {said}; the slot and its record are kept", 1)
