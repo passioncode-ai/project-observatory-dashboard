@@ -2,9 +2,10 @@
 """Your own relay, `fabric-relay/0.1`, on your always-on machine (OBS-287, the relay project's interim RLY-04), until
 the hosted relay runs.
 
-    project-observatory full relay serve [--origin URL] [--host HOST] [--port N] [--data DIR | --memory]
+    project-observatory full relay serve [--origin URL] [--host HOST] [--port N] [--trusted-proxy]
+                                         [--data DIR | --memory]
         run the relay in the foreground until Ctrl-C or SIGTERM; logs are JSON lines on stderr
-    project-observatory full relay enable --origin URL [--host HOST] [--port N]
+    project-observatory full relay enable --origin URL [--host HOST] [--port N] [--trusted-proxy]
         run it inside the node's own server from its next start (no service of its own)
     project-observatory full relay disable
         stop running it there from the server's next start
@@ -19,6 +20,11 @@ THE ORIGIN. What every machine signs into its `auth`. On this machine alone it i
 default). For your other machines put a TLS terminator in front (a private network's own HTTPS, a tunnel or a reverse
 proxy) and pass its `https://` origin: the relay itself serves plain HTTP on the address you bind, by default
 127.0.0.1. An `http://` origin is a loopback literal only, as the protocol requires.
+
+CALLERS' ADDRESSES. Connections still owing their `auth` are capped per caller address. Behind a terminator on this
+machine every connection comes from 127.0.0.1: make the terminator forward the caller's address in `X-Forwarded-For`
+and pass `--trusted-proxy`, and the relay counts each connection from a loopback peer against the rightmost address
+that header names. Without it the header is ignored, and all callers behind the terminator share one address's slots.
 
 WHAT IT KEEPS. Queued messages, sealed under the relay's own key (`spool.key`) in `node/relay/spool.sqlite`, both
 owner-only, until they are acknowledged or their ttl ends; never a key of yours and never a secret in clear (what must
@@ -75,7 +81,7 @@ def _loopback(host: str) -> bool:
         return False
 
 
-def checked(origin: str | None, host: str | None, port: int | None) -> dict:
+def checked(origin: str | None, host: str | None, port: int | None, trusted_proxy: bool = False) -> dict:
     """`{origin, host, port}` the relay can serve, or RelayConfigError. An `http://` origin is this machine's own
     address: a loopback bind on the same port. An `https://` origin is a TLS terminator in front of the bind."""
     port = DEFAULT_PORT if port is None else port
@@ -99,7 +105,9 @@ def checked(origin: str | None, host: str | None, port: int | None) -> dict:
                                    "terminator in front and pass its https:// --origin")
         if parts.port != port:
             raise RelayConfigError(f"an http:// origin names the port it is served on: http://127.0.0.1:{port}")
-    return {"origin": origin, "host": host.strip("[]"), "port": port}
+        if trusted_proxy:
+            raise RelayConfigError("--trusted-proxy is for a TLS terminator in front, which an https:// --origin names")
+    return {"origin": origin, "host": host.strip("[]"), "port": port, "trusted_proxy": bool(trusted_proxy)}
 
 
 def read_config() -> dict | None:
@@ -137,7 +145,7 @@ def start_configured(log=None):
     doc = read_config()
     if not doc or not doc.get("enabled"):
         return None
-    setting = checked(doc.get("origin"), doc.get("host"), doc.get("port"))
+    setting = checked(doc.get("origin"), doc.get("host"), doc.get("port"), doc.get("trusted_proxy", False))
     rs = _relay_server()
     server = rs.build(node_folder(), log=log or _printer(sys.stdout), **setting)
     return server.start()
@@ -164,7 +172,7 @@ def health(server) -> str | None:
 
 def serve(args) -> int:
     try:
-        setting = checked(args.origin, args.host, args.port)
+        setting = checked(args.origin, args.host, args.port, args.trusted_proxy)
         rs = _relay_server()
     except RelayConfigError as error:
         print(f"relay: {error}", file=sys.stderr)
@@ -200,7 +208,7 @@ def status() -> dict:
     doc = read_config()
     out: dict = {"schema": "observatory-relay-status/1", "enabled": bool(doc and doc.get("enabled"))}
     if doc:
-        out.update({k: doc.get(k) for k in ("origin", "host", "port")})
+        out.update({k: doc.get(k) for k in ("origin", "host", "port", "trusted_proxy")})
     rs = _relay_server()
     admission = rs.Admission(rs.NodeRecords(node_folder()).read, log=lambda record: None).current(
         int(time.time() * 1000))
@@ -232,6 +240,9 @@ def parser() -> argparse.ArgumentParser:
                                                          "front, or http://127.0.0.1:PORT on this machine alone")
         q.add_argument("--host", help="the address to bind (default 127.0.0.1)")
         q.add_argument("--port", type=int, help=f"the port to bind (default {DEFAULT_PORT})")
+        q.add_argument("--trusted-proxy", action="store_true",
+                       help="count a connection from this machine against the caller address its X-Forwarded-For names "
+                            "(a TLS terminator here that forwards it)")
     store = s.add_mutually_exclusive_group()
     store.add_argument("--data", help="the spool folder (default the workspace's node/relay/)")
     store.add_argument("--memory", action="store_true", help="keep queued messages in memory only")
@@ -247,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "serve":
             return serve(args)
         if args.cmd == "enable":
-            setting = checked(args.origin, args.host, args.port)
+            setting = checked(args.origin, args.host, args.port, args.trusted_proxy)
             write_config(dict({"schema": SCHEMA, "enabled": True}, **setting))
             print(f"relay: enabled at {setting['origin']} (bound to {setting['host']}:{setting['port']}); it starts "
                   "with the node's server, at its next start (a login, `full update`). To start it now, restart that "

@@ -877,9 +877,14 @@ own). It reuses the node's checks and adds what only a relay does:
   a frame over 1 MiB refused from its declared length and closed 1009). The request head must arrive within 10 s of
   the accept and `auth` within 10 s of the upgrade, each a wall-clock deadline across every byte (a missed `auth` is
   4401); an admitted session is closed after 90 s of silence.
-- **Bounds.** Connections not admitted yet have their own cap (32, at most 8 per non-loopback source address; past it
-  the oldest gives way when it is at least half a second old, else the newcomer is answered 503), apart from admitted sessions (128, at most 4 per machine, its oldest replaced), both kept below
-  the process's descriptor limit (`fd_caps`). The per-minute limits count a machine across all its connections, with
+- **Bounds.** Connections not admitted yet have their own cap (32, at most 8 per caller address, loopback included),
+  apart from admitted sessions (128, at most 4 per machine, its oldest replaced), both kept below the process's
+  descriptor limit (`fd_caps`). The caller address is the socket's peer; behind a TLS terminator on this machine,
+  with `--trusted-proxy`, it is the rightmost `X-Forwarded-For` entry of a connection from a loopback peer, and without
+  the setting that header is ignored. Past a cap one connection gives way (`RelayServer.victim`): from the address
+  holding the most slots, one that has sent nothing before one that sent its request, the oldest first, and never one
+  that sent its request less than 2 s ago (its fair answer window); when none may, the newcomer is answered 503. So a
+  flood from one address displaces itself, and a machine that answers its `hello` gets in. The per-minute limits count a machine across all its connections, with
   `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
   queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
   2 MiB), one page per machine at once. A failed accept is retried with a backoff and logged; `health` reports an

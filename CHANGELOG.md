@@ -19,7 +19,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
   have their own connection budget apart from admitted machines, the rate limits count a machine across all its
   connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
-  reads a mailbox a page at a time, and a failed accept is retried and shown in the server's health. Blobs, a hub's
+  reads a mailbox a page at a time, and a failed accept is retried and shown in the server's health. The per-address
+  cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
+  address it forwards in `X-Forwarded-For`, and a flood from one address displaces only itself. Blobs, a hub's
   delta and heartbeat frames and the Cloudflare deployment are not carried yet.
   Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
   on loopback.

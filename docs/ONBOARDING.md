@@ -1444,6 +1444,10 @@ project-observatory full relay disable
   in front (your private network's HTTPS, a tunnel or a reverse proxy) and pass its `https://`
   origin; the relay itself serves plain HTTP on the address you bind with `--host`, by default
   127.0.0.1. An `http://` origin is refused for anything but a loopback address and its own port.
+  Have the terminator forward each caller's address in `X-Forwarded-For` and pass
+  `--trusted-proxy`: the relay then counts a connection from this machine against the address the
+  terminator appended (the rightmost one). Without it the header is ignored, and every caller behind
+  the terminator shares the slots of one address.
 - **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
   the relay beside itself when it starts (a login, `full update`, or
   `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
@@ -1456,13 +1460,18 @@ project-observatory full relay disable
   `mailbox-full` or `rate-limited` (with the seconds to wait), and closes a connection that keeps
   sending (1008). A message to a machine the
   record does not admit is `unknown-recipient`. A repeat of a message within its ttl is answered
-  with its first number and is not delivered twice.
+  with its first number and is not delivered twice. The relay remembers at most 20000 messages per
+  sender for that; it forgets first those already acknowledged or expired, and while all 20000 are
+  still queued it refuses that machine's new messages (`rate-limited`, retry in 60 seconds) rather
+  than forget one.
 - **Connections.** A caller has 10 seconds from connecting to send its request and 10 seconds from
   the upgrade to send its `auth`, however it spreads the bytes; then it is closed (4401 for a missed
-  `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address
-  other than this machine's own; when it is full the oldest gives way), apart from admitted
-  machines (128 connections, at most 4 per machine, a fifth replacing its oldest), and both stay
-  below the process's limit of open files. A machine that stops reading its messages slows only its
+  `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address,
+  this machine's own included). When it is full, a connection from the address holding the most
+  gives way, one that has sent nothing first; a caller that has sent its request keeps its place
+  for 2 seconds to answer. That budget is kept apart from the admitted machines' (128 connections,
+  at most 4 per machine, a fifth replacing its oldest), and both stay below the process's limit of
+  open files. A machine that stops reading its messages slows only its
   own connection, which is closed when its queue fills. If the relay cannot accept connections for
   more than a second (out of open files, say), it keeps retrying and the server's health says so.
 - **What it keeps.** Queued messages, in `node/relay/spool.sqlite`, each sealed with AES-256-GCM

@@ -25,7 +25,9 @@ What it carries, and how:
 - `delta-query`, answered from the delta entries this machine's node applied (read-only).
 
 Connections are bounded twice, below the process's descriptor limit (`fd_caps`): those not admitted yet (`MAX_PENDING`,
-`MAX_PENDING_PER_SOURCE` per non-loopback address; past the cap the oldest gives way) apart from admitted sessions
+`MAX_PENDING_PER_SOURCE` per caller address, loopback included, a trusted terminator's forwarded address with
+`trusted_proxy`; past a cap `RelayServer.victim` gives way: from the address holding most slots, silence before an
+answer, the oldest first, never one answering inside `FAIR_ANSWER_SECONDS`) apart from admitted sessions
 (`MAX_SESSIONS`, `MAX_SESSIONS_PER_KID` per machine, its oldest replaced), so unauthenticated clients cannot starve the
 estate's machines. Each session writes from its own thread through a bounded queue: a machine that stops reading
 stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its socket. A
@@ -84,13 +86,15 @@ MAX_CONNECTIONS = MAX_SESSIONS                             # the name 0.31.0's f
 #: Connections one machine (one admitted kid) holds at once; one more replaces its oldest (closed 1001).
 MAX_SESSIONS_PER_KID = 4
 #: Connections not admitted yet (sending their request head, or upgraded and owing `auth`), apart from the sessions,
-#: so they cannot starve admitted machines: past it the oldest gives way, or the newcomer is answered 503.
+#: so they cannot starve admitted machines: past it one gives way (`RelayServer.victim`), or the newcomer is answered
+#: 503 when every one is answering inside its fair window.
 MAX_PENDING = 32
-#: Of those, from one source address; a loopback source is exempt (a TLS terminator on this machine carries every
-#: machine's connection, so only `MAX_PENDING` and the deadlines bound it there).
+#: Of those, from one caller address, loopback included: the socket's peer, or behind a TLS terminator on this machine
+#: the address it forwards (`trusted_proxy`, `X-Forwarded-For`), so one caller cannot hold the others' slots.
 MAX_PENDING_PER_SOURCE = 8
-#: A pending connection at least this old gives way to a newcomer when `MAX_PENDING` is reached.
-EVICT_AFTER_SECONDS = 0.5
+#: A connection that sent its request and owes `auth` keeps its slot this long whatever arrives (its fair answer
+#: window); one that has sent nothing may give way at once, after every older silent one of its address.
+FAIR_ANSWER_SECONDS = 2.0
 #: Descriptors left to the rest of the process (the node's server, the spool) below its soft limit.
 FD_RESERVE = 48
 #: An accept loop failing this long, or ended, is reported by `health`.
@@ -102,8 +106,9 @@ END_GRACE_SECONDS = 1.0
 #: One delivery page: at most this many messages and, past the first, this many body bytes, read one machine at a time.
 FLUSH_PAGE_ROWS = 8
 FLUSH_PAGE_BYTES = 2 * 1024 * 1024
-#: Tombstones `(from, msgId)` one sender keeps beyond the mailbox caps; past it its oldest go first (the recipient's
-#: own replay window still refuses a repeat), and every tombstone goes at its ttl.
+#: Tombstones `(from, msgId)` one sender keeps beyond the mailbox caps: past it, its oldest whose message has left the
+#: mailbox go first; while every one guards a queued message its new sends are refused (`rate-limited`). Every
+#: tombstone goes at its ttl.
 MAX_TOMBSTONES_PER_SENDER = 20000
 REVALIDATE_SECONDS = 2.0
 PURGE_SECONDS = 60.0
@@ -372,6 +377,9 @@ class Mailboxes:
                 if same:
                     db.execute('COMMIT')
                     return {'seq': same[0], 'duplicate': True}
+                if not self._tombstone_room(sender):
+                    db.execute('COMMIT')
+                    return {'full': 'tombstones'}
                 count, size = db.execute('SELECT count(*), coalesce(sum(size), 0) FROM mail WHERE recipient = ?',
                                          (to,)).fetchone()
                 if count >= self.limits['mailboxMessages']:
@@ -391,24 +399,34 @@ class Mailboxes:
                            (to, seq, sender, msg_id, sealed, len(data), relay.rfc3339(now_ms), expires))
                 db.execute('INSERT OR REPLACE INTO tombstones VALUES (?, ?, ?, ?, ?)',
                            (sender, msg_id, to, seq, expires))
-                over = db.execute('SELECT count(*) FROM tombstones WHERE sender = ?', (sender,)).fetchone()[0] \
-                    - MAX_TOMBSTONES_PER_SENDER
-                if over > 0:
-                    db.execute('DELETE FROM tombstones WHERE rowid IN (SELECT rowid FROM tombstones WHERE sender = ? '
-                               'ORDER BY rowid LIMIT ?)', (sender, over))
                 db.execute('COMMIT')
             except BaseException:
                 db.execute('ROLLBACK')
                 raise
         return {'seq': seq, 'duplicate': False}
 
+    def _tombstone_room(self, sender: str) -> bool:
+        """Whether `sender` may get one more tombstone (under the lock, inside the transaction): at
+        `MAX_TOMBSTONES_PER_SENDER` its oldest go whose message left the mailbox (acknowledged or expired); one whose
+        message is still queued is never dropped, since a retry under its `msgId` would then queue a second copy. False
+        when every one still guards a queued message: the send is refused, never forgotten."""
+        db = self._db
+        count = db.execute('SELECT count(*) FROM tombstones WHERE sender = ?', (sender,)).fetchone()[0]
+        if count < MAX_TOMBSTONES_PER_SENDER:
+            return True
+        db.execute('DELETE FROM tombstones WHERE rowid IN (SELECT t.rowid FROM tombstones t WHERE t.sender = ? AND '
+                   'NOT EXISTS (SELECT 1 FROM mail m WHERE m.recipient = t.recipient AND m.seq = t.seq) '
+                   'ORDER BY t.rowid LIMIT ?)', (sender, count - MAX_TOMBSTONES_PER_SENDER + 1))
+        return db.execute('SELECT count(*) FROM tombstones WHERE sender = ?', (sender,)).fetchone()[0] \
+            < MAX_TOMBSTONES_PER_SENDER
+
     def page(self, to: str, now_ms: int, after_seq: int = 0, *, max_rows: Optional[int] = None,
              max_bytes: Optional[int] = None) -> List[dict]:
         """The next unacknowledged, unexpired messages after `after_seq`, in `seq` order: at most `max_rows`
         (`FLUSH_PAGE_ROWS`), and no more once their bodies reach `max_bytes` (`FLUSH_PAGE_BYTES`; the first is always
         taken). Rows are read and opened one at a time, so a page holds no more than that in memory. Expired ones are
-        deleted on the way, and one whose seal does not open (another key, a damaged row) is deleted and logged, never
-        delivered."""
+        deleted on the way, and one whose seal does not open (another key, a damaged row) is skipped, deleted and
+        logged, never delivered and never counted against the page: an empty page means the mailbox is exhausted."""
         from cryptography.exceptions import InvalidTag
         rows = FLUSH_PAGE_ROWS if max_rows is None else max_rows
         limit = FLUSH_PAGE_BYTES if max_bytes is None else max_bytes
@@ -418,7 +436,7 @@ class Mailboxes:
         with self._lock:
             self._db.execute('DELETE FROM mail WHERE recipient = ? AND expires_at <= ?', (to, now_ms))
             cursor = self._db.execute('SELECT seq, sender, msg_id, sealed, sent_at FROM mail WHERE recipient = ? '
-                                      'AND seq > ? ORDER BY seq LIMIT ?', (to, after_seq, max(rows, 1)))
+                                      'AND seq > ? ORDER BY seq', (to, after_seq))
             for seq, sender, msg_id, sealed, sent_at in cursor:
                 try:
                     body = self._aead.decrypt(sealed[:12], sealed[12:],
@@ -428,7 +446,7 @@ class Mailboxes:
                     continue
                 out.append({'from': sender, 'msgId': msg_id, 'seq': seq, 'body': body, 'sentAt': sent_at})
                 total += len(body)
-                if total >= limit:
+                if total >= limit or len(out) >= max(rows, 1):
                     break
             cursor.close()
             if broken:
@@ -644,6 +662,7 @@ class Session:
         self.cond = threading.Condition()
         self.outbox: collections.deque = collections.deque()
         self.outbox_bytes = 0
+        self.pong: Optional[bytes] = None                 # the latest ping's answer; older ones are never queued
         self.wake = False
         self.ended = False
         self.ended_at: Optional[float] = None
@@ -724,11 +743,15 @@ class Session:
         try:
             while True:
                 with self.cond:
-                    while not self.outbox and not (self.wake and self.kid is not None and not self.ended):
+                    while not self.outbox and (self.pong is None or self.ended) \
+                            and not (self.wake and self.kid is not None and not self.ended):
                         if self.ws.closed:
                             return
                         self.cond.wait(1.0)
-                    if self.outbox:
+                    if self.pong is not None and not self.ended:
+                        item, self.pong = ('pong', self.pong), None
+                        self.outbox_bytes -= len(item[1])
+                    elif self.outbox:
                         item = self.outbox.popleft()
                         if item[0] == 'text':
                             self.outbox_bytes -= len(item[1])
@@ -763,7 +786,7 @@ class Session:
                               separators=(',', ':')).encode('utf-8')
             self.ws.write(OP_TEXT, data)
             self.delivered = message['seq']
-        if page and (len(page) >= FLUSH_PAGE_ROWS or sum(len(m['body']) for m in page) >= FLUSH_PAGE_BYTES):
+        if page:                                           # until a page comes back empty: the mailbox past `delivered`
             self.wake_up()
 
     def finish(self) -> None:
@@ -837,7 +860,15 @@ class Session:
             server.left(self)
 
     def _ping(self, payload: bytes) -> None:
-        self._enqueue(('pong', payload), 0)
+        """A ping's answer replaces any still waiting (RFC 6455 lets a pong answer the latest ping only), counted at
+        its size against `OUTBOX_BYTES`, so a caller that pings and never reads holds one pong, not one per ping."""
+        with self.cond:
+            self.outbox_bytes += len(payload) - (len(self.pong) if self.pong is not None else 0)
+            self.pong = payload
+            over = self.outbox_bytes > OUTBOX_BYTES
+            self.cond.notify()
+        if over:
+            self.drop(None, 'not-reading')
 
     def _serve(self) -> None:
         while not self.ended:
@@ -918,6 +949,10 @@ class Session:
         if to not in (admission.get('keys') or {}):
             return self.error('unknown-recipient', reply)
         answer = self.server.mailboxes.append(to, self.kid, msg_id, body, ttl, now)
+        if answer.get('full') == 'tombstones':
+            # The sender's own bound, not the recipient's mailbox: it retries once its recipients acknowledged.
+            self.server.log({'event': 'relay.tombstones-full', 'kid': self.kid})
+            return self.error('rate-limited', reply, retryAfter=60)
         if 'full' in answer:
             self.server.log({'event': 'relay.mailbox-full', 'kid': to, 'limit': answer['full']})
             return self.error('mailbox-full', reply)
@@ -998,11 +1033,29 @@ def _loopback_address(address: str) -> bool:
         return False
 
 
-class _Pending:
-    __slots__ = ('sock', 'peer', 'at', 'ws')
+def forwarded_for(headers: Dict[str, str]) -> Optional[str]:
+    """The caller's address a TLS terminator on this machine forwards: the rightmost `X-Forwarded-For` entry (the one
+    the terminator itself appended; those before it are the caller's own words), as an address literal, or None."""
+    import ipaddress
+    value = headers.get('x-forwarded-for')
+    if not value:
+        return None
+    last = value.split(',')[-1].strip().strip('[]')
+    try:
+        return str(ipaddress.ip_address(last))
+    except ValueError:
+        return None
 
-    def __init__(self, sock: socket.socket, peer: str):
-        self.sock, self.peer, self.at, self.ws = sock, peer, time.monotonic(), None
+
+class _Pending:
+    """A connection not admitted yet. `address` is whom it counts against (`MAX_PENDING_PER_SOURCE`): the socket's
+    peer, or the address a trusted terminator forwards. `progress` is 0 until its request head arrived, then 1."""
+    __slots__ = ('sock', 'peer', 'address', 'at', 'ws', 'progress', 'session')
+
+    def __init__(self, sock: Optional[socket.socket], address: str, at: Optional[float] = None, progress: int = 0):
+        self.sock, self.peer, self.address = sock, address, address
+        self.at = time.monotonic() if at is None else at
+        self.ws, self.progress, self.session = None, progress, None
 
 
 class RelayServer:
@@ -1010,15 +1063,17 @@ class RelayServer:
     without waiting on any of them. `origin` is what machines sign into `relay-auth/1`: its loopback `http://` address,
     or the `https://` origin of the TLS terminator in front of it.
 
-    Two separate budgets: connections not admitted yet (`max_pending`, `max_pending_per_source`, each within the
-    request-head and auth deadlines, the oldest giving way to a newcomer) and admitted sessions (`max_connections`,
-    at most `max_per_kid` per machine). Both stay below the process's descriptor limit (`fd_caps`)."""
+    Two separate budgets: connections not admitted yet (`max_pending`, at most `max_pending_per_source` per caller
+    address, each within the request-head and auth deadlines; past a cap one gives way by `victim`) and admitted
+    sessions (`max_connections`, at most `max_per_kid` per machine). Both stay below the process's descriptor limit
+    (`fd_caps`). With `trusted_proxy`, a connection from a loopback peer counts against the address its
+    `X-Forwarded-For` names; without it the header is ignored and the peer is the address."""
 
     def __init__(self, *, origin: str, admission: Admission, mailboxes: Mailboxes, host: str = '127.0.0.1',
                  port: int = 0, limits: Optional[dict] = None, clock: Callable[[], float] = time.time,
                  log: Callable[[dict], None] = _default_log, max_connections: int = MAX_SESSIONS,
                  max_pending: int = MAX_PENDING, max_pending_per_source: int = MAX_PENDING_PER_SOURCE,
-                 exempt_loopback: bool = True, max_per_kid: int = MAX_SESSIONS_PER_KID):
+                 trusted_proxy: bool = False, max_per_kid: int = MAX_SESSIONS_PER_KID):
         if not relay.is_relay_origin(origin):
             raise ValueError('not a relay origin: https on a host name, or http on a loopback literal')
         self.origin, self.admission, self.mailboxes = origin, admission, mailboxes
@@ -1026,12 +1081,12 @@ class RelayServer:
         self.limits = {name: value for name, value in dict(DEFAULT_LIMITS, **(limits or {})).items() if value}
         self.clock, self.log = clock, log
         self.max_connections, self.max_pending = max_connections, max_pending
-        self.max_pending_per_source, self.exempt_loopback = max_pending_per_source, exempt_loopback
+        self.max_pending_per_source, self.trusted_proxy = max_pending_per_source, trusted_proxy
         self.max_per_kid = max_per_kid
         self._lock = threading.Lock()
         self._sessions: Dict[str, List[Session]] = {}
         self._pending: Dict[int, _Pending] = {}
-        self._per_source: Dict[str, int] = collections.Counter()
+        self._per_source: Dict[str, int] = {}
         self._last_seen: Dict[str, int] = {}
         self._rates: Dict[Tuple[str, str], collections.deque] = {}
         self._limited_until: Dict[Tuple[str, str], float] = {}
@@ -1123,44 +1178,91 @@ class RelayServer:
         finally:
             self._accepting.clear()
 
+    @staticmethod
+    def victim(entries: List[_Pending], now: float) -> Optional[_Pending]:
+        """Which pending connection gives way to a newcomer: from the address holding the most of `entries`, the one
+        that sent nothing before one answering, the oldest first. One answering inside `FAIR_ANSWER_SECONDS` never
+        gives way; None when every one is such. So a flood from one address displaces itself before anyone else, and
+        a caller that sent its request keeps the time to answer."""
+        shares = collections.Counter(e.address for e in entries)
+        pool = [e for e in entries if e.progress == 0 or now - e.at >= FAIR_ANSWER_SECONDS]
+        return min(pool, key=lambda e: (-shares[e.address], e.progress, e.at), default=None)
+
+    def _count(self, address: str, delta: int) -> None:
+        """`_per_source` by `delta`; an address at zero leaves the map (under `_lock`)."""
+        left = self._per_source.get(address, 0) + delta
+        if left > 0:
+            self._per_source[address] = left
+        else:
+            self._per_source.pop(address, None)
+
+    def _unlist(self, entry: _Pending) -> bool:
+        """Takes `entry` out of the pending budget (under `_lock`); False when it was not in it."""
+        if self._pending.pop(id(entry), None) is None:
+            return False
+        self._count(entry.address, -1)
+        return True
+
+    def _place(self, entry: _Pending) -> Tuple[Optional[str], Optional[_Pending]]:
+        """Puts `entry` in the pending budget under its address (under `_lock`): `(None, evicted-or-None)`, or
+        `(refusal, None)` when its address, or the whole budget, is full of connections that may not give way."""
+        others = [e for e in self._pending.values() if e is not entry]
+        same = [e for e in others if e.address == entry.address]
+        now, evicted = time.monotonic(), None
+        if len(same) >= self.max_pending_per_source:
+            evicted = self.victim(same, now)
+            if evicted is None:
+                return 'per-source', None
+        elif len(others) >= self.max_pending:
+            evicted = self.victim(others, now)
+            if evicted is None:
+                return 'pending-full', None
+        if evicted is not None:
+            self._unlist(evicted)
+        self._pending[id(entry)] = entry
+        self._count(entry.address, +1)
+        return None, evicted
+
+    def _evicted(self, entry: Optional[_Pending]) -> None:
+        if entry is not None:
+            _shut(entry)
+            self.log({'event': 'relay.pending.evicted', 'progress': entry.progress})
+
+    def _refuse(self, sock: socket.socket, refusal: str) -> None:
+        self.log({'event': 'relay.refused', 'reason': refusal})
+        sock.setblocking(False)
+        _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
+        with contextlib.suppress(OSError):
+            sock.close()
+
     def _admit_connection(self, sock: socket.socket, peer: str) -> None:
-        exempt = self.exempt_loopback and _loopback_address(peer)
-        evict = None
+        entry = _Pending(sock, peer)
         with self._lock:
-            if not exempt and self._per_source[peer] >= self.max_pending_per_source:
-                refusal = 'per-source'
-            elif len(self._pending) >= self.max_pending:
-                oldest = min(self._pending.values(), key=lambda e: e.at)
-                if time.monotonic() - oldest.at >= EVICT_AFTER_SECONDS:
-                    evict = self._pending.pop(id(oldest))
-                    self._per_source[evict.peer] -= 1
-                    refusal = None
-                else:
-                    refusal = 'pending-full'
-            else:
-                refusal = None
-            if refusal is None:
-                entry = _Pending(sock, peer)
-                self._pending[id(entry)] = entry
-                self._per_source[peer] += 1
-        if evict is not None:
-            _shut(evict)
-            self.log({'event': 'relay.pending.evicted', 'reason': 'pending-full'})
+            refusal, evicted = self._place(entry)
+        self._evicted(evicted)
         if refusal is not None:
-            self.log({'event': 'relay.refused', 'reason': refusal})
-            sock.setblocking(False)
-            _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
-            with contextlib.suppress(OSError):
-                sock.close()
-            return
+            return self._refuse(sock, refusal)
         threading.Thread(target=self._connection, args=(entry,), name='relay-conn', daemon=True).start()
+
+    def _readdress(self, entry: _Pending, headers: Dict[str, str]) -> Optional[str]:
+        """After the head: the connection has answered (`progress` 1), and behind a trusted terminator on this machine
+        it counts against the caller's forwarded address from now on. A refusal when that address is full."""
+        evicted = None
+        with self._lock:
+            entry.progress = 1
+            forwarded = forwarded_for(headers) if self.trusted_proxy and _loopback_address(entry.peer) else None
+            if forwarded is None or forwarded == entry.address:
+                return None
+            if not self._unlist(entry):
+                return None                                # evicted meanwhile; its socket is already shut
+            entry.address = forwarded
+            refusal, evicted = self._place(entry)
+        self._evicted(evicted)
+        return refusal
 
     def _release_pending(self, entry: _Pending) -> None:
         with self._lock:
-            if self._pending.pop(id(entry), None) is not None:
-                self._per_source[entry.peer] -= 1
-                if self._per_source[entry.peer] <= 0:
-                    del self._per_source[entry.peer]
+            self._unlist(entry)
 
     def _watch(self) -> None:
         """Every `REVALIDATE_SECONDS`: every open session still stands, or is closed 4403; a session whose closing
@@ -1196,6 +1298,9 @@ class RelayServer:
             if head is None:
                 return
             method, target, headers = head
+            refusal = self._readdress(entry, headers)
+            if refusal is not None:
+                return self._refuse(sock, refusal)
             if target == '/healthz' and method in ('GET', 'HEAD'):
                 return _respond(sock, 200, {'ok': True, 'protocol': relay.RELAY_PROTOCOL, 'service': SERVICE})
             if target.startswith('/v1/blobs/'):
@@ -1216,7 +1321,7 @@ class RelayServer:
                           'Sec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n\r\n'
                           % (accept, relay.RELAY_SUBPROTOCOL)).encode('ascii'))
             entry.ws = ServerSocket(sock, rest)
-            session = Session(self, entry.ws, entry.peer)
+            session = entry.session = Session(self, entry.ws, entry.address)
             session.run()
         except (OSError, PeerClosed):
             pass
@@ -1276,10 +1381,7 @@ class RelayServer:
         with self._lock:
             entry = next((e for e in self._pending.values() if e.ws is session.ws), None)
             if entry is not None:
-                self._pending.pop(id(entry), None)
-                self._per_source[entry.peer] -= 1
-                if self._per_source[entry.peer] <= 0:
-                    del self._per_source[entry.peer]
+                self._unlist(entry)
             group = self._sessions.get(session.kid, [])
             total = sum(len(g) for g in self._sessions.values())
             if len(group) >= self.max_per_kid:
@@ -1419,7 +1521,7 @@ def _respond(sock: socket.socket, status: int, body: dict, extra: str = '') -> N
 # ---- Built from a workspace -----------------------------------------------------------------------------------------
 
 def build(node: Path, *, origin: str, host: str = '127.0.0.1', port: int = 0, data: Optional[Path] = None,
-          memory: bool = False, limits: Optional[dict] = None,
+          memory: bool = False, limits: Optional[dict] = None, trusted_proxy: bool = False,
           log: Callable[[dict], None] = _default_log) -> RelayServer:
     """A relay admitting from this machine's node (`<node>/records/`), its spool under `data` (default
     `<node>/relay/`, owner-only) or, with `memory`, in memory only. Not started."""
@@ -1432,4 +1534,4 @@ def build(node: Path, *, origin: str, host: str = '127.0.0.1', port: int = 0, da
         private_io.parent(folder)
         mailboxes = Mailboxes(folder / 'spool.sqlite', load_or_create_spool_key(folder), limits, log=log)
     return RelayServer(origin=origin, admission=admission, mailboxes=mailboxes, host=host, port=port, limits=limits,
-                       log=log)
+                       trusted_proxy=trusted_proxy, log=log)

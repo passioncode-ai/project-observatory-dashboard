@@ -607,15 +607,194 @@ class Relay(unittest.TestCase):
             for sock in idle:
                 sock.close()
 
-    def test_a_source_address_has_its_own_cap(self):
-        self.start(max_pending=8, max_pending_per_source=1, exempt_loopback=False)
-        first = socket.create_connection(('127.0.0.1', self.server.port))
+    def test_a_source_address_has_its_own_cap_loopback_included(self):
+        """No address is exempt: a second caller from the address of one still answering inside its fair window is
+        refused, and an idle one from that address gives way."""
+        self.start(max_pending=8, max_pending_per_source=1)
+        first = self.upgrade()
         try:
             time.sleep(0.2)
             with self.assertRaises(WebSocketError):
                 self.raw()
         finally:
             first.close()
+        idle = socket.create_connection(('127.0.0.1', self.server.port))
+        try:
+            time.sleep(0.2)
+            ws, _ = self.raw()                              # the idle one, which sent nothing, gave way
+            ws.close()
+        finally:
+            idle.close()
+
+    # ---- Review of #400, second round ----------------------------------------------------------------------
+
+    def flood(self, stop, opened, address_header=None):
+        """Idle connections from this machine, one every 10 ms, as the reviewer's flood."""
+        held = []
+        while not stop.is_set():
+            try:
+                sock = socket.create_connection(('127.0.0.1', self.server.port))
+                if address_header:
+                    sock.sendall(b'GET /v1/connect HTTP/1.1\r\nHost: x\r\nX-Forwarded-For: '
+                                 + address_header + b'\r\n')        # an unfinished head
+                held.append(sock)
+                opened[0] += 1
+            except OSError:
+                pass
+            if len(held) > 200:
+                for old in held[:100]:
+                    old.close()
+                del held[:100]
+            time.sleep(0.01)
+        for sock in held:
+            sock.close()
+
+    def test_a_flood_from_the_same_address_never_locks_a_machine_out(self):
+        self.start()
+        stop, opened = threading.Event(), [0]
+        flooder = threading.Thread(target=self.flood, args=(stop, opened), daemon=True)
+        flooder.start()
+        try:
+            time.sleep(1.0)
+            admitted = 0
+            for _ in range(5):
+                session, _ = self.open(self.estate.laptop)
+                admitted += session.welcome is not None
+                session.close()
+        finally:
+            stop.set()
+            flooder.join(5)
+        self.assertEqual(admitted, 5)
+        self.assertGreater(opened[0], 50)
+
+    def test_a_slow_answer_inside_the_fair_window_survives_a_flood(self):
+        self.start()
+        stop, opened = threading.Event(), [0]
+        flooder = threading.Thread(target=self.flood, args=(stop, opened), daemon=True)
+        flooder.start()
+        try:
+            time.sleep(1.0)
+            ws, hello = self.raw()
+            time.sleep(0.6)
+            ws.send_text(json.dumps(relay.auth_frame(
+                self.estate.laptop.sign, frame_id='a1', relay=self.origin, nonce=hello['nonce'],
+                estate=self.estate.name, kid=self.estate.laptop.sig_kid, iat=relay.rfc3339(int(time.time() * 1000)))))
+            self.assertEqual(self.next_frame(ws)['type'], 'welcome')
+            ws.close()
+        finally:
+            stop.set()
+            flooder.join(5)
+
+    def test_the_address_holding_most_slots_loses_first(self):
+        now = 100.0
+        entries = [rs._Pending(None, 'A', at=now - 5) for _ in range(3)] + [rs._Pending(None, 'B', at=now - 9)]
+        victim = rs.RelayServer.victim(entries, now)
+        self.assertEqual((victim.address, victim.at), ('A', now - 5))
+        young = [rs._Pending(None, 'A', at=now - 0.1, progress=1), rs._Pending(None, 'B', at=now - 9, progress=1)]
+        self.assertEqual(rs.RelayServer.victim(young, now).address, 'B')
+        self.assertIsNone(rs.RelayServer.victim(young[:1], now))   # answering inside its fair window
+        mixed = [rs._Pending(None, 'A', at=now - 9, progress=1), rs._Pending(None, 'A', at=now - 1)]
+        self.assertEqual(rs.RelayServer.victim(mixed, now).progress, 0)   # silence goes before an answer
+
+    def forwarded_upgrade(self, address: bytes):
+        sock = socket.create_connection(('127.0.0.1', self.server.port))
+        sock.sendall(b'GET /v1/connect HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                     b'X-Forwarded-For: 203.0.113.9, ' + address + b'\r\n'
+                     b'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+                     b'Sec-WebSocket-Protocol: fabric-relay.v1\r\n\r\n')
+        sock.settimeout(WAIT)
+        status = sock.recv(64)
+        return sock, status.split(b' ')[1] if status else b''
+
+    def test_behind_a_trusted_proxy_the_forwarded_address_is_the_callers(self):
+        self.start(max_pending_per_source=1, trusted_proxy=True)
+        first, status = self.forwarded_upgrade(b'192.0.2.1')
+        second, other = self.forwarded_upgrade(b'192.0.2.2')
+        third, again = self.forwarded_upgrade(b'192.0.2.1')
+        for sock in (first, second, third):
+            sock.close()
+        self.assertEqual((status, other, again), (b'101', b'101', b'503'))
+        self.assertTrue(any(r['event'] == 'relay.refused' and r.get('reason') == 'per-source' for r in self.logs))
+
+    def test_without_the_setting_a_forwarded_header_is_ignored(self):
+        self.start(max_pending_per_source=1)
+        first, status = self.forwarded_upgrade(b'192.0.2.1')
+        time.sleep(0.2)
+        second, other = self.forwarded_upgrade(b'192.0.2.2')
+        for sock in (first, second):
+            sock.close()
+        self.assertEqual((status, other), (b'101', b'503'))
+
+    def test_address_counts_are_dropped_at_zero(self):
+        self.start(max_pending=1, trusted_proxy=True)
+        with mock.patch.object(rs, 'FAIR_ANSWER_SECONDS', 0.2):
+            first, _ = self.forwarded_upgrade(b'192.0.2.1')
+            time.sleep(0.4)
+            second, status = self.forwarded_upgrade(b'192.0.2.2')
+            self.assertEqual(status, b'101')
+            self.assertTrue(eventually(lambda: '192.0.2.1' not in self.server._per_source))
+            first.close()
+            second.close()
+        self.assertTrue(eventually(lambda: self.server._per_source == {}))
+
+    def test_pongs_are_counted_and_coalesced(self):
+        self.start()
+        sock = self.upgrade()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        pings = (bytes([0x89, 0x80 | 125]) + b'\0\0\0\0' + b'p' * 125) * 512
+        end = time.monotonic() + 1.5
+        while time.monotonic() < end:
+            try:
+                sock.sendall(pings)
+            except OSError:
+                break
+        with self.server._lock:
+            sessions = [e.session for e in self.server._pending.values() if e.session is not None]
+        sock.close()
+        self.assertEqual(len(sessions), 1)
+        self.assertLessEqual(len(sessions[0].outbox), 2)
+        self.assertLessEqual(sessions[0].outbox_bytes, rs.OUTBOX_BYTES)
+
+    def test_a_tombstone_of_a_queued_message_is_never_forgotten(self):
+        boxes = rs.Mailboxes(None, b'\x01' * 32)
+        now = int(time.time() * 1000)
+        with mock.patch.object(rs, 'MAX_TOMBSTONES_PER_SENDER', 2):
+            first = boxes.append('b#sig', 'a#sig', 'm0', 'QUFB', 60, now)['seq']
+            boxes.append('b#sig', 'a#sig', 'm1', 'QUFB', 60, now)
+            self.assertEqual(boxes.append('b#sig', 'a#sig', 'm2', 'QUFB', 60, now), {'full': 'tombstones'})
+            self.assertEqual(boxes.append('b#sig', 'a#sig', 'm0', 'QUFB', 60, now), {'seq': first, 'duplicate': True})
+            boxes.ack('b#sig', first)
+            self.assertFalse(boxes.append('b#sig', 'a#sig', 'm2', 'QUFB', 60, now)['duplicate'])
+            self.assertTrue(boxes.append('b#sig', 'a#sig', 'm1', 'QUFB', 60, now)['duplicate'])
+        boxes.close()
+
+    def test_a_sender_at_its_tombstone_cap_is_refused_not_forgotten(self):
+        self.start()
+        laptop, _ = self.open(self.estate.laptop)
+        with mock.patch.object(rs, 'MAX_TOMBSTONES_PER_SENDER', 2):
+            seq = laptop.send(self.estate.desk.sig_kid, {'n': 0}, msg_id='keep-0')
+            laptop.send(self.estate.desk.sig_kid, {'n': 1}, msg_id='keep-1')
+            with self.assertRaises(RelayError) as refused:
+                laptop.send(self.estate.desk.sig_kid, {'n': 2}, msg_id='keep-2')
+            self.assertEqual(refused.exception.code, 'rate-limited')
+            self.assertGreater(refused.exception.retry_after, 0)
+            self.assertEqual(laptop.send(self.estate.desk.sig_kid, {'n': 0}, msg_id='keep-0'), seq)
+
+    def test_unreadable_rows_never_stall_delivery(self):
+        self.start()
+        laptop, _ = self.open(self.estate.laptop)
+        for n in range(12):
+            laptop.send(self.estate.desk.sig_kid, {'n': n})
+        boxes = self.server.mailboxes
+        with boxes._lock:
+            boxes._db.execute('UPDATE mail SET sealed = ? WHERE recipient = ? AND seq BETWEEN 2 AND 7',
+                              (b'\0' * 64, self.estate.desk.sig_kid))
+        with mock.patch.object(rs, 'FLUSH_PAGE_ROWS', 4):
+            _, inbox = self.open(self.estate.desk)
+            self.assertTrue(eventually(lambda: len(inbox) == 6))
+        self.assertEqual([m['payload']['n'] for m in inbox], [0, 7, 8, 9, 10, 11])
+        page = boxes.page  # unreadable rows are skipped and dropped, not counted against a page
+        self.assertEqual(page(self.estate.desk.sig_kid, int(time.time() * 1000)), [])
 
     def test_admitted_sessions_beyond_the_cap_are_refused(self):
         self.start(max_connections=1)
@@ -846,7 +1025,10 @@ class Cli(unittest.TestCase):
     def test_settings_it_refuses(self):
         checked = self.cli.checked
         self.assertEqual(checked(None, None, None), {'origin': 'http://127.0.0.1:47317', 'host': '127.0.0.1',
-                                                     'port': 47317})
+                                                     'port': 47317, 'trusted_proxy': False})
+        self.assertTrue(checked('https://relay.example', None, 9000, True)['trusted_proxy'])
+        with self.assertRaises(self.cli.RelayConfigError):
+            checked(None, None, None, True)                 # an http origin has no terminator in front
         self.assertEqual(checked('https://relay.example', '0.0.0.0', 9000)['host'], '0.0.0.0')
         for origin, host, port in (('http://127.0.0.1:9000', '0.0.0.0', 9000),
                                    ('http://127.0.0.1:9001', None, 9000),
@@ -870,6 +1052,9 @@ class Cli(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('serverd.py', out)
         self.assertEqual(json.loads(self.cli.CONFIG.read_text())['port'], port)
+        self.assertEqual(self.run_cli('enable', '--origin', 'https://relay.example', '--port', str(port),
+                                      '--trusted-proxy')[0], 0)
+        self.assertIs(json.loads(self.cli.CONFIG.read_text())['trusted_proxy'], True)
         code, out, _ = self.run_cli('status', '--json')
         self.assertEqual(code, 1)                           # enabled, but nothing answers and nobody is admitted
         self.assertEqual((json.loads(out)['answers'], json.loads(out)['enabled']), (False, True))
