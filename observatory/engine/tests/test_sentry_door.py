@@ -733,6 +733,72 @@ class SentryDoor(unittest.TestCase):
                            "OrganizationReleasePermission", "ProjectReleasePermission"):
             self.assertIn(permission, src)
 
+    # ── review of #401, round 2: the proof belongs to the value, not to the slot ──────────────────
+
+    def broad(self):
+        return json.loads(self.m.LEDGER.read_text())["broad"]["example-site/prod/SENTRY_ADMIN_TOKEN"]
+
+    def test_a_new_value_in_the_slot_does_not_inherit_the_old_values_proof(self):
+        self.oauth_admin()                                # repro E
+        self.assertEqual(self.issue()[0], 0)
+        other = fake("sntryu_", "other-sentry-live")      # another Sentry's live token: 401 here
+        put(ADMIN_SLOT, other)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, None, wait=0)
+        self.assertEqual(rc, 2, o + e)
+        self.assertIn("no longer holds the value recorded", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == other], "not sent to the recorded base")
+        self.assertEqual(slot_value(ADMIN_SLOT), other, "kept")
+        self.assertEqual(self.broad()["state"], "unproven")
+        # Named explicitly, it is sent there, and its 401 still proves nothing: no proof for this value.
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("A new proof is needed", e)
+        self.assertEqual(slot_value(ADMIN_SLOT), other, "kept")
+        b = self.broad()
+        self.assertEqual(b["state"], "unproven")
+        self.assertNotIn("proved_on", b)
+        self.assertTrue(no_value(self.surfaces(o + e)))
+
+    def test_the_same_kind_is_not_enough_the_value_must_match(self):
+        admin = self.personal_admin()
+        self.narrow_installed(70)
+        self.assertEqual(run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)[0], 3)
+        self.assertEqual(self.broad()["proved_kind"], "personal")
+        rotated = fake("sntryu_", "rotated-personal")      # same kind, another value, unknown here
+        put(ADMIN_SLOT, rotated)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("not the one that answered there before", e)
+        self.assertIsNotNone(slot_value(ADMIN_SLOT))
+        self.assertEqual(self.broad()["state"], "unproven")
+        put(ADMIN_SLOT, admin)                            # the proved value back, now dead: a new proof is needed
+        self.state.tokens[admin]["alive"] = False
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIsNotNone(slot_value(ADMIN_SLOT))
+
+    def test_the_proof_is_a_keyed_digest_never_a_plain_hash(self):
+        import hashlib
+        admin = self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        digest = self.broad()["proof_digest"]
+        self.assertTrue(digest.startswith("hmac-sha256:"))
+        self.assertNotIn(hashlib.sha256(admin.encode()).hexdigest(), self.m.LEDGER.read_text())
+        self.assertNotEqual(digest.split(":", 1)[1], hashlib.sha256(admin.encode()).hexdigest())
+        key = self.m.LEDGER.with_name("sentry-proof.key")
+        self.assertTrue(key.is_file())
+        if os.name != "nt":
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+
+    def test_a_base_trusted_for_the_first_time_is_named(self):
+        self.personal_admin()
+        self.narrow_installed(71)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 3, o + e)
+        self.assertIn(f"trusting {self.base} as this token's Sentry for the first time", e)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertNotIn("for the first time", e)
+
     @unittest.skipIf(os.name == "nt", "POSIX file modes")
     def test_the_ledger_is_owner_only(self):
         self.oauth_admin()

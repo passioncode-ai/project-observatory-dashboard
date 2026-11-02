@@ -454,7 +454,10 @@ SLUG] [--base-url URL]` first verifies every narrow token of that organization a
 token (a known prefix), and it is sent only to its own Sentry: `--base-url`, or the base recorded the last time that
 slot answered there. While Sentry accepts it, the door records that proof, names the page where a person deletes it
 and exits 3. It counts as revoked, and its slot is removed, only when Sentry refuses it (HTTP 401) after such a proof:
-a 401 from a Sentry that never accepted the value proves nothing, and the slot is kept. `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
+a 401 from a Sentry that never accepted the value proves nothing, and the slot is kept. The proof belongs to the
+value, not the slot: it is recorded as the token's kind and a keyed digest (HMAC-SHA256 under a random key kept
+owner-only beside the ledger, never a plain hash), so a slot whose value was replaced since is not sent to the
+recorded Sentry, and a 401 to it needs a new proof. A base named with `--base-url` for the first time is said so. `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
 person made, waits for that person), proves it dead and removes the slot; `list` and `status` say what exists and
 whether it still works. `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
 `de.sentry.io`) is read from the organization, or given with `--region us|de` or `--region-host`. A region read from a

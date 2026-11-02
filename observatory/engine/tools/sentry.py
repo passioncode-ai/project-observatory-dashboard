@@ -60,6 +60,11 @@ WHAT SENTRY'S API LETS A TOKEN MINT, and so where this door refuses:
   it and exits 3. A 401 counts as revoked, and removes the slot, only when such a proof was recorded
   before (by an `issue` that minted with it, or an earlier `revoke --from` that found it alive): a
   401 from a Sentry that never accepted the value proves only that it is not that Sentry's token.
+  The proof belongs to the VALUE, not the slot: it records the token's kind and an HMAC-SHA256 of it
+  under the ledger's own random key (`sentry-proof.key`, owner-only beside the ledger; never a plain
+  hash). A slot whose value has changed since (a rotation, another Sentry's token) is not sent to the
+  recorded base, and its 401 proves nothing: it is marked `unproven`, kept, and needs a new proof. A
+  base named with --base-url for the first time is said on stderr.
 * Service accounts (`/api/0/organizations/{org}/service-accounts/`, project-scoped) are being
   built behind a feature flag and issue no token yet; when they do, they are the route for a
   project-scoped token.
@@ -89,6 +94,8 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime
+import hashlib
+import hmac
 import http.client
 import json
 import os
@@ -432,6 +439,29 @@ def save_ledger(doc: dict) -> None:
     private_io.write(LEDGER, json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
 
 
+def _proof_key() -> bytes:
+    """The ledger's own random key (32 bytes, owner-only, beside the ledger, made on first use): what the
+    proof digests are keyed with, so the ledger never holds a plain hash of a secret."""
+    path = LEDGER.with_name("sentry-proof.key")
+    private_io.check(path)
+    if path.exists():
+        try:
+            key = bytes.fromhex(private_io.read(path).strip())
+        except ValueError:
+            key = b""
+        if len(key) != 32:
+            raise Refusal("the Sentry ledger's proof key is unreadable; refusing to replace it", 1)
+        return key
+    key = os.urandom(32)
+    private_io.write(path, key.hex() + "\n")
+    return key
+
+
+def proof_digest(value: str) -> str:
+    """HMAC-SHA256 of a token under the ledger's key: says "the same value", never the value."""
+    return "hmac-sha256:" + hmac.new(_proof_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 def ledger_lock():
     """One door operation on the ledger at a time, across processes: held from the first read to the
     last write (issue, install, revoke, status)."""
@@ -701,7 +731,8 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
             # can count as its revocation.
             doc["broad"][from_slot] = {**(doc["broad"].get(from_slot) or {}), "kind": kind, "base_url": base,
                                        "org": org, "state": (doc["broad"].get(from_slot) or {}).get("state")
-                                       or "in-use", "proved_on": today(),
+                                       or "in-use", "proved_on": today(), "proved_kind": kind,
+                                       "proof_digest": proof_digest(minter),
                                        "proof": "GET /api/0/ answered 200 on this base at issue"}
             save_ledger(doc)
         except BaseException as exc:  # noqa: BLE001  any exit after the mint is cleaned up, then re-raised
@@ -868,6 +899,9 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
         known = doc["broad"].get(from_slot) or {}
         if base_url:
             base = origin(base_url)
+            if not known.get("base_url"):
+                print(f"  {from_slot}: trusting {base} as this token's Sentry for the first time (--base-url); "
+                      f"it is the only host the value is sent to", file=sys.stderr)
         elif known.get("base_url") and known.get("proved_on"):
             base = known["base_url"]
         else:
@@ -880,6 +914,18 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
             raise Refusal(f"{from_slot} does not hold a Sentry token this door can recognise (none of "
                           f"{', '.join(KINDS)}); it was not sent anywhere and the slot is kept", 1)
         check_base(value, base)
+        # A base taken from the record holds only for the value it was recorded with: a replaced value
+        # (a rotation, another Sentry's token) is not sent there until a person names its Sentry.
+        if not base_url and not (known.get("proved_kind") == kind and hmac.compare_digest(
+                str(known.get("proof_digest") or ""), proof_digest(value))):
+            doc["broad"][from_slot] = {**known, "state": "unproven", "unproven_why":
+                                       "the value in the slot is not the one recorded for this base"}
+            for stale in ("proved_on", "proved_kind", "proof_digest", "proof"):
+                doc["broad"][from_slot].pop(stale, None)
+            save_ledger(doc)
+            raise Refusal(f"{from_slot} no longer holds the value recorded for {base} (it was replaced, or is "
+                          f"another kind of token): nothing was sent and the slot is kept. Name its Sentry with "
+                          f"--base-url; a `revoke --from` that finds it alive there records a new proof", 2)
         if known.get("base_url") and known["base_url"] != base:
             raise Refusal(f"{from_slot} was recorded as a token of {known['base_url']}, not {base}; nothing was "
                           f"sent and the slot is kept", 1)
@@ -912,6 +958,7 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
             page = pages(base, org_)["org" if kind == "org" else "integrations" if kind == "integration" else kind]
             doc = ledger()
             doc["broad"][from_slot] = {**entry, "state": "revocation-requested", "proved_on": today(),
+                                       "proved_kind": kind, "proof_digest": proof_digest(value),
                                        "proof": "GET /api/0/ answered 200 on this base",
                                        "requested_on": known.get("requested_on") or today()}
             save_ledger(doc)
@@ -920,14 +967,23 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
                           f"{'it' if kind != 'org' else 'an organization token'} from a signed-in browser session "
                           f"only: a person deletes it at {page}, then `sentry.py revoke --from {from_slot}` "
                           f"again proves it dead and removes the slot", 3)
-        if not known.get("proved_on"):
+        # The recorded 200 proves only the value it was recorded for: the slot may since hold another one
+        # (a rotation, a `vault.py put --force`, another Sentry's token), and a 401 to that says nothing.
+        same = bool(known.get("proved_on")) and known.get("proved_kind") == kind \
+            and hmac.compare_digest(str(known.get("proof_digest") or ""), proof_digest(value))
+        if not same:
+            why = ("no earlier answer from it showed the token belonged there" if not known.get("proved_on") else
+                   "the value in the slot is not the one that answered there before (it was replaced, or is "
+                   "another kind of token)")
             doc = ledger()
-            doc["broad"][from_slot] = {**entry, "state": "unproven"}
+            doc["broad"][from_slot] = {**entry, "state": "unproven", "unproven_why": why}
+            for stale in ("proved_on", "proved_kind", "proof_digest", "proof"):
+                doc["broad"][from_slot].pop(stale, None)
             save_ledger(doc)
-            raise Refusal(f"{base} refuses {from_slot} (401), but no earlier answer from {base} showed the token "
-                          f"belonged there: a 401 alone does not prove it was revoked. The slot is kept; if it was "
-                          f"this Sentry's token and is now deleted, remove the slot with `vault.py remove "
-                          f"{' '.join(frm)}`", 1)
+            raise Refusal(f"{base} refuses {from_slot} (401), but {why}: a 401 alone does not prove it was revoked. "
+                          f"The slot is kept. A new proof is needed: a `sentry.py revoke --from` that finds the "
+                          f"value alive records one. If this Sentry's token is already deleted, remove the slot "
+                          f"yourself with `vault.py remove {' '.join(frm)}`", 1)
         removed = remove_slot(*frm)
         doc = ledger()
         doc["broad"][from_slot] = {**entry, "state": "revoked-verified", "revoked_on": today(),
