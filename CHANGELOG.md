@@ -16,7 +16,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   or the record expires (4403). It keeps one mailbox per machine: messages in order, deleted on acknowledgement or
   when their ttl ends, a repeat answered with its first number, and the refusals `unknown-recipient`, `mailbox-full`,
   `rate-limited` and `too-large`; queued messages are sealed at rest under the relay's own key. It answers presence
-  and `delta-query`. Blobs, a hub's delta and heartbeat frames and the Cloudflare deployment are not carried yet.
+  and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
+  have their own connection budget apart from admitted machines, the rate limits count a machine across all its
+  connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
+  reads a mailbox a page at a time, and a failed accept is retried and shown in the server's health. Blobs, a hub's
+  delta and heartbeat frames and the Cloudflare deployment are not carried yet.
   Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
   on loopback.
 

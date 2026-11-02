@@ -126,7 +126,8 @@ class AdmitVectors(unittest.TestCase):
             'unknown kid': (frame, {}, 'urn:fabric:estate:example', False),
             'another estate': (frame, good, 'urn:fabric:estate:other', False),
             'no record': (frame, good, None, False),
-            'bad signature': (dict(frame, sig=frame['sig'][:-2] + 'AA'), good, 'urn:fabric:estate:example', False),
+            'bad signature': (dict(frame, sig=frame['sig'][:10] + ('B' if frame['sig'][10] == 'A' else 'A')
+                                   + frame['sig'][11:]), good, 'urn:fabric:estate:example', False),
             'high-S': (dict(frame, sig=high), good, 'urn:fabric:estate:example', False),
             'not canonical': (dict(frame, sig=frame['sig'] + '='), good, 'urn:fabric:estate:example', False),
             'not a string': (dict(frame, sig=7), good, 'urn:fabric:estate:example', False),
@@ -208,13 +209,14 @@ class Relay(unittest.TestCase):
         with self.lock:
             self.logs.append(record)
 
-    def start(self, limits=None, spool=None, key=None):
+    def start(self, limits=None, spool=None, key=None, **server):
         port = free_port()
         origin = 'http://127.0.0.1:%d' % port
         admission = rs.Admission(rs.NodeRecords(self.estate.node).read, log=self.log)
         mailboxes = rs.Mailboxes(spool, key or b'\x01' * 32, limits, log=self.log)
         self.server = rs.RelayServer(origin=origin, admission=admission, mailboxes=mailboxes, port=port,
-                                     limits=limits, clock=lambda: time.time() + self.offset[0], log=self.log).start()
+                                     limits=limits, clock=lambda: time.time() + self.offset[0], log=self.log,
+                                     **server).start()
         self.origin = origin
         return self.server
 
@@ -466,7 +468,9 @@ class Relay(unittest.TestCase):
                                  'msgId': 'm', 'body': body, 'ttl': 60}))
         answer = self.next_frame(ws)
         self.assertEqual((answer['code'], answer['replyTo']), ('too-large', 'big'))
-        ws._send_frame(OP_TEXT, b' ' * (relay.MAX_FRAME_BYTES + 1))
+        # Only the header: the relay refuses from the declared length before reading (or allocating) the payload.
+        ws._sock.sendall(bytes([0x80 | OP_TEXT, 0x80 | 127]) + (relay.MAX_FRAME_BYTES + 1).to_bytes(8, 'big')
+                         + b'\0\0\0\0' + b' ' * 1024)
         code, frames = self.closed_with(ws)
         self.assertEqual((code, frames[-1]['code']), (1009, 'too-large'))
 
@@ -539,13 +543,235 @@ class Relay(unittest.TestCase):
             self.assertIn('error', json.loads(refused.exception.read()))
             refused.exception.close()
 
-    def test_connections_beyond_the_limit_are_answered_503(self):
+    # ---- Review of #400: deadlines, caps, accept, rates, paging, slow readers --------------------------------
+
+    def upgrade(self):
+        """A raw socket upgraded to the relay, its hello read; nothing sent after."""
+        sock = socket.create_connection(('127.0.0.1', self.server.port))
+        sock.sendall(b'GET /v1/connect HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                     b'Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+                     b'Sec-WebSocket-Protocol: fabric-relay.v1\r\n\r\n')
+        return sock
+
+    @staticmethod
+    def dribble_until_closed(sock, data, every, limit):
+        """Sends `data` a byte at a time every `every` s; the seconds until the relay closed, or None at `limit`."""
+        start = time.monotonic()
+        sock.settimeout(every)
+        for byte in data:
+            if time.monotonic() - start > limit:
+                return None
+            try:
+                sock.send(bytes([byte]))
+                while True:
+                    if sock.recv(65536) == b'':
+                        return time.monotonic() - start
+            except socket.timeout:
+                continue
+            except OSError:
+                return time.monotonic() - start
+        return None
+
+    def test_the_request_head_has_a_wall_clock_deadline(self):
         self.start()
-        self.server.max_connections = 1
-        ws, _ = self.raw()
-        with self.assertRaises(WebSocketError):
-            self.raw()
-        ws.close()
+        with mock.patch.object(rs, 'REQUEST_HEAD_SECONDS', 1.0):
+            sock = socket.create_connection(('127.0.0.1', self.server.port))
+            took = self.dribble_until_closed(sock, b'GET /healthz HTTP/1.1\r\nX-Pad: ' + b'a' * 200, 0.3, 6.0)
+            sock.close()
+        self.assertIsNotNone(took, 'a client sending one byte at a time kept its slot past the deadline')
+        self.assertLess(took, 3.0)
+
+    def test_auth_has_a_wall_clock_deadline_and_closes_4401(self):
+        self.start()
+        with mock.patch.object(rs, 'AUTH_DEADLINE_SECONDS', 1.0):
+            sock = self.upgrade()
+            frame = bytes([0x81, 0x80 | 126]) + (200).to_bytes(2, 'big') + b'\0\0\0\0' + b'x' * 200
+            start = time.monotonic()
+            took = self.dribble_until_closed(sock, frame, 0.3, 6.0)
+            sock.close()
+        self.assertIsNotNone(took, 'a client dribbling its auth frame kept its slot past the deadline')
+        self.assertLess(took, 3.0)
+        self.assertTrue(any(r.get('reason') == 'auth-deadline' and r.get('close') == 4401 for r in self.logs))
+        del start
+
+    def test_unauthenticated_connections_cannot_starve_machines(self):
+        """Idle sockets fill the unauthenticated cap; a machine still gets in (the oldest idle one gives way), and
+        admitted sessions have their own cap."""
+        self.start(max_pending=2)
+        idle = [socket.create_connection(('127.0.0.1', self.server.port)) for _ in range(4)]
+        try:
+            time.sleep(1.2)
+            laptop, _ = self.open(self.estate.laptop)
+            laptop.ping()
+        finally:
+            for sock in idle:
+                sock.close()
+
+    def test_a_source_address_has_its_own_cap(self):
+        self.start(max_pending=8, max_pending_per_source=1, exempt_loopback=False)
+        first = socket.create_connection(('127.0.0.1', self.server.port))
+        try:
+            time.sleep(0.2)
+            with self.assertRaises(WebSocketError):
+                self.raw()
+        finally:
+            first.close()
+
+    def test_admitted_sessions_beyond_the_cap_are_refused(self):
+        self.start(max_connections=1)
+        laptop, _ = self.open(self.estate.laptop)
+        with self.assertRaises(RelayRefused) as refused:
+            self.open(self.estate.desk)
+        self.assertEqual(refused.exception.code, 'rate-limited')
+        laptop.ping()
+
+    def test_a_machine_holds_a_bounded_number_of_connections(self):
+        self.start(max_per_kid=2)
+        first, _ = self.raw_admitted(self.estate.laptop)
+        second, _ = self.raw_admitted(self.estate.laptop)
+        third, _ = self.raw_admitted(self.estate.laptop)
+        code, _ = self.closed_with(first)
+        self.assertEqual(code, 1001)
+        self.assertTrue(any(r['event'] == 'relay.session.replaced' for r in self.logs))
+        for ws in (second, third):
+            ws.send_text(json.dumps({'v': 1, 'type': 'ping', 'id': 'p'}))
+            self.assertEqual(self.next_frame(ws)['type'], 'pong')
+            ws.close()
+
+    def test_accept_survives_errors_and_health_reports_them(self):
+        self.start()
+        real = self.server._listener
+        failing = threading.Event()
+        failing.set()
+
+        class Flaky:
+            def accept(self):
+                if failing.is_set():
+                    time.sleep(0.01)
+                    raise OSError(24, 'Too many open files')
+                return real.accept()
+
+            def close(self):
+                real.close()
+
+            def fileno(self):
+                return real.fileno()
+
+        self.server._listener = Flaky()
+        with contextlib.suppress(OSError):
+            urllib.request.urlopen(self.origin + '/healthz', timeout=1).close()   # wakes the real accept once
+        self.assertTrue(eventually(lambda: self.server.health() is not None and 'accept' in self.server.health()))
+        self.assertTrue(any(r['event'] == 'relay.accept.error' for r in self.logs))
+        failing.clear()
+        self.assertTrue(eventually(lambda: _answers(self.server.port)))
+        self.assertTrue(eventually(lambda: self.server.health() is None))
+
+    def test_health_reports_an_accept_loop_that_ended(self):
+        self.start()
+        self.assertIsNone(self.server.health())
+        self.server._accepting.clear()
+        self.assertIn('accept', self.server.health())
+        import relay_cli
+        self.assertIn('accept loop ended', relay_cli.health(self.server))   # the node's server shows this row
+
+    def test_descriptor_caps_stay_below_the_process_limit(self):
+        self.assertEqual(rs.fd_caps(4096, 30), (rs.MAX_PENDING, rs.MAX_SESSIONS))
+        pending, sessions = rs.fd_caps(256, 40)
+        self.assertLessEqual(pending + sessions, 256 - 40 - rs.FD_RESERVE)
+        self.assertGreaterEqual(min(pending, sessions), 1)
+        self.assertEqual(rs.fd_caps(None, 0), (rs.MAX_PENDING, rs.MAX_SESSIONS))
+
+    def test_the_rate_limit_is_per_machine_across_its_connections(self):
+        self.start(limits={'sendPerMinute': 5})
+        accepted, held = 0, []
+        for c in range(3):
+            ws, _ = self.raw_admitted(self.estate.laptop)
+            held.append(ws)
+            for n in range(3):
+                try:
+                    ws.send_text(json.dumps({'v': 1, 'id': 'c%dn%d' % (c, n), 'type': 'send',
+                                             'to': self.estate.desk.sig_kid, 'msgId': 'm%d-%d' % (c, n),
+                                             'body': 'QUFB', 'ttl': 60}))
+                    accepted += self.next_frame(ws)['type'] == 'accepted'
+                except (Closed, OSError):
+                    break                                   # closed 1008: it kept sending after rate-limited
+        for ws in held:
+            ws.close()
+        self.assertEqual(accepted, 5)
+
+    def test_tombstones_are_bounded_per_sender_and_pruned_on_their_ttl(self):
+        boxes = rs.Mailboxes(None, b'\x01' * 32)
+        now = int(time.time() * 1000)
+        with mock.patch.object(rs, 'MAX_TOMBSTONES_PER_SENDER', 3):
+            for n in range(6):
+                seq = boxes.append('b#sig', 'a#sig', 'm%d' % n, 'QUFB', 60, now)['seq']
+                boxes.ack('b#sig', seq)
+        self.assertEqual(boxes.tombstones('a#sig'), 3)
+        self.assertEqual(boxes.append('b#sig', 'a#sig', 'm5', 'QUFB', 60, now), {'seq': 6, 'duplicate': True})
+        boxes.purge(now + 61_000)
+        self.assertEqual(boxes.tombstones('a#sig'), 0)
+        boxes.close()
+
+    def test_a_page_is_bounded_in_rows_and_bytes(self):
+        boxes = rs.Mailboxes(None, b'\x01' * 32)
+        now = int(time.time() * 1000)
+        for n in range(10):
+            boxes.append('b#sig', 'a#sig', 'm%d' % n, 'A' * 1000, 60, now)
+        self.assertEqual([m['seq'] for m in boxes.page('b#sig', now, 0, max_rows=4, max_bytes=10_000)], [1, 2, 3, 4])
+        self.assertEqual([m['seq'] for m in boxes.page('b#sig', now, 4, max_rows=8, max_bytes=2500)], [5, 6, 7])
+        self.assertEqual([m['seq'] for m in boxes.page('b#sig', now, 9, max_rows=8, max_bytes=1)], [10])
+        boxes.close()
+
+    def test_a_full_mailbox_is_delivered_page_by_page_one_flush_per_machine(self):
+        self.start()
+        laptop, _ = self.open(self.estate.laptop)
+        for n in range(25):
+            laptop.send(self.estate.desk.sig_kid, {'n': n})
+        active, peak, lock = [0], [0], threading.Lock()
+        real = self.server.mailboxes.page
+
+        def page(*a, **kw):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.02)
+            try:
+                return real(*a, **kw)
+            finally:
+                with lock:
+                    active[0] -= 1
+        self.server.mailboxes.page = page
+        with mock.patch.object(rs, 'FLUSH_PAGE_ROWS', 4):
+            _, one = self.open(self.estate.desk)
+            _, two = self.open(self.estate.desk)
+            # An acknowledged message leaves the mailbox, so each arrives once at least, over the two connections.
+            self.assertTrue(eventually(lambda: {m['payload']['n'] for m in one + two} == set(range(25))))
+        for inbox in (one, two):
+            numbers = [m['payload']['n'] for m in inbox]
+            self.assertEqual(numbers, sorted(numbers))
+        self.assertEqual(peak[0], 1)
+        self.assertGreaterEqual(sum(1 for r in self.logs if r['event'] == 'relay.session.admitted'), 3)
+
+    def test_a_recipient_that_stops_reading_blocks_no_other_session(self):
+        self.start()
+        stuck, _ = self.raw_admitted(self.estate.laptop)
+        stuck._sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        desk, _ = self.raw_admitted(self.estate.desk)
+        body = 'A' * 1_000_000
+        for n in range(6):
+            started = time.monotonic()
+            desk.send_text(json.dumps({'v': 1, 'id': 'i%d' % n, 'type': 'send', 'to': self.estate.laptop.sig_kid,
+                                       'msgId': 'big%d' % n, 'body': body, 'ttl': 600}))
+            self.assertEqual(self.next_frame(desk)['type'], 'accepted')
+            self.assertLess(time.monotonic() - started, 2.0)
+        started = time.monotonic()
+        other, _ = self.raw_admitted(self.estate.desk)
+        self.assertLess(time.monotonic() - started, 2.0)
+        started = time.monotonic()
+        self.server.stop()
+        self.assertLess(time.monotonic() - started, 2.0)
+        for ws in (stuck, desk, other):
+            ws.close()
 
     # ---- The spool ---------------------------------------------------------------------------------------------
 

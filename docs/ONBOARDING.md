@@ -1452,10 +1452,19 @@ project-observatory full relay disable
 - **Messages.** A message waits in its recipient's mailbox until the recipient acknowledges it or the
   ttl its sender set ends (the node signs the message's `exp` at the same time). Each mailbox holds
   at most 1000 messages and 64 MiB; a machine sends at most 120 messages, 30 presence queries and 12
-  delta queries a minute. Over a limit the relay answers `mailbox-full` or `rate-limited` (with the
-  seconds to wait), and closes a machine that keeps sending (1008). A message to a machine the
+  delta queries a minute, counted over all its connections. Over a limit the relay answers
+  `mailbox-full` or `rate-limited` (with the seconds to wait), and closes a connection that keeps
+  sending (1008). A message to a machine the
   record does not admit is `unknown-recipient`. A repeat of a message within its ttl is answered
   with its first number and is not delivered twice.
+- **Connections.** A caller has 10 seconds from connecting to send its request and 10 seconds from
+  the upgrade to send its `auth`, however it spreads the bytes; then it is closed (4401 for a missed
+  `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address
+  other than this machine's own; when it is full the oldest gives way), apart from admitted
+  machines (128 connections, at most 4 per machine, a fifth replacing its oldest), and both stay
+  below the process's limit of open files. A machine that stops reading its messages slows only its
+  own connection, which is closed when its queue fills. If the relay cannot accept connections for
+  more than a second (out of open files, say), it keeps retrying and the server's health says so.
 - **What it keeps.** Queued messages, in `node/relay/spool.sqlite`, each sealed with AES-256-GCM
   under the relay's own key `node/relay/spool.key`; the folder and both files are readable by your
   account only. A copied spool (a backup or a snapshot) carries no message in clear. The key sits

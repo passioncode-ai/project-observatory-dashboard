@@ -874,8 +874,16 @@ own). It reuses the node's checks and adds what only a relay does:
   `(to, from, msgId, seq)`. The relay never decodes a body; it expires one by the ttl of its `send`, which the node
   signs into the body's `exp`.
 - **Transport.** RFC 6455 from the server's side (masked client frames, 1 MiB per message, a binary frame closed 1003,
-  a frame over 1 MiB refused from its declared length and closed 1009), the auth deadline of 10 s, 90 s of silence,
-  the per-minute limits with `retryAfter` and 1008 for a node that keeps sending, at most 128 connections.
+  a frame over 1 MiB refused from its declared length and closed 1009). The request head must arrive within 10 s of
+  the accept and `auth` within 10 s of the upgrade, each a wall-clock deadline across every byte (a missed `auth` is
+  4401); an admitted session is closed after 90 s of silence.
+- **Bounds.** Connections not admitted yet have their own cap (32, at most 8 per non-loopback source address; past it
+  the oldest gives way when it is at least half a second old, else the newcomer is answered 503), apart from admitted sessions (128, at most 4 per machine, its oldest replaced), both kept below
+  the process's descriptor limit (`fd_caps`). The per-minute limits count a machine across all its connections, with
+  `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
+  queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
+  2 MiB), one page per machine at once. A failed accept is retried with a backoff and logged; `health` reports an
+  accept loop that ended or keeps failing, which the local server shows as its `relay` row.
 
 `tests/test_relay_server.py` runs the contract's `admit` vectors and drives the node's own `RelaySession` against the
 relay on loopback. Not carried yet: blobs, a hub's `delta` and `heartbeat` frames, and the Cloudflare deployment.

@@ -144,9 +144,12 @@ def start_configured(log=None):
 
 
 def health(server) -> str | None:
-    """None while the relay admits, else the reason it admits nobody, for the server's `degraded`."""
+    """None while the relay accepts connections and admits, else why not, for the server's `degraded`."""
     if server is None:
         return None
+    listening = server.health()                       # an accept loop that ended or keeps failing
+    if listening:
+        return listening
     answer = server.admission.current(server.now_ms())
     if answer.get("ok"):
         return None

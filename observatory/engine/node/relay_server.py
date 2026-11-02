@@ -9,16 +9,28 @@ node verified and applied (`node/records/`, `org.apply_record`), never from a co
 
 What it carries, and how:
 
-- `GET /v1/connect` with the subprotocol `fabric-relay.v1`: `hello` with a fresh 32-byte nonce, the machine's `auth`
-  within 10 s checked by `admit` (the reference's order and its one `unauthenticated` answer, with one signature's work
-  on every path past the frame's own bytes), then `welcome` with the revision, the delta head and the limits;
+- `GET /v1/connect` with the subprotocol `fabric-relay.v1`: the request head within 10 s of the accept and the
+  machine's `auth` within 10 s of the upgrade, both wall-clock deadlines across every byte (a client that sends one byte
+  at a time is closed at them; a missed `auth` is `unauthenticated`, 4401); `hello` with a fresh 32-byte nonce, `auth`
+  checked by `admit` (the reference's order and its one `unauthenticated` answer, with one signature's work on every
+  path past the frame's own bytes), then `welcome` with the revision, the delta head and the limits;
 - `send` to a recipient's mailbox (`accepted` with its per-mailbox `seq`), refused `malformed`, `too-large`,
-  `rate-limited` (with `retryAfter`), `unknown-recipient` or `mailbox-full`; a repeat of `(from, msgId)` within its
-  `ttl` answers the first `seq`, after an acknowledgement too;
-- `deliver` in `seq` order to every connection the recipient holds, deleted on `ack` or when the `ttl` the sender set
-  ends (the node signs `exp` at `iat + ttl`, so the mailbox keeps a body no longer than its signed life);
+  `rate-limited` (with `retryAfter`; the per-minute limits count a machine across all its connections),
+  `unknown-recipient` or `mailbox-full`; a repeat of `(from, msgId)` within its `ttl` answers the first `seq`, after an
+  acknowledgement too (tombstones bounded per sender and gone at their ttl);
+- `deliver` in `seq` order to every connection the recipient holds, by that connection's own writer thread, a page at a
+  time (`FLUSH_PAGE_ROWS`, `FLUSH_PAGE_BYTES`, read one machine at a time); deleted on `ack` or when the `ttl` the sender
+  set ends (the node signs `exp` at `iat + ttl`, so the mailbox keeps a body no longer than its signed life);
 - `presence` pushed when a machine comes and goes, `presence-query`, `ping`;
 - `delta-query`, answered from the delta entries this machine's node applied (read-only).
+
+Connections are bounded twice, below the process's descriptor limit (`fd_caps`): those not admitted yet (`MAX_PENDING`,
+`MAX_PENDING_PER_SOURCE` per non-loopback address; past the cap the oldest gives way) apart from admitted sessions
+(`MAX_SESSIONS`, `MAX_SESSIONS_PER_KID` per machine, its oldest replaced), so unauthenticated clients cannot starve the
+estate's machines. Each session writes from its own thread through a bounded queue: a machine that stops reading
+stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its socket. A
+failed accept (out of descriptors) is retried with a backoff and logged, and `health` names an accept loop that ended
+or keeps failing.
 
 Every open session is checked against the current admission set before any frame it sends or accepts and every two
 seconds: a machine the record or a delta no longer admits, or under another key, is closed `not-admitted` (4403), and
@@ -40,6 +52,8 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
+import errno
 import hashlib
 import json
 import logging
@@ -64,8 +78,33 @@ AUTH_DEADLINE_SECONDS = 10
 IDLE_CLOSE_SECONDS = 90
 REQUEST_HEAD_SECONDS = 10
 MAX_REQUEST_HEAD_BYTES = 8192
-#: Connections one relay holds at once, those still sending their request head included; one more is answered 503.
-MAX_CONNECTIONS = 128
+#: Admitted sessions one relay holds at once; one more is refused `rate-limited` and closed 1008.
+MAX_SESSIONS = 128
+MAX_CONNECTIONS = MAX_SESSIONS                             # the name 0.31.0's first slice used
+#: Connections one machine (one admitted kid) holds at once; one more replaces its oldest (closed 1001).
+MAX_SESSIONS_PER_KID = 4
+#: Connections not admitted yet (sending their request head, or upgraded and owing `auth`), apart from the sessions,
+#: so they cannot starve admitted machines: past it the oldest gives way, or the newcomer is answered 503.
+MAX_PENDING = 32
+#: Of those, from one source address; a loopback source is exempt (a TLS terminator on this machine carries every
+#: machine's connection, so only `MAX_PENDING` and the deadlines bound it there).
+MAX_PENDING_PER_SOURCE = 8
+#: A pending connection at least this old gives way to a newcomer when `MAX_PENDING` is reached.
+EVICT_AFTER_SECONDS = 0.5
+#: Descriptors left to the rest of the process (the node's server, the spool) below its soft limit.
+FD_RESERVE = 48
+#: An accept loop failing this long, or ended, is reported by `health`.
+ACCEPT_FAILING_SECONDS = 1.0
+#: Queued control frames (replies, presence, delta pages) one session may hold before it counts as not reading.
+OUTBOX_BYTES = 4 * 1024 * 1024
+#: Seconds a session closing with an error frame has to send it before its socket is shut regardless.
+END_GRACE_SECONDS = 1.0
+#: One delivery page: at most this many messages and, past the first, this many body bytes, read one machine at a time.
+FLUSH_PAGE_ROWS = 8
+FLUSH_PAGE_BYTES = 2 * 1024 * 1024
+#: Tombstones `(from, msgId)` one sender keeps beyond the mailbox caps; past it its oldest go first (the recipient's
+#: own replay window still refuses a repeat), and every tombstone goes at its ttl.
+MAX_TOMBSTONES_PER_SENDER = 20000
 REVALIDATE_SECONDS = 2.0
 PURGE_SECONDS = 60.0
 MAX_QUERY_KIDS = 256
@@ -309,7 +348,9 @@ class Mailboxes:
             CREATE TABLE IF NOT EXISTS counters (recipient TEXT PRIMARY KEY, next INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS tombstones (
               sender TEXT NOT NULL, msg_id TEXT NOT NULL, recipient TEXT NOT NULL, seq INTEGER NOT NULL,
-              expires_at INTEGER NOT NULL, PRIMARY KEY (sender, msg_id));''')
+              expires_at INTEGER NOT NULL, PRIMARY KEY (sender, msg_id));
+            CREATE INDEX IF NOT EXISTS mail_expiry ON mail (expires_at);
+            CREATE INDEX IF NOT EXISTS tombstone_expiry ON tombstones (expires_at);''')
 
     @staticmethod
     def _aad(to: str, sender: str, msg_id: str, seq: int) -> bytes:
@@ -350,33 +391,59 @@ class Mailboxes:
                            (to, seq, sender, msg_id, sealed, len(data), relay.rfc3339(now_ms), expires))
                 db.execute('INSERT OR REPLACE INTO tombstones VALUES (?, ?, ?, ?, ?)',
                            (sender, msg_id, to, seq, expires))
+                over = db.execute('SELECT count(*) FROM tombstones WHERE sender = ?', (sender,)).fetchone()[0] \
+                    - MAX_TOMBSTONES_PER_SENDER
+                if over > 0:
+                    db.execute('DELETE FROM tombstones WHERE rowid IN (SELECT rowid FROM tombstones WHERE sender = ? '
+                               'ORDER BY rowid LIMIT ?)', (sender, over))
                 db.execute('COMMIT')
             except BaseException:
                 db.execute('ROLLBACK')
                 raise
         return {'seq': seq, 'duplicate': False}
 
-    def pending(self, to: str, now_ms: int, after_seq: int = 0) -> List[dict]:
-        """Unacknowledged, unexpired messages after `after_seq`, in `seq` order; expired ones are deleted on the way,
-        and one whose seal does not open (another key, a damaged row) is deleted and logged, never delivered."""
+    def page(self, to: str, now_ms: int, after_seq: int = 0, *, max_rows: Optional[int] = None,
+             max_bytes: Optional[int] = None) -> List[dict]:
+        """The next unacknowledged, unexpired messages after `after_seq`, in `seq` order: at most `max_rows`
+        (`FLUSH_PAGE_ROWS`), and no more once their bodies reach `max_bytes` (`FLUSH_PAGE_BYTES`; the first is always
+        taken). Rows are read and opened one at a time, so a page holds no more than that in memory. Expired ones are
+        deleted on the way, and one whose seal does not open (another key, a damaged row) is deleted and logged, never
+        delivered."""
         from cryptography.exceptions import InvalidTag
+        rows = FLUSH_PAGE_ROWS if max_rows is None else max_rows
+        limit = FLUSH_PAGE_BYTES if max_bytes is None else max_bytes
+        out: List[dict] = []
+        broken: List[int] = []
+        total = 0
         with self._lock:
             self._db.execute('DELETE FROM mail WHERE recipient = ? AND expires_at <= ?', (to, now_ms))
-            rows = self._db.execute('SELECT seq, sender, msg_id, sealed, sent_at FROM mail WHERE recipient = ? '
-                                    'AND seq > ? ORDER BY seq', (to, after_seq)).fetchall()
-        out, broken = [], []
-        for seq, sender, msg_id, sealed, sent_at in rows:
-            try:
-                body = self._aead.decrypt(sealed[:12], sealed[12:], self._aad(to, sender, msg_id, seq)).decode('ascii')
-            except (InvalidTag, ValueError, UnicodeDecodeError):
-                broken.append(seq)
-                continue
-            out.append({'from': sender, 'msgId': msg_id, 'seq': seq, 'body': body, 'sentAt': sent_at})
+            cursor = self._db.execute('SELECT seq, sender, msg_id, sealed, sent_at FROM mail WHERE recipient = ? '
+                                      'AND seq > ? ORDER BY seq LIMIT ?', (to, after_seq, max(rows, 1)))
+            for seq, sender, msg_id, sealed, sent_at in cursor:
+                try:
+                    body = self._aead.decrypt(sealed[:12], sealed[12:],
+                                              self._aad(to, sender, msg_id, seq)).decode('ascii')
+                except (InvalidTag, ValueError, UnicodeDecodeError):
+                    broken.append(seq)
+                    continue
+                out.append({'from': sender, 'msgId': msg_id, 'seq': seq, 'body': body, 'sentAt': sent_at})
+                total += len(body)
+                if total >= limit:
+                    break
+            cursor.close()
+            if broken:
+                self._db.executemany('DELETE FROM mail WHERE recipient = ? AND seq = ?', [(to, b) for b in broken])
         if broken:
-            with self._lock:
-                self._db.executemany('DELETE FROM mail WHERE recipient = ? AND seq = ?', [(to, s) for s in broken])
             self.log({'event': 'relay.spool.unreadable', 'kid': to, 'count': len(broken)})
         return out
+
+    def pending(self, to: str, now_ms: int, after_seq: int = 0) -> List[dict]:
+        """Every pending message after `after_seq` (`page` without its bounds), for tools and tests."""
+        return self.page(to, now_ms, after_seq, max_rows=self.limits['mailboxMessages'], max_bytes=1 << 62)
+
+    def tombstones(self, sender: str) -> int:
+        with self._lock:
+            return self._db.execute('SELECT count(*) FROM tombstones WHERE sender = ?', (sender,)).fetchone()[0]
 
     def ack(self, to: str, seq: int) -> bool:
         with self._lock:
@@ -412,21 +479,37 @@ class ProtocolError(Exception):
 
 
 class PeerClosed(Exception):
-    pass
+    def __init__(self, code: Optional[int] = None):
+        super().__init__('closed')
+        self.code = code
+
+
+_DONTWAIT = getattr(socket, 'MSG_DONTWAIT', 0)
 
 
 class ServerSocket:
     """RFC 6455 from the server's side: client frames masked, ours not; text messages of at most 1 MiB in at most
-    `MAX_FRAGMENTS` frames; a ping answered; a close echoed."""
+    `MAX_FRAGMENTS` frames. One thread reads (`recv_text`) and one writes (`write`); `abort` is safe from any thread
+    and never waits for the writer. `deadline` (monotonic seconds) bounds the whole read across every byte, as the
+    auth phase needs; without one, each read waits at most `idle` seconds."""
 
     def __init__(self, sock: socket.socket, buffered: bytes = b''):
         self.sock = sock
         self.buffer = buffered
         self.lock = threading.Lock()
         self.closed = False
+        self.deadline: Optional[float] = None
+        self.idle: float = IDLE_CLOSE_SECONDS
 
     def _read(self, n: int) -> bytes:
         while len(self.buffer) < n:
+            if self.deadline is not None:
+                remaining = self.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise socket.timeout('the deadline passed')
+                self.sock.settimeout(remaining)
+            else:
+                self.sock.settimeout(self.idle)
             chunk = self.sock.recv(max(65536, n - len(self.buffer)))
             if not chunk:
                 raise PeerClosed()
@@ -453,22 +536,22 @@ class ServerSocket:
         payload = self._read(n)
         return fin, opcode, _unmask(payload, mask)
 
-    def recv_text(self) -> str:
-        """The next text message; raises `FrameTooLarge`, `ProtocolError` (a binary message: 1003, text not UTF-8:
-        1007, anything else out of order: 1002), `PeerClosed` and `socket.timeout`."""
+    def recv_text(self, on_ping: Callable[[bytes], None]) -> str:
+        """The next text message; a ping goes to `on_ping` (the writer answers it). Raises `FrameTooLarge`,
+        `ProtocolError` (a binary message: 1003, text not UTF-8: 1007, anything else out of order: 1002),
+        `PeerClosed` (with the peer's code) and `socket.timeout`."""
         parts: List[bytes] = []
         total = 0
         while True:
             fin, opcode, payload = self._frame()
             if opcode == OP_PING:
-                self._send(OP_PONG, payload)
+                on_ping(payload)
                 continue
             if opcode == OP_PONG:
                 continue
             if opcode == OP_CLOSE:
                 code = struct.unpack('!H', payload[:2])[0] if len(payload) >= 2 else None
-                self.close(code if code and (1000 <= code <= 1014 or 3000 <= code <= 4999) else 1000)
-                raise PeerClosed()
+                raise PeerClosed(code if code and (1000 <= code <= 1014 or 3000 <= code <= 4999) else 1000)
             if opcode == OP_BINARY:
                 raise ProtocolError(CLOSE_BINARY, 'a binary message')
             if opcode not in (OP_TEXT, OP_CONT) or (opcode == OP_TEXT) == bool(parts):
@@ -485,32 +568,32 @@ class ServerSocket:
                 except UnicodeDecodeError:
                     raise ProtocolError(CLOSE_NOT_UTF8, 'text that is not UTF-8') from None
 
-    def _send(self, opcode: int, payload: bytes) -> None:
-        n = len(payload)
+    @staticmethod
+    def _header(opcode: int, n: int) -> bytes:
         if n < 126:
-            header = struct.pack('!BB', 0x80 | opcode, n)
-        elif n < 65536:
-            header = struct.pack('!BBH', 0x80 | opcode, 126, n)
-        else:
-            header = struct.pack('!BBQ', 0x80 | opcode, 127, n)
-        with self.lock:
-            if self.closed and opcode != OP_CLOSE:
-                raise PeerClosed()
-            self.sock.sendall(header + payload)
+            return struct.pack('!BB', 0x80 | opcode, n)
+        if n < 65536:
+            return struct.pack('!BBH', 0x80 | opcode, 126, n)
+        return struct.pack('!BBQ', 0x80 | opcode, 127, n)
 
-    def send_json(self, frame: dict) -> None:
-        self._send(OP_TEXT, json.dumps(frame, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
-
-    def close(self, code: int) -> None:
-        """A close frame with `code`, once, then the socket shut both ways (which wakes a blocked reader)."""
+    def write(self, opcode: int, payload: bytes) -> None:
+        """The writer's send: blocks while the peer does not read, until the socket's timeout or an `abort`."""
         with self.lock:
             if self.closed:
-                return
-            self.closed = True
+                raise PeerClosed()
+            self.sock.sendall(self._header(opcode, len(payload)) + payload)
+
+    def abort(self, code: Optional[int] = None) -> None:
+        """Ends the connection from any thread without waiting: a close frame only when the writer is idle and the
+        socket takes it at once, then the socket shut both ways, which wakes a blocked reader and a blocked writer."""
+        self.closed = True
+        if code is not None and self.lock.acquire(blocking=False):
             try:
-                self.sock.sendall(struct.pack('!BBH', 0x80 | OP_CLOSE, 2, code))
+                self.sock.send(struct.pack('!BBH', 0x80 | OP_CLOSE, 2, code), _DONTWAIT)
             except OSError:
                 pass
+            finally:
+                self.lock.release()
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -543,46 +626,155 @@ _B64URL = frozenset('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 
 
 class Session:
-    """One connection: `hello`, `auth`, `welcome`, then the frames of an admitted machine."""
+    """One connection: `hello`, `auth`, `welcome`, then the frames of an admitted machine.
+
+    Two threads. The reader (the connection's own) reads and answers by queueing; the writer alone writes to the
+    socket: queued frames first, then delivery pages from the machine's mailbox while it is woken. So a machine that
+    stops reading stalls only its own writer: its queue is bounded (`OUTBOX_BYTES`, then the session is closed as not
+    reading), and no other session, `end` or `stop` ever waits on its socket."""
 
     def __init__(self, server: 'RelayServer', ws: ServerSocket, peer: str):
         self.server, self.ws, self.peer = server, ws, peer
         self.kid: Optional[str] = None
         self.key: Optional[bytes] = None
         self.session_id = secrets.token_urlsafe(18)
+        self.admitted_at = 0.0
         self.delivered = 0
-        self.flush_lock = threading.Lock()
-        self.windows: Dict[str, collections.deque] = {kind: collections.deque() for kind in RATE_LIMITED}
-        self.limited_until: Dict[str, float] = {}
+        self.cond = threading.Condition()
+        self.outbox: collections.deque = collections.deque()
+        self.outbox_bytes = 0
+        self.wake = False
         self.ended = False
+        self.ended_at: Optional[float] = None
+        self.writer = threading.Thread(target=self._write, name='relay-writer', daemon=True)
 
-    # ---- Sending --------------------------------------------------------------------------------------------------
+    # ---- Sending (any thread; never blocks on the socket) ---------------------------------------------------------
 
     def _id(self) -> str:
         return secrets.token_urlsafe(9)
 
+    def _enqueue(self, item: tuple, size: int) -> None:
+        with self.cond:
+            if self.ended and item[0] == 'text':
+                return
+            self.outbox.append(item)
+            self.outbox_bytes += size
+            over = self.outbox_bytes > OUTBOX_BYTES
+            self.cond.notify()
+        if over:
+            self.drop(None, 'not-reading')
+
     def send(self, frame: dict) -> None:
-        self.ws.send_json(dict({'v': 1, 'id': self._id()}, **frame))
+        data = json.dumps(dict({'v': 1, 'id': self._id()}, **frame), separators=(',', ':'),
+                          ensure_ascii=False).encode('utf-8')
+        self._enqueue(('text', data), len(data))
 
     def error(self, code: str, reply_to: Any = None, **extra) -> None:
         frame = {'type': 'error', 'code': code, 'message': MESSAGES[code]}
         if _valid_id(reply_to):
             frame['replyTo'] = reply_to
         frame.update(extra)
-        try:
-            self.send(frame)
-        except (OSError, PeerClosed):
-            pass
+        self.send(frame)
 
-    def end(self, code: str, close: int, reason: str) -> None:
-        """An `error` of `code`, then the close `close`; the reason goes to the log only."""
-        if self.ended:
+    def _closing(self) -> bool:
+        with self.cond:
+            if self.ended:
+                return False
+            self.ended, self.ended_at = True, time.monotonic()
+            return True
+
+    def end(self, code: str, close: int, reason: str, **extra) -> None:
+        """An `error` of `code`, then the close `close`, both through the writer; the reason goes to the log only.
+        A writer that cannot send them within `END_GRACE_SECONDS` is cut off (`server._watch`, `finish`)."""
+        if not self._closing():
             return
-        self.ended = True
-        self.error(code)
-        self.ws.close(close)
+        frame = {'type': 'error', 'id': self._id(), 'code': code, 'message': MESSAGES[code], 'v': 1}
+        frame.update(extra)
+        data = json.dumps(frame, separators=(',', ':')).encode('utf-8')
+        with self.cond:
+            self.outbox.append(('text', data))
+            self.outbox.append(('close', close))
+            self.cond.notify()
         self.server.log({'event': 'relay.session.closed', 'kid': self.kid, 'code': code, 'close': close,
                          'reason': reason})
+
+    def drop(self, close: Optional[int], reason: str) -> None:
+        """Ends the session with no error frame: a close of `close` through the writer, or with None (a session that
+        does not read) the socket shut at once."""
+        if not self._closing():
+            return
+        if close is None:
+            self.ws.abort()
+        else:
+            with self.cond:
+                self.outbox.append(('close', close))
+                self.cond.notify()
+        self.server.log({'event': 'relay.session.' + ('slow' if reason == 'not-reading' else 'closed'),
+                         'kid': self.kid, 'close': close, 'reason': reason})
+
+    def wake_up(self) -> None:
+        with self.cond:
+            self.wake = True
+            self.cond.notify()
+
+    # ---- The writer -----------------------------------------------------------------------------------------------
+
+    def _write(self) -> None:
+        try:
+            while True:
+                with self.cond:
+                    while not self.outbox and not (self.wake and self.kid is not None and not self.ended):
+                        if self.ws.closed:
+                            return
+                        self.cond.wait(1.0)
+                    if self.outbox:
+                        item = self.outbox.popleft()
+                        if item[0] == 'text':
+                            self.outbox_bytes -= len(item[1])
+                    else:
+                        item, self.wake = None, False
+                if item is None:
+                    self._deliver_page()
+                elif item[0] == 'text':
+                    self.ws.write(OP_TEXT, item[1])
+                elif item[0] == 'pong':
+                    self.ws.write(OP_PONG, item[1])
+                else:                                      # ('close', code): the last frame this connection sends
+                    with contextlib.suppress(OSError, PeerClosed):
+                        self.ws.write(OP_CLOSE, struct.pack('!H', item[1]))
+                    self.ws.abort()
+                    return
+        except (OSError, PeerClosed):
+            self.ws.abort()
+        except Exception as error:                         # noqa: BLE001 - a writer fault ends its session only
+            self.server.log({'event': 'relay.writer.fault', 'kid': self.kid, 'error': type(error).__name__})
+            self.ws.abort()
+
+    def _deliver_page(self) -> None:
+        """One page of the machine's mailbox past what this connection was sent, read while no other connection of
+        the machine reads one (`server.flush_lock`), then written; woken again while the page was full."""
+        if not self.stands():
+            return
+        with self.server.flush_lock(self.kid):
+            page = self.server.mailboxes.page(self.kid, self.server.now_ms(), self.delivered)
+        for message in page:
+            data = json.dumps(dict({'v': 1, 'id': self._id(), 'type': 'deliver'}, **message),
+                              separators=(',', ':')).encode('utf-8')
+            self.ws.write(OP_TEXT, data)
+            self.delivered = message['seq']
+        if page and (len(page) >= FLUSH_PAGE_ROWS or sum(len(m['body']) for m in page) >= FLUSH_PAGE_BYTES):
+            self.wake_up()
+
+    def finish(self) -> None:
+        """After the reader ends: the writer gets `END_GRACE_SECONDS` to send what it holds, then the socket goes."""
+        if self.writer.is_alive():
+            with self.cond:
+                if not self.ended:
+                    self.ended, self.ended_at = True, time.monotonic()
+                    self.outbox.append(('close', CLOSE_GOING_AWAY))
+                self.cond.notify()
+            self.writer.join(END_GRACE_SECONDS)
+        self.ws.abort()
 
     # ---- Admission ------------------------------------------------------------------------------------------------
 
@@ -600,19 +792,20 @@ class Session:
     def run(self) -> None:
         server = self.server
         nonce = p256.b64url_encode(secrets.token_bytes(32))
+        self.ws.deadline = time.monotonic() + AUTH_DEADLINE_SECONDS     # from the upgrade, across every byte
+        self.writer.start()
         self.send({'type': 'hello', 'protocol': relay.RELAY_PROTOCOL, 'relay': server.origin, 'nonce': nonce,
                    'time': relay.rfc3339(server.now_ms())})
-        self.ws.sock.settimeout(AUTH_DEADLINE_SECONDS)
         try:
-            text = self.ws.recv_text()
+            text = self.ws.recv_text(self._ping)
         except socket.timeout:
             return self.end('unauthenticated', CLOSE_UNAUTHENTICATED, 'auth-deadline')
         except FrameTooLarge:
             return self.end('too-large', CLOSE_TOO_LARGE, 'auth-too-large')
         except ProtocolError as error:
-            self.ended = True
-            self.ws.close(error.code)
-            return server.log({'event': 'relay.session.closed', 'close': error.code, 'reason': str(error)})
+            return self.drop(error.code, str(error))
+        except PeerClosed:
+            return self.drop(CLOSE_GOING_AWAY, 'peer-closed')
         try:
             frame = relay.parse_json(text.encode('utf-8'))
         except (ValueError, UnicodeError):
@@ -630,32 +823,33 @@ class Session:
                 'admission-' + admission.get('refusal', '') if not admission.get('ok') else 'not-proven')
             return self.end(verdict['code'], CLOSE_UNAUTHENTICATED, why)
         self.kid, self.key = verdict['kid'], bytes(keys[verdict['kid']])
+        if not server.promote(self):
+            return self.end('rate-limited', CLOSE_POLICY, 'sessions-full', retryAfter=30)
+        self.ws.deadline = None
         self.send({'type': 'welcome', 'session': self.session_id, 'estateRevision': admission['revision'],
                    'deltaHead': admission['deltaHead'], 'heartbeat': None, 'limits': dict(server.limits)})
         server.joined(self)
+        self.wake_up()
         try:
-            self.flush()
-            self.ws.sock.settimeout(IDLE_CLOSE_SECONDS)
             self._serve()
         finally:
             server.left(self)
 
+    def _ping(self, payload: bytes) -> None:
+        self._enqueue(('pong', payload), 0)
+
     def _serve(self) -> None:
         while not self.ended:
             try:
-                text = self.ws.recv_text()
+                text = self.ws.recv_text(self._ping)
             except socket.timeout:
-                self.ended = True
-                self.ws.close(CLOSE_GOING_AWAY)
-                return self.server.log({'event': 'relay.session.closed', 'kid': self.kid, 'close': CLOSE_GOING_AWAY,
-                                        'reason': 'idle'})
+                return self.drop(CLOSE_GOING_AWAY, 'idle')
             except FrameTooLarge:
                 return self.end('too-large', CLOSE_TOO_LARGE, 'frame-too-large')
             except ProtocolError as error:
-                self.ended = True
-                self.ws.close(error.code)
-                return self.server.log({'event': 'relay.session.closed', 'kid': self.kid, 'close': error.code,
-                                        'reason': str(error)})
+                return self.drop(error.code, str(error))
+            except PeerClosed as closed:
+                return self.drop(closed.code or 1000, 'peer-closed')
             if not self.stands():
                 return
             self.server.seen(self.kid)
@@ -669,8 +863,6 @@ class Session:
                 continue
             try:
                 self._handle(frame)
-            except (OSError, PeerClosed):
-                raise
             except Exception as error:                     # noqa: BLE001 - a fault ends this session, never the relay
                 self.server.log({'event': 'relay.session.fault', 'kid': self.kid, 'error': type(error).__name__})
                 return self.end('internal', CLOSE_INTERNAL, 'fault')
@@ -678,25 +870,17 @@ class Session:
     # ---- Frames ---------------------------------------------------------------------------------------------------
 
     def _rate(self, kind: str, reply: str) -> bool:
-        """Whether a frame of `kind` is within its limit; answers `rate-limited` (with `retryAfter`) when not, and
-        closes 1008 a node that sends that type again before its `retryAfter` passed."""
-        limit = self.server.limits.get(RATE_LIMITED[kind])
-        if not limit:
+        """Whether a frame of `kind` is within this machine's limit, counted across all its connections; answers
+        `rate-limited` (with `retryAfter`) when not, and closes 1008 a connection that sends that type again before
+        its `retryAfter` passed."""
+        verdict = self.server.rate(self.kid, kind)
+        if verdict is None:
             return True
-        now = time.monotonic()
-        window = self.windows[kind]
-        while window and window[0] <= now - 60:
-            window.popleft()
-        if len(window) < limit:
-            window.append(now)
-            return True
-        if self.limited_until.get(kind, 0) > now:
+        if verdict == 'again':
             self.end('rate-limited', CLOSE_POLICY, 'kept-sending-' + kind)
             return False
-        retry = max(1, math.ceil(window[0] + 60 - now))
-        self.limited_until[kind] = now + retry
-        self.error('rate-limited', reply, retryAfter=retry)
-        self.server.log({'event': 'relay.rate-limited', 'kid': self.kid, 'type': kind, 'retryAfter': retry})
+        self.error('rate-limited', reply, retryAfter=verdict)
+        self.server.log({'event': 'relay.rate-limited', 'kid': self.kid, 'type': kind, 'retryAfter': verdict})
         return False
 
     def _handle(self, frame: dict) -> None:
@@ -773,46 +957,88 @@ class Session:
             self.send({'type': 'delta', 'replyTo': reply, 'head': head, 'entries': page})
         return self.send({'type': 'delta', 'replyTo': reply, 'head': revocation.delta_head(state), 'entries': []})
 
-    # ---- Delivery -------------------------------------------------------------------------------------------------
-
-    def flush(self) -> None:
-        """Delivers what this machine's mailbox holds past what this connection was sent, in `seq` order."""
-        if self.kid is None or self.ended:
-            return
-        with self.flush_lock:
-            if not self.stands():
-                return
-            for message in self.server.mailboxes.pending(self.kid, self.server.now_ms(), self.delivered):
-                try:
-                    self.send(dict({'type': 'deliver'}, **message))
-                except (OSError, PeerClosed):
-                    return
-                self.delivered = message['seq']
-
 
 # ---- The server -----------------------------------------------------------------------------------------------------
 
+def fd_caps(soft_limit: Optional[int], open_fds: int) -> Tuple[int, int]:
+    """`(pending, sessions)` caps that keep the relay's own descriptors (one per connection) below the process's soft
+    limit, `FD_RESERVE` left to the rest of the process; the defaults when the limit leaves room for them or is
+    unknown."""
+    if not soft_limit or soft_limit < 0 or soft_limit >= 1 << 40:
+        return MAX_PENDING, MAX_SESSIONS
+    budget = soft_limit - open_fds - FD_RESERVE
+    if budget >= MAX_PENDING + MAX_SESSIONS:
+        return MAX_PENDING, MAX_SESSIONS
+    budget = max(budget, 2)
+    pending = max(1, min(MAX_PENDING, budget // 4))
+    return pending, max(1, min(MAX_SESSIONS, budget - pending))
+
+
+def _process_fds() -> Tuple[Optional[int], int]:
+    """The soft descriptor limit and how many are open now, where the platform says; `(None, 0)` elsewhere."""
+    try:
+        import resource
+        soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    except (ImportError, OSError, ValueError):
+        return None, 0
+    for folder in ('/dev/fd', '/proc/self/fd'):
+        try:
+            return soft, len(os.listdir(folder))
+        except OSError:
+            continue
+    return soft, 0
+
+
+def _loopback_address(address: str) -> bool:
+    try:
+        import ipaddress
+        return ipaddress.ip_address(address.split('%', 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+class _Pending:
+    __slots__ = ('sock', 'peer', 'at', 'ws')
+
+    def __init__(self, sock: socket.socket, peer: str):
+        self.sock, self.peer, self.at, self.ws = sock, peer, time.monotonic(), None
+
+
 class RelayServer:
-    """The listening relay: `start()` binds and serves on threads of its own, `stop()` ends every session (1001) and
-    stops. `origin` is what machines sign into `relay-auth/1`: its loopback `http://` address, or the `https://` origin
-    of the TLS terminator in front of it."""
+    """The listening relay: `start()` binds and serves on threads of its own, `stop()` ends every connection (1001)
+    without waiting on any of them. `origin` is what machines sign into `relay-auth/1`: its loopback `http://` address,
+    or the `https://` origin of the TLS terminator in front of it.
+
+    Two separate budgets: connections not admitted yet (`max_pending`, `max_pending_per_source`, each within the
+    request-head and auth deadlines, the oldest giving way to a newcomer) and admitted sessions (`max_connections`,
+    at most `max_per_kid` per machine). Both stay below the process's descriptor limit (`fd_caps`)."""
 
     def __init__(self, *, origin: str, admission: Admission, mailboxes: Mailboxes, host: str = '127.0.0.1',
                  port: int = 0, limits: Optional[dict] = None, clock: Callable[[], float] = time.time,
-                 log: Callable[[dict], None] = _default_log, max_connections: int = MAX_CONNECTIONS):
+                 log: Callable[[dict], None] = _default_log, max_connections: int = MAX_SESSIONS,
+                 max_pending: int = MAX_PENDING, max_pending_per_source: int = MAX_PENDING_PER_SOURCE,
+                 exempt_loopback: bool = True, max_per_kid: int = MAX_SESSIONS_PER_KID):
         if not relay.is_relay_origin(origin):
             raise ValueError('not a relay origin: https on a host name, or http on a loopback literal')
         self.origin, self.admission, self.mailboxes = origin, admission, mailboxes
         self.host, self.requested_port = host, port
         self.limits = {name: value for name, value in dict(DEFAULT_LIMITS, **(limits or {})).items() if value}
-        self.clock, self.log, self.max_connections = clock, log, max_connections
+        self.clock, self.log = clock, log
+        self.max_connections, self.max_pending = max_connections, max_pending
+        self.max_pending_per_source, self.exempt_loopback = max_pending_per_source, exempt_loopback
+        self.max_per_kid = max_per_kid
         self._lock = threading.Lock()
-        self._sessions: Dict[str, set] = {}
-        self._open: set = set()
-        self._active = 0
+        self._sessions: Dict[str, List[Session]] = {}
+        self._pending: Dict[int, _Pending] = {}
+        self._per_source: Dict[str, int] = collections.Counter()
         self._last_seen: Dict[str, int] = {}
+        self._rates: Dict[Tuple[str, str], collections.deque] = {}
+        self._limited_until: Dict[Tuple[str, str], float] = {}
+        self._flush_locks: Dict[str, threading.Lock] = {}
         self._stop = threading.Event()
-        self._listener: Optional[socket.socket] = None
+        self._accepting = threading.Event()
+        self._accept_failing: Optional[Tuple[float, str]] = None
+        self._listener: Any = None
         self.port: Optional[int] = None
 
     def now_ms(self) -> int:
@@ -821,6 +1047,13 @@ class RelayServer:
     # ---- Lifecycle ------------------------------------------------------------------------------------------------
 
     def start(self) -> 'RelayServer':
+        soft, open_now = _process_fds()
+        pending, sessions = fd_caps(soft, open_now)
+        if (pending, sessions) != (MAX_PENDING, MAX_SESSIONS):
+            self.log({'event': 'relay.fd-caps', 'limit': soft, 'open': open_now, 'maxSessions': sessions,
+                      'maxPending': pending})
+        self.max_pending = min(self.max_pending, pending)
+        self.max_connections = min(self.max_connections, sessions)
         family = socket.AF_INET6 if ':' in self.host else socket.AF_INET
         listener = socket.socket(family, socket.SOCK_STREAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -828,57 +1061,120 @@ class RelayServer:
         listener.listen(64)
         self._listener = listener
         self.port = listener.getsockname()[1]
+        self._accepting.set()
         threading.Thread(target=self._accept, name='relay-accept', daemon=True).start()
         threading.Thread(target=self._watch, name='relay-watch', daemon=True).start()
         self.log({'event': 'relay.listening', 'host': self.host, 'port': self.port, 'origin': self.origin,
-                  'protocol': relay.RELAY_PROTOCOL})
+                  'protocol': relay.RELAY_PROTOCOL, 'maxSessions': self.max_connections,
+                  'maxPending': self.max_pending})
         return self
 
     def stop(self) -> None:
         self._stop.set()
         if self._listener is not None:
-            try:
+            with contextlib.suppress(OSError):
                 self._listener.close()
-            except OSError:
-                pass
         with self._lock:
-            sockets = list(self._open)
-        for ws in sockets:
-            ws.close(CLOSE_GOING_AWAY)
-        self.log({'event': 'relay.stopped', 'sessions': len(sockets)})
+            sessions = [s for group in self._sessions.values() for s in group]
+            pending = list(self._pending.values())
+        for session in sessions:
+            session.ws.abort(CLOSE_GOING_AWAY)
+        for entry in pending:
+            _shut(entry)
+        self.log({'event': 'relay.stopped', 'sessions': len(sessions)})
+
+    def health(self) -> Optional[str]:
+        """None while the relay listens and accepts, else why not, for the node's `degraded`."""
+        if self._stop.is_set():
+            return None
+        if not self._accepting.is_set():
+            return 'relay: the accept loop ended; restart the node\'s server'
+        failing = self._accept_failing
+        if failing is not None and time.monotonic() - failing[0] >= ACCEPT_FAILING_SECONDS:
+            return 'relay: not accepting connections for %ds (%s)' % (time.monotonic() - failing[0], failing[1])
+        return None
 
     def _accept(self) -> None:
-        """One thread per connection, at most `max_connections` at once counting those still sending their request
-        head: one more is answered 503 here and closed, so a flood of idle sockets cannot grow the threads."""
-        while not self._stop.is_set():
-            try:
-                sock, address = self._listener.accept()
-            except OSError:
-                return
-            with self._lock:
-                full = self._active >= self.max_connections
-                if not full:
-                    self._active += 1
-            if full:
-                self.log({'event': 'relay.refused', 'reason': 'too-many-connections'})
+        """Accepts until `stop`. A failed accept (out of descriptors, say) is logged and retried with a backoff, never
+        the end of the loop; `health` names a failure that lasts."""
+        backoff, logged = 0.05, 0.0
+        try:
+            while not self._stop.is_set():
                 try:
-                    sock.settimeout(1.0)
-                    _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
-                finally:
-                    sock.close()
-                continue
-            threading.Thread(target=self._connection, args=(sock, address[0]), name='relay-conn',
-                             daemon=True).start()
+                    sock, address = self._listener.accept()
+                except Exception as error:                 # noqa: BLE001 - OSError (EMFILE) or worse: retried
+                    if self._stop.is_set():
+                        return
+                    name = errno.errorcode.get(getattr(error, 'errno', None) or 0, type(error).__name__)
+                    if self._accept_failing is None:
+                        self._accept_failing = (time.monotonic(), name)
+                    if time.monotonic() - logged >= 10:
+                        logged = time.monotonic()
+                        self.log({'event': 'relay.accept.error', 'error': name})
+                    self._stop.wait(backoff)
+                    backoff = min(backoff * 2, 1.0)
+                    continue
+                backoff = 0.05
+                if self._accept_failing is not None:
+                    self.log({'event': 'relay.accept.recovered', 'error': self._accept_failing[1]})
+                    self._accept_failing = None
+                self._admit_connection(sock, address[0] if isinstance(address, tuple) else str(address))
+        finally:
+            self._accepting.clear()
+
+    def _admit_connection(self, sock: socket.socket, peer: str) -> None:
+        exempt = self.exempt_loopback and _loopback_address(peer)
+        evict = None
+        with self._lock:
+            if not exempt and self._per_source[peer] >= self.max_pending_per_source:
+                refusal = 'per-source'
+            elif len(self._pending) >= self.max_pending:
+                oldest = min(self._pending.values(), key=lambda e: e.at)
+                if time.monotonic() - oldest.at >= EVICT_AFTER_SECONDS:
+                    evict = self._pending.pop(id(oldest))
+                    self._per_source[evict.peer] -= 1
+                    refusal = None
+                else:
+                    refusal = 'pending-full'
+            else:
+                refusal = None
+            if refusal is None:
+                entry = _Pending(sock, peer)
+                self._pending[id(entry)] = entry
+                self._per_source[peer] += 1
+        if evict is not None:
+            _shut(evict)
+            self.log({'event': 'relay.pending.evicted', 'reason': 'pending-full'})
+        if refusal is not None:
+            self.log({'event': 'relay.refused', 'reason': refusal})
+            sock.setblocking(False)
+            _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
+            with contextlib.suppress(OSError):
+                sock.close()
+            return
+        threading.Thread(target=self._connection, args=(entry,), name='relay-conn', daemon=True).start()
+
+    def _release_pending(self, entry: _Pending) -> None:
+        with self._lock:
+            if self._pending.pop(id(entry), None) is not None:
+                self._per_source[entry.peer] -= 1
+                if self._per_source[entry.peer] <= 0:
+                    del self._per_source[entry.peer]
 
     def _watch(self) -> None:
-        """Every two seconds: every open session still stands, or is closed 4403; every minute, expired mail goes."""
+        """Every `REVALIDATE_SECONDS`: every open session still stands, or is closed 4403; a session whose closing
+        frames did not go out within `END_GRACE_SECONDS` is cut off. Every minute, expired mail and tombstones go."""
         purged = time.monotonic()
         while not self._stop.wait(REVALIDATE_SECONDS):
             with self._lock:
                 sessions = [s for group in self._sessions.values() for s in group]
             for session in sessions:
                 try:
-                    session.stands()
+                    if session.ended:
+                        if session.ended_at and time.monotonic() - session.ended_at > END_GRACE_SECONDS:
+                            session.ws.abort()
+                    else:
+                        session.stands()
                 except Exception as error:                 # noqa: BLE001 - the watcher never stops
                     self.log({'event': 'relay.watch.fault', 'error': type(error).__name__})
             if time.monotonic() - purged >= PURGE_SECONDS:
@@ -892,11 +1188,10 @@ class RelayServer:
 
     # ---- One connection -------------------------------------------------------------------------------------------
 
-    def _connection(self, sock: socket.socket, peer: str) -> None:
-        ws = None
+    def _connection(self, entry: _Pending) -> None:
+        sock, session = entry.sock, None
         try:
-            sock.settimeout(REQUEST_HEAD_SECONDS)
-            head, rest = self._read_head(sock)
+            head, rest = self._read_head(sock, entry.at + REQUEST_HEAD_SECONDS)
             if head is None:
                 return
             method, target, headers = head
@@ -913,40 +1208,39 @@ class RelayServer:
                 status, message = refusal
                 return _respond(sock, status, _error_body('malformed', message),
                                 extra='Sec-WebSocket-Version: 13\r\n' if status == 426 else '')
-            ws = ServerSocket(sock, rest)
-            with self._lock:
-                self._open.add(ws)
             accept = base64.b64encode(hashlib.sha1((headers['sec-websocket-key'] + GUID).encode('ascii'))
                                       .digest()).decode('ascii')
+            sock.settimeout(max(0.1, entry.at + REQUEST_HEAD_SECONDS - time.monotonic()))
             sock.sendall(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
                           'Sec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n\r\n'
                           % (accept, relay.RELAY_SUBPROTOCOL)).encode('ascii'))
-            Session(self, ws, peer).run()
+            entry.ws = ServerSocket(sock, rest)
+            session = Session(self, entry.ws, entry.peer)
+            session.run()
         except (OSError, PeerClosed):
             pass
         except Exception as error:                         # noqa: BLE001 - one connection's fault is logged, not fatal
             self.log({'event': 'relay.connection.fault', 'error': type(error).__name__})
-            if ws is not None:
-                ws.close(CLOSE_INTERNAL)
         finally:
-            with self._lock:
-                self._active -= 1
-                if ws is not None:
-                    self._open.discard(ws)
-            if ws is not None:
-                ws.close(CLOSE_GOING_AWAY)
-            try:
+            self._release_pending(entry)
+            if session is not None:
+                session.finish()
+            with contextlib.suppress(OSError):
                 sock.close()
-            except OSError:
-                pass
 
     @staticmethod
-    def _read_head(sock: socket.socket):
+    def _read_head(sock: socket.socket, deadline: float):
+        """The request head, read against one wall-clock deadline across every byte (a client that sends one byte at a
+        time is closed at it like one that sends nothing)."""
         data = b''
         while b'\r\n\r\n' not in data:
             if len(data) > MAX_REQUEST_HEAD_BYTES:
                 _respond(sock, 431, _error_body('too-large', 'the request head is over 8 KiB'))
                 return None, b''
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None, b''
+            sock.settimeout(remaining)
             try:
                 chunk = sock.recv(4096)
             except socket.timeout:
@@ -974,11 +1268,34 @@ class RelayServer:
 
     # ---- The estate's sessions ------------------------------------------------------------------------------------
 
-    def joined(self, session: Session) -> None:
+    def promote(self, session: Session) -> bool:
+        """An admitted session leaves the pending budget for the sessions'. False when the sessions are full; a
+        machine at `max_per_kid` connections gives up its oldest (closed 1001)."""
+        replaced = None
         with self._lock:
-            group = self._sessions.setdefault(session.kid, set())
+            entry = next((e for e in self._pending.values() if e.ws is session.ws), None)
+            if entry is not None:
+                self._pending.pop(id(entry), None)
+                self._per_source[entry.peer] -= 1
+                if self._per_source[entry.peer] <= 0:
+                    del self._per_source[entry.peer]
+            group = self._sessions.get(session.kid, [])
+            total = sum(len(g) for g in self._sessions.values())
+            if len(group) >= self.max_per_kid:
+                replaced = group.pop(0)
+            elif total >= self.max_connections:
+                return False
+        if replaced is not None:
+            self.log({'event': 'relay.session.replaced', 'kid': session.kid})
+            replaced.drop(CLOSE_GOING_AWAY, 'replaced')
+        return True
+
+    def joined(self, session: Session) -> None:
+        session.admitted_at = time.monotonic()
+        with self._lock:
+            group = self._sessions.setdefault(session.kid, [])
             first = not group
-            group.add(session)
+            group.append(session)
             self._last_seen[session.kid] = self.now_ms()
             others = [s for kid, g in self._sessions.items() if kid != session.kid for s in g]
         self.log({'event': 'relay.session.admitted', 'kid': session.kid, 'session': session.session_id})
@@ -987,8 +1304,10 @@ class RelayServer:
 
     def left(self, session: Session) -> None:
         with self._lock:
-            group = self._sessions.get(session.kid, set())
-            group.discard(session)
+            group = self._sessions.get(session.kid, [])
+            if session not in group:
+                return                                     # replaced: its machine is still here
+            group.remove(session)
             last = not group
             if last:
                 self._sessions.pop(session.kid, None)
@@ -1001,10 +1320,31 @@ class RelayServer:
         frame = {'type': 'presence', 'kid': kid, 'state': state, 'lastSeen': relay.rfc3339(self.now_ms())}
         for other in sessions:
             if other.stands():
-                try:
-                    other.send(dict(frame))
-                except (OSError, PeerClosed):
-                    pass
+                other.send(dict(frame))
+
+    def rate(self, kid: str, kind: str):
+        """None within the machine's per-minute limit for `kind`, counted over all its connections; else the seconds
+        to wait, or 'again' when it sends once more before that."""
+        limit = self.limits.get(RATE_LIMITED[kind])
+        if not limit:
+            return None
+        now = time.monotonic()
+        with self._lock:
+            window = self._rates.setdefault((kid, kind), collections.deque())
+            while window and window[0] <= now - 60:
+                window.popleft()
+            if len(window) < limit:
+                window.append(now)
+                return None
+            if self._limited_until.get((kid, kind), 0) > now:
+                return 'again'
+            retry = max(1, math.ceil(window[0] + 60 - now))
+            self._limited_until[(kid, kind)] = now + retry
+            return retry
+
+    def flush_lock(self, kid: str) -> threading.Lock:
+        with self._lock:
+            return self._flush_locks.setdefault(kid, threading.Lock())
 
     def seen(self, kid: str) -> None:
         with self._lock:
@@ -1020,16 +1360,25 @@ class RelayServer:
         return {'kid': kid, 'state': 'online' if online else 'offline', 'lastSeen': relay.rfc3339(seen)}
 
     def queued(self, kid: str) -> None:
+        """Wakes the writers of every connection `kid` holds; never waits on any of them."""
         with self._lock:
             sessions = list(self._sessions.get(kid, ()))
         for session in sessions:
-            session.flush()
+            session.wake_up()
 
     def snapshot(self) -> dict:
         """What `status` reports: counts only."""
         with self._lock:
-            return {'connections': len(self._open), 'machinesOnline': len(self._sessions),
-                    'queued': self.mailboxes.count()}
+            return {'pending': len(self._pending), 'sessions': sum(len(g) for g in self._sessions.values()),
+                    'machinesOnline': len(self._sessions), 'queued': self.mailboxes.count()}
+
+
+def _shut(entry: _Pending) -> None:
+    if entry.ws is not None:
+        entry.ws.abort(CLOSE_UNAUTHENTICATED)
+    else:
+        with contextlib.suppress(OSError):
+            entry.sock.shutdown(socket.SHUT_RDWR)
 
 
 def _upgrade_refusal(headers: Dict[str, str]) -> Optional[Tuple[int, str]]:
