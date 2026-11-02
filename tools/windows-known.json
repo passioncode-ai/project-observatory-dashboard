@@ -1649,7 +1649,7 @@
     "workspace_upgrade": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: [] is not true",
+      "reason": "AssertionError: [] is not true; most tests stop at OSError: [Errno 9] Bad file descriptor before their own checks (run 41482280666), and test_then_node_init_makes_this_machines_own_device_id at OpenSSL's entropy source in the sandboxed environment",
       "statuses": [
         "FAIL",
         "TIMEOUT"
@@ -1657,22 +1657,31 @@
       "failing": [
         "WorkspaceUpgrade.test_a_failed_live_migration_puts_the_files_back",
         "WorkspaceUpgrade.test_a_settings_file_changed_while_staged_still_refuses",
+        "WorkspaceUpgrade.test_a_snapshot_names_the_machine_it_was_taken_on",
+        "WorkspaceUpgrade.test_a_snapshot_naming_no_machine_is_another_machines_unless_asked",
         "WorkspaceUpgrade.test_a_write_while_the_upgrade_is_staged_is_kept_not_refused",
+        "WorkspaceUpgrade.test_another_machine_never_takes_the_node_identity_or_the_schedules",
         "WorkspaceUpgrade.test_backup_does_not_recurse",
         "WorkspaceUpgrade.test_commit_failure_rolls_back_previous_files",
         "WorkspaceUpgrade.test_compatible_newer_producer_is_not_an_automatic_break",
         "WorkspaceUpgrade.test_empty_runtime_directories_survive_restore",
         "WorkspaceUpgrade.test_future_snapshot_floor_refused",
+        "WorkspaceUpgrade.test_init_restores_a_snapshot_naming_no_machine_whole",
         "WorkspaceUpgrade.test_logs_and_databases_written_during_a_snapshot_do_not_abort_it",
         "WorkspaceUpgrade.test_manifest_traversal_refused",
         "WorkspaceUpgrade.test_modified_snapshot_refused_before_destination_creation",
         "WorkspaceUpgrade.test_restore_refuses_existing_data",
+        "WorkspaceUpgrade.test_same_machine_is_a_choice_at_a_terminal",
+        "WorkspaceUpgrade.test_second_machine_is_asked_anywhere",
         "WorkspaceUpgrade.test_snapshot_extra_file_refused",
         "WorkspaceUpgrade.test_snapshot_restore_preserves_private_files_and_modes",
         "WorkspaceUpgrade.test_snapshot_retains_committed_wal_data",
         "WorkspaceUpgrade.test_snapshot_symlink_target_refused",
         "WorkspaceUpgrade.test_staging_failure_leaves_original_unchanged",
+        "WorkspaceUpgrade.test_the_mailbox_and_always_on_apps_stay_with_their_machine",
+        "WorkspaceUpgrade.test_the_same_machine_restores_the_whole_snapshot_as_before",
         "WorkspaceUpgrade.test_the_session_hooks_receipts_may_change_while_staged",
+        "WorkspaceUpgrade.test_then_node_init_makes_this_machines_own_device_id",
         "WorkspaceUpgrade.test_upgrade_adds_defaults_preserves_custom_values",
         "WorkspaceUpgrade.test_vector_database_integrity_when_extension_installed"
       ]
