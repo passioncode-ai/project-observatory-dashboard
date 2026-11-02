@@ -114,6 +114,8 @@ ACCEPT_BACKOFF_SECONDS = 1.0
 LINGER_SECONDS = 1.0
 LINGER_BYTES = 64 * 1024
 MAX_LINGERING = 16
+#: How often a drain looks whether the relay is stopping.
+LINGER_POLL_SECONDS = 0.25
 #: Queued control frames (replies, presence, delta pages) one session may hold before it counts as not reading.
 OUTBOX_BYTES = 4 * 1024 * 1024
 #: Seconds a session closing with an error frame has to send it before its socket is shut regardless.
@@ -1184,7 +1186,7 @@ class RelayServer:
             session.ws.abort(CLOSE_GOING_AWAY)
         for entry in pending:
             _shut(entry)
-        for sock in lingering:                             # wakes its drain, which closes it
+        for sock in lingering:                             # wakes its drain at once on POSIX, within a poll on Windows
             with contextlib.suppress(OSError):
                 sock.shutdown(socket.SHUT_RDWR)
         self.log({'event': 'relay.stopped', 'sessions': len(sessions)})
@@ -1311,21 +1313,23 @@ class RelayServer:
         is half-closed and drained before it closes (`_linger`), else the close would reset the connection and a
         Windows caller would lose the answer."""
         sock.setblocking(False)
-        _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
         drain = False
         if unread:
             with self._lock:
                 if len(self._lingering) < MAX_LINGERING:
                     self._lingering.add(sock)
                     drain = True
-        if drain and not self._spawn(self._linger, sock, name='relay-linger'):
-            drain = False
+        if drain and self._spawn(self._linger, sock, name='relay-linger'):   # the drain answers, then reads
+            self.log({'event': 'relay.refused', 'reason': refusal, 'drained': True})
+            return
+        if drain:
             with self._lock:
                 self._lingering.discard(sock)
-        self.log(dict({'event': 'relay.refused', 'reason': refusal}, **({'drained': drain} if unread else {})))
-        if not drain:
-            with contextlib.suppress(OSError):
-                sock.close()
+        # Logged before the answer, so whoever reads the answer finds the refusal already logged.
+        self.log(dict({'event': 'relay.refused', 'reason': refusal}, **({'drained': False} if unread else {})))
+        _respond(sock, 503, _REFUSED)
+        with contextlib.suppress(OSError):
+            sock.close()
 
     def _spawn(self, target: Callable[..., None], *args: Any, name: str) -> bool:
         """Runs `target(*args)` on a daemon thread; False, logged, when no thread can be started (the process is out
@@ -1338,9 +1342,10 @@ class RelayServer:
             return False
 
     def _linger(self, sock: socket.socket) -> None:
-        """Sends FIN after the answer, then reads and discards what the caller still sends until it closes, for at
+        """Answers 503 and sends FIN after it, then reads and discards what the caller still sends until it closes, for at
         most `LINGER_SECONDS` and `LINGER_BYTES`; then closes. Holds one of the `MAX_LINGERING` slots throughout."""
         try:
+            _respond(sock, 503, _REFUSED)
             with contextlib.suppress(OSError):
                 sock.shutdown(socket.SHUT_WR)
             deadline, read = time.monotonic() + LINGER_SECONDS, 0
@@ -1349,9 +1354,12 @@ class RelayServer:
                 if remaining <= 0:
                     break
                 try:
-                    sock.settimeout(remaining)
+                    # In slices, so `stop` ends the drain on Windows too, where a shutdown does not wake a blocked recv.
+                    sock.settimeout(min(remaining, LINGER_POLL_SECONDS))
                     chunk = sock.recv(4096)
-                except OSError:                            # a timeout, or the caller reset it
+                except socket.timeout:
+                    continue
+                except OSError:                            # the caller reset it
                     break
                 if not chunk:
                     break
@@ -1640,6 +1648,9 @@ def _upgrade_refusal(headers: Dict[str, str]) -> Optional[Tuple[int, str]]:
 
 def _error_body(code: str, message: str) -> dict:
     return {'error': {'code': code, 'message': message}}
+
+
+_REFUSED = _error_body('rate-limited', 'too many connections')
 
 
 def _respond(sock: socket.socket, status: int, body: dict, extra: str = '') -> None:
