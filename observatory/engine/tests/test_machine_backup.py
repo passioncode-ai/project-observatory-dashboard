@@ -1039,6 +1039,13 @@ class PlanByPath(unittest.TestCase):
         self.assertEqual(rows['~/.ssh/config']['state'], 'missing', 'a link named config leads to settings')
 
     def test_an_absolute_path_from_another_home_is_held_to_the_same_rules(self):
+        if sys.platform == 'win32':
+            # A POSIX absolute path names no place on Windows: the manifest refuses it as unsafe,
+            # so nothing of another home's .ssh or jobs is written there at all.
+            with self.assertRaisesRegex(MB.MachineBackupError, 'unsafe path'):
+                self.rows([{'kind': 'file', 'source': '/var/empty/example-account/.ssh/id_old', 'arcname': 'abs/x',
+                            'sha256': '0', 'category': 'operator'}])
+            return
         rows = self.rows([{'kind': 'file', 'source': '/var/empty/example-account/.ssh/id_old', 'arcname': 'abs/x',
                            'sha256': '0', 'category': 'operator'},
                           {'kind': 'file', 'source': '/var/empty/example-account/Library/LaunchAgents/com.example.a.plist',

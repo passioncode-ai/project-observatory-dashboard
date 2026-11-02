@@ -5022,8 +5022,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "377bdf7ad808238c4abdd2d5ca0b860f250101ea31199243dabb6352a471b5ba",
-      "bytes": 83516
+      "export_sha256": "b356c710edda6a561f9dd3692eb3a8dbc33a0e65ce452f0941a9a2c6441999a9",
+      "bytes": 84014
     },
     {
       "path": "tests/test_machine_findings.py",
