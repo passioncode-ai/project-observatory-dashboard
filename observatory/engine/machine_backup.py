@@ -87,6 +87,7 @@ from concurrent.futures import ThreadPoolExecutor
 import backup_vault
 import configuration as config
 import machine_identity
+import osprivacy
 import oslocks
 
 KIND, SUFFIX = backup_vault.MACHINE_KIND, backup_vault.MACHINE_SUFFIX
@@ -2296,8 +2297,8 @@ def restore_main(argv: list[str]) -> int:
         if bundle is None:
             raise MachineBackupError("no machine bundle was found in the backups roots this machine knows; "
                                      "copy one here and name it")
-        # A terminal on stdin, until the console helper of #387 (a terminal the person types in) lands.
-        if a.same_machine and not (sys.stdin is not None and sys.stdin.isatty()):
+        # A terminal the person types in (a real console on Windows, where NUL also reads as a tty).
+        if a.same_machine and not osprivacy.is_terminal():
             raise MachineBackupError("--same-machine writes the bundle's private SSH keys and its jobs here, so it is "
                                      "a person's choice at a terminal; without it a bundle from another machine is "
                                      "restored as a second machine")

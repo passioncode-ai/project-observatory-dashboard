@@ -686,8 +686,8 @@ def main(argv: list[str]) -> int:
                     result['maintenance'] = {'result':'unscheduled','detail':f'{type(exc).__name__}: {exc}'[:300]}
         elif getattr(args, 'same_machine', False) and getattr(args, 'second_machine', False):
             raise config.ConfigurationError('Give --same-machine or --second-machine, not both')
-        # A terminal on stdin, until the console helper of #387 (a terminal the person types in) lands.
-        elif getattr(args, 'same_machine', False) and not (sys.stdin is not None and sys.stdin.isatty()):
+        # A terminal the person types in (a real console on Windows, where NUL also reads as a tty).
+        elif getattr(args, 'same_machine', False) and not osprivacy.is_terminal():
             raise config.ConfigurationError('--same-machine restores the other machine\'s device identity and '
                                             'enrollments here, so it is a person\'s choice at a terminal')
         elif args.latest:

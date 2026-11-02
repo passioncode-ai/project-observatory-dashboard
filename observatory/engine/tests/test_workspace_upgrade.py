@@ -597,8 +597,7 @@ class WorkspaceUpgrade(unittest.TestCase):
             self.assertEqual(upgrade.main(['restore',str(source),'--same-machine']),2)
         self.assertIn('a terminal',err.getvalue())
         self.assertFalse(dest.exists())
-        with patch.object(sys,'stdin') as tty:
-            tty.isatty.return_value=True
+        with patch.object(upgrade.osprivacy,'is_terminal',return_value=True):
             with patch.dict(os.environ,{'OBSERVATORY_HOME':str(dest),'OBSERVATORY_MACHINE_ID':BETA}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(upgrade.main(['restore',str(source),'--same-machine']),0)

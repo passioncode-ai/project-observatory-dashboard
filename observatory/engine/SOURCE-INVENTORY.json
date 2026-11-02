@@ -2865,8 +2865,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "280270e0d9206b90b15d3c7f0063946419cc84ab31f38a02660aa753f352743e",
-      "bytes": 121229
+      "export_sha256": "e0c8994a72fe9380253fb2985a869a071e93b5c1ee14b1c2c2cbda98c47c0a98",
+      "bytes": 121220
     },
     {
       "path": "machine_identity.py",
@@ -6200,8 +6200,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "0c4538cb2bc480c2529d4be53c58f92eb5d436a5215854f0c61f9f1140b4427d",
-      "bytes": 32577,
+      "export_sha256": "e85ce31c7ca24d71f2e63f0d102d787367def37810807a6ca0ed870affab25f7",
+      "bytes": 32567,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -7174,8 +7174,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "3decb879c1df5341f8b031243b4b587d904425ca1656da15916ef56a8a4bfcb1",
-      "bytes": 38108,
+      "export_sha256": "980b07263b1203e330eb2b4696ecaaaa002a92f02251749140de583375c238c3",
+      "bytes": 38082,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
