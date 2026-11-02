@@ -3189,8 +3189,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "704590bbfbcbfb7f2c7cda28ccdbad5521c14da81ea497061cecd42f084b0020",
-      "bytes": 100028,
+      "export_sha256": "73e10f0757c15229086ba098536664ac9b3d52e310820a44d4ed301f2487a678",
+      "bytes": 100048,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
