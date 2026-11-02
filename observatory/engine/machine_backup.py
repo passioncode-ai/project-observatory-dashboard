@@ -72,6 +72,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -1588,8 +1589,9 @@ OWN_JOB_PREFIXES = ("org.project-observatory.", "project-observatory-")
 #: ssh's default identity files: read without an IdentityFile line, for every host.
 DEFAULT_IDENTITIES = ("id_ed25519", "id_ecdsa", "id_ecdsa_sk", "id_ed25519_sk", "id_rsa", "id_dsa")
 REASONS = {
-    "ssh-private": "ssh-private: a second machine never gets this machine's private SSH key; it makes its own "
-                   "under the same name (`ssh_keys` in this answer names each step)",
+    "ssh-private": "ssh-private: of a .ssh folder a second machine gets only the public files and the settings "
+                   "ssh shares between machines; a key among the rest is made anew there under the same name "
+                   "(`ssh_keys` in this answer names each step)",
     "ssh-private-content": "ssh-private: the file's text is a private key, so it stays on the machine it came from",
     "ssh-pub-pair": "ssh-private: the public half of a key that stays on the other machine; this machine makes its "
                     "own key under the same name, which this file would block",
@@ -1703,12 +1705,18 @@ class _Second:
             if item is None or item.get("kind") != "file":
                 continue
             dest = _destination(source, self.home)
-            keys[source] = {"key": rel[0], "file": display(dest, self.home), "hosts": [],
-                            "default": rel[0] in DEFAULT_IDENTITIES, "in_ssh": dest.parent == self.home / ".ssh"}
+            # Directly in this home's .ssh folder, whatever its case (`~/.SSH/id_ed25519` on a case-blind volume);
+            # `~/dotfiles/.ssh/deploy_key` and `~/.ssh/keys/work` are not where `ssh-keys create` writes.
+            in_ssh = len(rel) == 1 and dest.parent.parent == self.home and dest.parent.name.casefold() == ".ssh"
+            keys[source] = {"key": rel[-1], "file": display(dest, self.home), "hosts": [],
+                            "default": in_ssh and rel[0] in DEFAULT_IDENTITIES, "in_ssh": in_ssh}
         by_name = {k["key"]: k for k in keys.values() if k["in_ssh"]}
         named = set()
         for host, hostname, identity in self._config_identities(manifest):
-            key = by_name.get(identity.rsplit("/", 1)[-1]) if ".ssh/" in identity else None
+            # The key the line names only when it sits directly in a .ssh folder: `~/.ssh/k/config.local`
+            # is not the `~/.ssh/config.local` fragment.
+            parts = identity.split("/")
+            key = by_name.get(parts[-1]) if len(parts) >= 2 and parts[-2].casefold() == ".ssh" else None
             if key is not None:
                 named.add(key["key"])
                 if host not in [h["host"] for h in key["hosts"]]:
@@ -1727,10 +1735,10 @@ class _Second:
                 continue
             name, in_ssh = key["key"], key.pop("in_ssh")
             if not in_ssh:
-                out.append({**key, "steps": [], "note": "outside ~/.ssh: make this machine's own key and put it "
-                                                        "where the other machine kept this one, by hand"})
+                out.append({**key, "steps": [], "note": "not directly in ~/.ssh: make this machine's own key and "
+                                                        "put it where the other machine kept this one, by hand"})
                 continue
-            steps = [f"project-observatory full ssh-keys create {name}"]
+            steps = [f"project-observatory full ssh-keys create {shlex.quote(name)}"]
             targets = []
             for h in key["hosts"]:
                 github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
@@ -1740,7 +1748,7 @@ class _Second:
             if key["default"] and "github" not in targets:
                 targets.insert(0, "github")
             for target in targets:
-                steps.append(f"project-observatory full ssh-keys send {name} --to {target}"
+                steps.append(f"project-observatory full ssh-keys send {shlex.quote(name)} --to {shlex.quote(target)}"
                              + ("" if target == "github" else " --verify"))
             out.append({**key, "steps": steps})
         return out
@@ -2168,7 +2176,7 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
         None if do_packages else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
         *((step for key in ssh_keys for step in key["steps"]) if second and not do_clone else ()),
         None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts"
-                              + (", after this machine's own SSH keys above)" if second and ssh_keys else ")"),
+                              + (", after this machine's own SSH keys above)" if second and any(k["steps"] for k in ssh_keys) else ")"),
         "project-observatory full restore --latest  (the workspace itself, from its own snapshot)",
         *(SECOND_MACHINE_NEXT if second else ())) if s]
     return result

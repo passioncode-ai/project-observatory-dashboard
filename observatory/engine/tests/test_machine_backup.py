@@ -777,6 +777,44 @@ def job_bytes():
 
 
 @unittest.skipIf(sys.platform == 'win32', 'no launchd or systemd user jobs on Windows')
+class SecondMachineKeys(unittest.TestCase):
+    """Which withheld `.ssh` files get the steps that make a key, read off `_Second` directly."""
+
+    def keys(self, files: dict[str, bytes]) -> dict[str, dict]:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        home, stage, items = root / 'home', root / 'stage', []
+        home.mkdir()
+        (stage / 'files').mkdir(parents=True)
+        for i, (source, data) in enumerate(files.items()):
+            (stage / f'files/{i}').write_bytes(data)
+            items.append({'kind': 'file', 'source': source, 'arcname': f'files/{i}', 'sha256': 'x'})
+        manifest = {'items': items}
+        return {k['file']: k for k in MB._Second(manifest, home, stage).ssh_keys(manifest)}
+
+    def test_a_default_key_in_an_upper_case_folder_keeps_its_steps(self):
+        key = self.keys({'~/.SSH/id_ed25519': PRIVATE_HEAD + SECRET_MARKER})['~/.SSH/id_ed25519']
+        self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys create id_ed25519')
+        self.assertNotIn('note', key)
+
+    def test_a_key_in_a_subfolder_is_named_by_its_file_and_made_by_hand(self):
+        keys = self.keys({'~/.ssh/keys/work': PRIVATE_HEAD + SECRET_MARKER})
+        self.assertEqual((keys['~/.ssh/keys/work']['key'], keys['~/.ssh/keys/work']['steps']), ('work', []))
+        self.assertIn('not directly in ~/.ssh', keys['~/.ssh/keys/work']['note'])
+
+    def test_an_identity_file_in_a_subfolder_never_names_a_fragment(self):
+        keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile ~/.ssh/k/config.local\nInclude config.local\n',
+                          '~/.ssh/config.local': b'Host x\n  User y\n'})
+        self.assertEqual(keys, {}, 'no key is made over a settings fragment')
+
+    def test_a_name_with_a_space_is_quoted_for_the_shell(self):
+        keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile = "~/.ssh/work key"\n',
+                          '~/.ssh/work key': b'opaque'})
+        self.assertEqual(keys['~/.ssh/work key']['steps'],
+                         ["project-observatory full ssh-keys create 'work key'",
+                          "project-observatory full ssh-keys send 'work key' --to server:w --verify"])
+
+
 class SecondMachine(Machine):
     """OBS-283: a bundle restored on another machine never writes a private SSH key and never
     loads a job; it stages the jobs and names them in the placement file."""
