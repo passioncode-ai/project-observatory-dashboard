@@ -11,8 +11,12 @@ THE MACHINE ID is not a key and proves nothing: it only tells two machines apart
 `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`), so the identifier itself is
 never written anywhere. Where none can be read, a random id is kept once in
 `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-id`, a folder neither the machine
-bundle nor the workspace snapshot carries. `OBSERVATORY_MACHINE_ID` overrides it (tests, and a
-person who wants to name a machine). It is never the device key of `full node --init`.
+bundle nor the workspace snapshot carries. It is never the device key of `full node --init`.
+`OBSERVATORY_MACHINE_ID` overrides it only in a sandbox (`OBSERVATORY_SYSTEM_SETUP=0`, which the
+test runner sets): honoured anywhere, a variable could make a bundle from another machine read as
+this one's and restore its private SSH keys here. Two machines cloned from one disk image or
+virtual machine share the platform identifier and so the id: give a clone its own identifier
+(`systemd-machine-id-setup` on Linux, a new virtual machine UUID in the hypervisor) before restoring.
 
 THE PLACEMENT FILE, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`, schema
 `observatory-placement/1`, says which background jobs this machine holds for another one until the
@@ -41,6 +45,10 @@ import subprocess
 import sys
 import tempfile
 import xml.parsers.expat
+import contextlib
+
+import oslocks
+import osprivacy
 
 SCHEMA = "observatory-placement/1"
 ENV = "OBSERVATORY_MACHINE_ID"
@@ -135,10 +143,16 @@ def _write_private(path: Path, data: bytes) -> None:
         Path(tmp).unlink(missing_ok=True)
 
 
+TEST_MARKER = "OBSERVATORY_MACHINE_ID_FOR_TESTS"
+
+
 def machine_id(home: Path | None = None, *, runner=subprocess.run) -> str:
     """This machine's id: `OBSERVATORY_MACHINE_ID`, else a hash of the platform's identifier,
     else a random id kept once in the data folder. Stable for the life of the machine."""
-    override = os.environ.get(ENV)
+    # Only a test names the machine: a variable carried in a restored shell profile must never make a
+    # second machine read as the first (review of #394), so the override needs the test marker too.
+    testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
+    override = os.environ.get(ENV) if testing else None
     if override:
         if not ID_SHAPE.fullmatch(override):
             raise MachineIdentityError(f"{ENV} must be 8 to 128 letters, digits or . _ : -")
@@ -191,8 +205,27 @@ def write_placement(doc: dict, home: Path | None = None, *, machine: str | None 
     return path
 
 
+@contextlib.contextmanager
+def _placement_lock(home: Path | None):
+    """One writer of the placement file at a time: `machine-restore`, `machine-move` and a second
+    terminal would otherwise each read, change and write it and lose the other's change."""
+    lock = data_dir(home) / ".placement.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = osprivacy.open(lock, os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
+    try:
+        oslocks.flock(fd, oslocks.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def place_elsewhere(entries: list[dict], home: Path | None = None, *, machine: str | None = None) -> Path:
     """Add or replace `entries` (by label) in this machine's `elsewhere`."""
+    with _placement_lock(home):
+        return _place_elsewhere(entries, home, machine)
+
+
+def _place_elsewhere(entries: list[dict], home: Path | None, machine: str | None) -> Path:
     doc = read_placement(home)
     by_label = {e["label"]: e for e in doc["elsewhere"]}
     for entry in entries:
@@ -207,12 +240,13 @@ def place_elsewhere(entries: list[dict], home: Path | None = None, *, machine: s
 
 def remove_elsewhere(label: str, home: Path | None = None, *, machine: str | None = None) -> bool:
     """Remove `label` from this machine's `elsewhere`; whether it was there."""
-    doc = read_placement(home)
-    kept = [e for e in doc["elsewhere"] if e["label"] != label]
-    found = len(kept) != len(doc["elsewhere"])
-    doc["elsewhere"] = kept
-    write_placement(doc, home, machine=machine)
-    return found
+    with _placement_lock(home):
+        doc = read_placement(home)
+        kept = [e for e in doc["elsewhere"] if e["label"] != label]
+        found = len(kept) != len(doc["elsewhere"])
+        doc["elsewhere"] = kept
+        write_placement(doc, home, machine=machine)
+        return found
 
 
 def service_ids_by_label(descriptors: list[Path]) -> dict[str, str]:
@@ -247,12 +281,14 @@ def job_label(path: Path, data: bytes | None = None) -> str:
 
 
 def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
-                 home: Path | None = None) -> dict:
+                 home: Path | None = None, unknown: str = "second") -> dict:
     """Whether a bundle or snapshot taken on machine `recorded` is restored here as the same machine.
 
     `asked` is the person's choice: `second` (always safe) or `same` (a terminal-only override the
     caller checks). Otherwise the ids decide, and a bundle or snapshot that names no machine (taken
-    before 0.30.1) is treated as another machine's: the safe reading of an unknown."""
+    before 0.30.1) is treated as another machine's: the safe reading of an unknown. `unknown="keep"`
+    is `full init`'s reading on an empty home: such a snapshot is most often this machine's own
+    (taken by the engine before an update), so it is restored whole and the answer says `unknown`."""
     if asked not in (None, "second", "same"):
         raise MachineIdentityError("the restore mode is `second` or `same`")
     here = here or machine_id(home)
@@ -261,9 +297,9 @@ def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
         why = "asked"
         same = asked == "same"
     elif recorded is None:
-        why, same = "names-no-machine", False
+        why, same = "names-no-machine", unknown == "keep"
     else:
         same = recorded == here
         why = "same-machine" if same else "another-machine"
-    return {"mode": "same-machine" if same else "second-machine", "why": why,
-            "this_machine": here, "taken_on": recorded}
+    mode = "unknown" if why == "names-no-machine" and same else ("same-machine" if same else "second-machine")
+    return {"mode": mode, "why": why, "this_machine": here, "taken_on": recorded}

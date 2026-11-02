@@ -128,9 +128,26 @@ def show(home: Path, *, platform: str = sys.platform) -> dict:
                        for p in _definitions(staging, system)]}
 
 
+def ask_left(label: str, me: str) -> bool:
+    """The person's typed word that `leave` ran on the other machine: the label, typed back at a terminal.
+    A terminal on stdin, until the console helper of #387 (a terminal the person types in) lands."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        raise MachineMoveError("cutover asks you to confirm that the job was stopped on the other machine, so it "
+                               "runs only at a terminal")
+    print(f"Has `project-observatory full machine-move leave {label} --to {me}` run on the other machine?\n"
+          "Starting it here while it still runs there runs it twice.", file=sys.stderr)
+    try:
+        typed = input(f"Type {label} to confirm: ")
+    except EOFError:
+        return False
+    return typed.strip() == label
+
+
 def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sys.platform,
-            uid: int | None = None) -> dict:
-    """Move one staged job here: into the job folder, enabled and loaded, and out of `elsewhere`."""
+            uid: int | None = None, confirm=None) -> dict:
+    """Move one staged job here: into the job folder, enabled and loaded, and out of `elsewhere`.
+    `confirm(label, this machine's id)` answers whether the person confirmed that `leave` ran on the
+    other machine (`ask_left` at a terminal); without it, nothing moves."""
     if not mi.LABEL_SHAPE.fullmatch(label or ""):
         raise MachineMoveError("a label is letters, digits or . _ @ : -")
     system = _system(platform)
@@ -142,6 +159,10 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     if staged is None and live is None:
         raise MachineMoveError(f"no job {label} is staged here ({staging}) or defined here ({folder}); "
                                "`full machine-move show` lists the staged ones")
+    if not (confirm or ask_left)(label, me):
+        raise MachineMoveError(f"not confirmed: nothing moved. Run `full machine-move leave {label} --to {me}` on "
+                               "the other machine first")
+    moved_here = False
     if staged is not None:
         target = folder / staged.name
         if os.path.lexists(target):
@@ -153,6 +174,7 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
         else:
             folder.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged), str(target))
+            moved_here = True
         live = target
     loaded = "skipped: OBSERVATORY_SYSTEM_SETUP=0"
     if _commands_allowed():
@@ -160,6 +182,9 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
             _start(runner, system, label, live, uid)
             loaded = "loaded"
         except (MachineMoveError, OSError, subprocess.SubprocessError) as exc:
+            if not moved_here:
+                # This machine's own definition (it was not staged): it stays where it was.
+                raise MachineMoveFailed(f"{exc}; {live} was already this machine's and stays where it was") from None
             mi.ensure_private_dir(staging, home)
             shutil.move(str(live), str(staging / live.name))
             raise MachineMoveFailed(f"{exc}; its definition is back in {staging}, so nothing starts it at login")
@@ -228,7 +253,7 @@ def main(argv: list[str]) -> int:
             result = cutover(a.label, home)
         else:
             result = leave(a.label, a.to, home)
-    except (MachineMoveError, mi.MachineIdentityError, OSError) as exc:
+    except (MachineMoveError, mi.MachineIdentityError, OSError, EOFError) as exc:
         print(f"Observatory: {exc}", file=sys.stderr)
         return 1 if isinstance(exc, (OSError, MachineMoveFailed)) else 2
     print(json.dumps(result, indent=2, ensure_ascii=False))

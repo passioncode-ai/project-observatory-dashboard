@@ -26,7 +26,7 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.base=Path(self.tmp.name).resolve()
         self.home=self.base/'private workspace'
-        self.env=patch.dict(os.environ,{'OBSERVATORY_HOME':str(self.home),'OBSERVATORY_MACHINE_ID':ALPHA},clear=True)
+        self.env=patch.dict(os.environ,{'OBSERVATORY_HOME':str(self.home),'OBSERVATORY_MACHINE_ID':ALPHA,'OBSERVATORY_SYSTEM_SETUP':'0'},clear=True)
         self.env.start()
         workspace.initialize(self.home)
         import paths
@@ -483,7 +483,7 @@ class WorkspaceUpgrade(unittest.TestCase):
             result=upgrade.restore(source,dest)
         for rel in ('node/device','node/orgs','node/records','store/maintenance.json'):
             self.assertFalse((dest/rel).exists(),rel)
-        self.assertEqual((dest/'node/shares/owner/note.txt').read_text(),'kept')
+        self.assertFalse((dest/'node/shares').exists(),'shares are sealed to the machine that holds them')
         self.assertEqual((dest/'secrets/demo-slot').read_text(),'synthetic opaque private value','the vault moves')
         self.assertFalse(config.read_json(dest/'config/settings.json')['features']['scheduler'])
         self.assertNotEqual(config.read_json(dest/'workspace.json')['instance_id'],
@@ -492,11 +492,11 @@ class WorkspaceUpgrade(unittest.TestCase):
         machine=result['machine']
         self.assertEqual((machine['mode'],machine['why'],machine['taken_on'],machine['this_machine']),
                          ('second-machine','another-machine',ALPHA,BETA))
-        self.assertEqual(machine['left_out'],['node/device/','node/orgs/','node/records/','store/maintenance.json'])
+        self.assertEqual(machine['left_out'],['node/device/','node/orgs/','node/records/','node/shares/','store/maintenance.json'])
         self.assertIn('turned off',machine['scheduler'])
         self.assertIn('project-observatory full node --init',machine['next'][0])
         manifest=config.read_json(source/'manifest.json')
-        self.assertEqual(result['files'],len(manifest['files'])-5)
+        self.assertEqual(result['files'],len(manifest['files'])-6)
         for file in dest.rglob('*'):
             self.assertEqual(file.stat().st_mode & 0o777,0o700 if file.is_dir() else 0o600,str(file))
         upgrade.preflight(dest)

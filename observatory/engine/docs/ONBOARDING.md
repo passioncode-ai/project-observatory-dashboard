@@ -2171,10 +2171,23 @@ of that:
   left as it is. The plan shows a staged item with `staged` and its `label`. This engine's own
   jobs (`org.project-observatory.*`, `project-observatory-*` off macOS) are `withheld` instead:
   every machine installs its own with `full maintain ensure`.
-- **The workspace.** `full restore` leaves out `node/device/`, `node/orgs/`, `node/records/`
-  and `<home>/store/maintenance.json`, turns `features.scheduler` off and gives the workspace its own
-  `instance_id`, so the second machine's daily backups go to their own folder of the backups
-  root and never rotate the first machine's. The vault and everything else are restored.
+- **The workspace.** `full restore` leaves out `node/device/`, `node/orgs/`, `node/records/`,
+  `node/shares/` (a key someone shared with you is sealed to the machine that accepted it, so
+  they share it again to the second machine if it needs it; the shares you sent are renewed and
+  revoked from the machine that made them), `config/cloud.json` (the second machine deploys its
+  own mailbox with `full cloud deploy` if it sends shares) and `<home>/store/maintenance.json`. It
+  turns `features.scheduler` off, holds off every app enrolled `always_on` (the restore names the
+  `full lifecycle policy` step that turns it back on, to run on one machine only) and gives the
+  workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
+  the backups root and never rotate the first machine's. The vault and everything else, the CLI
+  logins the machine bundle carries included, are restored: they are your own credentials and
+  work on both machines.
+- **Which machine is which.** Each machine has an id derived from its platform identifier (never
+  written). A snapshot or bundle that names another machine, or names none, is restored the
+  second-machine way; `--same-machine` at a terminal restores one whole. `full init` on an empty
+  home restores a snapshot that names no machine whole and says so, with the step that restores it
+  as a second machine. A cloned disk image or virtual machine shares its source's identifier and
+  reads as the same machine: restore those with `--second-machine`.
 
 On the second machine, in order:
 
@@ -2182,7 +2195,7 @@ On the second machine, in order:
 project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
 project-observatory full machine-restore --latest --apply         # no private key written, jobs staged
 project-observatory full machine-restore --latest --packages
-project-observatory full ssh-keys create NAME                     # this machine's own SSH key
+project-observatory full ssh-keys create NAME                     # this machine's own SSH key, NAME as the plan names it
 project-observatory full ssh-keys send NAME --to github           # before --clone: SSH remotes need it
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity
@@ -2192,6 +2205,9 @@ project-observatory full machine-move show                        # this machine
 
 The key comes before `--clone` because the other machine's private key was not written: a
 checkout whose remote is `git@github.com:…` clones only once GitHub knows this machine's key.
+Use the name the plan gives: when the carried `~/.ssh/config` points a host at a key with
+`IdentityFile`, the plan lists that key as withheld with the hosts that use it and the exact
+`ssh-keys create` step under the same name, so the carried config finds the new key.
 
 Then move each job that should run on the second machine, **one at a time, the old machine
 first**:

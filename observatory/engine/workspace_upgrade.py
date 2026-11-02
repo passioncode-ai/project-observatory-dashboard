@@ -29,12 +29,19 @@ JOURNAL = 'upgrade-in-progress.json'
 EXCLUDED_DIRS = {'.git', '__pycache__', '.venv', 'backups', 'migration-backups'}
 #: What a snapshot restored on ANOTHER machine never takes (OBS-284): this machine's agent-network
 #: identity (`node/device/` from `full node --init`), its organization enrollments with their own
-#: keys (`node/orgs/`), the estate state it verified (`node/records/`), and the record of its own
-#: maintenance runs. The new machine makes its own with `full node --init` and `full org enroll`.
-#: Its scheduler (`features.scheduler`) is turned off and the workspace gets its own `instance_id`,
-#: so a tick never runs on two machines at once and the two machines' daily backups, which may share
-#: one iCloud folder, never rotate each other's files.
-ANOTHER_MACHINE_LEAVES = ('node/device', 'node/orgs', 'node/records', 'store/maintenance.json')
+#: keys (`node/orgs/`), the estate state it verified (`node/records/`), its shares with other people
+#: (`node/shares/`: a received share is sealed to this machine, contract DEC-0142, and a sent one is
+#: renewed and revoked from the machine that made it), the mailbox it deployed and its owner key
+#: (`config/cloud.json` and `node/shares/owner/`: the second machine deploys its own under another
+#: name), and the record of its own maintenance runs. The new machine makes its own with
+#: `full node --init`, `full org enroll` and `full cloud deploy`. Its scheduler (`features.scheduler`)
+#: is turned off, every `always_on` app it enrolled is held off (the lifecycle supervisor would start
+#: it here too), and the workspace gets its own `instance_id`, so a tick never runs on two machines
+#: at once and the two machines' daily backups, which may share one iCloud folder, never rotate each
+#: other's files.
+ANOTHER_MACHINE_LEAVES = ('node/device', 'node/orgs', 'node/records', 'node/shares', 'config/cloud.json',
+                          'store/maintenance.json')
+LIFECYCLE = 'config/node-lifecycle.json'
 
 
 def digest(file: Path) -> str:
@@ -391,17 +398,32 @@ def _as_another_machine(stage: Path) -> dict:
         doc['features']['scheduler'] = False
         workspace.write_json(settings_file, doc)
         scheduler = 'turned off: `project-observatory full configure features scheduler true` on the one machine that runs it'
+    held = []
+    lifecycle_file = stage / LIFECYCLE
+    if lifecycle_file.is_file():
+        doc = config.read_json(lifecycle_file)
+        targets = doc.get('targets') if isinstance(doc, dict) else None
+        for target_id, target in sorted((targets or {}).items()):
+            if isinstance(target, dict) and target.get('desiredState') == 'always_on':
+                target['desiredState'] = 'held_off'
+                target['policyRevision'] = int(target.get('policyRevision') or 0) + 1
+                held.append(target_id)
+        if held:
+            workspace.write_json(lifecycle_file, doc)
     marker_file = stage / 'workspace.json'
     marker = config.read_json(marker_file)
     previous = marker.get('instance_id')
     marker['instance_id'] = str(uuid.uuid4())
     workspace.write_json(marker_file, marker)
-    return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True,
+    return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True, 'held_off': held,
             'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
-            'next': ['project-observatory full node --init  (this machine\'s own device id)']}
+            'next': ['project-observatory full node --init  (this machine\'s own device id)',
+                     *(f'project-observatory full lifecycle policy {target} --desired always_on  (only on the one '
+                       f'machine that runs it)' for target in held)]}
 
 
-def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None) -> dict:
+def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None,
+            second_machine: bool | None = None, unknown: str = 'second') -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home;
@@ -412,12 +434,16 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     The snapshot's `machine_id` against this machine's decides how (OBS-284): taken here, the
     copy is restored whole, as before; taken on another machine, or naming none (before 0.30.1),
     it is restored without `ANOTHER_MACHINE_LEAVES` (`_as_another_machine`). `same_machine=True`
-    is the person's override at a terminal; the command line checks the terminal."""
+    is the person's override at a terminal (the command line checks the terminal); `second_machine=True`
+    asks for the second-machine way anywhere. `unknown='keep'` (`full init` on an empty home) restores
+    a snapshot that names no machine whole and answers `machine.mode: unknown` with the step that
+    restores it as a second machine; only a known other machine id is restored without its identity."""
     if source.is_file() and not source.is_symlink():
         secret = secret or backup_vault.require_passphrase(destination, prompt=True)
         stage = backup_vault.extract_tree(source.resolve(), destination.resolve().parent, secret)
         try:
-            return restore(stage, destination, same_machine=same_machine)
+            return restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
+                           unknown=unknown)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
     workspace.reject_symlinks(source)
@@ -425,8 +451,9 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     source, destination = source.resolve(), destination.resolve()
     manifest = verify_snapshot(source)
     try:
-        placing = machine_identity.restore_mode(manifest.get('machine_id'),
-                                                asked='same' if same_machine else None)
+        placing = machine_identity.restore_mode(
+            manifest.get('machine_id'), unknown=unknown,
+            asked='same' if same_machine else ('second' if second_machine else None))
     except machine_identity.MachineIdentityError as exc:
         raise config.ConfigurationError(str(exc)) from None
     another = placing['mode'] == 'second-machine'
@@ -631,6 +658,9 @@ def parser() -> argparse.ArgumentParser:
                      help='the newest backup a workspace at this path left, opened with the passphrase '
                           'kept in the OS credential store')
     res.add_argument('--label',help='with --latest: which workspace\'s backups, when several exist')
+    res.add_argument('--second-machine',action='store_true',
+                     help='restore as another machine: no device identity, enrollments, shares, mailbox or schedule '
+                          'state, the scheduler off (the default for a snapshot from another machine or naming none)')
     res.add_argument('--same-machine',action='store_true',
                      help='restore a snapshot taken on another machine, or one that names none, whole: its '
                           'device identity, enrollments and schedule state included; only at a terminal')
@@ -654,6 +684,9 @@ def main(argv: list[str]) -> int:
                     result['maintenance'] = maintenance.ensure(base)
                 except Exception as exc:  # noqa: BLE001 — the upgrade is done either way
                     result['maintenance'] = {'result':'unscheduled','detail':f'{type(exc).__name__}: {exc}'[:300]}
+        elif getattr(args, 'same_machine', False) and getattr(args, 'second_machine', False):
+            raise config.ConfigurationError('Give --same-machine or --second-machine, not both')
+        # A terminal on stdin, until the console helper of #387 (a terminal the person types in) lands.
         elif getattr(args, 'same_machine', False) and not (sys.stdin is not None and sys.stdin.isatty()):
             raise config.ConfigurationError('--same-machine restores the other machine\'s device identity and '
                                             'enrollments here, so it is a person\'s choice at a terminal')
@@ -661,14 +694,16 @@ def main(argv: list[str]) -> int:
             if args.snapshot is not None:
                 raise config.ConfigurationError('Give a snapshot or --latest, not both')
             import maintenance
-            result = maintenance.restore_latest(base, label=args.label, same_machine=args.same_machine or None)
+            result = maintenance.restore_latest(base, label=args.label, same_machine=args.same_machine or None,
+                                                second_machine=args.second_machine or None)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2
         else:
             if args.snapshot is None:
                 raise config.ConfigurationError('Name a snapshot, or pass --latest')
-            result = restore(args.snapshot,base,same_machine=args.same_machine or None)
+            result = restore(args.snapshot,base,same_machine=args.same_machine or None,
+                             second_machine=args.second_machine or None)
         print(json.dumps(result,indent=2))
         return 0
     # The same voice as every other command: `Observatory: <reason>`. A refusal
