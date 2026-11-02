@@ -476,21 +476,23 @@ def probes(preset: dict, org: str, project: str | None) -> tuple[list[str], list
 
 
 def verify(value: str, preset_key: str, org: str, project: str | None, base: str, region: str,
-           wait: float) -> dict:
+           wait: float, fresh: bool = False) -> dict:
     """Prove a token with its own value: its scopes are exactly the preset's, every purpose read answers,
-    every read outside the purpose is refused. Raises Refusal naming what failed."""
+    every read outside the purpose is refused. Raises Refusal naming what failed. A `fresh` token (minted by
+    this call) is asked again while it replicates; any other is asked once, so a dead one is said at once."""
+    attempts = PROOF_ATTEMPTS if fresh else 1
     preset = PRESETS[preset_key]
     kind = kind_of(value)
     if kind != preset["kind"]:
         raise Refusal(f"preset {preset_key} is {KIND_WORDS[preset['kind']]}; the slot holds {KIND_WORDS[kind]}", 1)
     want = sorted(preset["scopes"])
     scopes = None
-    for i in range(PROOF_ATTEMPTS):
+    for i in range(attempts):
         try:
             scopes = scopes_of(value, base)
             break
         except SentryError as exc:
-            if exc.status in (403, 404) or i == PROOF_ATTEMPTS - 1:
+            if exc.status in (403, 404) or i == attempts - 1:
                 raise Refusal(f"Sentry does not accept the token ({exc})", 1) from None
             time.sleep(min(wait * 2 ** i, wait * 8))
     if scopes is not None and scopes != want:
@@ -500,7 +502,7 @@ def verify(value: str, preset_key: str, org: str, project: str | None, base: str
     proved = []
     for path in purpose:
         reason = None
-        for i in range(PROOF_ATTEMPTS):
+        for i in range(attempts):
             try:
                 _call("GET", region + path, value)
                 reason = None
@@ -510,7 +512,7 @@ def verify(value: str, preset_key: str, org: str, project: str | None, base: str
                 # A fresh token replicates to the region: 401 is retried, 403 and 404 are final.
                 if exc.status in (403, 404):
                     break
-            if i < PROOF_ATTEMPTS - 1:
+            if i < attempts - 1:
                 time.sleep(min(wait * 2 ** i, wait * 8))
         if reason:
             raise Refusal(f"the token cannot do its purpose read {_shape(path)} ({reason})", 1)
@@ -642,7 +644,7 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
             tail = _delete_token(minter, base, org, token_id)
             raise Refusal(f"Sentry answered the mint without a usable token; {tail}", 1)
         try:
-            proof = verify(value, preset_key, org, project, base, reg, wait)
+            proof = verify(value, preset_key, org, project, base, reg, wait, fresh=True)
             deliver_to_vault(value, *to)
         except (Refusal, RuntimeError) as exc:
             tail = _delete_token(minter, base, org, token_id)
@@ -652,6 +654,11 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
         if prior and prior.get("minted_by") == "door" and prior.get("token_id") not in (None, token_id) \
                 and prior.get("org") == org and prior.get("base_url") == base:
             retired = f"; the slot's previous token: {_delete_token(minter, base, org, prior['token_id'])}"
+        elif prior and prior.get("minted_by") == "installed":
+            page = pages(prior.get("base_url") or base, prior.get("org"))["org" if prior.get("kind") == "org"
+                                                                            else "integrations"]
+            retired = (f"; the slot's previous token was made by a person and stays live at Sentry until it is "
+                       f"deleted at {page}")
         doc = ledger()
         doc["issued"][slot] = _row(preset_key, org, project, base, reg, proof, minted_by="door", token_id=token_id,
                                    name=name, from_slot=from_slot, prior=prior, expiry_reason=ORG_NO_EXPIRY)
@@ -694,9 +701,13 @@ def cmd_install(preset_key: str, target: str | None, org: str | None, project: s
                       + recipe(preset_key, slot, base, org, project, None), 3 if kind in ("personal", "oauth-app") else 1)
     check_base(value, base)
     with ledger_lock():
+        prior = ledger()["issued"].get(slot)
+        if prior and prior.get("minted_by") == "door":
+            raise Refusal(f"{slot} is recorded as a token this door minted (id {prior.get('token_id')}); installing "
+                          f"over it would leave that token live at Sentry and unrecorded: `sentry.py revoke {slot}` "
+                          f"first", 1)
         org = choose_org(value, base, org)
         reg = choose_region(value, base, org, region, region_url)
-        prior = ledger()["issued"].get(slot)
         proof = verify(value, preset_key, org, project, base, reg, wait)
         reason = ORG_NO_EXPIRY if kind == "org" else key_expiry.MINTED_ELSEWHERE
         expiry = record_slot_expiry(*to, reason)

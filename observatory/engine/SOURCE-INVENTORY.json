@@ -5754,6 +5754,13 @@
       "bytes": 67375
     },
     {
+      "path": "tests/test_sentry_door.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "30ef4b6c61dcc4baf3bac85d37bba754e30864e1e6d7f99a6c7e3c83e748ba8d",
+      "bytes": 30400
+    },
+    {
       "path": "tests/test_serverd.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6888,6 +6895,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/sentry.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "86327cd135f14272dc661c86672b8be5e09ed1aab8aef50cc864f4c4cdc0dd62",
+      "bytes": 52908
+    },
+    {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
       "export_sha256": "70a925387021baca48dd58951f3ef77fdd61a7358c13b4876dd6741968067925",
@@ -7168,7 +7182,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 960,
+  "file_count": 962,
   "excluded": [
     "git-history",
     "operator-registries",

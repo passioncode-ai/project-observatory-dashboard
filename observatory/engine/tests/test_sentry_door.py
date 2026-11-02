@@ -361,6 +361,47 @@ class SentryDoor(unittest.TestCase):
         self.assertFalse(self.state.tokens[first]["alive"])
         self.assertNotEqual(slot_value(NARROW_SLOT), first)
 
+    def test_replacing_a_slot_never_leaves_a_token_live_and_unrecorded(self):
+        self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        rc, o, e = run(self.m.cmd_install, "releases", "/".join(NARROW_SLOT), None, None, self.base, None, None,
+                       wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("revoke example-site/prod/SENTRY_RELEASES_TOKEN", e)
+        self.assertEqual(json.loads(self.m.LEDGER.read_text())["issued"][
+            "example-site/prod/SENTRY_RELEASES_TOKEN"]["minted_by"], "door")
+        put(READ_SLOT, self.state.add(fake("sntryi_", "made-by-hand"), "integration",
+                                      ("org:read", "project:read", "event:read")))
+        self.assertEqual(run(self.m.cmd_install, "read", "/".join(READ_SLOT), ORG, None, self.base, None, None,
+                             wait=0)[0], 0)
+        rc, o, e = self.issue(preset_key="releases", target="/".join(READ_SLOT))
+        self.assertEqual(rc, 0, o + e)
+        self.assertIn("made by a person and stays live at Sentry", o)
+
+    def test_a_dead_token_is_named_at_once_and_a_fresh_one_is_waited_for(self):
+        put(NARROW_SLOT, self.state.add(fake_org_token(44, self.state.control, self.state.region), "org", ("org:ci",)))
+        self.assertEqual(run(self.m.cmd_install, "releases", "/".join(NARROW_SLOT), None, None, self.base, None, None,
+                             wait=0)[0], 0)
+        self.state.tokens[slot_value(NARROW_SLOT)]["alive"] = False
+        before = len(self.state.requests)
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertEqual(len(self.state.requests) - before, 1, "a recorded token is asked once")
+        # A fresh token that the region refuses for a moment is asked again (replication).
+        self.oauth_admin()
+        calls = {"n": 0}
+        real = self.m._call
+
+        def flaky(method, url, token, payload=None):
+            if "/releases/" in url and calls["n"] < 2:
+                calls["n"] += 1
+                raise self.m.SentryError(401, "Sentry answered HTTP 401 on GET /api/0/projects/<id>/<id>/releases/")
+            return real(method, url, token, payload)
+        self.m._call = flaky
+        rc, o, e = self.issue(target="/".join(READ_SLOT))
+        self.assertEqual(rc, 0, o + e)
+        self.assertEqual(calls["n"], 2)
+
     # ── install ────────────────────────────────────────────────────────────────
 
     def test_install_verifies_a_person_made_org_token_from_its_own_payload(self):
