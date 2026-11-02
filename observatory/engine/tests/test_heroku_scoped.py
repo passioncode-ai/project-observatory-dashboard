@@ -31,7 +31,7 @@ class ScopedSurvey(unittest.TestCase):
                     'degraded': [{'source': 'heroku:beta-api', 'reason': 'old unknown'}],
                     'remotes_to_unknown_apps': ['gamma-worker'], 'extra': {'keep': True}}
         self.out.write_text(json.dumps(self.old))
-        self.env = patch.dict(os.environ, {'HOME': str(self.base), 'OBSERVATORY_HOME': str(self.base/'workspace')})
+        self.env = patch.dict(os.environ, {'HOME': str(self.base), 'USERPROFILE': str(self.base), 'OBSERVATORY_HOME': str(self.base/'workspace')})
         self.env.start(); self.addCleanup(self.env.stop)
         # These fail before an accidental live network or credential lookup can occur.
         self.net = patch('urllib.request.urlopen', side_effect=AssertionError('network forbidden'))

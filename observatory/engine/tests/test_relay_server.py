@@ -789,7 +789,8 @@ class Relay(unittest.TestCase):
         stored = spool.read_bytes()
         self.assertNotIn(captured[0][:48].encode(), stored)
         self.assertNotIn(b'readable-only-by-the-desk', stored)
-        self.assertEqual(spool.stat().st_mode & 0o077, 0)
+        if os.name != 'nt':                                 # owner-only by mode on POSIX; by ACL on Windows
+            self.assertEqual(spool.stat().st_mode & 0o077, 0)
         # Another key opens nothing: the row is dropped and logged, never delivered.
         other = rs.Mailboxes(spool, b'\x08' * 32, log=self.log)
         self.assertEqual(other.pending(self.estate.desk.sig_kid, int(time.time() * 1000)), [])
@@ -815,7 +816,8 @@ class Relay(unittest.TestCase):
         first = rs.load_or_create_spool_key(folder)
         self.assertEqual(rs.load_or_create_spool_key(folder), first)
         self.assertEqual(len(first), 32)
-        self.assertEqual((folder / 'spool.key').stat().st_mode & 0o077, 0)
+        if os.name != 'nt':
+            self.assertEqual((folder / 'spool.key').stat().st_mode & 0o077, 0)
 
 
 def _answers(port: int) -> bool:
@@ -909,7 +911,9 @@ class Cli(unittest.TestCase):
             code, out, _ = self.run_cli('status')
             self.assertEqual(code, 1)
             self.assertIn('answers; admits nobody (no-record)', out)
-            self.assertEqual((Path(os.environ['OBSERVATORY_NODE']) / 'relay' / 'spool.key').stat().st_mode & 0o077, 0)
+            if os.name != 'nt':
+                self.assertEqual((Path(os.environ['OBSERVATORY_NODE']) / 'relay' / 'spool.key').stat().st_mode
+                                 & 0o077, 0)
         finally:
             server.stop()
             server.mailboxes.close()

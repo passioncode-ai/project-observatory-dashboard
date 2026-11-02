@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import osprivacy  # noqa: E402
 
 import meter as M  # noqa: E402
 
@@ -69,7 +70,7 @@ def main(argv: list[str]) -> int:
     if args.amount is None or not args.jti:
         print("grant: --check needs --amount and --jti", file=sys.stderr)
         return 2
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         print("grant: the meter's token is read from stdin (`< token-file`), never from an argument",
               file=sys.stderr)
         return 2

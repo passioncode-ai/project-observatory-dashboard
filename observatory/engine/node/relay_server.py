@@ -587,7 +587,8 @@ class ServerSocket:
         """Ends the connection from any thread without waiting: a close frame only when the writer is idle and the
         socket takes it at once, then the socket shut both ways, which wakes a blocked reader and a blocked writer."""
         self.closed = True
-        if code is not None and self.lock.acquire(blocking=False):
+        # Without MSG_DONTWAIT (Windows) a send could wait on a peer that does not read: the socket is only shut.
+        if code is not None and _DONTWAIT and self.lock.acquire(blocking=False):
             try:
                 self.sock.send(struct.pack('!BBH', 0x80 | OP_CLOSE, 2, code), _DONTWAIT)
             except OSError:

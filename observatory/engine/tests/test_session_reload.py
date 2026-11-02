@@ -242,7 +242,7 @@ class SwapOverPipes(unittest.TestCase):
         (self.base / "user").mkdir()
         self.install = Install(self.base / "install", "9.0.0")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(HOME=str(self.base / "user"), OBSERVATORY_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
+        env.update(HOME=str(self.base / "user"), USERPROFILE=str(self.base / "user"), OBSERVATORY_HOME=str(self.home), PYTHONDONTWRITEBYTECODE="1",
                    OBSERVATORY_PRODUCT_LOG_DIR=str(self.base / "product-logs"),
                    OBSERVATORY_RELOAD_RETRY_SECONDS="0", OBSERVATORY_RELOAD_DRAIN_SECONDS="10",
                    OBSERVATORY_DB=str(self.home / "store/observatory.db"))

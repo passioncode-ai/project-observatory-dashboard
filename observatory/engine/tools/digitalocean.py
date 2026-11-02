@@ -724,6 +724,7 @@ API_REFERENCE = "https://docs.digitalocean.com/reference/api/digitalocean/"
 SCOPES_REFERENCE = "https://docs.digitalocean.com/reference/api/scopes/"
 
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import private_io  # noqa: E402
 
@@ -1050,7 +1051,7 @@ def _stash_value(value: str, source: str) -> str:
 
 def cmd_stash(from_doctl: str | None) -> int:
     if not from_doctl:
-        if sys.stdin.isatty():
+        if osprivacy.is_terminal(sys.stdin):
             raise DoorError("give the team's token on stdin, from a protected file: "
                             "`digitalocean.py stash < token-file`, or `stash --from-doctl CONTEXT`")
         print(_stash_value(one_value(sys.stdin.read()), "stdin"))
@@ -1064,7 +1065,6 @@ def cmd_stash(from_doctl: str | None) -> int:
         # doctl writes its config 0600; a wider file is still readable, but say so. Opened without
         # following a link, and only as a regular file.
         import stat as _stat
-        import osprivacy
         fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
         with os.fdopen(fd, encoding="utf-8") as f:
             if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
@@ -1397,7 +1397,7 @@ def cmd_install(preset: str, team: str, target: str | None, domain: str | None,
             raise DoorError("observatory-read goes to the collector's folder; drop --vault")
     elif not vault_spec:
         raise DoorError(f"preset {preset} is a project's credential: give --vault PROJECT/ENV/NAME")
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         raise DoorError("give the token on stdin (e.g. `pbpaste | digitalocean.py install ...`)")
     value = one_value(sys.stdin.read())
     with records_lock():
@@ -1472,7 +1472,7 @@ def _record(label: str) -> tuple[pathlib.Path, dict]:
 
 
 def cmd_token_rotate(label: str, expires_on: str | None = None) -> int:
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         raise DoorError("give the NEW token on stdin; mint it in the control panel with the preset's scopes "
                         f"(`digitalocean.py presets`) at {PANEL_TOKENS}")
     value = one_value(sys.stdin.read())
