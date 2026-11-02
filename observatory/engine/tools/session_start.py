@@ -46,6 +46,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))   # turn_state
 import paths              
 import safe_git           
@@ -320,7 +321,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--cwd", help="the session's working directory (default: hook payload on stdin, then $PWD)")
     a = ap.parse_args(argv[1:])
     cwd, session_id = a.cwd, ""
-    if not cwd and not sys.stdin.isatty():
+    if not cwd and not osprivacy.is_terminal(sys.stdin):
         try:
             payload = json.loads(sys.stdin.read() or "{}")
             cwd, session_id = payload.get("cwd") or "", payload.get("session_id") or ""

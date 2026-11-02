@@ -29,6 +29,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 from store import db as store_db                                                   # noqa: E402
 from store import ledger as L                                                      # noqa: E402
 from store import workflow as W                                                    # noqa: E402
@@ -38,7 +39,7 @@ CLI_OWNER = "service:observatory-cli"
 
 
 def _is_terminal() -> bool:
-    return sys.stdin.isatty()
+    return osprivacy.is_terminal(sys.stdin)
 
 
 def require_terminal(action: str) -> None:

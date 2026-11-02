@@ -1436,7 +1436,7 @@ def _candidate_secrets(bundle: Path, base: Path | None):
         yield from backup_vault.stored_passphrases(backup_vault.SecretStore(), bundle.parent.name)
     except (backup_vault.BackupError, OSError):
         pass
-    if sys.stdin is not None and sys.stdin.isatty():
+    if backup_vault.osprivacy.is_terminal(sys.stdin):
         import getpass
         value = getpass.getpass("Backup passphrase: ")
         if value:

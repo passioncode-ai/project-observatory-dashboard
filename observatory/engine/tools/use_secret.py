@@ -64,6 +64,7 @@ from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import credential_shape  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
@@ -665,7 +666,7 @@ def cmd_pipe(args) -> int:
               f"parse — that is the leak of 2026-09-14. Put the script in a file: "
               f"`… | use_secret.py pipe {args.name} -- python3 probe.py`", file=sys.stderr)
         return 2
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         print("the value must arrive on stdin, e.g. `heroku config:get NAME -a app | "
               "use_secret.py pipe NAME -- <command>`", file=sys.stderr)
         return 2

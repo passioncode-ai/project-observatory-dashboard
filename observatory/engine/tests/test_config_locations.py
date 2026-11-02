@@ -65,7 +65,7 @@ class ConfigLocations(unittest.TestCase):
         base = Path(cls.tmp.name).resolve()
         (base / "user").mkdir()
         cls.home = base / "home"
-        cls.env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(base / "user"),
+        cls.env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(base / "user"), "USERPROFILE": str(base / "user"),
                    "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
                    "OBSERVATORY_HOME": str(cls.home)}
         init = subprocess.run([sys.executable, "observatory.py", "init"], cwd=ROOT, env=cls.env,

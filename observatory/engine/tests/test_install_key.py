@@ -71,7 +71,7 @@ def workspace() -> tuple[pathlib.Path, dict]:
     base = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-installkey-")).resolve()
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("OBSERVATORY_", "CLAUDE_MEM_", "OPENAI_", "OPENROUTER_"))}
-    env.update(HOME=str(base / "user"), OBSERVATORY_HOME=str(base / "home"),
+    env.update(HOME=str(base / "user"), USERPROFILE=str(base / "user"), OBSERVATORY_HOME=str(base / "home"),
                PYTHONDONTWRITEBYTECODE="1")
     (base / "user").mkdir()
     return base, env

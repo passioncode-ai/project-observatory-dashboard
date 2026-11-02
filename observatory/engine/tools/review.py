@@ -48,6 +48,7 @@ import argparse, json, os, pathlib, sqlite3, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import paths                                                                      
 import atomic                                                                     
 import proposals                                                                  
@@ -67,7 +68,7 @@ def latest(conn) -> list[sqlite3.Row]:
 
 
 def require_terminal(action: str) -> None:
-    if not sys.stdin.isatty():
+    if not osprivacy.is_terminal(sys.stdin):
         sys.exit(
             f"review: refusing to {action} without a terminal.\n"
             f"  Everything written here is owned by `operator` — exempt from retention, "

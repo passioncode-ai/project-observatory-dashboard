@@ -46,7 +46,7 @@ class DashboardStop(unittest.TestCase):
         return patch.dict(sys.modules, {k: v for k, v in sys.modules.items() if k != "paths"}, clear=True)
 
     def env(self, name: str) -> dict[str, str]:
-        return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.base / "user"),
+        return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user"),
                 "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
                 "OBSERVATORY_HOME": str(self.base / name)}
 

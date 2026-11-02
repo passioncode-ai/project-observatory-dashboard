@@ -34,7 +34,7 @@ class LeakScan(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name).resolve()
         # The scan reads every agent's transcript home under HOME (I-5): a synthetic one here.
-        env = patch.dict(os.environ, {"HOME": str(base / "user")})
+        env = patch.dict(os.environ, {"HOME": str(base / "user"), "USERPROFILE": str(base / "user")})
         env.start()
         self.addCleanup(env.stop)
         for name in ("CODEX_HOME", "CODEX_SQLITE_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX",

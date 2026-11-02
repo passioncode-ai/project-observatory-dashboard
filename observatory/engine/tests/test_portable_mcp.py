@@ -22,12 +22,17 @@ def setup():
     temp=tempfile.TemporaryDirectory(prefix='observatory-synthetic-')
     atexit.register(temp.cleanup)
     base=Path(temp.name).resolve(); _BASE=base
-    from run_portable import runtime_environment
+    from run_portable import home_environment, runtime_environment
     from git_env import git_env
-    env=git_env({**runtime_environment(),'PATH':os.environ['PATH'],'HOME':str(base/'user'),'LANG':'en_US.UTF-8',
-                 'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime')})
+    (base/'user').mkdir(); (base/'tmp').mkdir()
+    env=git_env({**runtime_environment(),'PATH':os.environ['PATH'],**home_environment(base/'user'),'LANG':'en_US.UTF-8',
+                 'PYTHONDONTWRITEBYTECODE':'1','OBSERVATORY_HOME':str(base/'runtime'),
+                 # tests/tmp.py keeps a workspace only inside a temporary folder it knows; on Windows this
+                 # base is not under a fixed root, so it is named (OBS-277).
+                 'OBSERVATORY_TEST_SANDBOX':str(base)})
     os.environ.clear();os.environ.update(env)
-    (base/'user').mkdir(); (base/'tmp').mkdir(); os.environ['TMPDIR']=str(base/'tmp'); tempfile.tempdir=str(base/'tmp')
+    os.environ['TMPDIR']=str(base/'tmp'); tempfile.tempdir=str(base/'tmp')
+    if os.name=='nt': os.environ['TEMP']=os.environ['TMP']=str(base/'tmp')
     projects=base/'projects';projects.mkdir()
     def run(*args):
         p=subprocess.run(args,cwd=ROOT,env=dict(os.environ),capture_output=True,text=True,timeout=40)

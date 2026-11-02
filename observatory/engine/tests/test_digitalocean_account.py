@@ -223,7 +223,7 @@ def serve(provider: Provider) -> tuple[http.server.ThreadingHTTPServer, str]:
 def environment(tmp: pathlib.Path, base: str) -> dict:
     (tmp / "vault").mkdir(exist_ok=True)
     (tmp / "secrets").mkdir(exist_ok=True)
-    return {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "OBSERVATORY_HOME": str(tmp / "workspace"),
+    return {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "USERPROFILE": str(tmp), "OBSERVATORY_HOME": str(tmp / "workspace"),
             "OBSERVATORY_SECRETS": str(tmp / "secrets"), "PYTHONDONTWRITEBYTECODE": "1",
             "OBSERVATORY_VAULT_DIR": str(tmp / "vault"), "OBSERVATORY_DO_API": base,
             "DOCTL_CONFIG": str(tmp / "doctl-config.yaml")}

@@ -339,7 +339,7 @@ class OverTheAppProtocol(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.home = Path(tmp.name).resolve()
-        env = patch.dict(os.environ, {'HOME': str(self.home), 'OBSERVATORY_HOME': str(self.home / 'ws')}, clear=True)
+        env = patch.dict(os.environ, {'HOME': str(self.home), 'USERPROFILE': str(self.home), 'OBSERVATORY_HOME': str(self.home / 'ws')}, clear=True)
         env.start()
         self.addCleanup(env.stop)
         import workspace

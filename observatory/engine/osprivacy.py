@@ -16,6 +16,7 @@ Every privacy decision goes through here:
     osprivacy.explain(path_or_fd)          # the mode and uid, or the owner and ACL, for a diagnostic
     osprivacy.real_home()                  # the account's home, never from HOME/USERPROFILE
     osprivacy.read_regular(path, limit)    # a regular file's bytes: no link, no wait, at most `limit`
+    osprivacy.is_terminal(sys.stdin)       # a person at a console, never a pipe, a file or NUL
 
 POSIX: the calls the engine made before — `O_NOFOLLOW`, `S_IMODE(st_mode) & 0o077`, `st_uid`,
 `chmod`, the password database.
@@ -37,6 +38,10 @@ Windows:
   Administrators, full control, inherited by whatever is created inside a folder.
 - The account's home comes from the known-folder store (`SHGetKnownFolderPath(FOLDERID_Profile)`),
   which reads the account's profile and not the environment.
+- `is_terminal` asks the console: `isatty()` is true for every character device, the NUL device
+  included, so `< NUL` passed every operator-only gate on Windows (OBS-279). A console handle is a
+  character device (`GetFileType` = `FILE_TYPE_CHAR`) on which `GetConsoleMode` succeeds; NUL is a
+  character device on which it fails.
 """
 from __future__ import annotations
 
@@ -143,6 +148,9 @@ if not WINDOWS:
         asks it of every entry of a tree before removing the tree: a folder this account owns
         can hold another account's files (one created with sudo), and those are not ours."""
         return info.st_uid == os.getuid()
+
+    def _console_fd(fd: int) -> bool:
+        return False
 
     def real_home() -> Path | None:
         """The home the password database records for this uid; None when it has none."""
@@ -418,6 +426,23 @@ else:  # pragma: no cover - exercised by the Windows CI job
         rename probe (holders.py) refuses what another account holds."""
         return True
 
+    _kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+    _kernel32.GetFileType.restype = wintypes.DWORD
+    _kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    _kernel32.GetConsoleMode.restype = wintypes.BOOL
+
+    def _console_mode(handle) -> bool:
+        mode = wintypes.DWORD()
+        return bool(_kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+    def _console_fd(fd: int) -> bool:
+        """A console handle, not NUL, a pipe or a file (see `is_terminal`)."""
+        try:
+            handle = wintypes.HANDLE(msvcrt.get_osfhandle(fd))
+        except (OSError, TypeError, ValueError):
+            return False
+        return console_handle(handle, _kernel32.GetFileType, _console_mode)
+
     def real_home() -> Path | None:
         """The account's profile folder from the known-folder store; None when it cannot say."""
         fields = _FOLDERID_PROFILE.fields
@@ -431,6 +456,40 @@ else:  # pragma: no cover - exercised by the Windows CI job
             return Path(out.value) if out.value else None
         finally:
             ole32.CoTaskMemFree(out)
+
+
+
+#: `GetFileType` answers (winbase.h).
+FILE_TYPE_DISK, FILE_TYPE_CHAR, FILE_TYPE_PIPE = 0x0001, 0x0002, 0x0003
+
+
+def console_handle(handle, get_file_type, get_console_mode) -> bool:
+    """Whether a Windows handle is a console: a character device on which `GetConsoleMode`
+    succeeds. The two Win32 calls are passed in, so the rule is tested on every OS."""
+    try:
+        return get_file_type(handle) == FILE_TYPE_CHAR and bool(get_console_mode(handle))
+    except OSError:
+        return False
+
+
+def is_terminal(stream=None) -> bool:
+    """Whether `stream` (standard input when None) is a terminal a person types into: what every
+    operator-only command asks before it acts as the operator. POSIX: `isatty()`. Windows: a real
+    console, because `isatty()` is also true for the NUL device (OBS-279). False for a missing,
+    closed or detached stream."""
+    import sys
+    stream = sys.stdin if stream is None else stream
+    if stream is None:
+        return False
+    try:
+        if not stream.isatty():
+            return False
+        if not WINDOWS:
+            return True
+        fd = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return False
+    return _console_fd(fd)  # pragma: no cover - Windows
 
 
 def read_regular(path, limit: int) -> bytes:
