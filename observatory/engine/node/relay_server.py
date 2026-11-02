@@ -28,12 +28,14 @@ Connections are bounded twice, below the process's descriptor limit (`fd_caps`):
 `MAX_PENDING_PER_SOURCE` per caller address, loopback included, a trusted terminator's forwarded address with
 `trusted_proxy`, IPv6 by its /64; admission max-min fair across addresses, `RelayServer._place`: a newcomer whose
 address holds at least two fewer slots than the fullest takes one of that address's, otherwise one gives way by
-`RelayServer.victim`, never one answering inside `FAIR_ANSWER_SECONDS`) apart from admitted sessions
-(`MAX_SESSIONS`, `MAX_SESSIONS_PER_KID` per machine, its oldest replaced), so unauthenticated clients cannot starve the
-estate's machines. Each session writes from its own thread through a bounded queue: a machine that stops reading
-stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its socket. A
-failed accept (out of descriptors) is retried with a backoff and logged, and `health` names an accept loop that ended
-or keeps failing.
+`RelayServer.victim`, never one answering inside `FAIR_ANSWER_SECONDS`) apart from admitted sessions (`MAX_SESSIONS`,
+`MAX_SESSIONS_PER_KID` per machine, its oldest replaced), so unauthenticated clients cannot starve the estate's
+machines. A newcomer refused on arrival is answered 503, half-closed and drained for up to `LINGER_SECONDS` before the
+close (`MAX_LINGERING` at once), so the answer reaches it: a close over unread input is a reset, and a Windows caller
+drops what it has not read. Each session writes from its own thread through a bounded queue: a machine that stops
+reading stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its
+socket. A failed accept (out of descriptors) is retried with a backoff and logged, and `health` names an accept loop
+that ended or keeps failing.
 
 Every open session is checked against the current admission set before any frame it sends or accepts and every two
 seconds: a machine the record or a delta no longer admits, or under another key, is closed `not-admitted` (4403), and
@@ -103,6 +105,14 @@ FAIR_ANSWER_SECONDS = 2.0
 FD_RESERVE = 48
 #: An accept loop failing this long, or ended, is reported by `health`.
 ACCEPT_FAILING_SECONDS = 1.0
+#: The longest wait between two retries of a failing accept (the backoff doubles from 50 ms up to it).
+ACCEPT_BACKOFF_SECONDS = 1.0
+#: A connection refused before its request was read is half-closed and drained this long, at most this many bytes,
+#: before it is closed: a close with unread input is a reset, and a Windows caller drops the 503 it has not read yet.
+#: At most `MAX_LINGERING` drain at once (within `FD_RESERVE`); past it a refused connection is closed at once.
+LINGER_SECONDS = 1.0
+LINGER_BYTES = 64 * 1024
+MAX_LINGERING = 16
 #: Queued control frames (replies, presence, delta pages) one session may hold before it counts as not reading.
 OUTBOX_BYTES = 4 * 1024 * 1024
 #: Seconds a session closing with an error frame has to send it before its socket is shut regardless.
@@ -1128,6 +1138,7 @@ class RelayServer:
         self._stop = threading.Event()
         self._accepting = threading.Event()
         self._accept_failing: Optional[Tuple[float, str]] = None
+        self._lingering = threading.BoundedSemaphore(MAX_LINGERING)
         self._listener: Any = None
         self.port: Optional[int] = None
 
@@ -1202,7 +1213,7 @@ class RelayServer:
                         logged = time.monotonic()
                         self.log({'event': 'relay.accept.error', 'error': name})
                     self._stop.wait(backoff)
-                    backoff = min(backoff * 2, 1.0)
+                    backoff = min(backoff * 2, ACCEPT_BACKOFF_SECONDS)
                     continue
                 backoff = 0.05
                 if self._accept_failing is not None:
@@ -1280,12 +1291,42 @@ class RelayServer:
             _shut(entry)
             self.log({'event': 'relay.pending.evicted', 'progress': entry.progress, 'fair': fair})
 
-    def _refuse(self, sock: socket.socket, refusal: str) -> None:
+    def _refuse(self, sock: socket.socket, refusal: str, unread: bool = False) -> None:
+        """Answers 503 and closes. `unread`: the caller's request was never read (refused on arrival), so the socket
+        is half-closed and drained before it closes (`_linger`), else the close would reset the connection and a
+        Windows caller would lose the answer."""
         self.log({'event': 'relay.refused', 'reason': refusal})
         sock.setblocking(False)
         _respond(sock, 503, _error_body('rate-limited', 'too many connections'))
+        if unread and self._lingering.acquire(blocking=False):
+            threading.Thread(target=self._linger, args=(sock,), name='relay-linger', daemon=True).start()
+            return
         with contextlib.suppress(OSError):
             sock.close()
+
+    def _linger(self, sock: socket.socket) -> None:
+        """Sends FIN after the answer, then reads and discards what the caller still sends until it closes, for at
+        most `LINGER_SECONDS` and `LINGER_BYTES`; then closes. Holds one of the `MAX_LINGERING` slots throughout."""
+        try:
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_WR)
+            deadline, read = time.monotonic() + LINGER_SECONDS, 0
+            while read < LINGER_BYTES and not self._stop.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    sock.settimeout(remaining)
+                    chunk = sock.recv(4096)
+                except OSError:                            # a timeout, or the caller reset it
+                    break
+                if not chunk:
+                    break
+                read += len(chunk)
+        finally:
+            with contextlib.suppress(OSError):
+                sock.close()
+            self._lingering.release()
 
     def _admit_connection(self, sock: socket.socket, peer: str) -> None:
         entry = _Pending(sock, peer)
@@ -1293,7 +1334,7 @@ class RelayServer:
             refusal, evicted, fair = self._place(entry)
         self._evicted(evicted, fair)
         if refusal is not None:
-            return self._refuse(sock, refusal)
+            return self._refuse(sock, refusal, unread=True)
         threading.Thread(target=self._connection, args=(entry,), name='relay-conn', daemon=True).start()
 
     def _readdress(self, entry: _Pending, headers: Dict[str, str]) -> Optional[str]:

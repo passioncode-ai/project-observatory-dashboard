@@ -51,7 +51,16 @@ except ImportError:
 from node import p256, relay                           # noqa: E402
 
 VECTORS = ROOT / 'fabric' / 'node-vectors'
-WAIT = 5.0
+#: How long a check waits for something that should happen. Only a failing check waits it out, so it is generous: a
+#: hosted runner under a full parallel suite runs this file several times slower than a laptop.
+WAIT = 15.0
+#: The fair answer window these tests run under: longer than any pause a slow runner makes, so a caller that answered
+#: keeps its slot because it answered, never because the machine happened to be fast. A test of the window's end sets
+#: its own.
+WINDOW = 60.0
+#: What "at once" means for a check that a stuck reader blocks nobody: a blocked relay never answers (the read gives up
+#: at `WAIT`), so the bound only has to sit above a loaded runner's ordinary time.
+PROMPT = 5.0
 needs_crypto = unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
 
 if HAVE_CRYPTO:
@@ -192,9 +201,10 @@ class Relay(unittest.TestCase):
         self.lock = threading.Lock()
         self.sessions = []
         self.server = None
-        patcher = mock.patch.object(rs, 'REVALIDATE_SECONDS', 0.1)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (('REVALIDATE_SECONDS', 0.1), ('FAIR_ANSWER_SECONDS', WINDOW)):
+            patcher = mock.patch.object(rs, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def tearDown(self):
         for session in self.sessions:
@@ -208,6 +218,15 @@ class Relay(unittest.TestCase):
     def log(self, record):
         with self.lock:
             self.logs.append(record)
+
+    def logged(self, event):
+        with self.lock:
+            return sum(1 for r in self.logs if r['event'] == event)
+
+    def progress(self):
+        """The `progress` of every connection the relay holds as pending: 0 sent nothing yet, 1 sent its request."""
+        with self.server._lock:
+            return sorted(e.progress for e in self.server._pending.values())
 
     def start(self, limits=None, spool=None, key=None, **server):
         port = free_port()
@@ -573,26 +592,26 @@ class Relay(unittest.TestCase):
         return None
 
     def test_the_request_head_has_a_wall_clock_deadline(self):
+        """One byte every 0.1 s keeps any per-read timeout satisfied for the 23 s the head takes; only a deadline
+        across every byte closes it, at 0.3 s. The outer limit only bounds a relay that never closes it."""
         self.start()
-        with mock.patch.object(rs, 'REQUEST_HEAD_SECONDS', 1.0):
+        with mock.patch.object(rs, 'REQUEST_HEAD_SECONDS', 0.3):
             sock = socket.create_connection(('127.0.0.1', self.server.port))
-            took = self.dribble_until_closed(sock, b'GET /healthz HTTP/1.1\r\nX-Pad: ' + b'a' * 200, 0.3, 6.0)
+            took = self.dribble_until_closed(sock, b'GET /healthz HTTP/1.1\r\nX-Pad: ' + b'a' * 200, 0.1, WAIT)
             sock.close()
         self.assertIsNotNone(took, 'a client sending one byte at a time kept its slot past the deadline')
-        self.assertLess(took, 3.0)
+        self.assertLess(took, 5.0)
 
     def test_auth_has_a_wall_clock_deadline_and_closes_4401(self):
         self.start()
-        with mock.patch.object(rs, 'AUTH_DEADLINE_SECONDS', 1.0):
+        with mock.patch.object(rs, 'AUTH_DEADLINE_SECONDS', 0.3):
             sock = self.upgrade()
             frame = bytes([0x81, 0x80 | 126]) + (200).to_bytes(2, 'big') + b'\0\0\0\0' + b'x' * 200
-            start = time.monotonic()
-            took = self.dribble_until_closed(sock, frame, 0.3, 6.0)
+            took = self.dribble_until_closed(sock, frame, 0.1, WAIT)
             sock.close()
         self.assertIsNotNone(took, 'a client dribbling its auth frame kept its slot past the deadline')
-        self.assertLess(took, 3.0)
+        self.assertLess(took, 5.0)
         self.assertTrue(any(r.get('reason') == 'auth-deadline' and r.get('close') == 4401 for r in self.logs))
-        del start
 
     def test_unauthenticated_connections_cannot_starve_machines(self):
         """Idle sockets fill the unauthenticated cap; a machine still gets in (the oldest idle one gives way), and
@@ -600,7 +619,8 @@ class Relay(unittest.TestCase):
         self.start(max_pending=2)
         idle = [socket.create_connection(('127.0.0.1', self.server.port)) for _ in range(4)]
         try:
-            time.sleep(1.2)
+            # Four on a budget of two: the third and the fourth each displaced one, so every slot holds an idle one.
+            self.assertTrue(eventually(lambda: self.logged('relay.pending.evicted') == 2 and self.progress() == [0, 0]))
             laptop, _ = self.open(self.estate.laptop)
             laptop.ping()
         finally:
@@ -613,23 +633,26 @@ class Relay(unittest.TestCase):
         self.start(max_pending=8, max_pending_per_source=1)
         first = self.upgrade()
         try:
-            time.sleep(0.2)
+            self.assertTrue(eventually(lambda: self.progress() == [1]))    # its request read: it is answering
             with self.assertRaises(WebSocketError):
                 self.raw()
         finally:
             first.close()
+        self.assertTrue(eventually(lambda: self.progress() == []))
         idle = socket.create_connection(('127.0.0.1', self.server.port))
         try:
-            time.sleep(0.2)
+            self.assertTrue(eventually(lambda: self.progress() == [0]))
             ws, _ = self.raw()                              # the idle one, which sent nothing, gave way
             ws.close()
+            self.assertEqual(self.logged('relay.pending.evicted'), 1)
         finally:
             idle.close()
 
     # ---- Review of #400, second round ----------------------------------------------------------------------
 
     def flood(self, stop, opened, address_header=None):
-        """Idle connections from this machine, one every 10 ms, as the reviewer's flood."""
+        """Idle connections from this machine, one every 5 ms (the reviewer's flood, twice as dense), until
+        `stop`."""
         held = []
         while not stop.is_set():
             try:
@@ -645,46 +668,64 @@ class Relay(unittest.TestCase):
                 for old in held[:100]:
                     old.close()
                 del held[:100]
-            time.sleep(0.01)
+            time.sleep(0.005)
         for sock in held:
             sock.close()
 
-    def test_a_flood_from_the_same_address_never_locks_a_machine_out(self):
-        self.start()
+    def flooding(self):
+        """A flood under way in the background: its count of opened connections, and how to end it."""
         stop, opened = threading.Event(), [0]
         flooder = threading.Thread(target=self.flood, args=(stop, opened), daemon=True)
         flooder.start()
+
+        def end():
+            stop.set()
+            flooder.join(WAIT)
+        self.addCleanup(end)
+        return opened, end
+
+    def evictions_grow(self, by):
+        """Waits until the relay displaced `by` more pending connections: the flood is under way at the relay itself,
+        however slow the machine. Counted in connections, never in seconds."""
+        target = self.logged('relay.pending.evicted') + by
+        self.assertTrue(eventually(lambda: self.logged('relay.pending.evicted') >= target), 'the flood stalled')
+
+    def test_a_flood_from_the_same_address_never_locks_a_machine_out(self):
+        """Each of five admissions starts after the flood displaced ten more connections at the relay, and the flood
+        goes on while the machine answers, so every admission happens inside the flood."""
+        self.start()
+        opened, end = self.flooding()
+        admitted = 0
         try:
-            time.sleep(1.0)
-            admitted = 0
             for _ in range(5):
+                self.evictions_grow(10)
                 session, _ = self.open(self.estate.laptop)
                 admitted += session.welcome is not None
                 session.close()
         finally:
-            stop.set()
-            flooder.join(5)
+            end()
         self.assertEqual(admitted, 5)
-        self.assertGreater(opened[0], 50)
+        self.assertGreaterEqual(self.logged('relay.pending.evicted'), 50)
+        self.assertGreaterEqual(opened[0], 50 + rs.MAX_PENDING_PER_SOURCE)
 
     def test_a_slow_answer_inside_the_fair_window_survives_a_flood(self):
+        """A caller that read its hello owes `auth` while the flood displaces twenty connections of its own address
+        around it; it answers late and is still admitted."""
         self.start()
-        stop, opened = threading.Event(), [0]
-        flooder = threading.Thread(target=self.flood, args=(stop, opened), daemon=True)
-        flooder.start()
+        _, end = self.flooding()
         try:
-            time.sleep(1.0)
+            self.evictions_grow(10)
             ws, hello = self.raw()
-            time.sleep(0.6)
+            self.evictions_grow(20)
             ws.send_text(json.dumps(relay.auth_frame(
                 self.estate.laptop.sign, frame_id='a1', relay=self.origin, nonce=hello['nonce'],
                 estate=self.estate.name, kid=self.estate.laptop.sig_kid, iat=relay.rfc3339(int(time.time() * 1000)))))
             self.assertEqual(self.next_frame(ws)['type'], 'welcome')
             ws.close()
         finally:
-            stop.set()
-            flooder.join(5)
+            end()
 
+    @mock.patch.object(rs, 'FAIR_ANSWER_SECONDS', 2.0)
     def test_the_address_holding_most_slots_loses_first(self):
         now = 100.0
         entries = [rs._Pending(None, 'A', at=now - 5) for _ in range(3)] + [rs._Pending(None, 'B', at=now - 9)]
@@ -777,18 +818,41 @@ class Relay(unittest.TestCase):
 
     def test_without_the_setting_a_forwarded_header_is_ignored(self):
         self.start(max_pending_per_source=1)
-        first, status = self.forwarded_upgrade(b'192.0.2.1')
-        time.sleep(0.2)
-        second, other = self.forwarded_upgrade(b'192.0.2.2')
+        first, status = self.forwarded_upgrade(b'192.0.2.1')       # answered 101: its request was read
+        second, other = self.forwarded_upgrade(b'192.0.2.2')       # refused on arrival, its request never read
         for sock in (first, second):
             sock.close()
         self.assertEqual((status, other), (b'101', b'503'))
 
+    def test_a_refusal_on_arrival_is_read_whole_and_closed_cleanly(self):
+        """A connection refused before its request was read gets the whole 503 and a clean close, never a reset: the
+        relay half-closes and drains what the caller sends before it closes (a reset makes a Windows caller drop the
+        answer unread)."""
+        self.start(max_pending_per_source=1)
+        first, status = self.forwarded_upgrade(b'192.0.2.1')
+        self.assertEqual(status, b'101')
+        try:
+            sock = socket.create_connection(('127.0.0.1', self.server.port))
+            sock.settimeout(WAIT)
+            sock.sendall(b'GET /v1/connect HTTP/1.1\r\nHost: x\r\nX-Pad: ' + b'a' * 4000 + b'\r\n\r\n')
+            data = b''
+            while True:
+                chunk = sock.recv(4096)                     # a reset raises ConnectionResetError here
+                if not chunk:
+                    break
+                data += chunk
+            sock.close()
+        finally:
+            first.close()
+        self.assertTrue(data.startswith(b'HTTP/1.1 503 '), data[:40])
+        self.assertEqual(json.loads(data.split(b'\r\n\r\n', 1)[1])['error']['code'], 'rate-limited')
+        self.assertTrue(eventually(lambda: self.server._lingering._value == rs.MAX_LINGERING))   # every slot back
+
     def test_address_counts_are_dropped_at_zero(self):
         self.start(max_pending=1, trusted_proxy=True)
-        with mock.patch.object(rs, 'FAIR_ANSWER_SECONDS', 0.2):
+        with mock.patch.object(rs, 'FAIR_ANSWER_SECONDS', 0.1):
             first, _ = self.forwarded_upgrade(b'192.0.2.1')
-            time.sleep(0.4)
+            time.sleep(0.15)                                # past its fair window
             second, status = self.forwarded_upgrade(b'192.0.2.2')
             self.assertEqual(status, b'101')
             self.assertTrue(eventually(lambda: '192.0.2.1' not in self.server._per_source))
@@ -811,11 +875,13 @@ class Relay(unittest.TestCase):
         self.assertTrue(eventually(held))
         session = sessions[0]
         pings = (bytes([0x89, 0x80 | 125]) + b'\0\0\0\0' + b'p' * 125) * 512
-        end = time.monotonic() + 1.5
-        while time.monotonic() < end:
+        # 12 288 pings, a fixed count: their pongs (1.5 MB) are far more than the caller's 1 KiB receive buffer and
+        # the relay's send buffer hold, so the answers back up whatever the machine's speed.
+        sock.settimeout(WAIT)
+        for _ in range(24):
             try:
                 sock.sendall(pings)
-            except OSError:
+            except OSError:                                 # closed for overflow, or no longer read: the bound
                 break
         sock.close()
         self.assertLessEqual(len(session.outbox), 2)
@@ -883,6 +949,8 @@ class Relay(unittest.TestCase):
             self.assertEqual(self.next_frame(ws)['type'], 'pong')
             ws.close()
 
+    @mock.patch.object(rs, 'ACCEPT_FAILING_SECONDS', 0.2)
+    @mock.patch.object(rs, 'ACCEPT_BACKOFF_SECONDS', 0.05)
     def test_accept_survives_errors_and_health_reports_them(self):
         self.start()
         real = self.server._listener
@@ -1008,13 +1076,13 @@ class Relay(unittest.TestCase):
             desk.send_text(json.dumps({'v': 1, 'id': 'i%d' % n, 'type': 'send', 'to': self.estate.laptop.sig_kid,
                                        'msgId': 'big%d' % n, 'body': body, 'ttl': 600}))
             self.assertEqual(self.next_frame(desk)['type'], 'accepted')
-            self.assertLess(time.monotonic() - started, 2.0)
+            self.assertLess(time.monotonic() - started, PROMPT)
         started = time.monotonic()
         other, _ = self.raw_admitted(self.estate.desk)
-        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertLess(time.monotonic() - started, PROMPT)
         started = time.monotonic()
         self.server.stop()
-        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertLess(time.monotonic() - started, PROMPT)
         for ws in (stuck, desk, other):
             ws.close()
 
@@ -1172,4 +1240,5 @@ class Cli(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    # The slowest cases go into the suite's log (Python 3.12 and later), so a slow runner shows where its time went.
+    unittest.main(**({'durations': 8} if sys.version_info >= (3, 12) else {}))

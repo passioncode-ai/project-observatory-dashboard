@@ -19,7 +19,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
   have their own connection budget apart from admitted machines, the rate limits count a machine across all its
   connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
-  reads a mailbox a page at a time, and a failed accept is retried and shown in the server's health. The per-address
+  reads a mailbox a page at a time, a caller refused for want of a slot reads its whole 503 before a clean close
+  (a reset would make a Windows caller drop it), and a failed accept is retried and shown in the server's health. The per-address
   cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
   address it forwards in `X-Forwarded-For` (a port stripped), IPv6 addresses count by their /64, and admission is
   max-min fair across addresses, so a caller from a fresh address gets in while any address holds two or more. Blobs, a hub's

@@ -184,6 +184,11 @@ def serve(args) -> int:
         print(f"relay: unavailable: {error}", file=sys.stderr)
         return 2
     log = _printer(sys.stderr)
+    # The handlers go in before the relay listens: a supervisor that sees it answer may stop it at once, and a SIGTERM
+    # before them would end the process unclean (no `relay.stopped`, the spool left open).
+    stop = threading.Event()
+    for name in ("SIGTERM", "SIGINT"):
+        signal.signal(getattr(signal, name), lambda *_: stop.set())
     try:
         server = rs.build(node_folder(), data=Path(args.data).resolve() if args.data else None, memory=args.memory,
                           log=log, **setting).start()
@@ -194,9 +199,6 @@ def serve(args) -> int:
     reason = health(server)
     if reason:
         log({"event": "relay.degraded", "reason": reason})
-    stop = threading.Event()
-    for name in ("SIGTERM", "SIGINT"):
-        signal.signal(getattr(signal, name), lambda *_: stop.set())
     print(f"relay {setting['origin']} listening on {setting['host']}:{server.port}", file=sys.stderr, flush=True)
     try:
         while not stop.wait(1.0):
