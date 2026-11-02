@@ -880,11 +880,19 @@ own). It reuses the node's checks and adds what only a relay does:
 - **Bounds.** Connections not admitted yet have their own cap (32, at most 8 per caller address, loopback included),
   apart from admitted sessions (128, at most 4 per machine, its oldest replaced), both kept below the process's
   descriptor limit (`fd_caps`). The caller address is the socket's peer; behind a TLS terminator on this machine,
-  with `--trusted-proxy`, it is the rightmost `X-Forwarded-For` entry of a connection from a loopback peer, and without
-  the setting that header is ignored. Past a cap one connection gives way (`RelayServer.victim`): from the address
-  holding the most slots, one that has sent nothing before one that sent its request, the oldest first, and never one
-  that sent its request less than 2 s ago (its fair answer window); when none may, the newcomer is answered 503. So a
-  flood from one address displaces itself, and a machine that answers its `hello` gets in. The per-minute limits count a machine across all its connections, with
+  with `--trusted-proxy`, it is the rightmost `X-Forwarded-For` entry of a connection from a loopback peer (a port
+  stripped, an unreadable entry logged once and counted against the peer), and without the setting that header is
+  ignored. Addresses are counted by group: an IPv4 address alone, an IPv6 address by its /64.
+  Admission is max-min fair across those groups (`RelayServer._place`). At a group's own cap, one of its connections
+  gives way (`RelayServer.victim`: one that has sent nothing before one that sent its request, the oldest first, never
+  one that sent its request less than 2 s ago, its fair answer window), or the newcomer is answered 503. At the whole
+  budget's cap, a newcomer whose group holds at least two fewer slots than the fullest group takes that group's
+  slot (its silent one first, else its oldest), fair window or not; otherwise one of the groups holding as many slots
+  as the newcomer's or more gives way under the fair window, or the newcomer is answered 503. What holds: a newcomer
+  from a group holding fewer slots gets in whenever some group holds two or more, so a flood spread over a few
+  addresses cannot keep a fresh address out. What does not: within one group a flood of complete requests, each inside
+  its fair window, refuses every newcomer of that group, which behind a local terminator without `--trusted-proxy` is
+  every caller. The per-minute limits count a machine across all its connections, with
   `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
   queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
   2 MiB), one page per machine at once. A failed accept is retried with a backoff and logged; `health` reports an

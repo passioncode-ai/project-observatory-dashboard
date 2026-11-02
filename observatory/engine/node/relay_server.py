@@ -26,8 +26,9 @@ What it carries, and how:
 
 Connections are bounded twice, below the process's descriptor limit (`fd_caps`): those not admitted yet (`MAX_PENDING`,
 `MAX_PENDING_PER_SOURCE` per caller address, loopback included, a trusted terminator's forwarded address with
-`trusted_proxy`; past a cap `RelayServer.victim` gives way: from the address holding most slots, silence before an
-answer, the oldest first, never one answering inside `FAIR_ANSWER_SECONDS`) apart from admitted sessions
+`trusted_proxy`, IPv6 by its /64; admission max-min fair across addresses, `RelayServer._place`: a newcomer whose
+address holds at least two fewer slots than the fullest takes one of that address's, otherwise one gives way by
+`RelayServer.victim`, never one answering inside `FAIR_ANSWER_SECONDS`) apart from admitted sessions
 (`MAX_SESSIONS`, `MAX_SESSIONS_PER_KID` per machine, its oldest replaced), so unauthenticated clients cannot starve the
 estate's machines. Each session writes from its own thread through a bounded queue: a machine that stops reading
 stalls only itself and is closed when its queue fills, and no other session, `end` or `stop` waits on its socket. A
@@ -61,6 +62,7 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import socket
 import sqlite3
@@ -1033,18 +1035,48 @@ def _loopback_address(address: str) -> bool:
         return False
 
 
-def forwarded_for(headers: Dict[str, str]) -> Optional[str]:
+def address_group(address: str) -> str:
+    """What a per-address count counts against: an IPv4 address itself (/32), an IPv6 address by its /64 (one host or
+    one network's worth of addresses is one caller), an IPv4-mapped IPv6 address as its IPv4; anything else as given."""
+    import ipaddress
+    try:
+        parsed = ipaddress.ip_address(address.split('%', 1)[0])
+    except ValueError:
+        return address
+    if isinstance(parsed, ipaddress.IPv6Address):
+        if parsed.ipv4_mapped is not None:
+            return str(parsed.ipv4_mapped)
+        return str(ipaddress.ip_network(str(parsed) + '/64', strict=False))
+    return str(parsed)
+
+
+_UNSAFE = re.compile(r'[^0-9A-Za-z.:\[\]_-]')
+
+
+def forwarded_for(headers: Dict[str, str]) -> Tuple[Optional[str], bool]:
     """The caller's address a TLS terminator on this machine forwards: the rightmost `X-Forwarded-For` entry (the one
-    the terminator itself appended; those before it are the caller's own words), as an address literal, or None."""
+    the terminator itself appended; those before it are the caller's own words), as an address literal, with a port
+    stripped (`192.0.2.1:5678`, `[2001:db8::1]:443`). `(address, False)`, `(None, False)` without the header, and
+    `(None, True)` for an entry that is no address."""
     import ipaddress
     value = headers.get('x-forwarded-for')
     if not value:
-        return None
-    last = value.split(',')[-1].strip().strip('[]')
+        return None, False
+    last = value.split(',')[-1].strip()
+    if last.startswith('['):
+        last = last[1:last.find(']')] if ']' in last else ''
+    elif last.count(':') == 1:                             # IPv4 with a port; a bare IPv6 address has several colons
+        last = last.split(':', 1)[0]
     try:
-        return str(ipaddress.ip_address(last))
+        return str(ipaddress.ip_address(last)), False
     except ValueError:
-        return None
+        return None, True
+
+
+def sanitized(value: str, limit: int = 64) -> str:
+    """A header value fit for a log line: at most `limit` characters, anything outside a plain address alphabet
+    replaced by `?`."""
+    return _UNSAFE.sub('?', value[:limit])
 
 
 class _Pending:
@@ -1053,7 +1085,7 @@ class _Pending:
     __slots__ = ('sock', 'peer', 'address', 'at', 'ws', 'progress', 'session')
 
     def __init__(self, sock: Optional[socket.socket], address: str, at: Optional[float] = None, progress: int = 0):
-        self.sock, self.peer, self.address = sock, address, address
+        self.sock, self.peer, self.address = sock, address, address_group(address)
         self.at = time.monotonic() if at is None else at
         self.ws, self.progress, self.session = None, progress, None
 
@@ -1203,30 +1235,48 @@ class RelayServer:
         self._count(entry.address, -1)
         return True
 
-    def _place(self, entry: _Pending) -> Tuple[Optional[str], Optional[_Pending]]:
-        """Puts `entry` in the pending budget under its address (under `_lock`): `(None, evicted-or-None)`, or
-        `(refusal, None)` when its address, or the whole budget, is full of connections that may not give way."""
+    def _place(self, entry: _Pending) -> Tuple[Optional[str], Optional[_Pending], bool]:
+        """Puts `entry` in the pending budget under its address group (under `_lock`): `(None, evicted-or-None,
+        fair)`, or `(refusal, None, False)`.
+
+        Max-min fair across addresses. At its own address's cap, a connection of that address gives way (`victim`,
+        whose fair window holds). At the whole budget's cap, a newcomer whose address holds at least two fewer slots
+        than the fullest address takes that address's slot, the silent one first, else the oldest, fair window or not
+        (`fair` True): so a newcomer from a fresh address gets in while any address holds two or more. Otherwise
+        (the move would only swap who holds a slot) one of the fullest addresses gives way under the fair window, or
+        the newcomer is refused.
+
+        Behind a trusted terminator a connection counts against the terminator's own address until its request names
+        the caller, then moves to the caller's address keeping its slot (it never exceeds the budget then); an
+        eviction it made on arrival came from the fullest address, so it never takes a slot from an address holding
+        fewer than two."""
         others = [e for e in self._pending.values() if e is not entry]
         same = [e for e in others if e.address == entry.address]
-        now, evicted = time.monotonic(), None
+        now, evicted, fair = time.monotonic(), None, False
         if len(same) >= self.max_pending_per_source:
             evicted = self.victim(same, now)
             if evicted is None:
-                return 'per-source', None
+                return 'per-source', None, False
         elif len(others) >= self.max_pending:
-            evicted = self.victim(others, now)
-            if evicted is None:
-                return 'pending-full', None
+            shares = collections.Counter(e.address for e in others)
+            most = max(shares.values())
+            if len(same) + 2 <= most:
+                fullest = [e for e in others if shares[e.address] == most]
+                evicted, fair = min(fullest, key=lambda e: (e.progress, e.at)), True
+            else:
+                evicted = self.victim([e for e in others if shares[e.address] >= len(same)], now)
+                if evicted is None:
+                    return 'pending-full', None, False
         if evicted is not None:
             self._unlist(evicted)
         self._pending[id(entry)] = entry
         self._count(entry.address, +1)
-        return None, evicted
+        return None, evicted, fair
 
-    def _evicted(self, entry: Optional[_Pending]) -> None:
+    def _evicted(self, entry: Optional[_Pending], fair: bool = False) -> None:
         if entry is not None:
             _shut(entry)
-            self.log({'event': 'relay.pending.evicted', 'progress': entry.progress})
+            self.log({'event': 'relay.pending.evicted', 'progress': entry.progress, 'fair': fair})
 
     def _refuse(self, sock: socket.socket, refusal: str) -> None:
         self.log({'event': 'relay.refused', 'reason': refusal})
@@ -1238,8 +1288,8 @@ class RelayServer:
     def _admit_connection(self, sock: socket.socket, peer: str) -> None:
         entry = _Pending(sock, peer)
         with self._lock:
-            refusal, evicted = self._place(entry)
-        self._evicted(evicted)
+            refusal, evicted, fair = self._place(entry)
+        self._evicted(evicted, fair)
         if refusal is not None:
             return self._refuse(sock, refusal)
         threading.Thread(target=self._connection, args=(entry,), name='relay-conn', daemon=True).start()
@@ -1247,17 +1297,23 @@ class RelayServer:
     def _readdress(self, entry: _Pending, headers: Dict[str, str]) -> Optional[str]:
         """After the head: the connection has answered (`progress` 1), and behind a trusted terminator on this machine
         it counts against the caller's forwarded address from now on. A refusal when that address is full."""
-        evicted = None
+        evicted, fair, unreadable = None, False, False
         with self._lock:
             entry.progress = 1
-            forwarded = forwarded_for(headers) if self.trusted_proxy and _loopback_address(entry.peer) else None
-            if forwarded is None or forwarded == entry.address:
-                return None
-            if not self._unlist(entry):
-                return None                                # evicted meanwhile; its socket is already shut
-            entry.address = forwarded
-            refusal, evicted = self._place(entry)
-        self._evicted(evicted)
+            forwarded = None
+            if self.trusted_proxy and _loopback_address(entry.peer):
+                forwarded, unreadable = forwarded_for(headers)
+            group = address_group(forwarded) if forwarded is not None else None
+            if group is not None and group != entry.address and self._unlist(entry):
+                entry.address = group
+                refusal, evicted, fair = self._place(entry)
+            else:
+                refusal = None                             # unchanged, or evicted meanwhile (its socket already shut)
+        if unreadable:
+            # Once per connection, and never more of the header than a short, plain-character excerpt.
+            self.log({'event': 'relay.forwarded.unreadable',
+                      'value': sanitized(headers.get('x-forwarded-for', '').split(',')[-1].strip())})
+        self._evicted(evicted, fair)
         return refusal
 
     def _release_pending(self, entry: _Pending) -> None:

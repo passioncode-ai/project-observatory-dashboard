@@ -21,7 +21,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
   reads a mailbox a page at a time, and a failed accept is retried and shown in the server's health. The per-address
   cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
-  address it forwards in `X-Forwarded-For`, and a flood from one address displaces only itself. Blobs, a hub's
+  address it forwards in `X-Forwarded-For` (a port stripped), IPv6 addresses count by their /64, and admission is
+  max-min fair across addresses, so a caller from a fresh address gets in while any address holds two or more. Blobs, a hub's
   delta and heartbeat frames and the Cloudflare deployment are not carried yet.
   Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
   on loopback.

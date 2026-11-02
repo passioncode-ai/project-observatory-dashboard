@@ -706,6 +706,65 @@ class Relay(unittest.TestCase):
         status = sock.recv(64)
         return sock, status.split(b' ')[1] if status else b''
 
+    def test_a_fresh_address_gets_in_past_a_flood_spread_over_addresses(self):
+        """Max-min fair: four addresses hold every slot with requests sent (each inside its fair window), and a
+        newcomer from a fifth still gets in; more arrivals from the full addresses only displace one another."""
+        self.start(max_pending=8, trusted_proxy=True)
+        held = [self.forwarded_upgrade(b'192.0.2.%d' % (n % 4 + 1))[0] for n in range(8)]
+        try:
+            fresh, status = self.forwarded_upgrade(b'198.51.100.7')
+            held.append(fresh)
+            self.assertEqual(status, b'101')
+            for n in range(6):
+                held.append(self.forwarded_upgrade(b'192.0.2.%d' % (n % 4 + 1))[0])
+            with self.server._lock:
+                addresses = [e.address for e in self.server._pending.values()]
+            self.assertIn('198.51.100.7', addresses)        # the newcomer kept its place
+        finally:
+            for sock in held:
+                sock.close()
+        self.assertTrue(any(r['event'] == 'relay.pending.evicted' and r.get('fair') for r in self.logs))
+
+    def test_one_slot_each_is_already_fair(self):
+        self.start(max_pending=4, trusted_proxy=True)
+        held = [self.forwarded_upgrade(b'192.0.2.%d' % n)[0] for n in range(1, 5)]
+        try:
+            fresh, status = self.forwarded_upgrade(b'198.51.100.7')
+            held.append(fresh)
+            self.assertEqual(status, b'503')                # a swap gains nobody anything
+        finally:
+            for sock in held:
+                sock.close()
+
+    def test_addresses_are_counted_by_their_group(self):
+        group = rs.address_group
+        self.assertEqual(group('2001:db8:1:2::5'), group('2001:db8:1:2:ffff::1'))
+        self.assertNotEqual(group('2001:db8:1:2::5'), group('2001:db8:1:3::5'))
+        self.assertEqual(group('::ffff:192.0.2.1'), group('192.0.2.1'))
+        self.assertNotEqual(group('192.0.2.1'), group('192.0.2.2'))
+        self.assertEqual(group('not an address'), 'not an address')
+        self.start(max_pending_per_source=1, trusted_proxy=True)
+        first, status = self.forwarded_upgrade(b'2001:db8:1:2::5')
+        second, other = self.forwarded_upgrade(b'2001:db8:1:2::6')
+        for sock in (first, second):
+            sock.close()
+        self.assertEqual((status, other), (b'101', b'503'))
+
+    def test_a_forwarded_address_with_a_port_or_malformed(self):
+        self.assertEqual(rs.forwarded_for({'x-forwarded-for': '203.0.113.9, 192.0.2.1:5678'}), ('192.0.2.1', False))
+        self.assertEqual(rs.forwarded_for({'x-forwarded-for': '[2001:db8::1]:443'}), ('2001:db8::1', False))
+        self.assertEqual(rs.forwarded_for({'x-forwarded-for': '2001:db8::1'}), ('2001:db8::1', False))
+        self.assertEqual(rs.forwarded_for({}), (None, False))
+        self.assertEqual(rs.forwarded_for({'x-forwarded-for': 'unknown'}), (None, True))
+        self.start(trusted_proxy=True)
+        sock, status = self.forwarded_upgrade(b'not<an>address\x01' + b'x' * 300)
+        sock.close()
+        self.assertEqual(status, b'101')
+        logged = [r for r in self.logs if r['event'] == 'relay.forwarded.unreadable']
+        self.assertEqual(len(logged), 1)
+        self.assertLessEqual(len(logged[0]['value']), 64)
+        self.assertNotIn('<', logged[0]['value'])
+
     def test_behind_a_trusted_proxy_the_forwarded_address_is_the_callers(self):
         self.start(max_pending_per_source=1, trusted_proxy=True)
         first, status = self.forwarded_upgrade(b'192.0.2.1')
@@ -791,10 +850,10 @@ class Relay(unittest.TestCase):
                               (b'\0' * 64, self.estate.desk.sig_kid))
         with mock.patch.object(rs, 'FLUSH_PAGE_ROWS', 4):
             _, inbox = self.open(self.estate.desk)
-            self.assertTrue(eventually(lambda: len(inbox) == 6))
+            # Acknowledgements are asynchronous: wait until the mailbox itself is empty, not for the inbox count.
+            # The unreadable rows were skipped and dropped, never counted against a page.
+            self.assertTrue(eventually(lambda: boxes.count(self.estate.desk.sig_kid) == 0))
         self.assertEqual([m['payload']['n'] for m in inbox], [0, 7, 8, 9, 10, 11])
-        page = boxes.page  # unreadable rows are skipped and dropped, not counted against a page
-        self.assertEqual(page(self.estate.desk.sig_kid, int(time.time() * 1000)), [])
 
     def test_admitted_sessions_beyond_the_cap_are_refused(self):
         self.start(max_connections=1)

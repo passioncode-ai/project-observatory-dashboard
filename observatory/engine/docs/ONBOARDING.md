@@ -1446,8 +1446,17 @@ project-observatory full relay disable
   127.0.0.1. An `http://` origin is refused for anything but a loopback address and its own port.
   Have the terminator forward each caller's address in `X-Forwarded-For` and pass
   `--trusted-proxy`: the relay then counts a connection from this machine against the address the
-  terminator appended (the rightmost one). Without it the header is ignored, and every caller behind
-  the terminator shares the slots of one address.
+  terminator appended (the rightmost one; a port is stripped). This is a requirement on the
+  terminator: it MUST set the header itself to the real client address, overwriting it or
+  appending to it, and never pass a header the client sent through as the last entry. In nginx:
+  `proxy_set_header X-Forwarded-For $remote_addr;` (with `proxy_http_version 1.1;`,
+  `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` for the
+  WebSocket). In Caddy: `reverse_proxy 127.0.0.1:47317 { header_up X-Forwarded-For {remote_host} }`.
+  Two residuals stay. Without `--trusted-proxy` the header is ignored and every caller behind the
+  terminator is one address, so one caller flooding through it can keep everyone behind it out
+  until the flood stops. With `--trusted-proxy`, every program on this machine that can reach the
+  relay's port can claim any address it likes, so keep the relay bound to 127.0.0.1 and reachable
+  from other machines only through the terminator.
 - **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
   the relay beside itself when it starts (a login, `full update`, or
   `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
@@ -1467,9 +1476,12 @@ project-observatory full relay disable
 - **Connections.** A caller has 10 seconds from connecting to send its request and 10 seconds from
   the upgrade to send its `auth`, however it spreads the bytes; then it is closed (4401 for a missed
   `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address,
-  this machine's own included). When it is full, a connection from the address holding the most
-  gives way, one that has sent nothing first; a caller that has sent its request keeps its place
-  for 2 seconds to answer. That budget is kept apart from the admitted machines' (128 connections,
+  this machine's own included; an IPv6 address counts with its whole /64). When it is full, a
+  caller from an address holding at least two fewer connections than the fullest address takes a
+  place of that address; otherwise a caller that has sent its request keeps its place for 2
+  seconds to answer, and a connection that has sent nothing gives way first. So a caller from a
+  fresh address gets in while any address holds two or more; several callers sharing one address
+  (every caller behind a terminator without `--trusted-proxy`) compete among themselves only. That budget is kept apart from the admitted machines' (128 connections,
   at most 4 per machine, a fifth replacing its oldest), and both stay below the process's limit of
   open files. A machine that stops reading its messages slows only its
   own connection, which is closed when its queue fills. If the relay cannot accept connections for

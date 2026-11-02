@@ -24,7 +24,10 @@ proxy) and pass its `https://` origin: the relay itself serves plain HTTP on the
 CALLERS' ADDRESSES. Connections still owing their `auth` are capped per caller address. Behind a terminator on this
 machine every connection comes from 127.0.0.1: make the terminator forward the caller's address in `X-Forwarded-For`
 and pass `--trusted-proxy`, and the relay counts each connection from a loopback peer against the rightmost address
-that header names. Without it the header is ignored, and all callers behind the terminator share one address's slots.
+that header names. The terminator MUST set that header itself to the real client address (overwrite or append) and
+never pass a client's own value through as the last entry. Without the setting the header is ignored, and all callers
+behind the terminator share one address's slots; with it, any program on this machine that reaches the relay's port
+can claim any address, so keep the relay bound to 127.0.0.1.
 
 WHAT IT KEEPS. Queued messages, sealed under the relay's own key (`spool.key`) in `node/relay/spool.sqlite`, both
 owner-only, until they are acknowledged or their ttl ends; never a key of yours and never a secret in clear (what must
