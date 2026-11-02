@@ -129,9 +129,9 @@ def show(home: Path, *, platform: str = sys.platform) -> dict:
 
 
 def ask_left(label: str, me: str) -> bool:
-    """The person's typed word that `leave` ran on the other machine: the label, typed back at a terminal.
-    A terminal on stdin, until the console helper of #387 (a terminal the person types in) lands."""
-    if sys.stdin is None or not sys.stdin.isatty():
+    """The person's typed word that `leave` ran on the other machine: the label, typed back at a terminal
+    the person types in (a real console on Windows, where the NUL device also reads as a tty)."""
+    if not osprivacy.is_terminal():
         raise MachineMoveError("cutover asks you to confirm that the job was stopped on the other machine, so it "
                                "runs only at a terminal")
     print(f"Has `project-observatory full machine-move leave {label} --to {me}` run on the other machine?\n"

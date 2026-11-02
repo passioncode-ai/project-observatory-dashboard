@@ -1169,13 +1169,11 @@ class MachineMove(Base):
                 self.assertRaisesRegex(MM.MachineMoveError, 'terminal'):
             MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501)
         self.assertTrue(staged.is_file(), 'nothing moved')
-        with patch.object(sys, 'stdin') as tty, patch('builtins.input', return_value=JOB_LABEL), \
-                contextlib.redirect_stderr(io.StringIO()):
-            tty.isatty.return_value = True
+        with patch.object(MM.osprivacy, 'is_terminal', return_value=True), \
+                patch('builtins.input', return_value=JOB_LABEL), contextlib.redirect_stderr(io.StringIO()):
             self.assertTrue(MM.ask_left(JOB_LABEL, BETA))
-        with patch.object(sys, 'stdin') as tty, patch('builtins.input', return_value='yes'), \
-                contextlib.redirect_stderr(io.StringIO()):
-            tty.isatty.return_value = True
+        with patch.object(MM.osprivacy, 'is_terminal', return_value=True), \
+                patch('builtins.input', return_value='yes'), contextlib.redirect_stderr(io.StringIO()):
             self.assertFalse(MM.ask_left(JOB_LABEL, BETA), 'only the label typed back confirms')
 
     def test_a_failed_cutover_of_this_machines_own_job_leaves_it_where_it_was(self):
