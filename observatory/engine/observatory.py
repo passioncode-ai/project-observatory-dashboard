@@ -209,6 +209,7 @@ STEPS = {
     "test-openrouter": [PY, "tests/test_openrouter_keys.py"],
     "test-digitalocean": [PY, "tests/test_digitalocean_door.py"],
     "test-heroku-door": [PY, "tests/test_heroku_door.py"],
+    "test-sentry-door": [PY, "tests/test_sentry_door.py"],
     "test-credentials": [PY, "tests/test_credentials.py"],
     "test-remote-env": [PY, "tests/test_remote_env.py"],
     "test-google": [PY, "tests/test_google.py"],

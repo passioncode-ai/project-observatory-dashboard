@@ -247,6 +247,8 @@ BOUNDARY += ('disk_guard',)
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 # The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
 BOUNDARY += ('heroku_door',)
+# The Sentry door against a fake Sentry on loopback: narrow tokens from a vault slot (OBS-292).
+BOUNDARY += ('sentry_door',)
 # Every door that can mint with an expiry does, and records it (OBS-191).
 BOUNDARY += ('key_expiry',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).

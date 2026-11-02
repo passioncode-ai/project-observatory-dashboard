@@ -5,6 +5,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **A Sentry door: a narrow token for one purpose, and the broad one retired** (OBS-292, `tools/sentry.py`). A build
+  that holds a broad Sentry token in a vault slot can get a token that only creates releases and uploads source maps:
+  `sentry.py issue --preset releases --from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME` mints a Sentry organization
+  token with the one scope `org:ci`, proves it with its own value (that scope exactly, the releases read on the
+  organization's region host, members and issues refused) and writes it to the slot; nothing is printed and no value
+  reaches an argument or a URL. Sentry lets only an OAuth application's token holding `org:tokens` mint one by API,
+  so with a personal token the door refuses before any call and names the page where a person makes it in one click;
+  `install --preset releases|read` then verifies and records what the person made (`read` is an internal
+  integration token with exactly `org:read`, `project:read`, `event:read`). `revoke --from` retires the broad token
+  only after a narrow one verifies again, and counts it revoked only when Sentry refuses it; `list` and `status` say
+  what exists and whether it works. Self-hosted Sentry (`--base-url`) and the `us` and `de` region hosts are handled.
+
 ### Changed
 
 - **Windows is verified on every change, and what does not pass yet is named** (OBS-277, OBS-278, OBS-279,
