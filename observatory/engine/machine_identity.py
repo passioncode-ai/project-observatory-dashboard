@@ -13,7 +13,7 @@ never written anywhere. Where none can be read, a random id is kept once in
 `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-id`, a folder neither the machine
 bundle nor the workspace snapshot carries. It is never the device key of `full node --init`.
 `OBSERVATORY_MACHINE_ID` overrides it only in a sandbox (`OBSERVATORY_SYSTEM_SETUP=0`, which the
-test runner sets): honoured anywhere, a variable could make a bundle from another machine read as
+test runner sets, or `OBSERVATORY_MACHINE_ID_FOR_TESTS=1`, which a test sets): honoured anywhere, a variable could make a bundle from another machine read as
 this one's and restore its private SSH keys here. Two machines cloned from one disk image or
 virtual machine share the platform identifier and so the id: give a clone its own identifier
 (`systemd-machine-id-setup` on Linux, a new virtual machine UUID in the hypervisor) before restoring.
@@ -147,10 +147,10 @@ TEST_MARKER = "OBSERVATORY_MACHINE_ID_FOR_TESTS"
 
 
 def machine_id(home: Path | None = None, *, runner=subprocess.run) -> str:
-    """This machine's id: `OBSERVATORY_MACHINE_ID`, else a hash of the platform's identifier,
+    """This machine's id: `OBSERVATORY_MACHINE_ID` in a sandbox or a test, else a hash of the platform's identifier,
     else a random id kept once in the data folder. Stable for the life of the machine."""
-    # Only a test names the machine: a variable carried in a restored shell profile must never make a
-    # second machine read as the first (review of #394), so the override needs the test marker too.
+    # Only a sandbox or a test names the machine: a variable carried in a restored shell profile must
+    # never make a second machine read as the first (review of #394), so the override alone is ignored.
     testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
     override = os.environ.get(ENV) if testing else None
     if override:

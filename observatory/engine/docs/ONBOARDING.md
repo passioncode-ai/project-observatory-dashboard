@@ -2161,9 +2161,13 @@ scheduler acting twice) and copy its agent-network identity. A second-machine re
 of that:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
-  `allowed_signers` and every `*.pub` are written. Nothing else of `~/.ssh` is, whatever its
-  name, and a file whose text is a private key is withheld under any name. The plan shows such
-  an item as `withheld`. The second machine makes its own key.
+  `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the
+  `.pub` of a withheld key is withheld with it: the new key gets its own). Nothing else of
+  `~/.ssh` is, whatever its name, and a file whose text is a private key is withheld under any
+  name. The plan shows such an item as `withheld`; only a key (named by an `IdentityFile`, a
+  default name such as `id_ed25519`, or private-key text) gets an `ssh-keys create` step, and a
+  withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
+  `Include` that matches no file. The second machine makes its own key.
 - **Jobs.** Every launchd plist (a systemd user unit off macOS) is written into
   `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/LaunchAgents/`
   (`systemd-user/` off macOS), which nothing loads at login, and is named in the placement file
@@ -2193,7 +2197,7 @@ On the second machine, in order:
 
 ```sh
 project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
-project-observatory full machine-restore --latest --apply         # no private key written, jobs staged
+project-observatory full machine-restore --latest --apply         # nothing private of ~/.ssh written, jobs staged
 project-observatory full machine-restore --latest --packages
 project-observatory full ssh-keys create NAME                     # this machine's own SSH key, NAME as the plan names it
 project-observatory full ssh-keys send NAME --to github           # before --clone: SSH remotes need it
@@ -2218,7 +2222,9 @@ project-observatory full machine-move cutover LABEL                        # on 
 ```
 
 `leave` stops the job, moves its plist into the old machine's staging folder (so the next login
-does not start it again) and names it there as running on the second machine. `cutover` moves
+does not start it again) and names it there as running on the second machine. `cutover` runs only
+at a terminal: it asks whether `leave` ran on the other machine and moves nothing until you type
+the job's label back (a job started here while it still runs there runs twice). It then moves
 the staged plist into `~/Library/LaunchAgents`, enables and loads it, and removes it from the
 second machine's `elsewhere`; a load that fails puts the plist back in staging. A job that stays
 on the old machine needs nothing: on the second machine it stays staged and named as running

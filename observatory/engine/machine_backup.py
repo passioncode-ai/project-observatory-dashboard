@@ -1614,11 +1614,13 @@ def _area(item: dict, home: Path) -> tuple[str | None, tuple[str, ...]]:
         parts = dest.relative_to(home).parts
     except ValueError:
         parts = PurePosixPath(source).parts
-    for i, part in enumerate(parts):
+    # A default macOS or Windows volume ignores case: `~/.SSH` is the `.ssh` folder there.
+    folded = tuple(p.casefold() for p in parts)
+    for i, part in enumerate(folded):
         if part == ".ssh":
             return "ssh", tuple(parts[i + 1:])
         for system, folder in JOB_PARTS.items():
-            if tuple(parts[i:i + len(folder)]) == folder:
+            if folded[i:i + len(folder)] == tuple(f.casefold() for f in folder):
                 return system, tuple(parts[i + len(folder):])
     return None, ()
 
@@ -1698,18 +1700,31 @@ class _Second:
         for source in sorted(self.private):
             item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
             rel = self.areas[(item.get("kind"), source)][1] if item else ()
-            if item is None or item.get("kind") != "file" or len(rel) != 1:
+            if item is None or item.get("kind") != "file":
                 continue
             dest = _destination(source, self.home)
             keys[source] = {"key": rel[0], "file": display(dest, self.home), "hosts": [],
                             "default": rel[0] in DEFAULT_IDENTITIES, "in_ssh": dest.parent == self.home / ".ssh"}
         by_name = {k["key"]: k for k in keys.values() if k["in_ssh"]}
+        named = set()
         for host, hostname, identity in self._config_identities(manifest):
             key = by_name.get(identity.rsplit("/", 1)[-1]) if ".ssh/" in identity else None
-            if key is not None and host not in [h["host"] for h in key["hosts"]]:
-                key["hosts"].append({"host": host, "hostname": hostname})
+            if key is not None:
+                named.add(key["key"])
+                if host not in [h["host"] for h in key["hosts"]]:
+                    key["hosts"].append({"host": host, "hostname": hostname})
         out = []
-        for key in keys.values():
+        for source, key in keys.items():
+            # Only a key gets a key step: its text is a private key, the carried config names it as an
+            # IdentityFile, or it has one of ssh's default key names. A withheld setting such as an
+            # `Include config.local` fragment gets none: `ssh-keys create config.local` would write a key
+            # where ssh reads settings and break every connection (review of #394).
+            item = next(i for i in manifest.get("items", []) if i.get("source") == source)
+            data = _staged_file(item, self.stage)
+            is_key = (key["key"] in named or key["default"]
+                      or (data is not None and looks_private(data.read_bytes())))
+            if not is_key:
+                continue
             name, in_ssh = key["key"], key.pop("in_ssh")
             if not in_ssh:
                 out.append({**key, "steps": [], "note": "outside ~/.ssh: make this machine's own key and put it "
@@ -1744,8 +1759,8 @@ class _Second:
                 line = raw.split("#", 1)[0].strip()
                 if not line:
                     continue
-                key, _, value = line.replace("=", " ", 1).partition(" ")
-                key, value = key.lower(), value.strip().strip('"')
+                parts = re.split(r"[ \t]*=[ \t]*|[ \t]+", line, maxsplit=1)
+                key, value = parts[0].lower(), (parts[1] if len(parts) > 1 else "").strip().strip('"')
                 if key == "host":
                     hosts = [h for h in value.split() if not h.startswith("!")]
                 elif key == "match":

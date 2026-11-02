@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "dd6e5675a39f1a288f8316e661cfed26c0aac8b1c06b5ab9f602ca2b2a08d125",
-      "bytes": 210209,
+      "export_sha256": "04083b2dd77de9ecf5c1809f66498f23bdcc60b91351e47e91f5fe6b288e0e4d",
+      "bytes": 210798,
       "upstream_modified": true
     },
     {
@@ -2865,15 +2865,15 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "52d6c4f4f157e6b76ff76081f60c3636f2697d6d6a97f2a92469bec5df325812",
-      "bytes": 119434
+      "export_sha256": "ebc4dd107c1846db647ab1daa551abbbf82d60239365e55d592f03f60ed39524",
+      "bytes": 120434
     },
     {
       "path": "machine_identity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "858e29784601c0b26d961825e42f9f97f55299fdff6b2b2b68fdd108c6496c6b",
-      "bytes": 14401
+      "export_sha256": "82c90568d1c9008455f6d220f4ab4a965e91662adb7803ffa8ad88a66c76e8fd",
+      "bytes": 14488
     },
     {
       "path": "machine_move.py",
@@ -5022,8 +5022,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b2163880e47710a967e409ac713cafcb63868ad2585dccbc55dce3d428cb11a1",
-      "bytes": 80460
+      "export_sha256": "bcf9e34aad83f6772abca762b72ba051aefc007e6e16e727df1fdbaaad2ed18e",
+      "bytes": 81231
     },
     {
       "path": "tests/test_machine_findings.py",
@@ -6200,8 +6200,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "40c22d6b832b40daf74efc3fd87d505502fd6cc55f8a806f69264ad411cce358",
-      "bytes": 29855,
+      "export_sha256": "0c4538cb2bc480c2529d4be53c58f92eb5d436a5215854f0c61f9f1140b4427d",
+      "bytes": 32577,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

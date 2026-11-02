@@ -501,6 +501,50 @@ class WorkspaceUpgrade(unittest.TestCase):
             self.assertEqual(file.stat().st_mode & 0o777,0o700 if file.is_dir() else 0o600,str(file))
         upgrade.preflight(dest)
 
+    def test_the_mailbox_and_always_on_apps_stay_with_their_machine(self):
+        self.identity()
+        workspace.write_json(self.home/'config/cloud.json',{'mailbox':'synthetic'})
+        workspace.write_json(self.home/upgrade.LIFECYCLE,{'targets':{
+            'app.always':{'desiredState':'always_on','policyRevision':3},
+            'app.ondemand':{'desiredState':'on_demand','policyRevision':1}}})
+        source=self.snapshot()
+        dest=self.base/'second machine'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=upgrade.restore(source,dest)
+        self.assertFalse((dest/'config/cloud.json').exists(),'the second machine deploys its own mailbox')
+        self.assertIn('config/cloud.json',result['machine']['left_out'])
+        targets=config.read_json(dest/upgrade.LIFECYCLE)['targets']
+        self.assertEqual(targets['app.always'],{'desiredState':'held_off','policyRevision':4},
+                         'held off with a new revision, so the supervisor does not start it on two machines')
+        self.assertEqual(targets['app.ondemand'],{'desiredState':'on_demand','policyRevision':1})
+        self.assertEqual(result['machine']['held_off'],['app.always'])
+        self.assertIn('project-observatory full lifecycle policy app.always --desired always_on',
+                      ' '.join(result['machine']['next']))
+
+    def test_second_machine_is_asked_anywhere(self):
+        self.identity()
+        source=self.snapshot()
+        result=upgrade.restore(source,self.base/'asked',second_machine=True)
+        self.assertEqual((result['machine']['mode'],result['machine']['why']),('second-machine','asked'))
+        self.assertFalse((self.base/'asked'/'node/device').exists())
+        import io
+        dest=self.base/'asked by flag'
+        with patch.dict(os.environ,{'OBSERVATORY_HOME':str(dest)}),patch.object(sys,'stdin',io.StringIO('')), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(upgrade.main(['restore',str(source),'--second-machine']),0,'no terminal needed')
+        self.assertFalse((dest/'node/device').exists())
+
+    def test_init_restores_a_snapshot_naming_no_machine_whole(self):
+        self.identity()
+        source=self.snapshot()
+        manifest=config.read_json(source/'manifest.json')
+        del manifest['machine_id']
+        workspace.write_json(source/'manifest.json',manifest)
+        dest=self.base/'init'
+        result=upgrade.restore(source,dest,unknown='keep')
+        self.assertEqual((result['machine']['mode'],result['machine']['why']),('unknown','names-no-machine'))
+        self.assertTrue((dest/'node/device/device.json').is_file(),'an older snapshot keeps its identity at init')
+
     def test_then_node_init_makes_this_machines_own_device_id(self):
         try:
             from node.device_keys import DeviceKeys

@@ -786,12 +786,16 @@ class SecondMachine(Machine):
         # What `full ssh-keys create --host` writes: IdentitiesOnly, so only this key is offered (M3).
         self.write('.ssh/config', 'Host example\n  HostName example.invalid\n  IdentityFile ~/.ssh/id_example\n'
                                   '  IdentitiesOnly yes\n\nHost gh\n  HostName github.com\n'
-                                  '  IdentityFile ~/.ssh/id_example\n')
+                                  '  IdentityFile ~/.ssh/id_example\n'
+                                  'Host tabbed\n\tHostName tabbed.invalid\n\tIdentityFile\t~/.ssh/id_example\n'
+                                  'Include config.local\n')
+        # A fragment that is a setting, not a key: written, and never offered as a key to create (review of #394).
+        self.write('.ssh/config.local', 'Host extra\n  User someone\n')
         self.write('.ssh/known_hosts', 'example.invalid ssh-ed25519 AAAA\n')
         self.write('.ssh/id_example.pub', 'ssh-ed25519 AAAA example\n')
         self.write('.ssh/lone.pub', 'ssh-ed25519 AAAA someone-elses\n')
         # An operator's own include into a .ssh folder and into a job folder: the rules go by path.
-        self.write('dotfiles/.ssh/deploy_key', SECRET_MARKER, 0o600)
+        self.write('dotfiles/.ssh/deploy_key', PRIVATE_HEAD + SECRET_MARKER, 0o600)
         import plistlib
         self.write('Library/LaunchAgents/nested/com.example.nested.plist',
                    plistlib.dumps({'Label': 'com.example.nested', 'ProgramArguments': ['/usr/bin/true']}))
@@ -846,7 +850,9 @@ class SecondMachine(Machine):
             self.assertEqual(keys['id_example']['steps'], [
                 'project-observatory full ssh-keys create id_example',
                 'project-observatory full ssh-keys send id_example --to server:example --verify',
-                'project-observatory full ssh-keys send id_example --to github'])
+                'project-observatory full ssh-keys send id_example --to github',
+                'project-observatory full ssh-keys send id_example --to server:tabbed --verify'])
+            self.assertNotIn('config.local', keys, 'a withheld setting is never offered as a key to create')
             nxt = planned['next']
             self.assertLess(nxt.index('project-observatory full ssh-keys create id_example'),
                             next(i for i, n in enumerate(nxt) if '--clone' in n), 'the key before --clone')
@@ -855,19 +861,21 @@ class SecondMachine(Machine):
                    and r['source'].startswith('~/' + str(Path(job_rel()).parent))]
             self.assertEqual([r['state'] for r in own], ['withheld'], 'each machine installs its own engine jobs')
             self.assertIn('installs its own', own[0]['reason'])
-            self.assertEqual(planned['counts']['withheld'], 5)
+            self.assertEqual(planned['counts']['withheld'], 6)
             self.assertEqual(planned['counts']['staged'], 2)
             self.assertEqual(list(self.fresh.iterdir()), [], 'the plan writes nothing, the placement file included')
             for step in MB.SECOND_MACHINE_NEXT:
                 self.assertIn(step, planned['next'])
             applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
         self.assertEqual(applied['applied']['failed'], [])
-        self.assertEqual(applied['applied']['withheld'], 5,
-                         'id_example by name, its .pub, config.d/disguised by content, deploy_key by path, own job')
+        self.assertEqual(applied['applied']['withheld'], 6,
+                         'id_example by name, its .pub, config.d/disguised by content, deploy_key by path, '
+                         'config.local as any other non-public ~/.ssh file, own job')
         self.assertEqual([p.name for p in (self.fresh / job_rel()).parent.iterdir()]
                          if (self.fresh / job_rel()).parent.exists() else [], [])
         self.assertFalse((self.fresh / '.ssh/id_example').exists())
         self.assertFalse((self.fresh / '.ssh/config.d/disguised').exists())
+        self.assertFalse((self.fresh / '.ssh/config.local').exists(), 'a missing Include file is skipped by ssh')
         self.assertFalse((self.fresh / '.ssh/id_example.pub').exists())
         self.assertFalse((self.fresh / 'dotfiles/.ssh/deploy_key').exists())
         self.assertFalse((self.fresh / 'Library/LaunchAgents/nested').exists())
