@@ -6622,8 +6622,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "0b74bc9917c8ef8755f4bda4853bf636c9892008745169bd610fabd70d86d9a6",
-      "bytes": 41915,
+      "export_sha256": "0706c769f943f1d87c122c40c8ec8a92c6fd4d6dcfd10f44ec597181032dc089",
+      "bytes": 42719,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
