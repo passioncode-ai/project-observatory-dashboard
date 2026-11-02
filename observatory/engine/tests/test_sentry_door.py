@@ -107,15 +107,16 @@ def make_handler(state: State, role: str):
             if not tok or not tok["alive"]:
                 return self._send(401, {"detail": "Invalid token"})
             sc = tok["scopes"]
+            # Sentry's hierarchy: org:write and org:admin include org:read.
+            org_read = bool(sc & {"org:read", "org:write", "org:admin"})
             parts = [p for p in path.split("/") if p]
             if role == "control":
                 if path == "/api/0/" and method == "GET":
                     return self._send(200, {"version": "0", "auth": {"scopes": sorted(sc)}, "user": None})
                 if path == "/api/0/organizations/" and method == "GET":
-                    return self._send(200 if "org:read" in sc else 403,
-                                      [{"slug": ORG}] if "org:read" in sc else {"detail": "no"})
+                    return self._send(200 if org_read else 403, [{"slug": ORG}] if org_read else {"detail": "no"})
                 if parts[:3] == ["api", "0", "organizations"] and len(parts) == 4 and method == "GET":
-                    if "org:read" not in sc:
+                    if not org_read:
                         return self._send(403, {"detail": "no"})
                     return self._send(200, {"slug": parts[3], "links": {"regionUrl": state.region,
                                                                          "organizationUrl": state.control}})
@@ -124,7 +125,7 @@ def make_handler(state: State, role: str):
                     if tok["kind"] != "oauth-app" or "org:tokens" not in sc:
                         return self._send(403, {"detail": "You do not have permission"})
                     if method == "POST" and len(parts) == 5:
-                        if "org:read" not in sc:
+                        if not sc & {"org:read", "org:write", "org:admin"}:
                             return self._send(403, {"detail": "no"})
                         if set(body.get("scopes") or []) - {"org:ci"}:
                             return self._send(400, {"detail": "Org auth tokens cannot be granted"})
@@ -135,7 +136,7 @@ def make_handler(state: State, role: str):
                                                 "scopes": body["scopes"], "token": value_new,
                                                 "tokenLastCharacters": value_new[-4:]})
                     if method == "DELETE" and len(parts) == 6:
-                        if "org:write" not in sc:
+                        if not sc & {"org:write", "org:admin"}:
                             return self._send(403, {"detail": "no"})
                         hit = next((t for t in state.tokens.values() if t.get("id") == parts[5] and t["alive"]), None)
                         if not hit:
@@ -219,6 +220,8 @@ class SentryDoor(unittest.TestCase):
             self.servers.append(srv)
             setattr(self.state, role, f"http://127.0.0.1:{srv.server_address[1]}")
         self.base = self.state.control
+        # The fake control host plays sentry.io: its documented region host is the fake region server.
+        self.m.KNOWN_REGIONS = {self.base: (self.state.region,)}
         self.argv: list[list[str]] = []
         real_run = self.m.subprocess.run
 
@@ -236,7 +239,8 @@ class SentryDoor(unittest.TestCase):
 
     # helpers
     def oauth_admin(self, scopes=("org:read", "org:tokens", "org:write")):
-        value = self.state.add(fake("sntrya_", "oauth-admin"), "oauth-app", scopes)
+        value = self.state.add(fake("sntrya_", "oauth-admin-" + "-".join(x.replace(":", "") for x in scopes)),
+                               "oauth-app", scopes)
         put(ADMIN_SLOT, value)
         return value
 
@@ -443,21 +447,21 @@ class SentryDoor(unittest.TestCase):
 
     def test_the_broad_token_is_retired_only_after_a_narrow_one_verifies(self):
         admin = self.personal_admin()
-        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
         self.assertEqual(rc, 1, o + e)
         self.assertIn("no narrow token is recorded", e)
         self.assertEqual(slot_value(ADMIN_SLOT), admin)
         put(NARROW_SLOT, self.state.add(fake_org_token(41, self.state.control, self.state.region), "org", ("org:ci",)))
         self.assertEqual(run(self.m.cmd_install, "releases", "/".join(NARROW_SLOT), None, None, self.base, None, None,
                              wait=0)[0], 0)
-        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
         self.assertEqual(rc, 3, o + e)
         self.assertIn(f"{self.base}/settings/account/api/auth-tokens/", e)
         self.assertEqual(slot_value(ADMIN_SLOT), admin, "alive: kept")
         broad = json.loads(self.m.LEDGER.read_text())["broad"]["example-site/prod/SENTRY_ADMIN_TOKEN"]
         self.assertEqual(broad["state"], "revocation-requested")
         self.state.tokens[admin]["alive"] = False            # the person deleted it in Sentry
-        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
         self.assertEqual(rc, 0, o + e)
         self.assertIsNone(slot_value(ADMIN_SLOT))
         broad = json.loads(self.m.LEDGER.read_text())["broad"]["example-site/prod/SENTRY_ADMIN_TOKEN"]
@@ -472,7 +476,7 @@ class SentryDoor(unittest.TestCase):
                              wait=0)[0], 0)
         self.state.tokens[narrow]["alive"] = False
         self.state.tokens[admin]["alive"] = False
-        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
         self.assertEqual(rc, 1, o + e)
         self.assertIn("no narrow token verified now", e)
         self.assertEqual(slot_value(ADMIN_SLOT), admin)
@@ -523,10 +527,12 @@ class SentryDoor(unittest.TestCase):
                     "ftp://sentry.io", "https://sentry.io?x=1"):
             with self.assertRaises(m.Refusal, msg=bad):
                 m.origin(bad)
+        m.KNOWN_REGIONS = {"https://sentry.io": ("https://us.sentry.io", "https://de.sentry.io")}
         self.assertEqual(m.region_ok("https://de.sentry.io", "https://sentry.io"), "https://de.sentry.io")
         self.assertEqual(m.region_ok("https://sentry.example.com", "https://sentry.example.com"),
                          "https://sentry.example.com")
-        for bad in ("https://sentry.io.evil.example", "https://evil.example", "http://us.sentry.io"):
+        for bad in ("https://sentry.io.evil.example", "https://evil.example", "http://us.sentry.io",
+                    "https://eu.sentry.io", "https://other.sentry.io"):
             with self.assertRaises(m.Refusal, msg=bad):
                 m.region_ok(bad, "https://sentry.io")
         self.assertEqual(m.choose_region("unused", "https://sentry.io", ORG, "de", None), "https://de.sentry.io")
@@ -550,6 +556,182 @@ class SentryDoor(unittest.TestCase):
         with self.assertRaises(self.m.SentryError):
             self.m._call("GET", f"{self.base}/api/0/", "two words")
         self.assertEqual(len(self.state.requests), 1, "a malformed value is never sent")
+
+    # ── review of #401: the findings, each with the case that failed before its fix ─────────────────
+
+    def narrow_installed(self, n=60):
+        put(NARROW_SLOT, self.state.add(fake_org_token(n, self.state.control, self.state.region), "org", ("org:ci",)))
+        self.assertEqual(run(self.m.cmd_install, "releases", "/".join(NARROW_SLOT), None, None, self.base, None, None,
+                             wait=0)[0], 0)
+
+    def test_revoke_from_never_sends_or_removes_a_value_that_is_not_a_sentry_token(self):
+        other = fake("ghp_", "another-service")          # finding 1, repro A
+        put(ADMIN_SLOT, other)
+        self.narrow_installed(61)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("does not hold a Sentry token", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == other], "the value went nowhere")
+        self.assertEqual(slot_value(ADMIN_SLOT), other)
+        self.assertNotIn("example-site/prod/SENTRY_ADMIN_TOKEN", json.loads(self.m.LEDGER.read_text())["broad"])
+
+    def test_revoke_from_needs_the_tokens_own_sentry_and_sends_nowhere_else(self):
+        self.personal_admin()
+        self.narrow_installed(62)
+        before = len(self.state.requests)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        self.assertEqual(rc, 2, o + e)
+        self.assertIn("--base-url", e)
+        self.assertEqual(len(self.state.requests), before, "nothing was sent")
+        org_token = fake_org_token(63, "https://sentry.example.com", "https://sentry.example.com")
+        put(ADMIN_SLOT, org_token)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 2, o + e)
+        self.assertIn("belongs to https://sentry.example.com", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == org_token])
+
+    def test_a_401_counts_as_revoked_only_after_the_same_sentry_accepted_the_token(self):
+        stranger = fake("sntryu_", "another-sentrys-token")   # Sentry here never knew it: 401 at once
+        put(ADMIN_SLOT, stranger)
+        self.narrow_installed(64)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("does not prove it was revoked", e)
+        self.assertEqual(slot_value(ADMIN_SLOT), stranger)
+        self.assertEqual(json.loads(self.m.LEDGER.read_text())["broad"]["example-site/prod/SENTRY_ADMIN_TOKEN"]
+                         ["state"], "unproven")
+
+    def test_issue_records_the_minting_tokens_sentry_so_revoke_from_needs_no_base(self):
+        admin = self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        broad = json.loads(self.m.LEDGER.read_text())["broad"]["example-site/prod/SENTRY_ADMIN_TOKEN"]
+        self.assertEqual((broad["base_url"], broad["kind"]), (self.base, "oauth-app"))
+        self.assertTrue(broad["proved_on"])
+        self.state.tokens[admin]["alive"] = False
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, None, wait=0)
+        self.assertEqual(rc, 0, o + e)
+        self.assertIsNone(slot_value(ADMIN_SLOT))
+
+    def test_a_redirect_is_never_followed_with_the_token(self):
+        got = []                                          # finding 2, repro B
+
+        class Sink(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                got.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+        sink = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Sink)
+        threading.Thread(target=sink.serve_forever, daemon=True).start()
+
+        class Hop(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://localhost:{sink.server_address[1]}/elsewhere")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        hop = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Hop)
+        threading.Thread(target=hop.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaises(self.m.SentryError) as ctx:
+                self.m._call("GET", f"http://127.0.0.1:{hop.server_address[1]}/api/0/", fake("sntryu_", "redirect"))
+        finally:
+            hop.shutdown()
+            sink.shutdown()
+            hop.server_close()
+            sink.server_close()
+        self.assertEqual(got, [], "the other host received nothing")
+        self.assertEqual(ctx.exception.status, 302)
+        self.assertIn("redirecting to localhost", str(ctx.exception))
+        self.assertNotIn("/elsewhere", str(ctx.exception))
+
+    def test_a_region_host_is_never_guessed_from_a_suffix(self):
+        m = self.m                                        # finding 3, repro C
+        for base, region in (("https://sentry.example.co.uk", "https://attacker.co.uk"),
+                             ("https://sentry.corp.com.au", "https://evil.com.au"),
+                             ("https://sentry.example.com", "https://region.example.com")):
+            with self.assertRaises(m.Refusal, msg=region):
+                m.region_ok(region, base)
+        self.assertEqual(m.region_ok("https://region.example.com", "https://sentry.example.com", named=True),
+                         "https://region.example.com")
+        self.assertEqual(m.choose_region("unused", "https://sentry.example.com", ORG, None,
+                                         "https://region.example.com"), "https://region.example.com")
+        # A region a server names that is neither the base nor a documented one is refused, not used.
+        m.KNOWN_REGIONS = {}
+        value = self.state.add(fake("sntryi_", "region-from-server"), "integration", ("org:read",))
+        with self.assertRaises(m.Refusal):
+            m.choose_region(value, self.base, ORG, None, None)
+
+    def test_a_failed_vault_put_deletes_the_minted_token_and_says_so(self):
+        self.oauth_admin()                                # finding 4, repro D
+        real = self.m.subprocess.run
+
+        def boom(argv, **kw):
+            if "put" in argv:
+                raise __import__("subprocess").TimeoutExpired(argv, 60)
+            return real(argv, **kw)
+        self.m.subprocess = type("S", (), {"run": staticmethod(boom)})
+        rc, o, e = self.issue()
+        self.assertEqual(rc, 1, o + e)
+        minted = [t for t in self.state.tokens.values() if t["kind"] == "org"]
+        self.assertEqual(len(minted), 1)
+        self.assertFalse(minted[0]["alive"], "the minted token was deleted")
+        self.assertIn("token 1 deleted", e)
+        self.assertNotIn("example-site/prod/SENTRY_RELEASES_TOKEN", json.loads(
+            self.m.LEDGER.read_text())["issued"] if self.m.LEDGER.exists() else {})
+        self.assertTrue(no_value(o + e))
+
+    def test_a_failed_ledger_write_after_delivery_deletes_the_token_and_journals_its_id(self):
+        self.oauth_admin()
+        real_save = self.m.save_ledger
+
+        def full_disk(doc):
+            if doc["issued"]:
+                raise OSError(28, "No space left on device")
+            return real_save(doc)
+        self.m.save_ledger = full_disk
+        rc, o, e = self.issue()
+        self.assertEqual(rc, 1, o + e)
+        self.assertFalse(next(t for t in self.state.tokens.values() if t["kind"] == "org")["alive"])
+        self.assertIn("now holds that token's value", e)
+        rows = [json.loads(line) for line in vault.MOVES.read_text().splitlines() if line.strip()]
+        failed = [r for r in rows if r.get("event") == "issue-failed"]
+        self.assertTrue(failed and failed[-1].get("token") == "1", failed[-1:] if failed else rows[-3:])
+        self.assertTrue(no_value(self.surfaces(o + e)))
+
+    def test_main_turns_an_unexpected_error_into_a_clean_exit_without_its_message(self):
+        def broken():
+            raise ValueError("quoted " + fake("sntryu_", "in-an-error"))
+        self.m.cmd_list = broken
+        rc, o, e = run(self.m.main, ["list"])
+        self.assertEqual(rc, 1)
+        self.assertIn("unexpected ValueError", e)
+        self.assertTrue(no_value(o + e))
+
+    def test_minting_follows_sentrys_own_scope_rule(self):
+        self.oauth_admin(("org:tokens", "org:admin"))     # finding 6: org:admin with org:tokens mints
+        rc, o, e = self.issue()
+        self.assertEqual(rc, 0, o + e)
+        clear(NARROW_SLOT)
+        self.m.LEDGER.unlink()
+        self.oauth_admin(("org:tokens", "org:read"))      # mints; cannot delete, and says so
+        rc, o, e = self.issue()
+        self.assertEqual(rc, 0, o + e)
+        self.assertIn("cannot delete an organization token", e)
+
+    def test_what_org_ci_allows_is_stated_exactly(self):
+        src = (ROOT / "tools" / "sentry.py").read_text(encoding="utf-8")   # finding 5
+        self.assertNotIn("nothing else", src)
+        for permission in ("OrganizationIntegrationsLoosePermission", "OrganizationCodeMappingsBulkPermission",
+                           "OrganizationReleasePermission", "ProjectReleasePermission"):
+            self.assertIn(permission, src)
 
     @unittest.skipIf(os.name == "nt", "POSIX file modes")
     def test_the_ledger_is_owner_only(self):

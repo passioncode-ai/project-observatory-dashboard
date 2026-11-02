@@ -4,7 +4,7 @@
     T="$(project-observatory full-path)/tools"          # the installed engine's tools
     python "$T/sentry.py" presets
     python "$T/sentry.py" issue --preset releases --from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME \
-        [--org SLUG] [--project SLUG] [--base-url URL] [--region us|de | --region-url URL]
+        [--org SLUG] [--project SLUG] [--base-url URL] [--region us|de | --region-host URL]
     python "$T/sentry.py" install --preset releases|read --vault PROJECT/ENV/NAME [--org SLUG] [--project SLUG] ...
     python "$T/sentry.py" list
     python "$T/sentry.py" status [PROJECT/ENV/NAME]
@@ -22,13 +22,15 @@ a log, the ledger or the output, including on error.
 
 WHICH TOKEN, AND WHY (read from Sentry's source, getsentry/sentry `master`, 2026-11-02):
 
-* `releases` is an ORGANIZATION AUTH TOKEN (`sntrys_`) with the one scope `org:ci`. `org:ci` may
-  list, create and update releases and upload source maps, debug files and code mappings
-  (`OrganizationReleasePermission` and `ProjectReleasePermission`, `src/sentry/api/bases/`), and
-  nothing else: it cannot delete a release (DELETE takes `project:admin` or `project:releases`),
-  read an event, list members or change a setting. It is not bound to a person, so it survives the
-  person who made it leaving. `project:releases` on another token kind also deletes releases, so
-  it is broader. Organization tokens carry no expiry (`src/sentry/models/orgauthtoken.py` has no
+* `releases` is an ORGANIZATION AUTH TOKEN (`sntrys_`) with the one scope `org:ci`. The scope maps
+  in `src/sentry/api/bases/` that name `org:ci` are exactly: GET, POST and PUT of
+  `OrganizationReleasePermission` and `ProjectReleasePermission` (releases, their files and commits,
+  artifact bundles and source maps, debug files and chunk upload, which use those permissions); GET of
+  `OrganizationIntegrationsLoosePermission` (reading the organization's integrations); and GET and
+  POST of `OrganizationCodeMappingsBulkPermission` (bulk code mappings). It is in none of their DELETE
+  lists, so it cannot delete a release or a debug file, and it is in no member, event, project
+  setting or organization setting map. It is not bound to a person, so it survives the person who
+  made it leaving. `project:releases` on another token kind also deletes releases, so it is broader. Organization tokens carry no expiry (`src/sentry/models/orgauthtoken.py` has no
   expiry field), and that is recorded as the reason, not as "never asked".
 * `read` is an INTERNAL INTEGRATION token (`sntryi_`) with exactly `org:read`, `project:read`,
   `event:read`: the scopes triage needs, not bound to a person, and unable to read members or
@@ -38,8 +40,9 @@ WHICH TOKEN, AND WHY (read from Sentry's source, getsentry/sentry `master`, 2026
 WHAT SENTRY'S API LETS A TOKEN MINT, and so where this door refuses:
 
 * `POST /api/0/organizations/{org}/org-auth-tokens/` accepts a browser session, or an OAuth
-  application's token (`sntrya_`) whose grant includes `org:tokens` (and `org:read`; deleting one
-  takes `org:write`). A PERSONAL token (`sntryu_`), an organization token and an integration token
+  application's token (`sntrya_`) whose grant includes `org:tokens` and any one of `org:read`,
+  `org:write`, `org:admin` (deleting one takes `org:write` or `org:admin`, so a credential without
+  either mints, but a token whose proof fails must then be deleted by a person). A PERSONAL token (`sntryu_`), an organization token and an integration token
   are refused (`OrgAuthTokenPermission`, getsentry/sentry#99457 and #128051, the latter merged
   2026-10-23). So `issue --preset releases` mints by API when `--from` holds such an OAuth token,
   and otherwise refuses before any call, naming the page where a person makes the token in one
@@ -50,9 +53,13 @@ WHAT SENTRY'S API LETS A TOKEN MINT, and so where this door refuses:
   API gets no token (`skip_default_auth_token=True`). So `issue --preset read` always refuses with
   the integration recipe, and `install` verifies what the person made.
 * A personal token cannot revoke itself or anything else by API. `revoke --from` therefore
-  re-verifies the narrow tokens first, then reads whether the broad token still answers: dead
-  (HTTP 401) is recorded as a verified revocation and the slot is removed; alive is a person's one
-  step on the page this door names, and the door says so and exits 3.
+  re-verifies the narrow tokens first, then reads whether the broad token still answers on ITS OWN
+  Sentry: `--base-url`, or the base recorded the last time that slot answered there. The slot must
+  hold a Sentry token (a known prefix; an organization token must name that base). A 200 is recorded
+  as proof that the token belongs to that Sentry, and the door names the page where a person deletes
+  it and exits 3. A 401 counts as revoked, and removes the slot, only when such a proof was recorded
+  before (by an `issue` that minted with it, or an earlier `revoke --from` that found it alive): a
+  401 from a Sentry that never accepted the value proves only that it is not that Sentry's token.
 * Service accounts (`/api/0/organizations/{org}/service-accounts/`, project-scoped) are being
   built behind a feature flag and issue no token yet; when they do, they are the route for a
   project-scoped token.
@@ -61,9 +68,11 @@ HOSTS. `--base-url` is the Sentry the tokens belong to: `https://sentry.io` by d
 self-hosted origin over https (plain http only on a loopback address). Organization-level calls
 (`/api/0/`, organizations, organization tokens) go there. Release, issue and member reads go to the
 organization's REGION host, read from the organization's `links.regionUrl`, or from an
-organization token's own payload (`region_url`), or given with `--region us|de` or `--region-url`.
-A region host must be the base host or a host under the base's domain (`us.sentry.io` under
-`sentry.io`): a token is never sent anywhere else.
+organization token's own payload (`region_url`), or given with `--region us|de` or `--region-host`.
+A region host read from a token or an answer must be the base itself or one of its documented region
+hosts (`us.sentry.io` and `de.sentry.io` for `sentry.io`, by exact name, no suffix rule); another host
+is used only when the person names it with `--region-host`. Redirects are never followed: urllib would
+carry the Authorization header to any host they name, and from https to plain http.
 
 VERIFIED MEANS, with the token's own value: `GET /api/0/` answers its scopes and they are exactly
 the preset's; every purpose read answers 200 (retried while a fresh token replicates); and every
@@ -87,6 +96,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from subprocess import SubprocessError
 import time
 import urllib.error
 import urllib.parse
@@ -112,10 +122,11 @@ KIND_WORDS = {"personal": "a personal user auth token", "oauth-app": "an OAuth a
               "org": "an organization auth token", "integration": "an internal integration token",
               "unprefixed": "an unprefixed token from before Sentry named its kinds"}
 
-#: The scopes an OAuth token needs to mint (and to delete what a failed proof leaves) an
-#: organization token: `OrgAuthTokenPermission` (org:tokens consent; org:read for POST, org:write
-#: for DELETE).
-MINT_SCOPES = ("org:read", "org:tokens", "org:write")
+#: What an OAuth token needs to mint an organization token, as `OrgAuthTokenPermission` checks it:
+#: the `org:tokens` consent and any one of the POST scopes; deleting one takes one of the DELETE scopes.
+MINT_CONSENT = "org:tokens"
+MINT_ANY = ("org:read", "org:write", "org:admin")
+DELETE_ANY = ("org:write", "org:admin")
 
 #: Why an organization token is recorded without an expiry: Sentry's model has no field for one.
 ORG_NO_EXPIRY = ("a Sentry organization auth token has no expiry (the model has no expiry field); "
@@ -129,8 +140,9 @@ PRESETS: dict[str, dict] = {
     "releases": {
         "kind": "org",
         "scopes": ("org:ci",),
-        "why": ("creates and updates releases and uploads source maps and debug files for one organization; "
-                "cannot delete a release, read events or members, or change a setting"),
+        "why": ("lists, creates and updates releases and uploads source maps, artifact bundles and debug files "
+                "for one organization, reads its integrations and reads and writes bulk code mappings; cannot "
+                "delete a release or a debug file, read events or members, or change a setting"),
         "mint": "org-auth-token",
         "purpose": {"org": "/api/0/organizations/{org}/releases/?per_page=1",
                     "project": "/api/0/projects/{org}/{project}/releases/?per_page=1"},
@@ -199,22 +211,22 @@ def origin(url: str | None, what: str = "--base-url") -> str:
                   f"over an open network", 2)
 
 
-def _domain(host: str) -> str:
-    labels = host.split(".")
-    return ".".join(labels[-2:]) if len(labels) >= 2 else host
+#: The region hosts each SaaS base documents, by exact origin. A self-hosted Sentry has none: its region
+#: is its base, unless the person names another host with --region-host. No suffix rule: a region host
+#: comes from the server's answer or a token's payload, and `sentry.example.co.uk` must not accept
+#: `attacker.co.uk` because both end in `co.uk`.
+KNOWN_REGIONS: dict[str, tuple[str, ...]] = {API_DEFAULT: tuple(REGIONS.values())}
 
 
-def region_ok(region: str, base: str) -> str:
-    """The region origin, refused unless it is the base host or a host under the base's domain."""
+def region_ok(region: str, base: str, *, named: bool = False) -> str:
+    """The region origin, refused unless it is the base itself or one of the base's documented region
+    hosts. `named` is a host the person passed with --region-host: their word, checked only for shape."""
     r = origin(region, "the region host")
-    rh, bh = urllib.parse.urlsplit(r).hostname or "", urllib.parse.urlsplit(base).hostname or ""
-    if bh in LOOPBACK:
-        if rh in LOOPBACK:
-            return r
-    elif r.startswith("https://") and (rh == bh or rh.endswith("." + _domain(bh))):
+    if r == base or r in KNOWN_REGIONS.get(base, ()) or named:
         return r
-    raise Refusal(f"the region host {rh} is not {bh} or a host under {_domain(bh)}; a token is never sent "
-                  f"to another site", 1)
+    allowed = ", ".join((base, *KNOWN_REGIONS.get(base, ())))
+    raise Refusal(f"the region host {urllib.parse.urlsplit(r).hostname} is not one of {allowed}; a token is "
+                  f"never sent to another site (name a self-hosted region with --region-host)", 1)
 
 
 # ─────────────────────────── the wire ───────────────────────────────────────
@@ -234,6 +246,20 @@ def _shape(path: str) -> str:
     return "/".join(p if p in keep else "<id>" for p in path.split("?")[0].split("/"))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Every redirect refused: urllib would follow one with the Authorization header to any host, and
+    from https to http. The refusal names the status and the target host, never the path or a header."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        host = urllib.parse.urlsplit(newurl).hostname or "an unnamed host"
+        raise SentryError(code, f"Sentry answered HTTP {code} on {req.get_method()} "
+                                f"{_shape(urllib.parse.urlsplit(req.full_url).path)}, redirecting to {host}; "
+                                "not followed, so the token went nowhere else")
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _call(method: str, url: str, token: str, payload: dict | None = None) -> object:
     """One request; the decoded body. Errors name the endpoint's shape and the status, never a header,
     the body sent or the provider's body: an error that echoed a request is how a token reaches a
@@ -246,8 +272,10 @@ def _call(method: str, url: str, token: str, payload: dict | None = None) -> obj
         "Authorization": f"Bearer {token}", "Accept": "application/json",
         "Content-Type": "application/json", "User-Agent": "project-observatory"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _OPENER.open(req, timeout=30) as r:
             raw = r.read()
+    except SentryError:
+        raise
     except urllib.error.HTTPError as e:
         e.close()
         raise SentryError(e.code, f"Sentry answered HTTP {e.code} on {method} {_shape(path)}; "
@@ -349,8 +377,12 @@ def slot_held(project: str, env: str, name: str) -> bool:
 
 def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
     """Through the vault's own door, value on stdin; the child's output withheld."""
-    r = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "put", project, env, name, "--force"],
-                       input=value + "\n", capture_output=True, text=True, timeout=60)
+    try:
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "put", project, env, name, "--force"],
+                           input=value + "\n", capture_output=True, text=True, timeout=60)
+    except (OSError, SubprocessError) as exc:
+        raise RuntimeError(f"the vault's put for {project}/{env}/{name} did not finish ({type(exc).__name__}); "
+                           "the slot may or may not hold the new value") from None
     if r.returncode != 0:
         raise RuntimeError(f"vault refused the slot {project}/{env}/{name} (exit {r.returncode}); "
                            "child output withheld")
@@ -358,11 +390,15 @@ def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
 
 def remove_slot(project: str, env: str, name: str) -> str:
     """`vault.py remove`: the value is dead, its copy goes. A refusal (an open leak to settle) is said."""
-    r = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "remove", project, env, name],
-                       capture_output=True, text=True, timeout=60)
-    if r.returncode != 0 and slot_held(project, env, name):
-        return (f"the vault kept {project}/{env}/{name} (exit {r.returncode}; an open leak must be settled "
-                f"first, `vault.py leaks`)")
+    try:
+        r = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "remove", project, env, name],
+                           capture_output=True, text=True, timeout=60)
+        code = r.returncode
+    except (OSError, SubprocessError) as exc:
+        code = type(exc).__name__
+    if code != 0 and slot_held(project, env, name):
+        return (f"the vault kept {project}/{env}/{name} ({code}; an open leak must be settled first, "
+                f"`vault.py leaks`)")
     return f"{project}/{env}/{name} removed from the vault"
 
 
@@ -436,10 +472,11 @@ def choose_org(value: str, base: str, org: str | None) -> str:
 
 
 def choose_region(value: str, base: str, org: str, region: str | None, region_url: str | None) -> str:
-    """The organization's region origin: --region-url or --region, else the organization token's own
-    `region_url`, else the organization's `links.regionUrl`, else the base (a self-hosted Sentry)."""
+    """The organization's region origin: --region-host or --region, else the organization token's own
+    `region_url`, else the organization's `links.regionUrl`, else the base (a self-hosted Sentry). A
+    region read from a token or an answer must be the base or one of its documented region hosts."""
     if region_url:
-        return region_ok(region_url, base)
+        return region_ok(region_url, base, named=True)
     if region:
         if base != API_DEFAULT:
             raise Refusal("--region us|de names a sentry.io region; a self-hosted Sentry has one host", 2)
@@ -558,7 +595,7 @@ def recipe(preset_key: str, target: str, base: str, org: str | None, project: st
            f"{' '.join(target.split('/'))}` with a protected file on stdin")
     if preset_key == "releases":
         why = ("Sentry mints an organization token by API only for a browser session or an OAuth application's "
-               "token holding `org:tokens`, `org:read` and `org:write`"
+               "token holding `org:tokens` and one of `org:read`, `org:write`, `org:admin`"
                + (f"; --from holds {KIND_WORDS[kind]}" if kind else "")
                + (f" missing {', '.join(missing)}" if missing else ""))
         return (f"{why}.\n  a person makes it in one click: {page['org']} (Organization Tokens, "
@@ -626,9 +663,15 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
             held = scopes_of(minter, base)
         except SentryError as exc:
             raise Refusal(f"the credential in {from_slot} is not accepted ({exc})", 1) from None
-        missing = [s for s in MINT_SCOPES if held is None or s not in held]
+        have = set(held or ())
+        missing = ([MINT_CONSENT] if MINT_CONSENT not in have else []) \
+            + ([" or ".join(MINT_ANY)] if not have & set(MINT_ANY) else [])
         if missing:
             raise Refusal(recipe(preset_key, slot, base, org, project, kind, missing), 3)
+        if not have & set(DELETE_ANY):
+            print(f"  note: the credential in {from_slot} cannot delete an organization token (no "
+                  f"{' or '.join(DELETE_ANY)}): a token whose proof fails is left for a person to delete",
+                  file=sys.stderr)
         org = choose_org(minter, base, org)
         reg = choose_region(minter, base, org, region, region_url)
         prior = ledger()["issued"].get(slot)
@@ -638,18 +681,40 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
                          {"name": name, "scopes": list(preset["scopes"])})
         except SentryError as exc:
             raise Refusal(f"Sentry did not mint the organization token ({exc})", 1) from None
-        value = (made or {}).get("token") if isinstance(made, dict) else None
         token_id = (made or {}).get("id") if isinstance(made, dict) else None
-        if not token_ok(value):
-            tail = _delete_token(minter, base, org, token_id)
-            raise Refusal(f"Sentry answered the mint without a usable token; {tail}", 1)
+        # FROM HERE A TOKEN EXISTS AT SENTRY. Every way out either records it in the ledger or deletes it
+        # (and says so), whatever the exception: a vault put that timed out, a full disk, an interrupt.
+        delivered = False
         try:
+            value = (made or {}).get("token") if isinstance(made, dict) else None
+            if not token_ok(value):
+                raise Refusal("Sentry answered the mint without a usable token", 1)
             proof = verify(value, preset_key, org, project, base, reg, wait, fresh=True)
             deliver_to_vault(value, *to)
-        except (Refusal, RuntimeError) as exc:
+            delivered = True
+            expiry = record_slot_expiry(*to, ORG_NO_EXPIRY)
+            doc = ledger()
+            doc["issued"][slot] = _row(preset_key, org, project, base, reg, proof, minted_by="door",
+                                       token_id=token_id, name=name, from_slot=from_slot, prior=prior,
+                                       expiry_reason=ORG_NO_EXPIRY)
+            # The minting credential answered on this base: the proof `revoke --from` needs before a 401
+            # can count as its revocation.
+            doc["broad"][from_slot] = {**(doc["broad"].get(from_slot) or {}), "kind": kind, "base_url": base,
+                                       "org": org, "state": (doc["broad"].get(from_slot) or {}).get("state")
+                                       or "in-use", "proved_on": today(),
+                                       "proof": "GET /api/0/ answered 200 on this base at issue"}
+            save_ledger(doc)
+        except BaseException as exc:  # noqa: BLE001  any exit after the mint is cleaned up, then re-raised
             tail = _delete_token(minter, base, org, token_id)
-            raise Refusal(f"{exc}; the token this call minted: {tail}", 1) from None
-        expiry = record_slot_expiry(*to, ORG_NO_EXPIRY)
+            what = str(exc) if isinstance(exc, (Refusal, RuntimeError)) else f"{type(exc).__name__} (details withheld)"
+            if delivered:
+                what += f"; {slot} now holds that token's value, which is dead once deleted: issue again"
+            _journal("issue-failed", slot, preset=preset_key, org=org, token=token_id, cleanup=tail)
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                print(f"interrupted after the mint; the token this call minted: {tail}", file=sys.stderr)
+                raise
+            raise Refusal(f"{what}; the token this call minted: {tail}", 1) from None
+        # The slot's previous token goes only once the new one is delivered AND recorded.
         retired = ""
         if prior and prior.get("minted_by") == "door" and prior.get("token_id") not in (None, token_id) \
                 and prior.get("org") == org and prior.get("base_url") == base:
@@ -659,10 +724,6 @@ def cmd_issue(preset_key: str, target: str | None, source: str | None, org: str 
                                                                             else "integrations"]
             retired = (f"; the slot's previous token was made by a person and stays live at Sentry until it is "
                        f"deleted at {page}")
-        doc = ledger()
-        doc["issued"][slot] = _row(preset_key, org, project, base, reg, proof, minted_by="door", token_id=token_id,
-                                   name=name, from_slot=from_slot, prior=prior, expiry_reason=ORG_NO_EXPIRY)
-        save_ledger(doc)
     _journal("issue", slot, preset=preset_key, org=org, project=project, token=token_id, minted_from=from_slot)
     print(f"  {slot}: issued organization token {token_id} for {org}, scope {', '.join(preset['scopes'])}, "
           f"{expiry}{retired}")
@@ -795,20 +856,42 @@ def cmd_revoke(target: str | None, source: str | None, org: str | None, base_url
 
 
 def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: float) -> int:
+    """Retire the broad token in `source` once a narrow one verifies.
+
+    The value is sent to ONE Sentry only: --base-url, or the base recorded for this slot the last time it
+    answered there. A 401 proves a revocation only after a 200 from that same base was recorded: a Sentry
+    that never accepted the value answers 401 to anything, a stranger's token included."""
     frm = parse_slot(source, "--from")
     from_slot = "/".join(frm)
     with ledger_lock():
         doc = ledger()
-        rows = {s: r for s, r in doc["issued"].items() if s != from_slot
-                and (org is None or r.get("org") == org)
-                and (base_url is None or r.get("base_url") == origin(base_url))}
+        known = doc["broad"].get(from_slot) or {}
+        if base_url:
+            base = origin(base_url)
+        elif known.get("base_url") and known.get("proved_on"):
+            base = known["base_url"]
+        else:
+            raise Refusal(f"name the Sentry {from_slot} belongs to with --base-url (https://sentry.io for SaaS): "
+                          f"no answer from it was recorded for this slot, and a token is sent only to its own "
+                          f"Sentry; nothing was sent", 2)
+        value = read_slot(*frm)
+        kind = kind_of(value)
+        if kind == "unprefixed":
+            raise Refusal(f"{from_slot} does not hold a Sentry token this door can recognise (none of "
+                          f"{', '.join(KINDS)}); it was not sent anywhere and the slot is kept", 1)
+        check_base(value, base)
+        if known.get("base_url") and known["base_url"] != base:
+            raise Refusal(f"{from_slot} was recorded as a token of {known['base_url']}, not {base}; nothing was "
+                          f"sent and the slot is kept", 1)
+        rows = {s: r for s, r in doc["issued"].items() if s != from_slot and r.get("base_url") == base
+                and (org is None or r.get("org") == org)}
         orgs = sorted({r.get("org") for r in rows.values()})
         if org is None and len(orgs) > 1:
             raise Refusal(f"the ledger holds tokens for {', '.join(orgs)}: name the organization the broad token "
                           f"is being replaced for with --org", 2)
         if not rows:
-            raise Refusal(f"no narrow token is recorded" + (f" for {org}" if org else "")
-                          + f"; issue or install one first. {from_slot} is kept", 1)
+            raise Refusal(f"no narrow token is recorded for {org or 'any organization'} on {base}; issue or "
+                          f"install one first. {from_slot} is kept", 1)
         passed, report = [], []
         for slot, row in sorted(rows.items()):
             ok, why = _verify_row(slot, row, wait)
@@ -819,33 +902,40 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
         print("  narrow tokens checked now:\n" + "\n".join(report))
         if not passed:
             raise Refusal(f"no narrow token verified now; {from_slot} is kept", 1)
-        base = rows[passed[0]]["base_url"]
         org_ = rows[passed[0]]["org"]
-        value = read_slot(*frm)
-        kind = kind_of(value)
         try:
             live = alive(value, base)
         except SentryError as exc:
             raise Refusal(f"could not tell whether Sentry still accepts {from_slot} ({exc}); it is kept", 1) from None
-        entry = {"kind": kind, "org": org_, "base_url": base, "replaced_by": passed, "checked_on": today()}
+        entry = {**known, "kind": kind, "org": org_, "base_url": base, "replaced_by": passed, "checked_on": today()}
         if live:
             page = pages(base, org_)["org" if kind == "org" else "integrations" if kind == "integration" else kind]
             doc = ledger()
-            doc["broad"][from_slot] = {**entry, "state": "revocation-requested",
-                                       "requested_on": (doc["broad"].get(from_slot) or {}).get("requested_on") or today()}
+            doc["broad"][from_slot] = {**entry, "state": "revocation-requested", "proved_on": today(),
+                                       "proof": "GET /api/0/ answered 200 on this base",
+                                       "requested_on": known.get("requested_on") or today()}
             save_ledger(doc)
             _journal("revoke-requested", from_slot, kind=kind, org=org_)
             raise Refusal(f"{from_slot} holds {KIND_WORDS[kind]} and Sentry still accepts it. Sentry revokes "
                           f"{'it' if kind != 'org' else 'an organization token'} from a signed-in browser session "
                           f"only: a person deletes it at {page}, then `sentry.py revoke --from {from_slot}` "
                           f"again proves it dead and removes the slot", 3)
+        if not known.get("proved_on"):
+            doc = ledger()
+            doc["broad"][from_slot] = {**entry, "state": "unproven"}
+            save_ledger(doc)
+            raise Refusal(f"{base} refuses {from_slot} (401), but no earlier answer from {base} showed the token "
+                          f"belonged there: a 401 alone does not prove it was revoked. The slot is kept; if it was "
+                          f"this Sentry's token and is now deleted, remove the slot with `vault.py remove "
+                          f"{' '.join(frm)}`", 1)
         removed = remove_slot(*frm)
         doc = ledger()
         doc["broad"][from_slot] = {**entry, "state": "revoked-verified", "revoked_on": today(),
                                    "slot": "kept" if "kept" in removed else "removed"}
         save_ledger(doc)
-    _journal("revoke", from_slot, kind=kind, org=org_, verified="401")
-    print(f"  {from_slot}: Sentry refuses it now (401), revocation verified; {removed}")
+    _journal("revoke", from_slot, kind=kind, org=org_, verified="401 after a recorded 200")
+    print(f"  {from_slot}: Sentry refuses it now (401) after accepting it on {known.get('proved_on')}, revocation "
+          f"verified; {removed}")
     return 0 if "kept" not in removed else 1
 
 
@@ -855,8 +945,9 @@ def cmd_presets() -> int:
     for key, p in PRESETS.items():
         print(f"{key}: {KIND_WORDS[p['kind']]}, scopes {', '.join(p['scopes'])}")
         print(f"    {p['why']}")
-        print("    minted by: " + ("`issue`, from an OAuth application's token holding org:tokens, org:read and "
-                                   "org:write; otherwise a person makes it and `install` verifies it"
+        print("    minted by: " + ("`issue`, from an OAuth application's token holding org:tokens and one of "
+                                   "org:read, org:write, org:admin; otherwise a person makes it and `install` "
+                                   "verifies it"
                                    if p["mint"] else "a person in Sentry's settings; `install` verifies it"))
     return 0
 
@@ -921,7 +1012,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--base-url", help=f"the Sentry the tokens belong to (default {API_DEFAULT})")
         g = p.add_mutually_exclusive_group()
         g.add_argument("--region", choices=sorted(REGIONS), help="a sentry.io region (default: the organization's)")
-        g.add_argument("--region-url", help="the organization's region host, under the base's domain")
+        g.add_argument("--region-host", dest="region_url",
+                       help="the organization's region host, by your word (a self-hosted Sentry with a separate "
+                            "region host); otherwise only the base or its documented region hosts are used")
 
     p = sub.add_parser("issue", help="mint a narrow token from the credential in --from into --vault")
     p.add_argument("--preset", required=True, choices=sorted(PRESETS))
@@ -960,6 +1053,9 @@ def main(argv: list[str] | None = None) -> int:
         return exc.code
     except SentryError as exc:
         print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001  a message could quote a request; only the class leaves
+        print(f"failed: an unexpected {type(exc).__name__}; details withheld, no value printed", file=sys.stderr)
         return 1
 
 
