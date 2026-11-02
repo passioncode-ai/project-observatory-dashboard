@@ -892,7 +892,10 @@ own). It reuses the node's checks and adds what only a relay does:
   from a group holding fewer slots gets in whenever some group holds two or more, so a flood spread over a few
   addresses cannot keep a fresh address out. What does not: within one group a flood of complete requests, each inside
   its fair window, refuses every newcomer of that group, which behind a local terminator without `--trusted-proxy` is
-  every caller. The per-minute limits count a machine across all its connections, with
+  every caller; a flood from 32 or more groups holding one slot each leaves no group two slots above another, so
+  every slot sits in its fair window and a newcomer is answered 503 while it lasts (the pending budget is a capacity);
+  and the fair eviction can cut a connection of a group holding two or more slots inside its window, so callers that
+  share one /64 or one NAT address can be cut while they wait for `auth` and connect again (OBS-293). The per-minute limits count a machine across all its connections, with
   `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
   queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
   2 MiB), one page per machine at once. A failed accept is retried with a backoff and logged; `health` reports an

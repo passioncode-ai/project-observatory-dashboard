@@ -1452,11 +1452,15 @@ project-observatory full relay disable
   `proxy_set_header X-Forwarded-For $remote_addr;` (with `proxy_http_version 1.1;`,
   `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` for the
   WebSocket). In Caddy: `reverse_proxy 127.0.0.1:47317 { header_up X-Forwarded-For {remote_host} }`.
-  Two residuals stay. Without `--trusted-proxy` the header is ignored and every caller behind the
+  Four residuals stay. Without `--trusted-proxy` the header is ignored and every caller behind the
   terminator is one address, so one caller flooding through it can keep everyone behind it out
   until the flood stops. With `--trusted-proxy`, every program on this machine that can reach the
   relay's port can claim any address it likes, so keep the relay bound to 127.0.0.1 and reachable
-  from other machines only through the terminator.
+  from other machines only through the terminator. A flood from 32 or more address groups (one
+  IPv6 /48 holds 65536 of them) fills every pending slot with one connection each, and while it
+  lasts a newcomer is refused: the relay's pending budget is a capacity, not a filter. And machines
+  that share one group (one home IPv6 /64, one NAT address) can each be cut while they wait for
+  `auth` when an attacker from a smaller group arrives; their node connects again (OBS-293).
 - **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
   the relay beside itself when it starts (a login, `full update`, or
   `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
