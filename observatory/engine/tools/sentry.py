@@ -64,7 +64,10 @@ WHAT SENTRY'S API LETS A TOKEN MINT, and so where this door refuses:
   under the ledger's own random key (`sentry-proof.key`, owner-only beside the ledger; never a plain
   hash). A slot whose value has changed since (a rotation, another Sentry's token) is not sent to the
   recorded base, and its 401 proves nothing: it is marked `unproven`, kept, and needs a new proof. A
-  base named with --base-url for the first time is said on stderr.
+  base named with --base-url for the first time is said on stderr; so is a --base-url that replaces a
+  recorded base whose proof no longer holds for the value (a value still proved there is refused for any
+  other Sentry). `status` keeps the same rule: it asks a recorded base about a broad token only when the
+  slot still holds the proved value, and reports an `unproven` or changed entry without sending it.
 * Service accounts (`/api/0/organizations/{org}/service-accounts/`, project-scoped) are being
   built behind a feature flag and issue no token yet; when they do, they are the route for a
   project-scoped token.
@@ -460,6 +463,14 @@ def _proof_key() -> bytes:
 def proof_digest(value: str) -> str:
     """HMAC-SHA256 of a token under the ledger's key: says "the same value", never the value."""
     return "hmac-sha256:" + hmac.new(_proof_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def proof_holds(known: dict, value: str, kind: str) -> bool:
+    """Whether a recorded broad-token proof is about THIS value: same kind and same keyed digest. Refuses
+    (via `_proof_key`) on an unreadable key before anything is sent."""
+    digest = proof_digest(value)
+    return bool(known.get("proved_on")) and known.get("proved_kind") == kind \
+        and hmac.compare_digest(str(known.get("proof_digest") or ""), digest)
 
 
 def ledger_lock():
@@ -914,10 +925,10 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
             raise Refusal(f"{from_slot} does not hold a Sentry token this door can recognise (none of "
                           f"{', '.join(KINDS)}); it was not sent anywhere and the slot is kept", 1)
         check_base(value, base)
+        matches = proof_holds(known, value, kind)
         # A base taken from the record holds only for the value it was recorded with: a replaced value
         # (a rotation, another Sentry's token) is not sent there until a person names its Sentry.
-        if not base_url and not (known.get("proved_kind") == kind and hmac.compare_digest(
-                str(known.get("proof_digest") or ""), proof_digest(value))):
+        if not base_url and not matches:
             doc["broad"][from_slot] = {**known, "state": "unproven", "unproven_why":
                                        "the value in the slot is not the one recorded for this base"}
             for stale in ("proved_on", "proved_kind", "proof_digest", "proof"):
@@ -927,8 +938,14 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
                           f"another kind of token): nothing was sent and the slot is kept. Name its Sentry with "
                           f"--base-url; a `revoke --from` that finds it alive there records a new proof", 2)
         if known.get("base_url") and known["base_url"] != base:
-            raise Refusal(f"{from_slot} was recorded as a token of {known['base_url']}, not {base}; nothing was "
-                          f"sent and the slot is kept", 1)
+            if matches:
+                raise Refusal(f"{from_slot} holds the value {known['base_url']} accepted, so it is that Sentry's "
+                              f"token, not {base}'s; nothing was sent and the slot is kept", 1)
+            # The recorded base described another value (or none was proved): the person's word replaces it.
+            print(f"  {from_slot}: the value is not the one recorded for {known['base_url']}; trusting {base} "
+                  f"instead (--base-url), the only host it is sent to", file=sys.stderr)
+            known = {k: v for k, v in known.items()
+                     if k not in ("proved_on", "proved_kind", "proof_digest", "proof", "requested_on")}
         rows = {s: r for s, r in doc["issued"].items() if s != from_slot and r.get("base_url") == base
                 and (org is None or r.get("org") == org)}
         orgs = sorted({r.get("org") for r in rows.values()})
@@ -969,9 +986,7 @@ def _revoke_broad(source: str, org: str | None, base_url: str | None, wait: floa
                           f"again proves it dead and removes the slot", 3)
         # The recorded 200 proves only the value it was recorded for: the slot may since hold another one
         # (a rotation, a `vault.py put --force`, another Sentry's token), and a 401 to that says nothing.
-        same = bool(known.get("proved_on")) and known.get("proved_kind") == kind \
-            and hmac.compare_digest(str(known.get("proof_digest") or ""), proof_digest(value))
-        if not same:
+        if not proof_holds(known, value, kind):
             why = ("no earlier answer from it showed the token belonged there" if not known.get("proved_on") else
                    "the value in the slot is not the one that answered there before (it was replaced, or is "
                    "another kind of token)")
@@ -1039,8 +1054,25 @@ def cmd_status(target: str | None, wait: float = 2.0) -> int:
             if b.get("state") == "revoked-verified" and b.get("slot") == "removed":
                 print(f"  broad {slot}: revoked, verified on {b.get('revoked_on')}")
                 continue
+            if b.get("state") == "unproven" or not b.get("proved_on"):
+                print(f"  broad {slot}: unproven ({b.get('unproven_why') or 'no answer from its Sentry recorded'});"
+                      f" nothing sent. `sentry.py revoke --from {slot} --base-url URL` records a new proof",
+                      file=sys.stderr)
+                bad += 1
+                continue
             try:
-                live = alive(read_slot(*slot.split("/")), b["base_url"])
+                value = read_slot(*slot.split("/"))
+                kind = kind_of(value)
+                # The recorded base holds only for the value it was proved with: a rotated or foreign
+                # value is never sent there, not even to ask whether it still answers.
+                if not proof_holds(b, value, kind):
+                    print(f"  broad {slot}: the slot no longer holds the value proved on {b['base_url']} "
+                          f"(replaced, or another kind of token); nothing sent. `sentry.py revoke --from {slot} "
+                          f"--base-url URL` records a new proof", file=sys.stderr)
+                    bad += 1
+                    continue
+                check_base(value, b["base_url"])
+                live = alive(value, b["base_url"])
             except (Refusal, SentryError) as exc:
                 print(f"  broad {slot}: could not read it ({exc})", file=sys.stderr)
                 bad += 1

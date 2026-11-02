@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "98a2d7639d51f855e79710b009ba5cd10e6edfe961b2a2ba966cd08387b14beb",
-      "bytes": 207081,
+      "export_sha256": "7c02d8a1b6a5164879a1668678a7219e730348e4e819776fcd573e738ac5ae3b",
+      "bytes": 207429,
       "upstream_modified": true
     },
     {
@@ -5757,8 +5757,8 @@
       "path": "tests/test_sentry_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9ae8527496e9081f90363514ceb2ec9f54af22edb3f6cf4a63a5e91a8aedbaa",
-      "bytes": 44264
+      "export_sha256": "199cab9eb9822f464fbbae2333347273805f9f4838a69e3c2b156d6a7cf3b4b8",
+      "bytes": 48022
     },
     {
       "path": "tests/test_serverd.py",
@@ -6898,8 +6898,8 @@
       "path": "tools/sentry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d967219ad2c40e0aedf1a345c07f692af69999b96c236ca93b888ce2031cbca7",
-      "bytes": 64030
+      "export_sha256": "a24081bf50b037597fd9f8d6b1d4536789e8d684cfaa4adb71d96a6951b7328a",
+      "bytes": 66212
     },
     {
       "path": "tools/serverd.py",

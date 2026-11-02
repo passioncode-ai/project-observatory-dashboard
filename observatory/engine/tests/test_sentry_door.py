@@ -799,6 +799,74 @@ class SentryDoor(unittest.TestCase):
         rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
         self.assertNotIn("for the first time", e)
 
+    # ── review of #401, round 3: status keeps the same rule, and a stale record can be replaced ─────
+
+    def test_status_never_sends_a_changed_value_to_the_recorded_base(self):
+        self.oauth_admin()                                # round 3, finding 1
+        self.assertEqual(self.issue()[0], 0)
+        other = fake("sntryu_", "rotated-into-the-slot")
+        put(ADMIN_SLOT, other)
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("no longer holds the value proved", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == other], "nothing sent anywhere")
+        self.assertTrue(no_value(o + e))
+
+    def test_status_skips_an_unproven_entry_without_sending(self):
+        self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        other = fake("sntryu_", "unproven-in-the-slot")
+        put(ADMIN_SLOT, other)
+        self.assertEqual(run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, None, wait=0)[0], 2)
+        self.assertEqual(self.broad()["state"], "unproven")
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("unproven", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == other])
+
+    def test_status_still_asks_when_the_value_is_the_proved_one(self):
+        admin = self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        rc, o, e = run(self.m.cmd_status, None, wait=0)
+        self.assertEqual(rc, 0, o + e)
+        self.assertIn("still accepted by Sentry", o)
+        self.assertTrue([r for r in self.state.requests if r[3] == admin and r[2] == "/api/0/"])
+
+    def test_a_person_can_name_another_sentry_for_a_replaced_value(self):
+        self.oauth_admin()                                # round 3, finding 2
+        self.assertEqual(self.issue()[0], 0)
+        put(ADMIN_SLOT, fake("sntryu_", "belongs-to-another-sentry"))
+        self.assertEqual(run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, None, wait=0)[0], 2)
+        elsewhere = self.state.region                    # stands for another Sentry's base
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, elsewhere, wait=0)
+        self.assertNotIn("was recorded as a token of", e)
+        self.assertIn(f"trusting {elsewhere} instead", e)
+        self.assertIn(f"no narrow token is recorded for any organization on {elsewhere}", e)
+
+    def test_a_value_proved_on_one_sentry_is_not_sent_to_another(self):
+        admin = self.oauth_admin()
+        self.assertEqual(self.issue()[0], 0)
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), None, self.state.region, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("is that Sentry's token", e)
+        self.assertFalse([r for r in self.state.requests if r[3] == admin and r[0] == "region"])
+
+    def test_a_corrupt_proof_key_refuses_before_anything_is_sent(self):
+        admin = self.personal_admin()
+        self.narrow_installed(72)
+        import private_io
+        private_io.write(self.m.LEDGER.with_name("sentry-proof.key"), "abcd\n")   # short, not 32 bytes
+        before = [r for r in self.state.requests if r[3] == admin]
+        rc, o, e = run(self.m.cmd_revoke, None, "/".join(ADMIN_SLOT), ORG, self.base, wait=0)
+        self.assertEqual(rc, 1, o + e)
+        self.assertIn("proof key is unreadable", e)
+        self.assertEqual([r for r in self.state.requests if r[3] == admin], before, "nothing sent")
+        self.assertEqual(slot_value(ADMIN_SLOT), admin)
+        rc, o, e = run(self.m.main, ["status"])
+        self.assertIn(rc, (0, 1))
+        self.assertNotIn("Traceback", e)
+        self.assertTrue(no_value(o + e))
+
     @unittest.skipIf(os.name == "nt", "POSIX file modes")
     def test_the_ledger_is_owner_only(self):
         self.oauth_admin()
