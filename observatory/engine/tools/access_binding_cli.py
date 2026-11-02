@@ -44,7 +44,7 @@ MAX_DAYS = 365
 
 
 def _is_terminal() -> bool:
-    return sys.stdin.isatty()
+    return osprivacy.is_terminal(sys.stdin)
 
 
 def require_terminal(action: str) -> None:

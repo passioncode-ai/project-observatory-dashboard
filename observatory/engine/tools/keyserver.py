@@ -701,9 +701,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self._send(404, {"error": "no such path"})
 
+    def _read_bounded(self) -> bytes | None:
+        """The body when its framing is valid and within the limit, else None (the checks below answer).
+        Read before any refusal: on Windows, closing a socket with unread input sends a reset that loses
+        the queued answer, so a refused caller saw a connection abort instead of its typed refusal
+        (review of #387). Bounded at 64 KiB, and only for a loopback caller."""
+        lengths = self.headers.get_all("Content-Length", [])
+        if self.headers.get("Transfer-Encoding") or len(lengths) != 1 or not re.fullmatch(r"[0-9]+", lengths[0]):
+            return None
+        length = int(lengths[0])
+        return self.rfile.read(length) if length <= 65536 else None
+
     def do_POST(self) -> None:                                           
         if not self._local_request():
             return
+        early = self._read_bounded()
         if not self.path.startswith("/api/"):
             self._send(404, {"error": "no such path"})
             return
@@ -730,7 +742,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if length > 65536:
                 self._send(413, {"error": "request body is too large"})
                 return
-            raw = self.rfile.read(length)
+            raw = early if early is not None else self.rfile.read(length)
             if len(raw) != length:
                 raise ValueError
             body = json.loads(raw or b"{}", parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))

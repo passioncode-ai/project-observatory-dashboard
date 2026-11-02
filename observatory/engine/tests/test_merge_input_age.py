@@ -70,7 +70,7 @@ class InputAge(unittest.TestCase):
             home = Path(raw).resolve()
             env = {k: v for k, v in os.environ.items() if k not in {
                 'OBSERVATORY_REGISTRY', 'OBSERVATORY_DB', 'OBSERVATORY_STATE', 'OBSERVATORY_SCRATCH'}}
-            env.update(HOME=str(home), OBSERVATORY_HOME=str(home / 'workspace'), OBSERVATORY_SYSTEM_SETUP='0')
+            env.update(HOME=str(home), USERPROFILE=str(home), OBSERVATORY_HOME=str(home / 'workspace'), OBSERVATORY_SYSTEM_SETUP='0')
             initialized = subprocess.run([sys.executable, str(ROOT / 'observatory.py'), 'init'], env=env, capture_output=True, text=True)
             self.assertEqual(initialized.returncode, 0, initialized.stderr[-500:])
             scratch = home / 'workspace/store/raw'; scratch.mkdir(parents=True, exist_ok=True)

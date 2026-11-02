@@ -82,7 +82,7 @@ class Profile(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
         self.a, self.b = self.base / "machine-a", self.base / "machine-b"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.a), "HOME": str(self.base / "user")}, clear=True)
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.a), "HOME": str(self.base / "user"), "USERPROFILE": str(self.base / "user")}, clear=True)
         self.env.start()
         for home in (self.a, self.b):
             workspace.initialize(home)
@@ -444,7 +444,7 @@ class CliRoute(unittest.TestCase):
         import subprocess
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp).resolve() / "home"
-            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tmp,
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": tmp, "USERPROFILE": tmp,
                    "OBSERVATORY_HOME": str(home), "PYTHONDONTWRITEBYTECODE": "1"}
             with patch.dict(os.environ, env, clear=True):
                 workspace.initialize(home)

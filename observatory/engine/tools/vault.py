@@ -322,7 +322,7 @@ def _read_meta(slot: pathlib.Path) -> dict:
 
 
 def _stdin_value() -> str:
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         die("the value must arrive on stdin, never in an argument:\n"
             "    run vault put <project> <env> <NAME> with a protected file redirected to stdin")
     v = sys.stdin.read().strip()

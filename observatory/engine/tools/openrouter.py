@@ -1860,7 +1860,7 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
 
 
 def cmd_claim(name: str, account: str | None, where: str) -> int:
-    if sys.stdin.isatty():
+    if osprivacy.is_terminal(sys.stdin):
         print("give the key on stdin, from the file that holds it — never as an argument", file=sys.stderr)
         return 2
     try:
@@ -2204,7 +2204,7 @@ def main() -> int:
     p_cl.add_argument("--where", default="", help="where the copy was found: a path, never a value")
     a = ap.parse_args()
     if a.cmd == "stash":
-        if sys.stdin.isatty():
+        if osprivacy.is_terminal(sys.stdin):
             print("paste the provisioning key on stdin", file=sys.stderr)
             return 2
         return stash_value(sys.stdin.read().strip(), a.label, origin="stdin")

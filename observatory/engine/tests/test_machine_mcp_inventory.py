@@ -57,7 +57,7 @@ class Sandbox(unittest.TestCase):
         fx.make_workspace(self.home, mcp_root=self.agents if self.mcp_enabled else None)
         (self.base / "user").mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(HOME=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
+        env.update(HOME=str(self.base / "user"), USERPROFILE=str(self.base / "user"), OBSERVATORY_HOME=str(self.home),
                    PYTHONDONTWRITEBYTECODE="1")
         self.env = env
         self.patch = mock.patch.dict(os.environ, env, clear=True)

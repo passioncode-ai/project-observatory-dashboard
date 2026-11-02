@@ -40,7 +40,7 @@ def isolate_home(case: unittest.TestCase, user: Path) -> None:
     """HOME is a synthetic folder for the whole test: the real `~/.codex`, `~/.hermes` and
     opencode data are never read (I-5), and no override in the caller's environment leaks in."""
     user.mkdir(parents=True, exist_ok=True)
-    env = patch.dict(os.environ, {"HOME": str(user)})
+    env = patch.dict(os.environ, {"HOME": str(user), "USERPROFILE": str(user)})
     env.start()
     case.addCleanup(env.stop)
     for name in HOME_OVERRIDES:
@@ -76,7 +76,8 @@ class Coverage(unittest.TestCase):
             self.assertEqual(L.main(["leaks"] + (["--full"] if full else [])), 0)
         return json.loads(L.OUT.read_text())
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
     def test_an_unreadable_file_is_listed_not_counted_clean(self):
         doc = self.scan()
         self.assertEqual(doc["coverage"]["targets_unreadable"], 1)
@@ -210,7 +211,8 @@ class Coverage(unittest.TestCase):
         self.assertEqual(doc["degraded"][0]["reason"], doc["degraded"][0]["why"])
         self.assertEqual([f["type"] for f in F.findings(doc)], ["secret.leak_scan_unmeasured"])
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
     def test_an_unreadable_file_is_a_coded_hole_and_its_neighbour_still_counts(self):
         doc = self.scan()
         self.assertIn("source-unreadable", [d["code"] for d in doc["degraded"]])
@@ -220,7 +222,8 @@ class Coverage(unittest.TestCase):
         self.assertEqual(doc["coverage"]["targets_read"], 2, "both were reached; one would not open")
         self.assertIn("secret.seen_outside_its_home", {f["type"] for f in F.findings(doc)})
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
     def test_a_hole_holds_health_degraded_and_counts_every_unreadable_note(self):
         """Decision (review round 2): an unread source is a gap, so /health reads it as degraded."""
         L.targets = lambda days: ([self.readable, self.locked],
@@ -253,7 +256,8 @@ class Coverage(unittest.TestCase):
         finally:
             paths.SCRATCH = saved
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_a_session_folder_that_will_not_list_is_a_hole(self):
         """Review round 3: rglob skipped a folder it could not open, and /health stayed green."""
         root = self.readable.parent / "sessions"
@@ -272,7 +276,8 @@ class Coverage(unittest.TestCase):
         self.assertTrue(any(r["source"] == "leak-scan:source-unreadable" for r in self._health_rows()))
         self.assertTrue(any(h["where"].endswith("a.jsonl") for h in doc["hits"]), "the readable folder still counts")
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_a_sessions_root_that_will_not_list_is_a_hole(self):
         root = self.readable.parent / "sessions-root"
         (root / "projA").mkdir(parents=True)
@@ -385,9 +390,10 @@ class Coverage(unittest.TestCase):
             {"what": "demo/.env", "why": "unreadable now", "unreadable": True}])
         doc = self.scan()
         hole = next(d for d in doc["degraded"] if d["code"] == "source-unreadable")
-        self.assertIn("3 source(s)" if os.geteuid() != 0 else "2 source(s)", hole["why"])
+        self.assertIn("3 source(s)" if not (hasattr(os, "geteuid") and os.geteuid() == 0) else "2 source(s)", hole["why"])
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
     def test_known_values_marks_an_unreadable_slot_and_env_file(self):
         vault = self.readable.parent / "vault"
         (vault / "demo" / "prod").mkdir(parents=True)
@@ -416,7 +422,8 @@ class Coverage(unittest.TestCase):
         finally:
             L.VAULT, paths.SCRATCH, paths.DATA, L.DESTINATIONS = saved
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_every_vault_folder_that_will_not_list_is_a_hole(self):
         for depth in ("root", "project", "env"):
             with self.subTest(depth=depth):
@@ -431,7 +438,8 @@ class Coverage(unittest.TestCase):
                     locked.chmod(0o700)
                 self.assertTrue(any(k.get("unreadable") and "vault" in k["what"] for k in skipped), skipped)
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
     def test_an_unreadable_env_file_is_marked_unreadable(self):
         """Fails when `"unreadable": True` is dropped for an env file (round 4)."""
         scratch = self.readable.parent / "scratch-env"
@@ -452,7 +460,8 @@ class Coverage(unittest.TestCase):
         _values, _homes, skipped = self._known_values_over(scratch=scratch)
         self.assertTrue(any(k.get("unreadable") and "env" in k["what"] for k in skipped), skipped)
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_a_sessions_root_under_a_locked_ancestor_is_a_hole_not_absent(self):
         parent = self.readable.parent / "locked-parent"
         (parent / "sessions" / "projA").mkdir(parents=True)
@@ -670,7 +679,8 @@ class Coverage(unittest.TestCase):
         values, _homes, skipped = self._known_values_over(scratch=scratch, data=variant)
         self.assertEqual(list(values.values()), ["env:demo/API_TOKEN"], skipped)
 
-    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-0311 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-0311 folder")
     def test_a_traverse_only_data_folder_is_still_verified(self):
         """L6: a data folder at mode 0311 cannot be opened for reading; its canonical
         path still comes from the OS (O_EVTONLY / O_PATH), never from realpath."""
@@ -1015,7 +1025,8 @@ class TranscriptHomes(unittest.TestCase):
         self.assertEqual({h["agent"]: h["state"] for h in doc["coverage"]["transcript_homes"]},
                          {"claude": "absent", "codex": "absent", "hermes": "absent", "opencode": "absent"})
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_a_home_that_exists_but_will_not_read_is_named_with_a_reason(self):
         for agent, folder in (("codex", self.user / ".codex"), ("hermes", self.user / ".hermes"),
                               ("opencode", self.user / ".local" / "share" / "opencode")):
@@ -1189,7 +1200,8 @@ class TranscriptHomes(unittest.TestCase):
 
     # ── planted reverts that stayed green in round 1 ──
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a folder without read permission")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a folder without read permission")
     def test_r2d_an_unlistable_opencode_data_folder_without_storage_is_named(self):
         data = self.user / ".local" / "share" / "opencode"
         data.mkdir(parents=True)
@@ -1200,7 +1212,8 @@ class TranscriptHomes(unittest.TestCase):
             data.chmod(0o700)
         self.assertTrue(any(n["what"] == "~/.local/share/opencode" for n in self.holes(doc)), doc["not_scanned"])
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a folder without read permission")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a folder without read permission")
     def test_r2e_an_unlistable_hermes_profiles_folder_is_named(self):
         profiles = self.user / ".hermes" / "profiles"
         profiles.mkdir(parents=True)
@@ -1364,7 +1377,8 @@ class TranscriptHomes(unittest.TestCase):
         for name in names:
             self.assertIn(f"{codex / (name + '.sqlite')}#t.content", where, name)
 
-    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    @unittest.skipIf(os.name == "nt", "OBS-278: Windows makes no file unreadable by its mode; the case needs an ACL that denies this account")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root lists a mode-000 folder")
     def test_a_hole_in_a_nested_home_leaves_the_outer_home_partial(self):
         """F7: a locked folder under ~/.claude/projects is that home's hole; ~/.claude is partial."""
         projects = self.user / ".claude" / "projects"

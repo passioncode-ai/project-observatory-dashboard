@@ -88,7 +88,7 @@ def test_failed_backup_keeps_last_good_snapshots() -> None:
         # A workspace of its own, so no passphrase or backups root of the
         # machine running the suite can be consulted.
         env = {**os.environ, 'OBSERVATORY_DB': str(db), 'OBSERVATORY_HOME': str(root / 'home'),
-               'HOME': str(root)}
+               'HOME': str(root), 'USERPROFILE': str(root)}
         p = subprocess.run([PY, str(ROOT / 'tools/backup_store.py')], cwd=ROOT, env=env,
                            capture_output=True, text=True, timeout=30)
         check("failed backup is not reported successful", p.returncode != 0, (p.stdout + p.stderr)[-200:])

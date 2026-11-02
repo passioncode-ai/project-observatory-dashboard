@@ -55,6 +55,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 # The engine root first: `node` is the engine's package, never tools/node.py (`full node`).
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 
 #: Built from two parts: the bare `full share` is no command a person runs, and the handed-command check reads every
@@ -63,13 +64,13 @@ PROG = "project-observatory full" + " share"
 
 
 def _is_terminal() -> bool:
-    return sys.stdin.isatty()
+    return osprivacy.is_terminal(sys.stdin)
 
 
 def _shows_code() -> bool:
     """The comparison code is printed only to a terminal: never into --json, a pipe or a file an agent reads. On this
     machine any program running as you can still drive a terminal; the limit is stated in ONBOARDING."""
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    return osprivacy.is_terminal(sys.stdin) and osprivacy.is_terminal(sys.stdout)
 
 
 def require_terminal(action: str) -> None:

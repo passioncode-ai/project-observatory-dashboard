@@ -203,7 +203,7 @@ def test_the_hook_is_silent_about_what_is_not_its_business() -> None:
     """A Stop hook installed globally must change nothing where it does not watch."""
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-nothook-"))
     p = subprocess.run(["bash", str(HOOK)], cwd=d,
-                       env={**os.environ, "OBSERVATORY_ROOT": str(d), "HOME": str(d)},
+                       env={**os.environ, "OBSERVATORY_ROOT": str(d), "HOME": str(d), "USERPROFILE": str(d)},
                        input="", capture_output=True, text=True, timeout=120)
     check("no observatory checkout: exits 0", p.returncode == 0, str(p.returncode))
     check("and says nothing", not p.stdout.strip(), p.stdout[:160])
