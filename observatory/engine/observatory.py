@@ -463,7 +463,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
-                      "machine-backup", "machine-restore",
+                      "machine-backup", "machine-restore", "machine-move",
                       "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
 #: Commands `main` hands to a parser of their own before the step table is read. The dispatcher's
 #: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
@@ -498,8 +498,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                uncommitted work) into one encrypted .obmachine in the backups root;
                                daily from `maintain` and before each update
   machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
+                  [--second-machine|--same-machine]
                                put a machine bundle back: the plan by default; --apply writes only
-                               what is missing; --overwrite moves a conflict aside first
+                               what is missing; --overwrite moves a conflict aside first; a bundle
+                               from another machine writes no private SSH key and stages its jobs
+  machine-move show|cutover LABEL|leave LABEL --to MACHINE_ID
+                               move one background job between two machines, so it never runs on both
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left

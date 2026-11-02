@@ -70,8 +70,9 @@ import io
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import shlex
 import shutil
 import signal
 import stat
@@ -85,6 +86,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import backup_vault
 import configuration as config
+import machine_identity
+import osprivacy
 import oslocks
 
 KIND, SUFFIX = backup_vault.MACHINE_KIND, backup_vault.MACHINE_SUFFIX
@@ -1186,7 +1189,8 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                               f"under the {limits['min_free_gb']} GB a machine backup keeps (limits.min_free_gb "
                               f"in config/{CONFIG_NAME}); the disk holds {root}")
         manifest = {"format": FORMAT, "created_at": iso(at), "trigger": trigger, "engine_version": config.VERSION,
-                    "platform": sys.platform, "home_path": str(home), "items": [], "skipped": col.skipped,
+                    "platform": sys.platform, "machine_id": machine_identity.machine_id(home),
+                    "home_path": str(home), "items": [], "skipped": col.skipped,
                     "absent": col.absent, "not_carried": col.not_carried,
                     "inventories": [{k: v for k, v in i.items() if k != "data"} for i in invs],
                     "checkouts": records, "checkout_notes": notes}
@@ -1557,14 +1561,245 @@ def open_bundle(bundle: Path, secret: str, parent: Path) -> tuple[Path, dict]:
     return stage, manifest
 
 
-def plan(manifest: dict, stage: Path, home: Path) -> list[dict]:
-    """Every file, directory and link: where it goes and whether it is missing, the same, or a conflict."""
+# --- a second machine (OBS-283) -----------------------------------------------------------------
+#
+# A bundle restored on ANOTHER machine must not give it this machine's SSH identity or start its
+# jobs: one key would sign on two machines, and a bot polling one token, a scheduler or a publisher
+# would run twice from the next login. So in second-machine mode (`--second-machine`, and the
+# default whenever the bundle names another machine or none) the SSH files a person shares between
+# machines are written (config, known_hosts, authorized_keys, allowed_signers, a `*.pub` whose private
+# half is not in the bundle) and nothing else of a `.ssh` folder is, whatever its name, and a file that
+# reads as a private key is withheld even under a public name. Every launchd plist (systemd user unit
+# off macOS) is written into a staging folder nothing loads at login, and named in the placement file
+# as running elsewhere, until `full machine-move cutover LABEL` moves it here. Both rules go by the
+# path an item is written to, never by the category it was taken under, so an operator's own include
+# or an absolute path into a `.ssh` or job folder is held to them too.
+
+#: The `.ssh` names a second machine gets: shared settings and public halves, never a private key.
+SSH_PUBLIC = frozenset({"config", "known_hosts", "known_hosts.old", "known_hosts2", "authorized_keys",
+                        "authorized_keys2", "allowed_signers", "environment", "rc"})
+#: Folders of `.ssh` that hold only configuration fragments (`Include config.d/*`).
+SSH_PUBLIC_DIRS = frozenset({"config.d", "conf.d"})
+#: What a private key's text holds, whatever the file is called (PEM, OpenSSH, PuTTY).
+PRIVATE_MARKERS = (b"PRIVATE KEY-----", b"PuTTY-User-Key-File-")
+#: Where each job system's definitions live, as path parts; anything under them is staged.
+JOB_PARTS = {"launchd": ("Library", "LaunchAgents"), "systemd": (".config", "systemd", "user")}
+#: This engine's own jobs (maintenance, update check, tick, server), by file name: every machine installs
+#: its own (`full maintain ensure`, `full agent install`), so a second machine neither stages nor names them.
+OWN_JOB_PREFIXES = ("org.project-observatory.", "project-observatory-")
+#: ssh's default identity files: read without an IdentityFile line, for every host.
+DEFAULT_IDENTITIES = ("id_ed25519", "id_ecdsa", "id_ecdsa_sk", "id_ed25519_sk", "id_rsa", "id_dsa")
+REASONS = {
+    "ssh-private": "ssh-private: of a .ssh folder a second machine gets only the public files and the settings "
+                   "ssh shares between machines; a key among the rest is made anew there under the same name "
+                   "(`ssh_keys` in this answer names each step)",
+    "ssh-private-content": "ssh-private: the file's text is a private key, so it stays on the machine it came from",
+    "ssh-pub-pair": "ssh-private: the public half of a key that stays on the other machine; this machine makes its "
+                    "own key under the same name, which this file would block",
+    "ssh-link": "ssh-private: a link in a .ssh folder may lead to a private key; it is not written",
+    "job-folder-link": "a linked job folder: written as a link, everything it leads to would load at the next login; "
+                       "the jobs it held are staged one by one",
+    "own-job": "this engine's own job: each machine installs its own (`project-observatory full maintain ensure`), "
+               "so it is neither written nor named as running elsewhere",
+}
+
+
+def _area(item: dict, home: Path) -> tuple[str | None, tuple[str, ...]]:
+    """Where an item is written, by path: (`ssh`, the parts under the `.ssh` folder), (`launchd` or
+    `systemd`, the parts under the job folder), or (None, ()). A path under this home is read from
+    its destination; an absolute path from another home (an `abs/` item) from its own parts."""
+    source = str(item.get("source", ""))
+    try:
+        dest = _destination(source, home)
+    except MachineBackupError:
+        return None, ()
+    try:
+        parts = dest.relative_to(home).parts
+    except ValueError:
+        parts = PurePosixPath(source).parts
+    # A default macOS or Windows volume ignores case: `~/.SSH` is the `.ssh` folder there.
+    folded = tuple(p.casefold() for p in parts)
+    for i, part in enumerate(folded):
+        if part == ".ssh":
+            return "ssh", tuple(parts[i + 1:])
+        for system, folder in JOB_PARTS.items():
+            if folded[i:i + len(folder)] == tuple(f.casefold() for f in folder):
+                return system, tuple(parts[i + len(folder):])
+    return None, ()
+
+
+def _ssh_public_name(rel: tuple[str, ...]) -> bool:
+    if len(rel) > 1 and rel[0] in SSH_PUBLIC_DIRS:
+        return True
+    return bool(rel) and (rel[-1] in SSH_PUBLIC or rel[-1].endswith(".pub"))
+
+
+def looks_private(data: bytes) -> bool:
+    head = data[:8192]
+    return any(marker in head for marker in PRIVATE_MARKERS)
+
+
+def _staged_file(item: dict, stage: Path | None) -> Path | None:
+    if stage is None or item.get("kind") != "file" or not _safe_arcname(item.get("arcname")):
+        return None
+    path = stage / item["arcname"]
+    return path if path.is_file() else None
+
+
+class _Second:
+    """What a second machine does with each item of one manifest (OBS-283)."""
+
+    def __init__(self, manifest: dict, home: Path, stage: Path | None):
+        self.home, self.stage = home, stage
+        self.areas = {(i.get("kind"), i.get("source")): _area(i, home) for i in manifest.get("items", [])}
+        self.private: set[str] = set()      # sources of withheld private files and links in a .ssh folder
+        for item in manifest.get("items", []):
+            area, rel = self.areas[(item.get("kind"), item.get("source"))]
+            if area == "ssh" and rel and item.get("kind") in ("file", "link") and not _ssh_public_name(rel):
+                self.private.add(item["source"])
+
+    def place(self, item: dict) -> tuple[Path, str | None, str | None]:
+        """(destination, how, reason): how is None (its own place), `withheld` or `staged`."""
+        dest = _destination(item["source"], self.home)
+        area, rel = self.areas.get((item.get("kind"), item.get("source"))) or _area(item, self.home)
+        kind = item.get("kind")
+        if area == "ssh":
+            if not rel:
+                return (dest, "withheld", REASONS["ssh-link"]) if kind == "link" else (dest, None, None)
+            if kind == "dir":
+                return dest, None, None
+            if item["source"] in self.private:
+                return dest, "withheld", REASONS["ssh-private"] if kind == "file" else REASONS["ssh-link"]
+            if kind == "link":
+                return dest, None, None
+            if rel[-1].endswith(".pub") and item["source"][:-len(".pub")] in self.private:
+                return dest, "withheld", REASONS["ssh-pub-pair"]
+            data = _staged_file(item, self.stage)
+            if data is not None and looks_private(data.read_bytes()):
+                return dest, "withheld", REASONS["ssh-private-content"]
+            return dest, None, None
+        if area in JOB_PARTS:
+            if not rel:
+                return (dest, "withheld", REASONS["job-folder-link"]) if kind == "link" else (dest, None, None)
+            if kind == "dir":
+                return dest, "withheld", "a folder inside a job folder: its jobs are staged one by one"
+            if rel[-1].startswith(OWN_JOB_PREFIXES):
+                return dest, "withheld", REASONS["own-job"]
+            return machine_identity.staging_dir(self.home, area) / rel[-1], "staged", None
+        return dest, None, None
+
+    def label(self, item: dict, dest: Path) -> str:
+        """The job's label as the placement file names it: a plist's `Label` when its text is at hand."""
+        data = _staged_file(item, self.stage)
+        if data is not None:
+            return machine_identity.job_label(dest, data.read_bytes())
+        return dest.stem if dest.suffix == ".plist" else dest.name
+
+    def ssh_keys(self, manifest: dict) -> list[dict]:
+        """Every withheld private key, the hosts the carried `.ssh/config` sends to it, and the exact steps
+        that make this machine's own key under the same name, so a carried `IdentityFile ~/.ssh/NAME`
+        with `IdentitiesOnly yes` (what `full ssh-keys create --host` writes) finds a key here."""
+        keys: dict[str, dict] = {}
+        for source in sorted(self.private):
+            item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
+            rel = self.areas[(item.get("kind"), source)][1] if item else ()
+            if item is None or item.get("kind") != "file":
+                continue
+            dest = _destination(source, self.home)
+            # Directly in this home's .ssh folder, whatever its case (`~/.SSH/id_ed25519` on a case-blind volume);
+            # `~/dotfiles/.ssh/deploy_key` and `~/.ssh/keys/work` are not where `ssh-keys create` writes.
+            in_ssh = len(rel) == 1 and dest.parent.parent == self.home and dest.parent.name.casefold() == ".ssh"
+            keys[source] = {"key": rel[-1], "file": display(dest, self.home), "hosts": [],
+                            "default": in_ssh and rel[0] in DEFAULT_IDENTITIES, "in_ssh": in_ssh}
+        by_name = {k["key"]: k for k in keys.values() if k["in_ssh"]}
+        named = set()
+        for host, hostname, identity in self._config_identities(manifest):
+            # The key the line names only when it sits directly in a .ssh folder: `~/.ssh/k/config.local`
+            # is not the `~/.ssh/config.local` fragment.
+            parts = identity.split("/")
+            key = by_name.get(parts[-1]) if len(parts) >= 2 and parts[-2].casefold() == ".ssh" else None
+            if key is not None:
+                named.add(key["key"])
+                if host not in [h["host"] for h in key["hosts"]]:
+                    key["hosts"].append({"host": host, "hostname": hostname})
+        out = []
+        for source, key in keys.items():
+            # Only a key gets a key step: its text is a private key, the carried config names it as an
+            # IdentityFile, or it has one of ssh's default key names. A withheld setting such as an
+            # `Include config.local` fragment gets none: `ssh-keys create config.local` would write a key
+            # where ssh reads settings and break every connection (review of #394).
+            item = next(i for i in manifest.get("items", []) if i.get("source") == source)
+            data = _staged_file(item, self.stage)
+            is_key = (key["key"] in named or key["default"]
+                      or (data is not None and looks_private(data.read_bytes())))
+            if not is_key:
+                continue
+            # Quoted for the shell: `IdentityFile "~/.ssh/work key"` names a key with a space.
+            name, in_ssh = shlex.quote(key["key"]), key.pop("in_ssh")
+            if not in_ssh:
+                out.append({**key, "steps": [], "note": "not directly in ~/.ssh: make this machine's own key and "
+                                                        "put it where the other machine kept this one, by hand"})
+                continue
+            steps = [f"project-observatory full ssh-keys create {name}"]
+            targets = []
+            for h in key["hosts"]:
+                github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
+                target = "github" if github else shlex.quote(f"server:{h['host']}")
+                if target not in targets:
+                    targets.append(target)
+            if key["default"] and "github" not in targets:
+                targets.insert(0, "github")
+            for target in targets:
+                steps.append(f"project-observatory full ssh-keys send {name} --to {target}"
+                             + ("" if target == "github" else " --verify"))
+            out.append({**key, "steps": steps})
+        return out
+
+    def _config_identities(self, manifest: dict):
+        """(Host alias, its HostName or None, IdentityFile path) from the carried `.ssh/config` and its fragments."""
+        for item in manifest.get("items", []):
+            area, rel = self.areas.get((item.get("kind"), item.get("source")), (None, ()))
+            if area != "ssh" or not rel or not (rel == ("config",) or (len(rel) > 1 and rel[0] in SSH_PUBLIC_DIRS)):
+                continue
+            data = _staged_file(item, self.stage)
+            if data is None:
+                continue
+            hosts, hostnames, pending = ["*"], {}, []
+            for raw in data.read_bytes()[:1 << 20].decode("utf-8", "replace").splitlines():
+                line = raw.split("#", 1)[0].strip()
+                if not line:
+                    continue
+                parts = re.split(r"[ \t]*=[ \t]*|[ \t]+", line, maxsplit=1)
+                key, value = parts[0].lower(), (parts[1] if len(parts) > 1 else "").strip().strip('"')
+                if key == "host":
+                    hosts = [h for h in value.split() if not h.startswith("!")]
+                elif key == "match":
+                    hosts = []
+                elif key == "hostname":
+                    for h in hosts:
+                        hostnames.setdefault(h, value)
+                elif key == "identityfile":
+                    pending += [(h, value) for h in hosts if "*" not in h and "?" not in h]
+            for host, identity in pending:
+                yield host, hostnames.get(host), identity
+
+
+def plan(manifest: dict, stage: Path, home: Path, *, second: bool = False) -> list[dict]:
+    """Every file, directory and link: where it goes and whether it is missing, the same, or a conflict.
+    On a second machine a private SSH file is `withheld` and a job is `staged` (OBS-283)."""
+    rule = _Second(manifest, home, stage) if second else None
     out = []
     for item in manifest.get("items", []):
         if item.get("kind") not in ("file", "dir", "link"):
             continue
-        dest = _destination(item["source"], home)
+        dest, how, reason = rule.place(item) if rule else (_destination(item["source"], home), None, None)
         row = {"kind": item["kind"], "source": item["source"], "destination": display(dest, home)}
+        if how == "withheld":
+            row.update(state="withheld", reason=reason)
+            out.append(row)
+            continue
+        if how == "staged":
+            row.update(staged=True, label=rule.label(item, dest))
         if item["kind"] == "dir":
             row["state"] = "same" if dest.is_dir() and not dest.is_symlink() else \
                 ("conflict" if os.path.lexists(dest) else "missing")
@@ -1585,22 +1820,36 @@ def plan(manifest: dict, stage: Path, home: Path) -> list[dict]:
     return out
 
 
+def inspect_names(manifest: dict, home: Path) -> set[str]:
+    """The archive names a second-machine plan reads before anything is written: the `.ssh` and job
+    files (a private key's text, the carried `IdentityFile` lines, a plist's `Label`)."""
+    return {i["arcname"] for i in manifest.get("items", [])
+            if i.get("kind") == "file" and _safe_arcname(i.get("arcname")) and _area(i, home)[0] is not None}
+
+
 def _aside(dest: Path, stamp: str) -> str:
     moved = dest.with_name(f"{dest.name}.before-machine-restore-{stamp}")
     os.replace(dest, moved)
     return moved.name
 
 
-def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False) -> dict:
-    """Write what is missing; with `overwrite`, replace a conflict after moving it aside."""
-    rows = plan(manifest, stage, home)
+def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False, second: bool = False) -> dict:
+    """Write what is missing; with `overwrite`, replace a conflict after moving it aside. On a
+    second machine, withhold every private SSH file and write jobs to the staging folder."""
+    rows = plan(manifest, stage, home, second=second)
     by_source = {(i["kind"], i["source"]): i for i in manifest.get("items", [])}
     stamp = backup_vault.stamp()
     done = {"written": 0, "same": 0, "kept": 0, "replaced": 0, "failed": []}
+    if second:
+        done["withheld"] = 0
+    rule = _Second(manifest, home, stage) if second else None
     order = {"dir": 0, "file": 1, "link": 2}
     for row in sorted(rows, key=lambda r: (order[r["kind"]], r["source"])):
         item = by_source[(row["kind"], row["source"])]
-        dest = _destination(item["source"], home)
+        dest, how, _ = rule.place(item) if rule else (_destination(item["source"], home), None, None)
+        if row["state"] == "withheld":
+            done["withheld"] += 1
+            continue
         if row["state"] == "same":
             done["same"] += 1
             continue
@@ -1608,6 +1857,16 @@ def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False) -
             done["kept"] += 1
             continue
         try:
+            data = None
+            if row["kind"] == "file":
+                if not _safe_arcname(item.get("arcname")):
+                    raise MachineBackupError("an unsafe name in the manifest")
+                data = (stage / item["arcname"]).read_bytes()
+                if _sha256(data) != item["sha256"]:
+                    raise MachineBackupError("the copy in the bundle does not match its digest")
+                if second and _area(item, home)[0] == "ssh" and looks_private(data):
+                    done["withheld"] += 1  # a private key under a public name stays on its machine
+                    continue
             if row["state"] == "conflict":
                 if row["kind"] == "dir" and dest.is_dir() and not dest.is_symlink():
                     done["same"] += 1
@@ -1618,15 +1877,13 @@ def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False) -
                 dest.mkdir(parents=True, exist_ok=True)
                 os.chmod(dest, item.get("mode", 0o700))
             elif row["kind"] == "link":
+                if how == "staged":
+                    machine_identity.ensure_private_dir(dest.parent, home)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 os.symlink(_link_target(item["target"], home), dest)
             else:
-                if not _safe_arcname(item.get("arcname")):
-                    raise MachineBackupError("an unsafe name in the manifest")
-                source = stage / item["arcname"]
-                data = source.read_bytes()
-                if _sha256(data) != item["sha256"]:
-                    raise MachineBackupError("the copy in the bundle does not match its digest")
+                if how == "staged":
+                    machine_identity.ensure_private_dir(dest.parent, home)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.", suffix=".restore")
                 try:
@@ -1828,9 +2085,13 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
 
 def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "plan", overwrite: bool = False,
             do_packages: bool = False, do_clone: bool = False, secret: str | None = None,
-            runner=subprocess.run, which=shutil.which, git: str = "git", hold=None) -> dict:
+            runner=subprocess.run, which=shutil.which, git: str = "git", hold=None,
+            machine: str | None = None) -> dict:
     """Plan, and each requested step in its own phase: only what that step needs is decrypted,
-    into the private stage, and removed before the next step starts (round 1 of #305)."""
+    into the private stage, and removed before the next step starts (round 1 of #305).
+
+    `machine` is the person's choice, `second` or `same`; without one the bundle's machine id
+    against this machine's decides, and a bundle that names none is another machine's (OBS-283)."""
     if not bundle.is_file():
         raise MachineBackupError(f"no machine bundle at {bundle}")
     if secret:
@@ -1853,8 +2114,26 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                 raise MachineBackupError(f"{bundle.name} is not a machine bundle this engine reads")
             pointer = stage / "inventories" / "observatory.json"
             workspace_doc = json.loads(pointer.read_text(encoding="utf-8")) if pointer.is_file() else None
-        rows = plan(manifest, None, home)
+        try:
+            placing = machine_identity.restore_mode(manifest.get("machine_id"), asked=machine, home=home)
+        except machine_identity.MachineIdentityError as exc:
+            raise MachineBackupError(str(exc)) from None
+        second = placing["mode"] == "second-machine"
+        ssh_keys = None
+        if second:
+            # The plan reads what it decides by: a `.ssh` file's text, the carried IdentityFile lines,
+            # a plist's Label. Only those small files are decrypted, into the private stage.
+            wanted = inspect_names(manifest, home)
+            with _phase(root) as stage:
+                extract(bundle, secret, stage, lambda n: n in wanted)
+                rows = plan(manifest, stage, home, second=True)
+                ssh_keys = _Second(manifest, home, stage).ssh_keys(manifest)
+        else:
+            rows = plan(manifest, None, home)
         counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("missing", "same", "conflict")}
+        if second:
+            counts["withheld"] = sum(1 for r in rows if r["state"] == "withheld")
+            counts["staged"] = sum(1 for r in rows if r.get("staged"))
 
         def here(rec):
             try:
@@ -1869,7 +2148,8 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                                  "carried": sorted(k for k in (r.get("carried") or {}) if k != "untracked_modes"),
                                  "remotes": sorted((r.get("remotes") or {}).keys()), "exists_here": here(r)}
                                 for r in manifest.get("checkouts", []) if isinstance(r, dict)],
-                  "inventories": manifest.get("inventories", [])}
+                  "inventories": manifest.get("inventories", []), "machine": placing,
+                  **({"ssh_keys": ssh_keys} if second else {})}
         if workspace_doc is not None:
             result["workspace"] = workspace_doc
         if mode == "apply":
@@ -1877,7 +2157,9 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                 extract(bundle, secret, stage, lambda n: n.startswith(("files/", "abs/")))
                 if hold:
                     hold("apply", stage)
-                result["applied"] = apply(manifest, stage, home, overwrite=overwrite)
+                result["applied"] = apply(manifest, stage, home, overwrite=overwrite, second=second)
+                if second:
+                    result["placement"] = place_staged(manifest, stage, home, placing)
         if do_packages:
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith("inventories/"))
@@ -1894,9 +2176,52 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
         "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"
         if counts["conflict"] and not overwrite else None,
         None if do_packages else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
-        None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts)",
-        "project-observatory full restore --latest  (the workspace itself, from its own snapshot)") if s]
+        *((step for key in ssh_keys for step in key["steps"]) if second and not do_clone else ()),
+        None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts"
+                              + (", after this machine's own SSH keys above)" if second and any(k["steps"] for k in ssh_keys) else ")"),
+        "project-observatory full restore --latest  (the workspace itself, from its own snapshot)",
+        *(SECOND_MACHINE_NEXT if second else ())) if s]
     return result
+
+
+#: What a person does after a second-machine restore, in order (ONBOARDING, "A second machine").
+SECOND_MACHINE_NEXT = (
+    "project-observatory full node --init  (after `full restore --latest`: this machine's own device id)",
+    "project-observatory full machine-move show  (the jobs staged here, each named as running on the other machine)",
+    "on the other machine: project-observatory full machine-move leave LABEL --to MACHINE_ID (this machine's id), then here: "
+    "project-observatory full machine-move cutover LABEL  (moves one job, so it never runs on both)",
+)
+
+
+def place_staged(manifest: dict, stage: Path, home: Path, placing: dict) -> dict:
+    """Name every job this restore staged in the placement file, as running on the machine the
+    bundle was taken on, with its Fabric service id when a carried descriptor names its label.
+    A job whose definition this machine already has in its own job folder is left as it is."""
+    descriptors = [stage / i["arcname"] for i in manifest.get("items", [])
+                   if i.get("kind") == "file" and i.get("category") == "fabric" and _safe_arcname(i.get("arcname"))
+                   and str(i.get("source", "")).endswith(".json")]
+    rule = _Second(manifest, home, stage)
+    services = machine_identity.service_ids_by_label([f for f in descriptors if f.is_file()])
+    entries, here, staged = [], [], []
+    for item in manifest.get("items", []):
+        if item.get("kind") not in ("file", "link"):
+            continue
+        dest, how, _ = rule.place(item)
+        if how != "staged" or not os.path.lexists(dest):
+            continue
+        label = rule.label(item, dest)
+        staged.append({"label": label, "file": display(dest, home)})
+        if os.path.lexists(_destination(item["source"], home)):
+            here.append(label)
+            continue
+        entries.append({"label": label, "serviceId": services.get(label),
+                        "placedOn": placing.get("taken_on") or "unknown", "by": "machine-restore"})
+    try:
+        path = machine_identity.place_elsewhere(entries, home, machine=placing["this_machine"])
+    except (machine_identity.MachineIdentityError, OSError) as exc:
+        return {"file": None, "error": str(exc)[:300], "staged": staged}
+    return {"file": display(path, home), "elsewhere": sorted(e["label"] for e in entries),
+            "already_here": sorted(here), "staged": staged}
 
 
 # --- the command line ---------------------------------------------------------------------------
@@ -1926,6 +2251,14 @@ def restore_parser() -> argparse.ArgumentParser:
     ap.add_argument("--overwrite", action="store_true", help="with --apply: replace a conflict, moving the existing one aside")
     ap.add_argument("--packages", action="store_true", help="install the Homebrew, npm, pipx and uv inventories")
     ap.add_argument("--clone", action="store_true", help="clone the recorded checkouts and put back their carried work")
+    machine = ap.add_mutually_exclusive_group()
+    machine.add_argument("--second-machine", action="store_true",
+                         help="restore as another machine (the default when the bundle names another machine or "
+                              "none): no private SSH key is written, and every launchd job is staged, not loaded, "
+                              "until `full machine-move cutover LABEL`")
+    machine.add_argument("--same-machine", action="store_true",
+                         help="restore as the machine the bundle was taken on, private SSH keys and jobs included; "
+                              "only at a terminal")
     return ap
 
 
@@ -1964,10 +2297,20 @@ def restore_main(argv: list[str]) -> int:
         if bundle is None:
             raise MachineBackupError("no machine bundle was found in the backups roots this machine knows; "
                                      "copy one here and name it")
+        # A terminal the person types in (a real console on Windows, where NUL also reads as a tty).
+        if a.same_machine and not osprivacy.is_terminal():
+            raise MachineBackupError("--same-machine writes the bundle's private SSH keys and its jobs here, so it is "
+                                     "a person's choice at a terminal; without it a bundle from another machine is "
+                                     "restored as a second machine")
         result = restore(bundle, Path.home(), base=base, mode="apply" if a.apply else "plan",
-                         overwrite=a.overwrite, do_packages=a.packages, do_clone=a.clone)
+                         overwrite=a.overwrite, do_packages=a.packages, do_clone=a.clone,
+                         machine="second" if a.second_machine else ("same" if a.same_machine else None))
         print(json.dumps(result, indent=2, ensure_ascii=False))
         failed = (result.get("applied") or {}).get("failed") or result.get("failed")
+        if (result.get("placement") or {}).get("error"):
+            print("Observatory: the staged jobs were not named in the placement file: "
+                  f"{result['placement']['error']}", file=sys.stderr)
+            return 1
         if failed:
             print(f"Observatory: {len(failed)} item(s) were not restored; each is named in the answer", file=sys.stderr)
         return 1 if failed else 0
