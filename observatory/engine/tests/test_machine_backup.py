@@ -781,7 +781,7 @@ class SecondMachineKeys(unittest.TestCase):
     """Which withheld `.ssh` files get the steps that make a key, read off `_Second` directly."""
 
     def keys(self, files: dict[str, bytes]) -> dict[str, dict]:
-        root = Path(tempfile.mkdtemp())
+        root = Path(tmp.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         home, stage, items = root / 'home', root / 'stage', []
         home.mkdir()

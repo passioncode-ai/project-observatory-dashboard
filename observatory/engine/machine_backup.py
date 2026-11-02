@@ -1733,22 +1733,23 @@ class _Second:
                       or (data is not None and looks_private(data.read_bytes())))
             if not is_key:
                 continue
-            name, in_ssh = key["key"], key.pop("in_ssh")
+            # Quoted for the shell: `IdentityFile "~/.ssh/work key"` names a key with a space.
+            name, in_ssh = shlex.quote(key["key"]), key.pop("in_ssh")
             if not in_ssh:
                 out.append({**key, "steps": [], "note": "not directly in ~/.ssh: make this machine's own key and "
                                                         "put it where the other machine kept this one, by hand"})
                 continue
-            steps = [f"project-observatory full ssh-keys create {shlex.quote(name)}"]
+            steps = [f"project-observatory full ssh-keys create {name}"]
             targets = []
             for h in key["hosts"]:
                 github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
-                target = "github" if github else f"server:{h['host']}"
+                target = "github" if github else shlex.quote(f"server:{h['host']}")
                 if target not in targets:
                     targets.append(target)
             if key["default"] and "github" not in targets:
                 targets.insert(0, "github")
             for target in targets:
-                steps.append(f"project-observatory full ssh-keys send {shlex.quote(name)} --to {shlex.quote(target)}"
+                steps.append(f"project-observatory full ssh-keys send {name} --to {target}"
                              + ("" if target == "github" else " --verify"))
             out.append({**key, "steps": steps})
         return out

@@ -2865,8 +2865,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "af05e0eea92d1cfe118be2e6f8392e42348299ded1c265c1bebcb2715d0640ed",
-      "bytes": 121146
+      "export_sha256": "74760f27e0a840e475697323ca1a9580eb23cb3dc6db8cb5fcce46e29b4ff559",
+      "bytes": 121228
     },
     {
       "path": "machine_identity.py",
@@ -5022,8 +5022,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "57ed5e117726741572832eaeb46cca4dae4f42b63691a645d9878d0515de58c0",
-      "bytes": 83458
+      "export_sha256": "60179b9d571588297020039de79be964b9e2e66cd3fa7b20ee3cf5cc9848d46d",
+      "bytes": 83453
     },
     {
       "path": "tests/test_machine_findings.py",
