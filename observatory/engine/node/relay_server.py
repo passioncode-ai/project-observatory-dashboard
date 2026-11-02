@@ -72,6 +72,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import osprivacy
+
 from . import estate as estate_rules, jcs, p256, relay, revocation
 from .ws import GUID, MAX_FRAGMENTS, OP_BINARY, OP_CLOSE, OP_CONT, OP_PING, OP_PONG, OP_TEXT
 
@@ -342,7 +344,7 @@ class Mailboxes:
         if path is not None:
             path = Path(path)
             if not path.exists():
-                fd = os.open(str(path), os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
+                fd = osprivacy.open(str(path), os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
                 os.close(fd)
         self._db = sqlite3.connect(':memory:' if path is None else str(path), check_same_thread=False,
                                    isolation_level=None)

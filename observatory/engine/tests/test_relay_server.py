@@ -800,6 +800,16 @@ class Relay(unittest.TestCase):
         self.start()
         sock = self.upgrade()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        sessions = []
+
+        def held():
+            # Take the session before the flood: a slow runner may close it for overflow before the
+            # flood ends, which is the bound working, so the checks read the object, not the table.
+            with self.server._lock:
+                sessions[:] = [e.session for e in self.server._pending.values() if e.session is not None]
+            return len(sessions) == 1
+        self.assertTrue(eventually(held))
+        session = sessions[0]
         pings = (bytes([0x89, 0x80 | 125]) + b'\0\0\0\0' + b'p' * 125) * 512
         end = time.monotonic() + 1.5
         while time.monotonic() < end:
@@ -807,12 +817,9 @@ class Relay(unittest.TestCase):
                 sock.sendall(pings)
             except OSError:
                 break
-        with self.server._lock:
-            sessions = [e.session for e in self.server._pending.values() if e.session is not None]
         sock.close()
-        self.assertEqual(len(sessions), 1)
-        self.assertLessEqual(len(sessions[0].outbox), 2)
-        self.assertLessEqual(sessions[0].outbox_bytes, rs.OUTBOX_BYTES)
+        self.assertLessEqual(len(session.outbox), 2)
+        self.assertLessEqual(session.outbox_bytes, rs.OUTBOX_BYTES)
 
     def test_a_tombstone_of_a_queued_message_is_never_forgotten(self):
         boxes = rs.Mailboxes(None, b'\x01' * 32)
