@@ -742,6 +742,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
         import machine_backup
         return (machine_backup.backup_parser() if name == "machine-backup"
                 else machine_backup.restore_parser()).parse_args(rest)
+    if name == "machine-move":
+        import machine_move
+        return machine_move.parser().parse_args(rest)
     return _parser().parse_args(argv)
 
 
@@ -769,6 +772,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] in {"machine-backup", "machine-restore"}:
         import machine_backup
         return (machine_backup.backup_main if argv[0] == "machine-backup" else machine_backup.restore_main)(argv[1:])
+    if argv and argv[0] == "machine-move":
+        import machine_move
+        return machine_move.main(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()
@@ -864,11 +870,20 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
     restored = None
     empty = not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir())
     if empty and not fresh and allowed:
-        restored = maintenance.restore_latest(base)
+        # Most often a reinstall on THIS machine: a snapshot that names no machine (taken before 0.30.1)
+        # is restored whole and said to be `unknown`; only a known other machine id is restored
+        # without that machine's identity (OBS-284).
+        restored = maintenance.restore_latest(base, unknown="keep")
     result = initialize(base)
     if restored and restored.get("status") == "restored":
         result = {**result, "status": "restored", "restored_from": restored.get("from"),
-                  "files": restored.get("files")}
+                  "files": restored.get("files"), "machine": restored.get("machine")}
+        if (restored.get("machine") or {}).get("mode") == "unknown":
+            snap = restored.get("from")
+            result["machine"]["next"] = [
+                "the snapshot names no machine, so it was restored whole as this machine's; if it came from "
+                "another machine that keeps running, restore it again as a second machine: "
+                f"project-observatory --home NEW_EMPTY_HOME full restore '{snap}' --second-machine"]
     elif restored and restored.get("status") in ("backups-found-locked", "several-workspaces", "restore-failed"):
         result["backups_found"] = {k: restored[k] for k in ("newest", "backups", "detail", "next", "skipped")
                                    if k in restored}

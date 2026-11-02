@@ -77,6 +77,10 @@ SAMPLES = {
     "MEMORY_ID": "mem:0123456789abcdef",
     "PRINCIPAL": "agent:example-bot", "BINDING_ID": "bnd_0123456789ab",
     "LABEL": "example-ws-0badc0de",
+    # A job's move between two machines (OBS-283): the other machine's id, a launchd label, this machine's id.
+    "MACHINE_ID": "m-machine-beta-0002", "{label}": "com.example.alpha-bot", "{me}": "m-machine-alpha-0001", "{target}": "app.example.desktop",
+    # The second machine's own SSH key steps (OBS-283): the key's name and where it is sent; init's snapshot (OBS-284).
+    "{target}": "github", "{snap}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",

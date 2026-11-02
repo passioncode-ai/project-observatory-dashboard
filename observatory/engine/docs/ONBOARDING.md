@@ -2145,6 +2145,105 @@ stops the daily and pre-update bundles.
 
 The plan and every answer carry paths, counts and reasons, never a file's contents.
 
+**Which machine a bundle or snapshot came from (0.30.1).** Each bundle and each workspace
+snapshot names the machine it was taken on (`machine_id`: `m-` and 24 hex digits of a SHA-256
+over the platform's own machine identifier, which is never written; `full machine-move show`
+prints this machine's). Restored on the machine that took it, both behave as above. Restored on
+another machine, or when they name no machine (taken before 0.30.1), they restore as a **second
+machine**, below. `--same-machine` restores whole anyway and is accepted only at a terminal:
+use it when you replace a machine and want its identity back, never for a machine that keeps
+running. `full machine-restore --second-machine` asks for the second-machine way on any machine.
+
+**Moving to a second machine that runs beside this one** (OBS-283, OBS-284). When both
+machines keep running, a whole restore would give the second one this machine's SSH key, start
+every one of its launchd jobs at the next login (a bot polling one token on two machines, a
+scheduler acting twice) and copy its agent-network identity. A second-machine restore does none
+of that:
+
+- **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
+  `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the
+  `.pub` of a withheld key is withheld with it: the new key gets its own). Nothing else of
+  `~/.ssh` is, whatever its name, and a file whose text is a private key is withheld under any
+  name. The plan shows such an item as `withheld`; only a key (named by an `IdentityFile`, a
+  default name such as `id_ed25519`, or private-key text) gets an `ssh-keys create` step, and a
+  withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
+  `Include` that matches no file. The second machine makes its own key.
+- **Jobs.** Every launchd plist (a systemd user unit off macOS) is written into
+  `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/LaunchAgents/`
+  (`systemd-user/` off macOS), which nothing loads at login, and is named in the placement file
+  below as running on the machine the bundle came from. A job this machine already defines is
+  left as it is. The plan shows a staged item with `staged` and its `label`. This engine's own
+  jobs (`org.project-observatory.*`, `project-observatory-*` off macOS) are `withheld` instead:
+  every machine installs its own with `full maintain ensure`.
+- **The workspace.** `full restore` leaves out `node/device/`, `node/orgs/`, `node/records/`,
+  `node/shares/` (a key someone shared with you is sealed to the machine that accepted it, so
+  they share it again to the second machine if it needs it; the shares you sent are renewed and
+  revoked from the machine that made them), `config/cloud.json` (the second machine deploys its
+  own mailbox with `full cloud deploy` if it sends shares) and `<home>/store/maintenance.json`. It
+  turns `features.scheduler` off, holds off every app enrolled `always_on` (the restore names the
+  `full lifecycle policy` step that turns it back on, to run on one machine only) and gives the
+  workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
+  the backups root and never rotate the first machine's. The vault and everything else, the CLI
+  logins the machine bundle carries included, are restored: they are your own credentials and
+  work on both machines.
+- **Which machine is which.** Each machine has an id derived from its platform identifier (never
+  written). A snapshot or bundle that names another machine, or names none, is restored the
+  second-machine way; `--same-machine` at a terminal restores one whole. `full init` on an empty
+  home restores a snapshot that names no machine whole and says so, with the step that restores it
+  as a second machine. A cloned disk image or virtual machine shares its source's identifier and
+  reads as the same machine: restore those with `--second-machine`.
+
+On the second machine, in order:
+
+```sh
+project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
+project-observatory full machine-restore --latest --apply         # nothing private of ~/.ssh written, jobs staged
+project-observatory full machine-restore --latest --packages
+project-observatory full ssh-keys create NAME                     # this machine's own SSH key, NAME as the plan names it
+project-observatory full ssh-keys send NAME --to github           # before --clone: SSH remotes need it
+project-observatory full machine-restore --latest --clone
+project-observatory full restore --latest                         # the workspace, without the node identity
+project-observatory full node --init                              # this machine's own device id
+project-observatory full machine-move show                        # this machine's id and the staged jobs
+```
+
+The key comes before `--clone` because the other machine's private key was not written: a
+checkout whose remote is `git@github.com:…` clones only once GitHub knows this machine's key.
+Use the name the plan gives: when the carried `~/.ssh/config` points a host at a key with
+`IdentityFile`, the plan lists that key as withheld with the hosts that use it and the exact
+`ssh-keys create` step under the same name, so the carried config finds the new key.
+
+Then move each job that should run on the second machine, **one at a time, the old machine
+first**:
+
+```sh
+project-observatory full machine-move leave LABEL --to MACHINE_ID          # on the old machine, with the second's id: stop it, stage it
+project-observatory full machine-move cutover LABEL                        # on the second machine: load it here
+```
+
+`leave` stops the job, moves its plist into the old machine's staging folder (so the next login
+does not start it again) and names it there as running on the second machine. `cutover` runs only
+at a terminal: it asks whether `leave` ran on the other machine and moves nothing until you type
+the job's label back (a job started here while it still runs there runs twice). It then moves
+the staged plist into `~/Library/LaunchAgents`, enables and loads it, and removes it from the
+second machine's `elsewhere`; a load that fails puts the plist back in staging. A job that stays
+on the old machine needs nothing: on the second machine it stays staged and named as running
+elsewhere.
+
+**The placement file**, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`,
+owner-only and written atomically, says which jobs this machine holds for another one, until the
+estate record carries placement:
+
+```json
+{"schema": "observatory-placement/1", "machine": "m-…", "updatedAt": "2026-10-30T09:00:00Z",
+ "elsewhere": [{"label": "com.example.bot", "serviceId": "example-bot.default",
+                "placedOn": "m-…", "since": "2026-10-30T09:00:00Z", "by": "machine-restore"}]}
+```
+
+`serviceId` is the Fabric service whose descriptor names that launchd label, or `null`. Fabric
+Dashboards reads the file to show such an agent as placed on another machine and to hide its
+start.
+
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
 `--apply --writers-stopped`. It leaves the original in place and does not start
@@ -2155,7 +2254,9 @@ counts and database health before choosing which installation becomes active.
 
 Two operators, or one operator on two Macs, run the same engine version and the
 same functional configuration; each machine keeps its own paths, credentials and
-estate. On the new machine:
+estate. To carry one machine's setup, vault and checkouts to a second one that keeps
+running beside it, restore from its backups instead, as in "Moving to a second machine that
+runs beside this one" above. To start the second machine empty, on the new machine:
 
 1. **Install the same release.** From the release page, save `project_observatory-X.Y.Z-py3-none-any.whl`
    and `SHA256SUMS`, check the digest, and install the wheel

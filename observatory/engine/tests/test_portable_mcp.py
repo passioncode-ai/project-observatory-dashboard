@@ -34,8 +34,11 @@ def setup():
     os.environ['TMPDIR']=str(base/'tmp'); tempfile.tempdir=str(base/'tmp')
     if os.name=='nt': os.environ['TEMP']=os.environ['TMP']=str(base/'tmp')
     projects=base/'projects';projects.mkdir()
+    # A hosted Windows runner under load has taken more than 40 s for `observatory.py init` alone, failing
+    # whichever suites set up the estate at that moment (OBS-288); Windows gets the longer bound.
+    limit=180 if os.name=='nt' else 40
     def run(*args):
-        p=subprocess.run(args,cwd=ROOT,env=dict(os.environ),capture_output=True,text=True,timeout=40)
+        p=subprocess.run(args,cwd=ROOT,env=dict(os.environ),capture_output=True,text=True,timeout=limit)
         if p.returncode: raise RuntimeError('Synthetic setup failed: '+p.stderr[-500:])
     run(sys.executable,'observatory.py','init')
     runtime=base/'runtime'
