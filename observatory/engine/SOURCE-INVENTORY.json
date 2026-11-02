@@ -940,15 +940,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "d58a0cef03f24efa424efc85146e0640adf1b70833a39a0385ffc6d0a1e405a7",
-      "bytes": 30726,
+      "export_sha256": "9444ac94d0d48341ff082877385c317e05c177becc34ea4105e76ace431baca9",
+      "bytes": 31208,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "413f5853d0272f6f9427d968c653eba89718d46fabdeab58eb006dd4b624c874",
-      "bytes": 203437,
+      "export_sha256": "ea137d8bdde26d3cde29be8d39b62230fc7020126c34423a0effaa600028e97f",
+      "bytes": 207580,
       "upstream_modified": true
     },
     {
@@ -3106,8 +3106,8 @@
       "path": "node/p256.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "46df001144d8b881a7d09a0012e944024c98857649199866cd3bb8a38074f448",
-      "bytes": 6910
+      "export_sha256": "06d31ec2534be56be4a1c68c9bf569b66ce4c8b6343c60b0dcb286b95d5dc493",
+      "bytes": 7349
     },
     {
       "path": "node/pairing.py",
@@ -3129,6 +3129,13 @@
       "upstream_modified": true,
       "export_sha256": "57205727c3cbbe03694e3341a8d378ac533bfea47a8c859d26db1c0ee514b78c",
       "bytes": 25630
+    },
+    {
+      "path": "node/relay_server.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fee2ce126a677bfc1db259b5ef7cf3065c2baa18fbdb85d34840ca32e6373856",
+      "bytes": 53675
     },
     {
       "path": "node/repair.py",
@@ -3189,8 +3196,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "c597649bafdbfa225ee43d72ef0c43d9acd76f0fdfcbcb44a3f80eea6eecc63c",
-      "bytes": 98289,
+      "export_sha256": "401e3bb1890a0e2002a1a3e183950d17f5dadba0f1e5b1df93a6e84d9ca84b24",
+      "bytes": 99016,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3967,8 +3974,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "303fe17ea51196132ecd793594c71fbf6029a87decce139e1ae572d3ef827943",
-      "bytes": 48129,
+      "export_sha256": "7b91c1e2a10d4acc6df7f4cf01e9f79905524fb3d5be6c7209cc67ef7e801897",
+      "bytes": 48385,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5577,6 +5584,13 @@
       "bytes": 8837
     },
     {
+      "path": "tests/test_relay_server.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "68fe087016875577db1b516aeae790d701206fe3ca4309eadd0468ea4305dd57",
+      "bytes": 35067
+    },
+    {
       "path": "tests/test_release_cadence.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6783,6 +6797,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/relay_cli.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b2d4ab106e7ccf2274a5baa91d1dd5dc4a62e180fddfa938e90cc75ed9bb3fd7",
+      "bytes": 13221
+    },
+    {
       "path": "tools/remote_findings.py",
       "source_sha256": "a10a917d1565c27d8aaa96c97de5f8d7c171a27b59d8e375ed9260b96584abb9",
       "export_sha256": "ad015f7b6b32c05aba42bc48bebaf97b123c2490602c99b66d187817720a733a",
@@ -6890,8 +6911,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "70a925387021baca48dd58951f3ef77fdd61a7358c13b4876dd6741968067925",
-      "bytes": 58618,
+      "export_sha256": "c54d71f82e402aa942751adf17991d34b0e56bd25bce563960daf8555b76b8d3",
+      "bytes": 59554,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -7168,7 +7189,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 960,
+  "file_count": 963,
   "excluded": [
     "git-history",
     "operator-registries",

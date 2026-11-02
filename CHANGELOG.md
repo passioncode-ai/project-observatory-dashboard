@@ -3,6 +3,23 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **Your own relay for your machines** (OBS-287, the relay project's interim RLY-04, `docs/ONBOARDING.md` "Your own
+  relay for your machines: full relay"). `full relay serve` runs a `fabric-relay/0.1` relay in the foreground, and
+  `full relay enable --origin URL` runs it inside the node's own server from its next start, with no service of its
+  own (`full relay status`, `full relay disable`). It admits the machines of the estate record this machine's node
+  applied, minus every machine and key the record or an applied delta entry revokes, by the contract's `admit` (one
+  answer and one signature's work for every unproven caller), and closes a session the moment its machine is revoked
+  or the record expires (4403). It keeps one mailbox per machine: messages in order, deleted on acknowledgement or
+  when their ttl ends, a repeat answered with its first number, and the refusals `unknown-recipient`, `mailbox-full`,
+  `rate-limited` and `too-large`; queued messages are sealed at rest under the relay's own key. It answers presence
+  and `delta-query`. Blobs, a hub's delta and heartbeat frames and the Cloudflare deployment are not carried yet.
+  Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
+  on loopback.
+
 ## 0.30.0 (2026-10-28)
 
 A minor release. You can share a vault key with another person's Observatory from the command line and take it

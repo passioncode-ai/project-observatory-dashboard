@@ -855,6 +855,31 @@ supervisor (`node/lifecycle/supervisor.py`: the broker's pass on its cadence ins
 events fed to the broker, the store pruned on the sweep), is built for 0.30.0. The helper's release build inside the
 signed app (L2r) and the operator's import with the identity migration (L5) follow in 0.30.0.
 
+## The interim relay (OBS-287)
+
+Until the hosted relay (the relay project's RLY-05) runs, the engine carries its own `fabric-relay/0.1` server for one
+person's estate, the relay project's interim RLY-04: `observatory/engine/node/relay_server.py`, run by
+`full relay serve` (`tools/relay_cli.py`) or, after `full relay enable`, inside the local server
+(`tools/serverd.py` `start_relay`, [MACHINE-UTILITY.md](MACHINE-UTILITY.md) D1: a part of the node, no unit of its
+own). It reuses the node's checks and adds what only a relay does:
+
+- **Admission.** `admit` is the contract's, in its order, with one ES256 verification of equal cost on every path past
+  the frame's own bytes (`prove_es256` over `p256.es256_verifies`, a base-point key and fixed bytes in place of what is
+  missing). The admission set is `relay.peer_keys` over the estate record this machine's node applied
+  (`node/records/estate-record.json`, checked against its own digest whenever the file changes) and the revocations of
+  the delta entries it applied, forked ones included. `relay.session_stands` is checked before every frame a session
+  sends or receives and every two seconds, so a revocation or the record's end closes the session 4403.
+- **Mailboxes.** One SQLite database: `seq` per mailbox, a tombstone of `(from, msgId)` until the ttl, the limits
+  `mailboxMessages` and `mailboxBytes`, and each body sealed with AES-256-GCM under the relay's own key and bound to
+  `(to, from, msgId, seq)`. The relay never decodes a body; it expires one by the ttl of its `send`, which the node
+  signs into the body's `exp`.
+- **Transport.** RFC 6455 from the server's side (masked client frames, 1 MiB per message, a binary frame closed 1003,
+  a frame over 1 MiB refused from its declared length and closed 1009), the auth deadline of 10 s, 90 s of silence,
+  the per-minute limits with `retryAfter` and 1008 for a node that keeps sending, at most 128 connections.
+
+`tests/test_relay_server.py` runs the contract's `admit` vectors and drives the node's own `RelaySession` against the
+relay on loopback. Not carried yet: blobs, a hub's `delta` and `heartbeat` frames, and the Cloudflare deployment.
+
 ## What comes next
 
 | Slice | What |

@@ -1416,6 +1416,58 @@ project-observatory full cloud url                  # the address `full share cr
   `project-observatory full share accept` and paste the link. It runs no script, so it reads
   nothing of the link's code.
 
+### Your own relay for your machines: full relay
+
+Your machines reach one another through a relay (`fabric-relay/0.1`, contract DEC-0047 and
+DEC-0066). Until the hosted relay runs, run your own on the machine that is always on (OBS-287, the
+relay project's interim RLY-04). It is a router with mailboxes and holds no authority: every message
+is signed by its sender's device key and checked by its recipient, and what must stay secret is
+sealed to the recipient before it is sent.
+
+```sh
+project-observatory full relay serve                            # in the foreground, on http://127.0.0.1:47317
+project-observatory full relay enable --origin https://NAME     # inside the node's own server, from its next start
+project-observatory full relay status                           # enabled, answering, and how many machines it admits
+project-observatory full relay disable
+```
+
+- **Whom it admits.** The machines of the estate record this machine's node verified and applied
+  (`full org records apply`, kept under `node/records/`), minus every machine and key that record
+  or an applied delta entry revokes. A machine proves its device key in its `auth`; any other caller
+  gets one answer, `unauthenticated`, and the connection closes (4401). With no record applied, an
+  expired record or a record file changed on disk, the relay admits nobody, and `status` and the
+  server's health say why. Every open session is checked again before each frame and every two
+  seconds: a machine revoked since it connected is closed (4403), and so is every machine once the
+  record's window ends.
+- **The origin.** The address every machine signs into its `auth`. On this machine alone it is
+  `http://127.0.0.1:PORT` (the default port is 47317). For your other machines put a TLS terminator
+  in front (your private network's HTTPS, a tunnel or a reverse proxy) and pass its `https://`
+  origin; the relay itself serves plain HTTP on the address you bind with `--host`, by default
+  127.0.0.1. An `http://` origin is refused for anything but a loopback address and its own port.
+- **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
+  the relay beside itself when it starts (a login, `full update`, or
+  `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
+  service of its own. A relay that cannot start, or that admits nobody, is a `relay` row in the
+  server's `degraded`, and the server keeps running.
+- **Messages.** A message waits in its recipient's mailbox until the recipient acknowledges it or the
+  ttl its sender set ends (the node signs the message's `exp` at the same time). Each mailbox holds
+  at most 1000 messages and 64 MiB; a machine sends at most 120 messages, 30 presence queries and 12
+  delta queries a minute. Over a limit the relay answers `mailbox-full` or `rate-limited` (with the
+  seconds to wait), and closes a machine that keeps sending (1008). A message to a machine the
+  record does not admit is `unknown-recipient`. A repeat of a message within its ttl is answered
+  with its first number and is not delivered twice.
+- **What it keeps.** Queued messages, in `node/relay/spool.sqlite`, each sealed with AES-256-GCM
+  under the relay's own key `node/relay/spool.key`; the folder and both files are readable by your
+  account only. A copied spool (a backup or a snapshot) carries no message in clear. The key sits
+  beside it, so the seal does not hide a message from a program running as you: the protection
+  that counts is the sender's own sealing. `serve --memory` keeps nothing on disk, and queued
+  messages end with the process. Logs are one JSON line per event with kids, codes and counts, never
+  a body, a nonce, a signature or the estate's id.
+- **Not carried yet.** Blobs (`/v1/blobs/` answers 501), a hub's `delta` and `heartbeat` frames
+  (answered `unknown-type`; `welcome` names the delta head this node applied and no heartbeat), and
+  a deployment into your own Cloudflare account beside the share mailbox. A machine catches up on
+  the delta with `delta-query`, answered from the entries this node applied.
+
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 
 An agent should never launch, quit or kill your desktop apps or background jobs itself. The

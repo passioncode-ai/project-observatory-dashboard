@@ -212,6 +212,8 @@ STATE_FAMILIES = {
     # The Cloudflare page's collector and its read-only door preset (OBS-271).
     "store/raw/cloudflare_account.json": "0.30.0", "secrets/cloudflare-inventory.d": "0.30.0",
     "node/device": "0.25.0", "node/records": "0.27.0", "node/orgs": "0.27.0",
+    # The interim relay's spool (OBS-287).
+    "node/relay": "0.31.0",
 }
 ROW_FROM = (0, 26, 0)
 
