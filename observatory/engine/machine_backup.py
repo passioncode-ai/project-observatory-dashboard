@@ -57,7 +57,9 @@ RESTORE. `full machine-restore [BUNDLE | --latest]` prints the plan: every item,
 goes, whether it is missing, the same, or in conflict. `--apply` writes only what is missing;
 `--overwrite` replaces a conflict after moving the existing file aside; `--packages` installs
 the inventories; `--clone` clones the recorded checkouts and applies their carried commits,
-patches and untracked files. Nothing is printed but paths, counts and reasons.
+patches and untracked files. `--only` and `--skip` limit a restore by category and `--projects`
+limits `--clone` (OBS-282, "a partial restore" below); each step that writes leaves a receipt that
+`full machine-move status` reads (OBS-286). Nothing is printed but paths, counts and reasons.
 """
 from __future__ import annotations
 
@@ -1784,16 +1786,237 @@ class _Second:
                 yield host, hostnames.get(host), identity
 
 
-def plan(manifest: dict, stage: Path, home: Path, *, second: bool = False) -> list[dict]:
-    """Every file, directory and link: where it goes and whether it is missing, the same, or a conflict.
-    On a second machine a private SSH file is `withheld` and a job is `staged` (OBS-283)."""
+def _ssh_keys_module():
+    """The `ssh-keys` door (tools/ssh_keys.py): its readers parse a public line and a private key's clear
+    header without reading the private section."""
+    tools = str(Path(__file__).resolve().parent / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import ssh_keys
+    return ssh_keys
+
+
+def _other_keys(manifest: dict, stage: Path, home: Path) -> list[dict]:
+    """The other machine's SSH keys a second-machine restore withholds, as `{key, fingerprint}`: public
+    facts, read from a carried `.pub` or a private key's clear header, never its private section. The
+    restore receipt keeps them, so `full machine-move status` can tell this machine's own key from a
+    copy of the other machine's (OBS-286)."""
+    try:
+        sk = _ssh_keys_module()
+    except ImportError:
+        return []
+    rule, seen, out = _Second(manifest, home, stage), set(), []
+    for item in manifest.get("items", []):
+        if item.get("kind") != "file":
+            continue
+        area, rel = rule.areas.get((item.get("kind"), item.get("source")), (None, ()))
+        if area != "ssh" or not rel:
+            continue
+        staged = _staged_file(item, stage)
+        if staged is None or rule.place(item)[1] != "withheld":
+            continue
+        fp = None
+        try:
+            if rel[-1].endswith(".pub"):
+                parsed = sk.parse_public(staged.read_bytes()[:16384].decode("utf-8", "replace"))
+                fp = parsed["fingerprint"] if parsed else None
+            else:
+                fp = (sk.private_header(staged) or {}).get("fingerprint")
+        except (OSError, ValueError):
+            fp = None
+        name = rel[-1][:-len(".pub")] if rel[-1].endswith(".pub") else rel[-1]
+        if fp and fp not in seen:
+            seen.add(fp)
+            out.append({"key": name, "fingerprint": fp})
+    return sorted(out, key=lambda k: (k["key"], k["fingerprint"]))
+
+
+# --- a partial restore (OBS-282) ------------------------------------------------------------------
+#
+# A move to a second machine is rarely all or nothing: the person moves most of the setup and keeps
+# some of it where it is. So a restore takes `--only` or `--skip` by CATEGORY and `--projects` for
+# `--clone`. A category is decided by the same rule as the second-machine one, by the path an item is
+# written to: anything in a `.ssh` folder is `ssh-private` (a private key, by name or by its text, and
+# the public half of a key the bundle carries) or `ssh-config` (settings, known hosts, authorized keys,
+# a public key on its own), anything in a job folder is `launchd` (a systemd user unit off macOS), and
+# everything else keeps the category it was taken under, by the name a person reads. A filter never
+# widens what a second machine gets: a private key stays withheld there whatever `--only` names, and
+# only `--same-machine` at a terminal writes it.
+
+#: Every category a restore can be limited to, in the order the plan shows them.
+CATEGORIES = ("ssh-private", "ssh-config", "launchd", "cli-logins", "claude", "codex", "git", "shell",
+              "fabric-services", "packages", "agents", "operator")
+#: The category an item was taken under (Entry.category) as the restore names it; `ssh`, `launchd` and
+#: `systemd` are decided by path instead.
+BUNDLE_CATEGORY = {"claude": "claude", "agents": "agents", "codex": "codex", "git": "git", "shell": "shell",
+                   "cli": "cli-logins", "fabric": "fabric-services", "operator": "operator"}
+CATEGORY_HELP = {
+    "ssh-private": "private SSH keys and the public halves of those keys (on a second machine always withheld)",
+    "ssh-config": "~/.ssh/config and its fragments, known_hosts, authorized_keys, allowed_signers, a lone *.pub",
+    "launchd": "background jobs: launchd plists on macOS, systemd user units elsewhere (staged on a second machine)",
+    "cli-logins": "gh, doctl and heroku logins and ~/.netrc",
+    "claude": "Claude Code settings, CLAUDE.md, agents, commands, hooks, skills and plugins list",
+    "codex": "Codex config.toml and AGENTS.md",
+    "git": "~/.gitconfig, the global ignore file and ~/.config/git",
+    "shell": "zsh and bash profiles",
+    "fabric-services": "Fabric service descriptors",
+    "packages": "the Homebrew, npm, pipx and uv inventories that --packages installs",
+    "agents": "~/.agents/skills, shared by every coding agent",
+    "operator": "the paths machine-backup.json includes",
+}
+#: Why a row is not written: the person's filter, never a rule of this machine.
+LEFT_OUT = "left out by --only or --skip"
+
+
+def parse_categories(values) -> list[str]:
+    """`--only`/`--skip` values (repeatable, comma-separated) as a sorted list; an unknown name is refused
+    by name with the valid ones, so a typo never restores everything or nothing silently."""
+    out: list[str] = []
+    for value in values or []:
+        for name in str(value).split(","):
+            name = name.strip()
+            if not name:
+                continue
+            if name not in CATEGORIES:
+                raise MachineBackupError(f"unknown category {name!r}; the categories are {', '.join(CATEGORIES)}")
+            if name not in out:
+                out.append(name)
+    if values and not out:
+        raise MachineBackupError(f"name at least one category; the categories are {', '.join(CATEGORIES)}")
+    return sorted(out, key=CATEGORIES.index)
+
+
+def selection(only=None, skip=None) -> set[str]:
+    """The categories a restore writes: every one, `--only`'s, or all but `--skip`'s (never both)."""
+    only, skip = parse_categories(only), parse_categories(skip)
+    if only and skip:
+        raise MachineBackupError("give --only or --skip, not both")
+    return set(only) if only else set(CATEGORIES) - set(skip)
+
+
+class _Categories:
+    """The category of each item of one manifest, by the path it is written to (see above)."""
+
+    def __init__(self, manifest: dict, home: Path, stage: Path | None):
+        self.home, self.stage = home, stage
+        self.areas = {(i.get("kind"), i.get("source")): _area(i, home) for i in manifest.get("items", [])}
+        self.private: set[str] = set()
+        for item in manifest.get("items", []):
+            area, rel = self.areas[(item.get("kind"), item.get("source"))]
+            if area == "ssh" and rel and item.get("kind") in ("file", "link") and not _ssh_public_name(rel):
+                self.private.add(item["source"])
+
+    def of(self, item: dict, data: bytes | None = None) -> str:
+        area, rel = self.areas.get((item.get("kind"), item.get("source"))) or _area(item, self.home)
+        if area == "ssh":
+            source = str(item.get("source", ""))
+            if source in self.private:
+                return "ssh-private"
+            if item.get("kind") == "file":
+                if source.endswith(".pub") and source[:-len(".pub")] in self.private:
+                    return "ssh-private"
+                if data is None:
+                    staged = _staged_file(item, self.stage)
+                    data = staged.read_bytes() if staged is not None else None
+                if data is not None and looks_private(data):
+                    return "ssh-private"
+            return "ssh-config"
+        if area in JOB_PARTS:
+            return "launchd"
+        return BUNDLE_CATEGORY.get(item.get("category"), "operator")
+
+
+def category_summary(rows: list[dict], wanted: set[str], manifest: dict, *, overwrite: bool = False,
+                     shown: int = 20) -> dict:
+    """Per category: whether it is selected, how many items it holds in each state, and the first
+    `shown` destinations an `--apply` would write (a conflict only with `--overwrite`)."""
+    out: dict[str, dict] = {}
+    for name in CATEGORIES:
+        out[name] = {"selected": name in wanted, "items": 0, "would_write": 0, "writes": []}
+    for row in rows:
+        cat = out[row["category"]]
+        cat["items"] += 1
+        state = "left_out" if row["state"] == "left-out" else row["state"]
+        cat[state] = cat.get(state, 0) + 1
+        writes = row["state"] == "missing" or (row["state"] == "conflict" and overwrite)
+        if writes and row["kind"] != "dir":
+            cat["would_write"] += 1
+            if len(cat["writes"]) < shown:
+                cat["writes"].append(row["destination"])
+    for cat in out.values():
+        cat["more"] = max(0, cat["would_write"] - len(cat["writes"]))
+    invs = [i.get("name") for i in manifest.get("inventories", []) if isinstance(i, dict) and i.get("name")]
+    out["packages"].update(items=len(invs), inventories=invs,
+                           note="written only by --packages, which installs each inventory with its tool")
+    return out
+
+
+def _with_folders(rows: list[dict], wanted: set[str]) -> set[str]:
+    """The sources a filtered restore writes: every selected file and link, every selected folder, and
+    each folder that holds a selected item, so a key never lands in a folder made with the default mode."""
+    keep = {r["source"] for r in rows if r["category"] in wanted}
+    for row in rows:
+        if row["kind"] == "dir" and row["source"] not in keep:
+            prefix = row["source"].rstrip("/") + "/"
+            if any(s.startswith(prefix) for s in keep):
+                keep.add(row["source"])
+    return keep
+
+
+def select_checkouts(records: list[dict], projects, home: Path) -> tuple[list[dict], list[str]]:
+    """(the checkout records `--projects` names, the names that matched none). A name is a checkout's
+    folder name or a glob over it (`alpha-*`); a path (`~/src/work`, or absolute) names every checkout
+    at or under it. A worktree brings its main checkout, which it is added to, and a checkout brings
+    what is inside it (its submodules)."""
+    wanted: list[str] = []
+    for value in projects or []:
+        wanted += [v.strip() for v in str(value).split(",") if v.strip()]
+    usable = [r for r in records if isinstance(r, dict) and isinstance(r.get("path"), str)]
+    chosen: dict[int, dict] = {}
+    unmatched = []
+    for name in wanted:
+        is_path = "/" in name or name.startswith("~")
+        if is_path:
+            spelled = name.rstrip("/") or "/"
+            if Path(spelled).is_absolute():
+                spelled = display(Path(spelled), home)
+        hit = False
+        for i, rec in enumerate(usable):
+            path = rec["path"].rstrip("/")
+            match = (path == spelled or path.startswith(spelled + "/")) if is_path else \
+                fnmatch.fnmatchcase(PurePosixPath(path).name, name)
+            if match:
+                chosen[i] = rec
+                hit = True
+        if not hit:
+            unmatched.append(name)
+    for i, rec in list(chosen.items()):
+        inside = rec["path"].rstrip("/") + "/"
+        for j, other in enumerate(usable):
+            if other["path"].startswith(inside):
+                chosen.setdefault(j, other)
+            # Only a recorded common folder ties a worktree to its main checkout: two records that name
+            # none (an older bundle, a record whose git answer failed) are not one repository.
+            if rec.get("worktree") and rec.get("common_dir") is not None \
+                    and other.get("common_dir") == rec.get("common_dir") and not other.get("worktree"):
+                chosen.setdefault(j, other)
+    return [usable[i] for i in sorted(chosen)], unmatched
+
+
+def plan(manifest: dict, stage: Path, home: Path, *, second: bool = False, wanted: set[str] | None = None) -> list[dict]:
+    """Every file, directory and link: where it goes, its category, and whether it is missing, the same,
+    or a conflict. On a second machine a private SSH file is `withheld` and a job is `staged` (OBS-283);
+    with `wanted` (OBS-282) a row of another category is `left-out`, unless it is a folder that holds a
+    selected item."""
     rule = _Second(manifest, home, stage) if second else None
+    cats = _Categories(manifest, home, stage)
     out = []
     for item in manifest.get("items", []):
         if item.get("kind") not in ("file", "dir", "link"):
             continue
         dest, how, reason = rule.place(item) if rule else (_destination(item["source"], home), None, None)
-        row = {"kind": item["kind"], "source": item["source"], "destination": display(dest, home)}
+        row = {"kind": item["kind"], "source": item["source"], "destination": display(dest, home),
+               "category": cats.of(item)}
         if how == "withheld":
             row.update(state="withheld", reason=reason)
             out.append(row)
@@ -1817,6 +2040,13 @@ def plan(manifest: dict, stage: Path, home: Path, *, second: bool = False) -> li
             else:
                 row["state"] = "missing"
         out.append(row)
+    if wanted is not None:
+        keep = _with_folders(out, wanted)
+        for row in out:
+            if row["source"] not in keep and row["state"] != "withheld":
+                row.pop("staged", None)
+                row.pop("label", None)
+                row.update(state="left-out", reason=LEFT_OUT)
     return out
 
 
@@ -1833,15 +2063,19 @@ def _aside(dest: Path, stamp: str) -> str:
     return moved.name
 
 
-def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False, second: bool = False) -> dict:
+def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False, second: bool = False,
+          wanted: set[str] | None = None) -> dict:
     """Write what is missing; with `overwrite`, replace a conflict after moving it aside. On a
-    second machine, withhold every private SSH file and write jobs to the staging folder."""
-    rows = plan(manifest, stage, home, second=second)
+    second machine, withhold every private SSH file and write jobs to the staging folder. With
+    `wanted`, write only those categories (OBS-282)."""
+    rows = plan(manifest, stage, home, second=second, wanted=wanted)
     by_source = {(i["kind"], i["source"]): i for i in manifest.get("items", [])}
     stamp = backup_vault.stamp()
     done = {"written": 0, "same": 0, "kept": 0, "replaced": 0, "failed": []}
     if second:
         done["withheld"] = 0
+    if wanted is not None:
+        done["left_out"] = 0
     rule = _Second(manifest, home, stage) if second else None
     order = {"dir": 0, "file": 1, "link": 2}
     for row in sorted(rows, key=lambda r: (order[r["kind"]], r["source"])):
@@ -1849,6 +2083,9 @@ def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False, s
         dest, how, _ = rule.place(item) if rule else (_destination(item["source"], home), None, None)
         if row["state"] == "withheld":
             done["withheld"] += 1
+            continue
+        if row["state"] == "left-out":
+            done["left_out"] += 1
             continue
         if row["state"] == "same":
             done["same"] += 1
@@ -1866,6 +2103,10 @@ def apply(manifest: dict, stage: Path, home: Path, *, overwrite: bool = False, s
                     raise MachineBackupError("the copy in the bundle does not match its digest")
                 if second and _area(item, home)[0] == "ssh" and looks_private(data):
                     done["withheld"] += 1  # a private key under a public name stays on its machine
+                    continue
+                if wanted is not None and "ssh-private" not in wanted and _area(item, home)[0] == "ssh" \
+                        and looks_private(data):
+                    done["left_out"] += 1  # read as a private key only now: still not what was asked for
                     continue
             if row["state"] == "conflict":
                 if row["kind"] == "dir" and dest.is_dir() and not dest.is_symlink():
@@ -2086,12 +2327,21 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
 def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "plan", overwrite: bool = False,
             do_packages: bool = False, do_clone: bool = False, secret: str | None = None,
             runner=subprocess.run, which=shutil.which, git: str = "git", hold=None,
-            machine: str | None = None) -> dict:
+            machine: str | None = None, only=None, skip=None, projects=None) -> dict:
     """Plan, and each requested step in its own phase: only what that step needs is decrypted,
     into the private stage, and removed before the next step starts (round 1 of #305).
 
     `machine` is the person's choice, `second` or `same`; without one the bundle's machine id
-    against this machine's decides, and a bundle that names none is another machine's (OBS-283)."""
+    against this machine's decides, and a bundle that names none is another machine's (OBS-283).
+    `only` or `skip` (category names, CATEGORIES) limit what `--apply` writes and whether
+    `--packages` runs, and `projects` limits `--clone` (OBS-282); both are checked before anything
+    is written. Every step that writes leaves a receipt (`machine_identity.restore_receipt_path`)."""
+    filtered = bool(only or skip)
+    wanted = selection(only, skip) if filtered else None
+    if do_packages and wanted is not None and "packages" not in wanted:
+        raise MachineBackupError("--packages installs the `packages` category, which --only or --skip leaves out")
+    if projects is not None and not [v for v in projects if str(v).strip(", ")]:
+        raise MachineBackupError("--projects needs at least one checkout name or path")
     if not bundle.is_file():
         raise MachineBackupError(f"no machine bundle at {bundle}")
     if secret:
@@ -2119,66 +2369,121 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
         except machine_identity.MachineIdentityError as exc:
             raise MachineBackupError(str(exc)) from None
         second = placing["mode"] == "second-machine"
-        ssh_keys = None
-        if second:
+        chosen = None
+        if projects is not None:
+            chosen, unmatched = select_checkouts(manifest.get("checkouts", []), projects, home)
+            if unmatched:
+                raise MachineBackupError(f"no recorded checkout matches {', '.join(unmatched)}: name a checkout's "
+                                         "folder, a glob over it, or a path; the plan lists them under `checkouts`")
+        ssh_keys = other_keys = None
+        if second or filtered:
             # The plan reads what it decides by: a `.ssh` file's text, the carried IdentityFile lines,
             # a plist's Label. Only those small files are decrypted, into the private stage.
-            wanted = inspect_names(manifest, home)
+            names = inspect_names(manifest, home)
             with _phase(root) as stage:
-                extract(bundle, secret, stage, lambda n: n in wanted)
-                rows = plan(manifest, stage, home, second=True)
-                ssh_keys = _Second(manifest, home, stage).ssh_keys(manifest)
+                extract(bundle, secret, stage, lambda n: n in names)
+                rows = plan(manifest, stage, home, second=second, wanted=wanted)
+                if second:
+                    ssh_keys = _Second(manifest, home, stage).ssh_keys(manifest)
+                    other_keys = _other_keys(manifest, stage, home)
         else:
             rows = plan(manifest, None, home)
         counts = {s: sum(1 for r in rows if r["state"] == s) for s in ("missing", "same", "conflict")}
         if second:
             counts["withheld"] = sum(1 for r in rows if r["state"] == "withheld")
             counts["staged"] = sum(1 for r in rows if r.get("staged"))
+        if filtered:
+            counts["left_out"] = sum(1 for r in rows if r["state"] == "left-out")
 
         def here(rec):
             try:
                 return _destination(rec["path"], home).exists()
             except (MachineBackupError, KeyError, TypeError):
                 return None
+        picked = {id(r) for r in chosen} if chosen is not None else None
+        notes = []
+        if second and wanted is not None and "ssh-private" in wanted:
+            notes.append("ssh-private: a second machine never gets a private SSH key, whatever --only names; "
+                         "this machine makes its own (`ssh_keys` names each step), and only --same-machine at a "
+                         "terminal restores the other machine's keys")
         result = {"bundle": bundle.name, "created_at": manifest.get("created_at"), "trigger": manifest.get("trigger"),
-                  "from_platform": manifest.get("platform"), "mode": mode, "counts": counts, "plan": rows,
+                  "from_platform": manifest.get("platform"), "mode": mode, "counts": counts,
+                  "categories": category_summary(rows, wanted if wanted is not None else set(CATEGORIES), manifest,
+                                                 overwrite=overwrite),
+                  **({"selection": {"only": parse_categories(only), "skip": parse_categories(skip),
+                                    "left_out": [c for c in CATEGORIES if c not in wanted]}} if filtered else {}),
+                  **({"notes": notes} if notes else {}),
+                  "plan": rows,
                   "not_carried": manifest.get("not_carried", []),
                   "checkouts": [{"path": r.get("path"), "branch": r.get("branch"), "unpushed": r.get("unpushed"),
                                  "dirty": r.get("dirty"), "stashes": len(r.get("stashes") or []),
                                  "carried": sorted(k for k in (r.get("carried") or {}) if k != "untracked_modes"),
-                                 "remotes": sorted((r.get("remotes") or {}).keys()), "exists_here": here(r)}
+                                 "remotes": sorted((r.get("remotes") or {}).keys()), "exists_here": here(r),
+                                 **({"selected": id(r) in picked} if picked is not None else {})}
                                 for r in manifest.get("checkouts", []) if isinstance(r, dict)],
                   "inventories": manifest.get("inventories", []), "machine": placing,
                   **({"ssh_keys": ssh_keys} if second else {})}
         if workspace_doc is not None:
             result["workspace"] = workspace_doc
+        receipt: dict = {}
         if mode == "apply":
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith(("files/", "abs/")))
                 if hold:
                     hold("apply", stage)
-                result["applied"] = apply(manifest, stage, home, overwrite=overwrite, second=second)
-                if second:
+                result["applied"] = apply(manifest, stage, home, overwrite=overwrite, second=second, wanted=wanted)
+                if second and (wanted is None or "launchd" in wanted):
                     result["placement"] = place_staged(manifest, stage, home, placing)
+            done = result["applied"]
+            receipt["apply"] = {
+                "bundle": bundle.name, "created_at": manifest.get("created_at"),
+                "engine_version": manifest.get("engine_version"), "mode": placing["mode"],
+                "taken_on": placing.get("taken_on"), "this_machine": placing.get("this_machine"),
+                "only": parse_categories(only), "skip": parse_categories(skip),
+                "left_out": [c for c in CATEGORIES if wanted is not None and c not in wanted],
+                "counts": {k: v for k, v in done.items() if k != "failed"}, "failed": len(done["failed"]),
+                "placement_error": bool((result.get("placement") or {}).get("error")),
+                **({"other_keys": other_keys or []} if second else {})}
         if do_packages:
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith("inventories/"))
                 result["packages"] = packages(stage, runner=runner, which=which)
+            receipt["packages"] = {"bundle": bundle.name, "ran": len(result["packages"]),
+                                   "failed": sum(1 for r in result["packages"] if r.get("exit") != 0)}
         if do_clone:
             with _phase(root) as stage:
                 extract(bundle, secret, stage, lambda n: n.startswith("checkouts/"))
                 if hold:
                     hold("clone", stage)
-                result["clone"] = clone(manifest, stage, home, runner=runner, git=git)
+                part = manifest if chosen is None else {**manifest, "checkouts": chosen}
+                result["clone"] = clone(part, stage, home, runner=runner, git=git)
             result["failed"] = [r for r in result["clone"] if r.get("result") not in ("cloned", "exists")]
+            receipt["clone"] = {"bundle": bundle.name, "projects": sorted(str(p) for p in projects or []),
+                                "checkouts": len(result["clone"]), "failed": len(result["failed"]),
+                                "failed_checkouts": [r["checkout"] for r in result["failed"]][:20]}
+        if receipt:
+            try:
+                result["receipt"] = display(machine_identity.record_restore(receipt, home), home)
+            except (machine_identity.MachineIdentityError, OSError) as exc:
+                result["receipt_error"] = f"the restore receipt was not written: {type(exc).__name__}"
+    # The same filters again, so a step names exactly what the person chose (OBS-282).
+    keep = " ".join(f"--{flag}={shlex.quote(','.join(parse_categories(v)))}"
+                    for flag, v in (("only", only), ("skip", skip)) if v)
+    named = f"--projects={shlex.quote(','.join(str(p) for p in projects))}" if projects else ""
+    after_keys = ", after this machine's own SSH keys above)" if second and any(k["steps"] for k in ssh_keys or ()) else ")"
     result["next"] = [s for s in (
-        None if mode == "apply" else "project-observatory full machine-restore --apply  (writes only what is missing)",
-        "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"
-        if counts["conflict"] and not overwrite else None,
-        None if do_packages else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
+        None if mode == "apply" else
+        (f"project-observatory full machine-restore --apply {keep}  (writes only what is missing)" if keep
+         else "project-observatory full machine-restore --apply  (writes only what is missing)"),
+        None if not counts["conflict"] or overwrite else
+        (f"project-observatory full machine-restore --apply --overwrite {keep}  (replaces conflicts, moving each aside)"
+         if keep else "project-observatory full machine-restore --apply --overwrite  (replaces conflicts, moving each aside)"),
+        None if do_packages or (wanted is not None and "packages" not in wanted)
+        else "project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)",
         *((step for key in ssh_keys for step in key["steps"]) if second and not do_clone else ()),
-        None if do_clone else "project-observatory full machine-restore --clone  (the recorded checkouts"
-                              + (", after this machine's own SSH keys above)" if second and any(k["steps"] for k in ssh_keys) else ")"),
+        None if do_clone else
+        (f"project-observatory full machine-restore --clone {named}  (the recorded checkouts" + after_keys if named
+         else "project-observatory full machine-restore --clone  (the recorded checkouts" + after_keys),
         "project-observatory full restore --latest  (the workspace itself, from its own snapshot)",
         *(SECOND_MACHINE_NEXT if second else ())) if s]
     return result
@@ -2259,7 +2564,25 @@ def restore_parser() -> argparse.ArgumentParser:
     machine.add_argument("--same-machine", action="store_true",
                          help="restore as the machine the bundle was taken on, private SSH keys and jobs included; "
                               "only at a terminal")
+    part = ap.add_mutually_exclusive_group()
+    part.add_argument("--only", action="append", type=_category_arg, metavar="CATEGORY[,CATEGORY]",
+                      help="write only these categories (repeatable): " + ", ".join(CATEGORIES)
+                           + "; a second machine still never gets a private SSH key")
+    part.add_argument("--skip", action="append", type=_category_arg, metavar="CATEGORY[,CATEGORY]",
+                      help="write every category but these (repeatable)")
+    ap.add_argument("--projects", action="append", metavar="NAME|GLOB|PATH[,...]",
+                    help="with --clone: only these checkouts (a folder name, a glob over it, or a path that "
+                         "names every checkout under it); a worktree brings its main checkout")
+    ap.epilog = "categories: " + "; ".join(f"{k}: {v}" for k, v in CATEGORY_HELP.items())
     return ap
+
+
+def _category_arg(value: str) -> str:
+    try:
+        parse_categories([value])
+    except MachineBackupError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+    return value
 
 
 def _home_or_none() -> Path | None:
@@ -2292,6 +2615,8 @@ def restore_main(argv: list[str]) -> int:
             raise MachineBackupError("--overwrite replaces files, so it needs --apply as well")
         if bool(a.bundle) == bool(a.latest):
             raise MachineBackupError("name one bundle, or pass --latest")
+        if a.packages and (a.only or a.skip) and "packages" not in selection(a.only, a.skip):
+            raise MachineBackupError("--packages installs the `packages` category, which --only or --skip leaves out")
         base = _home_or_none()
         bundle = a.bundle.expanduser() if a.bundle else find_latest(base)
         if bundle is None:
@@ -2304,8 +2629,13 @@ def restore_main(argv: list[str]) -> int:
                                      "restored as a second machine")
         result = restore(bundle, Path.home(), base=base, mode="apply" if a.apply else "plan",
                          overwrite=a.overwrite, do_packages=a.packages, do_clone=a.clone,
-                         machine="second" if a.second_machine else ("same" if a.same_machine else None))
+                         machine="second" if a.second_machine else ("same" if a.same_machine else None),
+                         only=a.only, skip=a.skip, projects=a.projects)
         print(json.dumps(result, indent=2, ensure_ascii=False))
+        for note in result.get("notes") or []:
+            print(f"Observatory: {note}", file=sys.stderr)
+        if result.get("receipt_error"):
+            print(f"Observatory: {result['receipt_error']}", file=sys.stderr)
         failed = (result.get("applied") or {}).get("failed") or result.get("failed")
         if (result.get("placement") or {}).get("error"):
             print("Observatory: the staged jobs were not named in the placement file: "

@@ -2372,6 +2372,44 @@ Use the name the plan gives: when the carried `~/.ssh/config` points a host at a
 `IdentityFile`, the plan lists that key as withheld with the hosts that use it and the exact
 `ssh-keys create` step under the same name, so the carried config finds the new key.
 
+**Moving only part of it** (OBS-282). Every row of the plan names its `category`, and the
+answer's `categories` says per category whether it is selected, how many items it holds in each
+state and the first destinations an `--apply` would write. `--only` and `--skip` (repeatable, or
+comma-separated; not both) limit what `--apply` writes and whether `--packages` runs:
+
+| Category | What it holds |
+|---|---|
+| `ssh-private` | private SSH keys, by name or by their text, and the public halves of those keys; a second machine never gets them, whatever `--only` names (only `--same-machine` at a terminal does) |
+| `ssh-config` | `~/.ssh/config` and its fragments, `known_hosts`, `authorized_keys`, `allowed_signers`, a `*.pub` on its own |
+| `launchd` | background jobs: launchd plists on macOS, systemd user units elsewhere (staged on a second machine) |
+| `cli-logins` | the `gh`, `doctl` and `heroku` logins and `~/.netrc` |
+| `claude`, `codex` | Claude Code and Codex configuration |
+| `git`, `shell` | Git settings; zsh and bash profiles |
+| `fabric-services` | Fabric service descriptors |
+| `packages` | the inventories `--packages` installs; `--packages` with this category left out is refused |
+| `agents` | `~/.agents/skills` |
+| `operator` | the paths `machine-backup.json` includes |
+
+A category is decided by the path an item is written to, as the second-machine rules are: a key
+included from another folder is still `ssh-private`. A left-out row reads `left-out`; a folder that
+holds a selected item is written with its own mode even when its category is left out, so a key never
+lands in a folder made with the default mode. An unknown category is refused with the list above.
+`--projects` limits `--clone` to the named checkouts: a folder name (`alpha-web`), a glob over it
+(`alpha-*`), or a path that names every checkout under it (`~/src/work`); a worktree brings its main
+checkout, and a name no checkout matches is refused before anything is written. The plan's `next`
+repeats the filters, so each step names exactly what you chose:
+
+```sh
+project-observatory full machine-restore --latest --skip launchd,cli-logins           # the plan, per category
+project-observatory full machine-restore --latest --apply --skip launchd,cli-logins
+project-observatory full machine-restore --latest --clone --projects alpha-web,beta-api
+```
+
+Each step that writes (`--apply`, `--packages`, `--clone`) records what it did in
+`${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/restore.json`: the bundle, the
+machine it came from, the categories left out, the counts, the failures, and the fingerprints of the
+other machine's keys it withheld. `full machine-move status` reads it.
+
 Then move each job that should run on the second machine, **one at a time, the old machine
 first**:
 
@@ -2402,6 +2440,39 @@ estate record carries placement:
 `serviceId` is the Fabric service whose descriptor names that launchd label, or `null`. Fabric
 Dashboards reads the file to show such an agent as placed on another machine and to hide its
 start.
+
+**Checking the move** (OBS-286). `project-observatory full machine-move status` prints one
+checklist on the machine it runs on, each item `ok`, `missing` (with the step that fixes it) or
+`unknown`, with its evidence (`--json` for the same as JSON; exit 0 only when every item is `ok`):
+
+| Step | Item | `ok` when |
+|---|---|---|
+| M1 | `release` | the other machine runs the release this one runs |
+| M2 | `restore` | the restore receipt here shows `--apply` and `--clone` with no failure and no kept conflict (categories left out on purpose are named, not counted against it); on the machine moved from, the other machine's facts say it restored this one's bundle completely |
+| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld) |
+| M3 | `device-id` | this machine has a device id (`full node --init`) and it is not the other machine's |
+| M3 | `vault` | `full vault-digests` reads every slot `same`; status computes it without writing anything and never creates the estate key |
+| M4 | `jobs` | no job defined in this machine's job folder (it loads at the next login) is defined on the other machine, or named in this machine's placement file as running elsewhere; this engine's own jobs and a plist marked `Disabled` are not counted |
+
+Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
+public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it
+defines, its restore summary):
+
+```sh
+project-observatory full machine-move facts --out FILE              # on the other machine: a new owner-only file
+project-observatory full machine-move status --peer FILE            # here; or put FILE in machine-move/peers/
+```
+
+The backups root both machines read is a convenient way to carry the file. Facts older than
+`--max-age-hours` (48 by default), or dated in the future, say nothing about today's release or jobs,
+so those items read `unknown`; key fingerprints and device ids do not change by themselves, so an
+older file still tells them apart. With no facts at all, every item that compares the two machines
+reads `unknown`, never a guess. A file that does not read is named in `degraded` and the rest is
+still compared, whatever its shape. Facts hold only what the reader takes: a key whose file name the
+format cannot carry keeps its fingerprint under a masked name, a job label it cannot carry is left out,
+and `omitted` (and a line on stderr) says how many. Status writes nothing and starts, stops or asks
+launchctl about no job; on a machine with no platform identifier and no kept id it does not make one
+either, and names this machine `unknown` (`full machine-move show` makes the id).
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires

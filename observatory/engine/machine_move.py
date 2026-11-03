@@ -18,18 +18,28 @@ then moves one at a time, the old machine first:
 Nothing here reads the other machine: the person runs `leave` there, and `cutover` says so. A load
 that fails puts the definition back into the staging folder, so a failed cutover never leaves a job
 that would start at the next login. `OBSERVATORY_SYSTEM_SETUP=0` (a test, a sandbox) moves files
-and writes the placement file but never calls launchctl or systemctl. The full checklist of a move
-(both machines on one release, own SSH key, own device id, the vault equal) is OBS-286.
+and writes the placement file but never calls launchctl or systemctl.
+
+    on either:                      project-observatory full machine-move status [--peer FILE]
+        the checklist of the whole move, M1 to M4 (OBS-286, below): one release on both, the
+        restore complete, its own SSH key and device id, the vault the same, no job on both
+    on the other machine:           project-observatory full machine-move facts --out FILE
+        the public facts `status` compares this machine with (see "the checklist of a move")
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 from pathlib import Path
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import xml.parsers.expat
 
 import machine_identity as mi
 import osprivacy
@@ -230,6 +240,582 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
             "next": [f"on {to}: project-observatory full machine-move cutover {label}"]}
 
 
+# --- the checklist of a move (OBS-286) ----------------------------------------------------------
+#
+# `full machine-move status` answers, on one machine, whether the move between two machines is done:
+#
+#   M1 release    both machines run the same engine release
+#   M2 restore    the machine restored here completely (or the other one did, from this one's bundle)
+#   M3 ssh-key    this machine signs with an SSH key of its own, never a copy of the other machine's
+#   M3 device-id  this machine has its own device id in the agent network (`full node --init`)
+#   M3 vault      every vault slot reads `same` on both machines (`full vault-digests`, OBS-194)
+#   M4 jobs       no background job is defined on both machines
+#
+# Each item is `ok`, `missing` (with the step that fixes it) or `unknown`, and names its evidence.
+# Nothing here reaches the other machine: what it knows of it comes from that machine's FACTS, a
+# small owner-only file it writes with `full machine-move facts --out FILE` (its id, release, the
+# fingerprints of its SSH keys, its device id, the jobs defined there, its restore receipt), carried
+# here by the person (the backups root both machines read works) and named with `--peer FILE` or put
+# in `<data folder>/machine-move/peers/`. Facts older than `--max-age-hours` (48) say nothing about
+# today's release or jobs, so those items read `unknown`, never a guess; key fingerprints and device
+# ids do not change by themselves, so an older file still tells them apart. Facts and status carry
+# public facts only: fingerprints, ids, labels, versions and counts, never a key or a value. A facts file
+# holds only what `read_facts` takes (a key name it would refuse is masked, a label it would refuse is left
+# out, `omitted` counts both), and a file of any other shape is refused by name in `degraded`, never a crash.
+# Status reads and changes nothing: no file is written (not even this machine's id, which a machine without
+# a platform identifier would otherwise keep), and no job is started, stopped or listed by launchctl.
+
+FACTS_SCHEMA = "observatory-machine-facts/1"
+STATUS_SCHEMA = "observatory-machine-move-status/1"
+MAX_AGE_HOURS = 48
+#: How far ahead of this machine's clock a peer's facts may be dated before they read as from the future.
+CLOCK_SKEW = datetime.timedelta(minutes=5)
+FACTS_MAX_BYTES = 1 << 20
+FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+VERSION_SHAPE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}")
+DEVICE_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}")
+SHOWN_FILE = re.compile(r"~/[A-Za-z0-9._/ -]{1,200}")
+OK, MISSING, UNKNOWN = "ok", "missing", "unknown"
+ITEMS = (("release", "M1", "the same release on both machines"),
+         ("restore", "M2", "the restore complete"),
+         ("ssh-key", "M3", "its own SSH key"),
+         ("device-id", "M3", "its own device id"),
+         ("vault", "M3", "every vault slot reads same"),
+         ("jobs", "M4", "no job or bot defined on both machines"))
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+
+
+def _iso(at: datetime.datetime) -> str:
+    return at.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_time(text) -> datetime.datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        value = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=datetime.timezone.utc)
+    return value if 2000 <= value.year <= 2999 else None
+
+
+def peers_dir(home: Path) -> Path:
+    return mi.data_dir(home) / "machine-move" / "peers"
+
+
+def _ssh_keys_module():
+    tools = str(Path(__file__).resolve().parent / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import ssh_keys
+    return ssh_keys
+
+
+def own_keys(home: Path) -> tuple[list[dict], list[str]]:
+    """The private SSH keys in `~/.ssh` and one folder below, each `{file, fingerprint}`; the fingerprint
+    comes from the key's clear header or its `.pub`, so the private section is never read."""
+    folder, out, notes = home / ".ssh", [], []
+    try:
+        sk = _ssh_keys_module()
+    except ImportError as exc:
+        return [], [f"the SSH key reader did not load ({type(exc).__name__})"]
+    if not folder.is_dir():
+        return [], []
+    files, _pubs, _links = sk._candidates(folder)
+    for path in files:
+        try:
+            header = sk.private_header(path)
+        except (OSError, ValueError) as exc:
+            notes.append(f"{mb_display(path, home)} could not be read ({type(exc).__name__})")
+            continue
+        if header is None:
+            continue
+        fp = header.get("fingerprint")
+        if not fp:
+            try:
+                fp = sk.read_public(Path(str(path) + ".pub"))["fingerprint"]
+            except (sk.Refused, OSError, ValueError, KeyError):
+                fp = None
+        out.append({"file": mb_display(path, home), "fingerprint": fp})
+    return sorted(out, key=lambda k: k["file"]), notes
+
+
+def mb_display(path: Path, home: Path) -> str:
+    try:
+        return "~/" + path.relative_to(home).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def device_id(base: Path | None) -> tuple[str | None, str | None]:
+    """(this machine's device id in the agent network, why there is none): read from the public
+    `device.json` beside the device keys, never from a key."""
+    override = os.environ.get("OBSERVATORY_NODE")
+    if base is None and not override:
+        return None, "no Observatory workspace here, so no device keys"
+    folder = (Path(override).expanduser() if override else base / "node") / "device"
+    try:
+        doc = json.loads(osprivacy.read_regular(folder / "device.json", 65536).decode("utf-8"))
+    except FileNotFoundError:
+        return None, "no device keys here yet"
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        return None, f"device.json could not be read ({type(exc).__name__})"
+    value = doc.get("id") if isinstance(doc, dict) else None
+    if not isinstance(value, str) or not DEVICE_SHAPE.fullmatch(value):
+        return None, "device.json names no device id"
+    return value, None
+
+
+def defined_jobs(home: Path, platform: str = sys.platform) -> tuple[list[str] | None, str | None]:
+    """(the labels of the jobs defined in this machine's job folder, which load at the next login, or
+    None, why not). This engine's own jobs are left out: each machine installs its own."""
+    try:
+        system = _system(platform)
+    except MachineMoveError as exc:
+        return None, str(exc)
+    import machine_backup
+    labels = []
+    for path in _definitions(job_folder(home, system), system):
+        if path.name.startswith(machine_backup.OWN_JOB_PREFIXES):
+            continue
+        if path.is_file() and path.suffix == ".plist":
+            try:
+                doc = plistlib.loads(path.read_bytes())
+                if isinstance(doc, dict) and doc.get("Disabled") is True:
+                    continue
+            except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError):
+                pass
+        label = mi.job_label(path) if path.is_file() else path.stem
+        if label.startswith(machine_backup.OWN_JOB_PREFIXES):
+            continue
+        labels.append(label)
+    return sorted(set(labels)), None
+
+
+def _receipt(home: Path) -> tuple[dict | None, str | None]:
+    try:
+        return mi.read_restore_receipt(home), None
+    except mi.MachineIdentityError as exc:
+        return None, str(exc)
+
+
+def restore_summary(receipt: dict | None) -> dict | None:
+    """What a restore receipt says, shortened: where the bundle came from and whether it is complete."""
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("apply"), dict):
+        return None
+    applied = receipt["apply"]
+    counts = applied.get("counts") if isinstance(applied.get("counts"), dict) else {}
+
+    def number(value) -> int:
+        # The receipt is this engine's, but a file a person edited may hold anything: a count that is not a
+        # whole number reads as one problem, never as a crash.
+        return value if type(value) is int and value >= 0 else (0 if value in (None, 0, False) else 1)
+    gaps = []
+    if number(applied.get("failed")):
+        gaps.append(f"{number(applied['failed'])} item(s) failed to write")
+    if number(counts.get("kept")):
+        gaps.append(f"{number(counts['kept'])} conflict(s) kept, not restored")
+    if applied.get("placement_error") is not False and applied.get("placement_error") is not None:
+        gaps.append("the staged jobs were not named in the placement file")
+    for part in ("packages", "clone"):
+        done = receipt.get(part)
+        if isinstance(done, dict) and number(done.get("failed")):
+            gaps.append(f"{number(done['failed'])} {'checkout(s)' if part == 'clone' else 'inventory step(s)'} failed")
+    left = applied.get("left_out")
+    return {"taken_on": applied.get("taken_on") if mi.valid_id(applied.get("taken_on")) else None,
+            "mode": applied.get("mode")[:32] if isinstance(applied.get("mode"), str) else "",
+            "at": applied.get("at")[:32] if isinstance(applied.get("at"), str) else "",
+            "complete": not gaps, "gaps": gaps,
+            "left_out": [c[:32] for c in left if isinstance(c, str)][:20] if isinstance(left, list) else [],
+            "cloned": isinstance(receipt.get("clone"), dict)}
+
+
+def facts(home: Path, base: Path | None, *, platform: str = sys.platform, at: datetime.datetime | None = None) -> dict:
+    """This machine's public facts for the other machine's `machine-move status`."""
+    keys, _ = own_keys(home)
+    device, _ = device_id(base)
+    jobs, _ = defined_jobs(home, platform)
+    receipt, _ = _receipt(home)
+    try:
+        elsewhere = sorted(e["label"] for e in mi.read_placement(home)["elsewhere"])
+    except mi.MachineIdentityError:
+        elsewhere = []
+    import configuration as config
+    # What is written here is held to the rules `read_facts` reads it by, so the other machine never refuses
+    # the whole file for one entry: a key whose file name the reader would refuse keeps its fingerprint under
+    # a masked name, and a label it would refuse is left out; `omitted` says how many of each.
+    ssh, masked = [], 0
+    for k in keys:
+        if not k["fingerprint"] or not FINGERPRINT.fullmatch(k["fingerprint"]):
+            continue
+        name = k["file"]
+        if not SHOWN_FILE.fullmatch(name):
+            masked += 1
+            name = f"~/.ssh/name-not-shown-{masked}"
+        ssh.append({"file": name, "fingerprint": k["fingerprint"]})
+    shaped = {}
+    omitted = {"ssh_names_masked": masked}
+    for field, values in (("jobs", jobs), ("elsewhere", elsewhere)):
+        kept = None if values is None else [v for v in values if mi.LABEL_SHAPE.fullmatch(v)]
+        shaped[field] = kept
+        omitted[f"{field}_left_out"] = 0 if values is None else len(values) - len(kept)
+    if device is not None and not DEVICE_SHAPE.fullmatch(device):
+        device = None
+    summary = restore_summary(receipt)
+    if summary is not None:
+        summary["gaps"] = [g[:200] for g in summary["gaps"]][:20]
+    return {"schema": FACTS_SCHEMA, "machine": mi.machine_id(home), "generated_at": _iso(at or _now()),
+            "engine_version": config.VERSION, "platform": platform, "ssh": ssh, "device": device,
+            "jobs": shaped["jobs"], "elsewhere": shaped["elsewhere"], "restore": summary, "omitted": omitted}
+
+
+def read_facts(path: Path) -> dict:
+    """One peer's facts, validated; a refusal names what is wrong, never the file's content."""
+    try:
+        raw = osprivacy.read_regular(path, FACTS_MAX_BYTES)
+        doc = json.loads(raw.decode("utf-8"))
+    except FileNotFoundError:
+        raise MachineMoveError("no such file") from None
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError):
+        raise MachineMoveError("not a readable facts file (a regular JSON file of at most 1 MB)") from None
+    if not isinstance(doc, dict) or doc.get("schema") != FACTS_SCHEMA:
+        raise MachineMoveError(f"not an {FACTS_SCHEMA} file (`full machine-move facts --out FILE` writes one)")
+    if not mi.valid_id(doc.get("machine")):
+        raise MachineMoveError("its machine id is malformed")
+    if _parse_time(doc.get("generated_at")) is None:
+        raise MachineMoveError("its generated_at is not a time")
+    version = doc.get("engine_version")
+    if version is not None and not (isinstance(version, str) and VERSION_SHAPE.fullmatch(version)):
+        raise MachineMoveError("its engine_version is malformed")
+    ssh = doc.get("ssh")
+    ssh = [] if ssh is None else ssh
+    if not isinstance(ssh, list) or len(ssh) > 256 or not all(
+            isinstance(k, dict) and isinstance(k.get("fingerprint"), str) and FINGERPRINT.fullmatch(k["fingerprint"])
+            and isinstance(k.get("file"), str) and SHOWN_FILE.fullmatch(k["file"]) for k in ssh):
+        raise MachineMoveError("its ssh list is malformed")
+    device = doc.get("device")
+    if device is not None and not (isinstance(device, str) and DEVICE_SHAPE.fullmatch(device)):
+        raise MachineMoveError("its device id is malformed")
+    for field in ("jobs", "elsewhere"):
+        value = doc.get(field)
+        if value is not None and (not isinstance(value, list) or len(value) > 4096
+                                  or not all(isinstance(v, str) and mi.LABEL_SHAPE.fullmatch(v) for v in value)):
+            raise MachineMoveError(f"its {field} list is malformed")
+    restore = doc.get("restore")
+    if restore is not None:
+        # Every member the reader uses, by type and size: a facts file is carried by hand from another machine.
+        if not isinstance(restore, dict) or not isinstance(restore.get("complete"), bool):
+            raise MachineMoveError("its restore summary is malformed: complete is not true or false")
+        if restore.get("taken_on") is not None and not mi.valid_id(restore.get("taken_on")):
+            raise MachineMoveError("its restore summary is malformed: taken_on is not a machine id")
+        if restore.get("at") is not None and not (isinstance(restore["at"], str) and len(restore["at"]) <= 64):
+            raise MachineMoveError("its restore summary is malformed: at is not a time")
+        gaps = restore.get("gaps")
+        if gaps is not None and (not isinstance(gaps, list) or len(gaps) > 64
+                                 or not all(isinstance(g, str) and len(g) <= 400 for g in gaps)):
+            raise MachineMoveError("its restore summary is malformed: gaps is not a list of short texts")
+    return {"machine": doc["machine"], "generated_at": doc["generated_at"], "engine_version": version,
+            "ssh": [{"file": k["file"], "fingerprint": k["fingerprint"]} for k in ssh], "device": device,
+            "jobs": doc.get("jobs"), "elsewhere": doc.get("elsewhere") or [],
+            "restore": ({"taken_on": restore.get("taken_on"), "complete": restore["complete"],
+                         "at": str(restore.get("at") or "")[:32],
+                         "gaps": [g[:200] for g in restore.get("gaps") or []][:20]} if restore is not None else None)}
+
+
+def load_peers(home: Path, files: list[Path] | None = None) -> tuple[list[dict], list[dict]]:
+    """(valid peer facts, `{file, reason}` for each file refused): the named files, else every `*.json`
+    in the peers folder."""
+    if files is None:
+        folder = peers_dir(home)
+        files = sorted(folder.glob("*.json")) if folder.is_dir() else []
+    good, bad = [], []
+    for path in files:
+        name = path.name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}", path.name) else "a file (name not shown)"
+        try:
+            good.append(read_facts(path))
+        except MachineMoveError as exc:
+            bad.append({"file": name, "reason": str(exc)})
+        except (TypeError, ValueError, KeyError, AttributeError, IndexError) as exc:
+            # A shape the checks above did not foresee: the file is refused and named, status still runs.
+            bad.append({"file": name, "reason": f"its content is malformed ({type(exc).__name__})"})
+    return good, bad
+
+
+def _vault_view(max_age_hours: float) -> tuple[dict | None, str | None]:
+    """The vault-digests view (OBS-194) computed here without writing anything: this machine's
+    digests in memory under the estate key it already holds, against the peer manifests. Never
+    creates the key, never prints a digest."""
+    try:
+        tools = str(Path(__file__).resolve().parent / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import vault_digests as vd
+    except Exception as exc:  # noqa: BLE001: a workspace without a vault is a reason, not a crash
+        return None, f"the vault could not be read here ({type(exc).__name__})"
+    try:
+        key = vd._key(create=False)
+        if not key:
+            return None, ("this machine holds no estate digest key: `project-observatory full vault-digests key "
+                          "import FILE` with the other machine's `key export`")
+        local = vd.build_manifest(vd.machine_name(), key)
+        peers, bad = vd.read_peers(vd.peers_dir())
+        return vd.compare(local, peers, max_age_hours=max_age_hours, unreadable=bad), None
+    except Exception as exc:  # noqa: BLE001: Refused, a vault boundary, an OS error: all name a reason
+        reason = str(exc) if exc.__class__.__name__ == "Refused" else type(exc).__name__
+        return None, f"the vault digests could not be compared: {reason}"
+
+
+def _item(key: str, state: str, evidence: list[str], step: list[str] | None = None) -> dict:
+    step_id, title = next((s, t) for k, s, t in ITEMS if k == key)
+    out = {"id": key, "step": step_id, "title": title, "state": state, "evidence": evidence}
+    if step:
+        out["next"] = step
+    return out
+
+
+def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, unreadable: list[dict] | None = None,
+           platform: str = sys.platform, at: datetime.datetime | None = None, max_age_hours: float = MAX_AGE_HOURS,
+           vault_view=None) -> dict:
+    """The checklist M1 to M4 on this machine, from what it holds and the peers' facts. Changes nothing."""
+    import configuration as config
+    at = at or _now()
+    # Read-only: a machine with no platform identifier and no kept id gets none here (any restore,
+    # `machine-move show` or `facts` makes it), and the checklist says so.
+    me = mi.machine_id(home, create=False)
+    degraded = [{"source": "peers", "code": "unreadable-facts", "reason": f"{b['file']}: {b['reason']}"}
+                for b in unreadable or []]
+    if me is None:
+        degraded.append({"source": "machine", "code": "no-machine-id",
+                         "reason": "this machine has no id yet (no platform identifier and none kept); "
+                                   "`project-observatory full machine-move show` makes one"})
+    newest: dict[str, dict] = {}
+    for peer in peers or []:
+        if peer["machine"] == me:
+            degraded.append({"source": "peers", "code": "this-machine",
+                             "reason": "a facts file names this machine; it is not another machine's and is ignored"})
+            continue
+        held = newest.get(peer["machine"])
+        if held is not None:
+            degraded.append({"source": "peers", "code": "duplicate-machine",
+                             "reason": f"two facts files name {peer['machine']}; the newer is used"})
+            if _parse_time(held["generated_at"]) >= _parse_time(peer["generated_at"]):
+                continue
+        newest[peer["machine"]] = dict(peer)
+    others, fresh = [newest[m] for m in sorted(newest)], []
+    for peer in others:
+        when = _parse_time(peer["generated_at"])
+        age = (at - when) if when else None
+        peer["age_hours"] = round(age.total_seconds() / 3600, 1) if age is not None else None
+        if when is not None and when - at > CLOCK_SKEW:
+            peer["stale"] = "dated in the future: check both clocks"
+        elif age is None or age.total_seconds() > max_age_hours * 3600:
+            peer["stale"] = f"older than {max_age_hours:g} hours"
+        else:
+            fresh.append(peer)
+    def said(peer):
+        return f"{peer['machine']} (facts of {peer['generated_at']})"
+    carry = (f"on the other machine: project-observatory full machine-move facts --out FILE, then here: "
+             f"project-observatory full machine-move status --peer FILE")
+    items = []
+
+    # M1: the same release on both.
+    ours = config.VERSION
+    if not fresh:
+        items.append(_item("release", UNKNOWN, [f"this machine runs {ours}; no facts of another machine younger "
+                                                f"than {max_age_hours:g} hours"
+                                                + "".join(f"; {said(p)} {p['stale']}" for p in others)], [carry]))
+    else:
+        differ = [p for p in fresh if p.get("engine_version") != ours]
+        evidence = [f"this machine runs {ours}"] + [f"{said(p)} runs {p.get('engine_version') or 'an unknown release'}"
+                                                    for p in fresh]
+        items.append(_item("release", MISSING if differ else OK, evidence,
+                           ["project-observatory full update --apply  (on the machine with the older release)"]
+                           if differ else None))
+
+    # M2: the restore complete.
+    receipt, receipt_problem = _receipt(home)
+    mine = restore_summary(receipt)
+    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") == me]
+    if receipt_problem:
+        items.append(_item("restore", UNKNOWN, [receipt_problem]))
+    elif mine:
+        evidence = [f"machine-restore applied here at {mine['at']} ({mine['mode']}), from "
+                    f"{mine['taken_on'] or 'a bundle that names no machine'}"]
+        if mine["left_out"]:
+            evidence.append(f"left out on purpose (--only/--skip): {', '.join(mine['left_out'])}")
+        evidence += mine["gaps"]
+        if not mine["cloned"]:
+            evidence.append("--clone has not run here (the checkouts are not restored)")
+        steps = []
+        if any("conflict" in g for g in mine["gaps"]):
+            steps.append("project-observatory full machine-restore --latest --apply --overwrite  (replaces each "
+                         "conflict, moving it aside)")
+        if any("failed" in g for g in mine["gaps"]) or not mine["cloned"]:
+            steps.append("project-observatory full machine-restore --latest --apply --clone  (writes what is still "
+                         "missing; the answer names each failure)")
+        items.append(_item("restore", OK if mine["complete"] and mine["cloned"] else MISSING, evidence, steps or None))
+    elif theirs:
+        peer = theirs[0]
+        state = OK if peer["restore"]["complete"] else MISSING
+        items.append(_item("restore", state, [f"{said(peer)} restored a bundle of this machine at "
+                                              f"{peer['restore']['at']}: "
+                                              + ("complete" if state == OK else "; ".join(peer["restore"]["gaps"])
+                                                 or "not complete")],
+                           None if state == OK else ["on that machine: project-observatory full machine-move status"]))
+    else:
+        items.append(_item("restore", UNKNOWN, ["no machine-restore was recorded on this machine, and no other "
+                                                "machine's facts say it restored a bundle of this one"],
+                           ["on the machine you moved to: project-observatory full machine-restore --latest --apply"]))
+
+    # M3: its own SSH key.
+    keys, key_notes = own_keys(home)
+    other_fps: dict[str, str] = {}
+    for peer in others:
+        for k in peer["ssh"]:
+            other_fps.setdefault(k["fingerprint"], f"{k['file']} on {said(peer)}")
+    applied = (receipt or {}).get("apply")
+    withheld = applied.get("other_keys") if isinstance(applied, dict) else None
+    for k in withheld if isinstance(withheld, list) else []:
+        if isinstance(k, dict) and isinstance(k.get("fingerprint"), str) and FINGERPRINT.fullmatch(k["fingerprint"]):
+            other_fps.setdefault(k["fingerprint"], f"the key {str(k.get('key'))[:64]} the restored bundle withheld")
+    shared = [k for k in keys if k["fingerprint"] and k["fingerprint"] in other_fps]
+    if not keys:
+        items.append(_item("ssh-key", MISSING, ["no private SSH key in ~/.ssh on this machine", *key_notes],
+                           ["project-observatory full ssh-keys create NAME  (then `ssh-keys send NAME --to github`)"]))
+    elif shared:
+        items.append(_item("ssh-key", MISSING,
+                           [f"{k['file']} ({k['fingerprint']}) is the same key as {other_fps[k['fingerprint']]}"
+                            for k in shared] + key_notes,
+                           ["project-observatory full ssh-keys create NAME  (a key made here), send it where the "
+                            "shared one is registered, then remove the copy"]))
+    elif not other_fps:
+        items.append(_item("ssh-key", UNKNOWN, [f"{len(keys)} private key(s) here; nothing here says which keys the "
+                                                "other machine holds", *key_notes], [carry]))
+    else:
+        unread = [k["file"] for k in keys if not k["fingerprint"]]
+        evidence = [f"{len(keys)} private key(s) here, none of them among the other machine's {len(other_fps)} "
+                    f"key(s)"] + ([f"fingerprint not read (no public half): {', '.join(unread)}"] if unread else [])
+        items.append(_item("ssh-key", UNKNOWN if unread and len(unread) == len(keys) else OK, evidence + key_notes))
+
+    # M3: its own device id.
+    device, why = device_id(base)
+    known = [p for p in others if p.get("device")]
+    if device is None:
+        items.append(_item("device-id", MISSING, [why or "no device id"],
+                           ["project-observatory full node --init  (this machine's own device id)"]))
+    elif any(p["device"] == device for p in known):
+        twin = next(p for p in known if p["device"] == device)
+        items.append(_item("device-id", MISSING, [f"this machine's device id {device} is also {said(twin)}'s: its "
+                                                  "workspace was restored whole"],
+                           ["restore the workspace snapshot as a second machine (`project-observatory full restore "
+                            "--latest --second-machine` into a new home), then `full node --init`"]))
+    elif not known:
+        items.append(_item("device-id", UNKNOWN, [f"this machine's device id is {device}; no other machine's facts "
+                                                  "name one to compare"], [carry]))
+    else:
+        items.append(_item("device-id", OK, [f"this machine's device id is {device}"]
+                           + [f"{said(p)} has {p['device']}" for p in known]))
+
+    # M3: every vault slot the same.
+    view, problem = (vault_view or _vault_view)(max_age_hours)
+    if view is None:
+        items.append(_item("vault", UNKNOWN, [problem or "the vault digests were not compared"]))
+    elif view.get("all_match"):
+        items.append(_item("vault", OK, [view.get("summary") or "every slot matches"]))
+    elif not [m for m in view.get("machines", []) if m.get("state") == "reachable"]:
+        items.append(_item("vault", UNKNOWN, [view.get("summary") or "no other machine's digests to compare"],
+                           ["on the other machine: project-observatory full vault-digests write, then put its "
+                            "local.json in this machine's vault-digests peers folder"]))
+    else:
+        items.append(_item("vault", MISSING, [view.get("summary") or "some slots differ"],
+                           ["project-observatory full vault-digests  (names each slot that differs, is missing or "
+                            "is only on one machine)"]))
+
+    # M4: no job on both machines.
+    jobs, jobs_problem = defined_jobs(home, platform)
+    try:
+        elsewhere = {e["label"]: e for e in mi.read_placement(home)["elsewhere"]}
+    except mi.MachineIdentityError as exc:
+        elsewhere, jobs_problem = {}, jobs_problem or str(exc)
+    if jobs is None:
+        items.append(_item("jobs", UNKNOWN, [jobs_problem or "the job folder could not be read"]))
+    else:
+        both = [f"{label} is defined here and named in this machine's placement file as running on "
+                f"{elsewhere[label].get('placedOn') or 'another machine'}" for label in jobs if label in elsewhere]
+        fresh_jobs = [p for p in fresh if isinstance(p.get("jobs"), list)]
+        for peer in fresh_jobs:
+            both += [f"{label} is defined here and on {said(peer)}" for label in jobs if label in set(peer["jobs"])]
+        if both:
+            items.append(_item("jobs", MISSING, both,
+                               ["project-observatory full machine-move leave LABEL --to MACHINE_ID  (on the machine "
+                                "the job leaves), then `machine-move cutover LABEL` on the other"]))
+        elif not fresh_jobs:
+            items.append(_item("jobs", UNKNOWN, [f"{len(jobs)} job(s) defined here; no facts of another machine "
+                                                 f"younger than {max_age_hours:g} hours list its jobs"], [carry]))
+        else:
+            items.append(_item("jobs", OK, [f"{len(jobs)} job(s) defined here, {len(elsewhere)} placed on another "
+                                            "machine; none is defined on both"]
+                               + [f"{said(p)} defines {len(p['jobs'])}" for p in fresh_jobs]))
+
+    counts = {s: sum(1 for i in items if i["state"] == s) for s in (OK, MISSING, UNKNOWN)}
+    all_ok = counts[OK] == len(items)
+    summary = ("The move is done: " if all_ok else "The move is not done yet: ") + \
+        f"{counts[OK]} of {len(items)} items ok, {counts[MISSING]} missing, {counts[UNKNOWN]} unknown."
+    return {"schema": STATUS_SCHEMA, "machine": me, "generated_at": _iso(at), "engine_version": ours,
+            "other_machines": [{"machine": p["machine"], "generated_at": p["generated_at"], "age_hours": p["age_hours"],
+                                **({"stale": p["stale"]} if p.get("stale") else {})} for p in others],
+            "items": items, "counts": counts, "all_ok": all_ok, "summary": summary, "degraded": degraded}
+
+
+def render(view: dict) -> str:
+    lines = [view["summary"], f"  this machine: {view['machine'] or 'unknown'}, release {view['engine_version']}"]
+    for peer in view["other_machines"]:
+        lines.append(f"  other machine: {peer['machine']}, facts of {peer['generated_at']}"
+                     + (f" ({peer['stale']})" if peer.get("stale") else ""))
+    for item in view["items"]:
+        lines.append(f"  {item['step']} {item['id']:<9} {item['state']:<7} {item['title']}")
+        for line in item["evidence"]:
+            lines.append(f"      {line}")
+        for step in item.get("next") or []:
+            lines.append(f"      next: {step}")
+    for d in view["degraded"]:
+        lines.append(f"  degraded: {d['reason']}")
+    return "\n".join(lines)
+
+
+def write_facts(doc: dict, out: Path) -> Path:
+    """A new owner-only file, whole or not at all, that never replaces one (it may be another machine's facts):
+    written to a temporary file beside it, then linked to its name, which fails when the name exists (a link
+    included). A file system without hard links gets the exclusive create instead."""
+    data = (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if os.path.lexists(out):
+        raise FileExistsError(str(out))
+    fd, tmp = tempfile.mkstemp(prefix=f".{out.name}.", suffix=".tmp", dir=out.parent)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(tmp, out)
+        except FileExistsError:
+            raise
+        except (OSError, NotImplementedError):
+            exclusive = osprivacy.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+            with os.fdopen(exclusive, "wb") as stream:
+                stream.write(data)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    return out
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog=f"{PROG} machine-move", description="move one background job between two machines, so it "
                                                         "never runs on both (the placement file says where it runs)")
@@ -240,13 +826,59 @@ def parser() -> argparse.ArgumentParser:
     out = sub.add_parser("leave", help="stop a job here, stage it, and name it as running on another machine")
     out.add_argument("label")
     out.add_argument("--to", required=True, metavar="MACHINE_ID", help="the id `machine-move show` prints there")
+    st = sub.add_parser("status", help="the checklist of a move, M1 to M4: one release, the restore complete, "
+                                       "its own SSH key and device id, the vault the same, no job on both")
+    st.add_argument("--json", action="store_true", help="the checklist as JSON")
+    st.add_argument("--peer", action="append", type=Path, metavar="FILE",
+                    help="the other machine's facts (`machine-move facts --out FILE` there); default: every "
+                         "*.json in <data folder>/machine-move/peers/")
+    st.add_argument("--max-age-hours", type=_hours, default=MAX_AGE_HOURS, metavar="N",
+                    help=f"facts older than this say nothing about the release or the jobs (default {MAX_AGE_HOURS})")
+    fa = sub.add_parser("facts", help="this machine's public facts for the other machine's `machine-move status`")
+    fa.add_argument("--out", type=Path, metavar="FILE", help="write them to a new owner-only file (default: print)")
     return ap
+
+
+def _hours(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("a number of hours") from None
+    if not 0 < value <= 24 * 366:
+        raise argparse.ArgumentTypeError("between 0 and 8784 hours")
+    return value
 
 
 def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     home = Path.home()
     try:
+        if a.action == "status":
+            import machine_backup
+            base = machine_backup._home_or_none()
+            peers, bad = load_peers(home, [p.expanduser() for p in a.peer] if a.peer else None)
+            view = status(home, base, peers=peers, unreadable=bad, max_age_hours=a.max_age_hours)
+            print(json.dumps(view, indent=2, ensure_ascii=False) if a.json else render(view))
+            return 0 if view["all_ok"] else 1
+        if a.action == "facts":
+            import machine_backup
+            doc = facts(home, machine_backup._home_or_none())
+            o = doc["omitted"]
+            if any(o.values()):
+                print(f"Observatory: {o['ssh_names_masked']} key file name(s) masked (the fingerprint kept), "
+                      f"{o['jobs_left_out']} job label(s) and {o['elsewhere_left_out']} placed label(s) left out: "
+                      "they do not fit the facts format the other machine reads (`omitted` in the answer)",
+                      file=sys.stderr)
+            if a.out is None:
+                print(json.dumps(doc, indent=2, ensure_ascii=False))
+                return 0
+            try:
+                path = write_facts(doc, a.out.expanduser())
+            except FileExistsError:
+                raise MachineMoveError(f"{a.out} already exists; facts are written to a new file") from None
+            print(f"wrote {path}: carry it to the other machine and run `project-observatory full machine-move "
+                  f"status --peer FILE` there")
+            return 0
         if a.action == "show":
             result = show(home)
         elif a.action == "cutover":
