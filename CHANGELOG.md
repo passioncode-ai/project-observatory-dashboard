@@ -22,6 +22,28 @@ while the major version is 0, a minor release may change behaviour and says so h
   only after a narrow one verifies again, sends it only to its own Sentry, and counts it revoked only when that
   Sentry refuses it after once accepting it; `list` and `status` say what exists and whether it works. Self-hosted
   Sentry (`--base-url`, `--region-host`) and the documented `us` and `de` region hosts are handled, by exact name.
+- **Two buttons get their agent twin on the local server, each only on the operator's word** (OBS-291; contract
+  DEC-0147, DEC-0121 AP-2). `secret.decline` declines a waiting secret request: the window closes and the agent that
+  asked reads `declined` with `declinedBy: operator`; without the operator's decision in `_meta.decision` nothing is
+  declined (`operator-decision-required`), and a closed request is answered as it is. `share.open` hands a share link to
+  this machine and claims nothing: the share reads `handed-over` until the person accepts it with
+  `full share accept SHARE-ID` (Accept stays the person's, `humanStep: consent`), and lapses 7 days later; the sender's
+  key is pinned only when the link is in the operator's words unchanged. The operator's words go to the owner-only
+  `<state>/secret-requests/decisions.jsonl`, a share link's fragment replaced by the share id; answers and the journal
+  name the share id only. Both are on `POST /mcp` for an agent binding; the agent's own MCP server does not relay them
+  yet (OBS-298). The node checks the decision with a port of the contract's `actionDecision`, held to its
+  `actions.json` vectors.
+- **A `declined` names who declined** (OBS-291): the person in Observatory's window, or the operator through an agent.
+
+### Changed
+
+- **Shared keys: usage reports restate a window, and the sender counts each export once** (OBS-291; contract DEC-0147,
+  the pin moves to `v0.1.0+2026-11-02.1`, `d1b905ee`). The recipient's machine now restates in each report its day and
+  the 35 UTC days before it (from the day the link was accepted), every export beside its day's entry, so a report lost
+  on the way is made up by the next; `uses.jsonl` keeps those days. The sender replaces each day's uses and last use
+  with the latest report's and keeps exports and agents as sets, so a restated export counts once; 0.30 added each
+  report's exports to a running count (there is no export button yet, so no count changes). A report body with an
+  export but no entry for its day is refused `bad-body`. `docs/COMPATIBILITY.md` names the stored fields.
 
 ## 0.30.1 (2026-11-02)
 
