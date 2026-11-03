@@ -5862,8 +5862,8 @@
       "path": "tests/test_ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "28933e41ea4d1c14ed43effc69a505997aa977bc6d3ec277733ec5ec0b1027e8",
-      "bytes": 102205
+      "export_sha256": "059ee2f20025f16d5479deddd28b807a3c1ca2b78649de3bda482f8f91c1fb28",
+      "bytes": 105747
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -7000,8 +7000,8 @@
       "path": "tools/ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "413aae81f41ac067664a93d0910ed69ba670b1406ee69c9bf861542efae95da8",
-      "bytes": 100885
+      "export_sha256": "866c799aa3a3f87b3bf0a96b4a99032a7567a1b1e66f40bd3000cdf1411c3fa2",
+      "bytes": 103648
     },
     {
       "path": "tools/sweep_fixtures.py",

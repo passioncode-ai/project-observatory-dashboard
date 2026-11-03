@@ -29,7 +29,7 @@ The system's own tools do the work: `ssh-keygen` (fingerprints from the `.pub`, 
 `ssh-add` (the agent, the macOS Keychain), `ssh` (the access that already works) and `gh`
 (GitHub). `OBSERVATORY_SSH_KEYGEN`, `OBSERVATORY_SSH_ADD`, `OBSERVATORY_SSH`, `OBSERVATORY_GH`
 and `OBSERVATORY_CLIPBOARD` name other binaries (the tests' fakes); `OBSERVATORY_CLIPBOARD=none`
-says there is no clipboard.
+says there is no clipboard. `OBSERVATORY_SSH_SYSTEM_CONFIG` names the system ssh_config rekey scans.
 
 Exit codes: 0 done; 1 the provider or the server refused, or verification failed; 2 refused
 before anything changed; 3 done without the clipboard; 4 done, receipt not written.
@@ -515,11 +515,14 @@ def read_config_file(path: pathlib.Path, degraded: list[dict]) -> str | None:
     return b"".join(chunks).decode("utf-8", "replace")
 
 
-def read_config(degraded: list[dict], agents: list[dict] | None = None, seen_hosts: dict | None = None) -> list[dict]:
-    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config and its Includes; every
+def read_config(degraded: list[dict], agents: list[dict] | None = None, seen_hosts: dict | None = None,
+                root: pathlib.Path | None = None) -> list[dict]:
+    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config (or `root`, whose relative
+    Includes resolve beside it, as ssh resolves the system config's) and its Includes; every
     IdentityAgent goes to `agents` as {hosts, value}. `seen_hosts`, when given, receives `match`
-    (every Match line's criteria) and `hosts` ({pattern: {hostname, user}}, the first value of each,
-    as ssh takes it): rekey resolves hosts from them when `ssh -G` must not run."""
+    (every Match line's criteria) and `options` ([(Host patterns, hostname|user, value)] in file
+    order): rekey resolves hosts from them when `ssh -G` must not run."""
+    base = ssh_dir() if root is None else root.parent
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -547,15 +550,14 @@ def read_config(degraded: list[dict], agents: list[dict] | None = None, seen_hos
                 if seen_hosts is not None:
                     seen_hosts.setdefault("match", []).append(value)
             elif key in ("hostname", "user") and seen_hosts is not None:
-                for h in hosts:
-                    seen_hosts.setdefault("hosts", {}).setdefault(h, {}).setdefault(key, value.strip().strip('"'))
+                seen_hosts.setdefault("options", []).append((list(hosts), key, value.strip().strip('"')))
             elif key == "include":
                 for pattern in value.split():
                     target, _ = _expand(pattern)
                     if target is None:
                         continue
                     if not pattern.startswith(("~", "/", "%")):
-                        target = ssh_dir() / pattern
+                        target = base / pattern
                     for found in sorted(glob.glob(str(target))):
                         walk(pathlib.Path(found), depth + 1)
             elif key == "identityfile":
@@ -568,8 +570,37 @@ def read_config(degraded: list[dict], agents: list[dict] | None = None, seen_hos
             elif key == "identityagent" and agents is not None:
                 agents.append({"hosts": list(hosts), "value": value.strip().strip('"')})
 
-    walk(ssh_dir() / "config", 0)
+    walk(ssh_dir() / "config" if root is None else root, 0)
     return out
+
+
+def system_config() -> pathlib.Path:
+    """The system-wide ssh_config ssh reads after the user's (`OBSERVATORY_SSH_SYSTEM_CONFIG` for tests)."""
+    named = os.environ.get("OBSERVATORY_SSH_SYSTEM_CONFIG")
+    if named:
+        return pathlib.Path(named)
+    if sys.platform == "win32":
+        return pathlib.Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "ssh" / "ssh_config"
+    return pathlib.Path("/etc/ssh/ssh_config")
+
+
+def _host_matches(alias: str, patterns: list[str]) -> bool:
+    """ssh's Host rule: one pattern matches (`*`, `?`) and no negated one does."""
+    def one(p: str) -> bool:
+        return re.fullmatch("".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in p),
+                            alias, re.I) is not None
+    if any(one(p[1:]) for p in patterns if p.startswith("!")):
+        return False
+    return any(one(p) for p in patterns if not p.startswith("!") and not p.startswith("Match "))
+
+
+def config_value(seen: dict, alias: str, key: str) -> str | None:
+    """The first value of `key` (hostname, user) a Host block matching `alias` gives, in file order:
+    ssh keeps the first value it obtains, so an early `Host *` wins over a later `Host alias`."""
+    for patterns, k, value in seen.get("options", []):
+        if k == key and _host_matches(alias, patterns):
+            return value
+    return None
 
 
 def config_hosts() -> set[str]:
@@ -1476,10 +1507,12 @@ def github_account(degraded: list[dict]) -> str | None:
 
 
 def _git_service_step(new: str, hostname: str) -> str:
-    """The step for a git service reached over SSH (GitHub Enterprise Server and the like)."""
-    return (f"add this machine's public line ({CMD} copy {new}) in that service's SSH key settings; for GitHub "
-            f"Enterprise Server: gh auth login --hostname {hostname}, then "
-            f"GH_HOST={hostname} gh ssh-key add ~/.ssh/{new}.pub")
+    """The step for a git service reached over SSH (GitHub Enterprise Server and the like). The host
+    name was validated (HOST_ARG) and is quoted for the shell all the same."""
+    host, pub = shlex.quote(hostname), shlex.quote(f"{new}.pub")
+    return (f"add this machine's public line ({CMD} copy {shlex.quote(new)}) in that service's SSH key settings; "
+            f"for GitHub Enterprise Server: gh auth login --hostname {host}, then "
+            f"GH_HOST={host} gh ssh-key add ~/.ssh/{pub}")
 
 
 def _signs_with(value: str | None, old_base: pathlib.Path, fp_old: str | None) -> bool:
@@ -1543,7 +1576,11 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
     unknown: list[dict] = []
     aliases: list[str] = []
     seen: dict = {}
-    for entry in read_config(degraded, seen_hosts=seen):
+    config_gaps: list[dict] = []
+    entries = read_config(config_gaps, seen_hosts=seen)
+    read_config(config_gaps, seen_hosts=seen, root=system_config())   # ssh reads it after the user's
+    degraded += config_gaps
+    for entry in entries:
         if not _same_path(entry["path"], old_base):
             continue
         for h in entry["hosts"]:
@@ -1558,15 +1595,18 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
             elif h not in aliases:
                 aliases.append(h)
     # `ssh -G` evaluates `Match exec`, which runs a command (review of #405): a plan that reads only
-    # never hands such a config to ssh, and takes each host's HostName and User from the config text.
+    # never hands a config with one to ssh, nor one whose parts the scan could not read (the user's or
+    # the system's: an Include too deep, too large, unreadable), and takes each host's HostName and
+    # User from the config text instead, by ssh's first-obtained-value rule.
     match_exec = any(re.search(r"(?:^|\s)!?exec(?:\s|=|$)", m, re.I) for m in seen.get("match", []))
+    text_only = match_exec or any(d["source"] == "ssh-config" for d in config_gaps)
     ssh = tool("ssh")
     resolved: dict[str, dict] = {}
     for alias in aliases + [a for a in servers if a not in aliases]:
         user, _, bare = alias.rpartition("@")
-        written = dict(seen.get("hosts", {}).get("*", {}), **seen.get("hosts", {}).get(bare, {}))
-        host = {"hostname": written.get("hostname", bare), "user": user or written.get("user", "")}
-        if not match_exec and available(ssh):
+        hostname = (config_value(seen, bare, "hostname") or bare).replace("%%", "\0").replace("%h", bare)
+        host = {"hostname": hostname.replace("\0", "%"), "user": user or config_value(seen, bare, "user") or ""}
+        if not text_only and available(ssh):
             try:
                 g = resolve_host(ssh, alias)
                 host = {"hostname": g["hostname"], "user": g["user"]}
@@ -1575,7 +1615,11 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
         resolved[alias] = host
     github_hosts, server_hosts, git_hosts = [], [], []
     for alias, host in resolved.items():
-        if host["hostname"].lower() in GITHUB_HOSTS:
+        if not HOST_ARG.fullmatch(host["hostname"]) or "%" in host["hostname"] or "@" in host["hostname"]:
+            unknown.append({"where": f"Host {alias}", "why": "its HostName could not be read as a host name, so it is "
+                                                             "neither sent to nor named in a command",
+                            "next": f"check Host {alias} in ~/.ssh/config, then: {CMD} rekey {old} --server ALIAS"})
+        elif host["hostname"].lower() in GITHUB_HOSTS:
             github_hosts.append(alias)
         elif host["user"] == "git":
             git_hosts.append(alias)
@@ -1586,10 +1630,11 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
                                                          f"service (GitHub Enterprise and the like), with no "
                                                          f"authorized_keys to append to",
                         "next": _git_service_step(new, resolved[alias]["hostname"])})
-    if match_exec:
-        degraded.append({"source": "ssh-config", "reason": "ssh -G was not run: the config has Match exec, which "
-                                                           "ssh -G would run; hosts were read from the config's own "
-                                                           "HostName and User lines"})
+    if text_only:
+        why = ("the config has Match exec, which ssh -G would run" if match_exec
+               else "part of the config was not read, and it may hold a Match exec, which ssh -G would run")
+        degraded.append({"source": "ssh-config", "reason": f"ssh -G was not run: {why}; hosts were read from the "
+                                                           f"config's own HostName and User lines"})
 
     held, gh_degraded = github_keys()
     degraded += gh_degraded

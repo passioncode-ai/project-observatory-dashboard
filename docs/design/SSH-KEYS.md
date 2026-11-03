@@ -234,9 +234,15 @@ project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:.
 and its `Include`s, `ssh -G` for each alias (no connection), the account gh is signed in to (`gh api
 user`) and its key lists (`gh api`), and git's global `gpg.format` and `user.signingkey` (`git config
 --global --get`). **`ssh -G` evaluates `Match exec`, which runs a command** (review of #405, OpenSSH
-10.3p1): when the config or an `Include` it follows has a `Match exec` line, the plan does not run
-`ssh -G` at all, takes each host's `HostName` and `User` from the config text (the first value, as ssh
-does) and says so in `degraded`. `--apply` then runs `ssh`, which evaluates the config as every `ssh`
+10.3p1): the plan scans `~/.ssh/config`, the system's `ssh_config` (`/etc/ssh/ssh_config`;
+`%PROGRAMDATA%\ssh\ssh_config` on Windows) and the `Include`s of each, and when any of them has a
+`Match exec` line, or a part could not be read (an `Include` deeper than three levels, over 1 MiB, not
+a regular file or unreadable, each a `degraded` row), it does not run `ssh -G` at all. It then takes
+each host's `HostName` and `User` from the config text by ssh's rule, the first value obtained from
+the matching `Host` blocks in file order (an early `Host *` wins; `%h` is the alias), and says so in
+`degraded`. A host name read that way, or from `ssh -G`, must pass the same host-name rule as
+`server:ALIAS` and is quoted for the shell in every command the answer prints; one that does not is
+listed as not known. `--apply` then runs `ssh`, which evaluates the config as every `ssh`
 does. The plan prints the other machine's key, the GitHub account a key would go to, this machine's
 key (to be created, or already here and reused), every place it goes with why, what cannot be known
 from here with the next step for each, and what needs a person; it ends with the exact `--apply`

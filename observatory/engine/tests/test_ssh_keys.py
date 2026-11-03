@@ -337,6 +337,8 @@ class Door(unittest.TestCase):
             "FAKE_AGENT": "",
             "SSH_AUTH_SOCK": str(self.root / "default-agent.sock"),
             "FAKE_DEFAULT_SOCK": str(self.root / "default-agent.sock"),
+            # The system-wide ssh_config rekey scans for Match exec: the scratch one, never /etc's.
+            "OBSERVATORY_SSH_SYSTEM_CONFIG": str(self.root / "etc-ssh" / "ssh_config"),
         })
 
     def tearDown(self):
@@ -1687,6 +1689,53 @@ class Rekey(Door):
         self.assertIn("Match exec", p.stdout)
         self.assertIn("server:alpha", p.stdout)
         self.assertNotIn("server:gh", p.stdout)
+
+    def test_match_exec_in_the_system_config_also_keeps_ssh_g_away(self):
+        """Confirming review of #405: ssh reads /etc/ssh/ssh_config and its Includes too."""
+        system = self.root / "etc-ssh"
+        (system / "ssh_config.d").mkdir(parents=True)
+        (system / "ssh_config").write_text("Include ssh_config.d/*\n")
+        (system / "ssh_config.d" / "corp").write_text('Match exec "true"\n  User other\n')
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.calls("ssh"), [], "ssh -G ran although the system config has Match exec")
+        self.assertIn("server:alpha", p.stdout)
+
+    def test_a_config_part_the_scan_could_not_read_keeps_ssh_g_away(self):
+        """An Include deeper than the scan follows may hold a Match exec nobody saw."""
+        chain = ["config"] + [f"part{i}" for i in range(1, 6)]
+        body = (self.ssh / "config").read_text()
+        for here, there in zip(chain, chain[1:]):
+            (self.ssh / here).write_text(f"Include {there}\n" + (body if here == "config" else ""))
+        (self.ssh / chain[-1]).write_text('Match exec "true"\n')
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual(self.calls("ssh"), [])
+        self.assertTrue(any("ssh -G was not run" in d["reason"] for d in doc["degraded"]), doc["degraded"])
+
+    def test_the_text_fallback_takes_the_first_value_in_file_order(self):
+        """ssh takes each option's first value across the matching Host blocks, so an early `Host *`
+        wins over a later `Host alpha`."""
+        (self.ssh / "config").write_text('Match exec "true"\n  User other\n'
+                                         "Host *\n  HostName first.example.invalid\n"
+                                         "Host alpha\n  HostName alpha.example.invalid\n  User deploy\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        alpha = next(t for t in doc["targets"] if t["to"] == "server:alpha")
+        self.assertEqual(alpha["hostname"], "first.example.invalid")
+
+    def test_a_host_name_from_the_config_is_validated_and_quoted(self):
+        (self.ssh / "config").write_text('Match exec "true"\n  User other\n'
+                                         "Host ghe\n  HostName ghe[1].example.invalid\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n"
+                                         "Host bad\n  HostName $(touch pwned)\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        ghe = next(u for u in doc["unknown"] if u["where"] == "Host ghe")
+        self.assertIn("gh auth login --hostname 'ghe[1].example.invalid'", ghe["next"])
+        self.assertIn("GH_HOST='ghe[1].example.invalid' gh ssh-key add", ghe["next"])
+        bad = next(u for u in doc["unknown"] if u["where"] == "Host bad")
+        self.assertNotIn("touch", json.dumps(bad))
+        self.assertNotIn("server:bad", [t["to"] for t in doc["targets"]])
 
     def test_a_git_service_host_is_not_a_shell_target(self):
         """Review of #405: a Host that logs in as `git` to a server other than github.com is a git
