@@ -499,12 +499,17 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                uncommitted work) into one encrypted .obmachine in the backups root;
                                daily from `maintain` and before each update
   machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
-                  [--second-machine|--same-machine]
-                               put a machine bundle back: the plan by default; --apply writes only
-                               what is missing; --overwrite moves a conflict aside first; a bundle
-                               from another machine writes no private SSH key and stages its jobs
+                  [--second-machine|--same-machine] [--only|--skip CATEGORY[,...]] [--projects NAME[,...]]
+                               put a machine bundle back: the plan by default, per category; --apply
+                               writes only what is missing; --overwrite moves a conflict aside first;
+                               a bundle from another machine writes no private SSH key and stages its
+                               jobs; --only/--skip limit it by category, --projects limits --clone
   machine-move show|cutover LABEL|leave LABEL --to MACHINE_ID
                                move one background job between two machines, so it never runs on both
+  machine-move status [--peer FILE] [--json] | facts [--out FILE]
+                               the checklist of a move, M1 to M4 (one release, the restore complete,
+                               its own SSH key and device id, the vault the same, no job on both),
+                               against the other machine's facts
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left

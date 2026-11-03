@@ -42,6 +42,36 @@ while the major version is 0, a minor release may change behaviour and says so h
   only after a narrow one verifies again, sends it only to its own Sentry, and counts it revoked only when that
   Sentry refuses it after once accepting it; `list` and `status` say what exists and whether it works. Self-hosted
   Sentry (`--base-url`, `--region-host`) and the documented `us` and `de` region hosts are handled, by exact name.
+- **A partial move restores exactly what you name** (OBS-282; `docs/ONBOARDING.md` "Moving only part of it").
+  `full machine-restore` takes `--only` or `--skip` by category (`ssh-private`, `ssh-config`, `launchd`, `cli-logins`,
+  `claude`, `codex`, `git`, `shell`, `fabric-services`, `packages`, `agents`, `operator`; repeatable or
+  comma-separated, not both) and `--projects` for `--clone` (a checkout's folder name, a glob over it, or a path that
+  names every checkout under it; a worktree brings its main checkout). Every plan row names its `category`, and the
+  answer's `categories` says per category whether it is selected, how many items it holds in each state and the first
+  destinations an `--apply` would write; the plan's `next` repeats the filters. A category is decided by the path an
+  item is written to, so a key included from another folder is still `ssh-private`, and a private key stays withheld
+  on a second machine whatever `--only` names. An unknown category, `--only` with `--skip`, `--packages` with
+  `packages` left out and a project no checkout matches are refused before anything is written. Each step that writes
+  records what it did in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/restore.json` (schema
+  `observatory-machine-restore/1`, owner-only). Without the new flags a restore writes what it wrote before. Tests:
+  `tests/test_machine_backup.py` SecondMachine `test_only_writes_the_named_categories_and_the_plan_says_what_each_would_write`,
+  `test_skip_leaves_out_what_it_names`, `test_ssh_private_stays_withheld_on_a_second_machine_whatever_only_says`,
+  `test_the_same_machine_restores_only_the_keys_when_asked`, `test_a_category_is_checked_before_anything_is_read`,
+  `test_a_receipt_names_the_restore_and_the_other_machines_keys`; Restore `test_projects_clones_only_the_named_checkouts`,
+  `test_a_worktree_named_brings_its_main_checkout_and_a_path_names_what_is_under_it`,
+  `test_a_project_no_checkout_matches_is_refused_before_anything_is_written`.
+- **`full machine-move status`: the checklist of a move** (OBS-286; `docs/ONBOARDING.md` "Checking the move"). One
+  checklist on the machine it runs on, M1 `release` (the same release on both), M2 `restore` (the restore complete),
+  M3 `ssh-key` (its own SSH key), `device-id` (its own device id) and `vault` (every slot `same`, from the vault
+  digests, computed without writing anything or creating the estate key), M4 `jobs` (no job defined on both machines
+  or defined here while placed elsewhere), each `ok`, `missing` with the step that fixes it, or `unknown`, with its
+  evidence; `--json`, exit 0 only when every item is `ok`. It reaches nothing on the other machine: it compares that
+  machine's public facts (`full machine-move facts --out FILE` there, schema `observatory-machine-facts/1`, then
+  `--peer FILE` here or the file in `machine-move/peers/`), and facts older than 48 hours (`--max-age-hours`) read as
+  `unknown` for the release and the jobs, never a guess. A facts file of any other shape is refused by name in
+  `degraded` and the rest still compared; `facts` writes only what the reader takes (`omitted` counts what it
+  masked or left out) and writes the file whole, never over an existing name. Tests: `tests/test_machine_backup.py` MoveStatus,
+  MoveStatusVault.
 
 ## 0.30.1 (2026-11-02)
 
