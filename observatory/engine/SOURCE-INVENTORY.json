@@ -4945,8 +4945,8 @@
     {
       "path": "tests/test_keyserver_boundary.py",
       "source_sha256": "2d1679c184b45707a5c31e4bb503a6fdb37d458a04706b4c469fb6e3e654a2ab",
-      "export_sha256": "2b2d830660497dc05f0a024b4727bfa84236dd09f703f74e307778d525df0e3a",
-      "bytes": 30295,
+      "export_sha256": "aa65706594436d126ef71daa4bcbdf14f7db49049e206c2c7ec012e007cb8d83",
+      "bytes": 32920,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -6678,8 +6678,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "0706c769f943f1d87c122c40c8ec8a92c6fd4d6dcfd10f44ec597181032dc089",
-      "bytes": 42719,
+      "export_sha256": "a66b9b8955160fa270fa862e370d2a5c3973479a24981c343bb5d7058d7ea8ac",
+      "bytes": 45704,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
