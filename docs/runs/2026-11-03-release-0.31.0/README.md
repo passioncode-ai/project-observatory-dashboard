@@ -54,8 +54,21 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python`:
 
 ## Receipts
 
-To be filled in after the tag.
+- Release PR #408 merged as `f2b45754` (all 10 checks green on `2c72c460`); tag `v0.31.0` (annotated, object
+  `2800e2b9`) pushed on it.
+- Release run `41611465663`: every job green on the first attempt (guard, manifest, wheel, macos, linux x64 and
+  arm64, windows x64 and arm64, feed, publish). Published 2026-11-03T10:19:15Z with 19 assets.
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.31.0-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key (EdDSA
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7`); `gh attestation verify` on the wheel with `--signer-repo
+  passioncode-ai/.github`: exit 0.
+- Installed on the operator's machine by the engine's own unattended update from the feed (`full update --apply
+  --unattended`, already running when the manual `full update --version 0.31.0 --apply` was tried, which refused
+  with "Another `full update --apply` is running" and changed nothing). `full doctor` then reports version 0.31.0,
+  no coverage warnings, and the tick verdict `ok`.
 
 ## Next
 
-The live Sentry steps (OBS-292) once the human gates clear, then OBS-300, OBS-293, OBS-288's rest and OBS-294.
+The live Sentry steps (OBS-292) for the slot of the project that asked for them: the release token (`org:ci`) and the read
+token, each made by a person in Sentry's page, then `install` and `revoke`; reported on board thread `dafb49ce`. Then
+#409 (OBS-300) after its review, OBS-293, OBS-288's rest and OBS-294.
