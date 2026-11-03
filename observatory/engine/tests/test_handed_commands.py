@@ -83,6 +83,9 @@ SAMPLES = {
     "{target}": "github", "{snap}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # The other machine's key that `ssh-keys rekey` replaces here (OBS-285).
     "OLD": "id_work",
+    # machine-move status M3 (OBS-306): the key rekey replaces, this machine's own key's new name, its fingerprint.
+    "{shlex.quote(old)}": "id_work", "NEW": "id_work-own",
+    "{k['fingerprint']}": "SHA256:" + "A" * 43,
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
