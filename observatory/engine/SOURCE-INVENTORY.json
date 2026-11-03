@@ -940,22 +940,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "249820fe3964a1104637a4777bfe91e004db33bb1b646bccdc07db7bde855221",
-      "bytes": 34347,
+      "export_sha256": "ca885c3fbba77c641b8f43478f93515a5889295122f34a5b3afc639ae9aa8b18",
+      "bytes": 35010,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "04083b2dd77de9ecf5c1809f66498f23bdcc60b91351e47e91f5fe6b288e0e4d",
-      "bytes": 210798,
+      "export_sha256": "bbee7d9f0dbad67b06ffbe6165c651e466550a82ee16e9e1eaf191c17f39539d",
+      "bytes": 215268,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "b92033ed6fd4c8db74763c00ec77735015d1ae5bde8d27c0da30248e147f5192",
-      "bytes": 177839,
+      "export_sha256": "b6d078890330b26cc8359ea725d74241f847b95bd7e2ab76d3f89c55d7fa60e4",
+      "bytes": 179370,
       "upstream_modified": true
     },
     {
@@ -3203,8 +3203,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "3569560e2479d2254365f1c78b6ae953a4e7496891cccf1232a7570d9ec1c2a4",
-      "bytes": 100309,
+      "export_sha256": "621d3d6f32c73c36c410b9e11218e9737c03266308a966f800add384875e34fa",
+      "bytes": 100388,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3981,8 +3981,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "d09ed91a6ac047dfc52d7bd527f97eb1caeee41c03eff19fe3267b224d493f69",
-      "bytes": 50444,
+      "export_sha256": "f4c334d9aa7567b2afc9ba9531dcf7245d3367fcff5ea536a85a9a0ab5205753",
+      "bytes": 50569,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5768,6 +5768,13 @@
       "bytes": 67375
     },
     {
+      "path": "tests/test_sentry_door.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "24060ab563d461e4f9a51c55a9e1d27ac64958059047269e48e015d8345f9157",
+      "bytes": 51672
+    },
+    {
       "path": "tests/test_serverd.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6902,6 +6909,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/sentry.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6bed6f0c8d54a567eea72eafc67bdd05cda0b57c8d730323a79eed15ad65b615",
+      "bytes": 69385
+    },
+    {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
       "export_sha256": "70a925387021baca48dd58951f3ef77fdd61a7358c13b4876dd6741968067925",
@@ -7182,7 +7196,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 962,
+  "file_count": 964,
   "excluded": [
     "git-history",
     "operator-registries",
