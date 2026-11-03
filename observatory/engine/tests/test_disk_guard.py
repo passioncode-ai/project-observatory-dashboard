@@ -2688,5 +2688,261 @@ class RegistrationFairness(Base):
         self.assertTrue(all(0 < row[1] <= 2 for row in calls))
 
 
+
+class VmCacheAtCritical(Base):
+    """OBS-305: at `critical`, all unused Docker build cache, then a trim inside each running
+    Colima or Lima VM, counted by the host disk. Fakes only: no docker, colima or limactl runs."""
+
+    def shipped(self):
+        return json.loads((ROOT / "defaults" / "cleanup.json").read_text())["guard"]["commands"]
+
+    def script(self, name, body):
+        path = self.t1 / name
+        path.write_text(body)
+        return [sys.executable, str(path)]
+
+    def trim_action(self, listing, trim_body="pass", timeout=10, list_exit=0):
+        out = self.t1 / "trimmed.txt"
+        lister = self.script("list_vms.py", "import sys; sys.stdout.write(" + repr(listing) + "); sys.exit("
+                             + str(list_exit) + ")")
+        trimmer = self.script("trim.py", "import sys\nopen(" + repr(str(out)) + ", 'a').write(sys.argv[1] + '\\n')\n"
+                              + trim_body + "\n")
+        return out, {"class": "cache-command", "target": "vm fstrim", "argv": [*trimmer, "{instance}"],
+                     "instances": lister, "busy_if": [], "needs": [], "timeout": timeout,
+                     "password_output": "a password is required"}
+
+    def test_critical_prunes_all_unused_build_cache_then_trims_and_never_volumes(self):
+        cmds = self.shipped()
+        docker = [c for c in cmds if c["argv"][0] == "docker"]
+        prune = [c for c in docker if c["argv"] == ["docker", "builder", "prune", "-af"]]
+        self.assertEqual(len(prune), 1)
+        self.assertEqual(prune[0]["level"], "critical")
+        self.assertGreaterEqual(prune[0]["every_hours"], 1, "not on every pass")
+        self.assertEqual({tuple(c["needs_running"]) for c in docker}, {tuple(prune[0]["needs_running"])},
+                         "the same daemon rule for every docker entry")
+        for c in docker:
+            words = set(c["argv"])
+            self.assertFalse(words & {"system", "volume", "volumes", "--volumes", "container", "rm", "rmi"}, c["argv"])
+        trims = [c for c in cmds if "fstrim" in c["argv"]]
+        self.assertEqual([c["argv"][0] for c in trims], ["colima", "limactl"])
+        order = [c["argv"] for c in cmds]
+        for t in trims:
+            self.assertEqual(t["level"], "critical")
+            self.assertGreaterEqual(t["every_hours"], 1)
+            self.assertIn("{instance}", t["argv"])
+            self.assertEqual(t["instances"][0], t["argv"][0])
+            self.assertEqual(t["argv"][-4:], ["sudo", "-n", "fstrim", "-av"], "sudo never waits for a password")
+            self.assertGreater(order.index(t["argv"]), order.index(prune[0]["argv"]), "the trim follows the prune")
+        self.assertNotIn("start", {w for t in trims for w in t["argv"] + t["instances"]}, "the guard starts no VM")
+
+    def test_only_critical_plans_them_and_at_most_every_few_hours(self):
+        cfg = self.cfg(commands=self.shipped())
+        new = {"docker builder prune -af", "colima ssh --profile {instance} -- sudo -n fstrim -av",
+               "limactl shell -- {instance} sudo -n fstrim -av"}
+        with patch.object(self.g, "find_tool", side_effect=lambda name: "/fake/bin/" + name):
+            for level in ("normal", "low"):
+                self.assertFalse(new & {a["target"] for a in self.g.plan_commands(cfg, level)}, level)
+            planned = {a["target"]: a for a in self.g.plan_commands(cfg, "critical")}
+            self.assertLessEqual(new, set(planned))
+            trim = planned["colima ssh --profile {instance} -- sudo -n fstrim -av"]
+            self.assertEqual(trim["instances"], ["/fake/bin/colima", "list", "--json"])
+            self.assertEqual(trim["password_output"], "a password is required")
+            now_t = time.time()
+            recent = {t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_t - 600)) for t in new}
+            self.assertFalse(new & {a["target"] for a in self.g.plan_commands(cfg, "critical", recent, now_t)})
+        with patch.object(self.g, "find_tool", side_effect=lambda name: None if name == "limactl" else "/fake/" + name):
+            self.assertNotIn("limactl shell -- {instance} sudo -n fstrim -av",
+                             {a["target"] for a in self.g.plan_commands(cfg, "critical")})
+
+    def test_docker_entries_count_a_colima_or_lima_daemon_as_running(self):
+        import holders
+        needs = [c["needs_running"] for c in self.shipped() if c["argv"][0] == "docker"]
+        self.assertTrue(needs)
+        if os.name == "nt":
+            # No process listing on Windows: whether a daemon runs is unknown and the command is skipped.
+            self.assertIsNone(holders.running(needs[0]))
+            return
+        for listing in ("/opt/homebrew/bin/limactl hostagent --pidfile /x/ha.pid colima\n",
+                        "/opt/homebrew/bin/colima daemon start default\n"):
+            for need in needs:
+                with self.subTest(listing=listing), \
+                        captured_commands(return_value=subprocess.CompletedProcess([], 0, listing, "")):
+                    self.assertTrue(holders.running(need))
+        with captured_commands(return_value=subprocess.CompletedProcess([], 0, "/usr/bin/login -fp someone\n", "")):
+            self.assertIsNone(holders.running(needs[0]), "absence stays unknown: the command is skipped")
+
+    def test_the_trim_runs_in_each_running_vm_and_the_host_disk_counts_it(self):
+        listing = "\n".join(json.dumps(r) for r in (
+            {"name": "default", "status": "Running"}, {"name": "other", "status": "Stopped"},
+            {"name": "bad name;x", "status": "Running"}, {"name": "work", "status": "Running"})) + "\n"
+        out, action = self.trim_action(listing)
+        frees = iter([int(4.17 * self.g.GB), int(10.83 * self.g.GB)])
+        with patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
+            rec = self.g.act(action, self.free())
+        self.assertEqual(rec["result"], "removed")
+        self.assertEqual(out.read_text().split(), ["default", "work"], "running VMs only, valid names only")
+        self.assertEqual((rec["instances"], rec["instances_done"], rec["instances_failed"]), (2, 2, 0))
+        self.assertEqual(rec["freed_mb"], round((int(10.83 * self.g.GB) - int(4.17 * self.g.GB)) / 1048576))
+
+    def test_a_json_array_listing_is_read_too(self):
+        out, action = self.trim_action(json.dumps([{"name": "default", "status": "Running"}]))
+        with patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            self.assertEqual(self.g.act(action, self.free())["result"], "removed")
+        self.assertEqual(out.read_text().split(), ["default"])
+
+    def test_no_running_vm_or_an_unreadable_list_starts_nothing(self):
+        for listing, code, reason_code in ((json.dumps({"name": "default", "status": "Stopped"}) + "\n", 0, "no-running-vm"),
+                                           ("", 0, "no-running-vm"),
+                                           ("not json", 0, "vm-list-unknown"),
+                                           ('["x"]', 0, "vm-list-unknown"),
+                                           (json.dumps({"name": "default", "status": "Running"}), 1, "vm-list-unknown")):
+            with self.subTest(listing=listing, code=code):
+                out, action = self.trim_action(listing, list_exit=code)
+                rec = self.g.act(action, self.free())
+                self.assertEqual((rec["result"], rec["reason_code"]), ("skipped", reason_code))
+                self.assertIn("starts", rec["reason"])
+                self.assertFalse(out.exists(), "nothing ran inside a VM")
+
+    def test_sudo_asking_for_a_password_fails_fast_and_is_reported(self):
+        body = "sys.stderr.write('sudo: a password is required SYNTHETIC_SECRET_SENTINEL'); sys.exit(1)"
+        out, action = self.trim_action(json.dumps({"name": "default", "status": "Running"}), body)
+        with patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            rec = self.g.act(action, self.free())
+        self.assertEqual((rec["result"], rec["reason_code"], rec["exit_code"]), ("failed", "needs-password", 1))
+        self.assertIn("password", rec["reason"])
+        self.assertEqual((rec["instances_done"], rec["instances_failed"]), (0, 1))
+        self.assertNotIn("SYNTHETIC_SECRET_SENTINEL", json.dumps(rec))
+
+    def test_a_trim_past_its_time_is_skipped_quickly(self):
+        out, action = self.trim_action(json.dumps({"name": "default", "status": "Running"}),
+                                       "import time; time.sleep(30)", timeout=2)
+        started = time.monotonic()
+        with patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            rec = self.g.act(action, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertLess(time.monotonic() - started, 10)
+
+    def test_a_workspace_copy_of_an_earlier_release_takes_the_new_commands(self):
+        history = json.loads((ROOT / "defaults" / "cleanup-history.json").read_text())["guard"]
+        self.assertIn("0.24.1", history)
+        old = history["0.24.1"]
+        self.assertNotIn(["docker", "builder", "prune", "-af"], [c["argv"] for c in old["commands"]])
+        import paths
+        target = paths.config_file("cleanup.json")
+        doc = json.loads(target.read_text()) if target.exists() else {}
+        doc["guard"] = old
+        target.write_text(json.dumps(doc))
+        self.assertEqual(self.g.load_config()["commands"], self.shipped())
+
+
+    def test_a_name_with_a_trailing_newline_is_never_passed_on(self):
+        listing = json.dumps({"name": "default\n", "status": "Running"}) + "\n" + json.dumps(
+            {"name": "work", "status": "Running"}) + "\n"
+        out, action = self.trim_action(listing)
+        with patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            rec = self.g.act(action, self.free())
+        self.assertEqual(out.read_text().split(), ["work"])
+        self.assertEqual(rec["instances"], 1)
+
+    def test_one_failing_vm_does_not_stop_the_trim_of_the_others(self):
+        listing = "\n".join(json.dumps({"name": n, "status": "Running"}) for n in ("nofstrim", "default", "work"))
+        body = "if sys.argv[1] == 'nofstrim':\n    sys.stderr.write('fstrim: not found'); sys.exit(127)"
+        out, action = self.trim_action(listing, body)
+        frees = iter([self.g.GB, 3 * self.g.GB])
+        with patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
+            rec = self.g.act(action, self.free())
+        self.assertEqual(out.read_text().split(), ["nofstrim", "default", "work"], "every running VM was tried")
+        self.assertEqual((rec["instances"], rec["instances_done"], rec["instances_failed"]), (3, 2, 1))
+        self.assertEqual((rec["result"], rec["reason_code"], rec["exit_code"]), ("failed", "command-failed", 127))
+        self.assertEqual(rec["freed_mb"], 2048, "what the others gave back is still counted")
+
+
+class DockerDaemonIsLocal(Base):
+    """OBS-305 review M1: a docker command acts on whatever daemon the docker context names; the
+    guard cleans only a daemon behind a local socket. Fakes only: no docker runs."""
+
+    def test_endpoint_kinds(self):
+        home = str(Path.home())
+        cases = {
+            "unix:///var/run/docker.sock": "local",
+            "unix:///run/user/501/docker.sock": "local",
+            # A Windows home is not a unix path: there such a socket reads as unknown, never local.
+            "unix://" + home + "/.colima/default/docker.sock": "unknown" if os.name == "nt" else "local",
+            "unix://" + home + "/.docker/run/docker.sock": "unknown" if os.name == "nt" else "local",
+            "unix:///var/run/../../tmp/forwarded.sock": "remote",
+            "unix:///tmp/forwarded.sock": "remote",
+            "unix://relative.sock": "unknown",
+            "ssh://deploy@prod.example.test": "remote",
+            "tcp://10.0.0.5:2376": "remote",
+            "https://docker.example.test:2376": "remote",
+            "npipe:////./pipe/docker_engine": "local",
+            "npipe://buildhost/pipe/docker_engine": "remote",
+            "": "unknown",
+            "not an endpoint": "unknown",
+            "unix:///var/run/docker.sock\nssh://x": "unknown",
+            "gopher://x": "unknown",
+        }
+        for host, kind in cases.items():
+            with self.subTest(host=host):
+                self.assertEqual(self.g.endpoint_kind(host), kind)
+
+    def test_docker_host_wins_and_no_context_is_read(self):
+        with patch.dict(os.environ, {"DOCKER_HOST": "ssh://deploy@prod.example.test"}), \
+                patch.object(self.g.subprocess, "run", side_effect=AssertionError("no docker call")):
+            self.assertEqual(self.g.docker_daemon("/fake/bin/docker", 5), "remote")
+        with patch.dict(os.environ, {"DOCKER_HOST": "unix:///var/run/docker.sock"}), \
+                patch.object(self.g.subprocess, "run", side_effect=AssertionError("no docker call")):
+            self.assertEqual(self.g.docker_daemon("/fake/bin/docker", 5), "local")
+
+    def test_the_current_context_is_read_within_the_deadline(self):
+        for result, kind in ((subprocess.CompletedProcess([], 0, "unix:///var/run/docker.sock\n", ""), "local"),
+                             (subprocess.CompletedProcess([], 0, "ssh://deploy@prod.example.test\n", ""), "remote"),
+                             (subprocess.CompletedProcess([], 0, "tcp://10.0.0.5:2376\n", ""), "remote"),
+                             (subprocess.CompletedProcess([], 1, "", "context not found"), "unknown"),
+                             (subprocess.TimeoutExpired("docker", 3), "unknown"),
+                             (OSError(2, "missing"), "unknown")):
+            with self.subTest(result=result), patch.dict(os.environ, {"DOCKER_HOST": ""}):
+                run = Mock(side_effect=[result]) if isinstance(result, Exception) else Mock(return_value=result)
+                with patch.object(self.g.subprocess, "run", run):
+                    self.assertEqual(self.g.docker_daemon("/fake/bin/docker", 3), kind)
+                argv = run.call_args.args[0]
+                self.assertEqual(argv, ["/fake/bin/docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"])
+                self.assertLessEqual(run.call_args.kwargs["timeout"], 3)
+        with patch.dict(os.environ, {"DOCKER_HOST": ""}), \
+                patch.object(self.g.subprocess, "run", side_effect=AssertionError("no time left, no call")):
+            self.assertEqual(self.g.docker_daemon("/fake/bin/docker", 0), "unknown")
+
+    def action(self):
+        return {"class": "cache-command", "target": "docker builder prune -af",
+                "argv": ["/fake/bin/docker", "builder", "prune", "-af"], "busy_if": [], "needs": ["dockerd"],
+                "timeout": 20}
+
+    def test_a_remote_or_unknown_daemon_is_never_pruned(self):
+        for kind, code in (("remote", "remote-docker-context"), ("unknown", "docker-context-unknown")):
+            with self.subTest(kind=kind), patch.object(self.g, "running", return_value=True), \
+                    patch.object(self.g, "docker_daemon", return_value=kind) as where, \
+                    patch.object(self.g.subprocess, "run", side_effect=AssertionError("nothing runs")):
+                rec = self.g.act(self.action(), self.free())
+            self.assertEqual((rec["result"], rec["reason_code"]), ("skipped", code))
+            self.assertEqual(where.call_args.args[0], "/fake/bin/docker")
+            self.assertLessEqual(where.call_args.args[1], 20, "bounded by the command's own deadline")
+
+    def test_a_local_daemon_is_pruned(self):
+        with patch.object(self.g, "running", return_value=True), \
+                patch.object(self.g, "docker_daemon", return_value="local"), \
+                patch.object(self.g, "free_bytes", return_value=self.g.GB), \
+                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+            rec = self.g.act(self.action(), self.free())
+        self.assertEqual(rec["result"], "removed")
+        self.assertEqual(run.call_args.args[0], ["/fake/bin/docker", "builder", "prune", "-af"])
+
+    def test_a_person_s_own_docker_entry_is_held_to_the_same_rule(self):
+        a = {**self.action(), "argv": ["/usr/local/bin/docker", "system", "df"], "target": "docker system df",
+             "needs": []}
+        with patch.object(self.g, "docker_daemon", return_value="remote"), \
+                patch.object(self.g.subprocess, "run", side_effect=AssertionError("nothing runs")):
+            self.assertEqual(self.g.act(a, self.free())["reason_code"], "remote-docker-context")
+
+
 if __name__ == "__main__":
     unittest.main()
