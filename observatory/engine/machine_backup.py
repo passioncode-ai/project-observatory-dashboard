@@ -1699,15 +1699,16 @@ class _Second:
             return machine_identity.job_label(dest, data.read_bytes())
         return dest.stem if dest.suffix == ".plist" else dest.name
 
-    def ssh_keys(self, manifest: dict, config_written: bool = True, config_kept: bool = False) -> list[dict]:
+    def ssh_keys(self, manifest: dict, config_written: bool = True, config_kept=False) -> list[dict]:
         """Every withheld private key, the hosts the carried `.ssh/config` sends to it, its public
         fingerprint, and the one step that makes this machine's own key under the same name and sends it
         where the other machine's key is registered (`full ssh-keys rekey`, OBS-285, OBS-300), so a
         carried `IdentityFile ~/.ssh/NAME` with `IdentitiesOnly yes` (what `full ssh-keys create --host`
         writes) finds a key here. `config_written` is False when this restore leaves the carried
         `~/.ssh/config` out: `--skip ssh-config`, or (`config_kept`) this machine's own different config,
-        which a restore without `--overwrite` keeps (OBS-306). rekey reads the live config, so it would
-        not see a host."""
+        which a restore without `--overwrite` keeps (OBS-306); a list names every `ssh-config` file
+        `--overwrite --only=ssh-config` would replace. rekey reads the live config, so it would not see
+        a host."""
         keys: dict[str, dict] = {}
         for source in sorted(self.private):
             item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
@@ -1784,11 +1785,18 @@ class _Second:
             step += "".join(f" --server {shlex.quote(alias)}" for alias in servers)
             notes = []
             if unseen and config_kept:
+                # No restore route replaces ~/.ssh/config alone: the `ssh-config` category also replaces
+                # known_hosts, authorized_keys and allowed_signers, and a replaced authorized_keys can lock a
+                # person out of this machine's remote login (review of #414). So the note says to merge by hand.
+                replaced = (", ".join(config_kept) if isinstance(config_kept, (list, tuple)) and config_kept
+                            else "~/.ssh/config and every other ssh-config file that differs here")
                 notes.append(f"~/.ssh/config here differs from the carried one and this restore keeps it (no "
-                             f"--overwrite), so rekey does not see Host {', '.join(unseen)}: replace it first "
-                             "(`project-observatory full machine-restore --apply --overwrite --only=ssh-config`, "
-                             "which moves this machine's own aside), or add each server to both steps with "
-                             "--server ALIAS")
+                             f"--overwrite), so rekey does not see Host {', '.join(unseen)}: copy those Host blocks "
+                             "from the other machine's ~/.ssh/config into this one by hand, or add each server to "
+                             "both steps with --server ALIAS. No restore step replaces ~/.ssh/config alone: "
+                             "`project-observatory full machine-restore --apply --overwrite --only=ssh-config` "
+                             f"replaces {replaced} (each moved aside), and a replaced ~/.ssh/authorized_keys can "
+                             "shut out a remote login to this machine")
             elif unseen:
                 notes.append(f"this restore leaves ~/.ssh/config out, so rekey does not see Host {', '.join(unseen)}: "
                              "write the carried config first (`project-observatory full machine-restore --apply "
@@ -1805,7 +1813,10 @@ class _Second:
                 if HOST_ALIAS.fullmatch(address) and "%" not in address:
                     notes.append(f"rekey cannot be pointed at Host {h['host']} by name: send this machine's key to "
                                  f"its address by hand (`project-observatory full ssh-keys send {name} --to "
-                                 f"server:{shlex.quote(address)} --verify`, with user@ when that Host sets a User)")
+                                 f"server:{shlex.quote(address)} --verify`); that reaches {address} with ssh's "
+                                 f"defaults, not the User, Port or ProxyJump Host {h['host']} sets, so add user@ for "
+                                 "its User, and when it needs a Port or ProxyJump give it a plain Host alias with "
+                                 "them and add that alias to both steps with --server ALIAS")
                 else:
                     notes.append(f"rekey cannot be pointed at Host {h['host']} by name, and it names no address "
                                  "this tool takes: add a plain Host alias for it to ~/.ssh/config (letters, digits, "
@@ -1879,20 +1890,22 @@ class _Second:
                 yield host, hostnames.get(host), identity
 
 
-def _carried_config(manifest: dict, rows: list[dict], home: Path, overwrite: bool) -> str:
+def _carried_config(manifest: dict, rows: list[dict], home: Path, overwrite: bool) -> tuple[str, list[str]]:
     """Whether `--apply` leaves the carried `~/.ssh/config` live here (OBS-306): `written` (missing here,
     the same here, or a conflict `--overwrite` replaces; also when the bundle carries none), `left-out`
-    (`--only` or `--skip` leaves it out) or `kept` (this machine's own differs and is kept)."""
+    (`--only` or `--skip` leaves it out) or `kept` (this machine's own differs and is kept); with `kept`,
+    every `ssh-config` file `--overwrite --only=ssh-config` would replace here, by its destination."""
     configs = {i.get("source") for i in manifest.get("items", [])
                if i.get("kind") == "file" and _area(i, home) == ("ssh", ("config",))}
     for row in rows:
         if row.get("source") not in configs:
             continue
         if row["state"] == "left-out":
-            return "left-out"
+            return "left-out", []
         if row["state"] == "conflict" and not overwrite:
-            return "kept"
-    return "written"
+            return "kept", [r["destination"] for r in rows
+                            if r.get("category") == "ssh-config" and r.get("state") == "conflict"]
+    return "written", []
 
 
 def _ssh_keys_module():
@@ -1934,9 +1947,16 @@ def _other_keys(manifest: dict, stage: Path, home: Path) -> list[dict]:
         except (OSError, ValueError):
             fp = None
         name = rel[-1][:-len(".pub")] if rel[-1].endswith(".pub") else rel[-1]
+        # Directly in this home's .ssh folder, as `_Second.ssh_keys` reads it: only such a key gets a
+        # `rekey` step, in the restore and in `machine-move status` alike (OBS-306).
+        try:
+            dest = _destination(item["source"], home)
+            in_ssh = len(rel) == 1 and dest.parent.parent == home and dest.parent.name.casefold() == ".ssh"
+        except MachineBackupError:
+            in_ssh = False
         if fp and fp not in seen:
             seen.add(fp)
-            out.append({"key": name, "fingerprint": fp})
+            out.append({"key": name, "fingerprint": fp, "in_ssh": in_ssh})
     return sorted(out, key=lambda k: (k["key"], k["fingerprint"]))
 
 
@@ -2493,9 +2513,10 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                 extract(bundle, secret, stage, lambda n: n in names)
                 rows = plan(manifest, stage, home, second=second, wanted=wanted)
                 if second:
-                    landing = _carried_config(manifest, rows, home, overwrite)
+                    landing, replaced = _carried_config(manifest, rows, home, overwrite)
                     ssh_keys = _Second(manifest, home, stage).ssh_keys(
-                        manifest, config_written=landing == "written", config_kept=landing == "kept")
+                        manifest, config_written=landing == "written", config_kept=(replaced or True) if landing == "kept"
+                        else False)
                     other_keys = _other_keys(manifest, stage, home)
         else:
             rows = plan(manifest, None, home)

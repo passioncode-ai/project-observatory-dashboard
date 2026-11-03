@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "89c371517ca945e55ffbbc5d740baa686eb0d49049031ec9181e15258043d272",
-      "bytes": 236135,
+      "export_sha256": "7c19f564b161e3291dfdab4f8dca17dd1f12d011f0c57455d22c4ec07f72a808",
+      "bytes": 237261,
       "upstream_modified": true
     },
     {
@@ -2872,8 +2872,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0a706c5f8c15191b870c48a46324c817a20d9346b66a2400ebfe5996e72e1f87",
-      "bytes": 148710
+      "export_sha256": "26536fb9e0ae173a4f7a16e25ced93f6d8ce63764822f216a0aaa04462987dce",
+      "bytes": 150697
     },
     {
       "path": "machine_identity.py",
@@ -2886,8 +2886,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "34e46590bfb1bfcb9ed6a0c238c79d034082e9b1fd285f46de3b330d2352bbab",
-      "bytes": 52510
+      "export_sha256": "36fd08eb46f19054ee57855d7cd51b7ab200b02a0ae7e7a9034ca483e3931033",
+      "bytes": 54306
     },
     {
       "path": "machine_view.py",
@@ -5043,8 +5043,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e54e7353d5b983be985cb7e4f3c3f7587d33b6c4c1732494adfd9f6f2a45988",
-      "bytes": 133212
+      "export_sha256": "3cd1f40bf4079815349e87eee7f6d14a77c591b7124fde758473583e2e9746cc",
+      "bytes": 137378
     },
     {
       "path": "tests/test_machine_findings.py",

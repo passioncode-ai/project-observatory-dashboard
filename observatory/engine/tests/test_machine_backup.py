@@ -867,6 +867,8 @@ class SecondMachineKeys(unittest.TestCase):
         self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys rekey work')
         self.assertIn('Host my/box', key['note'])
         self.assertIn('ssh-keys send work --to server:box.invalid --verify', key['note'])
+        # Review of #414 (L3): the address alone drops what the Host block sets.
+        self.assertIn('not the User, Port or ProxyJump Host my/box sets', key['note'])
         self.assertNotIn('server:my/box', key['note'])
         self.assertNotIn('server:HOST', key['note'])
         self.assertIn('Host other/box by name, and it names no address', key['note'])
@@ -883,7 +885,32 @@ class SecondMachineKeys(unittest.TestCase):
         self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys rekey work')
         self.assertIn('differs from the carried one', key['note'])
         self.assertIn('Host plain, upper', key['note'])
-        self.assertIn('--overwrite --only=ssh-config', key['note'])
+        # Review of #414 (M2): no step replaces ~/.ssh/config alone, so the note says to merge by hand and
+        # names what the category-wide --overwrite would replace.
+        self.assertIn('copy those Host blocks from the other machine', key['note'])
+        self.assertIn('No restore step replaces ~/.ssh/config alone', key['note'])
+        self.assertIn('authorized_keys can shut out a remote login', key['note'])
+        named = self.keys({'~/.ssh/config': config, '~/.ssh/work': PRIVATE_HEAD + SECRET_MARKER},
+                          config_written=False,
+                          config_kept=['~/.ssh/config', '~/.ssh/authorized_keys'])['~/.ssh/work']
+        self.assertIn('replaces ~/.ssh/config, ~/.ssh/authorized_keys (each moved aside)', named['note'])
+
+    def test_other_keys_say_whether_a_key_sat_directly_in_ssh(self):
+        # Review of #414 (L1): M3 offers a rekey step only where the restore does.
+        root = Path(tmp.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        home, stage = root / 'home', root / 'stage'
+        home.mkdir()
+        (stage / 'files').mkdir(parents=True)
+        direct, fp_direct = openssh_private(b'alpha-direct')
+        deploy, fp_deploy = openssh_private(b'alpha-deploy')
+        items = []
+        for i, (source, data) in enumerate({'~/.ssh/id_work': direct, '~/dotfiles/.ssh/deploy_key': deploy}.items()):
+            (stage / f'files/{i}').write_bytes(data)
+            items.append({'kind': 'file', 'source': source, 'arcname': f'files/{i}', 'sha256': 'x'})
+        got = MB._other_keys({'items': items}, stage, home)
+        self.assertIn({'key': 'id_work', 'fingerprint': fp_direct, 'in_ssh': True}, got)
+        self.assertIn({'key': 'deploy_key', 'fingerprint': fp_deploy, 'in_ssh': False}, got)
 
     def test_a_default_key_in_an_upper_case_folder_keeps_its_steps(self):
         key = self.keys({'~/.SSH/id_ed25519': PRIVATE_HEAD + SECRET_MARKER})['~/.SSH/id_ed25519']
@@ -1031,6 +1058,7 @@ class SecondMachine(Machine):
         # read that one; the plan says so instead of counting the carried hosts as reached.
         (self.fresh / '.ssh').mkdir(mode=0o700)
         (self.fresh / '.ssh/config').write_text('Host mine\n  HostName mine.invalid\n')
+        (self.fresh / '.ssh/known_hosts').write_text('mine.invalid ssh-ed25519 BBBB\n')
         with self.on(BETA):
             kept = MB.restore(self.bundle, self.fresh, secret=PASS)
             replaced = MB.restore(self.bundle, self.fresh, secret=PASS, overwrite=True)
@@ -1039,6 +1067,9 @@ class SecondMachine(Machine):
         self.assertIn('differs from the carried one', key['note'])
         self.assertIn('Host example, tabbed', key['note'])
         self.assertIn('--overwrite --only=ssh-config', key['note'])
+        self.assertIn('replaces ~/.ssh/config, ~/.ssh/known_hosts (each moved aside)', key['note'],
+                      'the note names every ssh-config file the category-wide overwrite would replace here')
+        self.assertIn('by hand', key['note'])
         again = {k['key']: k for k in replaced['ssh_keys']}['id_example']
         self.assertNotIn('note', again, 'with --overwrite the carried config is the live one')
         self.assertEqual(again['steps'], key['steps'])
@@ -1297,7 +1328,7 @@ class SecondMachine(Machine):
         self.assertEqual((part['mode'], part['taken_on'], part['this_machine']), ('second-machine', ALPHA, BETA))
         self.assertEqual((part['skip'], part['only'], part['failed']), (['claude'], [], 0))
         self.assertIn('claude', part['left_out'])
-        self.assertIn({'key': 'id_work', 'fingerprint': fp}, part['other_keys'])
+        self.assertIn({'key': 'id_work', 'fingerprint': fp, 'in_ssh': True}, part['other_keys'])
         self.assertNotIn(SECRET_MARKER.decode(), path.read_text())
         self.assertNotIn('PRIVATE', path.read_text())
 
@@ -1752,8 +1783,13 @@ class MoveStatus(Base):
     def test_no_key_here_gets_the_restores_rekey_steps_from_the_receipt(self):
         # OBS-306 (6): M3 hands out what the restore does, built from the receipt's other_keys.
         shutil.rmtree(self.user / '.ssh')
-        self.receipt(other_keys=[{'key': 'id_ed25519', 'fingerprint': self.beta_fp},
-                                 {'key': '-bad name', 'fingerprint': self.alpha_fp}])
+        other_line, other_fp = pub_line(b'beta-deploy')
+        self.receipt(other_keys=[{'key': 'id_ed25519', 'fingerprint': self.beta_fp, 'in_ssh': True},
+                                 {'key': '-bad name', 'fingerprint': self.alpha_fp, 'in_ssh': True},
+                                 # Not directly in ~/.ssh (the restore gives it a by-hand note), or a receipt
+                                 # older than the field: no rekey step (review of #414, L1).
+                                 {'key': 'deploy_key', 'fingerprint': other_fp, 'in_ssh': False},
+                                 {'key': 'legacy', 'fingerprint': other_fp}])
         _, items = self.check()
         step = f'project-observatory full ssh-keys rekey id_ed25519 --fingerprint {self.beta_fp}'
         self.assertEqual(items['ssh-key']['state'], 'missing')
@@ -1780,10 +1816,33 @@ class MoveStatus(Base):
         self.assertEqual(steps[:2], [step, step + ' --apply'])
         self.assertIn('IdentityFile ~/.ssh/id_ed25519-own', steps[2])
         self.assertIn('rekey removes nothing', steps[2])
+        # Review of #414 (M1): ssh offers a default name to hosts with no IdentityFile line, the new name never.
+        self.assertIn('add `IdentityFile ~/.ssh/id_ed25519-own` for github.com', steps[2])
+        self.assertIn('`Host *`', steps[2])
+        self.assertIn('before removing the copy', steps[2])
         import shlex
         args = MM._ssh_keys_module().parser().parse_args(shlex.split(steps[1])[3:])
         self.assertEqual((args.old, args.name, args.fingerprint, args.apply),
                          ('id_ed25519', 'id_ed25519-own', self.alpha_fp, True))
+
+    def test_two_shared_copies_never_get_one_new_name(self):
+        # Review of #414 (L2): `a/id` and `b/id` beside each other, and a name already taken here.
+        line_a, fp_a = pub_line(b'shared-a')
+        line_b, fp_b = pub_line(b'shared-b')
+        for sub, line in (('a', line_a), ('b', line_b)):
+            folder = self.user / '.ssh' / sub
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / 'id').write_bytes(PRIVATE_HEAD + SECRET_MARKER)
+            (folder / 'id').chmod(0o600)
+            (folder / 'id.pub').write_text(line)
+        (self.user / '.ssh/a-id-own').write_text('taken')
+        self.key(self.other, 'id_a', line_a)
+        self.key(self.other, 'id_b', line_b)
+        _, items = self.check(self.facts_of_beta())
+        steps = items['ssh-key']['next']
+        self.assertIn(f'project-observatory full ssh-keys rekey a/id --name a-id-own2 --fingerprint {fp_a}', steps)
+        self.assertIn(f'project-observatory full ssh-keys rekey b/id --name b-id-own --fingerprint {fp_b}', steps)
+        self.assertNotIn('`Host *`', ' '.join(steps), 'not a default name: its Host lines name it already')
 
     def test_facts_are_public_owner_only_and_never_replace_a_file(self):
         out = self.base / 'alpha-facts.json'

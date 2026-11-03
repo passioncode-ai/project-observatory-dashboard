@@ -2402,10 +2402,16 @@ through another spelling (`~/.SSH/NAME`, another account's absolute path) is add
 `--server ALIAS`, and the `note` says to point that line at `~/.ssh/NAME` where the path it names is
 not this machine's key; and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) or keeps
 this machine's own different `~/.ssh/config` (a conflict, without `--overwrite`) the `note` names
-those hosts instead, with the step that writes the carried config. A Host whose alias rekey does not
-take (a `/` in it, say) is named in the `note` with the `ssh-keys send NAME --to server:ADDRESS
---verify` step for the address its `HostName` gives, or, with no such address, the advice to give it
-a plain Host alias. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
+those hosts instead. With `--skip ssh-config` the `note` gives the step that writes the carried config.
+With a kept config it says to copy those Host blocks from the other machine's `~/.ssh/config` by hand:
+no restore step replaces `~/.ssh/config` alone, and `--overwrite --only=ssh-config` also replaces
+`known_hosts`, `authorized_keys`, `allowed_signers` and a lone `.pub` where they differ (the `note`
+lists the files it would replace here, each moved aside), and a replaced `authorized_keys` can shut
+out a remote login to this machine. A Host whose alias rekey does not take (a `/` in it, say) is
+named in the `note` with the `ssh-keys send NAME --to server:ADDRESS --verify` step for the address
+its `HostName` gives, which reaches it with ssh's defaults rather than the User, Port or ProxyJump
+that Host sets (the `note` says to add `user@`, or to give it a plain Host alias when it needs a Port
+or ProxyJump), or, with no such address, the advice to give it a plain Host alias. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
 every host whose config names no key, so each such server is added with `--server ALIAS`: rekey names
 those hosts as not known, never guesses them. A server whose only access was the other machine's key does not let
 this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
@@ -2496,12 +2502,17 @@ checklist on the machine it runs on, each item `ok`, `missing` (with the step th
 | M4 | `jobs` | no job defined in this machine's job folder (it loads at the next login) is defined on the other machine, or named in this machine's placement file as running elsewhere; this engine's own jobs and a plist marked `Disabled` are not counted |
 
 The `ssh-key` item's steps are the ones the restore hands out: with no key here, `ssh-keys rekey
-NAME --fingerprint SHA256:...` and then the same with `--apply` for each key the restore receipt lists
-as withheld (its `other_keys`) or the other machine's facts name directly in `~/.ssh`; when neither
-names one, the steps say to read the names and fingerprints with `full ssh-keys list` on the other
-machine. A key here that is a copy of the other machine's gets `ssh-keys rekey NAME --name NAME-own
+NAME --fingerprint SHA256:...` and then the same with `--apply` for each key directly in `~/.ssh` that
+the restore receipt lists as withheld (its `other_keys`, whose `in_ssh` says where the key sat; a receipt
+written before that field is not used for steps) or the other machine's facts name; when neither names
+one, the steps say to read the names and fingerprints with `full ssh-keys list` on the other machine.
+A key here that is a copy of the other machine's gets `ssh-keys rekey NAME --name NAME-own
 --fingerprint SHA256:...` and the same with `--apply` (rekey does not reuse the other machine's key as
-this machine's own), then the step to point each Host at `~/.ssh/NAME-own` and remove the copy by hand.
+this machine's own; `keys/id` becomes `keys-id-own`, and a name already taken gets a number), then
+the step to point each Host at `~/.ssh/NAME-own` and remove the copy by hand. For a default name such
+as `id_ed25519` that step first adds `IdentityFile ~/.ssh/NAME-own` for github.com and every host ssh
+offered the copy to without an `IdentityFile` line (or once under `Host *`): ssh offers a default name
+on its own, the new name only where a line names it.
 
 Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
 public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it

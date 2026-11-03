@@ -22,12 +22,17 @@ while the major version is 0, a minor release may change behaviour and says so h
   the move"). With no SSH key here, the `ssh-key` item's steps are `full ssh-keys rekey NAME --fingerprint SHA256:...`
   and the same with `--apply` for each key the restore receipt lists as withheld or the other machine's facts name,
   where it gave `ssh-keys create` and a `send`; with neither, the steps name `full ssh-keys list` on the other machine.
-  A copy of the other machine's key gets `rekey NAME --name NAME-own --fingerprint SHA256:...`, then the step to
-  point each Host at the new key and remove the copy by hand. In `full machine-restore`, a different `~/.ssh/config`
+  Only keys the receipt records as directly in `~/.ssh` get steps: `other_keys` entries now carry `in_ssh`. A copy of
+  the other machine's key gets `rekey NAME --name NAME-own --fingerprint SHA256:...` (a unique name: `keys/id` becomes
+  `keys-id-own`, a taken name gets a number), then the step to point each Host at the new key and remove the copy by
+  hand; for a default name such as `id_ed25519` that step first adds `IdentityFile ~/.ssh/NAME-own` for github.com
+  and the hosts ssh offered the copy to (or under `Host *`). In `full machine-restore`, a different `~/.ssh/config`
   this machine keeps (no `--overwrite`) now counts as the carried config left out: the key's `note` names the hosts
-  `rekey` would not see and the `--overwrite --only=ssh-config` step, where the plan counted them as reached. A Host
-  whose alias `rekey` refuses gets a `note` naming `ssh-keys send NAME --to server:ADDRESS --verify` for its
-  `HostName`, or the advice to add a plain Host alias, where it named an alias `send` refuses too. A Host passed with
+  `rekey` would not see and says to copy their Host blocks by hand, naming the files `--overwrite --only=ssh-config`
+  would replace (`authorized_keys` among them), where the plan counted them as reached. A Host whose alias `rekey`
+  refuses gets a `note` naming `ssh-keys send NAME --to server:ADDRESS --verify` for its `HostName` and what that
+  drops (the Host's User, Port, ProxyJump), or the advice to add a plain Host alias, where it named an alias `send`
+  refuses too. A Host passed with
   `--server` because its `IdentityFile` line names another path gets a `note` to point that line at `~/.ssh/NAME`.
   A test pins the
   restore's alias rule to `tools/ssh_keys.py` HOST_ARG. Tests: `tests/test_machine_backup.py` SecondMachineKeys,
