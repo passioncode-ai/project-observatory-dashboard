@@ -694,6 +694,7 @@ project-observatory full ssh-keys create deploy-alpha     # ed25519; ssh-keygen 
 project-observatory full ssh-keys copy deploy-alpha       # the public line on the clipboard, and printed with its fingerprint
 project-observatory full ssh-keys send deploy-alpha --to github                 # gh ssh-key add, once; --as signing|both
 project-observatory full ssh-keys send deploy-alpha --to server:alpha --verify  # append to authorized_keys once, then prove the server accepts this key and no other
+project-observatory full ssh-keys rekey id_ed25519        # a second machine: the plan for its own key where the other machine's is registered
 project-observatory full ssh-keys findings                # no passphrase, weak, readable by others, unused, registered nowhere
 ```
 
@@ -710,6 +711,17 @@ project-observatory full ssh-keys findings                # no passphrase, weak,
   the new key alone, and passes only when ssh's log names the new key's fingerprint, so a Host block
   that still names the old key cannot make it pass. Clouds have no door yet (OBS-112): the refusal says
   so and the copied line goes in the provider's console.
+- `rekey OLD` is for a second machine, whose restore wrote `~/.ssh/config` but not the other machine's
+  private key. It plans first: this machine's own key (named OLD, so the carried `IdentityFile
+  ~/.ssh/OLD` finds it; `--name NEW` for another name), and every place the other machine's key is
+  registered: GitHub sign-in and signing (matched by the other key's fingerprint, `--fingerprint
+  SHA256:...` as `ssh-keys list` prints it there, or by the config and git's signing key when it is
+  not known) and each Host of `~/.ssh/config` that names `~/.ssh/OLD` (`--server ALIAS` adds one).
+  `--apply` creates the key, sends it to each place with `send`, verifying each server, and ends with
+  what still accepts only the other machine's key and the next step for each. A server usually does
+  not let this machine in until it has the key: answer a password with `--interactive`, or add the
+  printed public line from the other machine, as the answer says. It removes nothing: the other
+  machine keeps its key and its registrations. The other key's private file is never read.
 - Every create and send writes a receipt to the key movements journal (`tools/vault.py movements`).
 - `list` saves the inventory to `store/raw/ssh-keys.json`; the findings board reads it. Exit codes:
   0 done, 1 refused by the provider or the server, 2 refused before anything changed, 3 done without
@@ -2199,8 +2211,8 @@ On the second machine, in order:
 project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
 project-observatory full machine-restore --latest --apply         # nothing private of ~/.ssh written, jobs staged
 project-observatory full machine-restore --latest --packages
-project-observatory full ssh-keys create NAME                     # this machine's own SSH key, NAME as the plan names it
-project-observatory full ssh-keys send NAME --to github           # before --clone: SSH remotes need it
+project-observatory full ssh-keys rekey NAME                      # the plan: this machine's own SSH key, NAME as the plan names it
+project-observatory full ssh-keys rekey NAME --apply              # before --clone: make it, send it to GitHub and each server, verify
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity
 project-observatory full node --init                              # this machine's own device id
@@ -2211,7 +2223,16 @@ The key comes before `--clone` because the other machine's private key was not w
 checkout whose remote is `git@github.com:…` clones only once GitHub knows this machine's key.
 Use the name the plan gives: when the carried `~/.ssh/config` points a host at a key with
 `IdentityFile`, the plan lists that key as withheld with the hosts that use it and the exact
-`ssh-keys create` step under the same name, so the carried config finds the new key.
+`ssh-keys create` and `send` steps under the same name, so the carried config finds the new key.
+`ssh-keys rekey NAME --apply` runs those steps in one command (OBS-285): it sends the key to GitHub
+for sign-in and signing where the other machine's key is registered there (add `--fingerprint
+SHA256:...`, from `full ssh-keys list` on the other machine, to match GitHub's keys exactly) and to
+each Host that names it, verifying each, and then lists what still accepts only the other machine's
+key with the next step for each. A server whose only access was the other machine's key does not let
+this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
+password. Granting `gh` the `admin:public_key` and `admin:ssh_signing_key` scopes
+(`gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key`) and typing the new key's
+passphrase are yours.
 
 Then move each job that should run on the second machine, **one at a time, the old machine
 first**:

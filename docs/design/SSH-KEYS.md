@@ -1,4 +1,4 @@
-# SSH keys on this machine (PB-163, OBS-110)
+# SSH keys on this machine (PB-163, OBS-110, OBS-285)
 
 Observatory names every provider credential and never shows its value
 ([AGENT-SECRETS.md](AGENT-SECRETS.md)). The machine's SSH keys are the same kind of thing and were
@@ -6,7 +6,7 @@ invisible to it: `~/.ssh` holds pairs nobody inventoried, nobody knew which one 
 accepts, which one has a passphrase, and making a key, copying its public line and adding it
 somewhere took several commands, and that is the moment a private key gets pasted into the wrong window.
 
-This page specifies one door for them. The scenarios are OSS-62–67 in
+This page specifies one door for them. The scenarios are OSS-62–67 and OSS-96 (rekey) in
 [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md#ssh-keys-on-this-machine-pb-163-obs-110).
 Code: `observatory/engine/tools/ssh_keys.py` (the door and its CLI), `tools/ssh_key_findings.py`
 (the board's rules), `observatory_ssh_keys` in `mcp/server.py`. Tests:
@@ -215,6 +215,80 @@ the board, and `full ssh-keys findings` prints them.
 Rows are one per key, keyed `ssh:SHA256:…` (or `ssh:~/.ssh/NAME` without a fingerprint). No row
 carries a timestamp of its own beyond the inventory's.
 
+## Rekey on a second machine (OSS-96, OBS-285)
+
+A second machine restored from a machine bundle gets `~/.ssh/config` and every public file, but
+never the other machine's private key, nor the public half of a key it withholds
+(`machine_backup.py`, OBS-283): each machine signs with its own key. `rekey` makes that key and
+registers it everywhere the other machine's key is registered, by composing the steps above
+(`create`, `send --to github`, `send --to server:ALIAS --verify`), then lists what still accepts
+only the other machine's key.
+
+```
+project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:...] [--server ALIAS]...
+                                            [--apply] [--no-passphrase] [--no-keychain] [--interactive]
+                                            [--comment TEXT] [--title TEXT] [--json]
+```
+
+**A plan unless `--apply`**, the convention of `machine-restore`. The plan reads only: `~/.ssh/config`,
+`ssh -G` for each alias (no connection), GitHub's key lists (`gh api`) and git's global
+`gpg.format` and `user.signingkey` (`git config --global --get`). It prints the other machine's key,
+this machine's key (to be created, or already here and reused), every place it goes with why, what
+cannot be known from here with the next step for each, and what needs a person; it ends with the
+exact `--apply` command. `--json` gives the same as `ssh-rekey/1` (`old`, `new`, `targets`, `unknown`,
+`config`, `gates`, `degraded`; after `--apply` also `applied`, `results.done` and `still`).
+
+**The other machine's key is known by its public half only.** `--fingerprint SHA256:...` (as
+`ssh-keys list` prints it on the other machine), or `~/.ssh/OLD.pub` when it is here and this
+machine's key takes another name (`--name`). Its private file is never opened, not even for its
+clear header, never copied and never named in a tool's argument (`Rekey` in the tests patches the
+header reader and asserts it never sees that path).
+
+**This machine's key is named OLD by default**, so the carried `IdentityFile ~/.ssh/OLD` (with
+`IdentitiesOnly yes`) finds it and the config needs no change. A `~/.ssh/OLD` private file already
+here is this machine's own key (an earlier `rekey` or `create`): it is reused, never made twice, and
+a `--fingerprint` equal to it is refused. `OLD.pub` here without its private file is the other
+machine's public half and blocks the name: the refusal asks for `--name NEW`. With `--name NEW`, each
+Host naming `~/.ssh/OLD` gets a config note when OLD is not on this machine ("point its
+IdentityFile at `~/.ssh/NEW`"); `rekey` never rewrites `~/.ssh/config`.
+
+**Where the other machine's key is registered:**
+
+| Place | How it is known | Sent with |
+|---|---|---|
+| GitHub sign-in | the old fingerprint among `gh api user/keys`; without a fingerprint (or with that list unread), a Host whose `ssh -G` host name is `github.com` or `ssh.github.com` and names `~/.ssh/OLD`, or OLD being one of ssh's default key names | `send NEW --to github --as authentication` |
+| GitHub signing | the old fingerprint among `gh api user/ssh_signing_keys`; without it, git signing with `~/.ssh/OLD[.pub]` (`gpg.format ssh`) or a `key::` literal of the old key | `send NEW --to github --as signing` |
+| A server | each concrete `Host` alias whose `IdentityFile` resolves to `~/.ssh/OLD` (not reaching GitHub), and each `--server ALIAS` | `send NEW --to server:ALIAS --verify` |
+
+What cannot be listed from here is named, never guessed: a `Host` pattern or `Match` block naming
+OLD, every host that gets a default key without an `IdentityFile` line, GitHub's keys when the old
+fingerprint is unknown or a list could not be read. Each carries the command that makes it known
+(`--server ALIAS`, `--fingerprint`, `gh auth refresh -h github.com -s read:public_key,read:ssh_signing_key`).
+
+**`--apply`** creates the key (`create`'s rules: the passphrase is typed into ssh-keygen's own prompt
+at a terminal, refused before anything runs without one unless `--no-passphrase`), then each GitHub
+use and each server, one at a time, each through the door's own command and receipts. A step that
+fails does not stop the others. ssh-keygen making nothing stops everything: nothing is sent.
+
+**What still accepts only the other machine's key** ends the answer, one line per place a step did not
+finish, with the reason the provider or the server gave and the next steps:
+
+- GitHub: `send NEW --to github --as USE`, and `gh auth refresh -h github.com -s admin:public_key`
+  (`admin:ssh_signing_key` for signing) when gh lacks the scope: granting it is a browser sign-in,
+  the person's step.
+- A server that did not take the key: usually it does not let this machine in yet, since its
+  access was the other machine's key. Either `send NEW --to server:ALIAS --verify --interactive`
+  when it takes a password, or, on the machine that holds the other key and still gets in, save this
+  machine's public line (printed in the answer) as `~/.ssh/NEW-other.pub` and run
+  `send NEW-other --to server:ALIAS`; then `rekey` again here verifies it.
+- A server that took the key but did not verify it: `send NEW --to server:ALIAS --verify`, with the
+  door's reason (a ProxyCommand host is checked by hand).
+
+**Nothing is removed.** The other machine keeps its key and every registration; `rekey` deletes no
+GitHub key and no `authorized_keys` line, and never advises it (the rule of review round 3 above).
+Exit codes: 0 every place now accepts this machine's key too; 1 a step failed (listed); 2 refused
+before anything changed; 4 done, a receipt not written.
+
 ## Rotation (OSS-67, OBS-112)
 
 Specified here, shipped with OBS-112: `ssh-keys rotate OLD NEW` creates NEW, registers it where
@@ -244,8 +318,8 @@ the step to retry.
 
 | Reader | Surface |
 |---|---|
-| A person | `project-observatory full ssh-keys [list] \| show NAME \| copy NAME \| create NAME \| send NAME --to … \| findings` (`--json` on `list` and `findings`); `full --help`; [ONBOARDING.md](../ONBOARDING.md#ssh-keys-on-this-machine) |
-| An agent | `observatory_ssh_keys` (read-only: the inventory, one key's public line with `name`, the findings and the commands); the same CLI; [AGENT-ONBOARDING.md](../AGENT-ONBOARDING.md#ssh-keys) |
+| A person | `project-observatory full ssh-keys [list] \| show NAME \| copy NAME \| create NAME \| send NAME --to … \| rekey OLD [--apply] \| findings` (`--json` on `list`, `rekey` and `findings`); `full --help`; [ONBOARDING.md](../ONBOARDING.md#ssh-keys-on-this-machine) |
+| An agent | `observatory_ssh_keys` (read-only: the inventory, one key's public line with `name`, the findings and the commands, `rekey` among them); the same CLI (`rekey OLD --json` for the plan); [AGENT-ONBOARDING.md](../AGENT-ONBOARDING.md#ssh-keys) |
 | The board | the findings above, from `store/raw/ssh-keys.json` |
 | The dashboard | a section on the keys page: OBS-111 |
 

@@ -26,6 +26,9 @@ Contract: brand-contract v1
 | ssh.create_needs_person | a passphrase is typed by a person, into ssh-keygen's own prompt | observatory/engine/tools/ssh_keys.py | OSS-63 | proposed | copy |
 | ssh.never_overwritten | already exists; a key is never overwritten. Choose another name, | observatory/engine/tools/ssh_keys.py | OSS-63 | proposed | copy |
 | ssh.cloud_gap | no Observatory door registers SSH keys at | observatory/engine/tools/ssh_keys.py | OSS-65 | proposed | copy |
+| ssh.rekey_unchanged | Nothing was changed. Do it: | observatory/engine/tools/ssh_keys.py | OSS-96 | proposed | copy |
+| ssh.rekey_still | Still accepts only the other machine's key: | observatory/engine/tools/ssh_keys.py | OSS-96 | proposed | copy |
+| ssh.rekey_removes_nothing | The other machine's key stays registered everywhere it was: this command removes nothing. | observatory/engine/tools/ssh_keys.py | OSS-96 | proposed | copy |
 | ssh.finding_no_passphrase | {key} has no passphrase | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_weak | {key} is a weak {kind} key | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_readable | {key} is readable by other accounts | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |

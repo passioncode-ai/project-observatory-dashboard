@@ -3,6 +3,27 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **`full ssh-keys rekey OLD`: a second machine's own SSH key, everywhere the other machine's key is
+  registered** (OBS-285, OSS-96; `docs/design/SSH-KEYS.md` "Rekey on a second machine";
+  `docs/ONBOARDING.md` "Moving to a second machine that runs beside this one"). Without `--apply` it is a plan that
+  changes nothing: this machine's key `~/.ssh/OLD` (made, or reused when it is already here; named OLD so the carried
+  `IdentityFile ~/.ssh/OLD` finds it, `--name NEW` for another name), and each place to send it with why. GitHub
+  sign-in and signing are matched by the other key's fingerprint (`--fingerprint SHA256:...`, or `OLD.pub` when it is
+  here); without it, by a Host reaching github.com, ssh's default key name and git's SSH signing key. Every Host of
+  `~/.ssh/config` naming `~/.ssh/OLD` is a server, and `--server ALIAS` adds one. `--apply` creates the key (the
+  passphrase typed into ssh-keygen's own prompt at a terminal, as `create` does), sends it with `send --to github --as
+  USE` and `send --to server:ALIAS --verify`, and ends with what still accepts only the other machine's key, each with
+  the reason given and its next steps (the `gh auth refresh` scope command, `--interactive` for a password, or the
+  step to run on the other machine with the printed public line). Host patterns, `Match` blocks, hosts that get a
+  default key without an `IdentityFile` line and unread GitHub lists are named, never guessed. The other key is known
+  by its public half only: its private file is never read or named to a tool. Nothing is removed anywhere. `--json`
+  gives the plan and the result as `ssh-rekey/1`; `observatory_ssh_keys` lists the command. Tests:
+  `tests/test_ssh_keys.py` Rekey.
+
 ## 0.30.1 (2026-11-02)
 
 A patch release. A restore on a second machine that runs beside this one no longer takes this machine's identity,
