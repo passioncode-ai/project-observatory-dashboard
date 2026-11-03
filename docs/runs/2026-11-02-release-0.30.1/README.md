@@ -51,10 +51,23 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python`:
 
 ## Receipts
 
-Pending: the release pull request, tag `v0.30.1`, the release run, verification and installation.
+- Release PR #402 merged as `93a0c569` after #403; tag `v0.30.1` (annotated, object `cb65bd4f`) pushed on it.
+- Before the merge, the release pull request's own Windows job failed twice on `node_session`
+  `test_a_revoked_machine_is_closed_4403` (close code 1006 for 4403 under load). #403 fixed the test relay stub
+  (OBS-295) and landed first; the release branch then took main and its checks went green (10 of 10).
+- Release run `41561959654`: every job green on the first attempt (guard, wheel, manifest, macos, linux x64 and arm64,
+  windows x64 and arm64, feed, publish). Published 2026-11-03T02:33:45Z with 19 assets.
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.30.1-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key (EdDSA
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7`); `gh attestation verify` on the wheel with `--signer-repo
+  passioncode-ai/.github`: exit 0.
+- Installed on the operator's machine with `project-observatory full update --version 0.30.1 --apply` (a machine
+  backup was taken before the update): `full doctor` reports version 0.30.1 with nothing failing; its one warning,
+  three of the last ten ticks ending on their timeout, predates this release. Session MCP servers move themselves at
+  their next request.
 
 ## Next
 
-Merge the release pull request, tag `v0.30.1`, watch the release run, verify the sums, signature and attestation,
-install with `project-observatory full update --version 0.30.1 --apply`, run `full doctor`, record the receipts, and
-tell the coordinator that a restore on the second machine is now safe. Then land #401 and #400 for 0.31.0.
+The coordinator is told that a restore on the second machine is now safe once both machines run 0.30.1. Then
+0.31.0 by 2026-11-04: #401 (OBS-292, the Sentry door) and #400 (OBS-287, the interim relay) are reviewed and green
+and land next, then OBS-291 (DEC-0147), OBS-282, OBS-285 and OBS-286.
