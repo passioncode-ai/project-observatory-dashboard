@@ -139,6 +139,50 @@ operating system's grammar (a drive letter on macOS or Linux) names nothing here
 The report carries `kept` (class, path, reason; at most 200), and the Machine page shows it as
 "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots` pins each rule.
 
+## Space inside a Docker VM at `critical` (OBS-305, 2026-11-03)
+
+A finding measured on a MacBook whose Docker daemon runs inside a Colima VM: the guard was at
+`critical`, ran its cache commands, `docker builder prune -f --filter until=168h` among them, and
+freed 0.07 GB, while 6.58 GB of build cache (252 entries, none in use) younger than a week stayed
+in the VM and `~/.colima` held 27.8 GB. Pruning all unused build cache and dangling images by hand,
+then `colima ssh -- sudo fstrim -av`, took the host from 4.17 to 10.83 GB free. Without the trim
+the VM's sparse disk keeps the blocks the guest freed, and the host never sees them.
+
+So at `critical`, after its other commands, the guard runs (`defaults/cleanup.json`, `guard.commands`):
+
+1. `docker builder prune -af`: every build cache entry no build uses, whatever its age, at most
+   every 6 hours. The normal-pressure entry keeps its one-week filter.
+2. `colima ssh --profile <name> -- sudo -n fstrim -av` in each Colima profile that
+   `colima list --json` reports `Running`, at most every 6 hours.
+3. `limactl shell -- <name> sudo -n fstrim -av` in each Lima instance that `limactl list --json`
+   reports `Running` (Lima's own home; a Colima VM is listed by Colima), at most every 6 hours.
+
+**What it never touches.** No `docker system prune`, no `--volumes`, no container or image a
+container uses: `builder prune` removes build cache only, and `image prune -f` (at `low`) dangling
+images only. The guard starts no VM and no daemon: a docker entry runs only while a daemon process
+is seen (`needs_running`, now also `colima` and `limactl`, the processes a running Colima or Lima VM
+keeps on the host), and a trim runs only in a VM its tool lists as running. With none running the
+row is `skipped` with `reason_code` `no-running-vm`; a list that cannot be read is `vm-list-unknown`
+and nothing runs. A VM name that is not a plain identifier is never passed on.
+
+**It never waits for a password.** `sudo -n` fails at once where the VM's user would need one
+(Colima's and Lima's default users do not); the row is `failed` with `reason_code`
+`needs-password`, and the command's own output is never stored. The listing and every VM's trim
+share the command's one deadline (`command_timeout_seconds`, bounded by the class's share of the
+run), so a slow VM cannot hold the run.
+
+**Counted by the host disk.** As for every action, `freed_mb` is the host's free space after the
+command minus before it, so what a trim hands back to the host is counted, and space freed only
+inside the VM is not. A trim row also carries `instances` (VMs listed as running) and
+`instances_done`.
+
+**Workspaces made before.** A workspace's `config/cleanup.json` holds a copy of the guard section
+its release shipped. `defaults/cleanup-history.json` now records the sections of 0.24.0 and of
+0.24.1 (unchanged through 0.31.0), so such a copy reads as unset and takes these commands.
+
+`tests/test_disk_guard.py::VmCacheAtCritical` pins each rule with fake tools: no docker, colima or
+limactl runs in the tests.
+
 ## Not done here, and why
 
 - A person's `full update --apply` started while a pass runs is refused by the snapshot's

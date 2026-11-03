@@ -1816,7 +1816,7 @@ under `guard`:
 
 | What | normal | low | critical |
 |---|---|---|---|
-| The cache tools' own cleanup | `uv cache prune`, `pnpm store prune`, `brew cleanup --prune=14`, Docker build cache older than a week | also `npm cache verify`, `uv cache clean`, Go and Yarn caches, dangling Docker images | also `brew cleanup --prune=all` |
+| The cache tools' own cleanup | `uv cache prune`, `pnpm store prune`, `brew cleanup --prune=14`, Docker build cache older than a week | also `npm cache verify`, `uv cache clean`, Go and Yarn caches, dangling Docker images | also `brew cleanup --prune=all`, all unused Docker build cache, then a trim (`fstrim`) inside each running Colima or Lima VM so the host gets that space back ([why](design/DISK-GUARD.md#space-inside-a-docker-vm-at-critical-obs-305-2026-11-03)) |
 | Git-ignored build and dependency output (`node_modules`, `.venv`, `dist`, …) of checkouts nobody worked in | 14 days | 3 days | 1 day |
 | Temporary entries untouched for | 3 days | 1 day | 1 day |
 | Trash items older than | 30 days | 30 days | 3 days |

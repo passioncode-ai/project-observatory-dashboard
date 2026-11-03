@@ -734,15 +734,15 @@
       "path": "defaults/cleanup-history.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9148a6dea4257f41b575ad38dd3f14c82e0aa1a4a06869532e90080761486447",
-      "bytes": 4159
+      "export_sha256": "c705c824c544dd101ff548f298d83f87a86fd41900d44c6781488986d2c89998",
+      "bytes": 14299
     },
     {
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ec7f818a3342a014400c8902cd38cbf04c7873bdcf3102bf37d0a1892bdcd1c4",
-      "bytes": 5383
+      "export_sha256": "c53bcaf569e9ec274fa6688f60f591b2922bb1354ad127bbf5a37e2f39c41c4d",
+      "bytes": 6441
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -947,8 +947,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "9a4cc3da81b71a55a58b93a4775f0e890bafa695ea85edbab97867abbea1f922",
-      "bytes": 234539,
+      "export_sha256": "d1250cd26ad5eb06605cac72699316bb85d679c7fad0472836c8e67aebe3dcac",
+      "bytes": 234830,
       "upstream_modified": true
     },
     {
@@ -4513,8 +4513,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "79f7834bad4632f5082bb411bde6ffb4df7251f70ddd1ce93fc1c273796e7007",
-      "bytes": 145421
+      "export_sha256": "72ee80a3f03c4cc6e6c306a4c41492d9a7728aec63da79310285d0d05bb35de2",
+      "bytes": 154590
     },
     {
       "path": "tests/test_docs_current.py",
@@ -6536,8 +6536,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f88a3eba6c9c32791d48c768d11a7bac73300ab753fdcb037b2a52160b72a9e5",
-      "bytes": 87848
+      "export_sha256": "ff5582deda12d5b828bc1f91be44dd1cae0ccb9e294abd84326df610d94a6402",
+      "bytes": 91387
     },
     {
       "path": "tools/embedding_policy_cli.py",
