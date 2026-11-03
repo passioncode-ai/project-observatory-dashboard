@@ -5,6 +5,18 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.31.0 (2026-11-03)
+
+Your own relay for your machines: `full relay serve`, or `full relay enable` inside the node's own server, carries
+messages between the machines of your estate until the shared relay is deployed. A second machine now gets exactly
+what you name from a restore (`--only`, `--skip`, `--projects`), a checklist that says what the move still lacks
+(`full machine-move status`) and its own SSH key wherever the other machine's key is registered (`full ssh-keys
+rekey`). A new Sentry door makes a narrow release token from a broad one and retires the broad one only after the
+narrow one works. Shared keys follow the contract's DEC-0147: usage reports restate a window, the sender counts each
+export once, and two dashboard buttons (decline a secret request, open a share link) get an agent twin that acts only
+on the operator's own words. Nothing needs you after installing. Before going back to 0.30 on a machine, accept or
+remove any share link an agent handed over there: 0.30 cannot accept one (`docs/COMPATIBILITY.md`).
+
 ### Added
 
 - **Your own relay for your machines** (OBS-287, the relay project's interim RLY-04, `docs/ONBOARDING.md` "Your own
