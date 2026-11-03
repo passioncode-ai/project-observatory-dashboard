@@ -64,7 +64,12 @@ strength of a `ssh.github_orphan` row: it is information, and Observatory cannot
 ssh-keys create NAME` (in my terminal, so I type the passphrase into ssh-keygen; `--no-passphrase`
 only when I ask for an unattended key), copy its public line with `ssh-keys copy NAME`, and register
 it with `ssh-keys send NAME --to github` or `--to server:ALIAS --verify`. A cloud has no door yet:
-say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`).
+say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`). On a
+second machine, `ssh-keys rekey OLD` plans this machine's own key where the other machine's key is
+registered (read it, or `--json`, before acting, and check the GitHub account it names is mine for
+this key; without the other key's `--fingerprint` it sends nothing to GitHub); `--apply` does it in
+my terminal and ends with what still accepts only the old key and the next step for each. Relay that list to me as it stands: it
+removes nothing, and neither do you.
 
 ## The same key on my other machines
 
