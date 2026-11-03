@@ -2341,8 +2341,8 @@ of that:
   `.pub` of a withheld key is withheld with it: the new key gets its own). Nothing else of
   `~/.ssh` is, whatever its name, and a file whose text is a private key is withheld under any
   name. The plan shows such an item as `withheld`; only a key (named by an `IdentityFile`, a
-  default name such as `id_ed25519`, or private-key text) gets an `ssh-keys rekey` step, and a
-  withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
+  default name such as `id_ed25519`, or private-key text) gets two `ssh-keys rekey` steps (the
+  plan, then the same with `--apply`), and a withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
   `Include` that matches no file. The second machine makes its own key.
 - **Jobs.** Every launchd plist (a systemd user unit off macOS) is written into
   `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/LaunchAgents/`
@@ -2399,8 +2399,19 @@ the key on GitHub without it. When the bundle does not show it, the steps have n
 the key's `note` says to take it from `full ssh-keys list` on the other machine; without it nothing goes
 to GitHub. rekey reaches a Host through a line naming exactly `~/.ssh/NAME`; a host the plan lists
 through another spelling (`~/.SSH/NAME`, another account's absolute path) is added to both steps with
-`--server ALIAS`, and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) the `note`
-names those hosts instead. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
+`--server ALIAS`, and the `note` says to point that line at `~/.ssh/NAME` where the path it names is
+not this machine's key; and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) or keeps
+this machine's own different `~/.ssh/config` (a conflict, without `--overwrite`) the `note` names
+those hosts instead. With `--skip ssh-config` the `note` gives the step that writes the carried config.
+With a kept config it says to copy those Host blocks from the other machine's `~/.ssh/config` by hand:
+no restore step replaces `~/.ssh/config` alone, and `--overwrite --only=ssh-config` also replaces
+`known_hosts`, `authorized_keys`, `allowed_signers` and a lone `.pub` where they differ (the `note`
+lists the files it would replace here, each moved aside), and a replaced `authorized_keys` can shut
+out a remote login to this machine. A Host whose alias rekey does not take (a `/` in it, say) is
+named in the `note` with the `ssh-keys send NAME --to server:ADDRESS --verify` step for the address
+its `HostName` gives, which reaches it with ssh's defaults rather than the User, Port or ProxyJump
+that Host sets (the `note` says to add `user@`, or to give it a plain Host alias when it needs a Port
+or ProxyJump), or, with no such address, the advice to give it a plain Host alias. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
 every host whose config names no key, so each such server is added with `--server ALIAS`: rekey names
 those hosts as not known, never guesses them. A server whose only access was the other machine's key does not let
 this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
@@ -2485,10 +2496,26 @@ checklist on the machine it runs on, each item `ok`, `missing` (with the step th
 |---|---|---|
 | M1 | `release` | the other machine runs the release this one runs |
 | M2 | `restore` | the restore receipt here shows `--apply` and `--clone` with no failure and no kept conflict (categories left out on purpose are named, not counted against it); on the machine moved from, the other machine's facts say it restored this one's bundle completely |
-| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld) |
+| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld); the fix is the restore's two `ssh-keys rekey` steps (below) |
 | M3 | `device-id` | this machine has a device id (`full node --init`) and it is not the other machine's |
 | M3 | `vault` | `full vault-digests` reads every slot `same`; status computes it without writing anything and never creates the estate key |
 | M4 | `jobs` | no job defined in this machine's job folder (it loads at the next login) is defined on the other machine, or named in this machine's placement file as running elsewhere; this engine's own jobs and a plist marked `Disabled` are not counted |
+
+The `ssh-key` item's steps are the ones the restore hands out: with no key here, `ssh-keys rekey
+NAME --fingerprint SHA256:...` and then the same with `--apply` for each key directly in `~/.ssh` that
+the restore receipt lists as withheld (its `other_keys`, whose `in_ssh` says where the key sat; a receipt
+written before that field is not used for steps) or the other machine's facts name; when neither names
+one, the steps say to read the names and fingerprints with `full ssh-keys list` on the other machine.
+A key here that is a copy of the other machine's gets `ssh-keys rekey NAME --name NAME-own
+--fingerprint SHA256:...` and the same with `--apply` (rekey does not reuse the other machine's key as
+this machine's own; `keys/id` becomes `keys-id-own`, and a name taken by anything but this machine's
+own key pair gets a number), then the step to point each Host at `~/.ssh/NAME-own` and remove the copy
+by hand. Once `--apply` has made `~/.ssh/NAME-own`, status run again names that pair (rekey reuses it
+and sends only what is missing), so the steps do not change. For a default name such as `id_ed25519`
+the last step says that the hosts ssh offered the copy to without an `IdentityFile` line got the new
+key only if they were added to both rekey steps with `--server ALIAS`, and then to add `IdentityFile
+~/.ssh/NAME-own` for github.com and each of those hosts (or once under `Host *`): ssh offers a default
+name on its own, the new name only where a line names it.
 
 Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
 public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it

@@ -18,6 +18,26 @@ while the major version is 0, a minor release may change behaviour and says so h
   with `--server ALIAS`; with `~/.ssh/config` left out of the restore the `note` names those hosts. A default key's
   `note` names `--server ALIAS` for the servers ssh offers it to without an `IdentityFile` line. A key outside
   `~/.ssh` keeps its note and no step. Tests: `tests/test_machine_backup.py` SecondMachineKeys, SecondMachine.
+- **`full machine-move status` names the restore's `ssh-keys rekey` steps** (OBS-306, `docs/ONBOARDING.md` "Checking
+  the move"). With no SSH key here, the `ssh-key` item's steps are `full ssh-keys rekey NAME --fingerprint SHA256:...`
+  and the same with `--apply` for each key the restore receipt lists as withheld or the other machine's facts name,
+  where it gave `ssh-keys create` and a `send`; with neither, the steps name `full ssh-keys list` on the other machine.
+  Only keys the receipt records as directly in `~/.ssh` get steps: `other_keys` entries now carry `in_ssh`. A copy of
+  the other machine's key gets `rekey NAME --name NAME-own --fingerprint SHA256:...` (a unique name: `keys/id` becomes
+  `keys-id-own`, a name taken by anything but this machine's own key pair gets a number, and a re-run after `--apply`
+  names the pair it made), then the step to point each Host at the new key and remove the copy by hand; for a default
+  name such as `id_ed25519` that step says the hosts ssh offered the copy to got the new key only when passed with
+  `--server ALIAS`, then adds `IdentityFile ~/.ssh/NAME-own` for github.com and those hosts (or under `Host *`). In `full machine-restore`, a different `~/.ssh/config`
+  this machine keeps (no `--overwrite`) now counts as the carried config left out: the key's `note` names the hosts
+  `rekey` would not see and says to copy their Host blocks by hand, naming the files `--overwrite --only=ssh-config`
+  would replace (`authorized_keys` among them), where the plan counted them as reached. A Host whose alias `rekey`
+  refuses gets a `note` naming `ssh-keys send NAME --to server:ADDRESS --verify` for its `HostName` and what that
+  drops (the Host's User, Port, ProxyJump), or the advice to add a plain Host alias, where it named an alias `send`
+  refuses too. A Host passed with
+  `--server` because its `IdentityFile` line names another path gets a `note` to point that line at `~/.ssh/NAME`.
+  A test pins the
+  restore's alias rule to `tools/ssh_keys.py` HOST_ARG. Tests: `tests/test_machine_backup.py` SecondMachineKeys,
+  SecondMachine, MachineMove.
 - **The disk guard frees the space a Docker VM holds** (OBS-305, `docs/design/DISK-GUARD.md` "Space inside a Docker
   VM at `critical`"). At `critical` it now removes all build cache no build uses (`docker builder prune -af`, at most
   every 6 hours), then runs `sudo -n fstrim -av` inside each running Colima profile and Lima instance, so the space
