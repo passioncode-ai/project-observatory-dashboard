@@ -432,6 +432,48 @@ tick) records each account's Workers, Pages projects with their source repositor
 databases and zones with their plan and price, DNS record count and certificate expiry in
 `store/raw/cloudflare_account.json`; `emit` turns it into `registry/cloudflare-account.json`.
 
+**A Sentry token for one purpose, and the broad one retired** (OBS-292). A site's build needs only to create
+releases and upload source maps, and error triage only to read projects, issues and events; a broad Sentry token
+(org:admin, member:admin, and so on) in a vault slot can do far more. `tools/sentry.py issue --preset releases
+--from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME [--org SLUG] [--project SLUG]` reads the minting credential from
+its slot (vault only), mints a Sentry organization token with the one scope `org:ci` (Sentry lets it list, create and
+update releases, upload source maps, artifact bundles and debug files, read the organization's integrations and read
+and write bulk code mappings; it cannot delete a release or a debug file, read events or members, or change a
+setting), proves it with its own value
+(exactly that scope, the releases read on the organization's region host, members and issues refused), writes it
+to the `--vault` slot on stdin and records it in `secrets/sentry-issued.json` (kind, scope, organization, project,
+token id, never the value). Sentry mints an organization token by API only for an OAuth application's token holding
+`org:tokens` and one of `org:read`, `org:write`, `org:admin`; a personal token (`sntryu_`) can mint nothing and cannot revoke itself, so
+with one in `--from` the door refuses before any call and names the Organization Tokens page where a person makes
+the token in one click (Sentry offers only `org:ci` there). `--preset read` (an internal integration token with
+exactly `org:read`, `project:read`, `event:read`) is always made by a person, because Sentry creates an
+integration's token only from a browser session. Either way the person puts the token in the slot (through
+`observatory_secret_request` or `vault.py put` from a protected file), and `sentry.py install --preset
+releases|read --vault PROJECT/ENV/NAME` verifies and records it. `sentry.py revoke --from PROJECT/ENV/NAME [--org
+SLUG] [--base-url URL]` first verifies every narrow token of that organization again. The slot must hold a Sentry
+token (a known prefix), and it is sent only to its own Sentry: `--base-url`, or the base recorded the last time that
+slot answered there. While Sentry accepts it, the door records that proof, names the page where a person deletes it
+and exits 3. It counts as revoked, and its slot is removed, only when Sentry refuses it (HTTP 401) after such a proof:
+a 401 from a Sentry that never accepted the value proves nothing, and the slot is kept. The proof belongs to the
+value, not the slot: it is recorded as the token's kind and a keyed digest (HMAC-SHA256 under a random key kept
+owner-only beside the ledger, never a plain hash), so a slot whose value was replaced since is not sent to the
+recorded Sentry, and a 401 to it needs a new proof. A base named with `--base-url` for the first time is said so,
+and so is a `--base-url` that replaces a recorded Sentry whose proof no longer holds for the value; a value still
+proved on one Sentry is never sent to another. `sentry.py status` follows the same rule: it asks about a broad token
+only when the slot still holds the proved value, and otherwise reports it as unproven or changed without sending it.
+Narrow tokens follow the same rule: `issue` and `install` record each one's keyed digest, `status` and both kinds of
+`revoke` send a narrow slot's value only while it is still that value, and `revoke PROJECT/ENV/NAME` sends the
+minting credential only while its slot holds the value proved on that Sentry (otherwise it names the `revoke --from
+... --base-url` step that proves it again). `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
+person made, waits for that person), proves it dead and removes the slot; `list` and `status` say what exists and
+whether it still works. Without `--base-url`, `issue` and `install` use `https://sentry.io` and say so on
+stderr; `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
+`de.sentry.io`) is read from the organization, or given with `--region us|de` or `--region-host`. A region read from a
+token or an answer must be the base itself or one of its documented region hosts, by exact name; any other host is
+used only when you name it with `--region-host`. Redirects are never followed, so a token never travels to a host
+nobody named. Sentry organization tokens have no expiry: that is recorded as the reason, not as a missing
+record.
+
 **Every minted credential expires, and the expiry is recorded** (OBS-191). `cloudflare.py issue`,
 `openrouter.py issue` and `heroku.py issue` mint with an expiry 90 days out unless told otherwise:
 `--token-expire-days N` for Cloudflare (its `--expire-days` stays the R2 bucket's object lifecycle),
@@ -1432,6 +1474,92 @@ project-observatory full cloud url                  # the address `full share cr
   `project-observatory full share accept` and paste the link. It runs no script, so it reads
   nothing of the link's code.
 
+### Your own relay for your machines: full relay
+
+Your machines reach one another through a relay (`fabric-relay/0.1`, contract DEC-0047 and
+DEC-0066). Until the hosted relay runs, run your own on the machine that is always on (OBS-287, the
+relay project's interim RLY-04). It is a router with mailboxes and holds no authority: every message
+is signed by its sender's device key and checked by its recipient, and what must stay secret is
+sealed to the recipient before it is sent.
+
+```sh
+project-observatory full relay serve                            # in the foreground, on http://127.0.0.1:47317
+project-observatory full relay enable --origin https://NAME     # inside the node's own server, from its next start
+project-observatory full relay status                           # enabled, answering, and how many machines it admits
+project-observatory full relay disable
+```
+
+- **Whom it admits.** The machines of the estate record this machine's node verified and applied
+  (`full org records apply`, kept under `node/records/`), minus every machine and key that record
+  or an applied delta entry revokes. A machine proves its device key in its `auth`; any other caller
+  gets one answer, `unauthenticated`, and the connection closes (4401). With no record applied, an
+  expired record or a record file changed on disk, the relay admits nobody, and `status` and the
+  server's health say why. Every open session is checked again before each frame and every two
+  seconds: a machine revoked since it connected is closed (4403), and so is every machine once the
+  record's window ends.
+- **The origin.** The address every machine signs into its `auth`. On this machine alone it is
+  `http://127.0.0.1:PORT` (the default port is 47317). For your other machines put a TLS terminator
+  in front (your private network's HTTPS, a tunnel or a reverse proxy) and pass its `https://`
+  origin; the relay itself serves plain HTTP on the address you bind with `--host`, by default
+  127.0.0.1. An `http://` origin is refused for anything but a loopback address and its own port.
+  Have the terminator forward each caller's address in `X-Forwarded-For` and pass
+  `--trusted-proxy`: the relay then counts a connection from this machine against the address the
+  terminator appended (the rightmost one; a port is stripped). This is a requirement on the
+  terminator: it MUST set the header itself to the real client address, overwriting it or
+  appending to it, and never pass a header the client sent through as the last entry. In nginx:
+  `proxy_set_header X-Forwarded-For $remote_addr;` (with `proxy_http_version 1.1;`,
+  `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` for the
+  WebSocket). In Caddy: `reverse_proxy 127.0.0.1:47317 { header_up X-Forwarded-For {remote_host} }`.
+  Four residuals stay. Without `--trusted-proxy` the header is ignored and every caller behind the
+  terminator is one address, so one caller flooding through it can keep everyone behind it out
+  until the flood stops. With `--trusted-proxy`, every program on this machine that can reach the
+  relay's port can claim any address it likes, so keep the relay bound to 127.0.0.1 and reachable
+  from other machines only through the terminator. A flood from 32 or more address groups (one
+  IPv6 /48 holds 65536 of them) fills every pending slot with one connection each, and while it
+  lasts a newcomer is refused: the relay's pending budget is a capacity, not a filter. And machines
+  that share one group (one home IPv6 /64, one NAT address) can each be cut while they wait for
+  `auth` when an attacker from a smaller group arrives; their node connects again (OBS-293).
+- **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
+  the relay beside itself when it starts (a login, `full update`, or
+  `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
+  service of its own. A relay that cannot start, or that admits nobody, is a `relay` row in the
+  server's `degraded`, and the server keeps running.
+- **Messages.** A message waits in its recipient's mailbox until the recipient acknowledges it or the
+  ttl its sender set ends (the node signs the message's `exp` at the same time). Each mailbox holds
+  at most 1000 messages and 64 MiB; a machine sends at most 120 messages, 30 presence queries and 12
+  delta queries a minute, counted over all its connections. Over a limit the relay answers
+  `mailbox-full` or `rate-limited` (with the seconds to wait), and closes a connection that keeps
+  sending (1008). A message to a machine the
+  record does not admit is `unknown-recipient`. A repeat of a message within its ttl is answered
+  with its first number and is not delivered twice. The relay remembers at most 20000 messages per
+  sender for that; it forgets first those already acknowledged or expired, and while all 20000 are
+  still queued it refuses that machine's new messages (`rate-limited`, retry in 60 seconds) rather
+  than forget one.
+- **Connections.** A caller has 10 seconds from connecting to send its request and 10 seconds from
+  the upgrade to send its `auth`, however it spreads the bytes; then it is closed (4401 for a missed
+  `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address,
+  this machine's own included; an IPv6 address counts with its whole /64). When it is full, a
+  caller from an address holding at least two fewer connections than the fullest address takes a
+  place of that address; otherwise a caller that has sent its request keeps its place for 2
+  seconds to answer, and a connection that has sent nothing gives way first. So a caller from a
+  fresh address gets in while any address holds two or more; several callers sharing one address
+  (every caller behind a terminator without `--trusted-proxy`) compete among themselves only. That budget is kept apart from the admitted machines' (128 connections,
+  at most 4 per machine, a fifth replacing its oldest), and both stay below the process's limit of
+  open files. A machine that stops reading its messages slows only its
+  own connection, which is closed when its queue fills. If the relay cannot accept connections for
+  more than a second (out of open files, say), it keeps retrying and the server's health says so.
+- **What it keeps.** Queued messages, in `node/relay/spool.sqlite`, each sealed with AES-256-GCM
+  under the relay's own key `node/relay/spool.key`; the folder and both files are readable by your
+  account only. A copied spool (a backup or a snapshot) carries no message in clear. The key sits
+  beside it, so the seal does not hide a message from a program running as you: the protection
+  that counts is the sender's own sealing. `serve --memory` keeps nothing on disk, and queued
+  messages end with the process. Logs are one JSON line per event with kids, codes and counts, never
+  a body, a nonce, a signature or the estate's id.
+- **Not carried yet.** Blobs (`/v1/blobs/` answers 501), a hub's `delta` and `heartbeat` frames
+  (answered `unknown-type`; `welcome` names the delta head this node applied and no heartbeat), and
+  a deployment into your own Cloudflare account beside the share mailbox. A machine catches up on
+  the delta with `delta-query`, answered from the entries this node applied.
+
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 
 An agent should never launch, quit or kill your desktop apps or background jobs itself. The
@@ -2239,6 +2367,44 @@ password. Granting `gh` the `admin:public_key` and `admin:ssh_signing_key` scope
 (`gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key`) and typing the new key's
 passphrase are yours.
 
+**Moving only part of it** (OBS-282). Every row of the plan names its `category`, and the
+answer's `categories` says per category whether it is selected, how many items it holds in each
+state and the first destinations an `--apply` would write. `--only` and `--skip` (repeatable, or
+comma-separated; not both) limit what `--apply` writes and whether `--packages` runs:
+
+| Category | What it holds |
+|---|---|
+| `ssh-private` | private SSH keys, by name or by their text, and the public halves of those keys; a second machine never gets them, whatever `--only` names (only `--same-machine` at a terminal does) |
+| `ssh-config` | `~/.ssh/config` and its fragments, `known_hosts`, `authorized_keys`, `allowed_signers`, a `*.pub` on its own |
+| `launchd` | background jobs: launchd plists on macOS, systemd user units elsewhere (staged on a second machine) |
+| `cli-logins` | the `gh`, `doctl` and `heroku` logins and `~/.netrc` |
+| `claude`, `codex` | Claude Code and Codex configuration |
+| `git`, `shell` | Git settings; zsh and bash profiles |
+| `fabric-services` | Fabric service descriptors |
+| `packages` | the inventories `--packages` installs; `--packages` with this category left out is refused |
+| `agents` | `~/.agents/skills` |
+| `operator` | the paths `machine-backup.json` includes |
+
+A category is decided by the path an item is written to, as the second-machine rules are: a key
+included from another folder is still `ssh-private`. A left-out row reads `left-out`; a folder that
+holds a selected item is written with its own mode even when its category is left out, so a key never
+lands in a folder made with the default mode. An unknown category is refused with the list above.
+`--projects` limits `--clone` to the named checkouts: a folder name (`alpha-web`), a glob over it
+(`alpha-*`), or a path that names every checkout under it (`~/src/work`); a worktree brings its main
+checkout, and a name no checkout matches is refused before anything is written. The plan's `next`
+repeats the filters, so each step names exactly what you chose:
+
+```sh
+project-observatory full machine-restore --latest --skip launchd,cli-logins           # the plan, per category
+project-observatory full machine-restore --latest --apply --skip launchd,cli-logins
+project-observatory full machine-restore --latest --clone --projects alpha-web,beta-api
+```
+
+Each step that writes (`--apply`, `--packages`, `--clone`) records what it did in
+`${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/restore.json`: the bundle, the
+machine it came from, the categories left out, the counts, the failures, and the fingerprints of the
+other machine's keys it withheld. `full machine-move status` reads it.
+
 Then move each job that should run on the second machine, **one at a time, the old machine
 first**:
 
@@ -2269,6 +2435,39 @@ estate record carries placement:
 `serviceId` is the Fabric service whose descriptor names that launchd label, or `null`. Fabric
 Dashboards reads the file to show such an agent as placed on another machine and to hide its
 start.
+
+**Checking the move** (OBS-286). `project-observatory full machine-move status` prints one
+checklist on the machine it runs on, each item `ok`, `missing` (with the step that fixes it) or
+`unknown`, with its evidence (`--json` for the same as JSON; exit 0 only when every item is `ok`):
+
+| Step | Item | `ok` when |
+|---|---|---|
+| M1 | `release` | the other machine runs the release this one runs |
+| M2 | `restore` | the restore receipt here shows `--apply` and `--clone` with no failure and no kept conflict (categories left out on purpose are named, not counted against it); on the machine moved from, the other machine's facts say it restored this one's bundle completely |
+| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld) |
+| M3 | `device-id` | this machine has a device id (`full node --init`) and it is not the other machine's |
+| M3 | `vault` | `full vault-digests` reads every slot `same`; status computes it without writing anything and never creates the estate key |
+| M4 | `jobs` | no job defined in this machine's job folder (it loads at the next login) is defined on the other machine, or named in this machine's placement file as running elsewhere; this engine's own jobs and a plist marked `Disabled` are not counted |
+
+Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
+public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it
+defines, its restore summary):
+
+```sh
+project-observatory full machine-move facts --out FILE              # on the other machine: a new owner-only file
+project-observatory full machine-move status --peer FILE            # here; or put FILE in machine-move/peers/
+```
+
+The backups root both machines read is a convenient way to carry the file. Facts older than
+`--max-age-hours` (48 by default), or dated in the future, say nothing about today's release or jobs,
+so those items read `unknown`; key fingerprints and device ids do not change by themselves, so an
+older file still tells them apart. With no facts at all, every item that compares the two machines
+reads `unknown`, never a guess. A file that does not read is named in `degraded` and the rest is
+still compared, whatever its shape. Facts hold only what the reader takes: a key whose file name the
+format cannot carry keeps its fingerprint under a masked name, a job label it cannot carry is left out,
+and `omitted` (and a line on stderr) says how many. Status writes nothing and starts, stops or asks
+launchctl about no job; on a machine with no platform identifier and no kept id it does not make one
+either, and names this machine `unknown` (`full machine-move show` makes the id).
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires

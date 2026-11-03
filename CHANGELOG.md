@@ -7,6 +7,71 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Your own relay for your machines** (OBS-287, the relay project's interim RLY-04, `docs/ONBOARDING.md` "Your own
+  relay for your machines: full relay"). `full relay serve` runs a `fabric-relay/0.1` relay in the foreground, and
+  `full relay enable --origin URL` runs it inside the node's own server from its next start, with no service of its
+  own (`full relay status`, `full relay disable`). It admits the machines of the estate record this machine's node
+  applied, minus every machine and key the record or an applied delta entry revokes, by the contract's `admit` (one
+  answer and one signature's work for every unproven caller), and closes a session the moment its machine is revoked
+  or the record expires (4403). It keeps one mailbox per machine: messages in order, deleted on acknowledgement or
+  when their ttl ends, a repeat answered with its first number, and the refusals `unknown-recipient`, `mailbox-full`,
+  `rate-limited` and `too-large`; queued messages are sealed at rest under the relay's own key. It answers presence
+  and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
+  have their own connection budget apart from admitted machines, the rate limits count a machine across all its
+  connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
+  reads a mailbox a page at a time, a caller refused for want of a slot reads its whole 503 before a clean close
+  (a reset would make a Windows caller drop it), and a failed accept is retried and shown in the server's health. The per-address
+  cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
+  address it forwards in `X-Forwarded-For` (a port stripped), IPv6 addresses count by their /64, and admission is
+  max-min fair across addresses, so a caller from a fresh address gets in while any address holds two or more. Blobs, a hub's
+  delta and heartbeat frames and the Cloudflare deployment are not carried yet.
+  Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
+  on loopback.
+- **A Sentry door: a narrow token for one purpose, and the broad one retired** (OBS-292, `tools/sentry.py`). A build
+  that holds a broad Sentry token in a vault slot can get a token scoped to `org:ci`, which Sentry lets list, create
+  and update releases, upload source maps, artifact bundles and debug files, read the organization's integrations
+  and read and write bulk code mappings, and nothing that deletes, reads events or members, or changes a setting:
+  `sentry.py issue --preset releases --from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME` mints a Sentry organization
+  token with the one scope `org:ci`, proves it with its own value (that scope exactly, the releases read on the
+  organization's region host, members and issues refused) and writes it to the slot; nothing is printed and no value
+  reaches an argument, a URL or a redirect. Sentry lets only an OAuth application's token holding `org:tokens` (with
+  one of `org:read`, `org:write`, `org:admin`) mint one by API,
+  so with a personal token the door refuses before any call and names the page where a person makes it in one click;
+  `install --preset releases|read` then verifies and records what the person made (`read` is an internal
+  integration token with exactly `org:read`, `project:read`, `event:read`). `revoke --from` retires the broad token
+  only after a narrow one verifies again, sends it only to its own Sentry, and counts it revoked only when that
+  Sentry refuses it after once accepting it; `list` and `status` say what exists and whether it works. Self-hosted
+  Sentry (`--base-url`, `--region-host`) and the documented `us` and `de` region hosts are handled, by exact name.
+- **A partial move restores exactly what you name** (OBS-282; `docs/ONBOARDING.md` "Moving only part of it").
+  `full machine-restore` takes `--only` or `--skip` by category (`ssh-private`, `ssh-config`, `launchd`, `cli-logins`,
+  `claude`, `codex`, `git`, `shell`, `fabric-services`, `packages`, `agents`, `operator`; repeatable or
+  comma-separated, not both) and `--projects` for `--clone` (a checkout's folder name, a glob over it, or a path that
+  names every checkout under it; a worktree brings its main checkout). Every plan row names its `category`, and the
+  answer's `categories` says per category whether it is selected, how many items it holds in each state and the first
+  destinations an `--apply` would write; the plan's `next` repeats the filters. A category is decided by the path an
+  item is written to, so a key included from another folder is still `ssh-private`, and a private key stays withheld
+  on a second machine whatever `--only` names. An unknown category, `--only` with `--skip`, `--packages` with
+  `packages` left out and a project no checkout matches are refused before anything is written. Each step that writes
+  records what it did in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/restore.json` (schema
+  `observatory-machine-restore/1`, owner-only). Without the new flags a restore writes what it wrote before. Tests:
+  `tests/test_machine_backup.py` SecondMachine `test_only_writes_the_named_categories_and_the_plan_says_what_each_would_write`,
+  `test_skip_leaves_out_what_it_names`, `test_ssh_private_stays_withheld_on_a_second_machine_whatever_only_says`,
+  `test_the_same_machine_restores_only_the_keys_when_asked`, `test_a_category_is_checked_before_anything_is_read`,
+  `test_a_receipt_names_the_restore_and_the_other_machines_keys`; Restore `test_projects_clones_only_the_named_checkouts`,
+  `test_a_worktree_named_brings_its_main_checkout_and_a_path_names_what_is_under_it`,
+  `test_a_project_no_checkout_matches_is_refused_before_anything_is_written`.
+- **`full machine-move status`: the checklist of a move** (OBS-286; `docs/ONBOARDING.md` "Checking the move"). One
+  checklist on the machine it runs on, M1 `release` (the same release on both), M2 `restore` (the restore complete),
+  M3 `ssh-key` (its own SSH key), `device-id` (its own device id) and `vault` (every slot `same`, from the vault
+  digests, computed without writing anything or creating the estate key), M4 `jobs` (no job defined on both machines
+  or defined here while placed elsewhere), each `ok`, `missing` with the step that fixes it, or `unknown`, with its
+  evidence; `--json`, exit 0 only when every item is `ok`. It reaches nothing on the other machine: it compares that
+  machine's public facts (`full machine-move facts --out FILE` there, schema `observatory-machine-facts/1`, then
+  `--peer FILE` here or the file in `machine-move/peers/`), and facts older than 48 hours (`--max-age-hours`) read as
+  `unknown` for the release and the jobs, never a guess. A facts file of any other shape is refused by name in
+  `degraded` and the rest still compared; `facts` writes only what the reader takes (`omitted` counts what it
+  masked or left out) and writes the file whole, never over an existing name. Tests: `tests/test_machine_backup.py` MoveStatus,
+  MoveStatusVault.
 - **`full ssh-keys rekey OLD`: a second machine's own SSH key, everywhere the other machine's key is
   registered** (OBS-285, OSS-96; `docs/design/SSH-KEYS.md` "Rekey on a second machine";
   `docs/ONBOARDING.md` "Moving to a second machine that runs beside this one"). Without `--apply` it is a plan that
