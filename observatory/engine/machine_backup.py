@@ -1589,6 +1589,8 @@ JOB_PARTS = {"launchd": ("Library", "LaunchAgents"), "systemd": (".config", "sys
 #: This engine's own jobs (maintenance, update check, tick, server), by file name: every machine installs
 #: its own (`full maintain ensure`, `full agent install`), so a second machine neither stages nor names them.
 OWN_JOB_PREFIXES = ("org.project-observatory.", "project-observatory-")
+#: A Host alias `ssh-keys rekey --server` takes (tools/ssh_keys.py HOST_ARG).
+HOST_ALIAS = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._@%+:\[\]-]{0,252}")
 #: ssh's default identity files: read without an IdentityFile line, for every host.
 DEFAULT_IDENTITIES = ("id_ed25519", "id_ecdsa", "id_ecdsa_sk", "id_ed25519_sk", "id_rsa", "id_dsa")
 REASONS = {
@@ -1697,10 +1699,13 @@ class _Second:
             return machine_identity.job_label(dest, data.read_bytes())
         return dest.stem if dest.suffix == ".plist" else dest.name
 
-    def ssh_keys(self, manifest: dict) -> list[dict]:
-        """Every withheld private key, the hosts the carried `.ssh/config` sends to it, and the exact steps
-        that make this machine's own key under the same name, so a carried `IdentityFile ~/.ssh/NAME`
-        with `IdentitiesOnly yes` (what `full ssh-keys create --host` writes) finds a key here."""
+    def ssh_keys(self, manifest: dict, config_written: bool = True) -> list[dict]:
+        """Every withheld private key, the hosts the carried `.ssh/config` sends to it, its public
+        fingerprint, and the one step that makes this machine's own key under the same name and sends it
+        where the other machine's key is registered (`full ssh-keys rekey`, OBS-285, OBS-300), so a
+        carried `IdentityFile ~/.ssh/NAME` with `IdentitiesOnly yes` (what `full ssh-keys create --host`
+        writes) finds a key here. `config_written` is False when this restore leaves the carried
+        `~/.ssh/config` out (`--skip ssh-config`): rekey reads the live config, so it would not see a host."""
         keys: dict[str, dict] = {}
         for source in sorted(self.private):
             item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
@@ -1724,6 +1729,12 @@ class _Second:
                 named.add(key["key"])
                 if host not in [h["host"] for h in key["hosts"]]:
                     key["hosts"].append({"host": host, "hostname": hostname})
+                # rekey reaches a Host only through a line naming exactly this home's ~/.ssh/NAME
+                # (tools/ssh_keys.py `rekey_plan`, `_same_path`); `~/.SSH/NAME` or another account's
+                # absolute path is a host the plan lists and rekey would not see.
+                plain = identity.strip().strip('"') in {f"{t}/.ssh/{key['key']}" for t in
+                                                        ("~", "%d", "${HOME}", str(self.home))}
+                key.setdefault("reach", {})[host] = key.get("reach", {}).get(host, False) or plain
         out = []
         for source, key in keys.items():
             # Only a key gets a key step: its text is a private key, the carried config names it as an
@@ -1742,20 +1753,80 @@ class _Second:
                 out.append({**key, "steps": [], "note": "not directly in ~/.ssh: make this machine's own key and "
                                                         "put it where the other machine kept this one, by hand"})
                 continue
-            steps = [f"project-observatory full ssh-keys create {name}"]
-            targets = []
+            # One `rekey` step in place of `create` and a `send` per target (OBS-300). rekey reads the
+            # carried config itself: it sends to each Host naming ~/.ssh/NAME (verified) and to GitHub only
+            # where gh's account holds the other key's fingerprint. A key no host names gets the same step:
+            # rekey still makes the key under its name, reports no place to send it to, and lists what it
+            # cannot know from here. A second machine never gets NAME.pub (it is withheld with its key), so
+            # rekey alone could not match the key on GitHub: the plan hands it the fingerprint the bundle
+            # shows, a public fact read from the private file's clear header, else the carried `.pub`.
+            fingerprint = self._public_fingerprint(manifest, source)
+            key["fingerprint"] = fingerprint
+            reach = key.pop("reach", {})
+            servers, unseen = [], []
             for h in key["hosts"]:
                 github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
-                target = "github" if github else shlex.quote(f"server:{h['host']}")
-                if target not in targets:
-                    targets.append(target)
-            if key["default"] and "github" not in targets:
-                targets.insert(0, "github")
-            for target in targets:
-                steps.append(f"project-observatory full ssh-keys send {name} --to {target}"
-                             + ("" if target == "github" else " --verify"))
-            out.append({**key, "steps": steps})
+                if github:
+                    continue   # GitHub is matched by the fingerprint, never by a Host
+                if not config_written:
+                    unseen.append(h["host"])
+                elif reach.get(h["host"]):
+                    continue   # rekey finds it in the live config
+                elif HOST_ALIAS.fullmatch(h["host"]):
+                    servers.append(h["host"])   # its line is not ~/.ssh/NAME: named to rekey explicitly
+                else:
+                    unseen.append(h["host"])
+            step = f"project-observatory full ssh-keys rekey {name}"
+            if fingerprint:
+                step += f" --fingerprint {shlex.quote(fingerprint)}"
+            step += "".join(f" --server {shlex.quote(alias)}" for alias in servers)
+            notes = []
+            if unseen and not config_written:
+                notes.append(f"this restore leaves ~/.ssh/config out, so rekey does not see Host {', '.join(unseen)}: "
+                             "write the carried config first (`project-observatory full machine-restore --apply "
+                             "--only=ssh-config`), or add each server to both steps with --server ALIAS")
+            elif unseen:
+                notes.append(f"rekey cannot be pointed at Host {', '.join(unseen)} by name: send this machine's key "
+                             f"there by hand (`project-observatory full ssh-keys send {name} --to server:HOST --verify`)")
+            if fingerprint is None:
+                notes.append("the bundle does not show this key's fingerprint, and without it rekey sends nothing "
+                             "to GitHub: run `project-observatory full ssh-keys list` on the other machine, then "
+                             "add --fingerprint SHA256:... to both steps")
+            if key["default"]:
+                # rekey covers GitHub for a default key (by the fingerprint) and names, never guesses, the
+                # servers ssh offers it to without an IdentityFile line: those are not in the carried config.
+                notes.append(f"ssh offers ~/.ssh/{key['key']} to every host whose config names no key, so a "
+                             "server that accepts it need not be in ~/.ssh/config: add each such server to both "
+                             "steps with --server ALIAS")
+            # The plan step reads only (rekey without --apply); the acting step follows it, so `next`, read
+            # in order, has made the key before `--clone` needs it.
+            out.append({**key, "steps": [step, step + " --apply"],
+                        **({"note": "; ".join(notes)} if notes else {})})
         return out
+
+    def _public_fingerprint(self, manifest: dict, source: str) -> str | None:
+        """The other machine's key by its public half: the fingerprint in its private file's clear header,
+        else in its carried `.pub`; never its private section. None when neither reads as a key."""
+        try:
+            sk = _ssh_keys_module()
+        except ImportError:
+            return None
+        files = {i.get("source"): i for i in manifest.get("items", []) if i.get("kind") == "file"}
+        for src, public in ((source, False), (source + ".pub", True)):
+            staged = _staged_file(files[src], self.stage) if src in files else None
+            if staged is None:
+                continue
+            try:
+                if public:
+                    fp = (sk.parse_public(staged.read_bytes()[:16384].decode("utf-8", "replace")) or {}).get(
+                        "fingerprint")
+                else:
+                    fp = (sk.private_header(staged) or {}).get("fingerprint")
+            except (OSError, ValueError):
+                fp = None
+            if isinstance(fp, str) and sk.FINGERPRINT.fullmatch(fp):
+                return fp
+        return None
 
     def _config_identities(self, manifest: dict):
         """(Host alias, its HostName or None, IdentityFile path) from the carried `.ssh/config` and its fragments."""
@@ -2384,7 +2455,8 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                 extract(bundle, secret, stage, lambda n: n in names)
                 rows = plan(manifest, stage, home, second=second, wanted=wanted)
                 if second:
-                    ssh_keys = _Second(manifest, home, stage).ssh_keys(manifest)
+                    ssh_keys = _Second(manifest, home, stage).ssh_keys(
+                        manifest, config_written=wanted is None or "ssh-config" in wanted)
                     other_keys = _other_keys(manifest, stage, home)
         else:
             rows = plan(manifest, None, home)
@@ -2470,7 +2542,8 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
     keep = " ".join(f"--{flag}={shlex.quote(','.join(parse_categories(v)))}"
                     for flag, v in (("only", only), ("skip", skip)) if v)
     named = f"--projects={shlex.quote(','.join(str(p) for p in projects))}" if projects else ""
-    after_keys = ", after this machine's own SSH keys above)" if second and any(k["steps"] for k in ssh_keys or ()) else ")"
+    after_keys = (", after the `ssh-keys rekey ... --apply` steps above make this machine's own SSH keys)"
+                  if second and any(k["steps"] for k in ssh_keys or ()) else ")")
     result["next"] = [s for s in (
         None if mode == "apply" else
         (f"project-observatory full machine-restore --apply {keep}  (writes only what is missing)" if keep
