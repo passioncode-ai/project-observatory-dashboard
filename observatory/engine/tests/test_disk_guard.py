@@ -2758,6 +2758,10 @@ class VmCacheAtCritical(Base):
         import holders
         needs = [c["needs_running"] for c in self.shipped() if c["argv"][0] == "docker"]
         self.assertTrue(needs)
+        if os.name == "nt":
+            # No process listing on Windows: whether a daemon runs is unknown and the command is skipped.
+            self.assertIsNone(holders.running(needs[0]))
+            return
         for listing in ("/opt/homebrew/bin/limactl hostagent --pidfile /x/ha.pid colima\n",
                         "/opt/homebrew/bin/colima daemon start default\n"):
             for need in needs:
