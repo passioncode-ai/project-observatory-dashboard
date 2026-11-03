@@ -148,10 +148,16 @@ def verify_es256(key: Any, data: Union[str, bytes], sig: Any):
     raw = b64url_canonical(sig)
     if raw is None or len(raw) != 64 or not is_low_s(raw):
         return False
+    return es256_verifies(point(key), data.encode('utf-8') if isinstance(data, str) else data, raw)
+
+
+def es256_verifies(octets: bytes, message: bytes, raw: bytes) -> bool:
+    """One plain ECDSA P-256 / SHA-256 verification of the 64 raw bytes `raw` (r ‖ s) under the 65 SEC 1 `octets`
+    of a key `key_refusal` already accepted. No low-S rule and no key validation: the callers apply both, and a relay's
+    `admit` calls this on every path so its work does not depend on what it holds (DEC-0066)."""
     hashes, ec, _, encode_dss_signature, InvalidSignature = _crypto()
-    public = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), point(key))
+    public = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), bytes(octets))
     der = encode_dss_signature(int.from_bytes(raw[:32], 'big'), int.from_bytes(raw[32:], 'big'))
-    message = data.encode('utf-8') if isinstance(data, str) else data
     try:
         public.verify(der, message, ec.ECDSA(hashes.SHA256()))
     except InvalidSignature:

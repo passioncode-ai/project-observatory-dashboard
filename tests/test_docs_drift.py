@@ -214,6 +214,8 @@ STATE_FAMILIES = {
     # The Sentry door's ledger (OBS-292).
     "secrets/sentry-issued.json": "0.31.0",
     "node/device": "0.25.0", "node/records": "0.27.0", "node/orgs": "0.27.0",
+    # The interim relay's spool (OBS-287).
+    "node/relay": "0.31.0",
 }
 ROW_FROM = (0, 26, 0)
 

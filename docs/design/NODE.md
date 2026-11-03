@@ -855,6 +855,59 @@ supervisor (`node/lifecycle/supervisor.py`: the broker's pass on its cadence ins
 events fed to the broker, the store pruned on the sweep), is built for 0.30.0. The helper's release build inside the
 signed app (L2r) and the operator's import with the identity migration (L5) follow in 0.30.0.
 
+## The interim relay (OBS-287)
+
+Until the hosted relay (the relay project's RLY-05) runs, the engine carries its own `fabric-relay/0.1` server for one
+person's estate, the relay project's interim RLY-04: `observatory/engine/node/relay_server.py`, run by
+`full relay serve` (`tools/relay_cli.py`) or, after `full relay enable`, inside the local server
+(`tools/serverd.py` `start_relay`, [MACHINE-UTILITY.md](MACHINE-UTILITY.md) D1: a part of the node, no unit of its
+own). It reuses the node's checks and adds what only a relay does:
+
+- **Admission.** `admit` is the contract's, in its order, with one ES256 verification of equal cost on every path past
+  the frame's own bytes (`prove_es256` over `p256.es256_verifies`, a base-point key and fixed bytes in place of what is
+  missing). The admission set is `relay.peer_keys` over the estate record this machine's node applied
+  (`node/records/estate-record.json`, checked against its own digest whenever the file changes) and the revocations of
+  the delta entries it applied, forked ones included. `relay.session_stands` is checked before every frame a session
+  sends or receives and every two seconds, so a revocation or the record's end closes the session 4403.
+- **Mailboxes.** One SQLite database: `seq` per mailbox, a tombstone of `(from, msgId)` until the ttl, the limits
+  `mailboxMessages` and `mailboxBytes`, and each body sealed with AES-256-GCM under the relay's own key and bound to
+  `(to, from, msgId, seq)`. The relay never decodes a body; it expires one by the ttl of its `send`, which the node
+  signs into the body's `exp`.
+- **Transport.** RFC 6455 from the server's side (masked client frames, 1 MiB per message, a binary frame closed 1003,
+  a frame over 1 MiB refused from its declared length and closed 1009). The request head must arrive within 10 s of
+  the accept and `auth` within 10 s of the upgrade, each a wall-clock deadline across every byte (a missed `auth` is
+  4401); an admitted session is closed after 90 s of silence.
+- **Bounds.** Connections not admitted yet have their own cap (32, at most 8 per caller address, loopback included),
+  apart from admitted sessions (128, at most 4 per machine, its oldest replaced), both kept below the process's
+  descriptor limit (`fd_caps`). The caller address is the socket's peer; behind a TLS terminator on this machine,
+  with `--trusted-proxy`, it is the rightmost `X-Forwarded-For` entry of a connection from a loopback peer (a port
+  stripped, an unreadable entry logged once and counted against the peer), and without the setting that header is
+  ignored. Addresses are counted by group: an IPv4 address alone, an IPv6 address by its /64.
+  Admission is max-min fair across those groups (`RelayServer._place`). At a group's own cap, one of its connections
+  gives way (`RelayServer.victim`: one that has sent nothing before one that sent its request, the oldest first, never
+  one that sent its request less than 2 s ago, its fair answer window), or the newcomer is answered 503. At the whole
+  budget's cap, a newcomer whose group holds at least two fewer slots than the fullest group takes that group's
+  slot (its silent one first, else its oldest), fair window or not; otherwise one of the groups holding as many slots
+  as the newcomer's or more gives way under the fair window, or the newcomer is answered 503. What holds: a newcomer
+  from a group holding fewer slots gets in whenever some group holds two or more, so a flood spread over a few
+  addresses cannot keep a fresh address out. What does not: within one group a flood of complete requests, each inside
+  its fair window, refuses every newcomer of that group, which behind a local terminator without `--trusted-proxy` is
+  every caller; a flood from 32 or more groups holding one slot each leaves no group two slots above another, so
+  every slot sits in its fair window and a newcomer is answered 503 while it lasts (the pending budget is a capacity);
+  and the fair eviction can cut a connection of a group holding two or more slots inside its window, so callers that
+  share one /64 or one NAT address can be cut while they wait for `auth` and connect again (OBS-293). The per-minute limits count a machine across all its connections, with
+  `retryAfter` and 1008 for a connection that keeps sending. Each session writes from its own thread through a bounded
+  queue, so a machine that stops reading stalls only itself; delivery reads its mailbox a page at a time (8 messages or
+  2 MiB), one page per machine at once. A newcomer refused on arrival, before its request was read, gets its 503
+  and a clean close: the relay half-closes and drains what it still sends for up to a second (16 at once, past that
+  closed at once; `stop` ends every drain) before closing, since a close over unread input is a reset and a Windows
+  caller then drops the answer unread. A connection that no thread can be started for is closed and its slot given
+  back, never the end of the accept loop. A failed accept is retried with a backoff and logged; `health` reports an
+  accept loop that ended or keeps failing, which the local server shows as its `relay` row.
+
+`tests/test_relay_server.py` runs the contract's `admit` vectors and drives the node's own `RelaySession` against the
+relay on loopback. Not carried yet: blobs, a hub's `delta` and `heartbeat` frames, and the Cloudflare deployment.
+
 ## What comes next
 
 | Slice | What |

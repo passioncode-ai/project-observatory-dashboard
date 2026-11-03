@@ -7,6 +7,26 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Your own relay for your machines** (OBS-287, the relay project's interim RLY-04, `docs/ONBOARDING.md` "Your own
+  relay for your machines: full relay"). `full relay serve` runs a `fabric-relay/0.1` relay in the foreground, and
+  `full relay enable --origin URL` runs it inside the node's own server from its next start, with no service of its
+  own (`full relay status`, `full relay disable`). It admits the machines of the estate record this machine's node
+  applied, minus every machine and key the record or an applied delta entry revokes, by the contract's `admit` (one
+  answer and one signature's work for every unproven caller), and closes a session the moment its machine is revoked
+  or the record expires (4403). It keeps one mailbox per machine: messages in order, deleted on acknowledgement or
+  when their ttl ends, a repeat answered with its first number, and the refusals `unknown-recipient`, `mailbox-full`,
+  `rate-limited` and `too-large`; queued messages are sealed at rest under the relay's own key. It answers presence
+  and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
+  have their own connection budget apart from admitted machines, the rate limits count a machine across all its
+  connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
+  reads a mailbox a page at a time, a caller refused for want of a slot reads its whole 503 before a clean close
+  (a reset would make a Windows caller drop it), and a failed accept is retried and shown in the server's health. The per-address
+  cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
+  address it forwards in `X-Forwarded-For` (a port stripped), IPv6 addresses count by their /64, and admission is
+  max-min fair across addresses, so a caller from a fresh address gets in while any address holds two or more. Blobs, a hub's
+  delta and heartbeat frames and the Cloudflare deployment are not carried yet.
+  Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
+  on loopback.
 - **A Sentry door: a narrow token for one purpose, and the broad one retired** (OBS-292, `tools/sentry.py`). A build
   that holds a broad Sentry token in a vault slot can get a token scoped to `org:ci`, which Sentry lets list, create
   and update releases, upload source maps, artifact bundles and debug files, read the organization's integrations

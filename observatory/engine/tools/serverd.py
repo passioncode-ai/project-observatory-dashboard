@@ -922,12 +922,15 @@ def serve(port: int) -> int:
         LIFECYCLE.start()
     except Exception as exc:  # noqa: BLE001 - the dashboard, /health and the events feed stay up
         RUNTIME.note_failure("node-lifecycle-start", f"lifecycle: unavailable, {type(exc).__name__}")
+    relay = start_relay()
     stop = threading.Event()
 
     def beat():
         rotated = time.monotonic()
         rotate_own_logs()
         while not stop.is_set():
+            if relay is not None:
+                RUNTIME.note_failure("relay", relay_health(relay))
             beat_once(RUNTIME)
             if time.monotonic() - rotated >= LOG_ROTATE_SECONDS:
                 rotate_own_logs()
@@ -961,8 +964,29 @@ def serve(port: int) -> int:
         stop.set()
         srv.server_close()
         LIFECYCLE.close()
+        if relay is not None:
+            relay.stop()
         lock.release()
     return 0
+
+
+def start_relay():
+    """The relay `full relay enable` turned on (OBS-287), as a part of this server (MACHINE-UTILITY.md D1: no unit of
+    its own), or None. One that cannot start is a degraded row, never the server's failure."""
+    try:
+        import relay_cli
+        return relay_cli.start_configured()
+    except Exception as exc:  # noqa: BLE001 - the dashboard, /health and the events feed stay up
+        RUNTIME.note_failure("relay", f"relay: could not start, {type(exc).__name__}: {exc}"[:300])
+        return None
+
+
+def relay_health(relay) -> str | None:
+    try:
+        import relay_cli
+        return relay_cli.health(relay)
+    except Exception as exc:  # noqa: BLE001
+        return f"relay: health unreadable, {type(exc).__name__}"
 
 
 def build_plist() -> dict:
