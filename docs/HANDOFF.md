@@ -17,6 +17,11 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-02: release 0.30.1](runs/2026-11-02-release-0.30.1/README.md): engine 0.30.1 (`observatory-log` stays
+0.30.0): a restore on a second machine never takes this machine's identity, private SSH keys or jobs, and `full
+machine-move` (OBS-283, OBS-284, #394); Windows verified in CI and the terminal check (OBS-277, OBS-279, #387). Next:
+merge, tag `v0.30.1`, verify, install, record the receipts.
+
 [2026-10-28: release 0.30.0](runs/2026-10-28-release-0.30.0/README.md): engine and plugin 0.30.0: sharing a key
 with another person's Observatory (`full share`, `full cloud deploy`, OBS-263, OBS-264, OBS-276), the secret prompt's
 server half and Mac window (OBS-260, answered `no-client` until an engine is bundled), Home (OBS-261), DigitalOcean

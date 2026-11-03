@@ -32,8 +32,12 @@ import configuration as config
 import workspace
 import backup_vault as vault
 import machine_backup as MB
+import machine_identity as MI
+import machine_move as MM
 
 PASS = 'correct horse battery staple'
+#: The two machines of a move (OBS-283): the bundle is taken on ALPHA and restored on BETA.
+ALPHA, BETA = 'm-machine-alpha-0001', 'm-machine-beta-0002'
 AT = datetime.datetime(2026, 10, 19, 12, 0, tzinfo=datetime.timezone.utc)
 SECRET_MARKER = b'synthetic-private-key-material'
 TOKEN = 'fake-fixture-value'
@@ -58,7 +62,9 @@ class Base(unittest.TestCase):
         self.env = patch.dict(os.environ, git_env({
             'HOME': str(self.user), 'USERPROFILE': str(self.user), 'OBSERVATORY_HOME': str(self.ws), 'OBSERVATORY_BACKUPS': str(self.root),
             'FABRIC_SERVICES_DIR': str(self.user / 'fabric-services'), 'PATH': os.environ.get('PATH', ''),
-            'OBSERVATORY_SYSTEM_SETUP': '0', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir())},
+            'OBSERVATORY_SYSTEM_SETUP': '0', 'TMPDIR': os.environ.get('TMPDIR', tempfile.gettempdir()),
+            # One machine for every case unless a case moves to another (OBS-283).
+            'OBSERVATORY_MACHINE_ID': ALPHA, 'OBSERVATORY_MACHINE_ID_FOR_TESTS': '1'},
             global_config=None), clear=True)
         self.env.start()
         workspace.initialize(self.ws)
@@ -744,6 +750,552 @@ class Restore(Machine):
         self.assertEqual((doc['mode'], doc['bundle']), ('plan', self.bundle.name))
         self.assertIn('needs --apply', err.getvalue())
         self.assertEqual(list(self.fresh.iterdir()), [])
+
+
+#: A private key's first line, built so this file holds no key-shaped text.
+PRIVATE_HEAD = b'-----BEGIN OPENSSH ' + b'PRIVATE KEY-----\n'
+JOB_LABEL = 'com.example.alpha-bot'
+
+
+def job_rel():
+    """Where this platform keeps a user job's definition (what the bundle's job entry walks)."""
+    # The file name differs from the plist's Label on purpose: the plan and the placement file both name the Label.
+    return (f'Library/LaunchAgents/{JOB_LABEL}.job.plist' if sys.platform == 'darwin'
+            else f'.config/systemd/user/{JOB_LABEL}.service')
+
+
+def job_label():
+    """The label a job is named by: launchd's `Label`, or the systemd unit's file name."""
+    return JOB_LABEL if sys.platform == 'darwin' else f'{JOB_LABEL}.service'
+
+
+def job_bytes():
+    if sys.platform == 'darwin':
+        import plistlib
+        return plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true']})
+    return b'[Service]\nExecStart=/usr/bin/true\n'
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd or systemd user jobs on Windows')
+class SecondMachineKeys(unittest.TestCase):
+    """Which withheld `.ssh` files get the steps that make a key, read off `_Second` directly."""
+
+    def keys(self, files: dict[str, bytes]) -> dict[str, dict]:
+        root = Path(tmp.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        home, stage, items = root / 'home', root / 'stage', []
+        home.mkdir()
+        (stage / 'files').mkdir(parents=True)
+        for i, (source, data) in enumerate(files.items()):
+            (stage / f'files/{i}').write_bytes(data)
+            items.append({'kind': 'file', 'source': source, 'arcname': f'files/{i}', 'sha256': 'x'})
+        manifest = {'items': items}
+        return {k['file']: k for k in MB._Second(manifest, home, stage).ssh_keys(manifest)}
+
+    def test_a_default_key_in_an_upper_case_folder_keeps_its_steps(self):
+        key = self.keys({'~/.SSH/id_ed25519': PRIVATE_HEAD + SECRET_MARKER})['~/.SSH/id_ed25519']
+        self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys create id_ed25519')
+        self.assertNotIn('note', key)
+
+    def test_a_key_in_a_subfolder_is_named_by_its_file_and_made_by_hand(self):
+        keys = self.keys({'~/.ssh/keys/work': PRIVATE_HEAD + SECRET_MARKER})
+        self.assertEqual((keys['~/.ssh/keys/work']['key'], keys['~/.ssh/keys/work']['steps']), ('work', []))
+        self.assertIn('not directly in ~/.ssh', keys['~/.ssh/keys/work']['note'])
+
+    def test_an_identity_file_in_a_subfolder_never_names_a_fragment(self):
+        keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile ~/.ssh/k/config.local\nInclude config.local\n',
+                          '~/.ssh/config.local': b'Host x\n  User y\n'})
+        self.assertEqual(keys, {}, 'no key is made over a settings fragment')
+
+    def test_a_name_with_a_space_is_quoted_for_the_shell(self):
+        keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile = "~/.ssh/work key"\n',
+                          '~/.ssh/work key': b'opaque'})
+        self.assertEqual(keys['~/.ssh/work key']['steps'],
+                         ["project-observatory full ssh-keys create 'work key'",
+                          "project-observatory full ssh-keys send 'work key' --to server:w --verify"])
+
+
+class SecondMachine(Machine):
+    """OBS-283: a bundle restored on another machine never writes a private SSH key and never
+    loads a job; it stages the jobs and names them in the placement file."""
+
+    def setUp(self):
+        super().setUp()
+        # What `full ssh-keys create --host` writes: IdentitiesOnly, so only this key is offered (M3).
+        self.write('.ssh/config', 'Host example\n  HostName example.invalid\n  IdentityFile ~/.ssh/id_example\n'
+                                  '  IdentitiesOnly yes\n\nHost gh\n  HostName github.com\n'
+                                  '  IdentityFile ~/.ssh/id_example\n'
+                                  'Host tabbed\n\tHostName tabbed.invalid\n\tIdentityFile\t~/.ssh/id_example\n'
+                                  'Include config.local\n')
+        # A fragment that is a setting, not a key: written, and never offered as a key to create (review of #394).
+        self.write('.ssh/config.local', 'Host extra\n  User someone\n')
+        self.write('.ssh/known_hosts', 'example.invalid ssh-ed25519 AAAA\n')
+        self.write('.ssh/id_example.pub', 'ssh-ed25519 AAAA example\n')
+        self.write('.ssh/lone.pub', 'ssh-ed25519 AAAA someone-elses\n')
+        # An operator's own include into a .ssh folder and into a job folder: the rules go by path.
+        self.write('dotfiles/.ssh/deploy_key', PRIVATE_HEAD + SECRET_MARKER, 0o600)
+        import plistlib
+        self.write('Library/LaunchAgents/nested/com.example.nested.plist',
+                   plistlib.dumps({'Label': 'com.example.nested', 'ProgramArguments': ['/usr/bin/true']}))
+        self.settings({'include': ['~/.config/example-agent', '~/dotfiles/.ssh/deploy_key',
+                                   '~/Library/LaunchAgents/nested/com.example.nested.plist'],
+                       'exclude': ['~/.ssh/*.old'], 'roots': ['~/src'], 'limits': {'file_mb': 0.02}})
+        # A private key under a name that reads as public: withheld by its content.
+        self.write('.ssh/config.d/disguised', PRIVATE_HEAD + SECRET_MARKER, 0o600)
+        self.write(job_rel(), job_bytes())
+        self.write(str(Path(job_rel()).parent / ('org.project-observatory.0123456789abcdef.maintain.plist'
+                                                if sys.platform == 'darwin'
+                                                else 'project-observatory-0123456789abcdef-maintain.timer')),
+                   b'synthetic own job')
+        self.write('fabric-services/alpha-bot.default.json', json.dumps(
+            {'protocol': 'fabric-service/0.1', 'id': 'alpha-bot', 'instance': 'default',
+             'lifecycle': {'manager': 'launchd', 'label': job_label()}}))
+        self.take(at=AT)
+        self.bundle = MB.newest(self.ws)
+        self.fresh = self.base / 'fresh-user'
+        self.fresh.mkdir()
+
+    def on(self, machine):
+        return patch.dict(os.environ, {'OBSERVATORY_MACHINE_ID': machine})
+
+    def test_a_bundle_names_the_machine_it_was_taken_on(self):
+        stage, manifest = self.open(self.bundle)
+        self.addCleanup(shutil.rmtree, stage, True)
+        self.assertEqual(manifest['machine_id'], ALPHA)
+
+    def test_another_machine_gets_no_private_key_and_no_loaded_job(self):
+        with self.on(BETA):
+            planned = MB.restore(self.bundle, self.fresh, secret=PASS)
+            self.assertEqual((planned['machine']['mode'], planned['machine']['why']),
+                             ('second-machine', 'another-machine'))
+            self.assertEqual((planned['machine']['taken_on'], planned['machine']['this_machine']), (ALPHA, BETA))
+            rows = {r['source']: r for r in planned['plan']}
+            self.assertEqual(rows['~/.ssh/id_example']['state'], 'withheld')
+            self.assertIn('ssh-private', rows['~/.ssh/id_example']['reason'])
+            for public in ('~/.ssh/config', '~/.ssh/known_hosts', '~/.ssh/lone.pub'):
+                self.assertEqual(rows[public]['state'], 'missing', public)
+            self.assertEqual(rows['~/.ssh/id_example.pub']['state'], 'withheld',
+                             'its private half stays behind, and it would block `ssh-keys create id_example`')
+            self.assertEqual(rows['~/.ssh/config.d/disguised']['state'], 'withheld', 'a private key by its text')
+            self.assertEqual(rows['~/dotfiles/.ssh/deploy_key']['state'], 'withheld', 'an include, by its path')
+            self.assertTrue(rows['~/Library/LaunchAgents/nested/com.example.nested.plist']['staged'])
+            job = rows['~/' + job_rel()]
+            self.assertTrue(job['staged'])
+            self.assertEqual(job['label'], job_label(), 'the Label, as the placement file names it')
+            keys = {k['key']: k for k in planned['ssh_keys']}
+            self.assertEqual(set(keys), {'id_example', 'deploy_key'})
+            self.assertEqual(keys['deploy_key']['steps'], [], 'outside ~/.ssh: `ssh-keys create` cannot put it there')
+            self.assertEqual(keys['id_example']['steps'], [
+                'project-observatory full ssh-keys create id_example',
+                'project-observatory full ssh-keys send id_example --to server:example --verify',
+                'project-observatory full ssh-keys send id_example --to github',
+                'project-observatory full ssh-keys send id_example --to server:tabbed --verify'])
+            self.assertNotIn('config.local', keys, 'a withheld setting is never offered as a key to create')
+            nxt = planned['next']
+            self.assertLess(nxt.index('project-observatory full ssh-keys create id_example'),
+                            next(i for i, n in enumerate(nxt) if '--clone' in n), 'the key before --clone')
+            self.assertTrue(job['destination'].startswith('~/.local/share/project-observatory/machine-move/'), job)
+            own = [r for r in planned['plan'] if 'project-observatory' in r['source'] and r['kind'] == 'file'
+                   and r['source'].startswith('~/' + str(Path(job_rel()).parent))]
+            self.assertEqual([r['state'] for r in own], ['withheld'], 'each machine installs its own engine jobs')
+            self.assertIn('installs its own', own[0]['reason'])
+            self.assertEqual(planned['counts']['withheld'], 6)
+            self.assertEqual(planned['counts']['staged'], 2)
+            self.assertEqual(list(self.fresh.iterdir()), [], 'the plan writes nothing, the placement file included')
+            for step in MB.SECOND_MACHINE_NEXT:
+                self.assertIn(step, planned['next'])
+            applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
+        self.assertEqual(applied['applied']['failed'], [])
+        self.assertEqual(applied['applied']['withheld'], 6,
+                         'id_example by name, its .pub, config.d/disguised by content, deploy_key by path, '
+                         'config.local as any other non-public ~/.ssh file, own job')
+        self.assertEqual([p.name for p in (self.fresh / job_rel()).parent.iterdir()]
+                         if (self.fresh / job_rel()).parent.exists() else [], [])
+        self.assertFalse((self.fresh / '.ssh/id_example').exists())
+        self.assertFalse((self.fresh / '.ssh/config.d/disguised').exists())
+        self.assertFalse((self.fresh / '.ssh/config.local').exists(), 'a missing Include file is skipped by ssh')
+        self.assertFalse((self.fresh / '.ssh/id_example.pub').exists())
+        self.assertFalse((self.fresh / 'dotfiles/.ssh/deploy_key').exists())
+        self.assertFalse((self.fresh / 'Library/LaunchAgents/nested').exists())
+        for public in ('config', 'known_hosts', 'lone.pub'):
+            self.assertTrue((self.fresh / '.ssh' / public).is_file(), public)
+        for p in self.fresh.rglob('*'):
+            if p.is_file() and not p.is_symlink():
+                self.assertNotIn(SECRET_MARKER, p.read_bytes(), str(p))
+        self.assertFalse((self.fresh / job_rel()).exists(), 'nothing loads the job at the next login')
+        system = 'launchd' if sys.platform == 'darwin' else 'systemd'
+        staged = MI.staging_dir(self.fresh, system) / Path(job_rel()).name
+        self.assertEqual(staged.read_bytes(), job_bytes())
+        placement = MI.placement_path(self.fresh)
+        self.assertEqual(stat.S_IMODE(placement.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(placement.parent.stat().st_mode), 0o700)
+        doc = json.loads(placement.read_text())
+        self.assertEqual((doc['schema'], doc['machine']), ('observatory-placement/1', BETA))
+        nested = 'com.example.nested'
+        self.assertEqual(sorted(([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']]),
+                                key=lambda e: e['label']),
+                         sorted([{'label': job_label(), 'serviceId': 'alpha-bot.default', 'placedOn': ALPHA,
+                                  'by': 'machine-restore'},
+                                 {'label': nested, 'serviceId': None, 'placedOn': ALPHA, 'by': 'machine-restore'}],
+                                key=lambda e: e['label']))
+        self.assertTrue(doc['updatedAt'] and doc['elsewhere'][0]['since'])
+        self.assertEqual(applied['placement']['elsewhere'], sorted([job_label(), nested]))
+        self.assertFalse([p for p in placement.parent.iterdir() if p.name.endswith('.tmp')], 'written atomically')
+
+    def test_the_same_machine_keeps_todays_behaviour(self):
+        planned = MB.restore(self.bundle, self.fresh, secret=PASS)
+        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('same-machine', 'same-machine'))
+        self.assertEqual(set(planned['counts']), {'missing', 'same', 'conflict'})
+        self.assertFalse([r for r in planned['plan'] if r.get('staged') or r['state'] == 'withheld'])
+        self.assertNotIn(MB.SECOND_MACHINE_NEXT[0], planned['next'])
+        applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
+        self.assertNotIn('withheld', applied['applied'])
+        self.assertEqual((self.fresh / '.ssh/id_example').read_bytes(), SECRET_MARKER)
+        self.assertEqual((self.fresh / job_rel()).read_bytes(), job_bytes())
+        self.assertFalse(MI.placement_path(self.fresh).exists(), 'a same-machine restore writes no placement file')
+
+    def test_a_bundle_that_names_no_machine_is_another_machines(self):
+        with patch.object(MB.machine_identity, 'machine_id', lambda home=None, **kw: None):
+            self.take(at=AT + datetime.timedelta(minutes=1))
+        old = MB.newest(self.ws)
+        planned = MB.restore(old, self.fresh, secret=PASS)
+        self.assertEqual((planned['machine']['mode'], planned['machine']['why'], planned['machine']['taken_on']),
+                         ('second-machine', 'names-no-machine', None))
+        MB.restore(old, self.fresh, secret=PASS, mode='apply')
+        self.assertFalse((self.fresh / '.ssh/id_example').exists())
+        doc = json.loads(MI.placement_path(self.fresh).read_text())
+        self.assertEqual(doc['elsewhere'][0]['placedOn'], 'unknown')
+        whole = self.base / 'whole-user'
+        whole.mkdir()
+        MB.restore(old, whole, secret=PASS, mode='apply', machine='same')
+        self.assertEqual((whole / '.ssh/id_example').read_bytes(), SECRET_MARKER)
+
+    def test_second_machine_can_be_asked_for_on_the_same_machine(self):
+        planned = MB.restore(self.bundle, self.fresh, secret=PASS, machine='second')
+        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('second-machine', 'asked'))
+
+    def test_a_job_this_machine_already_defines_is_not_named_elsewhere(self):
+        self.write_to(self.fresh, job_rel(), job_bytes())
+        with self.on(BETA):
+            applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
+        self.assertEqual((applied['placement']['elsewhere'], applied['placement']['already_here']), (['com.example.nested'], [job_label()]))
+
+    def test_a_placement_file_that_cannot_be_written_exits_non_zero(self):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS, 'OBSERVATORY_MACHINE_ID': BETA}), \
+                patch.object(MI, 'place_elsewhere', side_effect=OSError('read-only')), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(MB.restore_main(['--latest', '--apply']), 1)
+        self.assertIn('placement file', err.getvalue())
+
+    def write_to(self, home, rel, data):
+        p = home / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+
+    def test_the_command_line_takes_the_machine_flags_and_same_machine_needs_a_terminal(self):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS, 'OBSERVATORY_MACHINE_ID': BETA}), \
+                patch.object(sys, 'stdin', io.StringIO('')), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(MB.restore_main(['--latest', '--same-machine']), 2)
+            self.assertIn('a terminal', err.getvalue())
+            self.assertEqual(MB.restore_main(['--latest']), 0, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())['machine']['mode'], 'second-machine')
+        self.assertEqual(list(self.fresh.iterdir()), [])
+        sys.path.insert(0, str(ROOT))
+        import observatory as cli
+        self.assertNotEqual(cli.refusal(['machine-restore', '--latest', '--same-machine', '--second-machine']), '')
+        self.assertEqual(cli.refusal(['machine-restore', '--latest', '--apply', '--second-machine']), '')
+
+
+def YES(label, machine):
+    """The person typed the label back: `leave` ran on the other machine."""
+    return True
+
+
+class PlanByPath(unittest.TestCase):
+    """OBS-283: the second-machine rules go by the path an item is written to, whatever its category."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name).resolve()
+
+    def rows(self, items):
+        return {r['source']: r for r in MB.plan({'items': items}, None, self.home, second=True)}
+
+    def test_a_linked_job_folder_or_ssh_folder_is_never_written_as_a_link(self):
+        rows = self.rows([{'kind': 'link', 'source': '~/Library/LaunchAgents', 'target': '~/dotfiles/agents',
+                           'category': 'launchd'},
+                          {'kind': 'link', 'source': '~/.config/systemd/user', 'target': '~/dotfiles/units',
+                           'category': 'systemd'},
+                          {'kind': 'link', 'source': '~/.ssh', 'target': '~/dotfiles/ssh', 'category': 'ssh'},
+                          {'kind': 'link', 'source': '~/.ssh/id_work', 'target': '~/keys/id_work', 'category': 'ssh'},
+                          {'kind': 'link', 'source': '~/.ssh/config', 'target': '~/dotfiles/ssh_config',
+                           'category': 'ssh'}])
+        for source in ('~/Library/LaunchAgents', '~/.config/systemd/user', '~/.ssh', '~/.ssh/id_work'):
+            self.assertEqual(rows[source]['state'], 'withheld', source)
+        self.assertEqual(rows['~/.ssh/config']['state'], 'missing', 'a link named config leads to settings')
+
+    def test_an_absolute_path_from_another_home_is_held_to_the_same_rules(self):
+        if sys.platform == 'win32':
+            # A POSIX absolute path names no place on Windows: the manifest refuses it as unsafe,
+            # so nothing of another home's .ssh or jobs is written there at all.
+            with self.assertRaisesRegex(MB.MachineBackupError, 'unsafe path'):
+                self.rows([{'kind': 'file', 'source': '/var/empty/example-account/.ssh/id_old', 'arcname': 'abs/x',
+                            'sha256': '0', 'category': 'operator'}])
+            return
+        rows = self.rows([{'kind': 'file', 'source': '/var/empty/example-account/.ssh/id_old', 'arcname': 'abs/x',
+                           'sha256': '0', 'category': 'operator'},
+                          {'kind': 'file', 'source': '/var/empty/example-account/Library/LaunchAgents/com.example.a.plist',
+                           'arcname': 'abs/y', 'sha256': '0', 'category': 'operator'}])
+        self.assertEqual(rows['/var/empty/example-account/.ssh/id_old']['state'], 'withheld')
+        self.assertTrue(rows['/var/empty/example-account/Library/LaunchAgents/com.example.a.plist']['staged'])
+
+
+class Recorder:
+    """A stand-in for subprocess.run: records each argv, answers from `codes` by its first two words."""
+
+    def __init__(self, codes=None):
+        self.calls, self.codes = [], codes or {}
+
+    def __call__(self, argv, **kw):
+        self.calls.append(list(argv))
+        code = self.codes.get(tuple(argv[:2]), 0)
+        if callable(code):
+            code = code()
+        return subprocess.CompletedProcess(argv, code, '', 'synthetic refusal' if code else '')
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd or systemd user jobs on Windows')
+class MachineMove(Base):
+    """OBS-283: one job moves between two machines; the placement file follows it."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.user
+        self.write('fabric-services/alpha-bot.default.json', json.dumps(
+            {'protocol': 'fabric-service/0.1', 'id': 'alpha-bot', 'instance': 'default',
+             'lifecycle': {'manager': 'launchd', 'label': JOB_LABEL}}))
+        self.allow = patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': '1'})
+
+    def plist(self):
+        import plistlib
+        return plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true']})
+
+    def stage(self, system='launchd', name=f'{JOB_LABEL}.plist', data=None):
+        folder = MI.staging_dir(self.home, system)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(data if data is not None else self.plist())
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': ALPHA, 'by': 'machine-restore'}], self.home)
+        return folder / name
+
+    def test_cutover_loads_the_staged_job_here_and_clears_it_from_elsewhere(self):
+        self.stage()
+        run = Recorder({('launchctl', 'print'): 113})
+        with self.allow:
+            result = MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        self.assertEqual(live.read_bytes(), self.plist())
+        self.assertEqual(list(MI.staging_dir(self.home).iterdir()), [])
+        self.assertIn(['launchctl', 'enable', f'gui/501/{JOB_LABEL}'], run.calls)
+        self.assertIn(['launchctl', 'bootstrap', 'gui/501', str(live)], run.calls)
+        self.assertEqual(json.loads(MI.placement_path(self.home).read_text())['elsewhere'], [])
+        self.assertEqual((result['load'], result['was_elsewhere']), ('loaded', True))
+        self.assertIn(f'machine-move leave {JOB_LABEL} --to {ALPHA}', result['next'][0])
+
+    def test_a_failed_load_puts_the_job_back_in_staging(self):
+        staged = self.stage()
+        run = Recorder({('launchctl', 'print'): 113, ('launchctl', 'bootstrap'): 5})
+        with self.allow, self.assertRaises(MM.MachineMoveFailed):
+            MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        self.assertTrue(staged.is_file())
+        self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
+        self.assertEqual([e['label'] for e in json.loads(MI.placement_path(self.home).read_text())['elsewhere']],
+                         [JOB_LABEL])
+
+    def test_a_different_definition_already_here_is_never_overwritten(self):
+        self.stage()
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(b'mine')
+        with self.allow, self.assertRaisesRegex(MM.MachineMoveError, 'differs'):
+            MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501, confirm=YES)
+        self.assertEqual(live.read_bytes(), b'mine')
+
+    def test_leave_stops_the_job_stages_it_and_names_where_it_runs(self):
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        loaded = iter([0, 113])
+        run = Recorder({('launchctl', 'print'): lambda: next(loaded)})
+        with self.allow:
+            result = MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=501)
+        self.assertIn(['launchctl', 'bootout', f'gui/501/{JOB_LABEL}'], run.calls)
+        self.assertFalse(live.exists(), 'the next login does not start it')
+        self.assertTrue((MI.staging_dir(self.home) / live.name).is_file())
+        doc = json.loads(MI.placement_path(self.home).read_text())
+        self.assertEqual(doc['machine'], ALPHA)
+        self.assertEqual([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']],
+                         [{'label': JOB_LABEL, 'serviceId': 'alpha-bot.default', 'placedOn': BETA,
+                           'by': 'machine-move leave'}])
+        self.assertEqual((result['stop'], result['next']), ('stopped', [f'on {BETA}: project-observatory full '
+                                                                         f'machine-move cutover {JOB_LABEL}']))
+
+    def test_a_job_that_will_not_stop_is_not_moved(self):
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        run = Recorder({('launchctl', 'bootout'): 1})
+        with self.allow, self.assertRaisesRegex(MM.MachineMoveError, 'still running'):
+            MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=501)
+        self.assertTrue(live.is_file())
+        self.assertFalse(MI.placement_path(self.home).exists())
+
+    def test_refusals_name_their_reason(self):
+        for call, reason in ((lambda: MM.leave(JOB_LABEL, ALPHA, self.home, runner=Recorder(), platform='darwin'),
+                              'names this machine'),
+                             (lambda: MM.leave(JOB_LABEL, 'x', self.home, runner=Recorder(), platform='darwin'),
+                              'other machine'),
+                             (lambda: MM.leave('bad label!', BETA, self.home, runner=Recorder(), platform='darwin'),
+                              'label'),
+                             (lambda: MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin'),
+                              'no job'),
+                             (lambda: MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='win32'),
+                              'Windows')):
+            with self.subTest(reason=reason), self.assertRaisesRegex(MM.MachineMoveError, reason):
+                call()
+
+    def test_cutover_asks_that_leave_ran_on_the_other_machine(self):
+        staged = self.stage()
+        with self.allow, self.assertRaisesRegex(MM.MachineMoveError, 'not confirmed'):
+            MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501,
+                       confirm=lambda label, machine: False)
+        with self.allow, patch.object(sys, 'stdin', io.StringIO('')), \
+                self.assertRaisesRegex(MM.MachineMoveError, 'terminal'):
+            MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501)
+        self.assertTrue(staged.is_file(), 'nothing moved')
+        with patch.object(MM.osprivacy, 'is_terminal', return_value=True), \
+                patch('builtins.input', return_value=JOB_LABEL), contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(MM.ask_left(JOB_LABEL, BETA))
+        with patch.object(MM.osprivacy, 'is_terminal', return_value=True), \
+                patch('builtins.input', return_value='yes'), contextlib.redirect_stderr(io.StringIO()):
+            self.assertFalse(MM.ask_left(JOB_LABEL, BETA), 'only the label typed back confirms')
+
+    def test_a_failed_cutover_of_this_machines_own_job_leaves_it_where_it_was(self):
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        run = Recorder({('launchctl', 'print'): 113, ('launchctl', 'bootstrap'): 5})
+        with self.allow, self.assertRaisesRegex(MM.MachineMoveFailed, 'stays where it was'):
+            MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        self.assertTrue(live.is_file())
+        self.assertFalse(MI.staging_dir(self.home).exists())
+
+    def test_the_placement_file_loses_no_change_when_two_write_at_once(self):
+        import threading
+        labels = [f'com.example.job-{n}' for n in range(16)]
+        threads = [threading.Thread(target=MI.place_elsewhere, args=([{'label': lab, 'placedOn': BETA}], self.home))
+                   for lab in labels]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(sorted(e['label'] for e in MI.read_placement(self.home)['elsewhere']), sorted(labels))
+
+    def test_systemd_off_macos(self):
+        self.stage('systemd', f'{JOB_LABEL}.service', b'[Service]\nExecStart=/usr/bin/true\n')
+        run = Recorder()
+        with self.allow:
+            MM.cutover(f'{JOB_LABEL}.service', self.home, runner=run, platform='linux', uid=1000, confirm=YES)
+        self.assertTrue((self.home / '.config/systemd/user' / f'{JOB_LABEL}.service').is_file())
+        self.assertEqual(run.calls, [['systemctl', '--user', 'daemon-reload'],
+                                     ['systemctl', '--user', 'enable', '--now', f'{JOB_LABEL}.service']])
+
+    def test_a_sandbox_moves_files_and_never_calls_the_job_system(self):
+        self.stage()
+        run = Recorder()
+        result = MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        self.assertEqual((run.calls, result['load']), ([], 'skipped: OBSERVATORY_SYSTEM_SETUP=0'))
+
+    def test_show_names_this_machine_and_the_staged_jobs(self):
+        self.stage()
+        shown = MM.show(self.home, platform='darwin')
+        self.assertEqual(shown['machine'], ALPHA)
+        self.assertEqual(shown['staged'], [{'label': JOB_LABEL, 'file': f'{JOB_LABEL}.plist'}])
+        self.assertEqual([e['label'] for e in shown['elsewhere']], [JOB_LABEL])
+
+    def test_a_placement_file_that_is_not_one_is_refused_not_replaced(self):
+        path = MI.placement_path(self.home)
+        path.parent.mkdir(parents=True)
+        path.write_text('{"schema": "something-else"}')
+        with self.assertRaisesRegex(MI.MachineIdentityError, 'move it aside'):
+            MI.place_elsewhere([{'label': JOB_LABEL}], self.home)
+        self.assertEqual(path.read_text(), '{"schema": "something-else"}')
+
+    def test_the_full_cli_routes_machine_move(self):
+        sys.path.insert(0, str(ROOT))
+        import observatory as cli
+        self.assertIn('machine-move', cli.WORKSPACE_COMMANDS)
+        self.assertIn('machine-move', cli.PUBLIC_HELP)
+        self.assertEqual(cli.refusal(['machine-move', 'cutover', JOB_LABEL]), '')
+        self.assertNotEqual(cli.refusal(['machine-move', 'leave', JOB_LABEL]), '', '--to is required')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(workspace.main(['machine-move', 'show']), 0)
+        self.assertEqual(json.loads(out.getvalue())['machine'], ALPHA)
+
+
+class MachineId(unittest.TestCase):
+    """The id tells two machines apart and never writes the platform's own identifier."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name).resolve()
+        self.env = patch.dict(os.environ, {'HOME': str(self.home)}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_the_platform_identifier_is_hashed_never_kept(self):
+        raw = '01234567-89AB-CDEF-0123-456789ABCDEF'
+
+        def ioreg(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, f'  "IOPlatformUUID" = "{raw}"\n', '')
+        with patch.object(MI.sys, 'platform', 'darwin'):
+            first = MI.machine_id(self.home, runner=ioreg)
+            again = MI.machine_id(self.home, runner=ioreg)
+        self.assertEqual(first, again)
+        self.assertRegex(first, r'^m-[0-9a-f]{24}$')
+        self.assertNotIn(raw.lower().replace('-', '')[:12], first)
+        self.assertFalse(MI.data_dir(self.home).exists(), 'nothing written when the platform has an identifier')
+
+    @unittest.skipIf(sys.platform == 'win32', 'owner-only is an access list on Windows, not a mode')
+    def test_without_one_a_random_id_is_kept_once_owner_only(self):
+        with patch.object(MI, '_platform_identifier', lambda runner=None: None):
+            first = MI.machine_id(self.home)
+            self.assertEqual(MI.machine_id(self.home), first)
+        kept = MI.data_dir(self.home) / MI.ID_FILE
+        self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
+
+    def test_the_override_is_validated_and_honoured_only_in_a_sandbox(self):
+        sandbox = {'OBSERVATORY_SYSTEM_SETUP': '0'}
+        with patch.dict(os.environ, {**sandbox, MI.ENV: 'bad id'}), self.assertRaises(MI.MachineIdentityError):
+            MI.machine_id(self.home)
+        with patch.dict(os.environ, {**sandbox, MI.ENV: ALPHA}):
+            self.assertEqual(MI.machine_id(self.home), ALPHA)
+        with patch.dict(os.environ, {MI.ENV: ALPHA}), patch.object(MI, '_platform_identifier', lambda runner=None: 'X'):
+            self.assertNotEqual(MI.machine_id(self.home), ALPHA, 'outside a sandbox the variable is ignored')
+
+    def test_the_restore_mode(self):
+        mode = lambda recorded, asked=None: MI.restore_mode(recorded, asked=asked, here=ALPHA)  # noqa: E731
+        self.assertEqual(mode(ALPHA)['mode'], 'same-machine')
+        self.assertEqual((mode(BETA)['mode'], mode(BETA)['why']), ('second-machine', 'another-machine'))
+        self.assertEqual((mode(None)['mode'], mode(None)['why']), ('second-machine', 'names-no-machine'))
+        self.assertEqual(mode('not an id!')['why'], 'names-no-machine')
+        self.assertEqual(mode(ALPHA, 'second')['mode'], 'second-machine')
+        self.assertEqual(mode(None, 'same')['mode'], 'same-machine')
 
 
 class Schedule(Base):
