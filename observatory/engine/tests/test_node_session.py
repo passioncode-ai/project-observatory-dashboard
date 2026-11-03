@@ -84,8 +84,18 @@ class Conn:
         self.raw(0x1, json.dumps(frame).encode())
 
     def close(self, code):
+        # Half-close and read off what the client still sends before closing: a socket closed with bytes unread
+        # makes Windows send a reset, and the client then loses the close frame and reads 1006 (OBS-295).
         try:
             self.raw(0x8, struct.pack('!H', code))
+            self.sock.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + 1.0
+            while (left := deadline - time.monotonic()) > 0:
+                self.sock.settimeout(left)
+                if not self.sock.recv(4096):
+                    break
+        except OSError:
+            pass
         finally:
             self.sock.close()
 
