@@ -1699,13 +1699,15 @@ class _Second:
             return machine_identity.job_label(dest, data.read_bytes())
         return dest.stem if dest.suffix == ".plist" else dest.name
 
-    def ssh_keys(self, manifest: dict, config_written: bool = True) -> list[dict]:
+    def ssh_keys(self, manifest: dict, config_written: bool = True, config_kept: bool = False) -> list[dict]:
         """Every withheld private key, the hosts the carried `.ssh/config` sends to it, its public
         fingerprint, and the one step that makes this machine's own key under the same name and sends it
         where the other machine's key is registered (`full ssh-keys rekey`, OBS-285, OBS-300), so a
         carried `IdentityFile ~/.ssh/NAME` with `IdentitiesOnly yes` (what `full ssh-keys create --host`
         writes) finds a key here. `config_written` is False when this restore leaves the carried
-        `~/.ssh/config` out (`--skip ssh-config`): rekey reads the live config, so it would not see a host."""
+        `~/.ssh/config` out: `--skip ssh-config`, or (`config_kept`) this machine's own different config,
+        which a restore without `--overwrite` keeps (OBS-306). rekey reads the live config, so it would
+        not see a host."""
         keys: dict[str, dict] = {}
         for source in sorted(self.private):
             item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
@@ -1763,7 +1765,7 @@ class _Second:
             fingerprint = self._public_fingerprint(manifest, source)
             key["fingerprint"] = fingerprint
             reach = key.pop("reach", {})
-            servers, unseen = [], []
+            servers, unseen, by_hand = [], [], []
             for h in key["hosts"]:
                 github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
                 if github:
@@ -1775,19 +1777,39 @@ class _Second:
                 elif HOST_ALIAS.fullmatch(h["host"]):
                     servers.append(h["host"])   # its line is not ~/.ssh/NAME: named to rekey explicitly
                 else:
-                    unseen.append(h["host"])
+                    by_hand.append(h)   # an alias neither rekey nor `send --to server:` takes
             step = f"project-observatory full ssh-keys rekey {name}"
             if fingerprint:
                 step += f" --fingerprint {shlex.quote(fingerprint)}"
             step += "".join(f" --server {shlex.quote(alias)}" for alias in servers)
             notes = []
-            if unseen and not config_written:
+            if unseen and config_kept:
+                notes.append(f"~/.ssh/config here differs from the carried one and this restore keeps it (no "
+                             f"--overwrite), so rekey does not see Host {', '.join(unseen)}: replace it first "
+                             "(`project-observatory full machine-restore --apply --overwrite --only=ssh-config`, "
+                             "which moves this machine's own aside), or add each server to both steps with "
+                             "--server ALIAS")
+            elif unseen:
                 notes.append(f"this restore leaves ~/.ssh/config out, so rekey does not see Host {', '.join(unseen)}: "
                              "write the carried config first (`project-observatory full machine-restore --apply "
                              "--only=ssh-config`), or add each server to both steps with --server ALIAS")
-            elif unseen:
-                notes.append(f"rekey cannot be pointed at Host {', '.join(unseen)} by name: send this machine's key "
-                             f"there by hand (`project-observatory full ssh-keys send {name} --to server:HOST --verify`)")
+            if servers:
+                # OBS-306 (4): rekey sends the new key there, but ssh still offers what the carried line names.
+                notes.append(f"Host {', '.join(servers)} name this key by another path than ~/.ssh/{key['key']}: "
+                             f"where that path is not this machine's ~/.ssh/{key['key']}, point the IdentityFile "
+                             f"line at ~/.ssh/{key['key']} so ssh offers the new key")
+            for h in by_hand:
+                # `send --to server:` refuses the alias by the same pattern (tools/ssh_keys.py HOST_ARG), so the
+                # note names the address its HostName gives, or says to give the host an alias both take.
+                address = h["hostname"] or ""
+                if HOST_ALIAS.fullmatch(address) and "%" not in address:
+                    notes.append(f"rekey cannot be pointed at Host {h['host']} by name: send this machine's key to "
+                                 f"its address by hand (`project-observatory full ssh-keys send {name} --to "
+                                 f"server:{shlex.quote(address)} --verify`, with user@ when that Host sets a User)")
+                else:
+                    notes.append(f"rekey cannot be pointed at Host {h['host']} by name, and it names no address "
+                                 "this tool takes: add a plain Host alias for it to ~/.ssh/config (letters, digits, "
+                                 ". _ -), then add it to both steps with --server ALIAS")
             if fingerprint is None:
                 notes.append("the bundle does not show this key's fingerprint, and without it rekey sends nothing "
                              "to GitHub: run `project-observatory full ssh-keys list` on the other machine, then "
@@ -1855,6 +1877,22 @@ class _Second:
                     pending += [(h, value) for h in hosts if "*" not in h and "?" not in h]
             for host, identity in pending:
                 yield host, hostnames.get(host), identity
+
+
+def _carried_config(manifest: dict, rows: list[dict], home: Path, overwrite: bool) -> str:
+    """Whether `--apply` leaves the carried `~/.ssh/config` live here (OBS-306): `written` (missing here,
+    the same here, or a conflict `--overwrite` replaces; also when the bundle carries none), `left-out`
+    (`--only` or `--skip` leaves it out) or `kept` (this machine's own differs and is kept)."""
+    configs = {i.get("source") for i in manifest.get("items", [])
+               if i.get("kind") == "file" and _area(i, home) == ("ssh", ("config",))}
+    for row in rows:
+        if row.get("source") not in configs:
+            continue
+        if row["state"] == "left-out":
+            return "left-out"
+        if row["state"] == "conflict" and not overwrite:
+            return "kept"
+    return "written"
 
 
 def _ssh_keys_module():
@@ -2455,8 +2493,9 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                 extract(bundle, secret, stage, lambda n: n in names)
                 rows = plan(manifest, stage, home, second=second, wanted=wanted)
                 if second:
+                    landing = _carried_config(manifest, rows, home, overwrite)
                     ssh_keys = _Second(manifest, home, stage).ssh_keys(
-                        manifest, config_written=wanted is None or "ssh-config" in wanted)
+                        manifest, config_written=landing == "written", config_kept=landing == "kept")
                     other_keys = _other_keys(manifest, stage, home)
         else:
             rows = plan(manifest, None, home)

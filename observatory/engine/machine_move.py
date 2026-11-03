@@ -35,6 +35,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -272,6 +273,8 @@ MAX_AGE_HOURS = 48
 CLOCK_SKEW = datetime.timedelta(minutes=5)
 FACTS_MAX_BYTES = 1 << 20
 FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+#: A key `ssh-keys rekey OLD` takes (tools/ssh_keys.py KEY_REF): in ~/.ssh or one folder below, never a `.pub`.
+KEY_REF = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63}/)?[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 VERSION_SHAPE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}")
 DEVICE_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}")
 SHOWN_FILE = re.compile(r"~/[A-Za-z0-9._/ -]{1,200}")
@@ -570,6 +573,41 @@ def _vault_view(max_age_hours: float) -> tuple[dict | None, str | None]:
         return None, f"the vault digests could not be compared: {reason}"
 
 
+def _rekey_steps(old: str, fingerprint: str | None, new: str | None = None) -> list[str]:
+    """`ssh-keys rekey` as the second-machine restore spells it: the plan, then the same with --apply."""
+    step = f"project-observatory full ssh-keys rekey {shlex.quote(old)}"
+    if new:
+        step += f" --name {shlex.quote(new)}"
+    if fingerprint:
+        step += f" --fingerprint {shlex.quote(fingerprint)}"
+    return [step, step + " --apply"]
+
+
+def _new_key_name(base: str) -> str:
+    """A name for this machine's own key beside a copy of the other machine's (tools/ssh_keys.py NAME)."""
+    return base[:60] + "-own"
+
+
+def _other_key_names(withheld, others: list[dict]) -> list[tuple[str, str]]:
+    """(name, fingerprint) of each key the other machine holds, as rekey takes it: first the keys the
+    restore receipt lists as withheld (`other_keys`), then the keys in the peers' facts directly in
+    ~/.ssh. A name rekey would refuse is left out, never repaired."""
+    out: dict[str, str] = {}
+    for k in withheld if isinstance(withheld, list) else []:
+        if not isinstance(k, dict):
+            continue
+        name, fp = k.get("key"), k.get("fingerprint")
+        if isinstance(name, str) and isinstance(fp, str) and FINGERPRINT.fullmatch(fp) \
+                and KEY_REF.fullmatch(name) and "/" not in name and not name.endswith(".pub"):
+            out.setdefault(name, fp)
+    for peer in others:
+        for k in peer.get("ssh") or []:
+            name = k["file"][len("~/.ssh/"):] if k["file"].startswith("~/.ssh/") else ""
+            if KEY_REF.fullmatch(name) and "/" not in name and not name.startswith("name-not-shown-"):
+                out.setdefault(name, k["fingerprint"])
+    return sorted(out.items())
+
+
 def _item(key: str, state: str, evidence: list[str], step: list[str] | None = None) -> dict:
     step_id, title = next((s, t) for k, s, t in ITEMS if k == key)
     out = {"id": key, "step": step_id, "title": title, "state": state, "evidence": evidence}
@@ -685,14 +723,40 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
             other_fps.setdefault(k["fingerprint"], f"the key {str(k.get('key'))[:64]} the restored bundle withheld")
     shared = [k for k in keys if k["fingerprint"] and k["fingerprint"] in other_fps]
     if not keys:
-        items.append(_item("ssh-key", MISSING, ["no private SSH key in ~/.ssh on this machine", *key_notes],
-                           ["project-observatory full ssh-keys create NAME  (then `ssh-keys send NAME --to github`)"]))
+        # The same two steps the restore hands out (OBS-300, OBS-306): rekey makes this machine's key under
+        # the other machine's key's name and sends it where that key is registered, matched on GitHub by
+        # its fingerprint. Only what the receipt and the peers' facts name is offered; nothing is guessed.
+        known = _other_key_names(withheld, others)
+        evidence = ["no private SSH key in ~/.ssh on this machine", *key_notes]
+        if known:
+            steps = [s for name, fp in known for s in _rekey_steps(name, fp)]
+        else:
+            evidence.append("nothing here names the other machine's keys (no restore receipt that lists them, "
+                            "no other machine's facts)")
+            steps = ["on the other machine: project-observatory full ssh-keys list  (each key's name and SHA256 "
+                     "fingerprint)",
+                     "project-observatory full ssh-keys rekey NAME --fingerprint SHA256:...  (the plan), then the "
+                     "same with --apply"]
+        items.append(_item("ssh-key", MISSING, evidence, steps))
     elif shared:
+        steps = []
+        for k in shared:
+            old = k["file"][len("~/.ssh/"):] if k["file"].startswith("~/.ssh/") else ""
+            if not KEY_REF.fullmatch(old) or old.endswith(".pub"):
+                steps.append(f"{k['file']} is not a key name rekey takes (letters, digits, . _ -, in ~/.ssh or "
+                             "one folder below): make this machine's own key under a new name (project-observatory "
+                             f"full ssh-keys rekey NEW --fingerprint {k['fingerprint']}, then the same with --apply) "
+                             "and remove the copy by hand")
+                continue
+            # The copy here holds the old name, so this machine's own key takes a new one (rekey refuses to
+            # reuse a key whose fingerprint is the other machine's).
+            new = _new_key_name(old.rsplit("/", 1)[-1])
+            steps += _rekey_steps(old, k["fingerprint"], new)
+            steps.append(f"then point each Host that names ~/.ssh/{old} at IdentityFile ~/.ssh/{new} and remove "
+                         f"the copy ~/.ssh/{old} by hand: rekey removes nothing")
         items.append(_item("ssh-key", MISSING,
                            [f"{k['file']} ({k['fingerprint']}) is the same key as {other_fps[k['fingerprint']]}"
-                            for k in shared] + key_notes,
-                           ["project-observatory full ssh-keys create NAME  (a key made here), send it where the "
-                            "shared one is registered, then remove the copy"]))
+                            for k in shared] + key_notes, steps))
     elif not other_fps:
         items.append(_item("ssh-key", UNKNOWN, [f"{len(keys)} private key(s) here; nothing here says which keys the "
                                                 "other machine holds", *key_notes], [carry]))

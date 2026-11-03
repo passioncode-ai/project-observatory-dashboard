@@ -2341,8 +2341,8 @@ of that:
   `.pub` of a withheld key is withheld with it: the new key gets its own). Nothing else of
   `~/.ssh` is, whatever its name, and a file whose text is a private key is withheld under any
   name. The plan shows such an item as `withheld`; only a key (named by an `IdentityFile`, a
-  default name such as `id_ed25519`, or private-key text) gets an `ssh-keys rekey` step, and a
-  withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
+  default name such as `id_ed25519`, or private-key text) gets two `ssh-keys rekey` steps (the
+  plan, then the same with `--apply`), and a withheld file that is not a key, such as an `Include`d fragment, gets none: `ssh` skips an
   `Include` that matches no file. The second machine makes its own key.
 - **Jobs.** Every launchd plist (a systemd user unit off macOS) is written into
   `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/LaunchAgents/`
@@ -2399,8 +2399,13 @@ the key on GitHub without it. When the bundle does not show it, the steps have n
 the key's `note` says to take it from `full ssh-keys list` on the other machine; without it nothing goes
 to GitHub. rekey reaches a Host through a line naming exactly `~/.ssh/NAME`; a host the plan lists
 through another spelling (`~/.SSH/NAME`, another account's absolute path) is added to both steps with
-`--server ALIAS`, and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) the `note`
-names those hosts instead. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
+`--server ALIAS`, and the `note` says to point that line at `~/.ssh/NAME` where the path it names is
+not this machine's key; and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) or keeps
+this machine's own different `~/.ssh/config` (a conflict, without `--overwrite`) the `note` names
+those hosts instead, with the step that writes the carried config. A Host whose alias rekey does not
+take (a `/` in it, say) is named in the `note` with the `ssh-keys send NAME --to server:ADDRESS
+--verify` step for the address its `HostName` gives, or, with no such address, the advice to give it
+a plain Host alias. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
 every host whose config names no key, so each such server is added with `--server ALIAS`: rekey names
 those hosts as not known, never guesses them. A server whose only access was the other machine's key does not let
 this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
@@ -2485,10 +2490,18 @@ checklist on the machine it runs on, each item `ok`, `missing` (with the step th
 |---|---|---|
 | M1 | `release` | the other machine runs the release this one runs |
 | M2 | `restore` | the restore receipt here shows `--apply` and `--clone` with no failure and no kept conflict (categories left out on purpose are named, not counted against it); on the machine moved from, the other machine's facts say it restored this one's bundle completely |
-| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld) |
+| M3 | `ssh-key` | this machine has a private key in `~/.ssh` and none of them is the other machine's (by fingerprint, from its facts and from the keys the restore withheld); the fix is the restore's two `ssh-keys rekey` steps (below) |
 | M3 | `device-id` | this machine has a device id (`full node --init`) and it is not the other machine's |
 | M3 | `vault` | `full vault-digests` reads every slot `same`; status computes it without writing anything and never creates the estate key |
 | M4 | `jobs` | no job defined in this machine's job folder (it loads at the next login) is defined on the other machine, or named in this machine's placement file as running elsewhere; this engine's own jobs and a plist marked `Disabled` are not counted |
+
+The `ssh-key` item's steps are the ones the restore hands out: with no key here, `ssh-keys rekey
+NAME --fingerprint SHA256:...` and then the same with `--apply` for each key the restore receipt lists
+as withheld (its `other_keys`) or the other machine's facts name directly in `~/.ssh`; when neither
+names one, the steps say to read the names and fingerprints with `full ssh-keys list` on the other
+machine. A key here that is a copy of the other machine's gets `ssh-keys rekey NAME --name NAME-own
+--fingerprint SHA256:...` and the same with `--apply` (rekey does not reuse the other machine's key as
+this machine's own), then the step to point each Host at `~/.ssh/NAME-own` and remove the copy by hand.
 
 Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
 public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it
