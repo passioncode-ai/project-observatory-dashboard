@@ -21,7 +21,8 @@ expectation. It changes test evidence and documentation, not the published engin
 0.30.0): your own relay (OBS-287, part, #400), the Sentry door (OBS-292, #401), a partial restore and the move
 checklist (OBS-282, OBS-286, #406), `full ssh-keys rekey` (OBS-285, #405) and DEC-0147 for shares (OBS-291, #407).
 
-Release pull request open; then the tag `v0.31.0`, verification and installation, with receipts in the record.
+Released: tag `v0.31.0` on `f2b45754`, verified and installed (receipts in the record). Next: the live Sentry steps
+for OBS-292, then #409 (OBS-300).
 
 [2026-11-02: release 0.30.1](runs/2026-11-02-release-0.30.1/README.md): engine 0.30.1 (`observatory-log` stays
 0.30.0): a restore on a second machine never takes this machine's identity, private SSH keys or jobs, and `full
