@@ -123,6 +123,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   is refused report by report instead of stopping the pass. A report body with an export but no entry for its day is
   refused `bad-body`. `docs/COMPATIBILITY.md` names the stored fields.
 
+- **A second-machine restore names one `ssh-keys rekey` step per key** (OBS-300, `docs/ONBOARDING.md` "Moving to a
+  second machine that runs beside this one"). `full machine-restore`'s `ssh_keys` gives each withheld key directly in
+  `~/.ssh` the step `full ssh-keys rekey NAME --fingerprint SHA256:...` where it gave `ssh-keys create` and a `send`
+  per target, and now names the key's `fingerprint`. The fingerprint is read from the bundle's public half of the key
+  (its `.pub`, else its private file's clear header, never its private section): the restore withholds `NAME.pub`, so
+  `rekey` could not otherwise match the key on GitHub. Without one the step has no `--fingerprint` and the key's
+  `note` names `full ssh-keys list` on the other machine; a default key's `note` names `--server ALIAS` for the
+  servers ssh offers it to without an `IdentityFile` line. A key outside `~/.ssh` keeps its note and no step. Tests:
+  `tests/test_machine_backup.py` SecondMachineKeys, SecondMachine.
+
 ## 0.30.1 (2026-11-02)
 
 A patch release. A restore on a second machine that runs beside this one no longer takes this machine's identity,

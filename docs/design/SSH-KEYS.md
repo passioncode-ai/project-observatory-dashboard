@@ -224,6 +224,17 @@ registers it everywhere the other machine's key is registered, by composing the 
 (`create`, `send --to github`, `send --to server:ALIAS --verify`), then lists what still accepts
 only the other machine's key.
 
+**`machine-restore` hands out this step** (OBS-300). On a second machine its answer's `ssh_keys`
+names, for each withheld key directly in `~/.ssh`, one step: `full ssh-keys rekey NAME
+--fingerprint SHA256:...`, where it used to name `create` and a `send` per target. The fingerprint is
+read from the bundle's public half of that key (its `.pub`, else its private file's clear header) and
+given to `rekey` because the restore withholds `NAME.pub` with its key, so `rekey` here could not read
+it; when the bundle does not show it, the step has no `--fingerprint` and the key's `note` names
+`ssh-keys list` on the other machine. A key no Host names gets the same step: `rekey` still makes it
+and reports no place to send it to. A default key's `note` names the servers it cannot list (every
+host with no IdentityFile line) and `--server ALIAS`. A key outside `~/.ssh` keeps its note and no
+step (`machine_backup.py` `_Second.ssh_keys`; `tests/test_machine_backup.py` SecondMachineKeys).
+
 ```
 project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:...] [--server ALIAS]...
                                             [--apply] [--no-passphrase] [--no-keychain] [--interactive]

@@ -1698,9 +1698,11 @@ class _Second:
         return dest.stem if dest.suffix == ".plist" else dest.name
 
     def ssh_keys(self, manifest: dict) -> list[dict]:
-        """Every withheld private key, the hosts the carried `.ssh/config` sends to it, and the exact steps
-        that make this machine's own key under the same name, so a carried `IdentityFile ~/.ssh/NAME`
-        with `IdentitiesOnly yes` (what `full ssh-keys create --host` writes) finds a key here."""
+        """Every withheld private key, the hosts the carried `.ssh/config` sends to it, its public
+        fingerprint, and the one step that makes this machine's own key under the same name and sends it
+        where the other machine's key is registered (`full ssh-keys rekey`, OBS-285, OBS-300), so a
+        carried `IdentityFile ~/.ssh/NAME` with `IdentitiesOnly yes` (what `full ssh-keys create --host`
+        writes) finds a key here."""
         keys: dict[str, dict] = {}
         for source in sorted(self.private):
             item = next((i for i in manifest.get("items", []) if i.get("source") == source), None)
@@ -1742,20 +1744,55 @@ class _Second:
                 out.append({**key, "steps": [], "note": "not directly in ~/.ssh: make this machine's own key and "
                                                         "put it where the other machine kept this one, by hand"})
                 continue
-            steps = [f"project-observatory full ssh-keys create {name}"]
-            targets = []
-            for h in key["hosts"]:
-                github = (h["hostname"] or h["host"]).lower() in ("github.com", "ssh.github.com")
-                target = "github" if github else shlex.quote(f"server:{h['host']}")
-                if target not in targets:
-                    targets.append(target)
-            if key["default"] and "github" not in targets:
-                targets.insert(0, "github")
-            for target in targets:
-                steps.append(f"project-observatory full ssh-keys send {name} --to {target}"
-                             + ("" if target == "github" else " --verify"))
-            out.append({**key, "steps": steps})
+            # One `rekey` step in place of `create` and a `send` per target (OBS-300). rekey reads the
+            # carried config itself: it sends to each Host naming ~/.ssh/NAME (verified) and to GitHub only
+            # where gh's account holds the other key's fingerprint. A key no host names gets the same step:
+            # rekey still makes the key under its name, reports no place to send it to, and lists what it
+            # cannot know from here. A second machine never gets NAME.pub (it is withheld with its key), so
+            # rekey alone could not match the key on GitHub: the plan hands it the fingerprint the bundle
+            # shows, a public fact read from the carried `.pub` or the private file's clear header.
+            fingerprint = self._public_fingerprint(manifest, source)
+            key["fingerprint"] = fingerprint
+            step = f"project-observatory full ssh-keys rekey {name}"
+            if fingerprint:
+                step += f" --fingerprint {shlex.quote(fingerprint)}"
+            notes = []
+            if fingerprint is None:
+                notes.append("the bundle does not show this key's fingerprint, and without it rekey sends nothing "
+                             "to GitHub: run `project-observatory full ssh-keys list` on the other machine, then "
+                             "add --fingerprint SHA256:... to the step")
+            if key["default"]:
+                # rekey covers GitHub for a default key (by the fingerprint) and names, never guesses, the
+                # servers ssh offers it to without an IdentityFile line: those are not in the carried config.
+                notes.append(f"ssh offers ~/.ssh/{key['key']} to every host whose config names no key, so a "
+                             "server that accepts it need not be in ~/.ssh/config: add each such server to the "
+                             "step with --server ALIAS")
+            out.append({**key, "steps": [step], **({"note": "; ".join(notes)} if notes else {})})
         return out
+
+    def _public_fingerprint(self, manifest: dict, source: str) -> str | None:
+        """The other machine's key by its public half: the fingerprint in its private file's clear header,
+        else in its carried `.pub`; never its private section. None when neither reads as a key."""
+        try:
+            sk = _ssh_keys_module()
+        except ImportError:
+            return None
+        files = {i.get("source"): i for i in manifest.get("items", []) if i.get("kind") == "file"}
+        for src, public in ((source, False), (source + ".pub", True)):
+            staged = _staged_file(files[src], self.stage) if src in files else None
+            if staged is None:
+                continue
+            try:
+                if public:
+                    fp = (sk.parse_public(staged.read_bytes()[:16384].decode("utf-8", "replace")) or {}).get(
+                        "fingerprint")
+                else:
+                    fp = (sk.private_header(staged) or {}).get("fingerprint")
+            except (OSError, ValueError):
+                fp = None
+            if isinstance(fp, str) and sk.FINGERPRINT.fullmatch(fp):
+                return fp
+        return None
 
     def _config_identities(self, manifest: dict):
         """(Host alias, its HostName or None, IdentityFile path) from the carried `.ssh/config` and its fragments."""
