@@ -315,7 +315,55 @@ class ShareFlow(unittest.TestCase):
         self.assertEqual(usage['exportTimes'], [{'slot': slot, 'at': today + 'T01:00:00Z'}])
         self.assertEqual(SH.summary('sent', sent)['usage']['outOfWindow'], usage['outOfWindow'])
         self.assertEqual(usage['outOfWindow'][-1], {'sequence': self.recipient._received(share_id).record()['reportSequence'],
-                                                    'days': 2, 'exports': 2, 'consumers': 0})
+                                                    'days': 2, 'exports': 2, 'consumers': 0, 'unknownSlots': 0,
+                                                    'backdated': 0})
+
+    def test_a_backdated_report_cannot_rewrite_old_days(self):
+        """A report whose iat is earlier than one already read is read with the later iat's window: it cannot reach
+        back to rewrite a day an earlier report set, and it is counted as backdated (the confirming review of #407)."""
+        share_id = self._active()
+        slot = 'OPENROUTER_API_KEY'
+        early = self.clock()
+        self.clock.advance(10 * 86400)
+        target = SH._day(self.clock())
+        self._post_report(share_id, {'days': [{'date': target, 'slot': slot, 'uses': 9, 'lastUse': None}],
+                                     'consumers': [], 'exports': []})
+        self.clock.advance(50 * 86400)                              # this report's window no longer holds `target`
+        self._post_report(share_id, {'days': [{'date': SH._day(self.clock()), 'slot': slot, 'uses': 1,
+                                               'lastUse': None}], 'consumers': [], 'exports': []})
+        self.sender.sync_sent(share_id)
+        backdated = early + 20 * 86400                               # a window that would hold `target` again
+        self._post_report(share_id, {'days': [{'date': target, 'slot': slot, 'uses': 0, 'lastUse': None}],
+                                     'consumers': [], 'exports': []}, iat_ms=backdated)
+        sent = self.sender.sync_sent(share_id)
+        self.assertEqual(sent['usage']['days'][target][slot]['uses'], 9)
+        last = sent['usage']['outOfWindow'][-1]
+        self.assertEqual((last['backdated'], last['days']), (1, 1))
+        self.assertEqual(sent['usage']['lastIat'], SH._iso(self.clock()))
+
+    def test_made_up_slots_and_too_many_days_are_not_held(self):
+        """A day or export of a slot the share does not carry is ignored and counted; the day entries the sender
+        holds are bounded in all (the confirming review of #407)."""
+        usage = {'days': {}, 'consumers': [], 'exports': 0, 'exportTimes': [], 'lastSequence': 0}
+        window = ('2026-10-01', '2026-11-05')
+        for part in range(3):
+            body = {'days': [{'date': '2026-11-01', 'slot': 'MADE_UP_%d_%d' % (part, i), 'uses': 1, 'lastUse': None}
+                             for i in range(400)],
+                    'consumers': [], 'exports': [{'slot': 'MADE_UP_%d_0' % part, 'at': '2026-11-01T00:00:00Z'}]}
+            ignored = SH.merge_report(usage, body, window, slots={'K'})
+            self.assertEqual(ignored['unknownSlots'], 401)
+        self.assertEqual(usage['days'], {})
+        self.assertEqual(usage['exportTimes'], [])
+        with mock.patch.object(SH, 'MAX_DAY_ENTRIES', 3):
+            body = {'days': [{'date': '2026-10-%02d' % d, 'slot': 'K', 'uses': 1, 'lastUse': None} for d in range(1, 6)],
+                    'consumers': [], 'exports': []}
+            ignored = SH.merge_report(usage, body, window, slots={'K'})
+            self.assertEqual(sum(len(v) for v in usage['days'].values()), 3)
+            self.assertEqual(ignored['days'], 2)
+            again = {'days': [{'date': '2026-10-01', 'slot': 'K', 'uses': 7, 'lastUse': None}], 'consumers': [],
+                     'exports': []}
+            SH.merge_report(usage, again, window, slots={'K'})        # a held day is still replaced
+            self.assertEqual(usage['days']['2026-10-01']['K']['uses'], 7)
 
     def test_the_export_set_and_the_labels_are_bounded(self):
         """However many reports a recipient sends, the sender holds at most 400 exports of one slot on one day, a
@@ -465,6 +513,28 @@ class ShareFlow(unittest.TestCase):
             self.assertEqual(refused.exception.code, 'too-many-handed-over')
             self.assertEqual(len(self.recipient._ids('received')), 2)
             self.assertFalse((self.recipient.root / 'received' / links[2].split('/s/')[1][:32]).exists())
+
+    def test_the_cap_holds_under_concurrent_hand_overs(self):
+        """The count and the creation are one step under a store-wide lock: hand-overs racing on the local server's
+        threads never exceed the cap (the confirming review of #407)."""
+        import threading
+        links = [self._create()[1] for _ in range(6)]
+        answers, start = [], threading.Barrier(6)
+
+        def hand(link):
+            start.wait()
+            try:
+                answers.append(self.recipient.hand_over(link, pinned=True)['state'])
+            except SH.ShareError as error:
+                answers.append(error.code)
+        with mock.patch.object(SH, 'MAX_HANDED_OVER', 2):
+            threads = [threading.Thread(target=hand, args=(link,)) for link in links]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(60)
+        self.assertEqual(sorted(answers), ['handed-over'] * 2 + ['too-many-handed-over'] * 4)
+        self.assertEqual(len(self.recipient._ids('received')), 2)
 
     def test_a_repeated_hand_over_says_it_is_one(self):
         share_id, link = self._create()

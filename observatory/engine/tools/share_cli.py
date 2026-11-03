@@ -339,7 +339,15 @@ def cmd_accept(args) -> int:
             print(f"share: {exc.code}: {exc}", file=sys.stderr)
             return 1
         handed = share_id
-        held = s._received(share_id).record() if side == "received" else {}
+        held = s._handed(s._received(share_id), s.clock()) if side == "received" else None
+        # Checked before any prompt: only a link an agent handed over and nobody accepted or refused is accepted here.
+        if held is None or held["state"] != "handed-over":
+            code, why = (("lapsed", "nobody accepted this link within 7 days; ask the sender for a new one")
+                         if held is not None else
+                         ("not-handed-over", "this share is no link an agent handed over and nobody answered yet; "
+                                             f"`{PROG} status {share_id[:8]}` says what it is"))
+            print(f"share: {code}: {why}", file=sys.stderr)
+            return 1
         print(f"a link an agent handed over: share {share_id[:8]}, from the mailbox {held.get('origin', 'unknown')}")
         if held.get("pinned"):
             print("  the sender's key is pinned: the link was in the operator's words as the sender sent it")

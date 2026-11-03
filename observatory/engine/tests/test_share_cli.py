@@ -131,10 +131,20 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
         SH.Shares(self.homes['alex'] / 'node' / 'shares').hand_over(link, pinned=False)
         unpinned = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='no\n')
         self.assertIn('NOT pinned', unpinned.stdout)
+        # A share that is no handed-over link is refused before any prompt (the confirming review of #407).
+        own = self.share('sam', 'accept', share_id[:8], terminal=True, stdin_text='yes\n')
+        self.assertNotEqual(own.returncode, 0)
+        self.assertIn('not-handed-over', own.stderr)
+        self.assertNotIn('pinned', own.stdout)
+        self.assertNotIn('The sender will see', own.stdout)
         refused = self.share('alex', 'differ', share_id[:8])
         self.assertEqual(refused.returncode, 0, refused.stderr)
         self.assertIn('refused', refused.stdout)
         self.assertFalse((self.homes['alex'] / 'node' / 'shares' / 'received' / share_id / 'link').exists())
+        again = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='yes\n')
+        self.assertNotEqual(again.returncode, 0)
+        self.assertIn('not-handed-over', again.stderr)
+        self.assertNotIn('The sender will see', again.stdout)
 
     def test_two_people(self):
         # Sam shares a key with Alex: the link once, never in a log.

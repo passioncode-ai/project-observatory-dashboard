@@ -1409,7 +1409,8 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   restates its day and the 35 days before it (from the day the link was accepted), so a report lost
   on the way is made up by the next; your machine replaces each day's count with the latest and
   counts each export once, however many reports restate it. It reads only those days of each report
-  (never one before your machine read the claim or after the report's own day) and keeps at most
+  (never one before your machine read the claim or after the report's own day, never further back
+  than a report it already read allows, and only the keys you shared) and keeps at most
   400 exports of a key a day, so another machine cannot rewrite your past days or grow your
   records without bound; what it ignores is listed under `usage.outOfWindow` in `full share status
   ID --json`. Each

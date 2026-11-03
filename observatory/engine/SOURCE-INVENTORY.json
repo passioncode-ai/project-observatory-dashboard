@@ -940,15 +940,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "e300971c4c86b91916482d070d1086ca860aca591f27acbe6c1d54a83822272f",
-      "bytes": 39390,
+      "export_sha256": "c319273127a978fa563d18ac70aca6b15b61bce664f3f59875859fa822c7863b",
+      "bytes": 39598,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "96065a9c1566cc4683ee85638f1034c3370d13ea7c9ae426b25723f8692292e4",
-      "bytes": 230995,
+      "export_sha256": "011f4989ae96bfaf4c24aa8c73aca51b0d1f788173d91c032d157a7ee0aa7e6a",
+      "bytes": 231084,
       "upstream_modified": true
     },
     {
@@ -3197,8 +3197,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "da4a99511b28d23a8411f94553f08bca6334df364b8f8e9438064f849ab29612",
-      "bytes": 75537
+      "export_sha256": "df7030a59c87357ac465d5f3028b777ca73d9ffb856df3ba53d00dd55fab6d30",
+      "bytes": 78262
     },
     {
       "path": "node/webauthn.py",
@@ -5841,8 +5841,8 @@
       "path": "tests/test_share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bf81b2a3972b3cb0597f3bc1af7cf1861e998e41ea96d3c780b2e08e76b8e00c",
-      "bytes": 12469
+      "export_sha256": "8b19d5fdc2e99224572a98e0cb797646dbb168855624da9b31cf2f912870f8e3",
+      "bytes": 13135
     },
     {
       "path": "tests/test_shared_ancestry.py",
@@ -5855,8 +5855,8 @@
       "path": "tests/test_shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "45d3119598aa4815ded0a98f45ec5e39dfce89ecce1ce510dc5f1c54bb39d115",
-      "bytes": 52090
+      "export_sha256": "ef0477f0a45fb1aa4388c93a36f0e80f2571627bb6e2dc63e0732815bfd9c823",
+      "bytes": 56524
     },
     {
       "path": "tests/test_side_effect_attribution.py",
@@ -6998,8 +6998,8 @@
       "path": "tools/share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9e33d311f619300157ff2cca8a3c150ea6afff0535eec5191567efdc8b892a8",
-      "bytes": 22461
+      "export_sha256": "333b65c9f3fb5d6aa9274db5084ccd81be321117bce8199ee6cb923c262fa081",
+      "bytes": 23107
     },
     {
       "path": "tools/sign_credential.py",

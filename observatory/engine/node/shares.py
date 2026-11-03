@@ -646,8 +646,16 @@ class Shares:
                                                                  'refusal': opened['refusal']}])[-50:]
                 continue
             iat = relay.instant(report['header']['iat'])           # read by the checks that opened it
+            # A report earlier than one already read is read with the later report's window: a backdated `iat`
+            # cannot reach back to rewrite a day (the review of #407). `lastIat` grows with `lastSequence`.
+            last_iat = relay.instant(usage.get('lastIat'))
+            backdated = last_iat is not None and iat < last_iat
+            if backdated:
+                iat = last_iat
             window = (PS.peer_report_window(iat, claimed), _day(iat))
-            ignored = merge_report(usage, opened['body'], window)
+            ignored = merge_report(usage, opened['body'], window, slots={e['slot'] for e in record['slots']})
+            ignored['backdated'] = int(backdated)
+            usage['lastIat'] = relay.rfc3339(iat)
             if any(ignored.values()):
                 usage['outOfWindow'] = (usage.get('outOfWindow', []) + [{'sequence': opened['sequence'],
                                                                          **ignored}])[-50:]
@@ -729,29 +737,50 @@ class Shares:
             raise ShareError('own-share', 'this is a share this machine sent; it is opened on the recipient\'s machine')
         folder = self._received(share_id)
         now = self.clock()
-        if not folder.exists():
-            # Counted before this share's folder is made, so a refusal leaves nothing behind.
-            waiting = sum(1 for other in self._ids('received')
-                          if (self._handed(self._received(other), now) or {}).get('state') == 'handed-over')
-            if waiting >= MAX_HANDED_OVER:
-                raise ShareError('too-many-handed-over', f'{waiting} handed-over links wait for the person already; '
-                                                         f'they accept or refuse those first (`full share list`)')
-        _private_dir(folder.path)
-        with self._locked(folder):
-            if folder.exists():
+        # One store-wide lock around the count and the creation, so hand-overs racing on the local server's threads
+        # (or two processes) never pass the cap together; a refusal leaves no folder behind.
+        with self._store_lock('.hand-over.lock'):
+            if not folder.exists():
+                waiting = sum(1 for other in self._ids('received')
+                              if (self._handed(self._received(other), now) or {}).get('state') == 'handed-over')
+                if waiting >= MAX_HANDED_OVER:
+                    raise ShareError('too-many-handed-over', f'{waiting} handed-over links wait for the person '
+                                                             f'already; they accept or refuse those first '
+                                                             f'(`full share list`)')
+            _private_dir(folder.path)
+            with self._locked(folder):
+                if folder.exists():                            # a repeat, or the person accepted it meanwhile
+                    if created is not None:
+                        created.append(False)
+                    return self._handed(folder, now) or folder.record()
                 if created is not None:
-                    created.append(False)
-                return self._handed(folder, now) or folder.record()
-            if created is not None:
-                created.append(True)
-            record = {'schema': RECEIVED_SCHEMA, 'shareId': share_id, 'origin': link['origin'],
-                      'label': 'share-' + share_id[:8], 'fpr': link['fpr'], 'pinned': bool(pinned),
-                      'state': 'handed-over', 'handedOverAt': _iso(now),
-                      'lapsesAt': _iso(now + PS.MAX_CLAIM_DAYS * PS.DAY_MS), 'burnt': None, 'code': None,
-                      'lease': None, 'slots': [], 'revocation': None, 'deletion': None, 'updatedAt': _iso(now)}
-            folder.put_text('link', link_text)
-            folder.save(record)
-            return record
+                    created.append(True)
+                return self._hand_over_new(folder, link, link_text, pinned, now)
+
+    @contextlib.contextmanager
+    def _store_lock(self, name: str):
+        """A lock over the whole received store (`received/<name>`), for a step that counts shares and then makes
+        one. Only taking it is translated into a share refusal; an error inside the step stays the step's own."""
+        held = private_io.lock(self.root / 'received' / name)
+        try:
+            held.__enter__()
+        except RuntimeError as error:
+            raise ShareError('unsafe-path', f'the store lock could not be taken: {error}') from None
+        try:
+            yield
+        finally:
+            held.__exit__(None, None, None)
+
+    def _hand_over_new(self, folder: _Folder, link: dict, link_text: str, pinned: bool, now: int) -> dict:
+        share_id = link['shareId']
+        record = {'schema': RECEIVED_SCHEMA, 'shareId': share_id, 'origin': link['origin'],
+                  'label': 'share-' + share_id[:8], 'fpr': link['fpr'], 'pinned': bool(pinned),
+                  'state': 'handed-over', 'handedOverAt': _iso(now),
+                  'lapsesAt': _iso(now + PS.MAX_CLAIM_DAYS * PS.DAY_MS), 'burnt': None, 'code': None,
+                  'lease': None, 'slots': [], 'revocation': None, 'deletion': None, 'updatedAt': _iso(now)}
+        folder.put_text('link', link_text)
+        folder.save(record)
+        return record
 
     def accept_handed(self, ref: str, *, label: Optional[str] = None) -> dict:
         """The person's "Accept" of a link an agent handed over (PS-5): the link the node holds, pinned as the hand-over
@@ -1176,9 +1205,11 @@ MAX_EXPORTS_PER_DAY = 400
 #: Exports the sender holds in all, and consumer labels: bounds on what a recipient can make the sender's record hold.
 MAX_EXPORTS_HELD = 10_000
 MAX_CONSUMERS_HELD = 1_000
+#: Day and slot entries the sender holds in all: a backstop beside the window and the share's own slots.
+MAX_DAY_ENTRIES = 40_000
 
 
-def merge_report(usage: dict, body: dict, window: Optional[tuple] = None) -> dict:
+def merge_report(usage: dict, body: dict, window: Optional[tuple] = None, slots: Optional[set] = None) -> dict:
     """The sender's reading of one report body (DEC-0147 item 1): each day and slot's uses and last use replaced by the
     report's, exports kept as a set keyed by slot and instant and consumer labels as a set. A report read twice, or a
     later one over the same day, counts nothing twice, and a later report never takes away an export already held.
@@ -1188,13 +1219,26 @@ def merge_report(usage: dict, body: dict, window: Optional[tuple] = None) -> dic
     rewrite a past day or grow the record without bound. The record holds at most MAX_EXPORTS_PER_DAY exports of one
     slot on one day and MAX_EXPORTS_HELD in all: past the second, exports older than the window (which no report
     restates) are dropped and counted in `exportsDropped`, and new ones past the bounds are ignored. `exports` is the
-    exports held plus those dropped; 0.30 kept it as a running count of each report's exports."""
+    exports held plus those dropped; 0.30 kept it as a running count of each report's exports.
+
+    `slots`, when given, are the share's own slots: a day or an export of any other slot is ignored and counted in
+    `unknownSlots`. The record holds at most MAX_DAY_ENTRIES day and slot entries; a new one past it is ignored and
+    counted (a held one is still replaced)."""
     first, last = window or ('0000-01-01', '9999-12-31')
-    ignored = {'days': 0, 'exports': 0, 'consumers': 0}
+    ignored = {'days': 0, 'exports': 0, 'consumers': 0, 'unknownSlots': 0}
+    held_days = sum(len(v) for v in usage['days'].values() if isinstance(v, dict))
     for day in body['days']:
+        if slots is not None and day['slot'] not in slots:
+            ignored['unknownSlots'] += 1
+            continue
         if not first <= day['date'] <= last:
             ignored['days'] += 1
             continue
+        known = day['slot'] in usage['days'].get(day['date'], {})
+        if not known and held_days >= MAX_DAY_ENTRIES:
+            ignored['days'] += 1
+            continue
+        held_days += 0 if known else 1
         usage['days'].setdefault(day['date'], {})[day['slot']] = {'uses': day['uses'], 'lastUse': day['lastUse']}
     for consumer in body['consumers']:
         if consumer in usage['consumers']:
@@ -1212,6 +1256,9 @@ def merge_report(usage: dict, body: dict, window: Optional[tuple] = None) -> dic
     for export in sorted(body['exports'], key=lambda e: e['at']):
         key = (export['slot'], export['at'])
         if key in held:
+            continue
+        if slots is not None and export['slot'] not in slots:
+            ignored['unknownSlots'] += 1
             continue
         group = (export['at'][:10], export['slot'])
         if not first <= group[0] <= last or per_day.get(group, 0) >= MAX_EXPORTS_PER_DAY:
