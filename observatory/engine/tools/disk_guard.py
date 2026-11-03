@@ -46,6 +46,7 @@ import json
 import math
 import os
 import pathlib
+import posixpath
 import re
 import shutil
 import stat
@@ -863,7 +864,53 @@ def plan_commands(cfg: dict, level: str, last: dict | None = None, at: float | N
     return out
 
 
-VM_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+VM_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")     # fullmatch: a trailing newline is refused
+
+
+def endpoint_kind(host: str) -> str:
+    """Where a docker endpoint (`DOCKER_HOST`, a context's `Endpoints.docker.Host`) leads: `local`
+    for a unix socket under the home folder, /var/run or /run, or the local named pipe; `remote`
+    for ssh, tcp, http(s), a pipe on another host, or a unix socket elsewhere (it may forward to
+    another machine); `unknown` for anything else, which the guard treats as not local."""
+    if not isinstance(host, str) or not host or any(c in host for c in "\r\n\x00"):
+        return "unknown"
+    scheme, sep, rest = host.strip().partition("://")
+    scheme = scheme.lower()
+    if not sep:
+        return "unknown"
+    if scheme == "unix":
+        if not rest.startswith("/"):
+            return "unknown"
+        path = posixpath.normpath(rest)
+        roots = ["/var/run", "/run"]
+        home = str(pathlib.Path.home())
+        if home.startswith("/"):
+            roots.append(posixpath.normpath(home))
+        return "local" if any(path.startswith(r.rstrip("/") + "/") for r in roots) else "remote"
+    if scheme == "npipe":
+        return "local" if rest.replace("\\", "/").lower().startswith("//./pipe/") else "remote"
+    if scheme in ("ssh", "tcp", "http", "https"):
+        return "remote"
+    return "unknown"
+
+
+def docker_daemon(docker: str, timeout: float) -> str:
+    """`local`, `remote` or `unknown`: where the daemon a docker command would reach runs.
+    `DOCKER_HOST` wins as it does for the docker CLI; otherwise the current context's endpoint
+    (which honours `DOCKER_CONTEXT`), read within `timeout`."""
+    host = os.environ.get("DOCKER_HOST", "").strip()
+    if not host:
+        if timeout <= 0:
+            return "unknown"
+        try:
+            p = subprocess.run([docker, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
+                               capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return "unknown"
+        if p.returncode:
+            return "unknown"
+        host = (p.stdout or "").strip()
+    return endpoint_kind(host)
 
 
 def running_vms(argv: list[str], timeout: float) -> list[str] | None:
@@ -894,7 +941,7 @@ def running_vms(argv: list[str], timeout: float) -> list[str] | None:
         if not isinstance(row, dict):
             return None
         name = row.get("name")
-        if (row.get("status") == "Running" and isinstance(name, str) and VM_NAME.match(name)
+        if (row.get("status") == "Running" and isinstance(name, str) and VM_NAME.fullmatch(name)
                 and name not in names):
             names.append(name)
     return names
@@ -1301,17 +1348,30 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
                     "reason": "the tool is running now" if busy else "whether the tool runs could not be read"}
         # ONE DEADLINE for the whole action, VM listing and every VM included (OBS-305).
         deadline = time.monotonic() + _number(a.get("timeout"), 90)
+        if os.path.basename(a["argv"][0]).lower() in ("docker", "docker.exe"):
+            # A docker command acts on whatever daemon the context names, and a process seen here
+            # proves nothing about it: only a daemon behind a local socket is cleaned (review of #411).
+            where = docker_daemon(a["argv"][0], min(10.0, deadline - time.monotonic()))
+            if where != "local":
+                return {**rec, "result": "skipped",
+                        "reason": "the docker context names a daemon on another machine; the guard cleans only "
+                                  "this one" if where == "remote"
+                        else "which daemon the docker context names could not be read; nothing was run",
+                        "reason_code": "remote-docker-context" if where == "remote" else "docker-context-unknown"}
         runs = [a["argv"]]
-        if a.get("instances"):
+        vm = bool(a.get("instances"))
+        if vm:
             names = running_vms(a["instances"], min(15.0, deadline - time.monotonic()))
             if not names:
                 return {**rec, "result": "skipped",
                         "reason": "no virtual machine is running; the guard starts none" if names == []
                         else "which virtual machines run could not be read; the guard starts none",
                         "reason_code": "no-running-vm" if names == [] else "vm-list-unknown"}
-            rec["instances"], rec["instances_done"] = len(names), 0
+            rec["instances"], rec["instances_done"], rec["instances_failed"] = len(names), 0, 0
             runs = [[w.replace("{instance}", n) for w in a["argv"]] for n in names]
+        problems: list[dict] = []
         for argv in runs:
+            outcome = None
             try:
                 # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock
                 # a long-running `uv tool run` server holds, and one such wait spent half a run.
@@ -1320,30 +1380,34 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
                     raise subprocess.TimeoutExpired(argv, 0)
                 p = subprocess.run(argv, capture_output=True, text=True, timeout=left, stdin=subprocess.DEVNULL)
             except subprocess.TimeoutExpired:
-                rec.update(result="skipped", reason="held up past its time: something else holds the tool's cache")
-                break
+                problems.append({"result": "skipped",
+                                 "reason": "held up past its time: something else holds the tool's cache"})
+                break                    # the deadline is spent: no further VM gets a turn
             except (OSError, subprocess.SubprocessError) as exc:
-                rec.update(result="failed", reason=f"{type(exc).__name__}")
-                break
-            said = (p.stderr or p.stdout or "").strip()
-            if p.returncode and a.get("busy_output") and a["busy_output"] in said:
-                rec.update(result="skipped", reason="its cache is in use", reason_code="cache-in-use",
-                           exit_code=p.returncode)
-                break
-            if p.returncode and a.get("password_output") and a["password_output"] in said:
-                # `sudo -n` refuses at once instead of waiting for a password nobody types.
-                rec.update(result="failed", reason="sudo inside the virtual machine asks for a password; "
-                                                   "the guard never types one",
-                           reason_code="needs-password", exit_code=p.returncode)
-                break
-            if p.returncode:
-                rec.update(result="failed", reason=f"exit {p.returncode}", reason_code="command-failed",
-                           exit_code=p.returncode)
-                break
-            if "instances_done" in rec:
-                rec["instances_done"] += 1
-        else:
-            rec["result"] = "removed"
+                outcome = {"result": "failed", "reason": f"{type(exc).__name__}"}
+            else:
+                said = (p.stderr or p.stdout or "").strip()
+                if p.returncode and a.get("busy_output") and a["busy_output"] in said:
+                    outcome = {"result": "skipped", "reason": "its cache is in use", "reason_code": "cache-in-use",
+                               "exit_code": p.returncode}
+                elif p.returncode and a.get("password_output") and a["password_output"] in said:
+                    # `sudo -n` refuses at once instead of waiting for a password nobody types.
+                    outcome = {"result": "failed", "reason": "sudo inside the virtual machine asks for a password; "
+                                                             "the guard never types one",
+                               "reason_code": "needs-password", "exit_code": p.returncode}
+                elif p.returncode:
+                    outcome = {"result": "failed", "reason": f"exit {p.returncode}", "reason_code": "command-failed",
+                               "exit_code": p.returncode}
+            if outcome is None:
+                if vm:
+                    rec["instances_done"] += 1
+                continue
+            # One VM that cannot trim (a guest without fstrim) does not keep the others from it.
+            problems.append(outcome)
+            if vm and outcome["result"] == "failed":
+                rec["instances_failed"] += 1
+        failed = [o for o in problems if o["result"] == "failed"]
+        rec.update(failed[0] if failed else problems[0] if problems else {"result": "removed"})
         if rec["result"] == "skipped" and not rec.get("instances_done"):
             return rec                   # nothing ran to the end: no delta to claim
     else:

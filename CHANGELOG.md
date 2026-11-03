@@ -23,8 +23,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   every 6 hours), then runs `sudo -n fstrim -av` inside each running Colima profile and Lima instance, so the space
   their sparse disks hold returns to the host; the freed amount is what the host disk reports. It never touches
   volumes, containers or images in use, starts no VM and never waits for a password. Docker cleanup also runs when
-  the daemon lives in a Colima or Lima VM, which the guard used to read as "could not tell" and skip. Tests:
-  `tests/test_disk_guard.py` VmCacheAtCritical.
+  the daemon lives in a Colima or Lima VM, which the guard used to read as "could not tell" and skip. Every docker
+  command now runs only when `DOCKER_HOST` or the current docker context names a local socket (under the home folder,
+  `/var/run` or `/run`, or the local named pipe); a context pointing at another machine over ssh or tcp, or one that
+  cannot be read, is skipped (`remote-docker-context`, `docker-context-unknown`). A VM whose trim fails no longer
+  keeps the next one from its trim. Tests: `tests/test_disk_guard.py` VmCacheAtCritical, DockerDaemonIsLocal.
 
 ## 0.31.0 (2026-11-03)
 
