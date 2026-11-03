@@ -5,12 +5,12 @@ CI OBS-277 with the terminal fix of OBS-279), then tag, verify and install it, b
 the second machine. The order was relayed by the fabric-workspace coordinator: 0.30.1 first (overdue since
 2026-10-30), then OBS-287 in 0.31.0 by 2026-11-04.
 
-Base: `f93ce304` (origin/main, #394 merged) on branch `release/0.30.1`. This record is committed with the version
+Base: `f93ce304` (origin/main, #394 merged) on branch `release/0.30.1`, then main merged in once #403 landed. This record is committed with the version
 bump; resolve the final object id with `git log -1 --format=%H` on that branch.
 
 ## What the release carries
 
-Everything merged since `v0.30.0` (`git log v0.30.0..f93ce304`, 6 commits). Each pull request with code passed an
+Everything merged since `v0.30.0` (`git log v0.30.0..origin/main` at the merge of #403, 7 commits). Each pull request with code passed an
 independent adversarial review and every confirming round its findings required:
 
 - #394: a restore on a second machine never copies this machine's identity, private SSH keys or background jobs;
@@ -18,6 +18,9 @@ independent adversarial review and every confirming round its findings required:
   gives the shared synthetic estate of the engine tests 180 s for its setup on Windows (OBS-288, part).
 - #387: Windows verified on every change against `tools/windows-known.json`, UTF-8 mode on Windows, and the
   terminal check of operator-only commands (OBS-277, OBS-279).
+- #403: the node session test's relay stub drains before it closes, so a loaded Windows runner no longer reads 1006
+  for 4403 (OBS-295); `engine_update` may also finish and fail on Windows, its failing checks listed; rows OBS-294 and
+  OBS-296. It landed first because the release pull request's own Windows job failed on that test twice.
 - The documentation pull requests #391, #393, #395 and #399 (rows OBS-282 to OBS-291 and the 0.30.0 receipts).
 
 ## Decisions
