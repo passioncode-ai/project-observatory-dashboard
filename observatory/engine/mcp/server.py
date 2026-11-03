@@ -673,8 +673,11 @@ def observatory_ssh_keys(
     clear header (the cipher name, and the public key stored in clear), never its private section. With `name`, the answer
     carries that key's PUBLIC line (the part pasted into GitHub or a server, safe to show) and
     the commands that act: `project-observatory full ssh-keys create NAME`, `copy NAME`,
-    `send NAME --to github`, `send NAME --to server:HOST --verify`. Those run in a terminal; a
-    passphrase is typed by a person into ssh-keygen's own prompt. Design: docs/design/SSH-KEYS.md.
+    `send NAME --to github`, `send NAME --to server:HOST --verify`, and on a second machine
+    `rekey OLD` (a plan; `--apply` makes this machine's own key, sends it where the other
+    machine's key is registered, and lists what still accepts only the old key; it removes
+    nothing). Those run in a terminal; a passphrase is typed by a person into ssh-keygen's own
+    prompt. Design: docs/design/SSH-KEYS.md.
     """
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
     import ssh_keys

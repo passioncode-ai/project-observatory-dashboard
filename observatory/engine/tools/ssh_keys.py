@@ -9,10 +9,13 @@ The private key is never shown or moved.
                                                   [--host ALIAS --hostname HOST [--user USER] [--port N]]
     project-observatory full ssh-keys send NAME --to github [--as authentication|signing|both] [--title TEXT]
     project-observatory full ssh-keys send NAME --to server:ALIAS [--verify] [--interactive]
+    project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:...] [--server ALIAS]...
+                                                [--apply] [--no-passphrase] [--no-keychain] [--interactive]
+                                                [--comment TEXT] [--title TEXT] [--json]
     project-observatory full ssh-keys findings [--json]
 
 The design, and why each step is the way it is: docs/design/SSH-KEYS.md (PB-163, OBS-110).
-Scenarios: OSS-62–67 in docs/ux/portable-scenarios.md.
+Scenarios: OSS-62–67 and OSS-96 (rekey, OBS-285) in docs/ux/portable-scenarios.md.
 
 WHY A DOOR AND NOT A HOWTO. Making a key, copying its public line and adding it to GitHub or a
 server took several commands, and the moment between them is when a private key gets pasted
@@ -26,7 +29,7 @@ The system's own tools do the work: `ssh-keygen` (fingerprints from the `.pub`, 
 `ssh-add` (the agent, the macOS Keychain), `ssh` (the access that already works) and `gh`
 (GitHub). `OBSERVATORY_SSH_KEYGEN`, `OBSERVATORY_SSH_ADD`, `OBSERVATORY_SSH`, `OBSERVATORY_GH`
 and `OBSERVATORY_CLIPBOARD` name other binaries (the tests' fakes); `OBSERVATORY_CLIPBOARD=none`
-says there is no clipboard.
+says there is no clipboard. `OBSERVATORY_SSH_SYSTEM_CONFIG` names the system ssh_config rekey scans.
 
 Exit codes: 0 done; 1 the provider or the server refused, or verification failed; 2 refused
 before anything changed; 3 done without the clipboard; 4 done, receipt not written.
@@ -512,9 +515,14 @@ def read_config_file(path: pathlib.Path, degraded: list[dict]) -> str | None:
     return b"".join(chunks).decode("utf-8", "replace")
 
 
-def read_config(degraded: list[dict], agents: list[dict] | None = None) -> list[dict]:
-    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config and its Includes; every
-    IdentityAgent goes to `agents` as {hosts, value}."""
+def read_config(degraded: list[dict], agents: list[dict] | None = None, seen_hosts: dict | None = None,
+                root: pathlib.Path | None = None) -> list[dict]:
+    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config (or `root`, whose relative
+    Includes resolve beside it, as ssh resolves the system config's) and its Includes; every
+    IdentityAgent goes to `agents` as {hosts, value}. `seen_hosts`, when given, receives `match`
+    (every Match line's criteria) and `options` ([(Host patterns, hostname|user, value)] in file
+    order): rekey resolves hosts from them when `ssh -G` must not run."""
+    base = ssh_dir() if root is None else root.parent
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -539,13 +547,17 @@ def read_config(degraded: list[dict], agents: list[dict] | None = None) -> list[
                 hosts = value.split()
             elif key == "match":
                 hosts = ["Match " + value]
+                if seen_hosts is not None:
+                    seen_hosts.setdefault("match", []).append(value)
+            elif key in ("hostname", "user") and seen_hosts is not None:
+                seen_hosts.setdefault("options", []).append((list(hosts), key, value.strip().strip('"')))
             elif key == "include":
                 for pattern in value.split():
                     target, _ = _expand(pattern)
                     if target is None:
                         continue
                     if not pattern.startswith(("~", "/", "%")):
-                        target = ssh_dir() / pattern
+                        target = base / pattern
                     for found in sorted(glob.glob(str(target))):
                         walk(pathlib.Path(found), depth + 1)
             elif key == "identityfile":
@@ -558,8 +570,37 @@ def read_config(degraded: list[dict], agents: list[dict] | None = None) -> list[
             elif key == "identityagent" and agents is not None:
                 agents.append({"hosts": list(hosts), "value": value.strip().strip('"')})
 
-    walk(ssh_dir() / "config", 0)
+    walk(ssh_dir() / "config" if root is None else root, 0)
     return out
+
+
+def system_config() -> pathlib.Path:
+    """The system-wide ssh_config ssh reads after the user's (`OBSERVATORY_SSH_SYSTEM_CONFIG` for tests)."""
+    named = os.environ.get("OBSERVATORY_SSH_SYSTEM_CONFIG")
+    if named:
+        return pathlib.Path(named)
+    if sys.platform == "win32":
+        return pathlib.Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "ssh" / "ssh_config"
+    return pathlib.Path("/etc/ssh/ssh_config")
+
+
+def _host_matches(alias: str, patterns: list[str]) -> bool:
+    """ssh's Host rule: one pattern matches (`*`, `?`) and no negated one does."""
+    def one(p: str) -> bool:
+        return re.fullmatch("".join(".*" if c == "*" else "." if c == "?" else re.escape(c) for c in p),
+                            alias, re.I) is not None
+    if any(one(p[1:]) for p in patterns if p.startswith("!")):
+        return False
+    return any(one(p) for p in patterns if not p.startswith("!") and not p.startswith("Match "))
+
+
+def config_value(seen: dict, alias: str, key: str) -> str | None:
+    """The first value of `key` (hostname, user) a Host block matching `alias` gives, in file order:
+    ssh keeps the first value it obtains, so an early `Host *` wins over a later `Host alias`."""
+    for patterns, k, value in seen.get("options", []):
+        if k == key and _host_matches(alias, patterns):
+            return value
+    return None
 
 
 def config_hosts() -> set[str]:
@@ -1215,7 +1256,9 @@ def cmd_send(args) -> int:
                   f"copy the key with `{CMD} copy {args.name}` and paste it in the provider's console")
 
 
-def send_github(args) -> int:
+def send_github(args, outcome: dict | None = None) -> int:
+    """`outcome`, when given, receives `reason`: GitHub's own words for a refusal (rekey lists it)."""
+    outcome = {} if outcome is None else outcome
     base, pub, parsed = public_of(args.name)
     uses = ["authentication", "signing"] if args.as_ == "both" else [args.as_]
     gh = tool("gh")
@@ -1245,6 +1288,7 @@ def send_github(args) -> int:
         if p.returncode != 0:
             reason = said(p.stderr) or f"exit {p.returncode}"
             print(f"GitHub refused {args.name} for {use}: {reason}", file=sys.stderr)
+            outcome["reason"] = f"GitHub refused it: {reason}"
             receipt("ssh.register_failed", fp, to=to, how=f"gh ssh-key add: {reason}")
             worst = 1
             continue
@@ -1255,7 +1299,10 @@ def send_github(args) -> int:
     return worst
 
 
-def send_server(args, alias: str) -> int:
+def send_server(args, alias: str, outcome: dict | None = None) -> int:
+    """`outcome`, when given, receives `stage` (`append` or `verify`, where it stopped; `done`) and
+    `reason`, so rekey can tell a server that did not take the key from one that did not verify it."""
+    outcome = {} if outcome is None else outcome
     if not HOST_ARG.fullmatch(alias):
         raise Refused(f"{credential_shape.echo(alias)} is not a host: a Host of ~/.ssh/config or [user@]host")
     base, pub, parsed = public_of(args.name)
@@ -1277,6 +1324,7 @@ def send_server(args, alias: str) -> int:
         if "password" in p.stderr.lower() and not args.interactive:
             hint = "; the server asks for a password: run with --interactive in a terminal"
         print(f"{alias} did not take the key: {reason}{hint}", file=sys.stderr)
+        outcome.update(stage="append", reason=f"did not take the key: {reason}{hint}")
         receipt("ssh.register_failed", fp, to=to, how=f"authorized_keys append: {reason}")
         return 1
     answer = "added" if p.returncode == ADDED else "already"
@@ -1288,12 +1336,15 @@ def send_server(args, alias: str) -> int:
         worst = 0 if receipt("ssh.already_registered", fp, to=to, how="found by key blob") else 4
     if not args.verify:
         print(f"Test it: {CMD} send {args.name} --to server:{alias} --verify")
+        outcome.update(stage="done")
         return worst
     ok, why = verify_login(ssh, alias, base, fp, args)
     if not ok:
         print(f"the key was {answer}, but it is not verified: {why}", file=sys.stderr)
+        outcome.update(stage="verify", reason=f"the key was {answer}, but it is not verified: {said(why)}")
         receipt("ssh.verify_failed", fp, to=to, how=said(why))
         return 1
+    outcome.update(stage="done")
     if getattr(args, "_ssh_key_unchecked", False):
         print(f"Verified: {alias} accepted {fp} for {args.name}; the private file was not checked against "
               f"{tilde(pub)} (its format stores no public key in clear)")
@@ -1394,6 +1445,453 @@ def verify_login(ssh: str, alias: str, base: pathlib.Path, fp: str, args) -> tup
     return True, ""
 
 
+# ── rekey: this machine's own key where the other machine's is registered (OBS-285, OSS-96) ──
+#
+# WHY. A second machine restored from a bundle gets `~/.ssh/config` but never the other machine's
+# private key (machine_backup.py, OBS-283): each machine signs with its own key. Making that key and
+# registering it everywhere the other one is took one `create` and a `send` per GitHub use and per
+# Host, and the places nobody listed kept accepting only the old key. `rekey` composes the door's
+# own steps (`create`, `send --to github`, `send --to server:HOST --verify`) behind one plan, and
+# ends with what still accepts only the other machine's key, each with its next step.
+#
+# THE OTHER MACHINE'S KEY IS KNOWN BY ITS PUBLIC HALF ONLY: `--fingerprint`, or `OLD.pub` when
+# it is here. Its private file is never opened (not even its clear header), copied or named to a
+# tool. Nothing is ever removed: the other machine keeps its key and its registrations.
+
+FINGERPRINT = re.compile(r"SHA256:[A-Za-z0-9+/]{43}")
+#: ssh's default identity files: offered to every host whose config names no IdentityFile.
+DEFAULT_IDENTITIES = ("id_ed25519", "id_ecdsa", "id_ecdsa_sk", "id_ed25519_sk", "id_rsa", "id_dsa")
+GITHUB_HOSTS = ("github.com", "ssh.github.com")
+USE_WORDS = {"authentication": "sign-in", "signing": "signing"}
+
+
+def _same_path(a: pathlib.Path | None, b: pathlib.Path) -> bool:
+    return a is not None and os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
+
+
+def git_signing_key(degraded: list[dict]) -> str | None:
+    """git's global `user.signingkey` when `gpg.format` is ssh, else None. `git config --get` is a
+    pure read; a missing git is a degraded row, never an error."""
+    values = {}
+    for key in ("gpg.format", "user.signingkey"):
+        try:
+            p = run(["git", "config", "--global", "--get", key], stdin=subprocess.DEVNULL, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            degraded.append({"source": "git", "reason": f"git config could not run ({type(exc).__name__}); "
+                                                        f"commit signing was not read"})
+            return None
+        values[key] = p.stdout.strip() if p.returncode == 0 else ""
+    return values["user.signingkey"] if values["gpg.format"].lower() == "ssh" and values["user.signingkey"] else None
+
+
+def github_account(degraded: list[dict]) -> str | None:
+    """The login gh is signed in to on github.com (`gh api user`), or None: the account a key is sent
+    to, named in the plan so nothing goes to an account the person did not mean."""
+    try:
+        p = run([tool("gh"), "api", "-H", "Accept: application/vnd.github+json", "user"], timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        degraded.append({"source": "github:account", "reason": f"gh could not run ({type(exc).__name__})"})
+        return None
+    login = None
+    if p.returncode == 0:
+        try:
+            login = (json.loads(p.stdout or "{}") or {}).get("login")
+        except (ValueError, AttributeError):
+            login = None
+    if not isinstance(login, str) or not USER_WORD.fullmatch(login.replace("-", "_")):
+        degraded.append({"source": "github:account", "reason": "the signed-in account was not read: "
+                                                               + (said(p.stderr, 160) or "no answer"),
+                         "fix": "gh auth status; gh auth login"})
+        return None
+    return login
+
+
+def _git_service_step(new: str, hostname: str) -> str:
+    """The step for a git service reached over SSH (GitHub Enterprise Server and the like). The host
+    name was validated (HOST_ARG) and is quoted for the shell all the same."""
+    host, pub = shlex.quote(hostname), shlex.quote(f"{new}.pub")
+    return (f"add this machine's public line ({CMD} copy {shlex.quote(new)}) in that service's SSH key settings; "
+            f"for GitHub Enterprise Server: gh auth login --hostname {host}, then "
+            f"GH_HOST={host} gh ssh-key add ~/.ssh/{pub}")
+
+
+def _signs_with(value: str | None, old_base: pathlib.Path, fp_old: str | None) -> bool:
+    """Whether git's signing key is the other machine's key: its path (`~/.ssh/OLD[.pub]`) or, for a
+    `key::` literal, its fingerprint."""
+    if not value:
+        return False
+    if value.startswith("key::"):
+        parsed = parse_public(value[5:])
+        return bool(parsed and fp_old and parsed["fingerprint"] == fp_old)
+    target, _ = _expand(value)
+    return _same_path(target, old_base) or _same_path(target, pathlib.Path(str(old_base) + ".pub"))
+
+
+def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None, servers=(),
+               no_passphrase: bool = False) -> dict:
+    """What `rekey` would do, read without changing anything: the other machine's key (by its public
+    half), this machine's key (made or reused), every place to send it with why, what cannot be
+    known from here, and the person's steps. Raises Refused."""
+    old_base, old_pub = _key_paths(old)
+    new = new or old
+    if not NAME.fullmatch(new) or new.endswith(".pub"):
+        raise Refused(f"{credential_shape.echo(new)} is not a key name for this machine's key: letters, digits, "
+                      f". _ - (at most 64, directly in ~/.ssh)")
+    if reserved(new):
+        raise Refused(f"{new} is a name ssh reads as something else; choose another name with --name")
+    new_base, new_pub = _key_paths(new)
+    if fingerprint is not None and not FINGERPRINT.fullmatch(fingerprint):
+        raise Refused("--fingerprint takes the other key's SHA256 fingerprint, as `ssh-keys list` prints it "
+                      "(SHA256: and 43 characters)")
+    for alias in servers:
+        if not HOST_ARG.fullmatch(alias or ""):
+            raise Refused(f"{credential_shape.echo(alias)} is not a host: a Host of ~/.ssh/config or [user@]host")
+    degraded: list[dict] = []
+    fp_old, source = fingerprint, ("--fingerprint" if fingerprint else None)
+    old_private, old_public = _probe(old_base)[0] != "missing", _probe(old_pub)[0] != "missing"
+    if new == old and not old_private and old_public:
+        raise Refused(f"{tilde(old_pub)} is here without its private key: it is the other machine's public half, "
+                      f"and this machine's key cannot take its name. Pass --name NEW for this machine's key "
+                      f"(the Host blocks naming {tilde(old_base)} then need IdentityFile ~/.ssh/NEW)")
+    if new != old and old_public:
+        parsed = read_public(old_pub)   # the public half only; the private file is never opened
+        if fp_old and fp_old != parsed["fingerprint"]:
+            raise Refused(f"--fingerprint {fp_old} is not {tilde(old_pub)} ({parsed['fingerprint']}); "
+                          f"nothing was changed")
+        fp_old, source = parsed["fingerprint"], tilde(old_pub)
+    kinds = (_probe(new_base)[0], _probe(new_pub)[0])
+    if kinds == ("missing", "missing"):
+        mine = {"name": new, "path": tilde(new_base), "action": "create", "fingerprint": None, "public": None}
+    elif kinds == ("file", "file"):
+        _, _, parsed = public_of(new)
+        mine = {"name": new, "path": tilde(new_base), "action": "reuse", "fingerprint": parsed["fingerprint"],
+                "public": parsed["line"]}
+    else:
+        raise Refused(f"{tilde(new_base)} and {tilde(new_pub)} are not a key pair on this machine (one is missing "
+                      f"or a link); `{CMD} list` shows them. Choose another name with --name")
+    if fp_old and fp_old == mine["fingerprint"]:
+        raise Refused(f"{fp_old} is this machine's own key {tilde(new_base)}, not the other machine's; pass the "
+                      f"other machine's fingerprint (`{CMD} list` there prints it)")
+
+    unknown: list[dict] = []
+    aliases: list[str] = []
+    seen: dict = {}
+    config_gaps: list[dict] = []
+    entries = read_config(config_gaps, seen_hosts=seen)
+    read_config(config_gaps, seen_hosts=seen, root=system_config())   # ssh reads it after the user's
+    degraded += config_gaps
+    for entry in entries:
+        if not _same_path(entry["path"], old_base):
+            continue
+        for h in entry["hosts"]:
+            if h.startswith("Match ") or h == "*" or any(c in h for c in "*?!"):
+                where = h if h.startswith("Match ") else f"Host {h}"
+                unknown.append({"where": shown(where), "why": f"names {tilde(old_base)} for hosts a pattern decides, "
+                                                              f"which cannot be listed from here",
+                                "next": f"name each host it reaches: {CMD} rekey {old} --server ALIAS"})
+            elif not HOST_ARG.fullmatch(h):
+                unknown.append({"where": f"Host {shown(h)}", "why": "not a host name the door sends to",
+                                "next": f"{CMD} copy {new}, and add the line to that host's authorized_keys by hand"})
+            elif h not in aliases:
+                aliases.append(h)
+    # `ssh -G` evaluates `Match exec`, which runs a command (review of #405): a plan that reads only
+    # never hands a config with one to ssh, nor one whose parts the scan could not read (the user's or
+    # the system's: an Include too deep, too large, unreadable), and takes each host's HostName and
+    # User from the config text instead, by ssh's first-obtained-value rule.
+    match_exec = any(re.search(r"(?:^|\s)!?exec(?:\s|=|$)", m, re.I) for m in seen.get("match", []))
+    text_only = match_exec or any(d["source"] == "ssh-config" for d in config_gaps)
+    ssh = tool("ssh")
+    resolved: dict[str, dict] = {}
+    for alias in aliases + [a for a in servers if a not in aliases]:
+        user, _, bare = alias.rpartition("@")
+        hostname = (config_value(seen, bare, "hostname") or bare).replace("%%", "\0").replace("%h", bare)
+        host = {"hostname": hostname.replace("\0", "%"), "user": user or config_value(seen, bare, "user") or ""}
+        if not text_only and available(ssh):
+            try:
+                g = resolve_host(ssh, alias)
+                host = {"hostname": g["hostname"], "user": g["user"]}
+            except Refused:
+                pass
+        resolved[alias] = host
+    github_hosts, server_hosts, git_hosts = [], [], []
+    for alias, host in resolved.items():
+        if not HOST_ARG.fullmatch(host["hostname"]) or "%" in host["hostname"] or "@" in host["hostname"]:
+            unknown.append({"where": f"Host {alias}", "why": "its HostName could not be read as a host name, so it is "
+                                                             "neither sent to nor named in a command",
+                            "next": f"check Host {alias} in ~/.ssh/config, then: {CMD} rekey {old} --server ALIAS"})
+        elif host["hostname"].lower() in GITHUB_HOSTS:
+            github_hosts.append(alias)
+        elif host["user"] == "git":
+            git_hosts.append(alias)
+        else:
+            server_hosts.append(alias)
+    for alias in git_hosts:
+        unknown.append({"where": f"Host {alias}", "why": f"logs in as git to {resolved[alias]['hostname']}: a git "
+                                                         f"service (GitHub Enterprise and the like), with no "
+                                                         f"authorized_keys to append to",
+                        "next": _git_service_step(new, resolved[alias]["hostname"])})
+    if text_only:
+        why = ("the config has Match exec, which ssh -G would run" if match_exec
+               else "part of the config was not read, and it may hold a Match exec, which ssh -G would run")
+        degraded.append({"source": "ssh-config", "reason": f"ssh -G was not run: {why}; hosts were read from the "
+                                                           f"config's own HostName and User lines"})
+
+    held, gh_degraded = github_keys()
+    degraded += gh_degraded
+    account = github_account(degraded)
+    signing = git_signing_key(degraded)
+    hints = ([f"Host {', '.join(github_hosts)} reaches GitHub with {tilde(old_base)}"] if github_hosts else []) \
+        + ([f"{old} is ssh's default key, offered to GitHub without a Host block"] if old in DEFAULT_IDENTITIES else []) \
+        + ([f"git signs commits with {tilde(old_base)}"] if _signs_with(signing, old_base, fp_old) else [])
+    hint = f" ({'; '.join(hints)})" if hints else ""
+    on = f"{account}'s" if account else "the signed-in"
+    switch = "gh auth status shows the account gh uses; gh auth switch, or gh auth login, picks the one that holds it"
+    # GITHUB IS A TARGET ONLY WHEN THE OTHER KEY IS PROVEN ON gh's ACCOUNT (review of #405): a Host
+    # reaching github.com, a default key name or git signing do not say which account holds it, and a
+    # key sent on their strength went to whatever account gh was signed in to.
+    targets: list[dict] = []
+    if account is None:
+        unknown.append({"where": "GitHub", "why": "the account gh is signed in to could not be read, so no key is "
+                                                  "sent to GitHub" + hint,
+                        "next": f"gh auth status (gh auth login if signed out), then run this again"})
+    elif not fp_old:
+        unknown.append({"where": "GitHub", "why": "the other machine's key is not known here by its fingerprint, so "
+                                                  f"it cannot be found among {on} GitHub keys, and nothing is sent "
+                                                  f"there" + hint,
+                        "next": f"run `{CMD} list` on the other machine, then: {CMD} rekey {old} --fingerprint "
+                                f"SHA256:... ({switch})"})
+    else:
+        found = False
+        for use, word in USE_WORDS.items():
+            rows = held.get(use)
+            if rows is None:
+                reason = "; ".join(d["reason"] for d in gh_degraded) or "not read"
+                unknown.append({"where": f"GitHub {word}", "why": f"{on} GitHub {use} keys were not read: "
+                                                                  f"{shown(reason)}",
+                                "next": f"gh auth refresh -h github.com -s {LIST_SCOPES}, then run this again"})
+                continue
+            hit = [k for k in rows if k["fingerprint"] == fp_old]
+            if hit:
+                found = True
+                targets.append({"to": "github", "use": use, "account": account,
+                                "why": f"{account}'s GitHub account holds the other machine's key for {word} "
+                                       f"({shown(hit[0]['title'])})"})
+        if not found and hints and all(held.get(u) is not None for u in USE_WORDS):
+            unknown.append({"where": "GitHub", "why": f"the other machine's key is not among {account}'s GitHub "
+                                                      f"keys, yet GitHub may know it{hint}: it may be on another "
+                                                      f"account",
+                            "next": f"{switch}; then run this again"})
+    if old in DEFAULT_IDENTITIES:
+        unknown.append({"where": "hosts without an IdentityFile line",
+                        "why": f"ssh offers {tilde(old_base)} to every host whose config names no key, so a server "
+                               f"that accepts it need not appear in ~/.ssh/config",
+                        "next": f"name each such server: {CMD} rekey {old} --server ALIAS"})
+    for alias in server_hosts:
+        why = (f"Host {alias} names {tilde(old_base)} in ~/.ssh/config" if alias in aliases
+               else "named with --server")
+        targets.append({"to": f"server:{alias}", "why": why, "verify": True,
+                        "hostname": resolved[alias]["hostname"]})
+    config = []
+    if new != old and not old_private:
+        for alias in aliases:
+            config.append({"host": alias, "why": f"Host {alias} names {tilde(old_base)}, which is not on this machine",
+                           "next": f"in ~/.ssh/config, point Host {alias}'s IdentityFile at ~/.ssh/{new}"})
+    gates = []
+    if mine["action"] == "create" and not no_passphrase:
+        gates.append("ssh-keygen asks for the new key's passphrase at this terminal (it is never an argument); "
+                     "--no-passphrase makes an unattended key, which the findings list")
+    for t in targets:
+        if t["to"] == "github":
+            gates.append(f"adding a {USE_WORDS[t['use']]} key needs gh's {USES[t['use']]} scope, granted once in a "
+                         f"browser: gh auth refresh -h github.com -s {USES[t['use']]}")
+    if any(t["to"] != "github" for t in targets):
+        gates.append("a server that does not let this machine in yet takes the key from the machine that holds the "
+                     "other key, or from a password typed at this terminal (--interactive)")
+    return {"schema": "ssh-rekey/1", "applied": False,
+            "old": {"name": old, "fingerprint": fp_old, "from": source},
+            "new": mine, "github": {"account": account}, "targets": targets, "unknown": unknown,
+            "config": config, "gates": gates, "degraded": degraded}
+
+
+def _target_label(t: dict) -> str:
+    return f"GitHub {USE_WORDS[t['use']]}" if t["to"] == "github" else t["to"]
+
+
+def print_rekey_plan(plan: dict) -> None:
+    old, mine = plan["old"], plan["new"]
+    print(f"Rekey: this machine's own key, sent where the other machine's {shown('~/.ssh/' + old['name'])} "
+          f"is registered.")
+    print("The other machine's key: " + (f"{old['fingerprint']} (from {shown(old['from'])})" if old["fingerprint"]
+                                         else "not known here by its fingerprint"))
+    account = (plan.get("github") or {}).get("account")
+    print(f"GitHub account (gh): {shown(account) if account else 'not read, so nothing goes to GitHub'}")
+    print(f"This machine's key: {shown(mine['path'])}, "
+          + ("to be created (ed25519)" if mine["action"] == "create" else f"already here, {mine['fingerprint']}, reused"))
+    if plan["targets"]:
+        print("\nIt goes to:")
+        for t in plan["targets"]:
+            print(f"  - {shown(_target_label(t))}{' (then verified)' if t.get('verify') else ''}: {shown(t['why'])}")
+    else:
+        print("\nNo place where the other machine's key is registered was found from here.")
+    if plan["unknown"]:
+        print("\nNot known from this machine:")
+        for u in plan["unknown"]:
+            print(f"  - {shown(u['where'])}: {shown(u['why'])}\n      next: {shown(u['next'])}")
+    if plan["config"]:
+        print("\nIn ~/.ssh/config:")
+        for c in plan["config"]:
+            print(f"  - {shown(c['why'])}\n      next: {shown(c['next'])}")
+    if plan["gates"]:
+        print("\nWhat needs a person:")
+        for g in plan["gates"]:
+            print(f"  - {shown(g)}")
+    for d in plan["degraded"]:
+        print(f"Not read: {shown(d['source'])}: {shown(d['reason'])}" + (f"; fix: {shown(d['fix'])}" if d.get("fix") else ""))
+
+
+def _still(plan: dict, t: dict, outcome: dict) -> dict:
+    """One place that still accepts only the other machine's key, with its next steps."""
+    new = plan["new"]["name"]
+    if t["to"] == "github":
+        use = t["use"]
+        steps = [f"{CMD} send {new} --to github --as {use}",
+                 f"if gh lacks the scope: gh auth refresh -h github.com -s {USES[use]}, then the step above"]
+    else:
+        alias = t["to"][len("server:"):]
+        again = f"{CMD} send {new} --to server:{alias} --verify"
+        if re.search(r"does not provide shell access|GitHub", outcome.get("reason") or ""):
+            # It answered like GitHub (Enterprise Server): a git service, not a shell host.
+            steps = [_git_service_step(new, t.get("hostname") or alias)]
+        elif outcome.get("stage") == "verify":
+            steps = [again]
+        else:
+            steps = [f"{again} --interactive (when {alias} takes a password)",
+                     f"or, on the machine that holds the other key, which {alias} still lets in: save this machine's "
+                     f"public line (printed below) as ~/.ssh/{new}-other.pub there, run {CMD} send {new}-other "
+                     f"--to server:{alias}, then run this rekey again here to verify it"]
+    return {"where": _target_label(t), "why": outcome.get("reason") or "not done", "next": steps}
+
+
+def _rekey_failed_create(plan: dict, args) -> int:
+    if args.json:
+        print(json.dumps(plan, indent=1, ensure_ascii=False))
+    else:
+        print("Nothing was sent: this machine's key was not made (above). Run the same command again.",
+              file=sys.stderr)
+    return 1
+
+
+def _rekey_command(args) -> str:
+    """The same rekey, spelled from its arguments (never from argv: `full ssh-keys` and the tool's
+    own entry point name it differently), every value quoted for the shell."""
+    words = ["rekey", args.old]
+    for flag, value in (("--name", args.name), ("--fingerprint", args.fingerprint), ("--comment", args.comment),
+                        ("--title", args.title)):
+        if value is not None:
+            words += [flag, value]
+    for alias in args.server or ():
+        words += ["--server", alias]
+    words += [flag for flag, on in (("--no-passphrase", args.no_passphrase), ("--no-keychain", args.no_keychain),
+                                    ("--interactive", args.interactive)) if on]
+    return f"{CMD} " + " ".join(shlex.quote(w) for w in words)
+
+
+def cmd_rekey(args) -> int:
+    """With --json every answer is one ssh-rekey/1 document on stdout, a refusal included (it then
+    carries `refused`, and the exit code stays 2)."""
+    holder: dict = {}
+    try:
+        return _cmd_rekey(args, holder)
+    except Refused as exc:
+        if not args.json:
+            raise
+        doc = holder.get("plan") or {"schema": "ssh-rekey/1", "applied": False}
+        doc["refused"] = str(exc)
+        print(json.dumps(doc, indent=1, ensure_ascii=False))   # redirect_stdout has already given stdout back
+        print(f"ssh-keys: {exc}", file=sys.stderr)
+        return 2
+
+
+def _cmd_rekey(args, holder: dict) -> int:
+    plan = rekey_plan(args.old, new=args.name, fingerprint=args.fingerprint, servers=tuple(args.server or ()),
+                      no_passphrase=args.no_passphrase)
+    holder["plan"] = plan
+    if not args.apply:
+        if args.json:
+            print(json.dumps(plan, indent=1, ensure_ascii=False))
+        else:
+            print_rekey_plan(plan)
+            print(f"\nNothing was changed. Do it: {shown(_rekey_command(args))} --apply")
+        return 0
+    mine = plan["new"]
+    if mine["action"] == "create" and not args.no_passphrase and not osprivacy.is_terminal(sys.stdin):
+        raise Refused("a passphrase is typed by a person, into ssh-keygen's own prompt; run this in a terminal, or "
+                      "pass --no-passphrase for an unattended key (the findings will list it); nothing was changed")
+    import contextlib
+    worst, done, still = 0, [], []
+    # With --json the door's own lines go to stderr, so stdout carries one JSON document.
+    with contextlib.redirect_stdout(sys.stderr) if args.json else contextlib.nullcontext():
+        if not args.json:
+            print_rekey_plan(plan)
+            print()
+        if mine["action"] == "create":
+            code = cmd_create(argparse.Namespace(name=mine["name"], comment=args.comment,
+                                                 no_passphrase=args.no_passphrase, no_keychain=args.no_keychain,
+                                                 host=None, hostname=None, user=None, port=None))
+            made = code != 1   # ssh-keygen made nothing: nothing is sent
+            worst = max(worst, 4 if code == 4 else 0)
+        else:
+            made = True
+        if made:
+            _, _, parsed = public_of(mine["name"])
+            mine.update(fingerprint=parsed["fingerprint"], public=parsed["line"])
+        for t in plan["targets"] if made else ():
+            outcome: dict = {}
+            print()
+            try:
+                if t["to"] == "github":
+                    code = send_github(argparse.Namespace(name=mine["name"], as_=t["use"], title=args.title), outcome)
+                else:
+                    code = send_server(argparse.Namespace(name=mine["name"], verify=True,
+                                                          interactive=args.interactive),
+                                       t["to"][len("server:"):], outcome)
+            except Refused as exc:
+                code, outcome["reason"] = 1, str(exc)
+                print(f"ssh-keys: {exc}", file=sys.stderr)
+            if code == 1:
+                still.append(_still(plan, t, outcome))
+                worst = 1
+            else:
+                done.append(_target_label(t))
+                worst = max(worst, code)
+    if not made:
+        plan.update(applied=True, results={"done": [], "failed": "ssh-keygen did not make this machine's key"},
+                    still=[])
+        return _rekey_failed_create(plan, args)
+    plan.update(applied=True, results={"done": done}, still=still)
+    if args.json:
+        print(json.dumps(plan, indent=1, ensure_ascii=False))
+        return worst
+    print()
+    if still:
+        print("Still accepts only the other machine's key:")
+        for s in still:
+            print(f"  - {shown(s['where'])}: {shown(s['why'])}")
+            for step in s["next"]:
+                print(f"      next: {shown(step)}")
+        print(f"\nThis machine's public line: {mine['public']}")
+    else:
+        print("Nothing accepts only the other machine's key among the places above"
+              + (": each now accepts this machine's key too." if done else "."))
+    if plan["unknown"]:
+        print("Not known from this machine, so not checked: " + "; ".join(shown(u["where"]) for u in plan["unknown"])
+              + f" (`{CMD} rekey {args.old}` names the next step for each)")
+    for c in plan["config"]:
+        print(f"In ~/.ssh/config: {shown(c['next'])}")
+    print("The other machine's key stays registered everywhere it was: this command removes nothing.")
+    return worst
+
+
 def cmd_findings(args) -> int:
     import ssh_key_findings
     doc = load_saved()
@@ -1419,7 +1917,7 @@ def cmd_findings(args) -> int:
 def _commands(name: str = "NAME") -> dict:
     return {"show": f"{CMD} show {name}", "copy": f"{CMD} copy {name}",
             "sendGithub": f"{CMD} send {name} --to github", "sendServer": f"{CMD} send {name} --to server:HOST --verify",
-            "create": f"{CMD} create NAME", "list": f"{CMD} list"}
+            "create": f"{CMD} create NAME", "list": f"{CMD} list", "rekey": f"{CMD} rekey OLD"}
 
 
 def agent_view(name: str | None = None, github: bool = False) -> dict:
@@ -1491,6 +1989,20 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--title")
     s.add_argument("--verify", action="store_true", help="server: log in with the new key alone afterwards")
     s.add_argument("--interactive", action="store_true", help="server: allow a password prompt")
+    r = sub.add_parser("rekey", help="this machine's own key, sent where the other machine's key is registered "
+                       "(GitHub, each Host naming it, verified); then what still accepts only the old key. "
+                       "Plans unless --apply")
+    r.add_argument("old", help="the other machine's key name, as ~/.ssh/config spells it (~/.ssh/OLD)")
+    r.add_argument("--name", help="this machine's key name; default OLD, so the carried config finds it")
+    r.add_argument("--fingerprint", help="the other key's SHA256 fingerprint, when its .pub is not here")
+    r.add_argument("--server", action="append", metavar="ALIAS", help="one more server to send to (repeatable)")
+    r.add_argument("--apply", action="store_true", help="do it; without it, the plan only")
+    r.add_argument("--no-passphrase", action="store_true", help="an unattended key (the findings list it)")
+    r.add_argument("--no-keychain", action="store_true", help="macOS: do not store the passphrase in the Keychain")
+    r.add_argument("--interactive", action="store_true", help="servers: allow a password prompt")
+    r.add_argument("--comment")
+    r.add_argument("--title", help="GitHub title; default the key's comment")
+    r.add_argument("--json", action="store_true")
     f = sub.add_parser("findings", help="what the saved inventory owes you")
     f.add_argument("--json", action="store_true")
     return p
@@ -1507,6 +2019,8 @@ def main(argv: list[str]) -> int:
             return cmd_create(args)
         if args.command == "send":
             return cmd_send(args)
+        if args.command == "rekey":
+            return cmd_rekey(args)
         return cmd_findings(args)
     except Refused as exc:
         print(f"ssh-keys: {exc}", file=sys.stderr)

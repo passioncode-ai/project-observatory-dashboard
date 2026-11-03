@@ -546,9 +546,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                FOLDER [--dry-run] reads another broker's state and imports what it accepts
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
-  ssh-keys list|show|copy|create|send|findings   this machine's SSH keys: list them, make an
+  ssh-keys list|show|copy|create|send|rekey|findings   this machine's SSH keys: list them, make an
                                ed25519 key, copy its public line, send it to GitHub or a server;
-                               the private key is never shown or moved
+                               rekey OLD plans (--apply does it) this machine's own key where the
+                               other machine's is registered, then lists what still accepts only
+                               the old one; the private key is never shown or moved
   vault-digests [view|write|mark|unmark|key]   every vault slot per machine (same, differs, only
                                here, missing, unreachable), compared by keyed HMAC-SHA-256 digests under
                                the estate key, never values; mark a slot different on purpose; peers'

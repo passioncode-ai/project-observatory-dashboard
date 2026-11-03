@@ -32,6 +32,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOOR = ROOT / "tools" / "ssh_keys.py"
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from git_env import git_env  # noqa: E402
 
 BEGIN = "-----BEGIN "
 END = "-----END "
@@ -171,6 +173,10 @@ with log.open("a") as f: f.write(json.dumps({"tool": "gh", "argv": a, "stdin": s
 st = pathlib.Path(os.environ["FAKE_GH_STATE"]); s = json.loads(st.read_text())
 if a[:1] == ["api"]:
     endpoint = a[-1].split("?")[0]
+    if endpoint == "user":
+        if s.get("user_fail"):
+            print(s["user_fail"], file=sys.stderr); sys.exit(1)
+        print(json.dumps({"login": s.get("login", "example-user")})); sys.exit(0)
     use = "signing" if endpoint == "user/ssh_signing_keys" else "authentication"
     if s.get("list_fail", {}).get(use):
         print(s["list_fail"][use], file=sys.stderr); sys.exit(1)
@@ -231,6 +237,10 @@ while i < len(a) and a[i] != "--":
 host, command = a[i + 1], a[i + 2:]
 if os.environ.get("FAKE_SSH_PASSWORD_ONLY") and "BatchMode=yes" in opts:
     print(f"{host}: Permission denied (publickey,password).", file=sys.stderr); sys.exit(255)
+if os.environ.get("FAKE_SSH_GITHUB") and command != ["true"]:   # a git service answers, never a shell
+    sys.stdin.read()
+    print("Hi example-user! You've successfully authenticated, but GitHub does not provide shell access.",
+          file=sys.stderr); sys.exit(1)
 if os.environ.get("FAKE_SSH_UNREACHABLE"):
     print(f"ssh: connect to host {host} port 22: Connection refused", file=sys.stderr); sys.exit(255)
 if command == ["true"]:
@@ -327,6 +337,8 @@ class Door(unittest.TestCase):
             "FAKE_AGENT": "",
             "SSH_AUTH_SOCK": str(self.root / "default-agent.sock"),
             "FAKE_DEFAULT_SOCK": str(self.root / "default-agent.sock"),
+            # The system-wide ssh_config rekey scans for Match exec: the scratch one, never /etc's.
+            "OBSERVATORY_SSH_SYSTEM_CONFIG": str(self.root / "etc-ssh" / "ssh_config"),
         })
 
     def tearDown(self):
@@ -1480,12 +1492,382 @@ class Findings(Door):
         self.assertEqual(len(json.loads(p.stdout)["findings"]), 11)
 
 
+class Rekey(Door):
+    """OBS-285: this machine's own key, sent where the other machine's key is registered, and
+    what still accepts only the old key. The second machine after `machine-restore`: the carried
+    `~/.ssh/config` names `~/.ssh/id_work`, whose private file and public half stayed behind."""
+
+    OTHER = ed25519_blob("the other machine")
+
+    def setUp(self):
+        super().setUp()
+        # git reads this HOME's .gitconfig as its global configuration, and no other (git_env.py).
+        self.env = git_env(self.env, global_config=str(self.home / ".gitconfig"))
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text(
+            "Host alpha\n  HostName alpha.example.invalid\n  User deploy\n  IdentityFile ~/.ssh/id_work\n"
+            "  IdentitiesOnly yes\n"
+            "Host gh\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_work\n"
+            "Host beta\n  HostName beta.example.invalid\n  IdentityFile ~/.ssh/id_other\n")
+        other = {"id": 7, "title": "work laptop", "key": pub_line(self.OTHER), "created_at": "2026-01-01T00:00:00Z"}
+        self.gh_state.write_text(json.dumps({"authentication": [other], "signing": [dict(other, id=8)]}))
+
+    def gh(self) -> dict:
+        return json.loads(self.gh_state.read_text())
+
+    def adds(self) -> list[list[str]]:
+        return [c for c in self.calls("gh") if c[:2] == ["ssh-key", "add"]]
+
+    def new_line(self, name: str = "id_work") -> str:
+        return " ".join((self.ssh / f"{name}.pub").read_text().split()[:2])
+
+    def test_the_plan_is_the_default_and_changes_nothing(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        for word in ("GitHub sign-in", "GitHub signing", "server:alpha", "Nothing was changed", "--apply"):
+            self.assertIn(word, p.stdout)
+        self.assertNotIn("server:beta", p.stdout, "beta names another key")
+        self.assertNotIn("server:gh", p.stdout, "a Host that reaches github.com is GitHub, not a server")
+        self.assertFalse((self.ssh / "id_work").exists())
+        self.assertEqual(self.calls("ssh-keygen"), [])
+        self.assertEqual(self.adds(), [])
+        self.assertTrue(all(c[:1] == ["-G"] for c in self.calls("ssh")), "the plan connected to a server")
+
+    def test_the_json_plan_names_each_target_and_why(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        doc = json.loads(p.stdout)
+        self.assertEqual(doc["schema"], "ssh-rekey/1")
+        self.assertEqual(doc["applied"], False)
+        self.assertEqual(doc["old"], {"name": "id_work", "fingerprint": fingerprint(self.OTHER), "from": "--fingerprint"})
+        self.assertEqual(doc["new"]["name"], "id_work")
+        self.assertEqual(doc["new"]["action"], "create")
+        self.assertEqual([(t["to"], t.get("use")) for t in doc["targets"]],
+                         [("github", "authentication"), ("github", "signing"), ("server:alpha", None)])
+        self.assertTrue(all(t["why"] for t in doc["targets"]))
+        self.assertIn("degraded", doc)
+
+    def test_apply_creates_sends_and_verifies_everywhere(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        line = self.new_line()
+        self.assertEqual(sorted(c[c.index("--type") + 1] for c in self.adds()), ["authentication", "signing"])
+        self.assertTrue(all(" ".join(r["stdin"].split()[:2]) == line for r in self.rows("gh") if r["stdin"]))
+        self.assertIn(line, (self.remote / ".ssh" / "authorized_keys").read_text())
+        self.assertIn("Verified", p.stdout)
+        self.assertIn("Nothing accepts only the other machine's key", p.stdout)
+        self.assertIn("removes nothing", p.stdout)
+        events = [r["event"] for r in self.receipts()]
+        self.assertEqual(events[0], "ssh.created")
+        self.assertEqual(events.count("ssh.registered"), 3)
+        self.assertIn("ssh.verified", events)
+        # The other machine's key stays registered: nothing is removed, and no delete is ever run.
+        self.assertIn(pub_line(self.OTHER), [k["key"] for k in self.gh()["authentication"]])
+        self.assertFalse(any("delete" in c for c in self.calls("gh")))
+
+    def test_a_second_run_reuses_this_machines_key_and_adds_nothing(self):
+        args = ("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase")
+        self.assertEqual(self.door(*args).returncode, 0)
+        before = (self.ssh / "id_work").read_bytes()
+        p = self.door(*args)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(len(self.calls("ssh-keygen")), 1, "the key was made twice")
+        self.assertEqual((self.ssh / "id_work").read_bytes(), before)
+        self.assertEqual(len(self.adds()), 2)
+        self.assertIn("already", p.stdout)
+        self.assertEqual((self.remote / ".ssh" / "authorized_keys").read_text().count(self.new_line()), 1)
+
+    def test_a_server_that_does_not_let_this_machine_in_is_listed_with_its_next_steps(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      env={"FAKE_SSH_UNREACHABLE": "1"})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        tail = p.stdout.split("Still accepts only the other machine's key", 1)[1]
+        self.assertIn("server:alpha", tail)
+        self.assertIn("ssh-keys send id_work --to server:alpha --verify --interactive", tail)
+        self.assertIn("id_work-other", tail, "the step for the machine that still holds the other key")
+        self.assertIn(self.new_line(), p.stdout, "the public line the other machine needs")
+        self.assertEqual(len(self.adds()), 2, "GitHub went on although the server refused")
+
+    def test_a_key_added_but_not_verified_is_listed_as_not_verified(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      env={"FAKE_SSH_SWALLOW": "1"})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        tail = p.stdout.split("Still accepts only the other machine's key", 1)[1]
+        self.assertIn("server:alpha", tail)
+        self.assertIn("not verified", tail)
+
+    def test_a_github_refusal_names_the_scope_command(self):
+        state = self.gh()
+        state["add_fail"] = "HTTP 404: Not Found (needs the admin:public_key scope)"
+        self.gh_state.write_text(json.dumps(state))
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase")
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        tail = p.stdout.split("Still accepts only the other machine's key", 1)[1]
+        self.assertIn("gh auth refresh -h github.com -s admin:public_key", tail)
+        self.assertIn("gh auth refresh -h github.com -s admin:ssh_signing_key", tail)
+        self.assertIn("ssh-keys send id_work --to github --as signing", tail)
+
+    def test_unread_github_keys_are_named_not_taken_as_absent(self):
+        state = self.gh()
+        state["list_fail"] = {"signing": "HTTP 403: missing scope read:ssh_signing_key"}
+        self.gh_state.write_text(json.dumps(state))
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual([t.get("use") for t in doc["targets"] if t["to"] == "github"], ["authentication"])
+        unknown = [u for u in doc["unknown"] if "signing" in u["where"]]
+        self.assertEqual(len(unknown), 1, doc["unknown"])
+        self.assertIn("gh auth refresh -h github.com -s read:public_key,read:ssh_signing_key", unknown[0]["next"])
+
+    def test_without_the_old_fingerprint_github_is_never_a_target(self):
+        """Review of #405: a Host reaching github.com, a default key name or git signing do not say
+        which GitHub account holds the other key, so nothing is uploaded on their strength. They are
+        named as hints under what is not known, with the step that makes it known."""
+        if not shutil.which("git"):
+            self.skipTest("git is not installed")
+        (self.home / ".gitconfig").write_text("[gpg]\n\tformat = ssh\n[user]\n\tsigningkey = ~/.ssh/id_work.pub\n")
+        doc = json.loads(self.door("rekey", "id_work", "--json").stdout)
+        self.assertIsNone(doc["old"]["fingerprint"])
+        self.assertEqual([t for t in doc["targets"] if t["to"] == "github"], [])
+        gh = next(u for u in doc["unknown"] if u["where"] == "GitHub")
+        self.assertIn("--fingerprint", gh["next"])
+        self.assertIn("gh auth status", gh["next"])
+        self.assertIn("Host gh", gh["why"])
+        self.assertIn("git signs commits", gh["why"])
+        p = self.door("rekey", "id_work", "--apply", "--no-passphrase")
+        self.assertEqual(self.adds(), [], "a key went to GitHub without the other key's fingerprint")
+        self.assertIn("example-user", p.stdout)
+
+    def test_a_default_key_name_without_a_fingerprint_goes_to_no_github_account(self):
+        (self.ssh / "config").write_text("Host alpha\n  HostName alpha.example.invalid\n")
+        doc = json.loads(self.door("rekey", "id_ed25519", "--json", "--server", "gamma").stdout)
+        self.assertEqual([(t["to"], t.get("use")) for t in doc["targets"]], [("server:gamma", None)])
+        self.assertTrue(any("--server" in u["next"] for u in doc["unknown"]), doc["unknown"])
+        self.assertTrue(any(u["where"] == "GitHub" for u in doc["unknown"]), doc["unknown"])
+
+    def test_a_key_the_signed_in_account_does_not_hold_is_not_uploaded_to_it(self):
+        """`Host github-work` reaches github.com with the old key, which gh's account does not hold:
+        the key is on another account, and the new one must not go to this one."""
+        (self.ssh / "config").write_text("Host github-work\n  HostName github.com\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        state = self.gh()
+        state.update(authentication=[], signing=[], login="personal-user")
+        self.gh_state.write_text(json.dumps(state))
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual(doc["targets"], [])
+        self.assertEqual(doc["github"]["account"], "personal-user")
+        gh = next(u for u in doc["unknown"] if u["where"] == "GitHub")
+        self.assertIn("personal-user", gh["why"])
+        self.assertIn("gh auth status", gh["next"])
+
+    def test_the_plan_names_the_github_account_it_would_upload_to(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER))
+        self.assertIn("GitHub account (gh): example-user", p.stdout)
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual(doc["github"]["account"], "example-user")
+        self.assertTrue(all("example-user" in t["why"] for t in doc["targets"] if t["to"] == "github"))
+
+    def test_an_unread_github_account_is_said_and_uploads_nothing(self):
+        state = self.gh()
+        state["user_fail"] = "HTTP 401: Bad credentials"
+        self.gh_state.write_text(json.dumps(state))
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertIsNone(doc["github"]["account"])
+        self.assertEqual([t for t in doc["targets"] if t["to"] == "github"], [])
+        self.assertTrue(any("gh auth status" in u["next"] for u in doc["unknown"]), doc["unknown"])
+
+    def test_a_config_with_match_exec_is_never_handed_to_ssh_g(self):
+        """Review of #405: `ssh -G` runs `Match exec` commands, so the read-only plan resolves hosts
+        from the config's own HostName and User lines instead, and says so."""
+        (self.ssh / "config.d").mkdir()
+        (self.ssh / "config.d" / "work").write_text('Match exec "touch /nonexistent/x"\n  User other\n')
+        (self.ssh / "config").write_text("Include config.d/*\n"
+                                         "Host alpha\n  HostName alpha.example.invalid\n  User deploy\n"
+                                         "  IdentityFile ~/.ssh/id_work\n"
+                                         "Host gh\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_work\n")
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.calls("ssh"), [], "ssh -G ran over a config with Match exec")
+        self.assertIn("Match exec", p.stdout)
+        self.assertIn("server:alpha", p.stdout)
+        self.assertNotIn("server:gh", p.stdout)
+
+    def test_match_exec_in_the_system_config_also_keeps_ssh_g_away(self):
+        """Confirming review of #405: ssh reads /etc/ssh/ssh_config and its Includes too."""
+        system = self.root / "etc-ssh"
+        (system / "ssh_config.d").mkdir(parents=True)
+        (system / "ssh_config").write_text("Include ssh_config.d/*\n")
+        (system / "ssh_config.d" / "corp").write_text('Match exec "true"\n  User other\n')
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(self.calls("ssh"), [], "ssh -G ran although the system config has Match exec")
+        self.assertIn("server:alpha", p.stdout)
+
+    def test_a_config_part_the_scan_could_not_read_keeps_ssh_g_away(self):
+        """An Include deeper than the scan follows may hold a Match exec nobody saw."""
+        chain = ["config"] + [f"part{i}" for i in range(1, 6)]
+        body = (self.ssh / "config").read_text()
+        for here, there in zip(chain, chain[1:]):
+            (self.ssh / here).write_text(f"Include {there}\n" + (body if here == "config" else ""))
+        (self.ssh / chain[-1]).write_text('Match exec "true"\n')
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual(self.calls("ssh"), [])
+        self.assertTrue(any("ssh -G was not run" in d["reason"] for d in doc["degraded"]), doc["degraded"])
+
+    def test_the_text_fallback_takes_the_first_value_in_file_order(self):
+        """ssh takes each option's first value across the matching Host blocks, so an early `Host *`
+        wins over a later `Host alpha`."""
+        (self.ssh / "config").write_text('Match exec "true"\n  User other\n'
+                                         "Host *\n  HostName first.example.invalid\n"
+                                         "Host alpha\n  HostName alpha.example.invalid\n  User deploy\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        alpha = next(t for t in doc["targets"] if t["to"] == "server:alpha")
+        self.assertEqual(alpha["hostname"], "first.example.invalid")
+
+    def test_a_host_name_from_the_config_is_validated_and_quoted(self):
+        (self.ssh / "config").write_text('Match exec "true"\n  User other\n'
+                                         "Host ghe\n  HostName ghe[1].example.invalid\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n"
+                                         "Host bad\n  HostName $(touch pwned)\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        ghe = next(u for u in doc["unknown"] if u["where"] == "Host ghe")
+        self.assertIn("gh auth login --hostname 'ghe[1].example.invalid'", ghe["next"])
+        self.assertIn("GH_HOST='ghe[1].example.invalid' gh ssh-key add", ghe["next"])
+        bad = next(u for u in doc["unknown"] if u["where"] == "Host bad")
+        self.assertNotIn("touch", json.dumps(bad))
+        self.assertNotIn("server:bad", [t["to"] for t in doc["targets"]])
+
+    def test_a_git_service_host_is_not_a_shell_target(self):
+        """Review of #405: a Host that logs in as `git` to a server other than github.com is a git
+        service (GitHub Enterprise and the like): no authorized_keys to append to."""
+        (self.ssh / "config").write_text("Host ghe\n  HostName ghe.example.invalid\n  User git\n"
+                                         "  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual([t["to"] for t in doc["targets"] if t["to"] != "github"], [])
+        ghe = next(u for u in doc["unknown"] if "ghe" in u["where"])
+        self.assertIn("gh auth login --hostname ghe.example.invalid", ghe["next"])
+
+    def test_a_server_that_answers_like_github_gets_the_git_service_step(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      env={"FAKE_SSH_GITHUB": "1"})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        tail = p.stdout.split("Still accepts only the other machine's key", 1)[1]
+        self.assertIn("server:alpha", tail)
+        self.assertIn("gh auth login --hostname alpha.example.invalid", tail)
+        self.assertNotIn("id_work-other", tail)
+
+    def test_json_apply_answers_a_late_refusal_as_json(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      "--json", env={"FAKE_RACE_DEST": str(self.ssh / "id_work")})
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        doc = json.loads(p.stdout)
+        self.assertIn("appeared while the key was being made", doc["refused"])
+        self.assertEqual(doc["schema"], "ssh-rekey/1")
+        (self.ssh / "id_work").unlink()   # the other writer's file, so the next run plans a key again
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--json")
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("typed by a person", json.loads(p.stdout)["refused"])
+
+    def test_wildcard_and_match_blocks_are_named_not_guessed(self):
+        (self.ssh / "config").write_text("Host *.example.invalid\n  IdentityFile ~/.ssh/id_work\n"
+                                         "Match host delta\n  IdentityFile ~/.ssh/id_work\n")
+        doc = json.loads(self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual([t["to"] for t in doc["targets"] if t["to"] != "github"], [])
+        wheres = " ".join(u["where"] for u in doc["unknown"])
+        self.assertIn("*.example.invalid", wheres)
+        self.assertIn("Match", wheres)
+
+    def test_the_other_machines_identity_is_read_from_its_public_half_only(self):
+        """With `--name`, the old key may be on this machine (the one being replaced): its fingerprint
+        comes from `id_work.pub`, and its private file is never opened or handed to a tool."""
+        old = self.plant("id_work", blob=self.OTHER)
+        import ssh_keys
+        opened = []
+        real = ssh_keys.private_header
+        with mock.patch.object(ssh_keys, "private_header", side_effect=lambda p: opened.append(p) or real(p)):
+            plan = self.in_process(ssh_keys.rekey_plan, "id_work", new="id_studio")
+        self.assertEqual(plan["old"], {"name": "id_work", "fingerprint": fingerprint(old), "from": "~/.ssh/id_work.pub"})
+        self.assertNotIn(self.ssh / "id_work", opened)
+        p = self.door("rekey", "id_work", "--name", "id_studio", "--apply", "--no-passphrase")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertTrue((self.ssh / "id_studio").is_file())
+        everything = (p.stdout + p.stderr + self.log.read_text()
+                      + ((self.vault / "movements.jsonl").read_text() if (self.vault / "movements.jsonl").is_file() else ""))
+        for fragment in marker_fragments():
+            self.assertNotIn(fragment, everything)
+        self.assertFalse(any(str(self.ssh / "id_work") == x for c in self.calls("ssh-keygen") + self.calls("ssh")
+                             for x in c), "the other key's private file was handed to a tool")
+
+    def test_a_new_name_leaves_a_config_note_for_each_host_that_names_the_old_key(self):
+        doc = json.loads(self.door("rekey", "id_work", "--name", "id_studio",
+                                   "--fingerprint", fingerprint(self.OTHER), "--json").stdout)
+        self.assertEqual(sorted(c["host"] for c in doc["config"]), ["alpha", "gh"])
+        self.assertTrue(all("~/.ssh/id_studio" in c["next"] for c in doc["config"]))
+
+    def test_the_other_machines_public_half_blocks_the_same_name(self):
+        self.plant("id_work", blob=self.OTHER, private=False)
+        p = self.door("rekey", "id_work")
+        self.assertEqual(p.returncode, 2, p.stdout)
+        self.assertIn("--name", p.stderr)
+
+    def test_this_machines_own_key_is_never_taken_for_the_other_one(self):
+        mine = self.plant("id_work")
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(mine))
+        self.assertEqual(p.returncode, 2, p.stdout)
+        self.assertIn("this machine's", p.stderr)
+
+    def test_a_fingerprint_that_disagrees_with_the_public_half_is_refused(self):
+        self.plant("id_work", blob=self.OTHER)
+        p = self.door("rekey", "id_work", "--name", "id_studio", "--fingerprint", fingerprint(ed25519_blob("x")))
+        self.assertEqual(p.returncode, 2, p.stdout)
+
+    def test_bad_arguments_are_refused_before_anything_runs(self):
+        for args in (("../x",), ("id_work", "--fingerprint", "MD5:aa"), ("id_work", "--server", "-oProxyCommand=x"),
+                     ("id_work", "--name", "config")):
+            p = self.door("rekey", *args, "--apply", "--no-passphrase")
+            self.assertEqual(p.returncode, 2, args)
+        self.assertEqual(self.calls("ssh-keygen"), [])
+        self.assertEqual(self.adds(), [])
+
+    def test_the_plan_spells_the_command_that_does_it_with_every_flag(self):
+        p = self.door("rekey", "id_work", "--server", "gamma", "--no-passphrase", "--title", "studio key")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("ssh-keys rekey id_work --title 'studio key' --server gamma --no-passphrase --apply", p.stdout)
+
+    def test_a_key_ssh_keygen_did_not_make_is_never_sent(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      env={"FAKE_KEYGEN_FAIL": "1"})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("Nothing was sent", p.stderr)
+        self.assertEqual(self.adds(), [])
+        self.assertTrue(all(c[:1] == ["-G"] for c in self.calls("ssh")))
+
+    def test_json_apply_keeps_stdout_one_document(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply", "--no-passphrase",
+                      "--json", env={"FAKE_SSH_UNREACHABLE": "1"})
+        self.assertEqual(p.returncode, 1, p.stderr)
+        doc = json.loads(p.stdout)
+        self.assertTrue(doc["applied"])
+        self.assertEqual(doc["results"]["done"], ["GitHub sign-in", "GitHub signing"])
+        self.assertEqual([s["where"] for s in doc["still"]], ["server:alpha"])
+        self.assertEqual(doc["new"]["public"], " ".join(self.new_line().split()) + " id_work")
+        self.assertIn("Created", p.stderr)
+
+    def test_a_passphrase_without_a_terminal_is_refused_before_anything_is_sent(self):
+        p = self.door("rekey", "id_work", "--fingerprint", fingerprint(self.OTHER), "--apply")
+        self.assertEqual(p.returncode, 2, p.stdout)
+        self.assertIn("typed by a person", p.stderr)
+        self.assertEqual(self.calls("ssh-keygen"), [])
+        self.assertEqual(self.adds(), [])
+        self.assertTrue(all(c[:1] == ["-G"] for c in self.calls("ssh")))
+
+
 class Surfaces(Door):
     def test_the_engine_cli_dispatches_ssh_keys(self):
         p = subprocess.run([sys.executable, str(ROOT / "observatory.py"), "ssh-keys", "--help"],
                            capture_output=True, text=True, env=self.env, timeout=60)
         self.assertEqual(p.returncode, 0, p.stderr)
-        for word in ("list", "create", "copy", "send", "findings"):
+        for word in ("list", "create", "copy", "send", "rekey", "findings"):
             self.assertIn(word, p.stdout)
 
     def test_the_agent_view_names_one_key_and_its_commands(self):
@@ -1498,6 +1880,7 @@ class Surfaces(Door):
         every = self.in_process(ssh_keys.agent_view)
         self.assertEqual(one["public"], pub_line(blob, "id_alpha"))
         self.assertIn("ssh-keys copy id_alpha", one["commands"]["copy"])
+        self.assertIn("ssh-keys rekey", one["commands"]["rekey"])
         self.assertIn("error", unknown)
         self.assertIn("error", traversal)
         self.assertIn("error", shaped)

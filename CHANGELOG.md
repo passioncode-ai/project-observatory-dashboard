@@ -72,6 +72,25 @@ while the major version is 0, a minor release may change behaviour and says so h
   `degraded` and the rest still compared; `facts` writes only what the reader takes (`omitted` counts what it
   masked or left out) and writes the file whole, never over an existing name. Tests: `tests/test_machine_backup.py` MoveStatus,
   MoveStatusVault.
+- **`full ssh-keys rekey OLD`: a second machine's own SSH key, everywhere the other machine's key is
+  registered** (OBS-285, OSS-96; `docs/design/SSH-KEYS.md` "Rekey on a second machine";
+  `docs/ONBOARDING.md` "Moving to a second machine that runs beside this one"). Without `--apply` it is a plan that
+  changes nothing: this machine's key `~/.ssh/OLD` (made, or reused when it is already here; named OLD so the carried
+  `IdentityFile ~/.ssh/OLD` finds it, `--name NEW` for another name), and each place to send it with why. The plan
+  names the GitHub account gh is signed in to, and GitHub sign-in and signing are targets only where that account
+  holds the other key's fingerprint (`--fingerprint SHA256:...`, or `OLD.pub` when it is here); otherwise GitHub is
+  listed as not known, with `gh auth status` and `--fingerprint` as the steps, so a key never goes to an account that
+  does not hold the other one. Every Host of `~/.ssh/config` naming `~/.ssh/OLD` is a server, and `--server ALIAS`
+  adds one; a Host logging in as `git` (GitHub Enterprise Server and the like) gets that service's step instead. A
+  config with `Match exec` is read as text: the plan never runs `ssh -G`, which would run that command. `--apply` creates the key (the
+  passphrase typed into ssh-keygen's own prompt at a terminal, as `create` does), sends it with `send --to github --as
+  USE` and `send --to server:ALIAS --verify`, and ends with what still accepts only the other machine's key, each with
+  the reason given and its next steps (the `gh auth refresh` scope command, `--interactive` for a password, or the
+  step to run on the other machine with the printed public line). Host patterns, `Match` blocks, hosts that get a
+  default key without an `IdentityFile` line and unread GitHub lists are named, never guessed. The other key is known
+  by its public half only: its private file is never read or named to a tool. Nothing is removed anywhere. `--json`
+  gives the plan, the result and any refusal as `ssh-rekey/1`; `observatory_ssh_keys` lists the command. Tests:
+  `tests/test_ssh_keys.py` Rekey.
 
 ## 0.30.1 (2026-11-02)
 
