@@ -247,6 +247,8 @@ BOUNDARY += ('disk_guard',)
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 # The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
 BOUNDARY += ('heroku_door',)
+# The Sentry door against a fake Sentry on loopback: narrow tokens from a vault slot (OBS-292).
+BOUNDARY += ('sentry_door',)
 # Every door that can mint with an expiry does, and records it (OBS-191).
 BOUNDARY += ('key_expiry',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
@@ -286,6 +288,9 @@ BOUNDARY += ('node_lifecycle_import',)
 # OBS-79 step L2r: which helper the macOS adapter runs, the signed app's or the source build, and why, against fake
 # signatures and a fake app; nothing compiled, no installed app looked at.
 BOUNDARY += ('node_lifecycle_helper',)
+# OBS-287: the interim relay (fabric-relay/0.1, the relay project's RLY-04) over the contract's `admit` vectors, and
+# the node's own client against it on loopback: admission, mailboxes and their refusals, expiry, revocation.
+BOUNDARY += ('relay_server',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.

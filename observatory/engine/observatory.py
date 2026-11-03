@@ -209,6 +209,7 @@ STEPS = {
     "test-openrouter": [PY, "tests/test_openrouter_keys.py"],
     "test-digitalocean": [PY, "tests/test_digitalocean_door.py"],
     "test-heroku-door": [PY, "tests/test_heroku_door.py"],
+    "test-sentry-door": [PY, "tests/test_sentry_door.py"],
     "test-credentials": [PY, "tests/test_credentials.py"],
     "test-remote-env": [PY, "tests/test_remote_env.py"],
     "test-google": [PY, "tests/test_google.py"],
@@ -372,7 +373,7 @@ GROUPS = {
     # somebody else can fix.
     "check": ["validate", "fabric", "ledger-current", "dashboard", "design", "smoke", "smoke-pages", "test-pages",
               "test", "test-ledger", "test-skill", "test-agent", "test-key", "test-install-key", "test-vault", "test-analytics", "test-doors", "test-surfaces", "test-mcp-inventory", "test-ack", "test-serverd", "test-skill-check", "test-index",
-              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-heroku-door", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
+              "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-heroku-door", "test-sentry-door", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
               "probes-check", "contract"],
     "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-digitalocean", "scan-cloudflare-account", "scan-mcp", "scan-agents", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
               "scan-events", "plugins", "rollup", "corroborate", "export-ledger", "lost",
@@ -470,7 +471,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "agent-binding",
-                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share", "cloud")
+                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share", "cloud", "relay")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -561,6 +562,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   cloud deploy|status|url      your share mailbox (observatory-cloud/1) in your own Cloudflare account: a
                                Worker deployed through the Cloudflare door's narrow token; it carries ciphertext
                                and names only, and `share create` uses its address
+  relay serve|enable|disable|status   your own relay (fabric-relay/0.1) for your estate's machines, on
+                               your always-on machine: it admits the machines of the estate record this node
+                               applied, queues their messages sealed at rest; enable runs it inside the node's
+                               server, serve in the foreground
   org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
                                enrollments (fabric-device/0.1): enroll with a token from a vault slot,
                                signed check-ins, rotation, the activity outbox, share registrations
@@ -874,6 +879,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import cloud_cli
         return argparse_refusal(lambda: cloud_cli.parser().parse_args(rest))
+    if name == "relay":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import relay_cli
+        return argparse_refusal(lambda: relay_cli.parser().parse_args(rest))
     if name == "memory-http":
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service
@@ -1316,6 +1325,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import cloud_cli
         return cloud_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "relay":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import relay_cli
+        return relay_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])

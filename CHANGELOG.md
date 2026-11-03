@@ -7,6 +7,41 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Your own relay for your machines** (OBS-287, the relay project's interim RLY-04, `docs/ONBOARDING.md` "Your own
+  relay for your machines: full relay"). `full relay serve` runs a `fabric-relay/0.1` relay in the foreground, and
+  `full relay enable --origin URL` runs it inside the node's own server from its next start, with no service of its
+  own (`full relay status`, `full relay disable`). It admits the machines of the estate record this machine's node
+  applied, minus every machine and key the record or an applied delta entry revokes, by the contract's `admit` (one
+  answer and one signature's work for every unproven caller), and closes a session the moment its machine is revoked
+  or the record expires (4403). It keeps one mailbox per machine: messages in order, deleted on acknowledgement or
+  when their ttl ends, a repeat answered with its first number, and the refusals `unknown-recipient`, `mailbox-full`,
+  `rate-limited` and `too-large`; queued messages are sealed at rest under the relay's own key. It answers presence
+  and `delta-query`. The request head and `auth` each have a 10-second wall-clock deadline, callers not admitted yet
+  have their own connection budget apart from admitted machines, the rate limits count a machine across all its
+  connections, each connection writes from its own thread so a machine that stops reading slows only itself, delivery
+  reads a mailbox a page at a time, a caller refused for want of a slot reads its whole 503 before a clean close
+  (a reset would make a Windows caller drop it), and a failed accept is retried and shown in the server's health. The per-address
+  cap counts every caller address, this machine's own included; behind a TLS terminator, `--trusted-proxy` counts the
+  address it forwards in `X-Forwarded-For` (a port stripped), IPv6 addresses count by their /64, and admission is
+  max-min fair across addresses, so a caller from a fresh address gets in while any address holds two or more. Blobs, a hub's
+  delta and heartbeat frames and the Cloudflare deployment are not carried yet.
+  Tests: `tests/test_relay_server.py` runs the contract's `admit` vectors and the node's own client against the relay
+  on loopback.
+- **A Sentry door: a narrow token for one purpose, and the broad one retired** (OBS-292, `tools/sentry.py`). A build
+  that holds a broad Sentry token in a vault slot can get a token scoped to `org:ci`, which Sentry lets list, create
+  and update releases, upload source maps, artifact bundles and debug files, read the organization's integrations
+  and read and write bulk code mappings, and nothing that deletes, reads events or members, or changes a setting:
+  `sentry.py issue --preset releases --from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME` mints a Sentry organization
+  token with the one scope `org:ci`, proves it with its own value (that scope exactly, the releases read on the
+  organization's region host, members and issues refused) and writes it to the slot; nothing is printed and no value
+  reaches an argument, a URL or a redirect. Sentry lets only an OAuth application's token holding `org:tokens` (with
+  one of `org:read`, `org:write`, `org:admin`) mint one by API,
+  so with a personal token the door refuses before any call and names the page where a person makes it in one click;
+  `install --preset releases|read` then verifies and records what the person made (`read` is an internal
+  integration token with exactly `org:read`, `project:read`, `event:read`). `revoke --from` retires the broad token
+  only after a narrow one verifies again, sends it only to its own Sentry, and counts it revoked only when that
+  Sentry refuses it after once accepting it; `list` and `status` say what exists and whether it works. Self-hosted
+  Sentry (`--base-url`, `--region-host`) and the documented `us` and `de` region hosts are handled, by exact name.
 - **A partial move restores exactly what you name** (OBS-282; `docs/ONBOARDING.md` "Moving only part of it").
   `full machine-restore` takes `--only` or `--skip` by category (`ssh-private`, `ssh-config`, `launchd`, `cli-logins`,
   `claude`, `codex`, `git`, `shell`, `fabric-services`, `packages`, `agents`, `operator`; repeatable or

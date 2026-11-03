@@ -432,6 +432,48 @@ tick) records each account's Workers, Pages projects with their source repositor
 databases and zones with their plan and price, DNS record count and certificate expiry in
 `store/raw/cloudflare_account.json`; `emit` turns it into `registry/cloudflare-account.json`.
 
+**A Sentry token for one purpose, and the broad one retired** (OBS-292). A site's build needs only to create
+releases and upload source maps, and error triage only to read projects, issues and events; a broad Sentry token
+(org:admin, member:admin, and so on) in a vault slot can do far more. `tools/sentry.py issue --preset releases
+--from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME [--org SLUG] [--project SLUG]` reads the minting credential from
+its slot (vault only), mints a Sentry organization token with the one scope `org:ci` (Sentry lets it list, create and
+update releases, upload source maps, artifact bundles and debug files, read the organization's integrations and read
+and write bulk code mappings; it cannot delete a release or a debug file, read events or members, or change a
+setting), proves it with its own value
+(exactly that scope, the releases read on the organization's region host, members and issues refused), writes it
+to the `--vault` slot on stdin and records it in `secrets/sentry-issued.json` (kind, scope, organization, project,
+token id, never the value). Sentry mints an organization token by API only for an OAuth application's token holding
+`org:tokens` and one of `org:read`, `org:write`, `org:admin`; a personal token (`sntryu_`) can mint nothing and cannot revoke itself, so
+with one in `--from` the door refuses before any call and names the Organization Tokens page where a person makes
+the token in one click (Sentry offers only `org:ci` there). `--preset read` (an internal integration token with
+exactly `org:read`, `project:read`, `event:read`) is always made by a person, because Sentry creates an
+integration's token only from a browser session. Either way the person puts the token in the slot (through
+`observatory_secret_request` or `vault.py put` from a protected file), and `sentry.py install --preset
+releases|read --vault PROJECT/ENV/NAME` verifies and records it. `sentry.py revoke --from PROJECT/ENV/NAME [--org
+SLUG] [--base-url URL]` first verifies every narrow token of that organization again. The slot must hold a Sentry
+token (a known prefix), and it is sent only to its own Sentry: `--base-url`, or the base recorded the last time that
+slot answered there. While Sentry accepts it, the door records that proof, names the page where a person deletes it
+and exits 3. It counts as revoked, and its slot is removed, only when Sentry refuses it (HTTP 401) after such a proof:
+a 401 from a Sentry that never accepted the value proves nothing, and the slot is kept. The proof belongs to the
+value, not the slot: it is recorded as the token's kind and a keyed digest (HMAC-SHA256 under a random key kept
+owner-only beside the ledger, never a plain hash), so a slot whose value was replaced since is not sent to the
+recorded Sentry, and a 401 to it needs a new proof. A base named with `--base-url` for the first time is said so,
+and so is a `--base-url` that replaces a recorded Sentry whose proof no longer holds for the value; a value still
+proved on one Sentry is never sent to another. `sentry.py status` follows the same rule: it asks about a broad token
+only when the slot still holds the proved value, and otherwise reports it as unproven or changed without sending it.
+Narrow tokens follow the same rule: `issue` and `install` record each one's keyed digest, `status` and both kinds of
+`revoke` send a narrow slot's value only while it is still that value, and `revoke PROJECT/ENV/NAME` sends the
+minting credential only while its slot holds the value proved on that Sentry (otherwise it names the `revoke --from
+... --base-url` step that proves it again). `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
+person made, waits for that person), proves it dead and removes the slot; `list` and `status` say what exists and
+whether it still works. Without `--base-url`, `issue` and `install` use `https://sentry.io` and say so on
+stderr; `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
+`de.sentry.io`) is read from the organization, or given with `--region us|de` or `--region-host`. A region read from a
+token or an answer must be the base itself or one of its documented region hosts, by exact name; any other host is
+used only when you name it with `--region-host`. Redirects are never followed, so a token never travels to a host
+nobody named. Sentry organization tokens have no expiry: that is recorded as the reason, not as a missing
+record.
+
 **Every minted credential expires, and the expiry is recorded** (OBS-191). `cloudflare.py issue`,
 `openrouter.py issue` and `heroku.py issue` mint with an expiry 90 days out unless told otherwise:
 `--token-expire-days N` for Cloudflare (its `--expire-days` stays the R2 bucket's object lifecycle),
@@ -1415,6 +1457,92 @@ project-observatory full cloud url                  # the address `full share cr
 - **Opening a link in a browser.** The link's page tells the recipient to run
   `project-observatory full share accept` and paste the link. It runs no script, so it reads
   nothing of the link's code.
+
+### Your own relay for your machines: full relay
+
+Your machines reach one another through a relay (`fabric-relay/0.1`, contract DEC-0047 and
+DEC-0066). Until the hosted relay runs, run your own on the machine that is always on (OBS-287, the
+relay project's interim RLY-04). It is a router with mailboxes and holds no authority: every message
+is signed by its sender's device key and checked by its recipient, and what must stay secret is
+sealed to the recipient before it is sent.
+
+```sh
+project-observatory full relay serve                            # in the foreground, on http://127.0.0.1:47317
+project-observatory full relay enable --origin https://NAME     # inside the node's own server, from its next start
+project-observatory full relay status                           # enabled, answering, and how many machines it admits
+project-observatory full relay disable
+```
+
+- **Whom it admits.** The machines of the estate record this machine's node verified and applied
+  (`full org records apply`, kept under `node/records/`), minus every machine and key that record
+  or an applied delta entry revokes. A machine proves its device key in its `auth`; any other caller
+  gets one answer, `unauthenticated`, and the connection closes (4401). With no record applied, an
+  expired record or a record file changed on disk, the relay admits nobody, and `status` and the
+  server's health say why. Every open session is checked again before each frame and every two
+  seconds: a machine revoked since it connected is closed (4403), and so is every machine once the
+  record's window ends.
+- **The origin.** The address every machine signs into its `auth`. On this machine alone it is
+  `http://127.0.0.1:PORT` (the default port is 47317). For your other machines put a TLS terminator
+  in front (your private network's HTTPS, a tunnel or a reverse proxy) and pass its `https://`
+  origin; the relay itself serves plain HTTP on the address you bind with `--host`, by default
+  127.0.0.1. An `http://` origin is refused for anything but a loopback address and its own port.
+  Have the terminator forward each caller's address in `X-Forwarded-For` and pass
+  `--trusted-proxy`: the relay then counts a connection from this machine against the address the
+  terminator appended (the rightmost one; a port is stripped). This is a requirement on the
+  terminator: it MUST set the header itself to the real client address, overwriting it or
+  appending to it, and never pass a header the client sent through as the last entry. In nginx:
+  `proxy_set_header X-Forwarded-For $remote_addr;` (with `proxy_http_version 1.1;`,
+  `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` for the
+  WebSocket). In Caddy: `reverse_proxy 127.0.0.1:47317 { header_up X-Forwarded-For {remote_host} }`.
+  Four residuals stay. Without `--trusted-proxy` the header is ignored and every caller behind the
+  terminator is one address, so one caller flooding through it can keep everyone behind it out
+  until the flood stops. With `--trusted-proxy`, every program on this machine that can reach the
+  relay's port can claim any address it likes, so keep the relay bound to 127.0.0.1 and reachable
+  from other machines only through the terminator. A flood from 32 or more address groups (one
+  IPv6 /48 holds 65536 of them) fills every pending slot with one connection each, and while it
+  lasts a newcomer is refused: the relay's pending budget is a capacity, not a filter. And machines
+  that share one group (one home IPv6 /64, one NAT address) can each be cut while they wait for
+  `auth` when an attacker from a smaller group arrives; their node connects again (OBS-293).
+- **Inside the node's server.** `enable` writes `config/relay.json`; the node's local server starts
+  the relay beside itself when it starts (a login, `full update`, or
+  `python "$(project-observatory full-path)/tools/serverd.py" --install` to restart it now), with no
+  service of its own. A relay that cannot start, or that admits nobody, is a `relay` row in the
+  server's `degraded`, and the server keeps running.
+- **Messages.** A message waits in its recipient's mailbox until the recipient acknowledges it or the
+  ttl its sender set ends (the node signs the message's `exp` at the same time). Each mailbox holds
+  at most 1000 messages and 64 MiB; a machine sends at most 120 messages, 30 presence queries and 12
+  delta queries a minute, counted over all its connections. Over a limit the relay answers
+  `mailbox-full` or `rate-limited` (with the seconds to wait), and closes a connection that keeps
+  sending (1008). A message to a machine the
+  record does not admit is `unknown-recipient`. A repeat of a message within its ttl is answered
+  with its first number and is not delivered twice. The relay remembers at most 20000 messages per
+  sender for that; it forgets first those already acknowledged or expired, and while all 20000 are
+  still queued it refuses that machine's new messages (`rate-limited`, retry in 60 seconds) rather
+  than forget one.
+- **Connections.** A caller has 10 seconds from connecting to send its request and 10 seconds from
+  the upgrade to send its `auth`, however it spreads the bytes; then it is closed (4401 for a missed
+  `auth`). Callers not admitted yet share their own budget (32 at once, at most 8 from one address,
+  this machine's own included; an IPv6 address counts with its whole /64). When it is full, a
+  caller from an address holding at least two fewer connections than the fullest address takes a
+  place of that address; otherwise a caller that has sent its request keeps its place for 2
+  seconds to answer, and a connection that has sent nothing gives way first. So a caller from a
+  fresh address gets in while any address holds two or more; several callers sharing one address
+  (every caller behind a terminator without `--trusted-proxy`) compete among themselves only. That budget is kept apart from the admitted machines' (128 connections,
+  at most 4 per machine, a fifth replacing its oldest), and both stay below the process's limit of
+  open files. A machine that stops reading its messages slows only its
+  own connection, which is closed when its queue fills. If the relay cannot accept connections for
+  more than a second (out of open files, say), it keeps retrying and the server's health says so.
+- **What it keeps.** Queued messages, in `node/relay/spool.sqlite`, each sealed with AES-256-GCM
+  under the relay's own key `node/relay/spool.key`; the folder and both files are readable by your
+  account only. A copied spool (a backup or a snapshot) carries no message in clear. The key sits
+  beside it, so the seal does not hide a message from a program running as you: the protection
+  that counts is the sender's own sealing. `serve --memory` keeps nothing on disk, and queued
+  messages end with the process. Logs are one JSON line per event with kids, codes and counts, never
+  a body, a nonce, a signature or the estate's id.
+- **Not carried yet.** Blobs (`/v1/blobs/` answers 501), a hub's `delta` and `heartbeat` frames
+  (answered `unknown-type`; `welcome` names the delta head this node applied and no heartbeat), and
+  a deployment into your own Cloudflare account beside the share mailbox. A machine catches up on
+  the delta with `delta-query`, answered from the entries this node applied.
 
 ### Which apps an agent may wake, stop and restart: node.lifecycle
 
