@@ -801,6 +801,23 @@ def pub_line(seed: bytes, comment: str = 'example') -> tuple[str, str]:
     return f'ssh-ed25519 {base64.b64encode(blob).decode()} {comment}\n', fp
 
 
+def openssh_private(seed: bytes) -> tuple[bytes, str]:
+    """A synthetic OpenSSH private key file whose clear header carries an ed25519 public key, and that
+    key's fingerprint. The private section is a marker, never key material."""
+    import base64
+    import hashlib
+
+    def string(b: bytes) -> bytes:
+        return len(b).to_bytes(4, 'big') + b
+    blob = string(b'ssh-ed25519') + string(hashlib.sha256(seed).digest())
+    body = (b'openssh-key-v1\0' + string(b'none') + string(b'none') + string(b'') + (1).to_bytes(4, 'big')
+            + string(blob) + string(SECRET_MARKER * 4))
+    encoded = base64.b64encode(body)
+    lines = b'\n'.join(encoded[i:i + 70] for i in range(0, len(encoded), 70))
+    fp = 'SHA256:' + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip('=')
+    return PRIVATE_HEAD + lines + b'\n-----END OPENSSH ' + b'PRIVATE KEY-----\n', fp
+
+
 def job_rel():
     """Where this platform keeps a user job's definition (what the bundle's job entry walks)."""
     # The file name differs from the plist's Label on purpose: the plan and the placement file both name the Label.
@@ -824,7 +841,7 @@ def job_bytes():
 class SecondMachineKeys(unittest.TestCase):
     """Which withheld `.ssh` files get the steps that make a key, read off `_Second` directly."""
 
-    def keys(self, files: dict[str, bytes]) -> dict[str, dict]:
+    def keys(self, files: dict[str, bytes], config_written: bool = True) -> dict[str, dict]:
         root = Path(tmp.mkdtemp())
         self.addCleanup(shutil.rmtree, root, True)
         home, stage, items = root / 'home', root / 'stage', []
@@ -834,12 +851,15 @@ class SecondMachineKeys(unittest.TestCase):
             (stage / f'files/{i}').write_bytes(data)
             items.append({'kind': 'file', 'source': source, 'arcname': f'files/{i}', 'sha256': 'x'})
         manifest = {'items': items}
-        return {k['file']: k for k in MB._Second(manifest, home, stage).ssh_keys(manifest)}
+        return {k['file']: k for k in MB._Second(manifest, home, stage).ssh_keys(manifest,
+                                                                                config_written=config_written)}
 
     def test_a_default_key_in_an_upper_case_folder_keeps_its_steps(self):
         key = self.keys({'~/.SSH/id_ed25519': PRIVATE_HEAD + SECRET_MARKER})['~/.SSH/id_ed25519']
-        self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys create id_ed25519')
-        self.assertNotIn('note', key)
+        self.assertEqual(key['steps'], ['project-observatory full ssh-keys rekey id_ed25519',
+                                        'project-observatory full ssh-keys rekey id_ed25519 --apply'])
+        # ssh offers a default key to every host with no IdentityFile line: rekey names those, never guesses.
+        self.assertIn('--server ALIAS', key['note'])
 
     def test_a_key_in_a_subfolder_is_named_by_its_file_and_made_by_hand(self):
         keys = self.keys({'~/.ssh/keys/work': PRIVATE_HEAD + SECRET_MARKER})
@@ -854,9 +874,78 @@ class SecondMachineKeys(unittest.TestCase):
     def test_a_name_with_a_space_is_quoted_for_the_shell(self):
         keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile = "~/.ssh/work key"\n',
                           '~/.ssh/work key': b'opaque'})
-        self.assertEqual(keys['~/.ssh/work key']['steps'],
-                         ["project-observatory full ssh-keys create 'work key'",
-                          "project-observatory full ssh-keys send 'work key' --to server:w --verify"])
+        self.assertEqual(keys['~/.ssh/work key']['steps'], ["project-observatory full ssh-keys rekey 'work key'",
+                                                            "project-observatory full ssh-keys rekey 'work key' --apply"])
+
+    def test_one_rekey_step_takes_the_place_of_create_and_send(self):
+        # OBS-300: `rekey` makes the key and sends it where the other machine's key is registered.
+        keys = self.keys({'~/.ssh/config': b'Host w\n  IdentityFile ~/.ssh/work\nHost gh\n  HostName github.com\n'
+                                           b'  IdentityFile ~/.ssh/work\n',
+                          '~/.ssh/work': PRIVATE_HEAD + SECRET_MARKER})
+        key = keys['~/.ssh/work']
+        self.assertEqual(key['steps'], ['project-observatory full ssh-keys rekey work',
+                                        'project-observatory full ssh-keys rekey work --apply'],
+                         'the plan, then the acting form: rekey without --apply changes nothing')
+        self.assertEqual([h['host'] for h in key['hosts']], ['w', 'gh'], 'the hosts stay named for the person')
+        self.assertFalse(any(' create ' in s or ' send ' in s for s in key['steps']))
+
+    def test_the_rekey_step_carries_the_other_keys_fingerprint_from_its_public_half(self):
+        # A second machine never gets OLD.pub, so rekey alone could not match the key on GitHub.
+        line, fp = pub_line(b'alpha-work')
+        keys = self.keys({'~/.ssh/config': b'Host gh\n  HostName github.com\n  IdentityFile ~/.ssh/id_work\n',
+                          '~/.ssh/id_work': PRIVATE_HEAD + SECRET_MARKER, '~/.ssh/id_work.pub': line.encode()})
+        key = keys['~/.ssh/id_work']
+        step = f'project-observatory full ssh-keys rekey id_work --fingerprint {fp}'
+        self.assertEqual(key['steps'], [step, step + ' --apply'])
+        self.assertEqual(key['fingerprint'], fp)
+        self.assertNotIn('note', key)
+
+    def test_without_its_fingerprint_the_plan_says_how_github_learns_it(self):
+        key = self.keys({'~/.ssh/config': b'Host gh\n  HostName github.com\n  IdentityFile ~/.ssh/id_work\n',
+                         '~/.ssh/id_work': PRIVATE_HEAD + SECRET_MARKER})['~/.ssh/id_work']
+        self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys rekey id_work')
+        self.assertIsNone(key['fingerprint'])
+        self.assertIn('ssh-keys list', key['note'])
+        self.assertIn('--fingerprint', key['note'])
+
+    def test_a_key_no_host_names_still_gets_its_rekey_step(self):
+        # rekey with nothing to send still makes the key under its name and says nothing was found to send to.
+        keys = self.keys({'~/.ssh/odd': PRIVATE_HEAD + SECRET_MARKER})
+        self.assertEqual(keys['~/.ssh/odd']['steps'], ['project-observatory full ssh-keys rekey odd',
+                                                       'project-observatory full ssh-keys rekey odd --apply'])
+        self.assertEqual(keys['~/.ssh/odd']['hosts'], [])
+
+    def test_a_host_rekey_would_not_see_is_named_to_it_with_server(self):
+        # rekey reaches a Host only through a line naming exactly ~/.ssh/NAME (review of #409, L1).
+        config = (b'Host plain\n  IdentityFile ~/.ssh/work\nHost upper\n  IdentityFile ~/.SSH/work\n'
+                  b'Host theirs\n  IdentityFile /opt/elsewhere/.ssh/work\n')
+        key = self.keys({'~/.ssh/config': config, '~/.ssh/work': PRIVATE_HEAD + SECRET_MARKER})['~/.ssh/work']
+        self.assertEqual(key['steps'][0], 'project-observatory full ssh-keys rekey work --server upper --server theirs')
+        self.assertEqual(key['steps'][1], key['steps'][0] + ' --apply')
+        left_out = self.keys({'~/.ssh/config': config, '~/.ssh/work': PRIVATE_HEAD + SECRET_MARKER},
+                             config_written=False)['~/.ssh/work']
+        self.assertNotIn('--server', left_out['steps'][0], 'no config here: an alias would not resolve')
+        self.assertIn('Host plain, upper, theirs', left_out['note'])
+        self.assertIn('--only=ssh-config', left_out['note'])
+
+    def test_the_fingerprint_is_read_from_the_private_files_clear_header(self):
+        # No .pub staged: the OpenSSH container's clear header carries the public key (review of #409, L3).
+        private, fp = openssh_private(b'alpha-header')
+        key = self.keys({'~/.ssh/id_head': private})['~/.ssh/id_head']
+        self.assertEqual(key['fingerprint'], fp)
+        self.assertEqual(key['steps'][0], f'project-observatory full ssh-keys rekey id_head --fingerprint {fp}')
+
+    def test_the_emitted_step_parses_as_rekey_with_its_name_and_fingerprint(self):
+        line, fp = pub_line(b'alpha-parse')
+        key = self.keys({'~/.ssh/config': b'Host up\n  IdentityFile ~/.SSH/id_parse\n',
+                         '~/.ssh/id_parse': PRIVATE_HEAD + SECRET_MARKER,
+                         '~/.ssh/id_parse.pub': line.encode()})['~/.ssh/id_parse']
+        import shlex
+        words = shlex.split(key['steps'][1])
+        self.assertEqual(words[:3], ['project-observatory', 'full', 'ssh-keys'])
+        args = MB._ssh_keys_module().parser().parse_args(words[3:])
+        self.assertEqual((args.command, args.old, args.fingerprint, args.server, args.apply),
+                         ('rekey', 'id_parse', fp, ['up'], True))
 
 
 class SecondMachine(Machine):
@@ -874,7 +963,8 @@ class SecondMachine(Machine):
         # A fragment that is a setting, not a key: written, and never offered as a key to create (review of #394).
         self.write('.ssh/config.local', 'Host extra\n  User someone\n')
         self.write('.ssh/known_hosts', 'example.invalid ssh-ed25519 AAAA\n')
-        self.write('.ssh/id_example.pub', 'ssh-ed25519 AAAA example\n')
+        example_line, self.example_fp = pub_line(b'alpha-example')
+        self.write('.ssh/id_example.pub', example_line)
         self.write('.ssh/lone.pub', 'ssh-ed25519 AAAA someone-elses\n')
         # An operator's own include into a .ssh folder and into a job folder: the rules go by path.
         self.write('dotfiles/.ssh/deploy_key', PRIVATE_HEAD + SECRET_MARKER, 0o600)
@@ -929,15 +1019,16 @@ class SecondMachine(Machine):
             keys = {k['key']: k for k in planned['ssh_keys']}
             self.assertEqual(set(keys), {'id_example', 'deploy_key'})
             self.assertEqual(keys['deploy_key']['steps'], [], 'outside ~/.ssh: `ssh-keys create` cannot put it there')
-            self.assertEqual(keys['id_example']['steps'], [
-                'project-observatory full ssh-keys create id_example',
-                'project-observatory full ssh-keys send id_example --to server:example --verify',
-                'project-observatory full ssh-keys send id_example --to github',
-                'project-observatory full ssh-keys send id_example --to server:tabbed --verify'])
+            rekey = f'project-observatory full ssh-keys rekey id_example --fingerprint {self.example_fp}'
+            self.assertEqual(keys['id_example']['steps'], [rekey, rekey + ' --apply'],
+                             'the rekey plan, then the step that makes, sends and verifies')
+            self.assertEqual([h['host'] for h in keys['id_example']['hosts']], ['example', 'gh', 'tabbed'])
             self.assertNotIn('config.local', keys, 'a withheld setting is never offered as a key to create')
             nxt = planned['next']
-            self.assertLess(nxt.index('project-observatory full ssh-keys create id_example'),
-                            next(i for i, n in enumerate(nxt) if '--clone' in n), 'the key before --clone')
+            clone = next(i for i, n in enumerate(nxt) if '--clone' in n)
+            self.assertLess(nxt.index(rekey), nxt.index(rekey + ' --apply'))
+            self.assertLess(nxt.index(rekey + ' --apply'), clone, 'the key is made before --clone needs it')
+            self.assertIn('--apply` steps above', nxt[clone])
             self.assertTrue(job['destination'].startswith('~/.local/share/project-observatory/machine-move/'), job)
             own = [r for r in planned['plan'] if 'project-observatory' in r['source'] and r['kind'] == 'file'
                    and r['source'].startswith('~/' + str(Path(job_rel()).parent))]
