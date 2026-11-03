@@ -117,6 +117,24 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
         self.assertEqual(accepted.returncode, 0, accepted.stderr + accepted.stdout)
         self.assertIn('The sender will see', accepted.stdout)
         self.assertIn('exchanging', accepted.stdout)
+        self.assertIn(ORIGIN, accepted.stdout)                           # where the link points, before the yes
+        self.assertIn('key is pinned', accepted.stdout)
+        self.assertIn('six-digit code', accepted.stdout)
+        self.assertLess(accepted.stdout.index(ORIGIN), accepted.stdout.index('The sender will see'))
+
+    def test_the_person_refuses_a_handed_over_link(self):
+        created = self.share('sam', 'create', 'alpha-web', 'prod', 'OPENROUTER_API_KEY', '--to', 'Alex laptop',
+                             '--mailbox', ORIGIN, '--show-link')
+        link = next(line for line in created.stdout.splitlines() if line.startswith(ORIGIN + '/s/'))
+        share_id = re.search(r'/s/([0-9a-f]{32})#', link).group(1)
+        from node import shares as SH
+        SH.Shares(self.homes['alex'] / 'node' / 'shares').hand_over(link, pinned=False)
+        unpinned = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='no\n')
+        self.assertIn('NOT pinned', unpinned.stdout)
+        refused = self.share('alex', 'differ', share_id[:8])
+        self.assertEqual(refused.returncode, 0, refused.stderr)
+        self.assertIn('refused', refused.stdout)
+        self.assertFalse((self.homes['alex'] / 'node' / 'shares' / 'received' / share_id / 'link').exists())
 
     def test_two_people(self):
         # Sam shares a key with Alex: the link once, never in a log.

@@ -34,7 +34,8 @@ Both:
     project-observatory full share list --json
         every share, sent and received, after one pass to the mailbox
     project-observatory full share differ ID
-        the codes differ: before sealing, nothing is sealed; after it, the sender takes the share back
+        the codes differ: before sealing, nothing is sealed; after it, the sender takes the share back; on a link an
+        agent handed over, refuse it: the link is deleted and nothing is claimed
     project-observatory full share sync ID
         one pass to the mailbox for one share, or every share without ID
 
@@ -175,6 +176,8 @@ def _print(side: str, record: dict, SH, as_json: bool) -> None:
                   f"(until {view['lapsesAt']})")
         if view["state"] == "lapsed":
             print("  an agent handed this link over and nobody accepted it within 7 days; ask the sender for a new one")
+        if view["state"] == "refused":
+            print("  you refused this link: it was deleted from this machine and nothing was claimed")
 
 
 def cmd_create(args) -> int:
@@ -336,7 +339,17 @@ def cmd_accept(args) -> int:
             print(f"share: {exc.code}: {exc}", file=sys.stderr)
             return 1
         handed = share_id
-        print(f"a link an agent handed over: share {share_id[:8]}")
+        held = s._received(share_id).record() if side == "received" else {}
+        print(f"a link an agent handed over: share {share_id[:8]}, from the mailbox {held.get('origin', 'unknown')}")
+        if held.get("pinned"):
+            print("  the sender's key is pinned: the link was in the operator's words as the sender sent it")
+        else:
+            print("  the sender's key is NOT pinned: the agent found this link somewhere other than the operator's "
+                  "words, so only the six-digit code tells you the sender is who you think")
+        print(f"  after you accept, compare the six-digit code with the sender by a call or a thread you trust "
+              f"(`{PROG} status {share_id[:8]}` shows it in your terminal); if theirs differs, run "
+              f"`{PROG} differ {share_id[:8]}`. To refuse this link without accepting, run "
+              f"`{PROG} differ {share_id[:8]}`.")
     elif args.link in (None, "-"):
         # Read, not taken from argv: a link on a command line stays in the shell's history.
         link = input("Paste the link you were sent and press Enter: ").strip()

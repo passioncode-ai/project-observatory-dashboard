@@ -1263,8 +1263,9 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   the request for the deploy key"). It carries your words to the local server's `secret.decline`
   (contract DEC-0147); the request is answered `declined`, its window closes, and the agent that
   asked reads that you declined it through an agent, not in the window. Without your words nothing
-  is declined. Your words are kept in `<state>/secret-requests/decisions.jsonl` (owner-only), never
-  in `events.jsonl` or an answer. An agent that withdraws its own request never reads it as yours.
+  is declined. An agent declining another agent's request learns only the outcome, not who asked or
+  for which slot. Your words are kept in `<state>/secret-requests/decisions.jsonl` (owner-only, two
+  days), never in `events.jsonl` or an answer. An agent that withdraws its own request never reads it as yours.
   The tool is on the local server's agent surface (`POST /mcp`, the agent's binding); the
   `observatory` MCP server an agent runs does not relay it yet (OBS-298).
 - **Refusals that file nothing.** The local server is down: "Observatory is not running", and no
@@ -1376,7 +1377,10 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
 - **Asking an agent to open a link.** Tell an agent "open this share: LINK" and it hands the link to
   your local server's `share.open` with your words (contract DEC-0147). Nothing is claimed: `full
   share status` shows the share `handed-over`, and accepting stays yours, at your terminal, with
-  `full share accept SHARE-ID` (you read what the sender will see and type yes). The sender's key is
+  `full share accept SHARE-ID`: it names the mailbox the link points to and whether the sender's key
+  is pinned, then you read what the sender will see and type yes. `full share differ SHARE-ID`
+  refuses a handed-over link instead: it is deleted and nothing is sent. At most 20 handed-over
+  links wait at once. The sender's key is
   pinned from the link only when the link is in your words unchanged; a link the agent found
   elsewhere (a page, a mail) is opened without the pin and rests on the six-digit code. A link
   nobody accepts lapses 7 days after the hand-over. The claim code is in the agent's transcript
@@ -1404,7 +1408,11 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   exports with the export button (none in this release: there is no export button yet). Each report
   restates its day and the 35 days before it (from the day the link was accepted), so a report lost
   on the way is made up by the next; your machine replaces each day's count with the latest and
-  counts each export once, however many reports restate it. Each
+  counts each export once, however many reports restate it. It reads only those days of each report
+  (never one before your machine read the claim or after the report's own day) and keeps at most
+  400 exports of a key a day, so another machine cannot rewrite your past days or grow your
+  records without bound; what it ignores is listed under `usage.outOfWindow` in `full share status
+  ID --json`. Each
   envelope lives at most 90 days; the maintenance job (`full maintain`, every 15 minutes once
   installed) makes one pass over your shares an hour: your machine seals each key again in the week
   before its copy ends and when the vault value changes (a rotation reaches the recipient at their

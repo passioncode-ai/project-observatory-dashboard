@@ -48,9 +48,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   declined (`operator-decision-required`), and a closed request is answered as it is. `share.open` hands a share link to
   this machine and claims nothing: the share reads `handed-over` until the person accepts it with
   `full share accept SHARE-ID` (Accept stays the person's, `humanStep: consent`), and lapses 7 days later; the sender's
-  key is pinned only when the link is in the operator's words unchanged. The operator's words go to the owner-only
-  `<state>/secret-requests/decisions.jsonl`, a share link's fragment replaced by the share id; answers and the journal
-  name the share id only. Both are on `POST /mcp` for an agent binding; the agent's own MCP server does not relay them
+  key is pinned only when the link is in the operator's words unchanged. At most 20 handed-over links wait at once
+  (`too-many-handed-over`), the same link handed over again is one hand-over, and `full share differ SHARE-ID` refuses
+  one (the link deleted, nothing sent); `full share accept SHARE-ID` names the link's mailbox and whether the sender's
+  key is pinned before the person types yes. An agent declining another agent's request learns only its outcome. The
+  operator's words go to the owner-only `<state>/secret-requests/decisions.jsonl`, kept two days, a share link's
+  fragment replaced by the share id; answers and the journal name the share id only. Both are on `POST /mcp` for an agent binding; the agent's own MCP server does not relay them
   yet (OBS-298). The node checks the decision with a port of the contract's `actionDecision`, held to its
   `actions.json` vectors.
 - **A `declined` names who declined** (OBS-291): the person in Observatory's window, or the operator through an agent.
@@ -62,8 +65,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   the 35 UTC days before it (from the day the link was accepted), every export beside its day's entry, so a report lost
   on the way is made up by the next; `uses.jsonl` keeps those days. The sender replaces each day's uses and last use
   with the latest report's and keeps exports and agents as sets, so a restated export counts once; 0.30 added each
-  report's exports to a running count (there is no export button yet, so no count changes). A report body with an
-  export but no entry for its day is refused `bad-body`. `docs/COMPATIBILITY.md` names the stored fields.
+  report's exports to a running count (there is no export button yet, so no count changes). The sender reads only
+  the days of a report's own window (never before the claim, never after the report's day), keeps at most 400 exports
+  of a key a day, 10,000 in all and 1,000 agent names, and lists what it ignored under `usage.outOfWindow`, so a
+  recipient cannot rewrite past days or grow the record without bound. A mailbox answer whose reports are not objects
+  is refused report by report instead of stopping the pass. A report body with an export but no entry for its day is
+  refused `bad-body`. `docs/COMPATIBILITY.md` names the stored fields.
 
 ## 0.30.1 (2026-11-02)
 

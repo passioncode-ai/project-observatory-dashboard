@@ -313,6 +313,10 @@ def stamp(at: float) -> str:
 
 
 class TheDeclineTwin(Base):
+    def setUp(self) -> None:
+        super().setUp()
+        (SP.state_dir() / "decisions.jsonl").unlink(missing_ok=True)
+
     """The secret prompt's "Decline" has an agent twin on the node's surface (DEC-0147 item 3, SP-4): it carries the
     operator's decision, records a `declined` answer, closes the window and answers `declined`; without a decision it
     declines nothing; on a closed request it answers that request's outcome."""
@@ -360,6 +364,34 @@ class TheDeclineTwin(Base):
         # The window's late "Store" is not an answer: the first answer stands (SP-5).
         self.assertEqual(SP.answer(rid, "stored")["outcome"], "declined")
 
+    def test_another_agents_request_is_declined_without_its_details(self):
+        """The decliner learns the outcome, never the asking agent's name, slot or words (the review of #407)."""
+        rid = ask("alpha", "TWIN_PRIVATE_KEY")["request"]["requestId"]
+        out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))["request"]
+        self.assertEqual((out["requestId"], out["outcome"], out["declinedBy"]), (rid, "declined", "operator"))
+        for member in ("agent", "slot", "why", "reason", "replaces", "step"):
+            self.assertNotIn(member, out)
+        self.assertNotIn("TWIN_PRIVATE_KEY", json.dumps(out))
+        own = ask("alpha", "TWIN_OWN_KEY")["request"]["requestId"]
+        mine = twin("alpha", "secret.decline", {"requestId": own}, self.decision(own))["request"]
+        self.assertIn("slot", mine)                                   # the asking agent reads its own request
+
+    def test_the_refusals_tell_the_agent_to_ask_the_operator(self):
+        for code in ("operator-decision-required", "decision-invalid"):
+            self.assertIn("operator", SP.MESSAGES[code])
+        rid = ask("alpha", "TWIN_ASK_KEY")["request"]["requestId"]
+        self.assertIn("operator", twin("beta", "secret.decline", {"requestId": rid})["message"])
+
+    def test_the_audit_record_keeps_two_days(self):
+        """decisions.jsonl is pruned past a decision's 24 h validity and a margin, so it cannot grow without bound."""
+        rid = ask("alpha", "TWIN_OLD_KEY")["request"]["requestId"]
+        twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))
+        self.now[0] += SP.DECISIONS_KEEP_SECONDS + 60
+        rid = ask("alpha", "TWIN_NEW_KEY")["request"]["requestId"]
+        twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))
+        lines = (SP.state_dir() / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([json.loads(line)["target"] for line in lines], [rid])
+
     def test_a_closed_request_is_answered_as_it_is(self):
         rid = ask("alpha", "TWIN_CLOSED_KEY")["request"]["requestId"]
         SP.answer(rid, "declined")
@@ -400,7 +432,9 @@ class FakeShareStore:
     def __init__(self) -> None:
         self.handed: list[tuple] = []
 
-    def hand_over(self, link: str, *, pinned: bool) -> dict:
+    def hand_over(self, link: str, *, pinned: bool, created: list | None = None) -> dict:
+        if created is not None:
+            created.append(not self.handed)
         self.handed.append((link, pinned))
         return {"shareId": LINK_SHARE, "state": "handed-over", "lapsesAt": "2026-11-10T00:00:00Z"}
 
@@ -454,6 +488,13 @@ class TheOpenAShareTwin(Base):
         changed = LINK.replace("A" * 22, "C" * 22)
         twin("beta", "share.open", {"link": LINK}, self.decision(f"Open this share: {changed}"))
         self.assertEqual(self.store.handed[-1], (LINK, False))
+
+    def test_a_repeated_hand_over_is_recorded_once(self):
+        words = self.decision(f"Open this share: {LINK}")
+        first = twin("beta", "share.open", {"link": LINK}, words)
+        self.assertEqual(twin("beta", "share.open", {"link": LINK}, words), first)
+        audit = (SP.state_dir() / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(audit), 1)
 
     def test_a_decision_for_another_share_or_a_bad_link(self):
         out = twin("beta", "share.open", {"link": LINK}, self.decision(f"Open {LINK}", target="0" * 32))

@@ -138,6 +138,14 @@ MESSAGES = {
     "value-multiline": "the value carries a line break; one secret per slot, nothing was written",
     "value-unchanged": "the new value equals the one the slot holds; nothing was written",
     "slot-filled-now": "the slot was filled after the request without asking to replace it; nothing was written",
+    "operator-decision-required": ("this button is the operator's: ask the operator, then call again with their words "
+                                   "in _meta.decision (by operator, via relayed-instruction, the action, the words, "
+                                   "when they said them)"),
+    "decision-invalid": ("the decision is not the operator's for this action and object, or is older than 24 hours: "
+                         "ask the operator again and send their words as they said them"),
+    "too-many-handed-over": ("twenty handed-over share links already wait for the person; ask them to accept or "
+                             "refuse those first"),
+    "own-share": "this machine sent that share; it is opened on the recipient's machine",
 }
 #: Who declined a request, as the agent that asked reads it (DEC-0147 item 3): the person's press of Decline or Cancel
 #: in the window, or the operator's decision an agent carried to `secret.decline`.
@@ -807,18 +815,30 @@ def answer(request_id: str, outcome: str) -> dict:
 
 
 # ── the agent twins of two buttons (DEC-0147 items 3 and 4; DEC-0121 AP-2) ──
+#: How long the audit record keeps a decision: its 24 h validity (AP-2) and a day's margin, then it is pruned.
+DECISIONS_KEEP_SECONDS = 2 * 86400
+
+
 def _audit(entry: dict) -> None:
     """The node's own audit record of a relayed decision (AP-2): the operator's words included, owner-only, apart from
-    the journal, and never in an answer, the events feed or a page another party reads."""
-    import osprivacy
+    the journal, and never in an answer, the events feed or a page another party reads. Each write drops the entries
+    older than DECISIONS_KEEP_SECONDS, under the queue's lock, so the file stays bounded."""
     path = state_dir() / "decisions.jsonl"
-    private_io.parent(path.parent)
-    line = json.dumps({"at": _stamp(CLOCK()), **entry}, ensure_ascii=False) + "\n"
-    fd = osprivacy.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | osprivacy.NOFOLLOW, 0o600)
-    try:
-        os.write(fd, line.encode("utf-8"))
-    finally:
-        os.close(fd)
+    now = CLOCK()
+    with _locked():
+        try:
+            kept = []
+            for line in private_io.read(path).splitlines():
+                try:
+                    at = _seconds(json.loads(line).get("at"))
+                except (ValueError, AttributeError):
+                    continue
+                if at is not None and now - at < DECISIONS_KEEP_SECONDS:
+                    kept.append(line + "\n")
+        except FileNotFoundError:
+            kept = []
+        kept.append(json.dumps({"at": _stamp(now), **entry}, ensure_ascii=False) + "\n")
+        private_io.write(path, "".join(kept))
 
 
 def _decided(action: dict, agent: str, decision: Any, target: str) -> dict:
@@ -859,7 +879,11 @@ def decline(agent: str, request_id: Any, decision: Any = _NO_DECISION) -> dict:
             PROMPTER.withdraw(prompt_view(r))                # the window closes, as `secret.cancel` closes it
         except Exception:  # noqa: BLE001 - closing a window is best effort; the request is declined anyway
             pass
-    return view(r)
+    if r["agent"] == agent:
+        return view(r)
+    # Another agent's request: the outcome only, never who asked, for which slot or why (`view` is the asker's).
+    full = view(r)
+    return {k: full[k] for k in ("requestId", "state", "outcome", "declinedBy", "message", "answeredAt") if k in full}
 
 
 def _share_store():
@@ -890,14 +914,16 @@ def share_open(agent: str, link: Any, decision: Any = _NO_DECISION) -> dict:
     pinned = isinstance(decision, dict) and isinstance(decision.get("instruction"), str) \
         and link in decision["instruction"]
     store = SHARE_STORE()
+    created: list = []
     try:
-        record = store.hand_over(link, pinned=pinned)
+        record = store.hand_over(link, pinned=pinned, created=created)
     except Exception as exc:  # noqa: BLE001 - a share store's refusal by its code; its message names no code or link
         code = getattr(exc, "code", None)
         raise Refused(code if isinstance(code, str) else "unavailable") from None
-    _audit({"action": "share.open", "target": share_id, "recordAs": record_as,
-            "decision": actions.redact_link(decision, link, share_id)})
-    journal("share-handed-over", shareId=share_id, caller=agent, pinned=bool(record.get("pinned", pinned)))
+    if created and created[0]:                                     # a repeat of the same link records nothing again
+        _audit({"action": "share.open", "target": share_id, "recordAs": record_as,
+                "decision": actions.redact_link(decision, link, share_id)})
+        journal("share-handed-over", shareId=share_id, caller=agent, pinned=bool(record.get("pinned", pinned)))
     out = {"shareId": share_id, "state": record.get("state"), "pinned": bool(record.get("pinned", pinned))}
     if record.get("state") == "handed-over":
         out.update(humanStep="consent", lapsesAt=record.get("lapsesAt"),

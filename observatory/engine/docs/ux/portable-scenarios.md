@@ -723,8 +723,10 @@ Failure paths:
   claim's proof and the six-digit code are checked inside Observatory.
 - The person asked an agent to open the link ("Open a share", contract DEC-0147 item 4): the agent
   hands it to the node with the person's words and nothing is claimed; the share reads
-  "handed-over" until the person accepts it (Accept stays theirs), and lapses 7 days later. The
-  sender's key is pinned only when the link is in the person's words unchanged.
+  "handed-over" until the person accepts it (Accept stays theirs) or refuses it ("They differ"
+  deletes the link and sends nothing), and lapses 7 days later; at most 20 wait at once. The
+  sender's key is pinned only when the link is in the person's words unchanged, and Accept says
+  whether it is.
 
 Acceptance: the claim proves possession of the code without sending it to any third party; the
 recipient's machine never writes a shared value to disk in the clear.

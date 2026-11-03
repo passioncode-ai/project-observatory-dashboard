@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -282,6 +283,85 @@ class ShareFlow(unittest.TestCase):
         self.assertEqual(sent['usage']['consumers'], [{'slot': 'OPENROUTER_API_KEY', 'agent': 'claude-code'}])
         self.assertEqual(sent['usage']['exports'], 0)
 
+    def _post_report(self, share_id, body, iat_ms=None):
+        """A report the recipient's keys sign, with any body the shape allows: what a hostile recipient can send."""
+        folder = self.recipient._received(share_id)
+        record = folder.record()
+        record['reportSequence'] += 1
+        folder.save(record)
+        report = PS.seal_peer_report(recipient_kem=record['senderKeys']['kem'], signer_sig=record['keys']['sig'],
+                                     signer=folder.key('sig'), share_id=share_id, sequence=record['reportSequence'],
+                                     iat_ms=self.clock() if iat_ms is None else iat_ms, body=body)
+        self.recipient._client(record['origin'], folder, record).post_report(report)
+
+    def test_a_report_cannot_rewrite_a_day_outside_its_window(self):
+        """The sender reads only the days a report may restate: its iat day and the 35 before it, never before the
+        claim and never after the iat day; the rest is ignored and counted (the review of #407)."""
+        share_id = self._active()
+        self.clock.advance(3 * 86400)
+        before_claim = SH._day(self.clock() - 10 * 86_400_000)
+        today, tomorrow = SH._day(self.clock()), SH._day(self.clock() + 86_400_000)
+        slot = 'OPENROUTER_API_KEY'
+        body = {'days': [{'date': d, 'slot': slot, 'uses': 99, 'lastUse': None} for d in (before_claim, today, tomorrow)],
+                'consumers': [],
+                'exports': [{'slot': slot, 'at': before_claim + 'T01:00:00Z'}, {'slot': slot, 'at': today + 'T01:00:00Z'},
+                            {'slot': slot, 'at': tomorrow + 'T01:00:00Z'}]}
+        self._post_report(share_id, body)
+        sent = self.sender.sync_sent(share_id)
+        usage = sent['usage']
+        self.assertEqual(usage['days'][today][slot]['uses'], 99)
+        self.assertNotIn(before_claim, usage['days'])
+        self.assertNotIn(tomorrow, usage['days'])
+        self.assertEqual(usage['exportTimes'], [{'slot': slot, 'at': today + 'T01:00:00Z'}])
+        self.assertEqual(SH.summary('sent', sent)['usage']['outOfWindow'], usage['outOfWindow'])
+        self.assertEqual(usage['outOfWindow'][-1], {'sequence': self.recipient._received(share_id).record()['reportSequence'],
+                                                    'days': 2, 'exports': 2, 'consumers': 0})
+
+    def test_the_export_set_and_the_labels_are_bounded(self):
+        """However many reports a recipient sends, the sender holds at most 400 exports of one slot on one day, a
+        fixed number in all and a fixed number of labels (the review of #407)."""
+        usage = {'days': {}, 'consumers': [], 'exports': 0, 'exportTimes': [], 'lastSequence': 0}
+        window = ('2026-10-01', '2026-11-05')
+        for part in range(3):
+            body = {'days': [{'date': '2026-11-01', 'slot': 'K', 'uses': 0, 'lastUse': None}], 'consumers': [],
+                    'exports': [{'slot': 'K', 'at': '2026-11-01T%02d:%02d:%02dZ' % (part, i // 60, i % 60)}
+                                for i in range(400)]}
+            ignored = SH.merge_report(usage, body, window)
+        self.assertEqual(len(usage['exportTimes']), SH.MAX_EXPORTS_PER_DAY)
+        self.assertEqual(ignored['exports'], 400)
+        with mock.patch.object(SH, 'MAX_EXPORTS_HELD', 450), mock.patch.object(SH, 'MAX_CONSUMERS_HELD', 3):
+            later = ('2026-11-03', '2026-12-08')                     # 2026-11-01 is before this window
+            body = {'days': [], 'consumers': [{'slot': 'K', 'agent': 'a%d' % i} for i in range(5)],
+                    'exports': [{'slot': 'K', 'at': '2026-11-04T00:%02d:%02dZ' % (i // 60, i % 60)} for i in range(400)]}
+            ignored = SH.merge_report(usage, body, later)
+            self.assertEqual(len(usage['exportTimes']), 450)
+            self.assertEqual(usage['exportsDropped'], 350)          # the oldest, which no report restates
+            self.assertEqual(usage['exports'], 800)                 # dropped ones still count
+            self.assertEqual(len(usage['consumers']), 3)
+            self.assertEqual(ignored['consumers'], 2)
+            again = {'days': [], 'consumers': [], 'exports': [{'slot': 'K', 'at': '2026-11-05T00:00:00Z'}]}
+            usage['exportTimes'] = [e for e in usage['exportTimes'] if e['at'] >= '2026-11-04']   # all inside
+            usage['exportTimes'] += [{'slot': 'K', 'at': '2026-11-06T00:%02d:%02dZ' % (i // 60, i % 60)}
+                                     for i in range(50)]
+            self.assertEqual(SH.merge_report(usage, again, later)['exports'], 1)   # full, nothing stale to drop
+
+    def test_reports_the_mailbox_mangles_are_refused_not_a_crash(self):
+        """A mailbox answer whose reports or headers are not objects is refused report by report (the review of
+        #407)."""
+        share_id = self._active()
+        folder, record = self.sender._sent(share_id), self.sender._sent(share_id).record()
+
+        class Client:
+            def reports(self, share, after):
+                return {'reports': ['text', {'header': 'x'}, {'header': {'sequence': 'one'}}, None]}
+        self.sender._read_reports(folder, record, Client(), self.clock())
+        self.assertEqual([r['refusal'] for r in record['usage']['refused']], ['malformed'] * 4)
+        for answer in ('text', {'reports': 'text'}, None):
+            class Odd:
+                def reports(self, share, after, answer=answer):
+                    return answer
+            self.sender._read_reports(folder, record, Odd(), self.clock())
+
     def test_a_split_report_keeps_a_day_with_its_exports(self):
         """Past 400 entries a report is split, and a day and slot's entry and its exports stay in one part, so every
         part passes the export-day rule (DEC-0147 item 1)."""
@@ -353,6 +433,45 @@ class ShareFlow(unittest.TestCase):
         with self.assertRaises(SH.ShareError) as refused:
             self.recipient.accept(link)
         self.assertEqual(refused.exception.code, 'already-opened')
+
+    def test_the_person_refuses_a_handed_over_link(self):
+        """"They differ" on a link an agent handed over refuses it: the stored link is deleted, nothing is sent to the
+        mailbox, and the share cannot be accepted afterwards (the review of #407)."""
+        share_id, link = self._create()
+        self.recipient.hand_over(link, pinned=True)
+        record = self.recipient.differ(share_id)
+        self.assertEqual(record['state'], 'refused')
+        self.assertIsNone(self.recipient._received(share_id).text('link'))
+        self.assertEqual(self.box.shares[share_id]['frames'], [])
+        self.assertEqual(self.recipient.sync_received(share_id)['state'], 'refused')
+        self.assertEqual(self.recipient.hand_over(link, pinned=True)['state'], 'refused')
+        with self.assertRaises(SH.ShareError) as refused:
+            self.recipient.accept_handed(share_id)
+        self.assertEqual(refused.exception.code, 'not-handed-over')
+        with self.assertRaises(SH.ShareError) as refused:
+            self.recipient.open_value(share_id, 'OPENROUTER_API_KEY', agent='claude-code')
+        self.assertEqual(refused.exception.code, 'not-accepted')
+
+    def test_handed_over_links_waiting_at_once_are_bounded(self):
+        """An agent cannot fill the machine with handed-over shares: past the cap the node refuses with a clear code
+        (the review of #407)."""
+        with mock.patch.object(SH, 'MAX_HANDED_OVER', 2):
+            links = [self._create()[1] for _ in range(3)]
+            self.recipient.hand_over(links[0], pinned=True)
+            self.recipient.hand_over(links[1], pinned=True)
+            self.recipient.hand_over(links[1], pinned=True)                  # a repeat is not a new one
+            with self.assertRaises(SH.ShareError) as refused:
+                self.recipient.hand_over(links[2], pinned=True)
+            self.assertEqual(refused.exception.code, 'too-many-handed-over')
+            self.assertEqual(len(self.recipient._ids('received')), 2)
+            self.assertFalse((self.recipient.root / 'received' / links[2].split('/s/')[1][:32]).exists())
+
+    def test_a_repeated_hand_over_says_it_is_one(self):
+        share_id, link = self._create()
+        made: list = []
+        self.recipient.hand_over(link, pinned=True, created=made)
+        self.recipient.hand_over(link, pinned=True, created=made)
+        self.assertEqual(made, [True, False])
 
     def test_a_bad_link_or_its_own_share_is_not_held(self):
         share_id, link = self._create()

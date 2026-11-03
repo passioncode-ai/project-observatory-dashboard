@@ -57,6 +57,10 @@ REPORT_EVERY_MS = 20 * 3600 * 1000
 LOCK_WAIT_SECONDS = 120
 LABEL = re.compile(r'[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,63}')
 
+#: Links an agent handed over that may wait for the person at once (DEC-0147 item 4): a bound agent cannot fill the
+#: machine with pending shares.
+MAX_HANDED_OVER = 20
+
 #: What the recipient's "Accept" names (PS-8): accepting is the recipient's consent to it.
 REPORT_CONSENT = ("The sender will see: the names of your agents that use these keys, how many times they are used "
                   "each day and when each day's last use was, any export made with the export button and when, and, "
@@ -433,7 +437,7 @@ class Shares:
                 self._burn(record, 'claim-mac', "the first claim's MAC did not hold: the link is spent")
                 return
             record.update(claimChecked=True, recipientKeys=claim['keys'], recipientCommit=claim['commit'],
-                          state='exchanging')
+                          state='exchanging', claimedAt=_iso(now))
             folder.save(record)
         mine = [f for f in frames if f.get('step') == 'commit']
         if not mine:
@@ -499,6 +503,14 @@ class Shares:
         folder = self._sent(share_id) if side == 'sent' else self._received(share_id)
         record = folder.record()
         now = self.clock()
+        if side == 'received' and record['state'] in ('handed-over', 'lapsed', 'refused'):
+            # A link an agent handed over and the person refuses: nothing was claimed, so nothing is sent; the link
+            # is deleted and the share can no longer be accepted on this machine.
+            folder.drop('link')
+            record.update(state='refused', updatedAt=_iso(now),
+                          warning='you refused this link: it was deleted from this machine and nothing was claimed')
+            folder.save(record)
+            return record
         # The sender's record only: a recipient's slots carry no sequence of the sender's and it seals nothing.
         sealed = side == 'sent' and (record['sealed'] or record['state'] == 'sealing'
                                      or any(e['sequence'] > 0 for e in record['slots']))
@@ -621,16 +633,24 @@ class Shares:
         usage = record['usage']
         answer = client.reports(record['shareId'], usage['lastSequence'])
         kem = folder.key('kem')
+        fetched = answer.get('reports') if isinstance(answer, dict) else None
+        claimed = relay.instant(record.get('claimedAt')) or relay.instant(record.get('createdAt'))
         # In ascending sequence (DEC-0147): a later report's day replaces an earlier one's, never the other way.
-        for report in sorted(answer.get('reports') or [], key=_sequence_of):
+        for report in sorted(fetched if isinstance(fetched, list) else [], key=_sequence_of):
             ctx = {'at': _iso(now), 'shareId': record['shareId'], 'ownKem': record['keys']['kem'],
                    'recipientSig': record['recipientKeys']['sig'], 'lastSequence': usage['lastSequence']}
             opened = PS.open_peer_report(report, ctx, kem)
             if not opened['ok']:
-                usage['refused'] = (usage.get('refused', []) + [{'sequence': report.get('header', {}).get('sequence'),
+                sequence = _sequence_of(report)
+                usage['refused'] = (usage.get('refused', []) + [{'sequence': sequence or None,
                                                                  'refusal': opened['refusal']}])[-50:]
                 continue
-            merge_report(usage, opened['body'])
+            iat = relay.instant(report['header']['iat'])           # read by the checks that opened it
+            window = (PS.peer_report_window(iat, claimed), _day(iat))
+            ignored = merge_report(usage, opened['body'], window)
+            if any(ignored.values()):
+                usage['outOfWindow'] = (usage.get('outOfWindow', []) + [{'sequence': opened['sequence'],
+                                                                         **ignored}])[-50:]
             usage['lastSequence'] = opened['sequence']
             usage['lastReportAt'] = _iso(now)
 
@@ -691,13 +711,15 @@ class Shares:
             folder.drop('link')
         return record
 
-    def hand_over(self, link_text: str, *, pinned: bool) -> dict:
+    def hand_over(self, link_text: str, *, pinned: bool, created: Optional[list] = None) -> dict:
         """An agent's "Open a share" (PS-4, DEC-0147 item 4): the node holds the link as the app holds a link pasted
         in and claims nothing; "Accept" stays the person's (`gate: human`, `humanStep: consent`, `accept_handed`).
         `pinned` is true only when the link was in the operator's decision unchanged, which the caller checked. The
         link is kept in its own owner-only file until the claim spends it, and no record names its code. The same link
         handed over again answers the same; once the share moved on, its current state. A link nobody accepts lapses
-        7 days after the hand-over (the mailbox gives no claim deadline to the recipient, CT-185)."""
+        7 days after the hand-over (the mailbox gives no claim deadline to the recipient, CT-185), and at most
+        MAX_HANDED_OVER wait at once (`too-many-handed-over`). `created`, when given, gets True for a new hand-over and
+        False for a repeat, so the caller records a decision once."""
         parsed = PS.parse_share_link(link_text)
         if not parsed['ok']:
             raise ShareError('bad-link', 'this is not a share link: https://MAILBOX/s/ID#c=CODE&k=FINGERPRINT')
@@ -707,10 +729,21 @@ class Shares:
             raise ShareError('own-share', 'this is a share this machine sent; it is opened on the recipient\'s machine')
         folder = self._received(share_id)
         now = self.clock()
+        if not folder.exists():
+            # Counted before this share's folder is made, so a refusal leaves nothing behind.
+            waiting = sum(1 for other in self._ids('received')
+                          if (self._handed(self._received(other), now) or {}).get('state') == 'handed-over')
+            if waiting >= MAX_HANDED_OVER:
+                raise ShareError('too-many-handed-over', f'{waiting} handed-over links wait for the person already; '
+                                                         f'they accept or refuse those first (`full share list`)')
         _private_dir(folder.path)
         with self._locked(folder):
             if folder.exists():
+                if created is not None:
+                    created.append(False)
                 return self._handed(folder, now) or folder.record()
+            if created is not None:
+                created.append(True)
             record = {'schema': RECEIVED_SCHEMA, 'shareId': share_id, 'origin': link['origin'],
                       'label': 'share-' + share_id[:8], 'fpr': link['fpr'], 'pinned': bool(pinned),
                       'state': 'handed-over', 'handedOverAt': _iso(now),
@@ -800,7 +833,7 @@ class Shares:
         sender's delivery count stays a count of renewals the recipient needed, and a report still goes daily."""
         folder = self._received(share_id)
         record = folder.record()
-        if record['state'] in ('burnt', 'removed', 'declined'):
+        if record['state'] in ('burnt', 'removed', 'declined', 'refused'):
             return record
         if record['state'] in ('handed-over', 'lapsed'):                 # nothing claimed until the person accepts
             return self._handed(folder, self.clock()) or record
@@ -1061,7 +1094,7 @@ class Shares:
                 raise ShareError('revoked', 'the sender took this share back; its keys were removed from this machine')
             if record['state'] == 'burnt':
                 raise ShareError('burnt', f"this share burnt ({record['burnt']['reason']}); ask the sender for a new link")
-            if record['state'] in ('handed-over', 'lapsed'):
+            if record['state'] in ('handed-over', 'lapsed', 'refused'):
                 raise ShareError('not-accepted', f"this share was handed over and is {record['state']}: the person "
                                                  f"accepts it with `full share accept {share_id[:8]}`")
             if record['state'] != 'active':
@@ -1138,21 +1171,65 @@ def report_pages(day_rows: list, exports: list, consumers: list) -> list:
     return pages
 
 
-def merge_report(usage: dict, body: dict) -> None:
+#: Exports the sender holds of one slot on one UTC day: as many as one report part can carry (PS-8).
+MAX_EXPORTS_PER_DAY = 400
+#: Exports the sender holds in all, and consumer labels: bounds on what a recipient can make the sender's record hold.
+MAX_EXPORTS_HELD = 10_000
+MAX_CONSUMERS_HELD = 1_000
+
+
+def merge_report(usage: dict, body: dict, window: Optional[tuple] = None) -> dict:
     """The sender's reading of one report body (DEC-0147 item 1): each day and slot's uses and last use replaced by the
     report's, exports kept as a set keyed by slot and instant and consumer labels as a set. A report read twice, or a
     later one over the same day, counts nothing twice, and a later report never takes away an export already held.
-    `exports` is the size of that set, which released 0.30 versions kept as a running count of each report's exports."""
+
+    `window` is `(first, last)`, the UTC days the report may restate: its `iat` day and the `PEER_REPORT_DAYS` before
+    it, not before the claim. A day or an export outside it is ignored and counted in the answer, so a recipient cannot
+    rewrite a past day or grow the record without bound. The record holds at most MAX_EXPORTS_PER_DAY exports of one
+    slot on one day and MAX_EXPORTS_HELD in all: past the second, exports older than the window (which no report
+    restates) are dropped and counted in `exportsDropped`, and new ones past the bounds are ignored. `exports` is the
+    exports held plus those dropped; 0.30 kept it as a running count of each report's exports."""
+    first, last = window or ('0000-01-01', '9999-12-31')
+    ignored = {'days': 0, 'exports': 0, 'consumers': 0}
     for day in body['days']:
+        if not first <= day['date'] <= last:
+            ignored['days'] += 1
+            continue
         usage['days'].setdefault(day['date'], {})[day['slot']] = {'uses': day['uses'], 'lastUse': day['lastUse']}
     for consumer in body['consumers']:
-        if consumer not in usage['consumers']:
-            usage['consumers'].append(consumer)
+        if consumer in usage['consumers']:
+            continue
+        if len(usage['consumers']) >= MAX_CONSUMERS_HELD:
+            ignored['consumers'] += 1
+            continue
+        usage['consumers'].append(consumer)
     held = {(e['slot'], e['at']) for e in usage.get('exportTimes') or []
             if isinstance(e, dict) and isinstance(e.get('slot'), str) and isinstance(e.get('at'), str)}
-    held.update((e['slot'], e['at']) for e in body['exports'])
+    dropped = usage.get('exportsDropped') if isinstance(usage.get('exportsDropped'), int) else 0
+    per_day: dict = {}
+    for slot, at in held:
+        per_day[(at[:10], slot)] = per_day.get((at[:10], slot), 0) + 1
+    for export in sorted(body['exports'], key=lambda e: e['at']):
+        key = (export['slot'], export['at'])
+        if key in held:
+            continue
+        group = (export['at'][:10], export['slot'])
+        if not first <= group[0] <= last or per_day.get(group, 0) >= MAX_EXPORTS_PER_DAY:
+            ignored['exports'] += 1
+            continue
+        if len(held) >= MAX_EXPORTS_HELD:
+            stale = sorted(e for e in held if e[1][:10] < first)
+            if not stale:
+                ignored['exports'] += 1
+                continue
+            held.discard(min(stale, key=lambda e: (e[1], e[0])))
+            dropped += 1
+        held.add(key)
+        per_day[group] = per_day.get(group, 0) + 1
     usage['exportTimes'] = [{'slot': s, 'at': a} for s, a in sorted(held, key=lambda e: (e[1], e[0]))]
-    usage['exports'] = len(usage['exportTimes'])
+    usage['exportsDropped'] = dropped
+    usage['exports'] = len(usage['exportTimes']) + dropped
+    return ignored
 
 
 # ---- What a person reads --------------------------------------------------------------------------------------------
@@ -1175,7 +1252,8 @@ def summary(side: str, record: dict) -> dict:
                 'codeReady': record['state'] == 'comparing' and record['code'] is not None,
                 'confirmed': record['confirmed'],
                 'usage': {'uses7d': uses7, 'reportedBy': 'their machine', 'consumers': usage['consumers'],
-                          'exportsWithTheButton': usage['exports'], 'lastReportAt': usage.get('lastReportAt')},
+                          'exportsWithTheButton': usage['exports'], 'lastReportAt': usage.get('lastReportAt'),
+                          'outOfWindow': usage.get('outOfWindow', [])},
                 'deliveries': {'count': record['deliveries'], 'lastRenewal': record['lastRenewal'],
                                'seenBy': 'your mailbox'},
                 'takingBack': None if record['revocation'] is None else {

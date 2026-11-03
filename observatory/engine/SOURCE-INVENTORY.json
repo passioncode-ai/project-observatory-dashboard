@@ -940,22 +940,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "c5d43a9b09d031a6ba49aadfeda09fb72a915c75a22b793641562406d70af429",
-      "bytes": 37467,
+      "export_sha256": "73feb58fc8a5a53ab5b40d13729b77d3b6914cbc7afaeb243c0e7628fded02f0",
+      "bytes": 38105,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c4e3a3840b0a22fa5771c6288f4c834aad259c227ebc1cc3c38cde33a7fe163a",
-      "bytes": 224805,
+      "export_sha256": "9e2d6d6385f0f4a845d84dccbd746d2e59dba060b1e07d50f214d0f9bd91421f",
+      "bytes": 225493,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "4df739538f70456b758d22e975481e4f8cd66718890e05fb24e5014102515c46",
-      "bytes": 180701,
+      "export_sha256": "4e4422405a3d18866277061609a97c670fa4bfd43360d4fbb51b1651c1d9ca56",
+      "bytes": 180826,
       "upstream_modified": true
     },
     {
@@ -3197,8 +3197,8 @@
       "path": "node/shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bcf358693d3969484d76e983458223c5f898585ac147ed36d950d62b731bf698",
-      "bytes": 70913
+      "export_sha256": "da4a99511b28d23a8411f94553f08bca6334df364b8f8e9438064f849ab29612",
+      "bytes": 75537
     },
     {
       "path": "node/webauthn.py",
@@ -3531,8 +3531,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "28317a06ebc0738ae691a9388f272723f6f2dcfbaa71400a95f215c47b65f7ef",
-      "bytes": 61143
+      "export_sha256": "1d0166b6a6e65c7b004f734f60eb859f8c7786e617fe19c5cfa4992cc3486a2a",
+      "bytes": 62909
     },
     {
       "path": "service_events.py",
@@ -5792,8 +5792,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a84c806758353d7c102cdea5f767dccd7f73da801f56013341ae2003a287201a",
-      "bytes": 50555
+      "export_sha256": "fdad23cea1f6d04fc5f257efbf775c6b11d771f9108ca712fd2e723e30349978",
+      "bytes": 53163
     },
     {
       "path": "tests/test_secrets.py",
@@ -5841,8 +5841,8 @@
       "path": "tests/test_share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bf715d0e3237f5a38f73c48f73b93ee9618766c14d3b164e563797c0c90f662e",
-      "bytes": 11180
+      "export_sha256": "bf81b2a3972b3cb0597f3bc1af7cf1861e998e41ea96d3c780b2e08e76b8e00c",
+      "bytes": 12469
     },
     {
       "path": "tests/test_shared_ancestry.py",
@@ -5855,8 +5855,8 @@
       "path": "tests/test_shares.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d0aae3fa7d2a7109d2173f931d79b4f72e3809ac1976060ac5c1587630062329",
-      "bytes": 44153
+      "export_sha256": "45d3119598aa4815ded0a98f45ec5e39dfce89ecce1ce510dc5f1c54bb39d115",
+      "bytes": 52090
     },
     {
       "path": "tests/test_side_effect_attribution.py",
@@ -6998,8 +6998,8 @@
       "path": "tools/share_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "abba9d4ed184bf31535059355ae2b228f6838a24345c4427c141d533a7c1d6c0",
-      "bytes": 21376
+      "export_sha256": "d9e33d311f619300157ff2cca8a3c150ea6afff0535eec5191567efdc8b892a8",
+      "bytes": 22461
     },
     {
       "path": "tools/sign_credential.py",
