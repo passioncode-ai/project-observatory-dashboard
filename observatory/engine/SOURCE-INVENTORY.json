@@ -968,8 +968,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "63465400e74977873a2d11666182724d20e6e6442b498b9b64d13e92b0a12bf0",
-      "bytes": 322747,
+      "export_sha256": "bb10c2b7d4e1456a1edf661eacdd9b95090945461a1c751bcf425d0960fcd97b",
+      "bytes": 322970,
       "upstream_modified": true
     },
     {
@@ -5342,8 +5342,8 @@
       "path": "tests/test_leak_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e76911a78b5d6f962f4219f6c28a66c5271e6d9e3909a238466e071b2dd7f32d",
-      "bytes": 117770
+      "export_sha256": "2e17730bdcde45ecbb120043ca21969341ee9b264873220008740189cc2c3991",
+      "bytes": 119859
     },
     {
       "path": "tests/test_leak_scan_incremental.py",
@@ -7431,8 +7431,8 @@
     {
       "path": "tools/scan_leaks.py",
       "source_sha256": "a6dead1ccdd505ddbdb6efabe884d1cc2acc8be744930c70cf1b1223eb39bc1e",
-      "export_sha256": "fe6bc1518117960ed2b4db7f60b8dfb7f5fb812c010f4e1cd04d8447f63a5892",
-      "bytes": 87146,
+      "export_sha256": "056f1a8b7f5fd44c147cfeca252fa013f1e6a1675fe59d6b8f927f390978840f",
+      "bytes": 87656,
       "python_comments_removed": 25,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
