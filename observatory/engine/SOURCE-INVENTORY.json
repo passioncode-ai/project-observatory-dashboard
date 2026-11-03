@@ -940,15 +940,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "113c4f70c179e2549281f86b4e6044356b08d017101e0f23a01f021ac3700db8",
-      "bytes": 39598,
+      "export_sha256": "e4544fc8ac05707ff42fb2169cc0e072c3aef466a666e5907dac42b20390657d",
+      "bytes": 39793,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "7c19f564b161e3291dfdab4f8dca17dd1f12d011f0c57455d22c4ec07f72a808",
-      "bytes": 237261,
+      "export_sha256": "e58b05a0289b15fcbbec893c27647e1e7feed5f9bbbe2975c0ecb54979364995",
+      "bytes": 237572,
       "upstream_modified": true
     },
     {
@@ -2872,8 +2872,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "26536fb9e0ae173a4f7a16e25ced93f6d8ce63764822f216a0aaa04462987dce",
-      "bytes": 150697
+      "export_sha256": "207230fd16ff380b4f48f1c25d7a76bcf312070c2856d9aa740faf2a5cfe0ebe",
+      "bytes": 150904
     },
     {
       "path": "machine_identity.py",
@@ -2886,8 +2886,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "36fd08eb46f19054ee57855d7cd51b7ab200b02a0ae7e7a9034ca483e3931033",
-      "bytes": 54306
+      "export_sha256": "72d49a5a1bdd80551de95a34495614b072c187758b646bc39088013dd0219298",
+      "bytes": 56762
     },
     {
       "path": "machine_view.py",
@@ -5043,8 +5043,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3cd1f40bf4079815349e87eee7f6d14a77c591b7124fde758473583e2e9746cc",
-      "bytes": 137378
+      "export_sha256": "d4a92c043eaddf6b94b52411bc287710adea41ca490f1afeebf3cebc798159af",
+      "bytes": 140196
     },
     {
       "path": "tests/test_machine_findings.py",

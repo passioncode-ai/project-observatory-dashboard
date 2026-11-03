@@ -1927,7 +1927,7 @@ def _other_keys(manifest: dict, stage: Path, home: Path) -> list[dict]:
         sk = _ssh_keys_module()
     except ImportError:
         return []
-    rule, seen, out = _Second(manifest, home, stage), set(), []
+    rule, seen = _Second(manifest, home, stage), {}
     for item in manifest.get("items", []):
         if item.get("kind") != "file":
             continue
@@ -1954,10 +1954,11 @@ def _other_keys(manifest: dict, stage: Path, home: Path) -> list[dict]:
             in_ssh = len(rel) == 1 and dest.parent.parent == home and dest.parent.name.casefold() == ".ssh"
         except MachineBackupError:
             in_ssh = False
-        if fp and fp not in seen:
-            seen.add(fp)
-            out.append({"key": name, "fingerprint": fp, "in_ssh": in_ssh})
-    return sorted(out, key=lambda k: (k["key"], k["fingerprint"]))
+        # One entry per key; where the same key also sits elsewhere, the copy directly in ~/.ssh names it
+        # (the one the restore gives a rekey step), whichever the manifest lists first.
+        if fp and (fp not in seen or (in_ssh and not seen[fp]["in_ssh"])):
+            seen[fp] = {"key": name, "fingerprint": fp, "in_ssh": in_ssh}
+    return sorted(seen.values(), key=lambda k: (k["key"], k["fingerprint"]))
 
 
 # --- a partial restore (OBS-282) ------------------------------------------------------------------

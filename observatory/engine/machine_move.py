@@ -585,16 +585,47 @@ def _rekey_steps(old: str, fingerprint: str | None, new: str | None = None) -> l
     return [step, step + " --apply"]
 
 
-def _new_key_name(old: str, taken: set[str]) -> str:
-    """A name for this machine's own key beside a copy of the other machine's (tools/ssh_keys.py NAME),
-    directly in ~/.ssh: `keys/id` becomes `keys-id-own`, and a name already taken (a file here, or
-    one this checklist already handed out) gets a number, so two copies never get one name."""
+def _ssh_names(folder: Path) -> set[str]:
+    """Every name in ~/.ssh, a `.pub` counted under its key's name. Raises OSError when it cannot be listed."""
+    return {p.name[:-len(".pub")] if p.name.endswith(".pub") else p.name for p in folder.iterdir()}
+
+
+def _own_pair(home: Path, name: str) -> str | None:
+    """The fingerprint of a key pair `~/.ssh/NAME` and `~/.ssh/NAME.pub` here (a private file and a
+    public line that reads), else None. Only the public half is read."""
+    folder = home / ".ssh"
+    try:
+        sk = _ssh_keys_module()
+    except ImportError:
+        return None
+    try:
+        if not (folder / name).is_file() or (folder / name).is_symlink():
+            return None
+        fp = sk.read_public(folder / f"{name}.pub")["fingerprint"]
+    except (sk.Refused, OSError, ValueError, KeyError, TypeError):   # a missing or unreadable half: no pair
+        return None
+    return fp if isinstance(fp, str) and FINGERPRINT.fullmatch(fp) else None
+
+
+def _new_key_name(old: str, taken: set[str], handed: set[str], mine=lambda name: None) -> tuple[str, str | None]:
+    """(the name for this machine's own key beside a copy of the other machine's, the fingerprint when
+    that name is already this machine's key pair). Directly in ~/.ssh (tools/ssh_keys.py NAME): `keys/id`
+    becomes `keys-id-own`. A name already holding this machine's own pair (`mine` gives its fingerprint,
+    never one of the other machine's) is that key, made by an earlier `rekey --apply`: it is reused, so a
+    re-run of the checklist hands out the same steps (rekey reuses a pair and sends only what is missing).
+    A name taken by anything else, or already handed out by this checklist, gets a number."""
     stem = old.replace("/", "-")[:56]
     new, n = f"{stem}-own", 2
-    while new in taken:
+    while True:
+        if new not in handed:
+            if new not in taken:
+                handed.add(new)
+                return new, None
+            made = mine(new)
+            if made:
+                handed.add(new)
+                return new, made
         new, n = f"{stem}-own{n}", n + 1
-    taken.add(new)
-    return new
 
 
 def _other_key_names(withheld, others: list[dict]) -> list[tuple[str, str]]:
@@ -750,12 +781,18 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
                      "same with --apply"]
         items.append(_item("ssh-key", MISSING, evidence, steps))
     elif shared:
-        steps = []
+        steps, notes, handed = [], [], set()
         folder = home / ".ssh"
         try:
-            taken = {p.name[:-len(".pub")] if p.name.endswith(".pub") else p.name for p in folder.iterdir()}
-        except OSError:
+            taken = _ssh_names(folder)
+        except OSError as exc:
             taken = set()
+            notes.append(f"~/.ssh could not be listed ({type(exc).__name__}): the new key names below were not "
+                         "checked against the files there; `project-observatory full ssh-keys list` shows them")
+
+        def mine(name):
+            fp = _own_pair(home, name)
+            return fp if fp and fp not in other_fps else None
         for k in shared:
             old = k["file"][len("~/.ssh/"):] if k["file"].startswith("~/.ssh/") else ""
             if not KEY_REF.fullmatch(old) or old.endswith(".pub"):
@@ -766,22 +803,28 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
                 continue
             # The copy here holds the old name, so this machine's own key takes a new one (rekey refuses to
             # reuse a key whose fingerprint is the other machine's).
-            new = _new_key_name(old, taken)
+            new, made = _new_key_name(old, taken, handed, mine)
+            if made:
+                notes.append(f"~/.ssh/{new} ({made}) is already this machine's own key: the rekey steps reuse it "
+                             "and send it only where it is still missing")
             steps += _rekey_steps(old, k["fingerprint"], new)
             if old in DEFAULT_IDENTITIES:
                 # ssh offers a default name to every host whose config names no key (plain git@github.com
-                # among them) and never offers ~/.ssh/NEW unless a line names it (review of #414).
-                steps.append(f"then, before removing the copy, add `IdentityFile ~/.ssh/{new}` for github.com and "
-                             f"for every host ssh offered ~/.ssh/{old} to without an IdentityFile line (or once "
-                             f"under `Host *`): ssh offers ~/.ssh/{new} only where a line names it; point each Host "
-                             f"that names ~/.ssh/{old} at ~/.ssh/{new} too, then remove the copy ~/.ssh/{old} by "
-                             "hand: rekey removes nothing")
+                # among them) and never offers ~/.ssh/NEW unless a line names it (review of #414). rekey
+                # cannot know those hosts: they got the new key only when named to it with --server.
+                steps.append(f"ssh offered ~/.ssh/{old} to every host whose config names no key, and rekey cannot "
+                             f"know those hosts: each got ~/.ssh/{new} only if it was added to both rekey steps with "
+                             f"--server ALIAS (run them again with it if not). Then, before removing the copy, add "
+                             f"`IdentityFile ~/.ssh/{new}` for github.com and for each of those hosts (or once under "
+                             f"`Host *`): ssh offers ~/.ssh/{new} only where a line names it; point each Host that "
+                             f"names ~/.ssh/{old} at ~/.ssh/{new} too, then remove the copy ~/.ssh/{old} by hand: "
+                             "rekey removes nothing")
             else:
                 steps.append(f"then point each Host that names ~/.ssh/{old} at IdentityFile ~/.ssh/{new} and "
                              f"remove the copy ~/.ssh/{old} by hand: rekey removes nothing")
         items.append(_item("ssh-key", MISSING,
                            [f"{k['file']} ({k['fingerprint']}) is the same key as {other_fps[k['fingerprint']]}"
-                            for k in shared] + key_notes, steps))
+                            for k in shared] + notes + key_notes, steps))
     elif not other_fps:
         items.append(_item("ssh-key", UNKNOWN, [f"{len(keys)} private key(s) here; nothing here says which keys the "
                                                 "other machine holds", *key_notes], [carry]))

@@ -911,6 +911,12 @@ class SecondMachineKeys(unittest.TestCase):
         got = MB._other_keys({'items': items}, stage, home)
         self.assertIn({'key': 'id_work', 'fingerprint': fp_direct, 'in_ssh': True}, got)
         self.assertIn({'key': 'deploy_key', 'fingerprint': fp_deploy, 'in_ssh': False}, got)
+        # One key in two .ssh folders, the other one listed first: the copy directly in ~/.ssh names it.
+        (stage / 'files/2').write_bytes(direct)
+        both = [{'kind': 'file', 'source': '~/dotfiles/.ssh/also', 'arcname': 'files/2', 'sha256': 'x'}, *items]
+        got = MB._other_keys({'items': both}, stage, home)
+        self.assertEqual([k for k in got if k['fingerprint'] == fp_direct],
+                         [{'key': 'id_work', 'fingerprint': fp_direct, 'in_ssh': True}])
 
     def test_a_default_key_in_an_upper_case_folder_keeps_its_steps(self):
         key = self.keys({'~/.SSH/id_ed25519': PRIVATE_HEAD + SECRET_MARKER})['~/.SSH/id_ed25519']
@@ -1820,6 +1826,9 @@ class MoveStatus(Base):
         self.assertIn('add `IdentityFile ~/.ssh/id_ed25519-own` for github.com', steps[2])
         self.assertIn('`Host *`', steps[2])
         self.assertIn('before removing the copy', steps[2])
+        # The hosts ssh offered the default key to got the new one only when named to rekey (confirming round).
+        self.assertIn('only if it was added to both rekey steps with --server ALIAS', steps[2])
+        self.assertLess(steps[2].index('--server ALIAS'), steps[2].index('`Host *`'))
         import shlex
         args = MM._ssh_keys_module().parser().parse_args(shlex.split(steps[1])[3:])
         self.assertEqual((args.old, args.name, args.fingerprint, args.apply),
@@ -1843,6 +1852,35 @@ class MoveStatus(Base):
         self.assertIn(f'project-observatory full ssh-keys rekey a/id --name a-id-own2 --fingerprint {fp_a}', steps)
         self.assertIn(f'project-observatory full ssh-keys rekey b/id --name b-id-own --fingerprint {fp_b}', steps)
         self.assertNotIn('`Host *`', ' '.join(steps), 'not a default name: its Host lines name it already')
+        # A pair under the name whose key is the other machine's is not this machine's own: numbered too.
+        (self.user / '.ssh/b-id-own').write_bytes(PRIVATE_HEAD + SECRET_MARKER)
+        (self.user / '.ssh/b-id-own.pub').write_text(line_b)
+        _, items = self.check(self.facts_of_beta())
+        self.assertIn(f'project-observatory full ssh-keys rekey b/id --name b-id-own2 --fingerprint {fp_b}',
+                      items['ssh-key']['next'])
+
+    def test_a_rerun_after_rekey_apply_hands_out_the_same_name(self):
+        # Confirming round of #414 (B1): `rekey --apply` makes ~/.ssh/NAME-own while the copy is still here
+        # (removing it is the last step), so the checklist must name that key again, never NAME-own2.
+        self.key(self.other, 'id_ed25519', self.alpha_line)
+        peer = self.facts_of_beta()
+        _, first = self.check(peer)
+        step = f'project-observatory full ssh-keys rekey id_ed25519 --name id_ed25519-own --fingerprint {self.alpha_fp}'
+        self.assertEqual(first['ssh-key']['next'][:2], [step, step + ' --apply'])
+        made_line, made_fp = pub_line(b'alpha-own')
+        self.key(self.user, 'id_ed25519-own', made_line)      # what `rekey ... --apply` left here
+        _, again = self.check(peer)
+        self.assertEqual(again['ssh-key']['next'], first['ssh-key']['next'], 'the same steps, the same name')
+        self.assertNotIn('-own2', json.dumps(again['ssh-key']))
+        self.assertIn(f'~/.ssh/id_ed25519-own ({made_fp}) is already this machine\'s own key',
+                      ' '.join(again['ssh-key']['evidence']))
+
+    def test_an_unlisted_ssh_folder_is_said_not_taken_as_empty(self):
+        self.key(self.other, 'id_ed25519', self.alpha_line)
+        with patch.object(MM, '_ssh_names', side_effect=PermissionError('denied')):
+            _, items = self.check(self.facts_of_beta())
+        self.assertEqual(items['ssh-key']['state'], 'missing')
+        self.assertIn('~/.ssh could not be listed (PermissionError)', ' '.join(items['ssh-key']['evidence']))
 
     def test_facts_are_public_owner_only_and_never_replace_a_file(self):
         out = self.base / 'alpha-facts.json'

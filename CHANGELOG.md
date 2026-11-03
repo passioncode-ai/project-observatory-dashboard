@@ -24,9 +24,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   where it gave `ssh-keys create` and a `send`; with neither, the steps name `full ssh-keys list` on the other machine.
   Only keys the receipt records as directly in `~/.ssh` get steps: `other_keys` entries now carry `in_ssh`. A copy of
   the other machine's key gets `rekey NAME --name NAME-own --fingerprint SHA256:...` (a unique name: `keys/id` becomes
-  `keys-id-own`, a taken name gets a number), then the step to point each Host at the new key and remove the copy by
-  hand; for a default name such as `id_ed25519` that step first adds `IdentityFile ~/.ssh/NAME-own` for github.com
-  and the hosts ssh offered the copy to (or under `Host *`). In `full machine-restore`, a different `~/.ssh/config`
+  `keys-id-own`, a name taken by anything but this machine's own key pair gets a number, and a re-run after `--apply`
+  names the pair it made), then the step to point each Host at the new key and remove the copy by hand; for a default
+  name such as `id_ed25519` that step says the hosts ssh offered the copy to got the new key only when passed with
+  `--server ALIAS`, then adds `IdentityFile ~/.ssh/NAME-own` for github.com and those hosts (or under `Host *`). In `full machine-restore`, a different `~/.ssh/config`
   this machine keeps (no `--overwrite`) now counts as the carried config left out: the key's `note` names the hosts
   `rekey` would not see and says to copy their Host blocks by hand, naming the files `--overwrite --only=ssh-config`
   would replace (`authorized_keys` among them), where the plan counted them as reached. A Host whose alias `rekey`

@@ -2508,11 +2508,14 @@ written before that field is not used for steps) or the other machine's facts na
 one, the steps say to read the names and fingerprints with `full ssh-keys list` on the other machine.
 A key here that is a copy of the other machine's gets `ssh-keys rekey NAME --name NAME-own
 --fingerprint SHA256:...` and the same with `--apply` (rekey does not reuse the other machine's key as
-this machine's own; `keys/id` becomes `keys-id-own`, and a name already taken gets a number), then
-the step to point each Host at `~/.ssh/NAME-own` and remove the copy by hand. For a default name such
-as `id_ed25519` that step first adds `IdentityFile ~/.ssh/NAME-own` for github.com and every host ssh
-offered the copy to without an `IdentityFile` line (or once under `Host *`): ssh offers a default name
-on its own, the new name only where a line names it.
+this machine's own; `keys/id` becomes `keys-id-own`, and a name taken by anything but this machine's
+own key pair gets a number), then the step to point each Host at `~/.ssh/NAME-own` and remove the copy
+by hand. Once `--apply` has made `~/.ssh/NAME-own`, status run again names that pair (rekey reuses it
+and sends only what is missing), so the steps do not change. For a default name such as `id_ed25519`
+the last step says that the hosts ssh offered the copy to without an `IdentityFile` line got the new
+key only if they were added to both rekey steps with `--server ALIAS`, and then to add `IdentityFile
+~/.ssh/NAME-own` for github.com and each of those hosts (or once under `Host *`): ssh offers a default
+name on its own, the new name only where a line names it.
 
 Status reaches nothing on the other machine. What it knows of it comes from that machine's facts,
 public facts only (its id, release, the fingerprints of its SSH keys, its device id, the jobs it
