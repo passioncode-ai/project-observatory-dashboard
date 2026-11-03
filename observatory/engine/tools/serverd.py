@@ -86,7 +86,11 @@ refused. The same route serves `secret.request`, `secret.get` and
 `secret.cancel` (OBS-260, `secret_prompt.py`) to a caller holding an agent
 binding the person issued (`full agent-binding issue NAME`): it files a request
 for a key in the node's queue and reads its outcome, and no value ever crosses
-it. Any other POST is 405. The events token opens the events feed and
+it. To the same caller it serves the agent twins of two buttons, each only with
+the operator's decision in `_meta.decision` (OBS-291, contract DEC-0147):
+`secret.decline` (the prompt window's Decline) and `share.open` (a recipient's
+Open a share, which holds the link and claims nothing until the person accepts).
+Any other POST is 405. The events token opens the events feed and
 nothing else, never the tools; it never travels in a URL, an argument or the
 plist.
 """

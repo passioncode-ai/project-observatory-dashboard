@@ -300,6 +300,169 @@ class Outcomes(Base):
             self.assertIn(code, SP.MESSAGES)
 
 
+def twin(agent: str, tool: str, arguments: dict, decision: dict | None = None) -> dict:
+    params = {"name": tool, "arguments": arguments}
+    if decision is not None:
+        params["_meta"] = {"decision": decision}
+    out = SP.handle(agent, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
+    return out["result"]["structuredContent"]
+
+
+def stamp(at: float) -> str:
+    return SP._stamp(at)
+
+
+class TheDeclineTwin(Base):
+    """The secret prompt's "Decline" has an agent twin on the node's surface (DEC-0147 item 3, SP-4): it carries the
+    operator's decision, records a `declined` answer, closes the window and answers `declined`; without a decision it
+    declines nothing; on a closed request it answers that request's outcome."""
+
+    def decision(self, rid: str | None = None, **extra) -> dict:
+        out = {"by": "operator", "via": "relayed-instruction", "action": "secret.decline",
+               "instruction": "Decline the request for the deploy key.", "at": stamp(self.now[0] - 30), **extra}
+        if rid is not None:
+            out["target"] = rid
+        return out
+
+    def test_without_the_operators_decision_nothing_is_declined(self):
+        rid = ask("alpha", "TWIN_KEY")["request"]["requestId"]
+        out = twin("beta", "secret.decline", {"requestId": rid})
+        self.assertEqual(out["error"], "operator-decision-required")
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+        self.assertEqual(self.prompter.withdrawn, [])
+        bad = twin("beta", "secret.decline", {"requestId": rid}, {**self.decision(rid), "by": "agent"})
+        self.assertEqual(bad["error"], "decision-invalid")
+        other = twin("beta", "secret.decline", {"requestId": rid}, self.decision("sreq_" + "0" * 24))
+        self.assertEqual(other["error"], "decision-invalid")
+        stale = twin("beta", "secret.decline", {"requestId": rid},
+                     {**self.decision(rid), "at": stamp(self.now[0] - 86400 - 1)})
+        self.assertEqual(stale["error"], "decision-invalid")
+        self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+
+    def test_the_operator_declines_through_an_agent(self):
+        rid = ask("alpha", "TWIN_DECLINE_KEY")["request"]["requestId"]
+        out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))["request"]
+        self.assertEqual((out["outcome"], out["declinedBy"]), ("declined", "operator"))
+        self.assertIn("operator", out["message"])
+        self.assertEqual(self.prompter.withdrawn[-1]["requestId"], rid)          # the window closes
+        asked = call("alpha", "secret.get", {"requestId": rid})["request"]
+        self.assertEqual((asked["outcome"], asked["declinedBy"]), ("declined", "operator"))
+        self.assertIn("operator", asked["message"])
+        # The operator's words stay in the node's own audit record, never in what an agent reads or the journal.
+        self.assertNotIn("deploy key", json.dumps(asked))
+        self.assertNotIn("deploy key", (SP.state_dir() / "events.jsonl").read_text(encoding="utf-8"))
+        audit = [json.loads(line) for line in (SP.state_dir() / "decisions.jsonl").read_text().splitlines()]
+        self.assertEqual(audit[-1]["decision"]["instruction"], "Decline the request for the deploy key.")
+        self.assertEqual((audit[-1]["action"], audit[-1]["target"], audit[-1]["recordAs"]["caller"]),
+                         ("secret.decline", rid, "agent:beta"))
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE((SP.state_dir() / "decisions.jsonl").stat().st_mode), 0o600)
+        # The window's late "Store" is not an answer: the first answer stands (SP-5).
+        self.assertEqual(SP.answer(rid, "stored")["outcome"], "declined")
+
+    def test_a_closed_request_is_answered_as_it_is(self):
+        rid = ask("alpha", "TWIN_CLOSED_KEY")["request"]["requestId"]
+        SP.answer(rid, "declined")
+        out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))["request"]
+        self.assertEqual((out["outcome"], out["declinedBy"]), ("declined", "person"))
+        self.assertIn("person", out["message"])
+        rid = ask("alpha", "TWIN_LATE_KEY")["request"]["requestId"]
+        self.now[0] += SP.MAX_DEADLINE_SECONDS + 1
+        out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid, at=stamp(self.now[0] - 5)))
+        self.assertEqual(out["request"]["outcome"], "no-answer")
+        self.assertNotIn("declinedBy", out["request"])
+        self.assertEqual(twin("beta", "secret.decline", {"requestId": "sreq_" + "f" * 24},
+                              self.decision())["error"], "unknown-request")
+
+    def test_the_agents_own_withdrawal_is_never_the_persons_decline(self):
+        rid = ask("alpha", "TWIN_WITHDRAWN_KEY")["request"]["requestId"]
+        out = call("alpha", "secret.cancel", {"requestId": rid})["request"]
+        self.assertNotEqual(out["outcome"], "declined")
+        self.assertNotIn("declinedBy", out)
+
+    def test_the_window_decline_names_the_person(self):
+        rid = ask("alpha", "TWIN_WINDOW_KEY")["request"]["requestId"]
+        out = SP.answer(rid, "declined")
+        self.assertEqual(out["declinedBy"], "person")
+        self.assertIn("person", out["message"])
+        self.assertIn("operator", SP.MESSAGES["declined"])    # the hint names both who may decline
+
+    def test_the_twins_are_listed(self):
+        out = SP.handle("beta", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = [t["name"] for t in out["result"]["tools"]]
+        self.assertIn("secret.decline", names)
+        self.assertIn("share.open", names)
+
+
+class FakeShareStore:
+    """Stands for the recipient's share store: records the hand-over, never claims."""
+
+    def __init__(self) -> None:
+        self.handed: list[tuple] = []
+
+    def hand_over(self, link: str, *, pinned: bool) -> dict:
+        self.handed.append((link, pinned))
+        return {"shareId": LINK_SHARE, "state": "handed-over", "lapsesAt": "2026-11-10T00:00:00Z"}
+
+
+LINK_SHARE = "1cbbf01dbcb842d86e9b25c6cb286dbd"
+LINK = f"https://mailbox.example/s/{LINK_SHARE}#c=" + "A" * 22 + "&k=" + "E" * 43
+
+
+class TheOpenAShareTwin(Base):
+    """An agent's "Open a share" (DEC-0147 item 4, PS-4): the link whole to the node with the operator's decision;
+    success with the share id and the person's next step (Accept, `humanStep: consent`); the pin only when the link
+    is in the operator's words unchanged; the answer, the journal and the logs name the share id only."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.store = FakeShareStore()
+        p = mock.patch.object(SP, "SHARE_STORE", lambda: self.store)
+        p.start()
+        self.addCleanup(p.stop)
+        (SP.state_dir() / "decisions.jsonl").unlink(missing_ok=True)
+
+    def decision(self, words: str, **extra) -> dict:
+        return {"by": "operator", "via": "relayed-instruction", "action": "share.open", "instruction": words,
+                "at": stamp(self.now[0] - 30), **extra}
+
+    def test_without_a_decision_nothing_is_held(self):
+        out = twin("beta", "share.open", {"link": LINK})
+        self.assertEqual(out["error"], "operator-decision-required")
+        self.assertEqual(self.store.handed, [])
+
+    def test_the_link_in_the_operators_words_is_pinned(self):
+        out = twin("beta", "share.open", {"link": LINK}, self.decision(f"Open this share: {LINK}"))
+        self.assertEqual(self.store.handed, [(LINK, True)])
+        self.assertEqual((out["shareId"], out["state"], out["humanStep"]), (LINK_SHARE, "handed-over", "consent"))
+        self.assertIn(f"full share accept {LINK_SHARE[:8]}", out["step"])
+        self.assertTrue(out["pinned"])
+        text = json.dumps(out)
+        self.assertNotIn("A" * 22, text)
+        self.assertNotIn("E" * 43, text)
+        audit = (SP.state_dir() / "decisions.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("A" * 22, audit)
+        self.assertIn(f"/s/{LINK_SHARE}#{LINK_SHARE}", audit)
+        journal = (SP.state_dir() / "events.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("A" * 22, journal)
+        self.assertIn(LINK_SHARE, journal)
+
+    def test_a_link_from_anywhere_else_carries_no_pin(self):
+        out = twin("beta", "share.open", {"link": LINK}, self.decision("Open the share link in the mail from Sam."))
+        self.assertEqual(self.store.handed, [(LINK, False)])
+        self.assertFalse(out["pinned"])
+        changed = LINK.replace("A" * 22, "C" * 22)
+        twin("beta", "share.open", {"link": LINK}, self.decision(f"Open this share: {changed}"))
+        self.assertEqual(self.store.handed[-1], (LINK, False))
+
+    def test_a_decision_for_another_share_or_a_bad_link(self):
+        out = twin("beta", "share.open", {"link": LINK}, self.decision(f"Open {LINK}", target="0" * 32))
+        self.assertEqual(out["error"], "decision-invalid")
+        out = twin("beta", "share.open", {"link": "https://mailbox.example/s/x"}, self.decision("Open it"))
+        self.assertEqual(out["error"], "invalid-argument")
+        self.assertEqual(self.store.handed, [])
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))

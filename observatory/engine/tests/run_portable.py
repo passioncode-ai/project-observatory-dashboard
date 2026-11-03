@@ -205,6 +205,9 @@ BOUNDARY += ('secret_prompt',)
 # OBS-264, OBS-276: a key shared with another person's estate (contract DEC-0142): the protocol over the contract's
 # vectors, both nodes' stores against an in-process mailbox, and `full share` between two workspaces.
 BOUNDARY += ('node_peer_share', 'shares', 'share_cli')
+# OBS-291: the relayed decision a button's agent twin carries (contract DEC-0121 AP-2, the port of `actionDecision`
+# over the contract's vectors), for the twins of the secret prompt's Decline and of Open a share (DEC-0147).
+BOUNDARY += ('node_actions',)
 # OBS-263: the share mailbox as a Cloudflare Worker (cloud/worker.mjs) against the stores, and `full cloud deploy`.
 BOUNDARY += ('cloud_worker', 'cloud_deploy')
 # ENG-018: a manifest never pins a tag its release does not have.
@@ -419,6 +422,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/summary').rglob('*.json'))    # OBS-192: node-summary/1 and the catalogue
     selected |= set((ROOT / 'fabric/node-vectors/repair').rglob('*.json'))     # OBS-193: the repair vectors and schemas
     selected |= set((ROOT / 'fabric/node-vectors/peer').rglob('*.json'))       # OBS-264: fabric-peer-share/1
+    selected |= set((ROOT / 'fabric/node-vectors/actions').rglob('*.json'))    # OBS-291: actionDecision's vectors
     selected |= set((ROOT / 'cloud').glob('*.mjs'))                            # OBS-263: the mailbox Worker
     out = []
     for source in sorted(selected):

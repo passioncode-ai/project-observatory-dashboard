@@ -1259,6 +1259,14 @@ project-observatory full agent-binding revoke claude-code    # refused from the 
   names its last change. Each filing, answer and refusal is one line in `events.jsonl` there, names
   only. `stored` is reported only when the slot shows a write after the request; otherwise the
   request reads `unconfirmed`.
+- **Declining through an agent.** You can also tell an agent to decline a waiting request ("decline
+  the request for the deploy key"). It carries your words to the local server's `secret.decline`
+  (contract DEC-0147); the request is answered `declined`, its window closes, and the agent that
+  asked reads that you declined it through an agent, not in the window. Without your words nothing
+  is declined. Your words are kept in `<state>/secret-requests/decisions.jsonl` (owner-only), never
+  in `events.jsonl` or an answer. An agent that withdraws its own request never reads it as yours.
+  The tool is on the local server's agent surface (`POST /mcp`, the agent's binding); the
+  `observatory` MCP server an agent runs does not relay it yet (OBS-298).
 - **Refusals that file nothing.** The local server is down: "Observatory is not running", and no
   window appears. No desktop session (a server, a remote shell): "no desktop to ask the person on",
   with the step for you: `python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV
@@ -1343,6 +1351,7 @@ The recipient, at their own terminal:
 
 ```sh
 project-observatory full share accept               # paste the link when asked; read what the sender will see, type yes
+project-observatory full share accept SHARE-ID      # or accept a link you told an agent to open (below)
 project-observatory full share status SHARE-ID      # in your terminal: the code to read to the sender, then the keys
 python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-ID OPENROUTER_API_KEY -- COMMAND
 ```
@@ -1364,6 +1373,17 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   warns the sender.
 - **The link.** `accept` asks for the link rather than taking it as an argument, which keeps it out
   of your shell history; it is opened once on one machine, and a second machine needs its own share.
+- **Asking an agent to open a link.** Tell an agent "open this share: LINK" and it hands the link to
+  your local server's `share.open` with your words (contract DEC-0147). Nothing is claimed: `full
+  share status` shows the share `handed-over`, and accepting stays yours, at your terminal, with
+  `full share accept SHARE-ID` (you read what the sender will see and type yes). The sender's key is
+  pinned from the link only when the link is in your words unchanged; a link the agent found
+  elsewhere (a page, a mail) is opened without the pin and rests on the six-digit code. A link
+  nobody accepts lapses 7 days after the hand-over. The claim code is in the agent's transcript
+  until the claim spends it, so accept soon and compare the code: whoever claims first otherwise
+  could. Your words are kept in the local server's owner-only audit record with the link's
+  fragment replaced by the share id. Like `secret.decline`, the tool is on the local server's agent
+  surface and the agent's own MCP server does not relay it yet (OBS-298).
 - **The person's acts, and their limit.** `confirm`, `accept` and `provider-ended` need a terminal,
   and none takes its answer as an argument. That stops an agent that runs commands the ordinary
   way. It does not stop a program running as you that drives a terminal of its own (a
@@ -1381,7 +1401,10 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   pays for a share's use is not decided yet (contract CT-187).
 - **What the sender sees.** `full share status ID`: uses per day and the agents, as reported by
   their machine (sealed to you, unreadable by the mailbox); deliveries, as seen by your mailbox; and
-  exports with the export button (none in this release: there is no export button yet). Each
+  exports with the export button (none in this release: there is no export button yet). Each report
+  restates its day and the 35 days before it (from the day the link was accepted), so a report lost
+  on the way is made up by the next; your machine replaces each day's count with the latest and
+  counts each export once, however many reports restate it. Each
   envelope lives at most 90 days; the maintenance job (`full maintain`, every 15 minutes once
   installed) makes one pass over your shares an hour: your machine seals each key again in the week
   before its copy ends and when the vault value changes (a rotation reaches the recipient at their

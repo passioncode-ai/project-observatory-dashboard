@@ -26,7 +26,20 @@ which still reads the profile lock under its old name for one release when no
 The probe receipt's `contractCommit` comes from the pin, its `localProfile` and
 `schemaRelease` from the profile lock.
 
-**What the node owes at the pin (OBS-226, contract `de8cec30`, the release `v0.1.0+2026-10-24.2`).**
+**What the node owes at the pin (OBS-291, contract `d1b905ee`, the release `v0.1.0+2026-11-02.1`).** DEC-0147 on top
+of DEC-0142 and DEC-0143 (OBS-264, OBS-260): `peer_report_body` refuses an export without the day and slot entry of
+its UTC day (`bad-body`); the recipient's report restates its `iat` day and the `PEER_REPORT_DAYS` (35) UTC days
+before it, from the claim's day when later, every export beside its entry (`peer_report_window`, the node's own: the
+contract has none); the sender reads reports in ascending sequence, replaces each day and slot's uses and last use and
+keeps exports (by slot and instant) and consumer labels as sets (`shares.merge_report`); the envelope harness reads a
+case's `open` member before `expect.ok`. The node serves two agent twins on its own surface (`POST /mcp`, an agent
+binding): `secret.decline` (SP-4) and `share.open` (PS-4), each `gate: relayed` through `node/actions.py`, the port of
+`actionDecision` held to the contract's `actions.json`; the recipient's Accept stays the person's (`humanStep:
+consent`). Not claimed at this pin: the actions declaration of DEC-0121 (OBS-237), the operator's mandate
+(DEC-0125, not read by the twins), the page that shows a pending share or request (the person's step is a command
+today), and the stdio server's relay of the two twins (OBS-298).
+
+**What the node owed at an earlier pin (OBS-226, contract `de8cec30`, the release `v0.1.0+2026-10-24.2`).**
 On top of what OBS-217 brought (below): a node summary under `machine.mode` `C`, the default, lists only the
 organization's context, under `A` the whole harness (DEC-0118, `node_summary.policy_scope`); the device certificate's
 window reads its bounds as RFC 3339 read strictly and closes on one that does not read (DEC-0115, DEC-0119), and

@@ -1,0 +1,2729 @@
+{
+  "about": "Vectors for fabric-actions/0.1 (DEC-0121), written by tools/vectors/actions.ts, never by hand. `cases`: actionDecision({action, tier, caller, decision?, target?, elicited?, approval?, actionDigest?, humanStepUrl?, now}) answers {ok: true, recordAs: \"caller\"} for gate none; {ok: false, code: \"human-step-required\", data: {humanStep, url}} for gate human; for gate relayed an accepted approval/1 at any tier is the approver's ({by: approver, via: \"approval\", caller}), a T2 caller without one gets {ok: false, code: \"approval-required\", data: {actionDigest}} (DL-17, DL-18, DL-25), and from T0 or T1 the service's own accepted elicitation, else {ok: false, code: \"operator-decision-required\"} without a decision, {ok: false, code: \"decision-invalid\"} for one invalid against decision.schema.json, for another action or another target, read strictly, more than 60 s ahead of now or more than 24 h behind it, else {ok: true, recordAs: {by: \"operator\", via, caller, source?}} (source: where the operator said the words, when the decision carries it, DEC-0126), caller being the service's own identity of who relayed it; {fault} is the service's own and is never sent. `declarations`: the instance paths of FAC-SEM-142's findings on a well-known document's extensions/actions/0.1. Under the operator's mandate (DEC-0125) a relayed action's call with no decision is answered as mandateCovers answers, given mandate, self, callerAgent, effect, spendUsd and project; fixtures/vectors/mandate.json holds those cases. `jobSteps` (DEC-0141 MJ-1): a job's input request (tool fabric.job.get) under a mandate is read with capability mandateCapability, the job's own (the tool its start call named), and action its request key, as at the start; without mandateCapability, or with an empty or blank one, one that is not a capability name, a non-string or fabric.job.get itself, it is the service's fault mandate-capability-missing; any other action reads its own tool.",
+  "cases": [
+    {
+      "name": "none from T0",
+      "input": {
+        "action": {
+          "id": "retry-job",
+          "title": "Retry",
+          "tool": "jobs.retry",
+          "gate": "none"
+        },
+        "tier": "T0"
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": "caller"
+      }
+    },
+    {
+      "name": "none from T2",
+      "input": {
+        "action": {
+          "id": "retry-job",
+          "title": "Retry",
+          "tool": "jobs.retry",
+          "gate": "none"
+        },
+        "tier": "T2"
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": "caller"
+      }
+    },
+    {
+      "name": "none from T1 with a decision: still the caller's act",
+      "input": {
+        "action": {
+          "id": "retry-job",
+          "title": "Retry",
+          "tool": "jobs.retry",
+          "gate": "none"
+        },
+        "tier": "T1",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": "caller"
+      }
+    },
+    {
+      "name": "human sign-in from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "sign-in"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "sign-in",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human consent from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "consent"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "consent",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human payment from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "payment"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "payment",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human secret from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "secret"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "secret",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human spend-above-limit from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "spend-above-limit"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "spend-above-limit",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human passkey from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "passkey"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "passkey",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human comparison from T0",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "comparison"
+        },
+        "tier": "T0",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "comparison",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human from T1 with the operator's decision: still the person's step",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "payment"
+        },
+        "tier": "T1",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        },
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "payment",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human from T2",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "consent"
+        },
+        "tier": "T2",
+        "humanStepUrl": "https://store.example/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "consent",
+          "url": "https://store.example/connect"
+        }
+      }
+    },
+    {
+      "name": "human with a path on the service's origin",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "consent"
+        },
+        "tier": "T0",
+        "humanStepUrl": "/dashboard/connect"
+      },
+      "expected": {
+        "ok": false,
+        "code": "human-step-required",
+        "data": {
+          "humanStep": "consent",
+          "url": "/dashboard/connect"
+        }
+      }
+    },
+    {
+      "name": "relayed from T2 with an accepted approval",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T2",
+        "approval": {
+          "ok": true,
+          "approver": "person:anna"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "person:anna",
+          "via": "approval",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "relayed from T0 with an accepted approval (DL-26 MAY)",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "approval": {
+          "ok": true,
+          "approver": "person:anna"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "person:anna",
+          "via": "approval",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "relayed from T2 without a decision",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T2",
+        "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "ok": false,
+        "code": "approval-required",
+        "data": {
+          "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "name": "relayed from T2 with a valid decision: the decision changes nothing",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T2",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        },
+        "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "ok": false,
+        "code": "approval-required",
+        "data": {
+          "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "name": "relayed from T2 with an approval that was not accepted",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T2",
+        "approval": {
+          "ok": false,
+          "code": "approval-invalid"
+        },
+        "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "ok": false,
+        "code": "approval-required",
+        "data": {
+          "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "name": "relayed from a caller placed nowhere is T2 (DL-25)",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T3",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        },
+        "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "ok": false,
+        "code": "approval-required",
+        "data": {
+          "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "name": "relayed with no tier is T2 (DL-25)",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        },
+        "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+      },
+      "expected": {
+        "ok": false,
+        "code": "approval-required",
+        "data": {
+          "actionDigest": "sha256:abababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    {
+      "name": "relayed from T0 without a decision",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0"
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required"
+      }
+    },
+    {
+      "name": "relayed from T1 without a decision",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T1"
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required"
+      }
+    },
+    {
+      "name": "relayed from T0 with the operator's instruction",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "relayed from T1 with the operator's instruction",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T1",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "relayed from T0 after the service's own elicitation was accepted",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "elicited": true
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "elicitation",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "an elicitation the caller claims is not the service's record",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "elicited": "true"
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required"
+      }
+    },
+    {
+      "name": "an instruction of 500 characters",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "an at with an offset",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T11:30:00+02:00"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "relayed words with where the operator said them",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "source": {
+            "project": "example-analyst",
+            "session": "example-session-7"
+          }
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code",
+          "source": {
+            "project": "example-analyst",
+            "session": "example-session-7"
+          }
+        }
+      }
+    },
+    {
+      "name": "a source naming neither the session nor the thread",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "source": {
+            "project": "example-analyst"
+          }
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision 60 s ahead of the service's clock",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:31:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a confirmation: the agent's question naming the action and the operator's answer",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "Agent: Approve the reply to the review from Anna? Operator: yes",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a decision naming the object the call acts on",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "target": "review-4711",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "target": "review-4711"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a decision without a target covers the action on any object",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "target": "review-9",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a job's input request answered on the operator's word: its key is the action's id",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "choose-variant",
+          "instruction": "take the second variant",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a job's input request whose key is not a slug",
+      "input": {
+        "action": {
+          "id": "variant_choice",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "variant_choice",
+          "instruction": "take the second variant",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a click at the host's interaction point, quoted by the host (T0)",
+      "input": {
+        "action": {
+          "id": "q1.answer",
+          "title": "Pick one",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "q1.answer",
+          "instruction": "Which variant should ship? Choice: Second",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a decision exactly 24 h old",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-23T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a decision for another action",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "publish-post",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision naming another object than the call acts on",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "target": "review-9",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "target": "review-4711"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision naming an object on a call that names none",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "target": "review-4711"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision that names no action",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "instruction": "approve it",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision without the operator's words",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an instruction of 501 characters",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an empty instruction",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision by the agent",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "agent",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a caller claiming an elicitation in its decision",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "elicitation",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision through a page",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "page",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision naming who relayed it: the service records its own caller",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z",
+          "relayedBy": "the-operator-themself"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision with no time",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve it"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision that is null",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": null
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision that is a string",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T1",
+        "decision": "the operator said yes"
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an at with a space for T",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24 09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an at with a leap second",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-12-31T23:59:60Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an at on 30 February",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-02-30T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "an at without an offset",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision 61 s ahead of the service's clock",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:31:01Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a decision 24 h and 1 s old",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-23T09:29:59Z"
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "decision-invalid"
+      }
+    },
+    {
+      "name": "a service clock it cannot read",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "yesterday",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "fault": "now-unreadable"
+      }
+    },
+    {
+      "name": "no service clock",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "tier": "T1",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "fault": "now-unreadable"
+      }
+    },
+    {
+      "name": "no authenticated caller",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "fault": "caller-missing"
+      }
+    },
+    {
+      "name": "a T2 refusal without the action's digest",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T2"
+      },
+      "expected": {
+        "fault": "digest-missing"
+      }
+    },
+    {
+      "name": "a human step without its link",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "payment"
+        },
+        "tier": "T0"
+      },
+      "expected": {
+        "fault": "url-missing"
+      }
+    },
+    {
+      "name": "a human step whose link is not https",
+      "input": {
+        "action": {
+          "id": "connect-store",
+          "title": "Do it yourself",
+          "tool": "accounts.connect",
+          "gate": "human",
+          "humanStep": "payment"
+        },
+        "tier": "T0",
+        "humanStepUrl": "http://store.example/pay"
+      },
+      "expected": {
+        "fault": "url-missing"
+      }
+    },
+    {
+      "name": "an action with an unknown gate",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "operator"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "fault": "action-invalid"
+      }
+    },
+    {
+      "name": "a human action that names no step",
+      "input": {
+        "action": {
+          "id": "retry-job",
+          "title": "Retry",
+          "tool": "jobs.retry",
+          "gate": "human"
+        },
+        "tier": "T0"
+      },
+      "expected": {
+        "fault": "action-invalid"
+      }
+    },
+    {
+      "name": "a relayed action that names a step",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed",
+          "humanStep": "consent"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "approve-reply",
+          "instruction": "approve the reply to the review from Anna",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "fault": "action-invalid"
+      }
+    },
+    {
+      "name": "no action",
+      "input": {
+        "tier": "T0"
+      },
+      "expected": {
+        "fault": "action-invalid"
+      }
+    }
+  ],
+  "jobSteps": [
+    {
+      "name": "a step of a job the mandate's capabilities cover",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "mandate",
+          "task": "answer the reviews of the week",
+          "chain": [
+            "example-developer",
+            "example-reviewer"
+          ],
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a step whose request key the mandate's actions list",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "actions": [
+              "choose-variant"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "mandate",
+          "task": "answer the reviews of the week",
+          "chain": [
+            "example-developer",
+            "example-reviewer"
+          ],
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a mandate naming fabric.job.get covers no step of another capability",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "fabric.job.get"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required",
+        "data": {
+          "detail": "outside-mandate: capability"
+        }
+      }
+    },
+    {
+      "name": "a step of a job outside the mandate's capabilities",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.delete",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required",
+        "data": {
+          "detail": "outside-mandate: capability"
+        }
+      }
+    },
+    {
+      "name": "a step whose effect is outside the mandate's ceiling",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "publish",
+        "mandateCapability": "reviews.approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required",
+        "data": {
+          "detail": "outside-mandate: effect"
+        }
+      }
+    },
+    {
+      "name": "a decision still decides a step: with a mandate too, the job's capability is not read",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        },
+        "decision": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "action": "choose-variant",
+          "instruction": "take the second variant",
+          "at": "2026-10-24T09:30:00Z"
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "relayed-instruction",
+          "caller": "agent:claude-code"
+        }
+      }
+    },
+    {
+      "name": "a step under a mandate without the job's capability: the service's own fault",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a step whose job's capability is empty",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a step whose job's capability is only whitespace",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "  ",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a step whose job's capability is not a capability name",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "Reviews Approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a step whose job's capability is not a string",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": 7,
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a step passed fabric.job.get as its job's capability: never the transport",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "fabric.job.get",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "fabric.job.get"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "fault": "mandate-capability-missing"
+      }
+    },
+    {
+      "name": "a mandate that also lists actions covers a step only when it names the step's key",
+      "input": {
+        "action": {
+          "id": "choose-variant",
+          "title": "Choose a variant",
+          "tool": "fabric.job.get",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.approve",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "actions": [
+              "approve-reply"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "code": "operator-decision-required",
+        "data": {
+          "detail": "outside-mandate: action"
+        }
+      }
+    },
+    {
+      "name": "an ordinary action ignores mandateCapability: its own tool is read",
+      "input": {
+        "action": {
+          "id": "approve-reply",
+          "title": "Approve the reply",
+          "tool": "reviews.approve",
+          "gate": "relayed"
+        },
+        "caller": "agent:claude-code",
+        "now": "2026-10-24T09:30:00Z",
+        "tier": "T0",
+        "self": "example-reviewer",
+        "callerAgent": "example-developer",
+        "effect": "reply",
+        "mandateCapability": "reviews.delete",
+        "mandate": {
+          "kind": "mandate/1",
+          "by": "operator",
+          "task": "answer the reviews of the week",
+          "instruction": "approve the replies to this week's reviews",
+          "at": "2026-10-24T08:00:00Z",
+          "expiresAt": "2026-10-25T08:00:00Z",
+          "scope": {
+            "capabilities": [
+              "reviews.approve"
+            ],
+            "effects": [
+              "reply"
+            ]
+          },
+          "chain": [
+            {
+              "agent": "example-developer",
+              "at": "2026-10-24T08:01:00Z"
+            },
+            {
+              "agent": "example-reviewer",
+              "at": "2026-10-24T08:02:00Z"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "ok": true,
+        "recordAs": {
+          "by": "operator",
+          "via": "mandate",
+          "task": "answer the reviews of the week",
+          "chain": [
+            "example-developer",
+            "example-reviewer"
+          ],
+          "caller": "agent:claude-code"
+        }
+      }
+    }
+  ],
+  "declarations": [
+    {
+      "name": "no key: nothing to check",
+      "input": {
+        "surfaces": {},
+        "extensions": {}
+      },
+      "findings": []
+    },
+    {
+      "name": "no extensions: nothing to check",
+      "input": {
+        "surfaces": {}
+      },
+      "findings": []
+    },
+    {
+      "name": "three actions, each tool served",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "retry-job",
+                "title": "Retry",
+                "tool": "jobs.retry",
+                "gate": "none"
+              },
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed"
+              },
+              {
+                "id": "connect-store",
+                "title": "Do it yourself",
+                "tool": "accounts.connect",
+                "gate": "human",
+                "humanStep": "sign-in"
+              }
+            ]
+          }
+        }
+      },
+      "findings": []
+    },
+    {
+      "name": "a human comparison of codes, a step DEC-0142 added",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed"
+              },
+              {
+                "id": "connect-store",
+                "title": "Do it yourself",
+                "tool": "accounts.connect",
+                "gate": "human",
+                "humanStep": "comparison"
+              }
+            ]
+          }
+        }
+      },
+      "findings": []
+    },
+    {
+      "name": "no capability list: tools are not compared",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http"
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed"
+              }
+            ]
+          }
+        }
+      },
+      "findings": []
+    },
+    {
+      "name": "an id declared twice",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed"
+              },
+              {
+                "id": "approve-reply",
+                "title": "Retry",
+                "tool": "jobs.retry",
+                "gate": "none"
+              }
+            ]
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1/actions/1/id"
+      ]
+    },
+    {
+      "name": "a human action without its step",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "retry-job",
+                "title": "Retry",
+                "tool": "jobs.retry",
+                "gate": "human"
+              }
+            ]
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1/actions/0/humanStep"
+      ]
+    },
+    {
+      "name": "a step on a relayed action",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed",
+                "humanStep": "consent"
+              }
+            ]
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1/actions/0/humanStep"
+      ]
+    },
+    {
+      "name": "a tool the MCP surface does not serve: a button without an agent twin",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve the reply",
+                "tool": "reviews.approve",
+                "gate": "relayed"
+              }
+            ]
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1/actions/0/tool"
+      ]
+    },
+    {
+      "name": "a value that is not the schema's: one finding at the key",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": []
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1"
+      ]
+    },
+    {
+      "name": "an action with no tool: one finding at the key",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": {
+            "actions": [
+              {
+                "id": "approve-reply",
+                "title": "Approve",
+                "gate": "relayed"
+              }
+            ]
+          }
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1"
+      ]
+    },
+    {
+      "name": "a value that is not an object",
+      "input": {
+        "surfaces": {
+          "events": {
+            "path": "/fabric/v1/events"
+          },
+          "mcp": {
+            "path": "/mcp",
+            "transport": "streamable-http",
+            "capabilities": [
+              "jobs.retry",
+              "reviews.approve",
+              "accounts.connect"
+            ]
+          }
+        },
+        "extensions": {
+          "https://fabric.passioncode.ai/agent-contract/extensions/actions/0.1": [
+            {
+              "id": "approve-reply",
+              "title": "Approve the reply",
+              "tool": "reviews.approve",
+              "gate": "relayed"
+            }
+          ]
+        }
+      },
+      "findings": [
+        "/extensions/https:~1~1fabric.passioncode.ai~1agent-contract~1extensions~1actions~10.1"
+      ]
+    }
+  ]
+}

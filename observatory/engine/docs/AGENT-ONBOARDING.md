@@ -30,7 +30,8 @@ the policy for me.
 Never ask me for a token, a key or a password in the chat. Call `observatory_secret_request`
 (project, env, slot, why; `replace: true` when the slot already holds a value I should replace). It
 returns a job: follow it with `fabric.job.get` until `output.outcome` is `stored` (then use the slot
-through `use_secret.py run --vault-only`), `declined` (do not ask again for the same reason),
+through `use_secret.py run --vault-only`), `declined` (by me in the window or by me through an agent;
+do not ask again for the same reason),
 `no-answer`, `unconfirmed` or `no-client`. A refusal comes at once: `not-running`, `no-desktop` and
 `no-client` carry the step I run in my own shell (`vault.py put`, the value on its stdin); give me
 that step, never a request for the value. `no-agent-binding` means your MCP server was started

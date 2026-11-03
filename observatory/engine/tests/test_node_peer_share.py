@@ -136,10 +136,23 @@ class Envelopes(unittest.TestCase):
         for case in v['envelopes']:
             with self.subTest(case['name']):
                 self.assertEqual(PS.check_peer_share_envelope(case['envelope'], case['context']), case['expect'])
-                if case['expect']['ok']:
-                    opened = PS.open_peer_share(case['envelope'], case['context'], private('rKem'))
+                # A case's `open` member, when it names one, is what opening answers, read before `expect.ok`: an
+                # envelope can pass every check and still not open (DEC-0147 item 6, `cannot-open`).
+                opened = PS.open_peer_share(case['envelope'], case['context'], private('rKem'))
+                if 'open' in case:
+                    self.assertEqual(opened, case['open'])
+                elif case['expect']['ok']:
                     self.assertEqual(opened, {'ok': True, 'secret': v['secret'].encode('utf-8'),
                                               'mark': case['expect']['mark']})
+                else:
+                    self.assertEqual(opened, case['expect'])
+
+    def test_the_harness_reads_open_before_expect_ok(self):
+        """The pin carries the case DEC-0147 added: its checks pass (`expect.ok: true`) and it does not open, so a
+        harness that read `expect.ok` as "opens" would fail it (CT-186)."""
+        cases = [c for c in vectors()['envelopes'] if 'open' in c]
+        self.assertTrue(cases)
+        self.assertTrue(all(c['expect']['ok'] and not c['open']['ok'] for c in cases))
 
     def test_seal_and_refusals(self):
         share_id = vectors()['envelopes'][0]['envelope']['header']['shareId']
@@ -191,6 +204,28 @@ class Reports(unittest.TestCase):
                 if case['expect']['ok']:
                     self.assertEqual(PS.check_peer_report(case['report'], case['context']),
                                      {'ok': True, 'sequence': case['expect']['sequence']})
+
+    def test_an_export_travels_with_its_day(self):
+        """DEC-0147 item 1: an export without the day and slot entry of its UTC day in the same body is `bad-body`;
+        an entry of zero uses carries an export on a day with no use."""
+        body = {'days': [{'date': '2026-10-27', 'slot': 'OPENROUTER_API_KEY', 'uses': 1,
+                          'lastUse': '2026-10-27T09:00:00Z'}],
+                'consumers': [], 'exports': [{'slot': 'OPENROUTER_API_KEY', 'at': '2026-10-27T08:00:00Z'}]}
+        self.assertTrue(PS.peer_report_body(body))
+        self.assertFalse(PS.peer_report_body({**body, 'exports': [{'slot': 'OPENROUTER_API_KEY',
+                                                                    'at': '2026-10-26T23:59:59Z'}]}))
+        self.assertFalse(PS.peer_report_body({**body, 'exports': [{'slot': 'OTHER_KEY', 'at': '2026-10-27T08:00:00Z'}]}))
+        zero = {'date': '2026-10-26', 'slot': 'OPENROUTER_API_KEY', 'uses': 0, 'lastUse': None}
+        self.assertTrue(PS.peer_report_body({**body, 'days': body['days'] + [zero],
+                                             'exports': [{'slot': 'OPENROUTER_API_KEY', 'at': '2026-10-26T23:59:59Z'}]}))
+        self.assertEqual(PS.PEER_REPORT_DAYS, 35)
+
+    def test_the_window_a_report_restates(self):
+        """The iat day and the 35 UTC days before it, from the claim's day when that is later (DEC-0147 item 1)."""
+        iat = relay.instant('2026-12-10T23:59:00Z')
+        self.assertEqual(PS.peer_report_window(iat, relay.instant('2026-01-01T00:00:00Z')), '2026-11-05')
+        self.assertEqual(PS.peer_report_window(iat, relay.instant('2026-12-01T12:00:00Z')), '2026-12-01')
+        self.assertEqual(PS.peer_report_window(iat, None), '2026-11-05')
 
     def test_seal_report(self):
         first = vectors()['reports'][0]
