@@ -247,7 +247,7 @@ mirrors it as it mirrors every registry document. A workspace upgraded from an e
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.
 
 
-## Machine placement (0.30.1, OBS-283, OBS-284)
+## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
 A machine bundle's `MANIFEST.json` and a workspace snapshot's `manifest.json` gain `machine_id`, the machine they
 were taken on (`m-` and 24 hex digits of a SHA-256 over the platform's own machine identifier; `machine_identity.py`).
@@ -257,13 +257,15 @@ key and stages its jobs, and a snapshot leaves out `node/device/`, `node/orgs/`,
 `<home>/store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
 `--same-machine` at a terminal restores either whole, as before. An update's own rollback restores its snapshot whole.
 
-Three files live outside the workspace, in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/` on every
+These files live outside the workspace, in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/` on every
 platform, so neither a machine bundle nor a workspace snapshot carries them:
 
 | Path | Since | What | Older engines, removal |
 |---|---|---|---|
 | `placement.json` | 0.30.1 | schema `observatory-placement/1`: `machine` (this machine's id), `updatedAt`, `elsewhere[]` of `label` (launchd label or systemd unit), `serviceId` (`<id>.<instance>` of the Fabric service whose descriptor names that label, or null), `placedOn` (the machine id it runs on, `unknown` for a bundle that named none), `since`, `by` (`machine-restore` or `machine-move leave`); owner-only, written atomically; read by Fabric Dashboards (FD-132) until the estate record carries placement | an older engine neither reads nor writes it; a file that is not this schema is refused by name, never replaced; deleting it forgets which jobs run elsewhere, it moves no job |
 | `machine-move/LaunchAgents/`, `machine-move/systemd-user/` | 0.30.1 | the jobs a second-machine restore or `full machine-move leave` staged, byte for byte; nothing loads this folder at login | `full machine-move cutover LABEL` moves one into the job folder and loads it; deleting a file deletes that staged copy only |
+| `machine-move/restore.json` | 0.31.0 | schema `observatory-machine-restore/1`: `machine`, `updatedAt` and one part per step that wrote (`apply`, `packages`, `clone`), each with its `at`, the bundle's name, counts and failures; `apply` adds `mode`, `taken_on`, `this_machine`, `only`, `skip`, `left_out` and `other_keys[]` of `key` and `fingerprint` (the public fingerprints of the keys a second-machine restore withheld); owner-only, written atomically; written by `full machine-restore`, read by `full machine-move status` (OBS-282, OBS-286) | an older engine neither reads nor writes it; one that is not this schema reads as `unknown` in status; deleting it makes the restore item `unknown` |
+| `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`), placed by the person; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
 ## Workspace state added in 0.25.0 to 0.27.0

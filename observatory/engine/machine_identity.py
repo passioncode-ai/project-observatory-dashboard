@@ -249,6 +249,52 @@ def remove_elsewhere(label: str, home: Path | None = None, *, machine: str | Non
         return found
 
 
+RECEIPT_SCHEMA = "observatory-machine-restore/1"
+RECEIPT_NAME = "restore.json"
+#: The parts of a restore receipt, one per step that writes; a later run of a step replaces its part.
+RECEIPT_PARTS = ("apply", "packages", "clone")
+
+
+def restore_receipt_path(home: Path | None = None) -> Path:
+    """`<data folder>/machine-move/restore.json`: what the last `full machine-restore` wrote here (OBS-286)."""
+    return data_dir(home) / "machine-move" / RECEIPT_NAME
+
+
+def read_restore_receipt(home: Path | None = None) -> dict | None:
+    """The restore receipt, or None when no restore wrote here. One that does not read refuses by its path."""
+    path = restore_receipt_path(home)
+    try:
+        doc = json.loads(osprivacy.read_regular(path, 1 << 20).decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise MachineIdentityError(f"{path} is not readable JSON ({type(exc).__name__}); move it aside") from None
+    if not isinstance(doc, dict) or doc.get("schema") != RECEIPT_SCHEMA:
+        raise MachineIdentityError(f"{path} is not an {RECEIPT_SCHEMA} document; move it aside")
+    return doc
+
+
+def record_restore(parts: dict, home: Path | None = None) -> Path:
+    """Write `parts` (`apply`, `packages`, `clone`) into the restore receipt, each stamped with the time,
+    keeping the parts this run did not touch. Owner-only and atomic, under the placement file's lock.
+    It holds bundle names, counts, machine ids, categories and public key fingerprints: never a value."""
+    with _placement_lock(home):
+        try:
+            doc = read_restore_receipt(home) or {}
+        except MachineIdentityError:
+            doc = {}
+        out = {"schema": RECEIPT_SCHEMA, "machine": machine_id(home), "updatedAt": now()}
+        for name in RECEIPT_PARTS:
+            if name in parts:
+                out[name] = {"at": now(), **parts[name]}
+            elif isinstance(doc.get(name), dict):
+                out[name] = doc[name]
+        path = restore_receipt_path(home)
+        ensure_private_dir(path.parent, home)
+        _write_private(path, (json.dumps(out, indent=2, ensure_ascii=False) + "\n").encode())
+        return path
+
+
 def service_ids_by_label(descriptors: list[Path]) -> dict[str, str]:
     """`{launchd label or systemd unit: "<id>.<instance>"}` from Fabric service descriptors
     (`fabric-service/0.1`, `lifecycle.label`). A descriptor that does not read is skipped."""

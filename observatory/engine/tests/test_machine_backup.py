@@ -527,11 +527,38 @@ class Restore(Machine):
         self.assertFalse([p for p in self.fresh.iterdir() if p.name.startswith('.decrypted-')],
                          'the unpacked copy is removed')
 
+    def test_projects_clones_only_the_named_checkouts(self):
+        result = MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True, projects=['beta-api'])
+        self.assertEqual([r['checkout'] for r in result['clone']], ['~/src/beta-api'])
+        self.assertEqual(result['clone'][0]['result'], 'cloned', result['clone'])
+        self.assertFalse((self.fresh / 'src' / 'alpha-web').exists())
+        self.assertEqual([c['path'] for c in result['checkouts'] if c['selected']], ['~/src/beta-api'])
+        planned = MB.restore(self.bundle, self.base / 'plan-only', secret=PASS, projects=['beta-api'])
+        self.assertIn('project-observatory full machine-restore --clone --projects=beta-api  (the recorded checkouts)',
+                      planned['next'])
+
+    def test_a_worktree_named_brings_its_main_checkout_and_a_path_names_what_is_under_it(self):
+        result = MB.restore(self.bundle, self.fresh, secret=PASS, do_clone=True, projects=['alpha-feature'])
+        self.assertEqual({r['checkout']: r['result'] for r in result['clone']},
+                         {'~/src/alpha-web': 'cloned', '~/src/alpha-feature': 'cloned'})
+        stage, manifest = self.open(self.bundle)
+        self.addCleanup(shutil.rmtree, stage, True)
+        every = sorted(r['path'] for r in manifest['checkouts'])
+        chosen, unmatched = MB.select_checkouts(manifest['checkouts'], ['~/src'], self.fresh)
+        self.assertEqual((sorted(r['path'] for r in chosen), unmatched), (every, []))
+        chosen, _ = MB.select_checkouts(manifest['checkouts'], ['gamma-*,beta-api'], self.fresh)
+        self.assertEqual(sorted(r['path'] for r in chosen), ['~/src/beta-api', '~/src/gamma-new'])
+
+    def test_a_project_no_checkout_matches_is_refused_before_anything_is_written(self):
+        with self.assertRaisesRegex(MB.MachineBackupError, 'no-such-project'):
+            MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', do_clone=True, projects=['no-such-project'])
+        self.assertEqual(list(self.fresh.iterdir()), [], 'refused before the apply')
+
     def test_a_conflict_is_kept_unless_overwrite_moves_it_aside(self):
         (self.fresh / '.zshrc').write_text('mine\n')
         planned = MB.restore(self.bundle, self.fresh, secret=PASS)
-        self.assertIn({'kind': 'file', 'source': '~/.zshrc', 'destination': '~/.zshrc', 'state': 'conflict'},
-                      planned['plan'])
+        self.assertIn({'kind': 'file', 'source': '~/.zshrc', 'destination': '~/.zshrc', 'category': 'shell',
+                       'state': 'conflict'}, planned['plan'])
         kept = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply')
         self.assertEqual((self.fresh / '.zshrc').read_text(), 'mine\n')
         self.assertGreaterEqual(kept['applied']['kept'], 1)
@@ -755,6 +782,16 @@ class Restore(Machine):
 #: A private key's first line, built so this file holds no key-shaped text.
 PRIVATE_HEAD = b'-----BEGIN OPENSSH ' + b'PRIVATE KEY-----\n'
 JOB_LABEL = 'com.example.alpha-bot'
+
+
+def pub_line(seed: bytes, comment: str = 'example') -> tuple[str, str]:
+    """A synthetic ed25519 public line and its fingerprint as `ssh-keygen -l` spells it."""
+    import base64
+    import hashlib
+    kind = b'ssh-ed25519'
+    blob = len(kind).to_bytes(4, 'big') + kind + (32).to_bytes(4, 'big') + hashlib.sha256(seed).digest()
+    fp = 'SHA256:' + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip('=')
+    return f'ssh-ed25519 {base64.b64encode(blob).decode()} {comment}\n', fp
 
 
 def job_rel():
@@ -987,6 +1024,133 @@ class SecondMachine(Machine):
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(MB.restore_main(['--latest', '--apply']), 1)
         self.assertIn('placement file', err.getvalue())
+
+    def test_only_writes_the_named_categories_and_the_plan_says_what_each_would_write(self):
+        with self.on(BETA):
+            planned = MB.restore(self.bundle, self.fresh, secret=PASS, only=['git', 'shell'])
+            cats = planned['categories']
+            self.assertEqual(list(cats), list(MB.CATEGORIES))
+            self.assertTrue(cats['git']['selected'] and cats['shell']['selected'])
+            self.assertFalse(cats['claude']['selected'])
+            self.assertIn('~/.gitconfig', cats['git']['writes'])
+            self.assertIn('~/.zshrc', cats['shell']['writes'])
+            self.assertEqual(cats['claude']['would_write'], 0)
+            self.assertGreater(cats['claude']['left_out'], 0)
+            rows = {r['source']: r for r in planned['plan']}
+            self.assertEqual((rows['~/.claude/settings.json']['state'], rows['~/.claude/settings.json']['category']),
+                             ('left-out', 'claude'))
+            self.assertEqual(rows['~/.gitconfig']['category'], 'git')
+            self.assertEqual(rows['~/.config/example-agent/agent.toml']['category'], 'operator')
+            self.assertEqual(rows['~/.ssh/config']['category'], 'ssh-config')
+            self.assertEqual(rows['~/' + job_rel()]['category'], 'launchd')
+            self.assertEqual(rows['~/fabric-services/alpha-bot.default.json']['category'], 'fabric-services')
+            self.assertEqual(planned['counts']['left_out'], sum(1 for r in planned['plan'] if r['state'] == 'left-out'))
+            self.assertEqual(planned['selection'], {'only': ['git', 'shell'], 'skip': [],
+                                                    'left_out': [c for c in MB.CATEGORIES if c not in ('git', 'shell')]})
+            self.assertIn("project-observatory full machine-restore --apply --only=git,shell  (writes only what is missing)",
+                          planned['next'])
+            self.assertNotIn('project-observatory full machine-restore --packages  (Homebrew, npm, pipx, uv)',
+                             planned['next'], 'packages is left out')
+            self.assertEqual(list(self.fresh.iterdir()), [], 'the plan writes nothing')
+            applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', only=['git,shell'])
+        self.assertEqual(applied['applied']['failed'], [])
+        self.assertGreater(applied['applied']['left_out'], 0)
+        self.assertTrue((self.fresh / '.gitconfig').is_file())
+        self.assertTrue((self.fresh / '.zshrc').is_file())
+        self.assertFalse((self.fresh / '.claude').exists())
+        self.assertFalse((self.fresh / '.ssh').exists())
+        system = 'launchd' if sys.platform == 'darwin' else 'systemd'
+        self.assertFalse(MI.staging_dir(self.fresh, system).exists())
+        self.assertFalse(MI.placement_path(self.fresh).exists(), 'no job was staged, so none is named elsewhere')
+        self.assertNotIn('placement', applied)
+
+    def test_skip_leaves_out_what_it_names(self):
+        with self.on(BETA):
+            applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', skip=['launchd', 'claude'])
+        self.assertEqual(applied['applied']['failed'], [])
+        self.assertTrue((self.fresh / '.ssh/config').is_file())
+        self.assertTrue((self.fresh / '.gitconfig').is_file())
+        self.assertFalse((self.fresh / '.claude').exists())
+        system = 'launchd' if sys.platform == 'darwin' else 'systemd'
+        self.assertFalse(MI.staging_dir(self.fresh, system).exists())
+        self.assertFalse(applied['categories']['launchd']['selected'])
+        self.assertNotIn('placement', applied)
+
+    def test_ssh_private_stays_withheld_on_a_second_machine_whatever_only_says(self):
+        with self.on(BETA):
+            applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', only=['ssh-private'])
+        self.assertFalse((self.fresh / '.ssh/id_example').exists())
+        self.assertFalse((self.fresh / '.ssh/config.d/disguised').exists())
+        for p in self.fresh.rglob('*'):
+            if p.is_file() and not p.is_symlink():
+                self.assertNotIn(SECRET_MARKER, p.read_bytes(), str(p))
+        self.assertTrue(any('ssh-private' in n and '--same-machine' in n for n in applied['notes']), applied['notes'])
+        self.assertEqual(applied['categories']['ssh-private']['would_write'], 0)
+        self.assertGreater(applied['categories']['ssh-private']['withheld'], 0)
+
+    def test_the_same_machine_restores_only_the_keys_when_asked(self):
+        applied = MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', only=['ssh-private'])
+        self.assertEqual(applied['machine']['mode'], 'same-machine')
+        self.assertEqual(applied['applied']['failed'], [])
+        self.assertEqual((self.fresh / '.ssh/id_example').read_bytes(), SECRET_MARKER)
+        self.assertEqual(stat.S_IMODE((self.fresh / '.ssh').stat().st_mode), 0o700, 'the folder keeps its mode')
+        self.assertEqual(stat.S_IMODE((self.fresh / '.ssh/id_example').stat().st_mode), 0o600)
+        self.assertTrue((self.fresh / '.ssh/id_example.pub').is_file(), 'a key comes with its public half')
+        self.assertTrue((self.fresh / '.ssh/config.d/disguised').is_file(), 'a private key by its text')
+        for other in ('.ssh/config', '.ssh/known_hosts', '.ssh/lone.pub', '.gitconfig', '.zshrc'):
+            self.assertFalse((self.fresh / other).exists(), other)
+        skipped = self.base / 'skip-user'
+        skipped.mkdir()
+        MB.restore(self.bundle, skipped, secret=PASS, mode='apply', skip=['ssh-private'])
+        self.assertFalse((skipped / '.ssh/id_example').exists())
+        self.assertFalse((skipped / '.ssh/config.d/disguised').exists(), 'withheld by its text as well')
+        self.assertTrue((skipped / '.ssh/config').is_file())
+
+    def test_a_category_is_checked_before_anything_is_read(self):
+        with self.assertRaisesRegex(MB.MachineBackupError, 'unknown category .nope.; the categories are ssh-private'):
+            MB.restore(self.bundle, self.fresh, secret=PASS, only=['nope'])
+        with self.assertRaisesRegex(MB.MachineBackupError, 'not both'):
+            MB.restore(self.bundle, self.fresh, secret=PASS, only=['git'], skip=['shell'])
+        with self.assertRaisesRegex(MB.MachineBackupError, '--packages installs the `packages` category'):
+            MB.restore(self.bundle, self.fresh, secret=PASS, do_packages=True, skip=['packages'])
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {'HOME': str(self.fresh), vault.PASS_ENV: PASS}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(MB.restore_main(['--latest', '--packages', '--only', 'git']), 2)
+            self.assertIn('`packages` category', err.getvalue())
+        sys.path.insert(0, str(ROOT))
+        import observatory as cli
+        refused = cli.refusal(['machine-restore', '--latest', '--only', 'nope'])
+        self.assertIn('unknown category', refused)
+        self.assertIn('fabric-services', refused, 'the refusal names the valid ones')
+        self.assertNotEqual(cli.refusal(['machine-restore', '--latest', '--only', 'git', '--skip', 'shell']), '')
+        self.assertEqual(cli.refusal(['machine-restore', '--latest', '--apply', '--only', 'git,shell', '--only',
+                                      'claude', '--clone', '--projects', 'alpha-*']), '')
+        self.assertEqual(list(self.fresh.iterdir()), [])
+
+    def test_a_receipt_names_the_restore_and_the_other_machines_keys(self):
+        line, fp = pub_line(b'alpha-work')
+        self.write('.ssh/id_work', PRIVATE_HEAD + SECRET_MARKER, 0o600)
+        self.write('.ssh/id_work.pub', line)
+        self.take(at=AT + datetime.timedelta(minutes=1))
+        bundle = MB.newest(self.ws)
+        with self.on(BETA):
+            planned = MB.restore(bundle, self.fresh, secret=PASS)
+            self.assertNotIn('receipt', planned, 'a plan writes no receipt')
+            self.assertFalse(MI.restore_receipt_path(self.fresh).exists())
+            applied = MB.restore(bundle, self.fresh, secret=PASS, mode='apply', skip=['claude'])
+            receipt = MI.read_restore_receipt(self.fresh)
+        path = MI.restore_receipt_path(self.fresh)
+        self.assertEqual(applied['receipt'], '~/.local/share/project-observatory/machine-move/restore.json')
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        part = receipt['apply']
+        self.assertEqual((receipt['schema'], receipt['machine']), ('observatory-machine-restore/1', BETA))
+        self.assertEqual((part['mode'], part['taken_on'], part['this_machine']), ('second-machine', ALPHA, BETA))
+        self.assertEqual((part['skip'], part['only'], part['failed']), (['claude'], [], 0))
+        self.assertIn('claude', part['left_out'])
+        self.assertIn({'key': 'id_work', 'fingerprint': fp}, part['other_keys'])
+        self.assertNotIn(SECRET_MARKER.decode(), path.read_text())
+        self.assertNotIn('PRIVATE', path.read_text())
 
     def write_to(self, home, rel, data):
         p = home / rel
@@ -1245,6 +1409,311 @@ class MachineMove(Base):
         with contextlib.redirect_stdout(out):
             self.assertEqual(workspace.main(['machine-move', 'show']), 0)
         self.assertEqual(json.loads(out.getvalue())['machine'], ALPHA)
+
+
+def job_file(home: Path, label: str, *, disabled: bool = False) -> Path:
+    """A job definition in `home`'s job folder, as launchd or systemd keeps it."""
+    import plistlib
+    if sys.platform == 'darwin':
+        path = home / 'Library/LaunchAgents' / f'{label}.plist'
+        data = plistlib.dumps({'Label': label, 'ProgramArguments': ['/usr/bin/true'],
+                               **({'Disabled': True} if disabled else {})})
+    else:
+        path = home / '.config/systemd/user' / label
+        data = b'[Service]\nExecStart=/usr/bin/true\n'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def label_of(name: str) -> str:
+    return name if sys.platform == 'darwin' else f'{name}.service'
+
+
+def NO_VAULT(hours):
+    return None, 'this machine holds no estate digest key'
+
+
+def VAULT_SAME(hours):
+    return {'all_match': True, 'summary': 'All 2 slot(s) match on 2 machines (synthetic).',
+            'machines': [{'machine': 'beta', 'state': 'reachable'}]}, None
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd or systemd user jobs on Windows')
+class MoveStatus(Base):
+    """OBS-286: the checklist M1 to M4, from what this machine holds and the other machine's facts."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.base / 'other-user'
+        self.other_ws = self.base / 'other-workspace'
+        (self.other_ws / 'node/device').mkdir(parents=True)
+        self.alpha_line, self.alpha_fp = pub_line(b'alpha-key')
+        self.beta_line, self.beta_fp = pub_line(b'beta-key')
+        self.key(self.user, 'id_ed25519', self.alpha_line)
+        self.device(self.ws, 'device-alpha-0001')
+        self.device(self.other_ws, 'device-beta-0002')
+        job_file(self.user, label_of('com.example.alpha-bot'))
+        job_file(self.user, label_of('org.project-observatory.0123456789abcdef.tick'))
+        job_file(self.other, label_of('com.example.beta-indexer'))
+        job_file(self.other, label_of('org.project-observatory.fedcba9876543210.tick'))
+
+    def key(self, home, name, line):
+        folder = home / '.ssh'
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (folder / name).write_bytes(PRIVATE_HEAD + SECRET_MARKER)
+        (folder / name).chmod(0o600)
+        (folder / f'{name}.pub').write_text(line)
+
+    def device(self, ws, value):
+        folder = ws / 'node/device'
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'device.json').write_text(json.dumps({'schema': 'device-keys/1', 'id': value}))
+
+    def facts_of_beta(self, at=None, **change):
+        with patch.dict(os.environ, {'OBSERVATORY_MACHINE_ID': BETA, 'HOME': str(self.other)}):
+            doc = MM.facts(self.other, self.other_ws, at=at)
+        doc.update(change)
+        path = self.base / f'beta-facts-{len(list(self.base.glob("beta-facts-*")))}.json'
+        path.write_text(json.dumps(doc))
+        return path
+
+    def check(self, *files, vault_view=VAULT_SAME, at=None):
+        peers, bad = MM.load_peers(self.user, list(files) if files else None)
+        view = MM.status(self.user, self.ws, peers=peers, unreadable=bad, vault_view=vault_view, at=at)
+        text = json.dumps(view) + MM.render(view)
+        self.assertNotIn(SECRET_MARKER.decode(), text)
+        self.assertNotIn('PRIVATE', text)
+        return view, {i['id']: i for i in view['items']}
+
+    def receipt(self, **apply):
+        part = {'bundle': 'machine-x.obmachine', 'mode': 'second-machine', 'taken_on': BETA, 'this_machine': ALPHA,
+                'only': [], 'skip': [], 'left_out': [], 'failed': 0, 'placement_error': False,
+                'counts': {'written': 10, 'same': 0, 'kept': 0, 'replaced': 0, 'withheld': 2}, 'other_keys': []}
+        part.update(apply)
+        MI.record_restore({'apply': part, 'clone': {'checkouts': 2, 'failed': 0}}, self.user)
+
+    def test_with_nothing_to_compare_every_cross_machine_item_is_unknown_never_a_guess(self):
+        view, items = self.check(vault_view=NO_VAULT)
+        self.assertEqual({k: i['state'] for k, i in items.items()},
+                         {'release': 'unknown', 'restore': 'unknown', 'ssh-key': 'unknown', 'device-id': 'unknown',
+                          'vault': 'unknown', 'jobs': 'unknown'})
+        self.assertEqual([i['step'] for i in view['items']], ['M1', 'M2', 'M3', 'M3', 'M3', 'M4'])
+        self.assertFalse(view['all_ok'])
+        self.assertIn('machine-move facts --out FILE', items['release']['next'][0])
+        self.assertIn('device-alpha-0001', items['device-id']['evidence'][0])
+        self.assertIn('1 job(s) defined here', items['jobs']['evidence'][0], 'the engine\'s own job is not counted')
+        self.assertIn('estate digest key', items['vault']['evidence'][0])
+
+    def test_a_peer_with_the_same_release_and_its_own_key_device_and_jobs_reads_ok(self):
+        self.key(self.other, 'id_ed25519', self.beta_line)
+        self.receipt()
+        view, items = self.check(self.facts_of_beta())
+        self.assertEqual({k: i['state'] for k, i in items.items()}, dict.fromkeys(items, 'ok'), items)
+        self.assertTrue(view['all_ok'])
+        self.assertEqual(view['counts'], {'ok': 6, 'missing': 0, 'unknown': 0})
+        self.assertEqual(view['other_machines'][0]['machine'], BETA)
+        self.assertIn(f'runs {config.VERSION}', items['release']['evidence'][1])
+        self.assertIn('device-beta-0002', ' '.join(items['device-id']['evidence']))
+        self.assertTrue(view['summary'].startswith('The move is done'))
+
+    def test_what_the_two_machines_share_is_missing_and_named(self):
+        self.key(self.other, 'id_ed25519', self.alpha_line)      # the key was copied, not made anew
+        self.device(self.other_ws, 'device-alpha-0001')            # the workspace restored whole
+        job_file(self.other, label_of('com.example.alpha-bot'))    # the bot defined on both
+        view, items = self.check(self.facts_of_beta(engine_version='0.29.0'))
+        for key in ('release', 'ssh-key', 'device-id', 'jobs'):
+            self.assertEqual(items[key]['state'], 'missing', items[key])
+            self.assertTrue(items[key].get('next'), key)
+        self.assertIn(f'{BETA} (facts of', items['release']['evidence'][1])
+        self.assertIn('runs 0.29.0', items['release']['evidence'][1])
+        self.assertIn(f'~/.ssh/id_ed25519 ({self.alpha_fp}) is the same key as ~/.ssh/id_ed25519 on {BETA}',
+                      items['ssh-key']['evidence'][0])
+        self.assertIn('device-alpha-0001 is also', items['device-id']['evidence'][0])
+        self.assertIn(f"{label_of('com.example.alpha-bot')} is defined here and on {BETA}", items['jobs']['evidence'][0])
+        self.assertEqual(view['counts']['missing'], 4)
+
+    def test_old_facts_say_nothing_about_todays_release_or_jobs(self):
+        self.key(self.other, 'id_ed25519', self.beta_line)
+        old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
+        view, items = self.check(self.facts_of_beta(at=old))
+        self.assertEqual(items['release']['state'], 'unknown')
+        self.assertEqual(items['jobs']['state'], 'unknown')
+        self.assertEqual(items['ssh-key']['state'], 'ok', 'a key fingerprint does not age')
+        self.assertEqual(items['device-id']['state'], 'ok')
+        self.assertIn('older than 48 hours', view['other_machines'][0]['stale'])
+        future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=2)
+        view, items = self.check(self.facts_of_beta(at=future))
+        self.assertIn('future', view['other_machines'][0]['stale'])
+        self.assertEqual(items['release']['state'], 'unknown')
+
+    def test_a_job_placed_elsewhere_and_defined_here_runs_on_both(self):
+        MI.place_elsewhere([{'label': label_of('com.example.alpha-bot'), 'placedOn': BETA, 'by': 'machine-restore'}],
+                           self.user)
+        job_file(self.user, label_of('com.example.disabled'), disabled=True)
+        view, items = self.check()
+        self.assertEqual(items['jobs']['state'], 'missing')
+        self.assertIn(f'named in this machine\'s placement file as running on {BETA}', items['jobs']['evidence'][0])
+        if sys.platform == 'darwin':
+            jobs, _ = MM.defined_jobs(self.user)
+            self.assertNotIn('com.example.disabled', jobs, 'a plist marked Disabled does not load at login')
+
+    def test_the_restore_reads_complete_only_without_gaps(self):
+        self.receipt()
+        _, items = self.check()
+        self.assertEqual(items['restore']['state'], 'ok', items['restore'])
+        self.receipt(counts={'written': 9, 'kept': 2}, failed=1, left_out=['claude'])
+        _, items = self.check()
+        self.assertEqual(items['restore']['state'], 'missing')
+        evidence = ' '.join(items['restore']['evidence'])
+        self.assertIn('2 conflict(s) kept', evidence)
+        self.assertIn('1 item(s) failed', evidence)
+        self.assertIn('left out on purpose (--only/--skip): claude', evidence)
+        self.assertTrue(any('--overwrite' in step for step in items['restore']['next']))
+
+    def test_the_machine_moved_from_reads_the_restore_from_the_other_machines_facts(self):
+        with patch.dict(os.environ, {'OBSERVATORY_MACHINE_ID': BETA}):
+            MI.record_restore({'apply': {'mode': 'second-machine', 'taken_on': ALPHA, 'failed': 0,
+                                         'counts': {'kept': 0}}, 'clone': {'failed': 0}}, self.other)
+        _, items = self.check(self.facts_of_beta())
+        self.assertEqual(items['restore']['state'], 'ok', items['restore'])
+        self.assertIn(f'{BETA} (facts of', items['restore']['evidence'][0])
+
+    def test_a_key_the_restore_withheld_is_the_other_machines(self):
+        self.receipt(other_keys=[{'key': 'id_ed25519', 'fingerprint': self.alpha_fp}])
+        _, items = self.check()
+        self.assertEqual(items['ssh-key']['state'], 'missing')
+        self.assertIn('the restored bundle withheld', items['ssh-key']['evidence'][0])
+        self.receipt(other_keys=[{'key': 'id_ed25519', 'fingerprint': self.beta_fp}])
+        _, items = self.check()
+        self.assertEqual(items['ssh-key']['state'], 'ok', items['ssh-key'])
+
+    def test_no_key_or_no_device_here_is_missing(self):
+        shutil.rmtree(self.user / '.ssh')
+        shutil.rmtree(self.ws / 'node/device')
+        _, items = self.check()
+        self.assertEqual((items['ssh-key']['state'], items['device-id']['state']), ('missing', 'missing'))
+        self.assertIn('ssh-keys create', items['ssh-key']['next'][0])
+        self.assertIn('node --init', items['device-id']['next'][0])
+
+    def test_facts_are_public_owner_only_and_never_replace_a_file(self):
+        out = self.base / 'alpha-facts.json'
+        doc = MM.facts(self.user, self.ws)
+        self.assertEqual((doc['schema'], doc['machine'], doc['device']), ('observatory-machine-facts/1', ALPHA,
+                                                                          'device-alpha-0001'))
+        self.assertEqual(doc['ssh'], [{'file': '~/.ssh/id_ed25519', 'fingerprint': self.alpha_fp}])
+        self.assertEqual(doc['jobs'], [label_of('com.example.alpha-bot')])
+        MM.write_facts(doc, out)
+        self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
+        self.assertNotIn(SECRET_MARKER.decode(), out.read_text())
+        with self.assertRaises(FileExistsError):
+            MM.write_facts(doc, out)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(MM.main(['facts', '--out', str(out)]), 2)
+        self.assertIn('already exists', err.getvalue())
+
+    def test_a_peer_file_that_does_not_read_is_named_and_the_rest_still_compares(self):
+        folder = MM.peers_dir(self.user)
+        folder.mkdir(parents=True)
+        (folder / 'broken.json').write_text('{"schema": "observatory-machine-facts/1", "machine": "x"}')
+        (folder / 'beta.json').write_text(self.facts_of_beta().read_text())
+        (folder / 'self.json').write_text(json.dumps(MM.facts(self.user, self.ws)))
+        view, items = self.check()
+        reasons = ' '.join(d['reason'] for d in view['degraded'])
+        self.assertIn('broken.json: its machine id is malformed', reasons)
+        self.assertIn('names this machine', reasons)
+        self.assertEqual([m['machine'] for m in view['other_machines']], [BETA])
+        self.assertEqual(items['release']['state'], 'ok')
+
+    def test_the_command_line_prints_the_checklist_and_exits_by_it(self):
+        sys.path.insert(0, str(ROOT))
+        import observatory as cli
+        self.assertIn('machine-move', cli.PUBLIC_HELP)
+        self.assertIn('status', cli.PUBLIC_HELP[cli.PUBLIC_HELP.index('machine-move'):])
+        self.assertEqual(cli.refusal(['machine-move', 'status', '--json', '--peer', 'x.json', '--max-age-hours', '12']), '')
+        self.assertEqual(cli.refusal(['machine-move', 'facts', '--out', 'x.json']), '')
+        self.assertNotEqual(cli.refusal(['machine-move', 'status', '--max-age-hours', '0']), '')
+        peer = self.facts_of_beta()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                patch.object(MM, '_vault_view', NO_VAULT):
+            self.assertEqual(workspace.main(['machine-move', 'status', '--json', '--peer', str(peer)]), 1)
+        self.assertEqual(json.loads(out.getvalue())['schema'], 'observatory-machine-move-status/1')
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), patch.object(MM, '_vault_view', NO_VAULT):
+            self.assertEqual(MM.main(['status', '--peer', str(peer)]), 1)
+        self.assertIn('M1 release', out.getvalue())
+        self.assertIn('M4 jobs', out.getvalue())
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd or systemd user jobs on Windows')
+class MoveStatusVault(unittest.TestCase):
+    """OBS-286 with the real vault digests (OBS-194): two vaults, one estate key, the other's manifest."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+        (self.base / 'a-peers').mkdir()
+        self.tools = ROOT / 'tools'
+
+    def env(self, name, peers):
+        root = self.base / name
+        (root / 'home').mkdir(parents=True, exist_ok=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith('OBSERVATORY_')}
+        env.update({'HOME': str(root / 'home'), 'OBSERVATORY_HOME': str(root / 'workspace'),
+                    'OBSERVATORY_VAULT_DIR': str(root / 'secrets/projects'), 'OBSERVATORY_STATE': str(root / 'state'),
+                    'OBSERVATORY_DATA': str(root / 'projects'), 'OBSERVATORY_REGISTRY': str(root / 'registry'),
+                    'OBSERVATORY_MACHINE_NAME': name, 'OBSERVATORY_VAULT_PEERS': str(peers),
+                    'OBSERVATORY_SYSTEM_SETUP': '0', 'OBSERVATORY_MACHINE_ID': f'm-{name}-0000000001',
+                    'OBSERVATORY_MACHINE_ID_FOR_TESTS': '1'})
+        env.pop('XDG_DATA_HOME', None)
+        return env
+
+    def run_tool(self, env, *args, value=None, script=None):
+        argv = [str(script), *args] if script else [str(self.tools / args[0]), *args[1:]]
+        p = subprocess.run([sys.executable, *argv], input=value, text=True,
+                           capture_output=True, env=env, timeout=120)
+        return p
+
+    def vault_item(self, env):
+        p = self.run_tool(env, 'status', '--json', script=ROOT / 'machine_move.py')
+        self.assertEqual(p.returncode, 1, p.stderr)
+        view = json.loads(p.stdout)
+        self.assertNotIn('synthetic-value', p.stdout + p.stderr)
+        return next(i for i in view['items'] if i['id'] == 'vault')
+
+    def test_the_vault_item_reads_the_digests_and_never_makes_a_key(self):
+        a, b = self.env('alpha', self.base / 'a-peers'), self.env('beta', self.base / 'b-peers')
+        item = self.vault_item(a)
+        self.assertEqual(item['state'], 'unknown')
+        self.assertIn('no estate digest key', item['evidence'][0])
+        self.assertFalse((self.base / 'alpha/secrets/projects/.estate-digest-key').exists(), 'status made no key')
+        for env in (a, b):
+            self.assertEqual(self.run_tool(env, 'vault.py', 'put', 'alpha-web', 'prod', 'API_TOKEN',
+                                           value='synthetic-value-0001').returncode, 0)
+        self.assertEqual(self.run_tool(a, 'vault_digests.py', 'write').returncode, 0)
+        exported = self.base / 'estate-key'
+        self.assertEqual(self.run_tool(a, 'vault_digests.py', 'key', 'export', str(exported)).returncode, 0)
+        self.assertEqual(self.run_tool(b, 'vault_digests.py', 'key', 'import', value=exported.read_text()).returncode, 0)
+        exported.unlink()
+        item = self.vault_item(a)
+        self.assertEqual(item['state'], 'unknown', 'no peer manifest yet')
+        self.assertEqual(self.run_tool(b, 'vault_digests.py', 'write').returncode, 0)
+        (self.base / 'a-peers/beta.json').write_text((self.base / 'beta/state/vault-digests/local.json').read_text())
+        item = self.vault_item(a)
+        self.assertEqual(item['state'], 'ok', item)
+        self.assertIn('All 1 slot(s) match on 2 machines', item['evidence'][0])
+        self.assertEqual(self.run_tool(b, 'vault.py', 'put', 'alpha-web', 'prod', 'API_TOKEN', '--force',
+                                       value='synthetic-value-0002').returncode, 0)
+        self.assertEqual(self.run_tool(b, 'vault_digests.py', 'write').returncode, 0)
+        (self.base / 'a-peers/beta.json').write_text((self.base / 'beta/state/vault-digests/local.json').read_text())
+        item = self.vault_item(a)
+        self.assertEqual(item['state'], 'missing', item)
+        self.assertIn('1 differs', item['evidence'][0])
+        key = (self.base / 'alpha/secrets/projects/.estate-digest-key').read_text().strip()
+        self.assertNotIn(key, json.dumps(item))
 
 
 class MachineId(unittest.TestCase):

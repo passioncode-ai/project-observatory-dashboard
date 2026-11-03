@@ -84,6 +84,8 @@ SAMPLES = {
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
+    # A partial restore's filters, repeated in its next steps (OBS-282): one `--flag=value` word each.
+    "{keep}": "--skip=launchd,cli-logins", "{named}": "--projects=alpha-web",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
     # A harness skill key (collectors/scan_harness.py): `plain/<folder>` or `plugin:<plugin>/<folder>`.
     # The meter's values (tools/grant.py): an amount, a token jti, a receipt, a grant ref.
