@@ -843,6 +843,11 @@ def plan_commands(cfg: dict, level: str, last: dict | None = None, at: float | N
         tool = find_tool(argv[0]) if argv else None
         if not tool:
             continue
+        # A command run inside each running VM (`{instance}` in its argv) lists them first.
+        listing = list(c.get("instances") or [])
+        lister = find_tool(listing[0]) if listing else None
+        if listing and not lister:
+            continue
         target = " ".join(argv)
         every = _number(c.get("every_hours", cfg.get("command_every_hours", 6)), 6)
         ran = parse_stamp((last or {}).get(target))
@@ -852,8 +857,47 @@ def plan_commands(cfg: dict, level: str, last: dict | None = None, at: float | N
                     "busy_if": c.get("busy_if") or [], "needs": c.get("needs_running") or [],
                     "busy_output": c.get("busy_output") or "",
                     "timeout": _number(c.get("timeout_seconds") or cfg.get("command_timeout_seconds", 90), 90),
-                    "bytes": 0, "why": c.get("why") or "the tool's own cleanup"})
+                    "bytes": 0, "why": c.get("why") or "the tool's own cleanup"}
+                   | ({"instances": [lister, *listing[1:]]} if listing else {})
+                   | ({"password_output": c["password_output"]} if c.get("password_output") else {}))
     return out
+
+
+VM_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def running_vms(argv: list[str], timeout: float) -> list[str] | None:
+    """The virtual machines a VM tool lists as running (`colima list --json`, `limactl list
+    --json`: one JSON object per line, or one array), by name. None when the list cannot be
+    read. Listing starts nothing; a name that is not a plain identifier is never passed on."""
+    if timeout <= 0:
+        return None
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if p.returncode:
+        return None
+    text = (p.stdout or "").strip()
+    if not text:
+        return []
+    try:
+        doc = json.loads(text)
+        rows = doc if isinstance(doc, list) else [doc]
+    except ValueError:
+        try:
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+        except ValueError:
+            return None
+    names: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        name = row.get("name")
+        if (row.get("status") == "Running" and isinstance(name, str) and VM_NAME.match(name)
+                and name not in names):
+            names.append(name)
+    return names
 
 
 def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | None:
@@ -1255,24 +1299,53 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
         if busy is not False:
             return {**rec, "result": "skipped",
                     "reason": "the tool is running now" if busy else "whether the tool runs could not be read"}
-        try:
-            # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock
-            # a long-running `uv tool run` server holds, and one such wait spent half a run.
-            p = subprocess.run(a["argv"], capture_output=True, text=True,
-                               timeout=_number(a.get("timeout"), 90), stdin=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired:
-            return {**rec, "result": "skipped", "reason": "held up past its time — something else holds the tool's cache"}
-        except (OSError, subprocess.SubprocessError) as exc:
-            return {**rec, "result": "failed", "reason": f"{type(exc).__name__}"}
-        said = (p.stderr or p.stdout or "").strip()
-        if p.returncode and a.get("busy_output") and a["busy_output"] in said:
-            return {**rec, "result": "skipped", "reason": "its cache is in use",
-                    "reason_code": "cache-in-use", "exit_code": p.returncode}
-        rec["result"] = "removed" if p.returncode == 0 else "failed"
-        if p.returncode:
-            rec["reason"] = f"exit {p.returncode}"
-            rec["reason_code"] = "command-failed"
-            rec["exit_code"] = p.returncode
+        # ONE DEADLINE for the whole action, VM listing and every VM included (OBS-305).
+        deadline = time.monotonic() + _number(a.get("timeout"), 90)
+        runs = [a["argv"]]
+        if a.get("instances"):
+            names = running_vms(a["instances"], min(15.0, deadline - time.monotonic()))
+            if not names:
+                return {**rec, "result": "skipped",
+                        "reason": "no virtual machine is running; the guard starts none" if names == []
+                        else "which virtual machines run could not be read; the guard starts none",
+                        "reason_code": "no-running-vm" if names == [] else "vm-list-unknown"}
+            rec["instances"], rec["instances_done"] = len(names), 0
+            runs = [[w.replace("{instance}", n) for w in a["argv"]] for n in names]
+        for argv in runs:
+            try:
+                # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock
+                # a long-running `uv tool run` server holds, and one such wait spent half a run.
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise subprocess.TimeoutExpired(argv, 0)
+                p = subprocess.run(argv, capture_output=True, text=True, timeout=left, stdin=subprocess.DEVNULL)
+            except subprocess.TimeoutExpired:
+                rec.update(result="skipped", reason="held up past its time: something else holds the tool's cache")
+                break
+            except (OSError, subprocess.SubprocessError) as exc:
+                rec.update(result="failed", reason=f"{type(exc).__name__}")
+                break
+            said = (p.stderr or p.stdout or "").strip()
+            if p.returncode and a.get("busy_output") and a["busy_output"] in said:
+                rec.update(result="skipped", reason="its cache is in use", reason_code="cache-in-use",
+                           exit_code=p.returncode)
+                break
+            if p.returncode and a.get("password_output") and a["password_output"] in said:
+                # `sudo -n` refuses at once instead of waiting for a password nobody types.
+                rec.update(result="failed", reason="sudo inside the virtual machine asks for a password; "
+                                                   "the guard never types one",
+                           reason_code="needs-password", exit_code=p.returncode)
+                break
+            if p.returncode:
+                rec.update(result="failed", reason=f"exit {p.returncode}", reason_code="command-failed",
+                           exit_code=p.returncode)
+                break
+            if "instances_done" in rec:
+                rec["instances_done"] += 1
+        else:
+            rec["result"] = "removed"
+        if rec["result"] == "skipped" and not rec.get("instances_done"):
+            return rec                   # nothing ran to the end: no delta to claim
     else:
         target = a["target"]
         if not os.path.lexists(target):
