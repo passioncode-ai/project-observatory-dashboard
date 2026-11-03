@@ -65,8 +65,9 @@ only when I ask for an unattended key), copy its public line with `ssh-keys copy
 it with `ssh-keys send NAME --to github` or `--to server:ALIAS --verify`. A cloud has no door yet:
 say so and give me the copied line. A missing `gh` scope is mine to grant (`gh auth refresh`). On a
 second machine, `ssh-keys rekey OLD` plans this machine's own key where the other machine's key is
-registered (read it, or `--json`, before acting); `--apply` does it in my terminal and ends with what
-still accepts only the old key and the next step for each. Relay that list to me as it stands: it
+registered (read it, or `--json`, before acting, and check the GitHub account it names is mine for
+this key; without the other key's `--fingerprint` it sends nothing to GitHub); `--apply` does it in
+my terminal and ends with what still accepts only the old key and the next step for each. Relay that list to me as it stands: it
 removes nothing, and neither do you.
 
 ## The same key on my other machines

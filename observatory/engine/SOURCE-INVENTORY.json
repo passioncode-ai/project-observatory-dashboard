@@ -926,8 +926,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "9dacca47c95b00339f4388211ceb5376b427b272c9ea028e2ecd7d4c47448635",
-      "bytes": 29239,
+      "export_sha256": "989b0c5be867328e0a1e532b867c641089c543cfd6b32e451175ac010d8a86d1",
+      "bytes": 29367,
       "upstream_modified": true
     },
     {
@@ -947,15 +947,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "837748119a745aee28400360a4e5faa361bc38b70d013204c5e64c77bcdcdeeb",
-      "bytes": 212876,
+      "export_sha256": "a081c26234d462eb5b85298bc1693dad26e7c796168560590e0bbbfde9cc26e9",
+      "bytes": 213279,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "a351a5b0a7e9f3599be3681c8fbd866c557542b1fb3334df27b23c90f28183a0",
-      "bytes": 179542,
+      "export_sha256": "0e5fa060e5303b821186a11c52237ccbb21d3d25540c7dd224945b8e61a79de2",
+      "bytes": 179775,
       "upstream_modified": true
     },
     {
@@ -5862,8 +5862,8 @@
       "path": "tests/test_ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6629d2fb2ae9496a9cad8eb7cb853291a5b85750e29de7ec95fa5788c0aec656",
-      "bytes": 96161
+      "export_sha256": "28933e41ea4d1c14ed43effc69a505997aa977bc6d3ec277733ec5ec0b1027e8",
+      "bytes": 102205
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -7000,8 +7000,8 @@
       "path": "tools/ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bb28a994dd72516f6334fcfa4b10615224b556efb03f48678f39025a99de3939",
-      "bytes": 94720
+      "export_sha256": "413aae81f41ac067664a93d0910ed69ba670b1406ee69c9bf861542efae95da8",
+      "bytes": 100885
     },
     {
       "path": "tools/sweep_fixtures.py",

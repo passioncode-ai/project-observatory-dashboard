@@ -714,9 +714,13 @@ project-observatory full ssh-keys findings                # no passphrase, weak,
 - `rekey OLD` is for a second machine, whose restore wrote `~/.ssh/config` but not the other machine's
   private key. It plans first: this machine's own key (named OLD, so the carried `IdentityFile
   ~/.ssh/OLD` finds it; `--name NEW` for another name), and every place the other machine's key is
-  registered: GitHub sign-in and signing (matched by the other key's fingerprint, `--fingerprint
-  SHA256:...` as `ssh-keys list` prints it there, or by the config and git's signing key when it is
-  not known) and each Host of `~/.ssh/config` that names `~/.ssh/OLD` (`--server ALIAS` adds one).
+  registered: GitHub sign-in and signing, only where the account gh is signed in to (the plan names
+  it) holds the other key's fingerprint (`--fingerprint SHA256:...` as `ssh-keys list` prints it
+  there, or `OLD.pub` when it is here; without it GitHub is listed as not known, with `gh auth
+  status` to check the account), and each Host of `~/.ssh/config` that names `~/.ssh/OLD`
+  (`--server ALIAS` adds one; a Host logging in as `git`, such as GitHub Enterprise Server, gets
+  that service's step instead). A config with `Match exec` is read as text: the plan never runs
+  `ssh -G`, which would run that command.
   `--apply` creates the key, sends it to each place with `send`, verifying each server, and ends with
   what still accepts only the other machine's key and the next step for each. A server usually does
   not let this machine in until it has the key: answer a password with `--interactive`, or add the
@@ -2225,9 +2229,10 @@ Use the name the plan gives: when the carried `~/.ssh/config` points a host at a
 `IdentityFile`, the plan lists that key as withheld with the hosts that use it and the exact
 `ssh-keys create` and `send` steps under the same name, so the carried config finds the new key.
 `ssh-keys rekey NAME --apply` runs those steps in one command (OBS-285): it sends the key to GitHub
-for sign-in and signing where the other machine's key is registered there (add `--fingerprint
-SHA256:...`, from `full ssh-keys list` on the other machine, to match GitHub's keys exactly) and to
-each Host that names it, verifying each, and then lists what still accepts only the other machine's
+for sign-in and signing where the account gh is signed in to holds the other machine's key (pass
+`--fingerprint SHA256:...`, from `full ssh-keys list` on the other machine: without it nothing goes to
+GitHub, since the other key cannot be matched, and the plan says so) and to each Host that names it,
+verifying each, and then lists what still accepts only the other machine's
 key with the next step for each. A server whose only access was the other machine's key does not let
 this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
 password. Granting `gh` the `admin:public_key` and `admin:ssh_signing_key` scopes

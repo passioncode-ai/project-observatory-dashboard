@@ -230,13 +230,19 @@ project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:.
                                             [--comment TEXT] [--title TEXT] [--json]
 ```
 
-**A plan unless `--apply`**, the convention of `machine-restore`. The plan reads only: `~/.ssh/config`,
-`ssh -G` for each alias (no connection), GitHub's key lists (`gh api`) and git's global
-`gpg.format` and `user.signingkey` (`git config --global --get`). It prints the other machine's key,
-this machine's key (to be created, or already here and reused), every place it goes with why, what
-cannot be known from here with the next step for each, and what needs a person; it ends with the
-exact `--apply` command. `--json` gives the same as `ssh-rekey/1` (`old`, `new`, `targets`, `unknown`,
-`config`, `gates`, `degraded`; after `--apply` also `applied`, `results.done` and `still`).
+**A plan unless `--apply`**, the convention of `machine-restore`. The plan reads only: `~/.ssh/config`
+and its `Include`s, `ssh -G` for each alias (no connection), the account gh is signed in to (`gh api
+user`) and its key lists (`gh api`), and git's global `gpg.format` and `user.signingkey` (`git config
+--global --get`). **`ssh -G` evaluates `Match exec`, which runs a command** (review of #405, OpenSSH
+10.3p1): when the config or an `Include` it follows has a `Match exec` line, the plan does not run
+`ssh -G` at all, takes each host's `HostName` and `User` from the config text (the first value, as ssh
+does) and says so in `degraded`. `--apply` then runs `ssh`, which evaluates the config as every `ssh`
+does. The plan prints the other machine's key, the GitHub account a key would go to, this machine's
+key (to be created, or already here and reused), every place it goes with why, what cannot be known
+from here with the next step for each, and what needs a person; it ends with the exact `--apply`
+command. `--json` gives the same as `ssh-rekey/1` (`old`, `new`, `github.account`, `targets`,
+`unknown`, `config`, `gates`, `degraded`; after `--apply` also `applied`, `results.done` and `still`;
+a refusal, before or during `--apply`, is the same document with `refused`, exit 2).
 
 **The other machine's key is known by its public half only.** `--fingerprint SHA256:...` (as
 `ssh-keys list` prints it on the other machine), or `~/.ssh/OLD.pub` when it is here and this
@@ -256,14 +262,31 @@ IdentityFile at `~/.ssh/NEW`"); `rekey` never rewrites `~/.ssh/config`.
 
 | Place | How it is known | Sent with |
 |---|---|---|
-| GitHub sign-in | the old fingerprint among `gh api user/keys`; without a fingerprint (or with that list unread), a Host whose `ssh -G` host name is `github.com` or `ssh.github.com` and names `~/.ssh/OLD`, or OLD being one of ssh's default key names | `send NEW --to github --as authentication` |
-| GitHub signing | the old fingerprint among `gh api user/ssh_signing_keys`; without it, git signing with `~/.ssh/OLD[.pub]` (`gpg.format ssh`) or a `key::` literal of the old key | `send NEW --to github --as signing` |
-| A server | each concrete `Host` alias whose `IdentityFile` resolves to `~/.ssh/OLD` (not reaching GitHub), and each `--server ALIAS` | `send NEW --to server:ALIAS --verify` |
+| GitHub sign-in | the old fingerprint among the signed-in account's `gh api user/keys` | `send NEW --to github --as authentication` |
+| GitHub signing | the old fingerprint among the signed-in account's `gh api user/ssh_signing_keys` | `send NEW --to github --as signing` |
+| A server | each concrete `Host` alias whose `IdentityFile` resolves to `~/.ssh/OLD`, and each `--server ALIAS`, that neither reaches `github.com` / `ssh.github.com` nor logs in as `git` | `send NEW --to server:ALIAS --verify` |
+
+**GitHub is a target only when the other key is proven on gh's account** (review of #405). gh uploads
+to whatever account it is signed in to, so a Host reaching github.com, a default key name or git signing
+with the key say nothing about which account holds it: with `Host github-work` naming the old key and gh
+signed in to another account, an upload on their strength put the new key on the wrong account. So
+without the old fingerprint, with the account unread, or with the fingerprint absent from that account's
+lists, GitHub is listed under what is not known, those signals given as hints, with the step:
+`--fingerprint SHA256:...`, and `gh auth status` (then `gh auth switch` or `gh auth login` for the account
+that holds it). The plan always names the account (`GitHub account (gh): LOGIN`).
+
+**A git service is not a shell host.** A Host that logs in as `git` to a server other than github.com
+(GitHub Enterprise Server and the like) has no `authorized_keys` to append to: it is listed as not known
+with the step `gh auth login --hostname HOST`, then `GH_HOST=HOST gh ssh-key add ~/.ssh/NEW.pub` (or
+the service's SSH key settings). A server that answers the append like GitHub ("does not provide shell
+access") gets that step in its "still" line instead of the server steps. Detection goes by the login
+name and that answer only; another forge under another login name reads as a server whose append fails.
 
 What cannot be listed from here is named, never guessed: a `Host` pattern or `Match` block naming
-OLD, every host that gets a default key without an `IdentityFile` line, GitHub's keys when the old
-fingerprint is unknown or a list could not be read. Each carries the command that makes it known
-(`--server ALIAS`, `--fingerprint`, `gh auth refresh -h github.com -s read:public_key,read:ssh_signing_key`).
+OLD, every host that gets a default key without an `IdentityFile` line, a git service, and GitHub when
+the old fingerprint is unknown, the account or a list could not be read, or the account does not hold
+the key. Each carries the command that makes it known (`--server ALIAS`, `--fingerprint`, `gh auth
+status`, `gh auth refresh -h github.com -s read:public_key,read:ssh_signing_key`).
 
 **`--apply`** creates the key (`create`'s rules: the passphrase is typed into ssh-keygen's own prompt
 at a terminal, refused before anything runs without one unless `--no-passphrase`), then each GitHub
