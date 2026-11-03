@@ -81,6 +81,8 @@ SAMPLES = {
     "MACHINE_ID": "m-machine-beta-0002", "{label}": "com.example.alpha-bot", "{me}": "m-machine-alpha-0001", "{target}": "app.example.desktop",
     # The second machine's own SSH key steps (OBS-283): the key's name and where it is sent; init's snapshot (OBS-284).
     "{target}": "github", "{snap}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
+    # The other machine's key that `ssh-keys rekey` replaces here (OBS-285).
+    "OLD": "id_work",
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
