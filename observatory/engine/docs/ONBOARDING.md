@@ -432,6 +432,48 @@ tick) records each account's Workers, Pages projects with their source repositor
 databases and zones with their plan and price, DNS record count and certificate expiry in
 `store/raw/cloudflare_account.json`; `emit` turns it into `registry/cloudflare-account.json`.
 
+**A Sentry token for one purpose, and the broad one retired** (OBS-292). A site's build needs only to create
+releases and upload source maps, and error triage only to read projects, issues and events; a broad Sentry token
+(org:admin, member:admin, and so on) in a vault slot can do far more. `tools/sentry.py issue --preset releases
+--from PROJECT/ENV/NAME --vault PROJECT/ENV/NAME [--org SLUG] [--project SLUG]` reads the minting credential from
+its slot (vault only), mints a Sentry organization token with the one scope `org:ci` (Sentry lets it list, create and
+update releases, upload source maps, artifact bundles and debug files, read the organization's integrations and read
+and write bulk code mappings; it cannot delete a release or a debug file, read events or members, or change a
+setting), proves it with its own value
+(exactly that scope, the releases read on the organization's region host, members and issues refused), writes it
+to the `--vault` slot on stdin and records it in `secrets/sentry-issued.json` (kind, scope, organization, project,
+token id, never the value). Sentry mints an organization token by API only for an OAuth application's token holding
+`org:tokens` and one of `org:read`, `org:write`, `org:admin`; a personal token (`sntryu_`) can mint nothing and cannot revoke itself, so
+with one in `--from` the door refuses before any call and names the Organization Tokens page where a person makes
+the token in one click (Sentry offers only `org:ci` there). `--preset read` (an internal integration token with
+exactly `org:read`, `project:read`, `event:read`) is always made by a person, because Sentry creates an
+integration's token only from a browser session. Either way the person puts the token in the slot (through
+`observatory_secret_request` or `vault.py put` from a protected file), and `sentry.py install --preset
+releases|read --vault PROJECT/ENV/NAME` verifies and records it. `sentry.py revoke --from PROJECT/ENV/NAME [--org
+SLUG] [--base-url URL]` first verifies every narrow token of that organization again. The slot must hold a Sentry
+token (a known prefix), and it is sent only to its own Sentry: `--base-url`, or the base recorded the last time that
+slot answered there. While Sentry accepts it, the door records that proof, names the page where a person deletes it
+and exits 3. It counts as revoked, and its slot is removed, only when Sentry refuses it (HTTP 401) after such a proof:
+a 401 from a Sentry that never accepted the value proves nothing, and the slot is kept. The proof belongs to the
+value, not the slot: it is recorded as the token's kind and a keyed digest (HMAC-SHA256 under a random key kept
+owner-only beside the ledger, never a plain hash), so a slot whose value was replaced since is not sent to the
+recorded Sentry, and a 401 to it needs a new proof. A base named with `--base-url` for the first time is said so,
+and so is a `--base-url` that replaces a recorded Sentry whose proof no longer holds for the value; a value still
+proved on one Sentry is never sent to another. `sentry.py status` follows the same rule: it asks about a broad token
+only when the slot still holds the proved value, and otherwise reports it as unproven or changed without sending it.
+Narrow tokens follow the same rule: `issue` and `install` record each one's keyed digest, `status` and both kinds of
+`revoke` send a narrow slot's value only while it is still that value, and `revoke PROJECT/ENV/NAME` sends the
+minting credential only while its slot holds the value proved on that Sentry (otherwise it names the `revoke --from
+... --base-url` step that proves it again). `revoke PROJECT/ENV/NAME` deletes one token this door minted (or, for one a
+person made, waits for that person), proves it dead and removes the slot; `list` and `status` say what exists and
+whether it still works. Without `--base-url`, `issue` and `install` use `https://sentry.io` and say so on
+stderr; `--base-url` takes a self-hosted Sentry over https; the region host (`us.sentry.io`,
+`de.sentry.io`) is read from the organization, or given with `--region us|de` or `--region-host`. A region read from a
+token or an answer must be the base itself or one of its documented region hosts, by exact name; any other host is
+used only when you name it with `--region-host`. Redirects are never followed, so a token never travels to a host
+nobody named. Sentry organization tokens have no expiry: that is recorded as the reason, not as a missing
+record.
+
 **Every minted credential expires, and the expiry is recorded** (OBS-191). `cloudflare.py issue`,
 `openrouter.py issue` and `heroku.py issue` mint with an expiry 90 days out unless told otherwise:
 `--token-expire-days N` for Cloudflare (its `--expire-days` stays the R2 bucket's object lifecycle),
