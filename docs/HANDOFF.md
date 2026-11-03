@@ -19,8 +19,10 @@ expectation. It changes test evidence and documentation, not the published engin
 
 [2026-11-02: release 0.30.1](runs/2026-11-02-release-0.30.1/README.md): engine 0.30.1 (`observatory-log` stays
 0.30.0): a restore on a second machine never takes this machine's identity, private SSH keys or jobs, and `full
-machine-move` (OBS-283, OBS-284, #394); Windows verified in CI and the terminal check (OBS-277, OBS-279, #387). Next:
-merge, tag `v0.30.1`, verify, install, record the receipts.
+machine-move` (OBS-283, OBS-284, #394); Windows verified in CI and the terminal check (OBS-277, OBS-279, #387).
+
+Released: tag `v0.30.1` on `93a0c569`, verified and installed (receipts in the record). Next: 0.31.0 with #401
+(OBS-292), #400 (OBS-287) and OBS-291.
 
 [2026-10-28: release 0.30.0](runs/2026-10-28-release-0.30.0/README.md): engine and plugin 0.30.0: sharing a key
 with another person's Observatory (`full share`, `full cloud deploy`, OBS-263, OBS-264, OBS-276), the secret prompt's
