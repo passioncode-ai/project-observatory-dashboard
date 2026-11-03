@@ -2375,8 +2375,8 @@ On the second machine, in order:
 project-observatory full machine-restore --latest                 # the plan: `machine.mode` reads second-machine
 project-observatory full machine-restore --latest --apply         # nothing private of ~/.ssh written, jobs staged
 project-observatory full machine-restore --latest --packages
-project-observatory full ssh-keys rekey NAME                      # the step `ssh_keys` names: the plan for this machine's own SSH key
-project-observatory full ssh-keys rekey NAME --apply              # before --clone: make it, send it to GitHub and each server, verify
+project-observatory full ssh-keys rekey NAME --fingerprint SHA256:...          # the plan for this machine's own SSH key, as `ssh_keys` names it
+project-observatory full ssh-keys rekey NAME --fingerprint SHA256:... --apply  # before --clone: make it, send it to GitHub and each server, verify
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity
 project-observatory full node --init                              # this machine's own device id
@@ -2387,18 +2387,22 @@ The key comes before `--clone` because the other machine's private key was not w
 checkout whose remote is `git@github.com:…` clones only once GitHub knows this machine's key.
 Use the name the plan gives: when the carried `~/.ssh/config` points a host at a key with
 `IdentityFile`, the plan lists that key as withheld with the hosts that use it, its `fingerprint` and
-one step under the same name, `ssh-keys rekey NAME --fingerprint SHA256:...` (OBS-300), so the carried
-config finds the new key. That step prints rekey's plan and ends with its `--apply` command, which
-makes the key in one command (OBS-285) and sends it to GitHub for sign-in and signing where the account
-gh is signed in to holds the other machine's key, and to each Host that names it,
-verifying each, and then lists what still accepts only the other machine's
-key with the next step for each. The fingerprint is a public fact the plan reads from the bundle (the
-key's `.pub`, or its private file's clear header, never its private section): a second machine never
-gets `NAME.pub`, so rekey could not match the key on GitHub without it. When the bundle does not show
-it, the step has no `--fingerprint` and the key's `note` says to take it from `full ssh-keys list` on
-the other machine; without it nothing goes to GitHub. For a default key such as `id_ed25519` the
-`note` adds that ssh offers it to every host whose config names no key, so each such server is added
-with `--server ALIAS`: rekey names those hosts as not known, never guesses them. A server whose only access was the other machine's key does not let
+two steps under the same name (OBS-300), so the carried config finds the new key:
+`ssh-keys rekey NAME --fingerprint SHA256:...`, which prints rekey's plan and changes nothing, then the
+same with `--apply`, which makes the key (OBS-285) and sends it to GitHub for sign-in and signing where
+the account gh is signed in to holds the other machine's key, and to each Host that names it,
+verifying each, and then lists what still accepts only the other machine's key with the next step for
+each. `next` lists both before `--clone`. The fingerprint is a public fact the plan reads from the
+bundle (the private file's clear header, else the key's `.pub`, never its private section), and only
+keys directly in `~/.ssh` carry it: a second machine never gets `NAME.pub`, so rekey could not match
+the key on GitHub without it. When the bundle does not show it, the steps have no `--fingerprint` and
+the key's `note` says to take it from `full ssh-keys list` on the other machine; without it nothing goes
+to GitHub. rekey reaches a Host through a line naming exactly `~/.ssh/NAME`; a host the plan lists
+through another spelling (`~/.SSH/NAME`, another account's absolute path) is added to both steps with
+`--server ALIAS`, and when the restore leaves `~/.ssh/config` out (`--skip ssh-config`) the `note`
+names those hosts instead. For a default key such as `id_ed25519` the `note` adds that ssh offers it to
+every host whose config names no key, so each such server is added with `--server ALIAS`: rekey names
+those hosts as not known, never guesses them. A server whose only access was the other machine's key does not let
 this machine in yet: the answer gives the step to run on the other machine, or `--interactive` for a
 password. Granting `gh` the `admin:public_key` and `admin:ssh_signing_key` scopes
 (`gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key`) and typing the new key's

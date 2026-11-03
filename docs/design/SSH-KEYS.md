@@ -225,15 +225,19 @@ registers it everywhere the other machine's key is registered, by composing the 
 only the other machine's key.
 
 **`machine-restore` hands out this step** (OBS-300). On a second machine its answer's `ssh_keys`
-names, for each withheld key directly in `~/.ssh`, one step: `full ssh-keys rekey NAME
---fingerprint SHA256:...`, where it used to name `create` and a `send` per target. The fingerprint is
-read from the bundle's public half of that key (its `.pub`, else its private file's clear header) and
-given to `rekey` because the restore withholds `NAME.pub` with its key, so `rekey` here could not read
-it; when the bundle does not show it, the step has no `--fingerprint` and the key's `note` names
-`ssh-keys list` on the other machine. A key no Host names gets the same step: `rekey` still makes it
-and reports no place to send it to. A default key's `note` names the servers it cannot list (every
-host with no IdentityFile line) and `--server ALIAS`. A key outside `~/.ssh` keeps its note and no
-step (`machine_backup.py` `_Second.ssh_keys`; `tests/test_machine_backup.py` SecondMachineKeys).
+names, for each withheld key directly in `~/.ssh`, two steps where it used to name `create` and a
+`send` per target: `full ssh-keys rekey NAME --fingerprint SHA256:...` (the plan) and the same with
+`--apply`; `next` lists both before `--clone`. The fingerprint, carried only on keys directly in
+`~/.ssh`, is read from the bundle's public half of that key (its private file's clear header, else its
+`.pub`) and given to `rekey` because the restore withholds `NAME.pub` with its key, so `rekey` here
+could not read it; when the bundle does not show it, the steps have no `--fingerprint` and the key's
+`note` names `ssh-keys list` on the other machine. `rekey` reaches a Host only through a line naming
+exactly `~/.ssh/NAME`, so a Host the plan lists through another spelling is added with `--server
+ALIAS`, and when the restore leaves `~/.ssh/config` out the `note` names those hosts. A key no Host
+names gets the same steps: `rekey` still makes it and reports no place to send it to. A default key's
+`note` names the servers it cannot list (every host with no IdentityFile line) and `--server ALIAS`. A
+key outside `~/.ssh` keeps its note and no step (`machine_backup.py` `_Second.ssh_keys`;
+`tests/test_machine_backup.py` SecondMachineKeys).
 
 ```
 project-observatory full ssh-keys rekey OLD [--name NEW] [--fingerprint SHA256:...] [--server ALIAS]...

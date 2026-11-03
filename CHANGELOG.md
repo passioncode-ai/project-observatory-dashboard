@@ -5,6 +5,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **A second-machine restore names `ssh-keys rekey` for each key** (OBS-300, `docs/ONBOARDING.md` "Moving to a
+  second machine that runs beside this one"). `full machine-restore`'s `ssh_keys` gives each withheld key directly in
+  `~/.ssh` two steps, `full ssh-keys rekey NAME --fingerprint SHA256:...` (the plan) and the same with `--apply`, where
+  it gave `ssh-keys create` and a `send` per target; `next` lists both before `--clone`. Keys directly in `~/.ssh` now
+  name their `fingerprint`, read from the bundle's public half of the key (its private file's clear header, else its
+  `.pub`, never its private section): the restore withholds `NAME.pub`, so `rekey` could not otherwise match the key
+  on GitHub. Without one the steps have no `--fingerprint` and the key's `note` names `full ssh-keys list` on the
+  other machine. A Host whose `IdentityFile` line is not exactly `~/.ssh/NAME`, which `rekey` would not see, is added
+  with `--server ALIAS`; with `~/.ssh/config` left out of the restore the `note` names those hosts. A default key's
+  `note` names `--server ALIAS` for the servers ssh offers it to without an `IdentityFile` line. A key outside
+  `~/.ssh` keeps its note and no step. Tests: `tests/test_machine_backup.py` SecondMachineKeys, SecondMachine.
+
 ## 0.31.0 (2026-11-03)
 
 Your own relay for your machines: `full relay serve`, or `full relay enable` inside the node's own server, carries
@@ -134,16 +148,6 @@ remove any share link an agent handed over there: 0.30 cannot accept one (`docs/
   recipient cannot rewrite past days or grow the record without bound. A mailbox answer whose reports are not objects
   is refused report by report instead of stopping the pass. A report body with an export but no entry for its day is
   refused `bad-body`. `docs/COMPATIBILITY.md` names the stored fields.
-
-- **A second-machine restore names one `ssh-keys rekey` step per key** (OBS-300, `docs/ONBOARDING.md` "Moving to a
-  second machine that runs beside this one"). `full machine-restore`'s `ssh_keys` gives each withheld key directly in
-  `~/.ssh` the step `full ssh-keys rekey NAME --fingerprint SHA256:...` where it gave `ssh-keys create` and a `send`
-  per target, and now names the key's `fingerprint`. The fingerprint is read from the bundle's public half of the key
-  (its `.pub`, else its private file's clear header, never its private section): the restore withholds `NAME.pub`, so
-  `rekey` could not otherwise match the key on GitHub. Without one the step has no `--fingerprint` and the key's
-  `note` names `full ssh-keys list` on the other machine; a default key's `note` names `--server ALIAS` for the
-  servers ssh offers it to without an `IdentityFile` line. A key outside `~/.ssh` keeps its note and no step. Tests:
-  `tests/test_machine_backup.py` SecondMachineKeys, SecondMachine.
 
 ## 0.30.1 (2026-11-02)
 
