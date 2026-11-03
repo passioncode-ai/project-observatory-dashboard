@@ -722,6 +722,12 @@ Failure paths:
   nothing was sealed to it.
 - Another app registered the same link scheme: it may open instead; nothing is lost, because the
   claim's proof and the six-digit code are checked inside Observatory.
+- The person asked an agent to open the link ("Open a share", contract DEC-0147 item 4): the agent
+  hands it to the node with the person's words and nothing is claimed; the share reads
+  "handed-over" until the person accepts it (Accept stays theirs) or refuses it ("They differ"
+  deletes the link and sends nothing), and lapses 7 days later; at most 20 wait at once. The
+  sender's key is pinned only when the link is in the person's words unchanged, and Accept says
+  whether it is.
 
 Acceptance: the claim proves possession of the code without sending it to any third party; the
 recipient's machine never writes a shared value to disk in the clear.
@@ -732,10 +738,13 @@ makes the share's key pair and claims; `full share status ID` shows the code to 
 then the command an agent uses. A second accept of one link on one machine is refused; a link another
 machine claimed first, an expired link and a sender commit that does not name the link's key
 fingerprint each burn the share with that reason. A delegated (metered) agent is refused a shared key
-until contract CT-187 says who pays for its use.
-Coverage: `tests/test_shares.py`, `tests/test_share_cli.py`. Status: partly built (OBS-264, the
-command line); the landing page, the scheme and the screen planned (OBS-266); product outcome
-unobserved.
+until contract CT-187 says who pays for its use. An agent's "Open a share" (OBS-291): the node's
+`share.open` tool, with the operator's decision, holds the link and claims nothing; the person accepts
+it with `full share accept ID`; the agent's own MCP server does not relay the tool yet (OBS-298).
+Coverage: `tests/test_shares.py`, `tests/test_share_cli.py`, `tests/test_secret_prompt.py`
+(`TheOpenAShareTwin`), `tests/test_node_actions.py`. Status: partly built (OBS-264, OBS-291, the
+command line and the node's tool); the landing page, the scheme and the screen planned (OBS-266);
+product outcome unobserved.
 
 ### OSS-81: see how my shared keys are used, and take them back
 
@@ -770,7 +779,9 @@ agents as reported by their machine, deliveries as seen by your mailbox, and exp
 `full share revoke ID` hands the signed revocation to the mailbox (observed at once), the recipient's
 machine deletes and returns a signed receipt at its next contact, and the share reads "taken back"
 only after `full share provider-ended ID` (a terminal) records that the key was revoked or rotated at
-its provider. The provider's spend and the door's revoke from the screen are OBS-265.
+its provider. Each report restates its day and the 35 days before it; the sender replaces each day's
+count and counts each export once however many reports restate it (OBS-291, contract DEC-0147). The
+provider's spend and the door's revoke from the screen are OBS-265.
 Coverage: `tests/test_shares.py`, `tests/test_share_cli.py`. Status: partly built (OBS-264, OBS-276,
 the command line); the screen planned (OBS-265); product outcome unobserved.
 
@@ -840,7 +851,9 @@ a machine with no desktop session: the request is refused with the step for the 
 be driven by an agent;
 the node is not running: the agent receives "Observatory is not running" and no window appears; the
 person presses Cancel or the window times out (10 minutes): the agent receives
-"declined" or "no answer"; an empty or multi-line value is refused in the window; a second request
+"declined" or "no answer"; the person tells an agent to decline it: the agent carries their words to
+the node's `secret.decline`, the window closes and the asking agent receives "declined" naming the
+operator through an agent (contract DEC-0147 item 3, OBS-291); an empty or multi-line value is refused in the window; a second request
 for the same slot while one is open joins it; a slot that already holds a value asks "replace?"
 naming its last rotation.
 
@@ -857,7 +870,9 @@ the provider's shape check, invalid arguments journalled, a request withdrawn wh
 start or its runner is refused; the broker opens the enrolled app with the request id and a failed
 start closes the request `no-client`; Windows `broker-unsupported`; the app's door: only a verified
 signed parent reads or answers, `store` writes the slot in the app's own child with the value on
-its stdin only and rotates on Replace, `decline`, `unavailable` without a phrase store),
+its stdin only and rotates on Replace, `decline`, `unavailable` without a phrase store; the Decline
+twin `secret.decline`: no decision declines nothing, the operator's decline names who declined and
+keeps the words in the audit record only, a closed request answered as it is),
 `tests/test_node_lifecycle_broker.py` (the prompt's own internal caller, one operation per request),
 `tests/test_mcp_wire.py` (the tool is published), and in the Mac app
 `macos/Tests/ObservatoryCoreTests/SecretPromptTests.swift` (the request as the door answers it, the

@@ -22,6 +22,8 @@ Recipient:
 
     project-observatory full share accept
         open a link the sender gave you: it asks for the link, which keeps it out of your shell history (a terminal)
+    project-observatory full share accept ID
+        accept a link an agent handed to this machine (its "Open a share"): nothing is claimed before you do
     project-observatory full share status ID
         the code to read to the sender, then the keys you received
     python "$(project-observatory full-path)/tools/use_secret.py" run --share ID SLOT -- COMMAND
@@ -32,7 +34,8 @@ Both:
     project-observatory full share list --json
         every share, sent and received, after one pass to the mailbox
     project-observatory full share differ ID
-        the codes differ: before sealing, nothing is sealed; after it, the sender takes the share back
+        the codes differ: before sealing, nothing is sealed; after it, the sender takes the share back; on a link an
+        agent handed over, refuse it: the link is deleted and nothing is claimed
     project-observatory full share sync ID
         one pass to the mailbox for one share, or every share without ID
 
@@ -168,6 +171,13 @@ def _print(side: str, record: dict, SH, as_json: bool) -> None:
                   f"{s['slot']} -- COMMAND")
         if view["state"] == "removed":
             print("  the sender took this share back; its keys were removed from this machine")
+        if view["state"] == "handed-over":
+            print(f"  an agent handed this link over; nothing is claimed until you accept it: `{PROG} accept {short}` "
+                  f"(until {view['lapsesAt']})")
+        if view["state"] == "lapsed":
+            print("  an agent handed this link over and nobody accepted it within 7 days; ask the sender for a new one")
+        if view["state"] == "refused":
+            print("  you refused this link: it was deleted from this machine and nothing was claimed")
 
 
 def cmd_create(args) -> int:
@@ -320,7 +330,35 @@ def cmd_provider_ended(args) -> int:
 def cmd_accept(args) -> int:
     require_terminal("accept a share")
     SH, s = store()
-    if args.link in (None, "-"):
+    handed = None
+    if args.link not in (None, "-") and "://" not in args.link:
+        # A link an agent handed over ("Open a share", DEC-0147): the node holds it; the person accepts it by its id.
+        try:
+            side, share_id = s.find(args.link)
+        except SH.ShareError as exc:
+            print(f"share: {exc.code}: {exc}", file=sys.stderr)
+            return 1
+        handed = share_id
+        held = s._handed(s._received(share_id), s.clock()) if side == "received" else None
+        # Checked before any prompt: only a link an agent handed over and nobody accepted or refused is accepted here.
+        if held is None or held["state"] != "handed-over":
+            code, why = (("lapsed", "nobody accepted this link within 7 days; ask the sender for a new one")
+                         if held is not None else
+                         ("not-handed-over", "this share is no link an agent handed over and nobody answered yet; "
+                                             f"`{PROG} status {share_id[:8]}` says what it is"))
+            print(f"share: {code}: {why}", file=sys.stderr)
+            return 1
+        print(f"a link an agent handed over: share {share_id[:8]}, from the mailbox {held.get('origin', 'unknown')}")
+        if held.get("pinned"):
+            print("  the sender's key is pinned: the link was in the operator's words as the sender sent it")
+        else:
+            print("  the sender's key is NOT pinned: the agent found this link somewhere other than the operator's "
+                  "words, so only the six-digit code tells you the sender is who you think")
+        print(f"  after you accept, compare the six-digit code with the sender by a call or a thread you trust "
+              f"(`{PROG} status {share_id[:8]}` shows it in your terminal); if theirs differs, run "
+              f"`{PROG} differ {share_id[:8]}`. To refuse this link without accepting, run "
+              f"`{PROG} differ {share_id[:8]}`.")
+    elif args.link in (None, "-"):
         # Read, not taken from argv: a link on a command line stays in the shell's history.
         link = input("Paste the link you were sent and press Enter: ").strip()
     else:
@@ -331,7 +369,7 @@ def cmd_accept(args) -> int:
         print("not accepted; nothing was sent")
         return 1
     try:
-        record = s.accept(link, label=args.label)
+        record = s.accept_handed(handed, label=args.label) if handed else s.accept(link, label=args.label)
     except SH.ShareError as exc:
         print(f"share: {exc.code}: {exc}", file=sys.stderr)
         return 1
@@ -401,8 +439,8 @@ def parser() -> argparse.ArgumentParser:
         q.add_argument("id")
         q.set_defaults(fn=fn)
     q = sub.add_parser("accept", help="open a link someone sent you (a terminal; without LINK, or with -, it asks "
-                                      "for the link)")
-    q.add_argument("link", nargs="?")
+                                      "for the link), or accept by its ID a link an agent handed over")
+    q.add_argument("link", nargs="?", help="the link, -, or the ID of a share an agent handed over")
     q.add_argument("--label", help="your name for this share (default share-<id>)")
     q.set_defaults(fn=cmd_accept)
     q = sub.add_parser("mailbox-trial", help="a loopback mailbox for a trial between two workspaces on this machine")

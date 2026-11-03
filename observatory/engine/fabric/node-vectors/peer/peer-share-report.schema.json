@@ -140,7 +140,7 @@
               }
             }
           },
-          "description": "Per slot and UTC day: the uses the recipient's node counted, and the last one."
+          "description": "Per slot and UTC day of the report's window (its iat day and the 35 UTC days before it, or from the claim's day when later; DEC-0147): the uses the recipient's node counted, and the last one. The sender replaces a day and slot's uses and last use with a later report's."
         },
         "consumers": {
           "type": "array",
@@ -187,7 +187,7 @@
               }
             }
           },
-          "description": "Exports made with the export button, recorded before the value left; not every way a value can leave."
+          "description": "Exports made with the export button, recorded before the value left; not every way a value can leave. Each falls on a day and slot the report holds an entry for; the sender keeps exports as a set keyed by slot and instant, never removing one a later report omits (DEC-0147)."
         }
       },
       "description": "The report's plaintext (peerReportBody): counts, consumer labels and the time of each day's last use and of each export, never a value, a command, an argument or an output (DEC-0111's call-record rule)."

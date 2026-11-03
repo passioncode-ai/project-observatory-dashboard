@@ -98,6 +98,54 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
             os.close(master)
         return subprocess.CompletedProcess(command, proc.returncode, b''.join(chunks).decode('utf-8', 'replace'), err)
 
+    def test_a_link_an_agent_handed_over_is_accepted_by_its_id(self):
+        """An agent's "Open a share" leaves the link with the node (DEC-0147 item 4); the person accepts it at a
+        terminal by its id, and nothing was claimed before."""
+        created = self.share('sam', 'create', 'alpha-web', 'prod', 'OPENROUTER_API_KEY', '--to', 'Alex laptop',
+                             '--mailbox', ORIGIN, '--show-link')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        link = next(line for line in created.stdout.splitlines() if line.startswith(ORIGIN + '/s/'))
+        share_id = re.search(r'/s/([0-9a-f]{32})#', link).group(1)
+        from node import shares as SH
+        SH.Shares(self.homes['alex'] / 'node' / 'shares').hand_over(link, pinned=True)
+        status = self.share('alex', 'status', share_id[:8])
+        self.assertIn('handed-over', status.stdout)
+        self.assertIn(f'accept {share_id[:8]}', status.stdout)
+        self.assertNotIn(link.split('#', 1)[1], status.stdout)
+        self.assertNotEqual(self.share('alex', 'accept', share_id[:8]).returncode, 0)    # a person's act
+        accepted = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='yes\n')
+        self.assertEqual(accepted.returncode, 0, accepted.stderr + accepted.stdout)
+        self.assertIn('The sender will see', accepted.stdout)
+        self.assertIn('exchanging', accepted.stdout)
+        self.assertIn(ORIGIN, accepted.stdout)                           # where the link points, before the yes
+        self.assertIn('key is pinned', accepted.stdout)
+        self.assertIn('six-digit code', accepted.stdout)
+        self.assertLess(accepted.stdout.index(ORIGIN), accepted.stdout.index('The sender will see'))
+
+    def test_the_person_refuses_a_handed_over_link(self):
+        created = self.share('sam', 'create', 'alpha-web', 'prod', 'OPENROUTER_API_KEY', '--to', 'Alex laptop',
+                             '--mailbox', ORIGIN, '--show-link')
+        link = next(line for line in created.stdout.splitlines() if line.startswith(ORIGIN + '/s/'))
+        share_id = re.search(r'/s/([0-9a-f]{32})#', link).group(1)
+        from node import shares as SH
+        SH.Shares(self.homes['alex'] / 'node' / 'shares').hand_over(link, pinned=False)
+        unpinned = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='no\n')
+        self.assertIn('NOT pinned', unpinned.stdout)
+        # A share that is no handed-over link is refused before any prompt (the confirming review of #407).
+        own = self.share('sam', 'accept', share_id[:8], terminal=True, stdin_text='yes\n')
+        self.assertNotEqual(own.returncode, 0)
+        self.assertIn('not-handed-over', own.stderr)
+        self.assertNotIn('pinned', own.stdout)
+        self.assertNotIn('The sender will see', own.stdout)
+        refused = self.share('alex', 'differ', share_id[:8])
+        self.assertEqual(refused.returncode, 0, refused.stderr)
+        self.assertIn('refused', refused.stdout)
+        self.assertFalse((self.homes['alex'] / 'node' / 'shares' / 'received' / share_id / 'link').exists())
+        again = self.share('alex', 'accept', share_id[:8], terminal=True, stdin_text='yes\n')
+        self.assertNotEqual(again.returncode, 0)
+        self.assertIn('not-handed-over', again.stderr)
+        self.assertNotIn('The sender will see', again.stdout)
+
     def test_two_people(self):
         # Sam shares a key with Alex: the link once, never in a log.
         created = self.share('sam', 'create', 'alpha-web', 'prod', 'OPENROUTER_API_KEY', '--to', 'Alex laptop',

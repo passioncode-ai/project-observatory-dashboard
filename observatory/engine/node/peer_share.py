@@ -667,10 +667,25 @@ def _scalar(key: Any) -> Any:
 
 # ---- The usage report ---------------------------------------------------------------------------------------------
 
+#: How many UTC days before its own `iat` day a usage report restates (DEC-0147 item 1): the `iat` day and these, from
+#: the claim's day when that is later. A report lost or refused is restated by the next while its days stay inside.
+PEER_REPORT_DAYS = 35
+
+
+def peer_report_window(iat_ms: int, claimed_ms: Optional[int]) -> str:
+    """The first UTC day a report sealed at `iat_ms` restates (DEC-0147 item 1): `PEER_REPORT_DAYS` days before the
+    `iat` day, or the claim's day when that is later. The contract has no reference function for the window (CT-201);
+    this is the node's, and `peer_report_body` checks a body's shape only."""
+    first = relay.rfc3339((iat_ms // DAY_MS - PEER_REPORT_DAYS) * DAY_MS)[:10]
+    claimed = relay.rfc3339(claimed_ms)[:10] if isinstance(claimed_ms, int) else None
+    return max(first, claimed) if claimed else first
+
+
 def peer_report_body(value: Any) -> bool:
     """A report's body (PS-8): per slot and UTC day the uses counted and the last use, the consumer labels and the
     exports made with the export button; never a value, a command, an argument or an output. At most 400 entries
-    in each list, one day entry per date and slot."""
+    in each list, one day entry per date and slot, and a day entry for the UTC day and slot of every export, which
+    travels with it: the sender replaces a day and slot's uses and keeps its exports together (DEC-0147)."""
     if not _is_obj(value) or not _exactly(value, ('days', 'consumers', 'exports')):
         return False
 
@@ -692,7 +707,11 @@ def peer_report_body(value: Any) -> bool:
             and entries(value.get('exports'), exported)):
         return False
     keys = [(e['date'], e['slot']) for e in value['days']]
-    return len(set(keys)) == len(keys)
+    held = set(keys)
+    if len(held) != len(keys):
+        return False
+    # An export travels with its day (DEC-0147): its `at` is a `Z` instant, so its first ten characters are its UTC day.
+    return all((e['at'][:10], e['slot']) in held for e in value['exports'])
 
 
 def check_peer_report(value: Any, ctx: Any) -> dict:

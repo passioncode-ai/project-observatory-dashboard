@@ -130,7 +130,11 @@ FILES = {**{name: "fixtures/vectors/" + name for name in (
          **{"peer/positive/peer-share-%s.json" % name: "fixtures/positive/peer-share-%s.json" % name
             for name in ("envelope", "frame-claim", "report", "revocation")},
          **{"peer/negative/peer-share-%s.json" % name: "fixtures/negative/peer-share-%s.json" % name
-            for name in ("deletion-no-revocation", "envelope-value", "frame-claim-code", "report-device-key")}}
+            for name in ("deletion-no-revocation", "envelope-value", "frame-claim-code", "report-device-key")},
+         # The relayed decision a button's agent twin carries (DEC-0121 AP-2): `actionDecision`'s shared vectors, which
+         # the node's port (`node/actions.py`) answers for the twins of the secret prompt's Decline and of Open a share
+         # (DEC-0147, OBS-291).
+         "actions/actions.json": "fixtures/vectors/actions.json"}
 #: The contract's estate fixtures, vendored into `semantic/` without a digest row (`test_node_pairing.py` runs each).
 SEMANTIC = re.compile(r"^estate-[A-Za-z0-9-]+\.json$")
 #: Its slot is the AWS documentation's example access key id, a shape the public-release gate refuses;

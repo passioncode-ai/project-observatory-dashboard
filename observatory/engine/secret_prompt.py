@@ -22,7 +22,10 @@ does with it. What it keeps, and why:
   reported when the slot was written after the request was filed, and `unconfirmed` when the app said stored but the
   slot does not show it (SP-5). Nothing here takes, logs, journals or returns a value.
 - **Every final state is named.** `stored`, `declined`, `no-answer` (the deadline passed), `unconfirmed`,
-  `no-client` (no genuine window could be shown) and `cancelled` (the agent withdrew it). Refusals that file
+  `no-client` (no genuine window could be shown) and `cancelled` (the agent withdrew it). A `declined` names who
+  declined (`declinedBy`): the person in the window, or the operator through an agent, whose decision the window's
+  Decline twin `secret.decline` carries (DEC-0147 item 3); the operator's words go to the node's own audit record
+  `decisions.jsonl`, never to the journal or an answer. Refusals that file
   nothing: `no-desktop` (a server or a remote shell, D4: the person runs `vault.py put` in their own shell),
   `no-client` before filing, `slot-filled`, `slot-busy`, `rate-limited`, `invalid-argument`.
 - **The window is the Mac app's, opened through the lifecycle broker.** The local server installs `BrokerPrompter`:
@@ -108,14 +111,15 @@ JOURNAL_MAX_BYTES = 1_000_000
 
 OPEN = "waiting"
 OUTCOMES = ("stored", "declined", "no-answer", "unconfirmed", "no-client", "cancelled")
-TOOLS = ("secret.request", "secret.get", "secret.cancel")
+TOOLS = ("secret.request", "secret.get", "secret.cancel", "secret.decline", "share.open")
 MCP_REVISION = "2026-07-28"
 HANDSHAKE_REVISIONS = ("2025-03-26", "2025-06-18", "2025-11-25", MCP_REVISION)
 
 #: What each answer means to the agent and what to do next. One line per code; tests pin that every code has one.
 MESSAGES = {
     "stored": "the person stored the value in the vault slot; use it through use_secret.py, never ask for the value",
-    "declined": "the person pressed Cancel; do not ask again for the same reason",
+    "declined": ("declined by the person in Observatory's window, or by the operator through an agent "
+                 "(secret.decline); do not ask again for the same reason"),
     "no-answer": "the person did not answer within 10 minutes",
     "unconfirmed": "the app reported the value stored, but the vault slot does not show a write after the request",
     "no-client": "Observatory's own prompt window cannot be shown here",
@@ -134,6 +138,21 @@ MESSAGES = {
     "value-multiline": "the value carries a line break; one secret per slot, nothing was written",
     "value-unchanged": "the new value equals the one the slot holds; nothing was written",
     "slot-filled-now": "the slot was filled after the request without asking to replace it; nothing was written",
+    "operator-decision-required": ("this button is the operator's: ask the operator, then call again with their words "
+                                   "in _meta.decision (by operator, via relayed-instruction, the action, the words, "
+                                   "when they said them)"),
+    "decision-invalid": ("the decision is not the operator's for this action and object, or is older than 24 hours: "
+                         "ask the operator again and send their words as they said them"),
+    "too-many-handed-over": ("twenty handed-over share links already wait for the person; ask them to accept or "
+                             "refuse those first"),
+    "own-share": "this machine sent that share; it is opened on the recipient's machine",
+}
+#: Who declined a request, as the agent that asked reads it (DEC-0147 item 3): the person's press of Decline or Cancel
+#: in the window, or the operator's decision an agent carried to `secret.decline`.
+DECLINED_BY = {
+    "person": "the person declined it in Observatory's window; do not ask again for the same reason",
+    "operator": ("the operator declined it through an agent (secret.decline), not in the window; do not ask again "
+                 "for the same reason"),
 }
 #: Why a window cannot be shown (`no-client`), by reason code.
 NO_CLIENT = {
@@ -635,6 +654,10 @@ def view(r: dict) -> dict:
     if r["state"] != OPEN:
         out["outcome"] = r["state"]
         out["message"] = MESSAGES[r["state"]]
+        if r["state"] == "declined":
+            # A request declined before this field existed was declined in the window: the only way then.
+            out["declinedBy"] = r.get("declinedBy") if r.get("declinedBy") in DECLINED_BY else "person"
+            out["message"] = DECLINED_BY[out["declinedBy"]]
         out["answeredAt"] = r.get("answeredAt")
         if r.get("why"):
             out["why"] = r["why"]
@@ -719,7 +742,8 @@ def _file(agent: str, args: dict, where: dict) -> dict:
 
 
 def _finish(request_id: str, outcome: str, *, why: str | None = None, agent: str | None = None,
-            reason: str | None = None) -> dict:
+            reason: str | None = None, declined_by: str | None = None,
+            on_close: Optional[Callable[[dict], None]] = None) -> dict:
     now = CLOCK()
     with _locked():
         doc = _read_queue()
@@ -732,7 +756,12 @@ def _finish(request_id: str, outcome: str, *, why: str | None = None, agent: str
             r.update(state=outcome, answeredAt=_stamp(now), why=why)
             if reason is not None:
                 r["reason"] = reason
-            journal("answered", requestId=r["id"], outcome=outcome, agent=r["agent"], slot=_slot_text(r))
+            if declined_by is not None and outcome == "declined":
+                r["declinedBy"] = declined_by
+            journal("answered", requestId=r["id"], outcome=outcome, agent=r["agent"], slot=_slot_text(r),
+                    **({"declinedBy": declined_by} if declined_by and outcome == "declined" else {}))
+            if on_close is not None:
+                on_close(r)
         _write_queue(doc, now)
         return r
 
@@ -782,7 +811,126 @@ def answer(request_id: str, outcome: str) -> dict:
         filed = _seconds(r["createdAt"]) or 0
         confirmed = state["filled"] and written is not None and written >= filed
         outcome = "stored" if confirmed else "unconfirmed"
-    return view(_finish(request_id, outcome))
+    return view(_finish(request_id, outcome, declined_by="person" if outcome == "declined" else None))
+
+
+# ── the agent twins of two buttons (DEC-0147 items 3 and 4; DEC-0121 AP-2) ──
+#: How long the audit record keeps a decision: its 24 h validity (AP-2) and a day's margin, then it is pruned.
+DECISIONS_KEEP_SECONDS = 2 * 86400
+
+
+def _audit(entry: dict) -> None:
+    """The node's own audit record of a relayed decision (AP-2): the operator's words included, owner-only, apart from
+    the journal, and never in an answer, the events feed or a page another party reads. Each write drops the entries
+    older than DECISIONS_KEEP_SECONDS, under the queue's lock, so the file stays bounded."""
+    path = state_dir() / "decisions.jsonl"
+    now = CLOCK()
+    with _locked():
+        try:
+            kept = []
+            for line in private_io.read(path).splitlines():
+                try:
+                    at = _seconds(json.loads(line).get("at"))
+                except (ValueError, AttributeError):
+                    continue
+                if at is not None and now - at < DECISIONS_KEEP_SECONDS:
+                    kept.append(line + "\n")
+        except FileNotFoundError:
+            kept = []
+        kept.append(json.dumps({"at": _stamp(now), **entry}, ensure_ascii=False) + "\n")
+        private_io.write(path, "".join(kept))
+
+
+def _decided(action: dict, agent: str, decision: Any, target: str) -> dict:
+    """The relayed action's check (`node/actions.py`, the contract's `actionDecision`): a local agent binding on this
+    machine's loopback is T0 (DL-25); no decision, or one that is not the operator's for this action and object,
+    refuses."""
+    from node import actions
+    kwargs = {} if decision is _NO_DECISION else {"decision": decision}
+    answer = actions.action_decision(action=action, tier="T0", caller="agent:" + agent, target=target,
+                                     now=_stamp(CLOCK()), **kwargs)
+    if answer.get("ok") is True:
+        return answer["recordAs"]
+    raise Refused(answer.get("code") or "unavailable")
+
+
+_NO_DECISION = object()
+
+
+def decline(agent: str, request_id: Any, decision: Any = _NO_DECISION) -> dict:
+    """The agent twin of the window's "Decline" (DEC-0147 item 3, SP-4): with the operator's decision, an open request
+    is answered `declined` at the node's receipt time and its window closed; the asking agent reads that the operator
+    declined it. Without a decision nothing is declined (`operator-decision-required`); a closed request (answered,
+    withdrawn, past its deadline, `no-client`) is answered as it is. Any bound agent may carry the operator's
+    decision for any request it names."""
+    if not isinstance(request_id, str) or not REQUEST_ID.match(request_id):
+        raise Refused("unknown-request")
+    from node import actions
+    record_as = _decided(actions.SECRET_DECLINE, agent, decision, request_id)
+    with _locked():
+        known = any(r["id"] == request_id for r in _read_queue()["requests"])
+    if not known:
+        raise Refused("unknown-request")
+    closed: list = []
+    r = _finish(request_id, "declined", declined_by="operator", on_close=closed.append)
+    if closed:
+        _audit({"action": "secret.decline", "target": request_id, "recordAs": record_as, "decision": decision})
+        try:
+            PROMPTER.withdraw(prompt_view(r))                # the window closes, as `secret.cancel` closes it
+        except Exception:  # noqa: BLE001 - closing a window is best effort; the request is declined anyway
+            pass
+    if r["agent"] == agent:
+        return view(r)
+    # Another agent's request: the outcome only, never who asked, for which slot or why (`view` is the asker's).
+    full = view(r)
+    return {k: full[k] for k in ("requestId", "state", "outcome", "declinedBy", "message", "answeredAt") if k in full}
+
+
+def _share_store():
+    """The node's share store (`node/shares.py`) under `OBSERVATORY_NODE`, as `full share` opens it."""
+    from node import shares as SH
+    root = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node") / "shares"
+    if any(p.is_symlink() for p in (root, *root.parents)):
+        raise Refused("unavailable")
+    return SH.Shares(root.resolve())
+
+
+#: The recipient's share store; tests replace it.
+SHARE_STORE: Callable[[], Any] = _share_store
+
+
+def share_open(agent: str, link: Any, decision: Any = _NO_DECISION) -> dict:
+    """The agent twin of "Open a share" (DEC-0147 item 4, PS-4): the link whole, as one argument, handed to the node,
+    which holds it and claims nothing; Accept stays the person's (`humanStep: consent`), so the answer is success with
+    the share id and the person's step. The sender's key is pinned only when the link is in the operator's decision
+    unchanged. The answer and the journal name the share id only; the audit record keeps the decision with the
+    link's fragment replaced by the share id."""
+    from node import actions, peer_share
+    parsed = peer_share.parse_share_link(link)
+    if not isinstance(link, str) or not parsed["ok"]:
+        raise Refused("invalid-argument", field="link")
+    share_id = parsed["link"]["shareId"]
+    record_as = _decided(actions.SHARE_OPEN, agent, decision, share_id)
+    pinned = isinstance(decision, dict) and isinstance(decision.get("instruction"), str) \
+        and link in decision["instruction"]
+    store = SHARE_STORE()
+    created: list = []
+    try:
+        record = store.hand_over(link, pinned=pinned, created=created)
+    except Exception as exc:  # noqa: BLE001 - a share store's refusal by its code; its message names no code or link
+        code = getattr(exc, "code", None)
+        raise Refused(code if isinstance(code, str) else "unavailable") from None
+    if created and created[0]:                                     # a repeat of the same link records nothing again
+        _audit({"action": "share.open", "target": share_id, "recordAs": record_as,
+                "decision": actions.redact_link(decision, link, share_id)})
+        journal("share-handed-over", shareId=share_id, caller=agent, pinned=bool(record.get("pinned", pinned)))
+    out = {"shareId": share_id, "state": record.get("state"), "pinned": bool(record.get("pinned", pinned))}
+    if record.get("state") == "handed-over":
+        out.update(humanStep="consent", lapsesAt=record.get("lapsesAt"),
+                   step=f"project-observatory full share accept {share_id[:8]}",
+                   why=("Accept is the person's consent to the usage reports the sender will see; hand them the step, "
+                        "nothing is claimed before they accept"))
+    return out
 
 
 def waiting() -> list[dict]:
@@ -931,6 +1079,20 @@ TOOL_DEFINITIONS = [
      "description": "Withdraw a secret request you filed; a final one is answered unchanged.",
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["requestId"],
                      "properties": {"requestId": {"type": "string"}}}},
+    {"name": "secret.decline",
+     "description": ("The window's Decline, on the operator's word: carry the operator's decision in "
+                     "_meta.decision (action secret.decline, their words verbatim) and the request id. The request is "
+                     "answered declined and its window closes; without a decision nothing is declined "
+                     "(operator-decision-required). To withdraw your own request use secret.cancel."),
+     "inputSchema": {"type": "object", "additionalProperties": False, "required": ["requestId"],
+                     "properties": {"requestId": {"type": "string"}}}},
+    {"name": "share.open",
+     "description": ("Open a share, on the operator's word: hand the share link whole to this machine, with the "
+                     "operator's decision in _meta.decision (action share.open, their words verbatim). Nothing is "
+                     "claimed: Accept is the person's step (humanStep consent), so hand them the answer's step. The "
+                     "sender's key is pinned only when the link is in the operator's words unchanged."),
+     "inputSchema": {"type": "object", "additionalProperties": False, "required": ["link"],
+                     "properties": {"link": {"type": "string", "maxLength": 512}}}},
 ]
 
 
@@ -968,6 +1130,8 @@ def handle(agent: str, message: Any) -> Optional[dict]:
         return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"Method {method} is not served here."}}
     name = params.get("name") if isinstance(params, dict) else None
     arguments = (params.get("arguments") or {}) if isinstance(params, dict) else {}
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    decision = meta["decision"] if isinstance(meta, dict) and "decision" in meta else _NO_DECISION
     try:
         if name == "secret.request":
             out = file(agent, arguments)
@@ -975,6 +1139,11 @@ def handle(agent: str, message: Any) -> Optional[dict]:
             out = {"request": get(agent, (arguments or {}).get("requestId") if isinstance(arguments, dict) else None)}
         elif name == "secret.cancel":
             out = {"request": cancel(agent, (arguments or {}).get("requestId") if isinstance(arguments, dict) else None)}
+        elif name == "secret.decline":
+            out = {"request": decline(agent, (arguments or {}).get("requestId") if isinstance(arguments, dict) else None,
+                                      decision)}
+        elif name == "share.open":
+            out = share_open(agent, (arguments or {}).get("link") if isinstance(arguments, dict) else None, decision)
         else:
             return _rpc(rid, _tool_result({"error": "unknown-tool", "message": "the secret tools are "
                                            + ", ".join(TOOLS)}, is_error=True))
