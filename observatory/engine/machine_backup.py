@@ -1995,7 +1995,10 @@ def select_checkouts(records: list[dict], projects, home: Path) -> tuple[list[di
         for j, other in enumerate(usable):
             if other["path"].startswith(inside):
                 chosen.setdefault(j, other)
-            if rec.get("worktree") and other.get("common_dir") == rec.get("common_dir") and not other.get("worktree"):
+            # Only a recorded common folder ties a worktree to its main checkout: two records that name
+            # none (an older bundle, a record whose git answer failed) are not one repository.
+            if rec.get("worktree") and rec.get("common_dir") is not None \
+                    and other.get("common_dir") == rec.get("common_dir") and not other.get("worktree"):
                 chosen.setdefault(j, other)
     return [usable[i] for i in sorted(chosen)], unmatched
 

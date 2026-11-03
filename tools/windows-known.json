@@ -868,6 +868,7 @@
         "Restore.test_a_restore_killed_outright_is_swept_by_the_next_run",
         "Restore.test_a_restore_never_starts_a_background_gc",
         "Restore.test_a_worktree_named_brings_its_main_checkout_and_a_path_names_what_is_under_it",
+        "Restore.test_a_worktree_with_no_common_folder_brings_no_other_checkout",
         "Restore.test_a_wrong_passphrase_or_kind_is_refused",
         "Restore.test_clone_brings_back_every_checkout_with_its_carried_work",
         "Restore.test_no_decrypted_copy_is_left_in_the_home",

@@ -33,7 +33,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   evidence; `--json`, exit 0 only when every item is `ok`. It reaches nothing on the other machine: it compares that
   machine's public facts (`full machine-move facts --out FILE` there, schema `observatory-machine-facts/1`, then
   `--peer FILE` here or the file in `machine-move/peers/`), and facts older than 48 hours (`--max-age-hours`) read as
-  `unknown` for the release and the jobs, never a guess. Tests: `tests/test_machine_backup.py` MoveStatus,
+  `unknown` for the release and the jobs, never a guess. A facts file of any other shape is refused by name in
+  `degraded` and the rest still compared; `facts` writes only what the reader takes (`omitted` counts what it
+  masked or left out) and writes the file whole, never over an existing name. Tests: `tests/test_machine_backup.py` MoveStatus,
   MoveStatusVault.
 
 ## 0.30.1 (2026-11-02)

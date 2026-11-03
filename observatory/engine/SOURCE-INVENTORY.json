@@ -940,15 +940,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "c18881ac7da6b2bdbcb13ba19fab1fecb068fd96a3094456ae140991feb2fa7f",
-      "bytes": 35541,
+      "export_sha256": "7aa62d748b9b8f8fd0b9d35bd9bc763786ff7d00742852a389e26a9f5897ed35",
+      "bytes": 35632,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "2cc57549946aa5138cacad9c2e304c080f9419e1cdbe4a41bda36d1232a57bb4",
-      "bytes": 215900,
+      "export_sha256": "532a31d05e26a4102c9c60c8ba2ee7d80d3b9c49ab8e8b937caaaa6b0139ab93",
+      "bytes": 216300,
       "upstream_modified": true
     },
     {
@@ -2865,22 +2865,22 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6d3f94abd3a35d6a9512e52b1bb1745aadf66914009bc5bcb4947f60823babd6",
-      "bytes": 140248
+      "export_sha256": "622f6499057eb96d3f4a7ead721f2a0db935a2d64f7e2aee425438144d336cc6",
+      "bytes": 140507
     },
     {
       "path": "machine_identity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d4592ba9c88cc95fe99953232451bbee65b3f68908a858ff416b32b332923069",
-      "bytes": 16707
+      "export_sha256": "412f35f24623d8c0b8f45d030e179c54054d2bc6f31bfd487dd6054af04694b6",
+      "bytes": 16948
     },
     {
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7e0003caa5c7f4565a578ba19872467532518fc5a378e4974624e010593244de",
-      "bytes": 43690
+      "export_sha256": "2922a1cec04fa6cedb82c4b3f0ebb067f9811698f909e2c90c1223c12586352e",
+      "bytes": 48741
     },
     {
       "path": "machine_view.py",
@@ -5022,8 +5022,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fd63c4433d0cf1ff82b35ffe574522238b68cab16a811f5e822bc0de33148e65",
-      "bytes": 113521
+      "export_sha256": "b62b762533b5867455c2e6419ab871a9923cea1da648548083fdc0678066cc31",
+      "bytes": 120414
     },
     {
       "path": "tests/test_machine_findings.py",

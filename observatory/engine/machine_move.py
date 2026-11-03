@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.parsers.expat
 
 import machine_identity as mi
@@ -258,8 +259,11 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
 # in `<data folder>/machine-move/peers/`. Facts older than `--max-age-hours` (48) say nothing about
 # today's release or jobs, so those items read `unknown`, never a guess; key fingerprints and device
 # ids do not change by themselves, so an older file still tells them apart. Facts and status carry
-# public facts only: fingerprints, ids, labels, versions and counts, never a key or a value. Status
-# reads and changes nothing: no file is written and no job is started, stopped or listed by launchctl.
+# public facts only: fingerprints, ids, labels, versions and counts, never a key or a value. A facts file
+# holds only what `read_facts` takes (a key name it would refuse is masked, a label it would refuse is left
+# out, `omitted` counts both), and a file of any other shape is refused by name in `degraded`, never a crash.
+# Status reads and changes nothing: no file is written (not even this machine's id, which a machine without
+# a platform identifier would otherwise keep), and no job is started, stopped or listed by launchctl.
 
 FACTS_SCHEMA = "observatory-machine-facts/1"
 STATUS_SCHEMA = "observatory-machine-move-status/1"
@@ -402,24 +406,32 @@ def _receipt(home: Path) -> tuple[dict | None, str | None]:
 
 def restore_summary(receipt: dict | None) -> dict | None:
     """What a restore receipt says, shortened: where the bundle came from and whether it is complete."""
-    if not receipt or not isinstance(receipt.get("apply"), dict):
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("apply"), dict):
         return None
     applied = receipt["apply"]
     counts = applied.get("counts") if isinstance(applied.get("counts"), dict) else {}
+
+    def number(value) -> int:
+        # The receipt is this engine's, but a file a person edited may hold anything: a count that is not a
+        # whole number reads as one problem, never as a crash.
+        return value if type(value) is int and value >= 0 else (0 if value in (None, 0, False) else 1)
     gaps = []
-    if applied.get("failed"):
-        gaps.append(f"{applied['failed']} item(s) failed to write")
-    if counts.get("kept"):
-        gaps.append(f"{counts['kept']} conflict(s) kept, not restored")
-    if applied.get("placement_error"):
+    if number(applied.get("failed")):
+        gaps.append(f"{number(applied['failed'])} item(s) failed to write")
+    if number(counts.get("kept")):
+        gaps.append(f"{number(counts['kept'])} conflict(s) kept, not restored")
+    if applied.get("placement_error") is not False and applied.get("placement_error") is not None:
         gaps.append("the staged jobs were not named in the placement file")
     for part in ("packages", "clone"):
         done = receipt.get(part)
-        if isinstance(done, dict) and done.get("failed"):
-            gaps.append(f"{done['failed']} {'checkout(s)' if part == 'clone' else 'inventory step(s)'} failed")
+        if isinstance(done, dict) and number(done.get("failed")):
+            gaps.append(f"{number(done['failed'])} {'checkout(s)' if part == 'clone' else 'inventory step(s)'} failed")
+    left = applied.get("left_out")
     return {"taken_on": applied.get("taken_on") if mi.valid_id(applied.get("taken_on")) else None,
-            "mode": str(applied.get("mode") or "")[:32], "at": str(applied.get("at") or "")[:32],
-            "complete": not gaps, "gaps": gaps, "left_out": [str(c)[:32] for c in applied.get("left_out") or []][:20],
+            "mode": applied.get("mode")[:32] if isinstance(applied.get("mode"), str) else "",
+            "at": applied.get("at")[:32] if isinstance(applied.get("at"), str) else "",
+            "complete": not gaps, "gaps": gaps,
+            "left_out": [c[:32] for c in left if isinstance(c, str)][:20] if isinstance(left, list) else [],
             "cloned": isinstance(receipt.get("clone"), dict)}
 
 
@@ -434,10 +446,32 @@ def facts(home: Path, base: Path | None, *, platform: str = sys.platform, at: da
     except mi.MachineIdentityError:
         elsewhere = []
     import configuration as config
+    # What is written here is held to the rules `read_facts` reads it by, so the other machine never refuses
+    # the whole file for one entry: a key whose file name the reader would refuse keeps its fingerprint under
+    # a masked name, and a label it would refuse is left out; `omitted` says how many of each.
+    ssh, masked = [], 0
+    for k in keys:
+        if not k["fingerprint"] or not FINGERPRINT.fullmatch(k["fingerprint"]):
+            continue
+        name = k["file"]
+        if not SHOWN_FILE.fullmatch(name):
+            masked += 1
+            name = f"~/.ssh/name-not-shown-{masked}"
+        ssh.append({"file": name, "fingerprint": k["fingerprint"]})
+    shaped = {}
+    omitted = {"ssh_names_masked": masked}
+    for field, values in (("jobs", jobs), ("elsewhere", elsewhere)):
+        kept = None if values is None else [v for v in values if mi.LABEL_SHAPE.fullmatch(v)]
+        shaped[field] = kept
+        omitted[f"{field}_left_out"] = 0 if values is None else len(values) - len(kept)
+    if device is not None and not DEVICE_SHAPE.fullmatch(device):
+        device = None
+    summary = restore_summary(receipt)
+    if summary is not None:
+        summary["gaps"] = [g[:200] for g in summary["gaps"]][:20]
     return {"schema": FACTS_SCHEMA, "machine": mi.machine_id(home), "generated_at": _iso(at or _now()),
-            "engine_version": config.VERSION, "platform": platform,
-            "ssh": [{"file": k["file"], "fingerprint": k["fingerprint"]} for k in keys if k["fingerprint"]],
-            "device": device, "jobs": jobs, "elsewhere": elsewhere, "restore": restore_summary(receipt)}
+            "engine_version": config.VERSION, "platform": platform, "ssh": ssh, "device": device,
+            "jobs": shaped["jobs"], "elsewhere": shaped["elsewhere"], "restore": summary, "omitted": omitted}
 
 
 def read_facts(path: Path) -> dict:
@@ -458,7 +492,8 @@ def read_facts(path: Path) -> dict:
     version = doc.get("engine_version")
     if version is not None and not (isinstance(version, str) and VERSION_SHAPE.fullmatch(version)):
         raise MachineMoveError("its engine_version is malformed")
-    ssh = doc.get("ssh") or []
+    ssh = doc.get("ssh")
+    ssh = [] if ssh is None else ssh
     if not isinstance(ssh, list) or len(ssh) > 256 or not all(
             isinstance(k, dict) and isinstance(k.get("fingerprint"), str) and FINGERPRINT.fullmatch(k["fingerprint"])
             and isinstance(k.get("file"), str) and SHOWN_FILE.fullmatch(k["file"]) for k in ssh):
@@ -472,15 +507,24 @@ def read_facts(path: Path) -> dict:
                                   or not all(isinstance(v, str) and mi.LABEL_SHAPE.fullmatch(v) for v in value)):
             raise MachineMoveError(f"its {field} list is malformed")
     restore = doc.get("restore")
-    if restore is not None and (not isinstance(restore, dict) or not isinstance(restore.get("complete"), bool)
-                                or (restore.get("taken_on") is not None and not mi.valid_id(restore.get("taken_on")))):
-        raise MachineMoveError("its restore summary is malformed")
+    if restore is not None:
+        # Every member the reader uses, by type and size: a facts file is carried by hand from another machine.
+        if not isinstance(restore, dict) or not isinstance(restore.get("complete"), bool):
+            raise MachineMoveError("its restore summary is malformed: complete is not true or false")
+        if restore.get("taken_on") is not None and not mi.valid_id(restore.get("taken_on")):
+            raise MachineMoveError("its restore summary is malformed: taken_on is not a machine id")
+        if restore.get("at") is not None and not (isinstance(restore["at"], str) and len(restore["at"]) <= 64):
+            raise MachineMoveError("its restore summary is malformed: at is not a time")
+        gaps = restore.get("gaps")
+        if gaps is not None and (not isinstance(gaps, list) or len(gaps) > 64
+                                 or not all(isinstance(g, str) and len(g) <= 400 for g in gaps)):
+            raise MachineMoveError("its restore summary is malformed: gaps is not a list of short texts")
     return {"machine": doc["machine"], "generated_at": doc["generated_at"], "engine_version": version,
             "ssh": [{"file": k["file"], "fingerprint": k["fingerprint"]} for k in ssh], "device": device,
             "jobs": doc.get("jobs"), "elsewhere": doc.get("elsewhere") or [],
             "restore": ({"taken_on": restore.get("taken_on"), "complete": restore["complete"],
                          "at": str(restore.get("at") or "")[:32],
-                         "gaps": [str(g)[:200] for g in restore.get("gaps") or []][:20]} if restore else None)}
+                         "gaps": [g[:200] for g in restore.get("gaps") or []][:20]} if restore is not None else None)}
 
 
 def load_peers(home: Path, files: list[Path] | None = None) -> tuple[list[dict], list[dict]]:
@@ -496,6 +540,9 @@ def load_peers(home: Path, files: list[Path] | None = None) -> tuple[list[dict],
             good.append(read_facts(path))
         except MachineMoveError as exc:
             bad.append({"file": name, "reason": str(exc)})
+        except (TypeError, ValueError, KeyError, AttributeError, IndexError) as exc:
+            # A shape the checks above did not foresee: the file is refused and named, status still runs.
+            bad.append({"file": name, "reason": f"its content is malformed ({type(exc).__name__})"})
     return good, bad
 
 
@@ -537,9 +584,15 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     """The checklist M1 to M4 on this machine, from what it holds and the peers' facts. Changes nothing."""
     import configuration as config
     at = at or _now()
-    me = mi.machine_id(home)
+    # Read-only: a machine with no platform identifier and no kept id gets none here (any restore,
+    # `machine-move show` or `facts` makes it), and the checklist says so.
+    me = mi.machine_id(home, create=False)
     degraded = [{"source": "peers", "code": "unreadable-facts", "reason": f"{b['file']}: {b['reason']}"}
                 for b in unreadable or []]
+    if me is None:
+        degraded.append({"source": "machine", "code": "no-machine-id",
+                         "reason": "this machine has no id yet (no platform identifier and none kept); "
+                                   "`project-observatory full machine-move show` makes one"})
     newest: dict[str, dict] = {}
     for peer in peers or []:
         if peer["machine"] == me:
@@ -587,7 +640,7 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     # M2: the restore complete.
     receipt, receipt_problem = _receipt(home)
     mine = restore_summary(receipt)
-    theirs = [p for p in others if p.get("restore") and p["restore"].get("taken_on") == me]
+    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") == me]
     if receipt_problem:
         items.append(_item("restore", UNKNOWN, [receipt_problem]))
     elif mine:
@@ -625,7 +678,9 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     for peer in others:
         for k in peer["ssh"]:
             other_fps.setdefault(k["fingerprint"], f"{k['file']} on {said(peer)}")
-    for k in ((receipt or {}).get("apply") or {}).get("other_keys") or []:
+    applied = (receipt or {}).get("apply")
+    withheld = applied.get("other_keys") if isinstance(applied, dict) else None
+    for k in withheld if isinstance(withheld, list) else []:
         if isinstance(k, dict) and isinstance(k.get("fingerprint"), str) and FINGERPRINT.fullmatch(k["fingerprint"]):
             other_fps.setdefault(k["fingerprint"], f"the key {str(k.get('key'))[:64]} the restored bundle withheld")
     shared = [k for k in keys if k["fingerprint"] and k["fingerprint"] in other_fps]
@@ -718,7 +773,7 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
 
 
 def render(view: dict) -> str:
-    lines = [view["summary"], f"  this machine: {view['machine']}, release {view['engine_version']}"]
+    lines = [view["summary"], f"  this machine: {view['machine'] or 'unknown'}, release {view['engine_version']}"]
     for peer in view["other_machines"]:
         lines.append(f"  other machine: {peer['machine']}, facts of {peer['generated_at']}"
                      + (f" ({peer['stale']})" if peer.get("stale") else ""))
@@ -734,10 +789,30 @@ def render(view: dict) -> str:
 
 
 def write_facts(doc: dict, out: Path) -> Path:
-    """A new owner-only file; never replaces one (it may be another machine's facts)."""
-    fd = osprivacy.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        stream.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    """A new owner-only file, whole or not at all, that never replaces one (it may be another machine's facts):
+    written to a temporary file beside it, then linked to its name, which fails when the name exists (a link
+    included). A file system without hard links gets the exclusive create instead."""
+    data = (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if os.path.lexists(out):
+        raise FileExistsError(str(out))
+    fd, tmp = tempfile.mkstemp(prefix=f".{out.name}.", suffix=".tmp", dir=out.parent)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(tmp, out)
+        except FileExistsError:
+            raise
+        except (OSError, NotImplementedError):
+            exclusive = osprivacy.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+            with os.fdopen(exclusive, "wb") as stream:
+                stream.write(data)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
     return out
 
 
@@ -788,6 +863,12 @@ def main(argv: list[str]) -> int:
         if a.action == "facts":
             import machine_backup
             doc = facts(home, machine_backup._home_or_none())
+            o = doc["omitted"]
+            if any(o.values()):
+                print(f"Observatory: {o['ssh_names_masked']} key file name(s) masked (the fingerprint kept), "
+                      f"{o['jobs_left_out']} job label(s) and {o['elsewhere_left_out']} placed label(s) left out: "
+                      "they do not fit the facts format the other machine reads (`omitted` in the answer)",
+                      file=sys.stderr)
             if a.out is None:
                 print(json.dumps(doc, indent=2, ensure_ascii=False))
                 return 0

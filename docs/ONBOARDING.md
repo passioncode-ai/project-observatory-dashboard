@@ -2309,7 +2309,11 @@ The backups root both machines read is a convenient way to carry the file. Facts
 so those items read `unknown`; key fingerprints and device ids do not change by themselves, so an
 older file still tells them apart. With no facts at all, every item that compares the two machines
 reads `unknown`, never a guess. A file that does not read is named in `degraded` and the rest is
-still compared. Status writes nothing and starts, stops or asks launchctl about no job.
+still compared, whatever its shape. Facts hold only what the reader takes: a key whose file name the
+format cannot carry keeps its fingerprint under a masked name, a job label it cannot carry is left out,
+and `omitted` (and a line on stderr) says how many. Status writes nothing and starts, stops or asks
+launchctl about no job; on a machine with no platform identifier and no kept id it does not make one
+either, and names this machine `unknown` (`full machine-move show` makes the id).
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires

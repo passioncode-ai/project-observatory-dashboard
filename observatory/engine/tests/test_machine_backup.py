@@ -549,6 +549,13 @@ class Restore(Machine):
         chosen, _ = MB.select_checkouts(manifest['checkouts'], ['gamma-*,beta-api'], self.fresh)
         self.assertEqual(sorted(r['path'] for r in chosen), ['~/src/beta-api', '~/src/gamma-new'])
 
+    def test_a_worktree_with_no_common_folder_brings_no_other_checkout(self):
+        records = [{'path': '~/src/alpha-feature', 'worktree': True, 'common_dir': None},
+                   {'path': '~/src/beta-api', 'common_dir': None},
+                   {'path': '~/src/gamma-new'}]
+        chosen, unmatched = MB.select_checkouts(records, ['alpha-feature'], self.fresh)
+        self.assertEqual(([r['path'] for r in chosen], unmatched), (['~/src/alpha-feature'], []))
+
     def test_a_project_no_checkout_matches_is_refused_before_anything_is_written(self):
         with self.assertRaisesRegex(MB.MachineBackupError, 'no-such-project'):
             MB.restore(self.bundle, self.fresh, secret=PASS, mode='apply', do_clone=True, projects=['no-such-project'])
@@ -1625,6 +1632,103 @@ class MoveStatus(Base):
         self.assertIn('names this machine', reasons)
         self.assertEqual([m['machine'] for m in view['other_machines']], [BETA])
         self.assertEqual(items['release']['state'], 'ok')
+
+    def test_a_hostile_facts_file_is_refused_by_name_and_status_still_runs(self):
+        good = json.loads(self.facts_of_beta().read_text())
+        good['restore'] = {'taken_on': ALPHA, 'complete': True, 'at': '2026-11-02T10:00:00Z', 'gaps': []}
+        hostile = {
+            'not-an-object': [], 'schema': {'schema': 1}, 'machine': {'machine': 7},
+            'generated_at': {'generated_at': 12}, 'engine_version': {'engine_version': ['0.31.0']},
+            'ssh-type': {'ssh': 'id_ed25519'}, 'ssh-zero': {'ssh': 0}, 'ssh-member': {'ssh': [5]},
+            'ssh-fingerprint': {'ssh': [{'file': '~/.ssh/id', 'fingerprint': 5}]},
+            'ssh-file': {'ssh': [{'file': ['~/.ssh/id'], 'fingerprint': self.alpha_fp}]},
+            'device': {'device': 5}, 'jobs-type': {'jobs': 'com.example.a'}, 'jobs-member': {'jobs': [1]},
+            'jobs-shape': {'jobs': ['has space']}, 'elsewhere': {'elsewhere': [None]},
+            'restore-type': {'restore': ['complete']}, 'restore-complete': {'restore': {'complete': 'yes'}},
+            'restore-taken-on': {'restore': {'complete': True, 'taken_on': 5}},
+            'restore-at': {'restore': {'complete': True, 'at': 5}},
+            'restore-gaps-int': {'restore': {'complete': True, 'gaps': 5}},
+            'restore-gaps-true': {'restore': {'complete': True, 'gaps': True}},
+            'restore-gaps-member': {'restore': {'complete': True, 'gaps': [1]}},
+            'restore-gaps-dict': {'restore': {'complete': True, 'gaps': {'a': 'b'}}},
+            'restore-gaps-long': {'restore': {'complete': True, 'gaps': ['x'] * 65}},
+        }
+        folder = MM.peers_dir(self.user)
+        folder.mkdir(parents=True)
+        for name, change in hostile.items():
+            doc = [] if name == 'not-an-object' else {**good, **change}
+            (folder / f'{name}.json').write_text(json.dumps(doc))
+        (folder / 'beta.json').write_text(json.dumps(good))
+        peers, bad = MM.load_peers(self.user)
+        self.assertEqual(sorted(b['file'] for b in bad), sorted(f'{n}.json' for n in hostile), bad)
+        self.assertEqual([p['machine'] for p in peers], [BETA])
+        view, items = self.check()
+        self.assertEqual(len([d for d in view['degraded'] if d['code'] == 'unreadable-facts']), len(hostile))
+        self.assertIn('restore-gaps-int.json: its restore summary is malformed: gaps', json.dumps(view['degraded']))
+        self.assertEqual(items['restore']['state'], 'ok', 'the good file still answers')
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), patch.object(MM, '_vault_view', NO_VAULT):
+            self.assertEqual(MM.main(['status', '--json']), 1, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())['schema'], 'observatory-machine-move-status/1')
+
+    def test_a_restore_receipt_edited_by_hand_reads_as_gaps_never_a_crash(self):
+        path = MI.restore_receipt_path(self.user)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'schema': 'observatory-machine-restore/1',
+                                    'apply': {'failed': 'many', 'counts': {'kept': [1]}, 'left_out': 5, 'at': 3,
+                                              'mode': None, 'other_keys': {'k': 'v'}, 'placement_error': 'x'},
+                                    'clone': {'failed': None}}))
+        _, items = self.check()
+        self.assertEqual(items['restore']['state'], 'missing')
+        self.assertIn('1 item(s) failed to write', ' '.join(items['restore']['evidence']))
+
+    def test_facts_hold_only_what_the_other_machine_reads(self):
+        line, fp = pub_line(b'plus-key')
+        self.key(self.user, 'id+work', line)
+        job_file(self.user, label_of('com.example has space'))
+        with patch.object(MI, 'read_placement', lambda home=None: {'elsewhere': [{'label': 'com.example.placed'},
+                                                                                  {'label': 'not ok'}]}):
+            doc = MM.facts(self.user, self.ws)
+        self.assertIn({'file': '~/.ssh/name-not-shown-1', 'fingerprint': fp}, doc['ssh'], 'the fingerprint is kept')
+        self.assertEqual(doc['omitted'], {'ssh_names_masked': 1, 'jobs_left_out': 1, 'elsewhere_left_out': 1})
+        self.assertEqual(doc['jobs'], [label_of('com.example.alpha-bot')])
+        self.assertEqual(doc['elsewhere'], ['com.example.placed'])
+        out = self.base / 'alpha-facts.json'
+        MM.write_facts(doc, out)
+        self.assertEqual(MM.read_facts(out)['ssh'], doc['ssh'], 'what facts writes, the reader takes')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(MM.main(['facts', '--out', str(self.base / 'cli-facts.json')]), 0)
+        self.assertIn('1 key file name(s) masked', err.getvalue())
+
+    def test_facts_are_written_whole_and_never_over_a_name_or_a_link(self):
+        doc = MM.facts(self.user, self.ws)
+        out = self.base / 'facts.json'
+        MM.write_facts(doc, out)
+        self.assertEqual(json.loads(out.read_text())['machine'], ALPHA)
+        self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
+        self.assertEqual([p.name for p in self.base.iterdir() if p.name.startswith('.facts.json.')], [],
+                         'no temporary file is left')
+        out.write_text('kept')
+        with self.assertRaises(FileExistsError):
+            MM.write_facts(doc, out)
+        self.assertEqual(out.read_text(), 'kept')
+        target = self.base / 'target.txt'
+        target.write_text('untouched')
+        link = self.base / 'link.json'
+        link.symlink_to(target)
+        with self.assertRaises(FileExistsError):
+            MM.write_facts(doc, link)
+        self.assertEqual(target.read_text(), 'untouched')
+
+    def test_status_never_makes_this_machines_id(self):
+        env = {k: v for k, v in os.environ.items() if k != 'OBSERVATORY_MACHINE_ID'}
+        with patch.dict(os.environ, env, clear=True), patch.object(MI, '_platform_identifier', lambda runner=None: None):
+            view, items = self.check()
+        self.assertIsNone(view['machine'])
+        self.assertIn('no-machine-id', [d['code'] for d in view['degraded']])
+        self.assertFalse((MI.data_dir(self.user) / MI.ID_FILE).exists(), 'status wrote no machine id')
+        self.assertIn('this machine: unknown', MM.render(view))
 
     def test_the_command_line_prints_the_checklist_and_exits_by_it(self):
         sys.path.insert(0, str(ROOT))

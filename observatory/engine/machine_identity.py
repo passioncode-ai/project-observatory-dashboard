@@ -146,9 +146,11 @@ def _write_private(path: Path, data: bytes) -> None:
 TEST_MARKER = "OBSERVATORY_MACHINE_ID_FOR_TESTS"
 
 
-def machine_id(home: Path | None = None, *, runner=subprocess.run) -> str:
+def machine_id(home: Path | None = None, *, runner=subprocess.run, create: bool = True) -> str | None:
     """This machine's id: `OBSERVATORY_MACHINE_ID` in a sandbox or a test, else a hash of the platform's identifier,
-    else a random id kept once in the data folder. Stable for the life of the machine."""
+    else a random id kept once in the data folder. Stable for the life of the machine. With `create=False` a
+    machine with no platform identifier and no kept id answers None instead of writing one (a read-only
+    caller such as `full machine-move status`)."""
     # Only a sandbox or a test names the machine: a variable carried in a restored shell profile must
     # never make a second machine read as the first (review of #394), so the override alone is ignored.
     testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
@@ -167,6 +169,8 @@ def machine_id(home: Path | None = None, *, runner=subprocess.run) -> str:
             return value
     except (OSError, UnicodeDecodeError):
         pass
+    if not create:
+        return None
     value = "m-" + secrets.token_hex(12)
     _write_private(kept, (value + "\n").encode())
     return value
