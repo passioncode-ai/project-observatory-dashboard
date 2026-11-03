@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.30.1 (2026-11-02)
+
+A patch release. A restore on a second machine that runs beside this one no longer takes this machine's identity,
+private SSH keys or background jobs: bundles and snapshots now name the machine they were taken on, and one taken on
+another machine, or naming none, is restored as a second machine's (`--same-machine` at a terminal restores it
+whole, as before). `full machine-move` moves one background job between the two machines so it never runs on both.
+Windows is now checked on every change against a published list of what does not pass yet, the engine runs in UTF-8
+mode there, and operator-only commands no longer take the NUL device for a person. Install this release on both
+machines before restoring on the second one; nothing else needs you after installing.
 
 ### Added
 
