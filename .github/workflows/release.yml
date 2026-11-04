@@ -48,6 +48,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
+      # OBS-329: the Aptabase App-Key (the repository secret APTABASE_APP_KEY_PROJECT_OBSERVATORY, set
+      # from the analytics owner's vault slot of that name) goes beside usage_analytics.py, where app_key reads
+      # it; tools/check_package.py admits the file only in the key's shape. Without the secret the
+      # wheel ships with no key, collects nothing, and the run says so in a warning.
+      - name: Write the analytics App-Key
+        env:
+          APP_KEY: ${{ secrets.APTABASE_APP_KEY_PROJECT_OBSERVATORY }}
+        run: |
+          if [ -z "$APP_KEY" ]; then
+            echo "::warning::no APTABASE_APP_KEY_PROJECT_OBSERVATORY secret: this wheel carries no analytics App-Key and collects nothing"
+          else
+            printf '%s' "$APP_KEY" > observatory/engine/analytics-app-key
+          fi
       - name: Build and check the wheel
         run: |
           python -m pip install --upgrade build

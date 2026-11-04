@@ -284,6 +284,30 @@ class ReleaseBoundaryTests(unittest.TestCase):
             result=self.with_marker(stale)
             self.assertFalse(result['passed'],stale)
             self.assertIn('RELEASE.json',' '.join(result['failures']))
+    def test_a_release_wheel_may_carry_one_well_formed_analytics_app_key(self):
+        # OBS-329: the release build writes the Aptabase App-Key from a repository secret beside
+        # usage_analytics.py; it is not reviewed source, so the wheel check admits that one member
+        # only in the shape usage_analytics.app_key reads, and nothing else under its name.
+        name='observatory/engine/analytics-app-key'
+        self.assertTrue(self.checked(self.wheel({**self.package_files(),name:b'A-SH-1234567890'}))['passed'])
+        for bad in (b'',b'A-SH-1234567890\n',b'A-SH-123',b'a-sh-1234567890',b'A-SH-1234567890 extra',
+                    b'A-SH-1234567890\nA-SH-1234567890',b'\xff'):
+            result=self.checked(self.wheel({**self.package_files(),name:bad}))
+            self.assertFalse(result['passed'],bad)
+            self.assertIn('analytics-app-key',' '.join(result['failures']))
+    def test_only_the_release_wheel_job_reads_the_analytics_app_key_secret(self):
+        # OBS-329: a checkout and a pull-request build carry no key; the release workflow's wheel job
+        # is the one place that writes it, and it writes it with printf from the environment, never
+        # through a command line or a log.
+        secret='secrets.APTABASE_APP_KEY_PROJECT_OBSERVATORY'
+        for workflow in (ROOT/'.github'/'workflows').glob('*.yml'):
+            if workflow.name!='release.yml':self.assertNotIn(secret,workflow.read_text(),workflow.name)
+        release=(ROOT/'.github'/'workflows'/'release.yml').read_text()
+        self.assertEqual(release.count(secret),1)
+        wheel_job=release.split('\n  wheel:\n',1)[1].split('\n  manifest:\n',1)[0]
+        self.assertIn(secret,wheel_job)
+        self.assertIn("printf '%s' \"$APP_KEY\" > observatory/engine/analytics-app-key",wheel_job)
+        self.assertIn('observatory/engine/analytics-app-key',(ROOT/'.gitignore').read_text().splitlines())
     def test_wheel_rejects_symlink_even_when_content_matches_source(self):
         self.assertFalse(self.checked(self.wheel(self.package_files(),symlink='observatory/engine/example.py'))['passed'])
     def test_wheel_rejects_unreviewed_dist_info_payload(self):
