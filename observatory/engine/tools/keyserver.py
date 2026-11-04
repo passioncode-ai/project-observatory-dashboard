@@ -70,6 +70,7 @@ import pathlib
 import re
 import socketserver
 import sys
+import time
 import urllib.error
 import urllib.request
 import urllib.parse
@@ -512,8 +513,65 @@ REFUSED = {
 }
 
 
+#: The largest request body the keyserver reads, and so the most it reads off after an answer.
+BODY_LIMIT = 65536
+#: How long a refused request's unread body is read off after the answer before the socket closes (OBS-309).
+DRAIN_SECONDS = 1.0
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "observatory-keyserver"
+    #: Body bytes this request has read; what the request declared beyond it is read off in `finish`.
+    _body_read = 0
+
+    def finish(self) -> None:
+        try:
+            self._read_off_unread_body()
+        finally:
+            super().finish()
+
+    def _owed(self) -> int:
+        """The body bytes the request declared and nothing has read, never more than BODY_LIMIT.
+
+        A framing the keyserver refuses (Transfer-Encoding, several or malformed Content-Length) is read
+        off up to the limit as well; no Content-Length and no Transfer-Encoding is no body."""
+        headers = getattr(self, "headers", None)
+        if headers is None:
+            return 0
+        lengths = headers.get_all("Content-Length", [])
+        if headers.get("Transfer-Encoding") or len(lengths) > 1 or (
+                lengths and not re.fullmatch(r"[0-9]{1,18}", lengths[0])):
+            declared = BODY_LIMIT
+        elif lengths:
+            declared = min(int(lengths[0]), BODY_LIMIT)
+        else:
+            return 0
+        return max(0, declared - self._body_read)
+
+    def _read_off_unread_body(self) -> None:
+        """Answer sent: half-close, read off what the body still owes for at most DRAIN_SECONDS, then close.
+
+        Several refusals answer before the body is read (a Host or Origin that is not this server, a body
+        over the limit, a framing the server refuses, any GET or unknown method that carries one). A socket
+        closed with bytes unread makes Windows send a reset, and a reset can lose the answer the client has
+        not read yet: the caller saw WinError 10053 or 10054 instead of its 403 (OBS-309, the class of
+        OBS-294 and OBS-295). Nothing read here is parsed or acted on, and it is bounded twice: by the
+        declared length capped at BODY_LIMIT, and by the deadline."""
+        owed = self._owed()
+        if owed <= 0:
+            return
+        try:
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + DRAIN_SECONDS
+            while owed > 0 and (left := deadline - time.monotonic()) > 0:
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(owed, 8192))
+                if not chunk:
+                    break
+                owed -= len(chunk)
+        except (OSError, ValueError):
+            pass
 
     def log_message(self, fmt, *args):                                   
         pass                                                                              
@@ -703,14 +761,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _read_bounded(self) -> bytes | None:
         """The body when its framing is valid and within the limit, else None (the checks below answer).
-        Read before any refusal: on Windows, closing a socket with unread input sends a reset that loses
-        the queued answer, so a refused caller saw a connection abort instead of its typed refusal
-        (review of #387). Bounded at 64 KiB, and only for a loopback caller."""
+        Read before the refusals that follow it: on Windows, closing a socket with unread input sends a reset
+        that loses the queued answer, so a refused caller saw a connection abort instead of its typed refusal
+        (review of #387). The refusals answered before it (Host, Origin) and those it leaves to the checks
+        below (framing, size) have their body read off after the answer in `finish` (OBS-309). Bounded at
+        BODY_LIMIT, and only for a loopback caller."""
         lengths = self.headers.get_all("Content-Length", [])
-        if self.headers.get("Transfer-Encoding") or len(lengths) != 1 or not re.fullmatch(r"[0-9]+", lengths[0]):
+        if (self.headers.get("Transfer-Encoding") or len(lengths) != 1
+                or not re.fullmatch(r"[0-9]{1,18}", lengths[0])):
             return None
         length = int(lengths[0])
-        return self.rfile.read(length) if length <= 65536 else None
+        if length > BODY_LIMIT:
+            return None
+        raw = self.rfile.read(length)
+        self._body_read = len(raw)
+        return raw
 
     def do_POST(self) -> None:                                           
         if not self._local_request():
@@ -739,10 +804,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not re.fullmatch(r"[0-9]+", lengths[0]):
                 raise ValueError
             length = int(lengths[0])
-            if length > 65536:
+            if length > BODY_LIMIT:
                 self._send(413, {"error": "request body is too large"})
                 return
             raw = early if early is not None else self.rfile.read(length)
+            self._body_read = len(raw)
             if len(raw) != length:
                 raise ValueError
             body = json.loads(raw or b"{}", parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))

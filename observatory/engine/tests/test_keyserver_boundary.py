@@ -176,6 +176,52 @@ class KeyserverBoundaryTests(unittest.TestCase):
                 conn.close()
         self.assertEqual(self.effects, [])
 
+    def _late_body(self, head: bytes, body: bytes) -> tuple[bytes, bytes]:
+        """Send the head, read the whole answer, then send the body: (answer, what a read after the body sees).
+
+        The server answers a refusal before it reads the body; a body that arrives after that answer must
+        be read off, not met by a closed socket. Windows answers a socket closed with bytes unread by a reset
+        that can lose the queued answer (OBS-309); on every platform such a reset reaches the client after
+        the body, which is what the second read shows."""
+        import time
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as sock:
+            sock.sendall(head)
+            answer = b""
+            while chunk := sock.recv(4096):
+                answer += chunk
+            time.sleep(0.2)
+            sock.sendall(body)
+            time.sleep(0.3)
+            try:
+                after = sock.recv(4096)
+            except ConnectionError as exc:
+                after = type(exc).__name__.encode()
+        return answer, after
+
+    def test_a_refusal_before_the_body_reads_the_late_body_off(self):
+        body = b'{"destination": "never acted on"}'
+        authority = f"127.0.0.1:{self.port}"
+        for duplicate in ("Host", "Origin"):
+            lines = ["POST /api/probe HTTP/1.1", f"Host: {authority}",
+                     f"{keyserver.HEADER}: {self.token}", f"Content-Length: {len(body)}"]
+            lines += [f"Host: {authority}"] if duplicate == "Host" else [
+                f"Origin: http://{authority}", f"Origin: http://{authority}"]
+            head = ("\r\n".join(lines) + "\r\n\r\n").encode()
+            with self.subTest(duplicate=duplicate):
+                answer, after = self._late_body(head, body)
+                self.assertTrue(answer.startswith(b"HTTP/1.0 403 "), answer[:80])
+                self.assertEqual(after, b"", "the late body met a closed socket")
+        self.assertEqual(self.effects, [])
+        self.assertFalse(keyserver.AUDIT.exists())
+
+    def test_an_over_limit_body_is_answered_then_read_off_up_to_the_limit(self):
+        head = (f"POST /api/probe HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
+                f"{keyserver.HEADER}: {self.token}\r\nContent-Length: 65537\r\n\r\n").encode()
+        answer, after = self._late_body(head, b" " * 1024)
+        self.assertTrue(answer.startswith(b"HTTP/1.0 413 "), answer[:80])
+        self.assertEqual(after, b"", "the late body met a closed socket")
+        self.assertEqual(self.effects, [])
+
     def test_token_is_checked_with_compare_digest(self):
         with patch.object(keyserver.hmac, "compare_digest", wraps=keyserver.hmac.compare_digest) as compare:
             self.assertEqual(self.request(headers={keyserver.HEADER: "wrong"})[0], 401)
@@ -187,6 +233,7 @@ class KeyserverBoundaryTests(unittest.TestCase):
             self.assertEqual(self.request(body=body)[0], 400)
         self.assertEqual(self.request(headers={"Content-Length": "-1"})[0], 400)
         self.assertEqual(self.request(headers={"Content-Length": "65537"})[0], 413)
+        self.assertEqual(self.request(headers={"Content-Length": "9" * 5000})[0], 400)
         self.assertEqual(self.request(headers={"Transfer-Encoding": "chunked"})[0], 400)
         self.assertEqual(self.effects, [])
 
