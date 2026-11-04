@@ -213,6 +213,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              # fourth time for the same reason: the scan knows an
                              # application and only `emit` writes registry documents.
                              "registry/remote-env.json",
+                             # Copies and moves (OBS-321): the curated relations joined to the
+                             # repositories written above, which only `emit` holds.
+                             "registry/derivations.json",
                              # The analytics inventory, written here for the
                              # same reason as the rest: the project join needs
                              # the project list and only `emit` holds it.
@@ -291,6 +294,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the SSH-key inventory, written by `full ssh-keys list`
                             # outside the step graph (PB-163): declared so the read is known
                             "store/raw/ssh-keys.json",
+                            # copies and moves, written by `emit` (OBS-321, tools/derivation_findings.py)
+                            "registry/derivations.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

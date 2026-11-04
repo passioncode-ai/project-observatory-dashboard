@@ -5424,8 +5424,8 @@
       "path": "tests/test_pipeline.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6a6c2bfece2f81bbb32f8348a2db6204d6b0b9c365aba74c1386c06d945175a2",
-      "bytes": 50445
+      "export_sha256": "f1978b0f274452530c78532bb7b4a9819d29a4103b069fe6a39dec38021d749f",
+      "bytes": 50845
     },
     {
       "path": "tests/test_plugin_pair.py",
