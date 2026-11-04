@@ -22,6 +22,10 @@ LOCK_MEMBER = "observatory/engine/" + LOCK
 #: one, it must name this very version and say what the person does. One written for an
 #: earlier release and left in the tree would otherwise be ignored by the updater in silence.
 RELEASE_MEMBER = "observatory/engine/RELEASE.json"
+#: The Aptabase App-Key a release build writes from a repository secret (OBS-329). It is not
+#: reviewed source, so it is admitted only in the exact shape usage_analytics.app_key reads.
+APP_KEY_MEMBER = "observatory/engine/analytics-app-key"
+APP_KEY_SHAPE = re.compile(rb"A-[A-Z]{2}-[0-9]{10}")
 
 
 def check(wheel: Path) -> dict:
@@ -73,6 +77,11 @@ def check(wheel: Path) -> dict:
                     or not isinstance(marker.get("needs_person"), str) or not marker["needs_person"].strip():
                 failures.append(RELEASE_MEMBER + ' must be {"version": "' + project["version"]
                                 + '", "needs_person": "<the step>"}; delete it when the release needs no person')
+        if APP_KEY_MEMBER in names:
+            if APP_KEY_SHAPE.fullmatch(z.read(APP_KEY_MEMBER)):
+                expected.add(APP_KEY_MEMBER)
+            else:
+                failures.append(APP_KEY_MEMBER + ' must be one Aptabase App-Key (A-XX-0123456789), nothing else')
         for name in names:
             if name not in expected and name not in metadata_names:
                 failures.append('unexpected package resource: ' + name)
