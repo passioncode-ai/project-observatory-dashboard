@@ -465,7 +465,7 @@ PUBLIC_SOURCE_ONLY = {
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
                       "machine-backup", "machine-restore", "machine-move",
-                      "update", "profile", "maintain", "auto-update", "track", "untrack", "tracked"}
+                      "update", "profile", "maintain", "auto-update", "analytics", "track", "untrack", "tracked"}
 #: Commands `main` hands to a parser of their own before the step table is read. The dispatcher's
 #: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
 #: holds `main` to this list and the public help to describing each one (`full node` and
@@ -515,6 +515,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
   auto-update status|on|off    install each new stable release by itself (on by default)
+  analytics status|on|off|send  anonymous usage and error data that helps improve the product
+                               (on by default): command, tool and error names, outcomes, versions,
+                               platform; never keys, paths, names or workspace content.
+                               OBSERVATORY_ANALYTICS=off or DO_NOT_TRACK=1 turns it off for a process
   maintain run|ensure|uninstall|status  the job every 15 min: the disk guard, updates, the app, a daily encrypted backup
   maintain app                 the app step alone: swap a verified staged app (what the Mac
                                app's Restart to update runs after it quits)
@@ -1693,9 +1697,49 @@ def run_again(argv: list[str]) -> int:
             continue
 
 
+def command_name(argv: list[str]) -> str:
+    """The command a person ran, as the dispatcher knows it, or `other`. Never an argument: only
+    the first word, and only a name this file defines (OBS-324)."""
+    if len(argv) < 2 or argv[1] in ("-h", "--help"):
+        return "help"
+    known = WORKSPACE_COMMANDS | set(OWN_PARSER_COMMANDS) | set(STEPS) | set(GROUPS) | {"check-portable", "check"}
+    return argv[1] if argv[1] in known else "other"
+
+
+def counted(argv: list[str]) -> int:
+    """`main`, with one anonymous `command_run` event (and an `error_raised` for a crash) queued
+    after it, and the first-run notice shown once on a person's terminal (usage_analytics.py).
+    Queuing is a local append that never raises; nothing here waits on the network."""
+    import time
+    started, code, crash = time.monotonic(), 1, None
+    try:
+        code = main(argv)
+        return code
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 0 if exc.code is None else 1
+        raise
+    except KeyboardInterrupt:
+        code = 130
+        raise
+    except BaseException as exc:
+        crash = exc
+        raise
+    finally:
+        try:
+            import usage_analytics as UA
+            UA.record("command_run", command=command_name(argv), surface="cli",
+                      outcome="ok" if code == 0 else "refused" if code == 2 else "error",
+                      exit_code=int(code), duration_ms=int((time.monotonic() - started) * 1000))
+            if crash is not None:
+                UA.record("error_raised", surface="cli", kind=UA.error_kind(crash))
+            UA.cli_notice()
+        except Exception:  # noqa: BLE001: counting never changes what the command did
+            pass
+
+
 if __name__ == "__main__":
     again = utf8_mode_argv(sys.argv)
     if again is not None:
         os.environ["PYTHONUTF8"] = "1"
         raise SystemExit(run_again(again))
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(counted(sys.argv))

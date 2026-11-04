@@ -505,7 +505,21 @@ class Tick:
         raise SystemExit(0)
 
 
+def count_tick(outcome: str, steps_failed: int, started: float, crash: BaseException | None = None) -> None:
+    """One anonymous `tick_finished` event (and an `error_raised` for a crash): the outcome, how
+    many steps failed and how long it took, never a step's output (usage_analytics.py, OBS-324)."""
+    try:
+        import usage_analytics as UA
+        UA.record("tick_finished", surface="tick", outcome=outcome, steps_failed=int(steps_failed),
+                  duration_ms=int((time.monotonic() - started) * 1000))
+        if crash is not None:
+            UA.record("error_raised", surface="tick", kind=UA.error_kind(crash))
+    except Exception:  # noqa: BLE001: counting never changes the tick
+        pass
+
+
 def run(t: Tick, scratch: Path, dashboard: Path) -> int:
+    started = time.monotonic()
     log("tick start")
     # The tick's own agent-sync identity: without it the tick IS every shell command in this
     # checkout, and a lease under a shared identity separates nothing.
@@ -514,12 +528,21 @@ def run(t: Tick, scratch: Path, dashboard: Path) -> int:
     if code != 0:
         log("lease: " + " ".join(out.splitlines()[:2]))
         log("tick skipped — the registry belongs to another run right now, and the next tick is 30 minutes away")
+        count_tick("skipped", 0, started)
         return 0
     log(f"lease: {out}")
     try:
         steps(t, scratch, dashboard)
         t.write_report()
         log("tick done")
+        count_tick("failed" if t.failed else "ok", len(t.failed), started)
+    except SystemExit:
+        # `bail` ends a tick that cannot go on with SystemExit(0) after writing its report.
+        count_tick("failed", max(1, len(t.failed)), started)
+        raise
+    except Exception as exc:
+        count_tick("failed", max(1, len(t.failed)), started, exc)
+        raise
     finally:
         # Released on every path, a bail and a crash included: a held lease would stop the
         # next tick until its TTL.

@@ -316,5 +316,18 @@ class ReviewFixes(unittest.TestCase):
         payload["digitalocean"]["totals"]["by_state"] = {"down": 1}
         self.assertIn('data-state="bad"', tile(home_page.band_html(payload, EN), "apps"))
 
+    def test_the_analytics_notice_shows_only_while_the_build_says_so(self):
+        """OBS-324: the first-run notice of anonymous usage data, at the top of Home, with the off command."""
+        shown = home_page.home_html({"rows": [], "health": {"analytics": {"notice": True}}}, EN)
+        self.assertIn('class="home-notice"', shown)
+        self.assertIn("analytics off", shown)
+        self.assertIn("never sends keys, paths", shown)
+        self.assertLess(shown.index("home-notice"), shown.index("home-empty"))
+        for health in ({}, {"analytics": {"notice": False}}):
+            self.assertNotIn("home-notice", home_page.home_html({"rows": [], "health": health}, EN))
+        ru = home_page.home_html({"rows": [], "health": {"analytics": {"notice": True}}}, Translator("ru"))
+        self.assertIn("Анонимные данные об использовании", ru)
+
+
 if __name__ == "__main__":
     unittest.main()

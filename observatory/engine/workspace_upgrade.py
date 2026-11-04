@@ -39,8 +39,11 @@ EXCLUDED_DIRS = {'.git', '__pycache__', '.venv', 'backups', 'migration-backups'}
 #: it here too), and the workspace gets its own `instance_id`, so a tick never runs on two machines
 #: at once and the two machines' daily backups, which may share one iCloud folder, never rotate each
 #: other's files.
+#: The anonymous usage data's install id and unsent queue (`store/analytics/`, OBS-324) stay behind too:
+#: two machines with one install id would read as one install, and the queue would be sent twice. The
+#: person's switch, the file `analytics` in the home, moves with the workspace.
 ANOTHER_MACHINE_LEAVES = ('node/device', 'node/orgs', 'node/records', 'node/shares', 'config/cloud.json',
-                          'store/maintenance.json')
+                          'store/maintenance.json', 'store/analytics')
 LIFECYCLE = 'config/node-lifecycle.json'
 
 

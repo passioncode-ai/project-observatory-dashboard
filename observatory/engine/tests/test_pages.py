@@ -569,7 +569,11 @@ def test_the_server_serves_the_pages_and_refuses_the_rest() -> None:
     (work / "single.html").write_text("<html>the single page</html>", encoding="utf-8")
     env = {**os.environ, "OBSERVATORY_SCRATCH": str(work / "scratch"),
            "OBSERVATORY_DASHBOARD": str(work / "single.html"),
-           "OBSERVATORY_DASHBOARD_DIR": str(pages)}
+           "OBSERVATORY_DASHBOARD_DIR": str(pages),
+           # OBS-324: a synthetic key, so the analytics notice is live; nothing is ever sent from a test.
+           "OBSERVATORY_ANALYTICS_APP_KEY": "A-SH-0000000000"}
+    import usage_analytics
+    notice_before = usage_analytics.notice_state(paths.HOME).get("dashboard")
     p = subprocess.Popen([PY, "tools/serverd.py", "--run", "--port", str(PORT)],
                          cwd=ROOT, env=env, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
@@ -583,6 +587,9 @@ def test_the_server_serves_the_pages_and_refuses_the_rest() -> None:
         code, body, ctype = get("/dashboard/index.html")
         check("a page in the whitelist is served as HTML", code == 200
               and b"const PAGE" in body and "text/html" in ctype, f"{code} {ctype}")
+        check("serving Home counts the analytics notice as seen by a person (OBS-324)",
+              notice_before is None and bool(usage_analytics.notice_state(paths.HOME).get("dashboard")),
+              str(usage_analytics.notice_state(paths.HOME)))
         code, body, ctype = get(f"/dashboard/{shell.ASSET_JS}")
         check("so is the script every page loads, as JavaScript",
               code == 200 and "javascript" in ctype and len(body) > 10000, f"{code} {ctype}")

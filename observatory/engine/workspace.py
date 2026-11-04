@@ -522,6 +522,9 @@ def doctor(base: Path) -> dict:
             # Updates that arrive by themselves and the daily encrypted backup: whether the
             # job is scheduled, what it last found, and what needs a person (maintenance.py).
             "maintenance": __import__("maintenance").status(base),
+            # OBS-324: anonymous usage and error data, on unless a person turned it off: what is sent,
+            # what never is, the switch and where it was set, the queue and the counters. No network.
+            "analytics": _analytics(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
             # OBS-159: which session MCP servers moved onto an installed release by
@@ -552,6 +555,14 @@ def doctor(base: Path) -> dict:
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
                if (doc.get("features") or {}).get("agent") is True else {})}
+
+
+def _analytics(base: Path) -> dict:
+    """The analytics switch and what it sends (usage_analytics.status); a fault is named, never raised."""
+    try:
+        return __import__("usage_analytics").status(base)
+    except Exception as exc:  # noqa: BLE001: doctor reports, it does not stop
+        return {"state": "unknown", "reason": type(exc).__name__}
 
 
 def _embedding_policy(base: Path) -> dict:
@@ -729,6 +740,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "auto-update":
         import maintenance
         return maintenance.auto_update_parser().parse_args(rest)
+    if name == "analytics":
+        import usage_analytics
+        return usage_analytics.parser().parse_args(rest)
     if name == "profile":
         import workspace_profile
         return workspace_profile.parser().parse_args(rest)
@@ -761,6 +775,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "auto-update":
         import maintenance
         return maintenance.auto_update_main(argv[1:])
+    if argv and argv[0] == "analytics":
+        import usage_analytics
+        return usage_analytics.main(argv[1:])
     if argv and argv[0] == "profile":
         import workspace_profile
         return workspace_profile.main(argv[1:])

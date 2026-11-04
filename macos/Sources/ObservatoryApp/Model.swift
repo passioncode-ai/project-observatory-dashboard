@@ -90,6 +90,9 @@ enum DashboardMode: Equatable {
     @Published var secretStage: SecretPromptStage = .needsPhrase
     @Published var secretFailure: Failure?
     @Published var secretBusy = false
+    /// Anonymous usage and error data (OBS-324): the workspace's switch as the engine reports it; nil while
+    /// unknown (not connected yet, or an engine before the `analytics` action), and the switch is then hidden.
+    @Published var analyticsOn: Bool?
     /// The phrase's store: the signed app's data protection keychain group, or a stand-in in tests.
     let phraseStore: PhraseStore
     /// The secret prompt's engine (`SecretEngine`): inside this app, after its own signature checks out; nil otherwise.
@@ -280,6 +283,15 @@ enum DashboardMode: Equatable {
         let data = try await backend.call(action, input: input, timeout: timeout)
         guard let doc = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw BridgeError.invalidResponse }
         return doc
+    }
+
+    /// The Settings switch for anonymous usage and error data: read, or written and read back, through the
+    /// engine's `analytics` action, which writes the same file `full analytics on|off` does.
+    func loadAnalytics() async {
+        do { analyticsOn = try await call("analytics", ["op": "status"])["on"] as? Bool } catch { analyticsOn = nil }
+    }
+    func setAnalytics(_ on: Bool) async {
+        do { analyticsOn = try await call("analytics", ["op": on ? "on" : "off"])["on"] as? Bool } catch { await loadAnalytics() }
     }
 
     /// Readiness, conversations and projects. Loads the selected conversation once:

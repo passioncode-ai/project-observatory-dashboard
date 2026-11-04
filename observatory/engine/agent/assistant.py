@@ -436,7 +436,7 @@ def parser():
         description='The assistant protocol (observatory-assistant/1) the Mac app speaks: one action; '
                     'ask, get, job, cancel and delete read one JSON object on stdin; one JSON object on stdout.')
     # One line: the Mac app's BridgeTests read these choices from it as its allowlist's contract.
-    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build','ceremony','secret'])
+    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build','ceremony','secret','analytics'])
     return ap
 
 
@@ -478,6 +478,19 @@ def secret(doc):
         doc.pop('value',None)
 
 
+def analytics(doc):
+    """The apps' Settings switch for anonymous usage and error data (OBS-324): `{"op": "status"}` reads it,
+    `{"op": "on"}` and `{"op": "off"}` write the workspace's switch file, the one `full analytics on|off`
+    writes. The answer is `usage_analytics.status` plus the notice text, so a switch's caption and the CLI's
+    notice say the same thing."""
+    import usage_analytics as UA
+    if set(doc)!={'op'} or doc.get('op') not in ('status','on','off'):
+        raise AssistantError('invalid-input')
+    base=configuration.home()
+    if doc['op']!='status':UA.write_switch(base,doc['op']=='on')
+    return {**UA.status(base),'notice_text':UA.NOTICE}
+
+
 def main(argv=None):
     args=parser().parse_args(argv)
     try:
@@ -497,6 +510,7 @@ def main(argv=None):
         elif args.action=='ask':result=ask(doc)
         elif args.action=='ceremony':result=ceremony(doc)
         elif args.action=='secret':result=secret(doc)
+        elif args.action=='analytics':result=analytics(doc)
         else:
             if set(doc)!={'id'} or not isinstance(doc['id'],str):raise AssistantError('invalid-input')
             if args.action=='get':result=get_conversation(doc['id'])

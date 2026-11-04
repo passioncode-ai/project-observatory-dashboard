@@ -95,6 +95,8 @@ PATH_PREFIX_ALLOWLIST = {
     "store/review-policy/": "the standing review policy's journal and lock, written into the workspace by "
                             "`review.py policy run` (OBS-227)",
     "store/review/": "the review batch file `review.py batch prepare` writes into the workspace (OBS-227)",
+    "store/analytics/": "the anonymous usage events' install id, queue, counters and notice record, written into "
+                        "the workspace by usage_analytics.py (OBS-324)",
 }
 
 PATH_ALLOWLIST = {

@@ -278,6 +278,19 @@ struct SettingsView: View {
                 Text(m.t("Project Observatory opens when you log in and keeps working with its window closed. Quit it from its menu (⌘Q)."))
                     .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
+            // Anonymous usage and error data (OBS-324): on by default, turned off here or with
+            // `project-observatory full analytics off`; the engine keeps the choice through updates.
+            VStack(alignment: .leading, spacing: 6) {
+                if let on = m.analyticsOn {
+                    Toggle(m.t("Send anonymous usage and error data"),
+                           isOn: Binding(get: { on }, set: { value in Task { await m.setAnalytics(value) } }))
+                        .toggleStyle(.switch).tint(Theme.accent)
+                        .accessibilityLabel(m.t("Send anonymous usage and error data"))
+                    Text(m.t("Which commands and tools run, their outcome and duration, error kinds, the version and the platform, to help improve Project Observatory. Never keys, paths, project or person names, or anything from your workspace. On by default."))
+                        .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .task { await m.loadAnalytics() }
             PhraseSettings()
             HStack(spacing: 10) {
                 Button(m.t("Save and check connection")) { Task { await m.saveSettings() } }

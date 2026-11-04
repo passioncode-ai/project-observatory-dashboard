@@ -477,6 +477,9 @@ body[data-page] .home-tile span { text-transform: none; letter-spacing: 0; }
 body[data-page="index"] .home-list .fdetail { margin-left: auto; white-space: nowrap; }
 .home-more { margin: var(--space-2) 0 0; }
 .home-calm { margin: 0; }
+/* The first-run notice of anonymous usage data (OBS-324): a bordered note above the state band. */
+.home-notice { border: 1px solid var(--border-strong); border-radius: var(--r-card); padding: var(--space-3); }
+.home-notice p { margin: 0 0 var(--space-2); }
 .home-orgs { list-style: none; margin: 0; padding: 0; display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-2); }
 .home-orgs li { display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3);

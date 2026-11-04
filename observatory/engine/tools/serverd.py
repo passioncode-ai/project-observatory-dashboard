@@ -668,6 +668,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if kind or (name.endswith(".html") and name[:-5] in shell.NAMES):
                 page = paths.DASHBOARD_DIR / name
                 if page.is_file():
+                    if name == "index.html":
+                        # A person opened Home: the anonymous usage notice on it counts as shown from now
+                        # (OBS-324). The tick's build never marks it; a read here never fails the page.
+                        try:
+                            import usage_analytics
+                            usage_analytics.dashboard_viewed(pathlib.Path(paths.HOME))
+                        except Exception:  # noqa: BLE001
+                            pass
                     body = page.read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", f"{kind or 'text/html'}; charset=utf-8")

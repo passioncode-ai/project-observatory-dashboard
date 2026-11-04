@@ -430,6 +430,17 @@ def from_store() -> dict:
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["embedding_policy"] = {"state": "unknown",
                                                  "reason": f"{type(exc).__name__}"}
+        # ANONYMOUS USAGE DATA (OBS-324): whether this install sends anonymous usage and error
+        # events, where that was decided and the command that changes it; and whether the
+        # first-run notice is still shown on the home page (the first week after it appeared).
+        try:
+            import usage_analytics
+            ua = usage_analytics.status(Path(paths.HOME))
+            out["health"]["analytics"] = {
+                "on": ua["on"], "collecting": ua["collecting"], "source": ua["source"],
+                "app_key": ua["app_key"], "notice": usage_analytics.dashboard_notice(Path(paths.HOME))}
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["analytics"] = {"state": "unknown", "reason": type(exc).__name__}
         # UPDATES AND BACKUPS (docs/runs/2026-10-05-auto-update, R10): whether each new
         # release installs itself, whether the hourly job is scheduled here, the last check
         # and the newest full backup — the answer `full maintain status` gives.
@@ -2314,6 +2325,20 @@ if (H.embedding_policy) {
     hb.push([T("memory embeddings"), T("nothing leaves this machine"), show]);
   else
     hb.push([T("memory embeddings"), T("policy refused, nothing leaves this machine: {reason}", {reason: EP.reason || "?"}), show]);
+}
+// Anonymous usage and error data (OBS-324): on or off, why, and the command that changes it.
+if (H.analytics && H.analytics.state !== "unknown") {
+  const UA = H.analytics;
+  if (!UA.on)
+    hb.push([T("anonymous usage data"), UA.source && UA.source.startsWith("env:")
+      ? T("off for the processes {variable} is set in: nothing is sent", {variable: UA.source.slice(4)})
+      : T("off: nothing is sent"), fullCommand("analytics on")]);
+  else if (!UA.collecting)
+    hb.push([T("anonymous usage data"), T("on, but this build carries no analytics key: nothing is sent"),
+      fullCommand("analytics status")]);
+  else
+    hb.push([T("anonymous usage data"), T("on: command, tool and error names, outcomes, versions and platform; never keys, paths, names or workspace content"),
+      fullCommand("analytics off")]);
 }
 // Updates and backups (R10): whether new releases install themselves and when the last
 // full backup was taken, with the command that turns the missing part on.

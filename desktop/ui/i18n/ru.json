@@ -121,5 +121,10 @@
   "The network's new revision does not list this machine with the keys it showed. Nothing was added.": "Новая ревизия сети не указывает эту машину с ключами, которые она показала. Ничего не добавлено.",
   "The network's new revision no longer lists the machine you paired with. Nothing was added.": "Новая ревизия сети больше не указывает машину, с которой шло подключение. Ничего не добавлено.",
   "This machine's keys could not be read or created. Run `project-observatory full node --init` in a terminal to see why.": "Не удалось прочитать или создать ключи этой машины. Выполните `project-observatory full node --init` в терминале, чтобы узнать причину.",
-  "A pairing is already under way on this machine.": "На этой машине уже выполняется подключение."
+  "A pairing is already under way on this machine.": "На этой машине уже выполняется подключение.",
+  "Send anonymous usage and error data": "Отправлять анонимные данные об использовании и ошибках",
+  "Which commands and tools run, their outcome and duration, error kinds, the version and the platform, to help improve Project Observatory. Never keys, paths, project or person names, or anything from your workspace. On by default.": "Какие команды и инструменты запускаются, их результат и длительность, типы ошибок, версия и платформа: это помогает улучшать Project Observatory. Никогда не отправляются ключи, пути, имена проектов и людей и ничего из вашего рабочего пространства. Включено по умолчанию.",
+  "Anonymous usage data is on.": "Анонимные данные об использовании включены.",
+  "Anonymous usage data is off. Nothing is sent.": "Анонимные данные об использовании выключены. Ничего не отправляется.",
+  "The setting could not be changed: {error}": "Не удалось изменить настройку: {error}"
 }

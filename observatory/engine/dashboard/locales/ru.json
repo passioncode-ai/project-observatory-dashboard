@@ -2431,5 +2431,12 @@
  "{copy} has a copy record that cannot be read": "у {copy} нечитаемая запись копии",
  "{copy} and its copy record disagree": "{copy} и его запись копии расходятся",
  "{copy} says it is a copy, but its source is not recorded": "{copy} называет себя копией, но его источник не записан",
- "{source} was moved but is not archived": "{source} перенесён, но не архивирован"
+ "{source} was moved but is not archived": "{source} перенесён, но не архивирован",
+ "anonymous usage data": "анонимные данные об использовании",
+ "off for the processes {variable} is set in: nothing is sent": "выключено для процессов, где задана {variable}: ничего не отправляется",
+ "off: nothing is sent": "выключено: ничего не отправляется",
+ "on, but this build carries no analytics key: nothing is sent": "включено, но в этой сборке нет ключа аналитики: ничего не отправляется",
+ "on: command, tool and error names, outcomes, versions and platform; never keys, paths, names or workspace content": "включено: названия команд, инструментов и ошибок, результаты, версии и платформа; никогда ключи, пути, имена или содержимое рабочего пространства",
+ "Anonymous usage data": "Анонимные данные об использовании",
+ "Project Observatory sends anonymous usage and error data to help improve it: which commands and tools run, their outcome and duration, error kinds, the version and the platform. It never sends keys, paths, project or person names, or anything from your workspace. To turn it off:": "Project Observatory отправляет анонимные данные об использовании и ошибках, чтобы его улучшать: какие команды и инструменты запускаются, их результат и длительность, типы ошибок, версию и платформу. Он никогда не отправляет ключи, пути, имена проектов и людей и ничего из вашего рабочего пространства. Чтобы выключить:"
 }
