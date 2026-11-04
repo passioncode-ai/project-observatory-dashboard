@@ -114,6 +114,7 @@
 "Secret request" = "Запрос ключа";
 "Send" = "Отправить";
 "Send (⌘↩)" = "Отправить (⌘↩)";
+"Send anonymous usage and error data" = "Отправлять анонимные данные об использовании и ошибках";
 "Sending shares your question and selected local facts with your configured model. Model costs apply. Answers suggest actions; they do not run them." = "При отправке вопрос и выбранные локальные факты передаются настроенной модели, запрос оплачивается по её тарифам. Ответы предлагают действия, но не выполняют их.";
 "Set your phrase" = "Задайте фразу";
 "Settings" = "Настройки";
@@ -198,6 +199,7 @@
 "Waiting for the new revision" = "Ожидание новой ревизии";
 "Waiting for the other machine" = "Ожидание другой машины";
 "What is happening across your projects?" = "Что происходит с вашими проектами?";
+"Which commands and tools run, their outcome and duration, error kinds, the version and the platform, to help improve Project Observatory. Never keys, paths, project or person names, or anything from your workspace. On by default." = "Какие команды и инструменты запускаются, их результат и длительность, типы ошибок, версия и платформа: это помогает улучшать Project Observatory. Никогда не отправляются ключи, пути, имена проектов и людей и ничего из вашего рабочего пространства. Включено по умолчанию.";
 "Which projects need attention?" = "Какие проекты требуют внимания?";
 "Why" = "Зачем";
 "Working…" = "Выполняется…";

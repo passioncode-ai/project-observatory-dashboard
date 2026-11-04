@@ -195,6 +195,17 @@ Values enter credential tools locally through stdin. Agents work with names, and
 
 Known-value scanning cannot find unknown or transformed values. A copied value in an agent transcript or local memory store does not prove a vendor breach. [Security boundaries](SECURITY.md) describe what is and is not protected.
 
+## Privacy: anonymous usage data
+
+Project Observatory sends anonymous usage and error data to help improve it: which commands, MCP tools and ticks run,
+their outcome and duration, error class names, the version, the OS and the Python version, under a random install id
+made only for this. It never sends keys, vault values, paths, repository, project or person names, registry content,
+URLs, prompts or anything you typed. It is on by default, and the first command at your terminal after the release
+that brings it says so once. Turn it off with `project-observatory full analytics off`, in the apps' Settings, or for
+one process with `OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1`; an update keeps your choice. Events wait in a
+local queue and the maintenance job sends them; no command waits on the network. Details:
+[onboarding](docs/ONBOARDING.md#anonymous-usage-and-error-data) and [the event catalogue](docs/analytics-events.md).
+
 ## Updates preserve supported contracts
 
 An installed release updates itself through the maintenance job, or by hand with `project-observatory full update --apply`: the wheel is verified against GitHub's digest and `SHA256SUMS`, whose signature `SHA256SUMS.asc` must be by the organization's release key, the workspace is upgraded, and a failure rolls back ([staying in step](docs/ONBOARDING.md#staying-in-step)). A source checkout is updated with Git and reinstalled (`python -m pip install -U -c requirements-full.lock '.[full]'`), followed by `project-observatory full upgrade`. Both install the dependencies from the release's `requirements-full.lock`, which the wheel carries. `full profile export` / `import` carries the functional configuration to a [second machine](docs/ONBOARDING.md#second-machine). The Claude Code plugin updates itself when auto-update is on; see `full agent status`.

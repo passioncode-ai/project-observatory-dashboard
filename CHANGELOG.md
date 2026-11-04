@@ -5,6 +5,19 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Anonymous usage and error data, on by default** (OBS-324, `docs/ONBOARDING.md` "Anonymous usage and error data",
+  `docs/analytics-events.md`, `docs/COMPATIBILITY.md` "Workspace state: anonymous usage data"). Commands, MCP tool
+  calls and ticks queue an anonymous event (`command_run`, `mcp_tool_called`, `tick_finished`, `error_raised`,
+  `analytics_notice_shown`) with the name of what ran, its outcome and duration, and an error's class name; the
+  maintenance job sends the queue in batches with a random install id, the version and the platform. Never keys,
+  paths, names, registry content, URLs, prompts or arguments. A one-time notice at the terminal and on the
+  dashboard's Home says so; `full analytics status|on|off|send`, the apps' Settings switch, a Health row and
+  `full doctor` show and change it; `OBSERVATORY_ANALYTICS=off` and `DO_NOT_TRACK=1` turn it off for a process. An
+  install that predates this release is on after the update unless a person turned it off. A build without an
+  analytics App-Key collects nothing.
+
 ## 0.32.0 (2026-11-04)
 
 Observatory can now record that one of your repositories is a copy of another, or that a project moved to a new

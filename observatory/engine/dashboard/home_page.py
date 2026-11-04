@@ -441,10 +441,26 @@ def empty_html(payload: dict, t: Translator) -> str:
             + f'<div class="empty not-scanned">{body}</div></section>')
 
 
+def analytics_notice_html(payload: dict, t: Translator) -> str:
+    """The first-run notice of anonymous usage data (OBS-324), at the top of Home for the first
+    week after it appeared (usage_analytics.dashboard_notice); nothing once that week is over or
+    while collection is off."""
+    if not (((payload.get("health") or {}).get("analytics") or {}).get("notice")):
+        return ""
+    said = t.mark("Project Observatory sends anonymous usage and error data to help improve it: which "
+                  "commands and tools run, their outcome and duration, error kinds, the version and the "
+                  "platform. It never sends keys, paths, project or person names, or anything from your "
+                  "workspace. To turn it off:")
+    return (f'<section class="home-notice" aria-labelledby="home-notice-h">'
+            + t.mark("Anonymous usage data", tag="h2", attrs=' class="home-h" id="home-notice-h"')
+            + f'<p>{said}</p>{_copy(full_command(payload, "analytics off"), t)}</section>')
+
+
 def home_html(payload: dict, t: Translator | None = None) -> str:
     """Home's body, rendered at build time into the index page."""
     t = t or Translator()
+    notice = analytics_notice_html(payload, t)
     if not payload.get("rows"):
-        return f'<div id="home" class="home">{empty_html(payload, t)}</div>'
-    return (f'<div id="home" class="home">{band_html(payload, t)}{needs_html(payload, t)}'
+        return f'<div id="home" class="home">{notice}{empty_html(payload, t)}</div>'
+    return (f'<div id="home" class="home">{notice}{band_html(payload, t)}{needs_html(payload, t)}'
             f'{projects_html(payload, t)}</div>')

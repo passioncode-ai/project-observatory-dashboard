@@ -21,3 +21,6 @@ node_modules/
 # Local SwiftPM build products
 macos/.build/
 macos/.swiftpm/
+
+# The analytics App-Key a release build writes beside usage_analytics.py (OBS-324); never committed.
+observatory/engine/analytics-app-key

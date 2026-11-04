@@ -195,6 +195,8 @@ class DoorPresetsAreDocumented(unittest.TestCase):
 #: cannot appear unclassified. `StateFamilies` derives the families from the code and refuses one
 #: missing here.
 STATE_FAMILIES = {
+    # OBS-324: anonymous usage data, the switch file in the home and its folder (the release after 0.32.0).
+    "analytics": "0.33.0", "store/analytics": "0.33.0",
     "store/raw/agents.json": "0.25.0", "store/raw/bitbucket.json": "0.2.0",
     "store/raw/cloudflare_zones.json": "0.2.0", "store/raw/companion-faults.jsonl": "0.2.0",
     "store/raw/digitalocean.json": "0.27.0", "store/raw/domains_live.json": "0.2.0", "store/raw/env.json": "0.2.0",

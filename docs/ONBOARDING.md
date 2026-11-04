@@ -2655,6 +2655,38 @@ second machine's name, for example `machine-b.json`. A slot meant to differ is m
 machines' copies read as stale. `observatory_credentials` names, for each vault row, the machines
 that hold it. The design: [docs/design/VAULT-DIGESTS.md](design/VAULT-DIGESTS.md).
 
+## Anonymous usage and error data
+
+Project Observatory sends anonymous usage and error data to its maintainers to help improve it. It is on by
+default, for new installs and for installs that update to this release, and you turn it off per workspace:
+
+```sh
+project-observatory full analytics status   # on or off, why, what is sent and what never is, the queue and counters
+project-observatory full analytics off      # nothing is sent from now on; the queue and the install id are deleted
+project-observatory full analytics on       # on again, with a new install id
+```
+
+The Mac app and the Windows and Linux app have the same switch in Settings ("Send anonymous usage and error
+data"). For one process, a CI job or a shell profile, `OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1` turns it off
+without touching the switch; the environment never turns on what you turned off. An update keeps your choice.
+
+**What is sent:** the name of each `full` command, MCP tool call and tick, with its outcome (ok, refused, error,
+failed, skipped), its duration and exit code; the class name of an error (`OSError`, never its message); the engine
+version, the OS name and version and the Python version; and a random install id made only for this, kept in
+`store/analytics/install-id`, never derived from your machine, account or name. Every event and property is listed
+in [the event catalogue](analytics-events.md).
+
+**What is never sent:** keys or vault values, paths or file names, repository, project, organisation or person
+names, anything from the registry or the store, URLs, prompts, arguments, messages or anything you typed.
+
+**How it travels:** a command or tool call appends one line to a local queue and returns; it never waits on the
+network. The maintenance job (every 15 minutes) sends the queue to `https://analytics.sshlg.me` in batches of at most
+25 and drops events older than 23 hours; a failure is counted in `store/analytics/counters.json` and never shown as
+an error. `full analytics send` sends the queue now. The first time a command runs at your terminal after this
+release, it prints a one-time notice saying this; the dashboard's Home shows it for a week, and Health shows the
+switch with the command that changes it. A build without an analytics key (a source checkout, for one) collects and
+sends nothing, and `analytics status` says `app_key: absent`.
+
 ## Staying in step
 
 ### Updates install themselves (0.17.0 and later)

@@ -171,6 +171,8 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('identifiers',)
 # One repository derived from another: copies, moves, how far a copy is behind (OBS-321).
 BOUNDARY += ('derivations',)
+# Anonymous usage and error events: on by default, off by a switch, never a private fact (OBS-324).
+BOUNDARY += ('usage_analytics',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
 # Home: the state band, the three problems to do first, projects at a glance (OSS-88).
@@ -343,7 +345,7 @@ ROOT_FILES = (
     # The companion's request for a why: journal, measurement, reach (M-8).
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
-    'maintenance.py', 'app_update.py', 'update_events.py',
+    'maintenance.py', 'app_update.py', 'update_events.py', 'usage_analytics.py',
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
     # The machine id, the placement file and a job's move between two machines (OBS-283, OBS-284).

@@ -1101,11 +1101,23 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             except Exception as exc:  # noqa: BLE001: a share never stops the pass
                 report["shares"] = {"result": "error", "degraded": "shares.unsynced",
                                     "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        # Anonymous usage and error events (OBS-324): what the commands, tools and ticks queued since
+        # the last pass is sent now, in batches; never raises, a failure is a local counter.
+        report["analytics"] = step_analytics(base)
         state["pass"] = {"at": iso(at)}
         report["log_retention"] = state["log_retention"] = _rotate_logs(base)
         write_state(base, state)
         report["schedule_reload"] = _reload_after_pass(base)
         return report
+
+
+def step_analytics(base: Path) -> dict:
+    """Send the queued anonymous usage events (usage_analytics.flush). Never raises."""
+    try:
+        import usage_analytics
+        return usage_analytics.flush(base)
+    except Exception as exc:  # noqa: BLE001: analytics never stops a pass
+        return {"result": "error", "kind": type(exc).__name__}
 
 
 #: How long a release the check job handed to the pass waits before the job starts the pass again

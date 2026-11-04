@@ -529,11 +529,12 @@ async fn build_dashboard(app: AppHandle) -> Result<(), bridge::BridgeError> {
     Ok(())
 }
 
-/// The assistant window's engine calls: only the assistant's own actions, never `serve` or `build`
-/// (those are the dashboard window's), each bounded like every bridge call.
+/// The assistant window's engine calls, and the Settings window's `analytics` switch: never `serve` or
+/// `build` (those are the dashboard window's), each bounded like every bridge call.
 #[tauri::command]
 async fn assistant(app: AppHandle, action: String, input: Value) -> Result<Value, bridge::BridgeError> {
-    const ALLOWED: &[&str] = &["status", "list", "get", "ask", "job", "cancel", "delete"];
+    // `analytics` is the Settings window's switch for anonymous usage and error data (OBS-324).
+    const ALLOWED: &[&str] = &["status", "list", "get", "ask", "job", "cancel", "delete", "analytics"];
     if !ALLOWED.contains(&action.as_str()) || !input.is_object() {
         return Err(bridge::BridgeError { code: "backend-configuration".into(), detail: None });
     }

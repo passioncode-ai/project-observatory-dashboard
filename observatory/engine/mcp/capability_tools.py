@@ -337,6 +337,37 @@ class InteropServer(MCPServer):
 
     # ── calling ──────────────────────────────────────────────────────────────
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+        """Every tool call, with one anonymous `mcp_tool_called` event queued after it (and an
+        `error_raised` for a crash): the tool's name when this server serves it, else `other`, its
+        outcome and duration, never an argument or an answer (usage_analytics.py, OBS-324)."""
+        import time
+        started, failed, crash = time.monotonic(), True, None
+        try:
+            result = await self._call_tool(name, arguments, context)
+            failed = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
+            return result
+        except Exception as exc:
+            crash = exc
+            raise
+        finally:
+            self._count_call(name, failed, crash, started)
+
+    def _count_call(self, name: str, failed: bool, crash: BaseException | None, started: float) -> None:
+        try:
+            import time
+            import usage_analytics as UA
+            served = (name in self._definitions or name in self._memory or name == GRANT_CHECK
+                      or name in ("observatory_assistant_ask", "observatory_secret_request")
+                      or (self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL))
+                      or self._tool_manager.get_tool(name) is not None)
+            UA.record("mcp_tool_called", surface="mcp", tool=name if served else "other",
+                      outcome="error" if failed else "ok", duration_ms=int((time.monotonic() - started) * 1000))
+            if crash is not None:
+                UA.record("error_raised", surface="mcp", kind=UA.error_kind(crash))
+        except Exception:  # noqa: BLE001: counting never changes the answer
+            pass
+
+    async def _call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         stale = stale_answer()
         if stale is not None:
             return stale

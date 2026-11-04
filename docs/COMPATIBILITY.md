@@ -339,6 +339,30 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Workspace state: anonymous usage data (OBS-324, the release after 0.32.0)
+
+New files only; no earlier file changes shape. An upgrade writes none of them: the switch file is
+absent until a person runs `full analytics on|off` (absent reads as on, so an install that predates
+this release sends anonymous usage data after the update unless a person turned it off), and the
+folder appears the first time an event is queued, which happens only in a build that carries an
+analytics App-Key. A downgrade leaves them in place, unread by the older engine, which sends nothing.
+What is sent and what never is: [the event catalogue](analytics-events.md).
+
+| Path | Since | What it holds | Upgrade and downgrade |
+|---|---|---|---|
+| `analytics` (in the workspace home) | 0.33.0 | the switch: `on` or `off`, owner-only; absent is on, only `off` is off, like `auto-update` | written by `full analytics on\|off` and by the apps' Settings switch; deleting it turns collection back on |
+| `store/analytics/install-id` | 0.33.0 | a random UUID made for analytics only, never derived from the machine, an account or a person | deleted when the switch is turned off; a new one is made when it is turned on again |
+| `store/analytics/queue.jsonl` | 0.33.0 | events waiting to be sent: name, catalogued properties, time, version; at most 512 KiB, sent by the maintenance job, dropped after 23 hours | deleted when the switch is turned off; deleting it loses only unsent events |
+| `store/analytics/counters.json` | 0.33.0 | counts of what was sent, refused, expired, rejected or failed; never an event | deleting it resets the counts |
+| `store/analytics/notice.json` | 0.33.0 | when the first-run notice was shown on the terminal and on the dashboard, and in which version | deleting it shows the notice again |
+
+Settings outside the workspace: `OBSERVATORY_ANALYTICS=off` (also `0`, `false`, `no`) and `DO_NOT_TRACK`
+(any value but empty or `0`) turn collection off for the processes that carry them, without touching
+the switch file; `OBSERVATORY_ANALYTICS_APP_KEY` supplies the App-Key to a build without one;
+`OBSERVATORY_ANALYTICS_ENVIRONMENT` (`production` or `sandbox`) overrides the install check. A
+release build may carry the App-Key in the file `analytics-app-key` beside `usage_analytics.py`; the
+repository never does.
+
 ## Workspace state added in 0.25.0 to 0.27.0
 
 Each family below is new; no earlier file changes shape. An upgrade creates none of them: each

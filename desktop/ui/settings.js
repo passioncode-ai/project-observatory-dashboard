@@ -19,6 +19,26 @@
       status.textContent = t("The startup entry could not be changed: {error}", { error: e.detail || e.code || String(e) });
     }
   };
+  // Anonymous usage and error data (OBS-324): the workspace's switch, read and written through the engine's
+  // `analytics` action (the file `full analytics on|off` writes). Hidden when the engine cannot answer.
+  const analytics = async op => invoke("assistant", { action: "analytics", input: { op } });
+  try {
+    $("analytics").checked = (await analytics("status")).on === true;
+    $("analytics-row").hidden = false; $("analytics-hint").hidden = false;
+  } catch (e) { /* an engine before OBS-324, or not connected yet: no switch to show */ }
+  $("analytics").onchange = async () => {
+    const on = $("analytics").checked, status = $("analytics-status");
+    status.className = "status"; status.textContent = "";
+    try {
+      $("analytics").checked = (await analytics(on ? "on" : "off")).on === true;
+      status.className = "status good";
+      status.textContent = $("analytics").checked ? t("Anonymous usage data is on.") : t("Anonymous usage data is off. Nothing is sent.");
+    } catch (e) {
+      $("analytics").checked = !on;
+      status.className = "status bad";
+      status.textContent = t("The setting could not be changed: {error}", { error: e.detail || e.code || String(e) });
+    }
+  };
   const dialog = window.__TAURI__.dialog;
   $("pick-program").onclick = async () => { const p = await dialog.open({ multiple: false, directory: false, defaultPath: $("program").value || undefined }); if (p) $("program").value = p; };
   $("pick-workspace").onclick = async () => { const p = await dialog.open({ multiple: false, directory: true, defaultPath: $("workspace").value || undefined }); if (p) $("workspace").value = p; };

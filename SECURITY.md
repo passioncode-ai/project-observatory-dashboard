@@ -78,6 +78,14 @@ from a person's terminal or with `OBSERVATORY_SYSTEM_SETUP=1`
 (`maintenance.system_setup_allowed`). `OBSERVATORY_SYSTEM_SETUP=0` refuses it everywhere:
 `full update --apply` then schedules nothing and writes nothing to the credential store,
 and reports `"maintenance": "not-scheduled-here"` (`engine_update.system_setup_refused`).
+Anonymous usage and error data is on by default (`usage_analytics.py`, OBS-324): commands, MCP tool
+calls and ticks append the name, outcome and duration of what ran, and an error's class name, to a local
+queue, and the maintenance job sends that queue with a random install id, the engine, OS and Python versions
+to the maintainers' analytics host (`HOST` in `usage_analytics.py`, over https). Only catalogued events and properties pass
+(`docs/analytics-events.md`); no key, vault value, path, name, registry content, URL, prompt or argument is
+ever sent. `full analytics off` (or the apps' Settings switch) stops it and deletes the queue and the install
+id; `OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1` stops it for one process. A build without an analytics
+App-Key sends nothing.
 The assistant and the agent spend through an OpenRouter key, and an
 `OPENROUTER_API_KEY` in the environment of the process that runs them is that key,
 ahead of every key file: a key exported in your shell profile is spent by them.
