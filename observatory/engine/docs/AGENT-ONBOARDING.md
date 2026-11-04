@@ -15,6 +15,10 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 
 Fabric owns the canonical project id. Observatory pulls it from Fabric's hub and records `fabric:<uuid>` against each `project:<slug>` in its own store; it never creates a Fabric project and writes nothing to Fabric but one access request (`fabric.access.request`, capability `project.resolve`, allowed at once on the operator's own machine). `observatory_resolve` answers a `fabric:<uuid>` (via `alias`, owner `fabric`) and an absolute folder (also via `alias`, by the fabric-agent-contract's DEC-0089 rules). The SessionStart hook asks Fabric which project a session's folder is, and applies those rules itself only while Fabric is not running. A refusal names its reason in `degraded`; run `project-observatory full fabric-attribution` to ask again now.
 
+## Copies and moves of repositories
+
+`config/derivations.json` is mine: it records which repository is a copy (`kind: copy`) or a move (`kind: move`) of which, by registry ids. `observatory_project` and `observatory_resolve` show it both ways as `derived_from` and `copies`, each with `behind`, the commits on the source's branch after `last_synced`, counted in the source's local clone (null when not measured here, never fetched). An entry the registry cannot stand behind is refused by name in `degraded`. Observatory never syncs: `project-observatory full copies plan COPY` prints the steps, and carrying a copy forward is a reviewed pull request in the copy, after which I record the new `last_synced`.
+
 ## The review queue
 
 What you propose waits for a decision. When I enabled the standing review policy

@@ -247,6 +247,66 @@ mirrors it as it mirrors every registry document. A workspace upgraded from an e
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.
 
 
+## Registry: derivations (OBS-321)
+
+New optional curated file `config/derivations.json` (schema `derivations/1`), the operator's own and
+never shipped: `{"schema": "derivations/1", "derivations": [...]}`, each entry `copy` and `source`
+(repository ids as the registry spells them), `kind` (`copy` or `move`), `copy_point` and
+`last_synced` (a source commit of 7 to 64 hex digits, or `{source_commit, copy_commit?, date?}`),
+and optionally `builder` (`{path_hint, rules_count?, rules_sha256?}`), `source_branch` (default: the
+source repository's `default_branch`), `note` and `evidence` (one line each). A copy needs
+`copy_point`; a move has no `last_synced`. Nothing is created for it: without the file there is no
+relation, and no reader reports anything missing. A file that is not JSON or not this schema is
+refused whole; an entry is refused alone, by code, in `degraded` and `refused`, and never repaired:
+
+| Code | Meaning |
+|---|---|
+| `unreadable` | the file is not JSON, or not an object of schema derivations/1 |
+| `not-an-object` | an entry is not an object |
+| `unknown-field` | an entry carries a field this schema does not define |
+| `bad-repository` | copy or source is not a `repository:` id |
+| `unknown-repository` | copy or source is not a repository in the registry |
+| `self-derivation` | a repository is recorded as derived from itself |
+| `bad-kind` | kind is neither `copy` nor `move` |
+| `bad-point` | copy_point or last_synced is not a commit or {source_commit, copy_commit?, date?} |
+| `missing-copy-point` | a copy without copy_point: behind cannot be measured |
+| `move-with-last-synced` | a move is never synced, so it carries no last_synced |
+| `bad-builder` | builder is not {path_hint, rules_count?, rules_sha256?} |
+| `bad-branch` | source_branch is not a branch name |
+| `bad-text` | note or evidence is not short plain text, or looks like a credential |
+| `duplicate-copy` | two entries name the same copy: a copy has one source |
+| `cycle` | the entries form a cycle of derivations |
+
+A copy may carry a tracked `.copy/upstream.json` (read at HEAD of its local clone, at most 64 KiB):
+`kind`, `copy_point`, `last_synced` (same shapes) and `deny` (relative paths the copy never takes).
+Any other field, a `source` among them, is ignored. Where both files give a value the curated one is
+used and the difference is listed; a value only the copy gives is used and marked as the copy's.
+
+New file `registry/derivations.json` (`schema_version` 1, `schema` `derivations/1`), rebuilt by every
+emit, declared by the new source `SRC-0023`: `relations[]` with `copy`, `source`, `kind`,
+`source_branch`, `copy_branch`, `copy_point`, `last_synced`, `builder`, `deny`, `provenance` (each
+value's side: `curated` or `copy`), `copy_record` (`state`: `read`, `absent`, `no-clone` or
+`unreadable`; `differs[]`), `behind` (null for a move; `state` `measured` with `commits`,
+`outside_deny`, `ref`, `head`, `on_branch`, `oldest_on`, `since`, or `unknown` with its `reason`) and
+`source_archived`; `unrecorded[]` (copies that carry `.copy/upstream.json` and no accepted entry);
+`refused[]`; `degraded[]`; `totals`. `behind` is counted in the source's local clone (its
+`origin/<branch>`, else the local branch), offline: nothing is fetched and nothing is written to any
+repository. The findings `copy.behind_source` (the source has commits after `last_synced` outside
+the deny paths: warning once the oldest is over 7 days old, info before that or when not measured),
+`copy.relation_unrecorded` (a copy that says so with no entry, a recorded copy that does not say so,
+or a record that cannot be read), `copy.record_differs` and `copy.moved_source_open` (a move whose
+source is not archived) are rebuilt from it on every tick.
+
+`project.detail` (`observatory_project`) gains `project.derived_from` and `project.copies`, and
+`project.resolve` (`observatory_resolve`) gains `derived_from` and `copies`: lists of `{copy, source,
+kind, copy_point, last_synced, behind}` (commits as the source spells them; `behind` null when not
+measured or for a move), present whenever `registry/derivations.json` exists and absent when no
+relation was ever recorded. Both published output schemas declare them as optional; a refusal naming
+one of the answer's repositories is in `degraded`, and a curated file the emit has not turned into
+the registry document yet is named there too. New command `project-observatory full copies list|plan
+COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
+files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
+
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
 A machine bundle's `MANIFEST.json` and a workspace snapshot's `manifest.json` gain `machine_id`, the machine they

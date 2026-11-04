@@ -5,6 +5,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Copies and moves of repositories** (OBS-321, `docs/ONBOARDING.md`, `docs/COMPATIBILITY.md` "Registry:
+  derivations"). The new curated `config/derivations.json` (schema `derivations/1`) records which repository is a
+  copy or a move of which; each copy may say so itself in a tracked `.copy/upstream.json` that never names its
+  source. Every emit writes `registry/derivations.json` (source `SRC-0023`): each relation with the side each value
+  came from (the curated file wins and the difference is listed), and the commits on the source's branch after
+  `last_synced`, counted in the source's local clone, never fetched. A wrong entry (unknown repository, a repository
+  derived from itself, a cycle, two sources for one copy, a move with `last_synced`) is refused by name in
+  `degraded`. New findings `copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs` and
+  `copy.moved_source_open`; `project.detail` and `project.resolve` show the relation both ways (`derived_from`,
+  `copies`); `full copies list|plan COPY` prints the sync steps and runs none. Nothing writes to a repository.
+  Tests: `tests/test_derivations.py`.
+
 ### Changed
 
 - **A second-machine restore names `ssh-keys rekey` for each key** (OBS-300, `docs/ONBOARDING.md` "Moving to a

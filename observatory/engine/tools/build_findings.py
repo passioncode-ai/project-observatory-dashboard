@@ -1772,6 +1772,11 @@ def collect() -> list[dict]:
     # GitHub (tools/ssh_key_findings.py). Silent until `full ssh-keys list` saved an inventory.
     import ssh_key_findings
     out.extend(ssh_key_findings.from_file(paths.SCRATCH / "ssh-keys.json"))
+    # COPIES AND MOVES (OBS-321, tools/derivation_findings.py): a copy behind its source, a copy
+    # nothing records, a record the copy contradicts, a moved repository still open. Silent until
+    # the operator records a relation in config/derivations.json.
+    import derivation_findings
+    out.extend(derivation_findings.from_file(paths.REGISTRY / "derivations.json", TODAY))
     # THE REVIEW QUEUE, both halves (OBS-227, tools/review_findings.py): what waits for a person after
     # the standing review policy took what it may. The registry proposals had no finding before.
     import review_findings

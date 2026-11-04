@@ -87,6 +87,8 @@ SAMPLES = {
     "{shlex.quote(old)}": "id_work", "NEW": "id_work-own",
     "{k['fingerprint']}": "SHA256:" + "A" * 43,
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
+    # A recorded copy's repository id, for `full copies plan` (OBS-321).
+    "COPY": "repository:example-org/alpha-agent", "{copy}": "repository:example-org/alpha-agent",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
     # A partial restore's filters, repeated in its next steps (OBS-282): one `--flag=value` word each.

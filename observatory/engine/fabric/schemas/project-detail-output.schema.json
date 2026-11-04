@@ -40,6 +40,116 @@
         "id": {
           "type": "string",
           "pattern": "^project:"
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "copy",
+              "source",
+              "kind",
+              "copy_point",
+              "last_synced",
+              "behind"
+            ],
+            "properties": {
+              "copy": {
+                "type": "string",
+                "pattern": "^repository:\\S+$"
+              },
+              "source": {
+                "type": "string",
+                "pattern": "^repository:\\S+$"
+              },
+              "kind": {
+                "enum": [
+                  "copy",
+                  "move"
+                ],
+                "description": "copy: kept in step with its source; move: the source is frozen and nothing is carried."
+              },
+              "copy_point": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source commit the copy was taken from."
+              },
+              "last_synced": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source commit the copy was last carried forward to; null for a move."
+              },
+              "behind": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Commits on the source branch after last_synced (or copy_point), counted in the source's local clone as of its last fetch; null when not measured here or for a move."
+              }
+            }
+          },
+          "description": "Relations in which one of the project's repositories is the copy (config/derivations.json, OBS-321). Present when the registry holds derivations; absent when none were ever recorded."
+        },
+        "copies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "copy",
+              "source",
+              "kind",
+              "copy_point",
+              "last_synced",
+              "behind"
+            ],
+            "properties": {
+              "copy": {
+                "type": "string",
+                "pattern": "^repository:\\S+$"
+              },
+              "source": {
+                "type": "string",
+                "pattern": "^repository:\\S+$"
+              },
+              "kind": {
+                "enum": [
+                  "copy",
+                  "move"
+                ],
+                "description": "copy: kept in step with its source; move: the source is frozen and nothing is carried."
+              },
+              "copy_point": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source commit the copy was taken from."
+              },
+              "last_synced": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The source commit the copy was last carried forward to; null for a move."
+              },
+              "behind": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Commits on the source branch after last_synced (or copy_point), counted in the source's local clone as of its last fetch; null when not measured here or for a move."
+              }
+            }
+          },
+          "description": "Relations in which one of the project's repositories is the source."
         }
       }
     },
