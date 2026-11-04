@@ -285,6 +285,9 @@ relations):
 `kind` (`rewritten` for a copy whose history a filter rewrote, `export` for a copy made by export,
 both read as the curated kind `copy`; or `move`), `copy_point`, `sync_base` (the last source commit
 carried into the copy; same shapes as above) and `deny` (relative paths the copy never takes).
+A commit there may also be written `<name>@<sha>`, as a copy's sync commit names its source in
+`Source-Revision: <name>@<sha12>` (0.33.0, OBS-334): the name (a letter or digit, then up to 63 of
+letters, digits, `.`, `_` and `-`) is checked and dropped, and the commit is compared as before.
 `last_synced` is read there too, as an alias, when `sync_base` is absent. Another kind value is listed in the relation's `copy_record.problems`. Any other field, a `source`
 among them, is ignored. Where both files give a value the curated one is
 used and the difference is listed; a value only the copy gives is used and marked as the copy's.

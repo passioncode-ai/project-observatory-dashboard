@@ -65,6 +65,9 @@ ENTRY_FIELDS = {"copy", "source", "kind", "copy_point", "sync_base", "last_synce
 POINT_FIELDS = {"source_commit", "copy_commit", "date"}
 BUILDER_FIELDS = {"path_hint", "rules_count", "rules_sha256"}
 _COMMIT = re.compile(r"^[0-9a-f]{7,64}\Z")
+#: A commit named the way a copy's sync commit names it (`Source-Revision: <name>@<sha12>`, OBS-334):
+#: the name is checked by shape and dropped; only the commit is kept and compared.
+_NAMED_COMMIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}@([0-9A-Fa-f]{7,64})\Z")
 _SHA256 = re.compile(r"^[0-9a-f]{64}\Z")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 _BRANCH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
@@ -108,9 +111,11 @@ def _shown(value: Any) -> str:
 
 
 def _point(value: Any) -> dict | None:
-    """A commit (`abc1234`) or {source_commit, copy_commit?, date?}, normalised; None when not."""
+    """A commit (`abc1234`, or `name@abc1234` as a copy's sync commit writes it) or
+    {source_commit, copy_commit?, date?}, normalised; None when not."""
     if isinstance(value, str):
-        value = {"source_commit": value}
+        named = _NAMED_COMMIT.match(value)
+        value = {"source_commit": named.group(1) if named else value}
     if not isinstance(value, dict) or set(value) - POINT_FIELDS:
         return None
     commit = value.get("source_commit")
