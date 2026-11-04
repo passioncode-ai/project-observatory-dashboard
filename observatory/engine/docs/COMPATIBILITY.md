@@ -351,10 +351,10 @@ What is sent and what never is: [the event catalogue](https://github.com/passion
 | Path | Since | What it holds | Upgrade and downgrade |
 |---|---|---|---|
 | `analytics` (in the workspace home) | 0.33.0 | the switch: `on` or `off`, owner-only; absent is on, only `off` is off, like `auto-update` | written by `full analytics on\|off` and by the apps' Settings switch; deleting it turns collection back on |
-| `store/analytics/install-id` | 0.33.0 | a random UUID made for analytics only, never derived from the machine, an account or a person | deleted when the switch is turned off; a new one is made when it is turned on again |
+| `store/analytics/install-id` | 0.33.0 | a random UUID made for analytics only, never derived from the machine, an account or a person | deleted when the switch is turned off; a new one is made when it is turned on again. A snapshot restored on another machine leaves the whole `store/analytics/` folder behind (`ANOTHER_MACHINE_LEAVES`), so that machine makes its own id and never resends this one's queue; the switch file `analytics` moves |
 | `store/analytics/queue.jsonl` | 0.33.0 | events waiting to be sent: name, catalogued properties, time, version; at most 512 KiB, sent by the maintenance job, dropped after 23 hours | deleted when the switch is turned off; deleting it loses only unsent events |
 | `store/analytics/counters.json` | 0.33.0 | counts of what was sent, refused, expired, rejected or failed; never an event | deleting it resets the counts |
-| `store/analytics/notice.json` | 0.33.0 | when the first-run notice was shown on the terminal and on the dashboard, and in which version | deleting it shows the notice again |
+| `store/analytics/notice.json` | 0.33.0 | when the first-run notice was shown on the terminal, and when a person first opened Home through the local server, and in which version | deleting it shows the notice again |
 
 Settings outside the workspace: `OBSERVATORY_ANALYTICS=off` (also `0`, `false`, `no`) and `DO_NOT_TRACK`
 (any value but empty or `0`) turn collection off for the processes that carry them, without touching

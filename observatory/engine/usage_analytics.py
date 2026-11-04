@@ -76,6 +76,9 @@ QUEUE_LIMIT_BYTES = 512 * 1024
 #: One request's timeout, and how many times a batch is tried (the first try included).
 TIMEOUT_SECONDS = 5.0
 ATTEMPTS = 3
+#: The whole flush's budget. It runs inside the maintenance pass's lock, so an unreachable host
+#: holds that pass at most this long; what is not sent by then waits for the next pass.
+FLUSH_BUDGET_SECONDS = 30.0
 #: How long the first-run notice stays on the dashboard after it was first shown there.
 DASHBOARD_NOTICE_DAYS = 7
 
@@ -374,10 +377,22 @@ def error_kind(exc: BaseException) -> str:
 
 # --- sending -------------------------------------------------------------------------
 
+def os_version(system: str | None = None, release: str | None = None, mac: str | None = None) -> str:
+    """The OS version sent: the macOS version, the Windows release (`10`, `11`), and on Linux only the
+    kernel's major.minor (`6.5`), never its full release string, which can name a vendor build."""
+    system = sys.platform if system is None else system
+    if system == "darwin":
+        return (_platform.mac_ver()[0] if mac is None else mac)[:30]
+    release = _platform.release() if release is None else release
+    if system == "win32":
+        return release[:30]
+    m = re.match(r"(\d+\.\d+)", release or "")
+    return m.group(1) if m else ""
+
+
 def _system_props(version: str, env: str) -> dict:
     os_name = {"darwin": "macOS", "win32": "Windows"}.get(sys.platform, "Linux")
-    os_version = _platform.mac_ver()[0] if sys.platform == "darwin" else _platform.release()
-    return {"isDebug": env != "production", "osName": os_name, "osVersion": (os_version or "")[:100],
+    return {"isDebug": env != "production", "osName": os_name, "osVersion": os_version(),
             "appVersion": str(version)[:50], "sdkVersion": f"project-observatory@{config.VERSION}"[:40],
             "engineName": "python", "engineVersion": _platform.python_version()[:30]}
 
@@ -392,17 +407,43 @@ def wire_event(item: dict, iid: str) -> dict:
             "systemProps": _system_props(item.get("v") or config.VERSION, env), "props": props}
 
 
+def _bounded(call: Callable[[], int], timeout: float) -> int:
+    """`call()` in a daemon thread, given up after `timeout` seconds with an OSError. urllib's timeout
+    covers the socket but not name resolution (getaddrinfo), which can hang far longer; a thread left
+    behind is a daemon and never keeps the process alive."""
+    import threading
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["value"] = call()
+        except BaseException as exc:  # noqa: BLE001: handed back to the caller below
+            box["error"] = exc
+    worker = threading.Thread(target=run, name="usage-analytics-send", daemon=True)
+    worker.start()
+    worker.join(max(0.0, timeout))
+    if worker.is_alive():
+        raise OSError("the analytics host did not answer in time")
+    if "error" in box:
+        error = box["error"]
+        raise error if isinstance(error, OSError) else OSError(type(error).__name__)
+    return box["value"]
+
+
 def _urllib_transport(url: str, body: bytes, headers: dict, timeout: float) -> int:
     import urllib.error
     import urllib.request
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310: a fixed https URL
-            return resp.status
-    except urllib.error.HTTPError as exc:
-        return exc.code
-    except urllib.error.URLError as exc:
-        raise OSError(str(exc.reason)) from None
+
+    def send() -> int:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310: a fixed https URL
+                return resp.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except urllib.error.URLError as exc:
+            raise OSError(str(exc.reason)) from None
+    return _bounded(send, timeout + 1.0)
 
 
 def _parse_time(value: object) -> datetime.datetime | None:
@@ -413,12 +454,20 @@ def _parse_time(value: object) -> datetime.datetime | None:
 
 
 def flush(base: Path | None = None, *, transport: Transport | None = None, environ: dict | None = None,
-          sleep: Callable[[float], None] = time.sleep, now: datetime.datetime | None = None) -> dict:
+          sleep: Callable[[float], None] = time.sleep, now: datetime.datetime | None = None,
+          clock: Callable[[], float] = time.monotonic, budget: float = FLUSH_BUDGET_SECONDS) -> dict:
     """Send what is queued. Never raises; the answer is what happened, in counts.
+
+    Bounded: the whole flush takes at most `budget` seconds (each request gets at most what is left,
+    the backoff too), and it stops at the first batch the host does not take (a transport failure,
+    429 or 5xx after its tries), keeping that batch and every later one queued for the next pass.
+    The switch is read again before every batch and every retry: turned off mid-flush, nothing more
+    is sent and nothing is written back.
 
     A test suite (`OBSERVATORY_TEST_SANDBOX`) never reaches the network: without an injected
     transport its flush answers `test-sandbox` and sends nothing."""
     env = os.environ if environ is None else environ
+    deadline = clock() + max(0.0, budget)
     try:
         if not enabled(base, environ):
             write_switch_safe_drop(base)
@@ -457,13 +506,24 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
                    "User-Agent": f"project-observatory/{config.VERSION}"}
         sent = rejected = failed = 0
         kept: list[dict] = []
-        for start in range(0, len(events), BATCH):
-            batch = events[start:start + BATCH]
+        stopped = None
+        batches = [events[i:i + BATCH] for i in range(0, len(events), BATCH)]
+        for index, batch in enumerate(batches):
+            if not enabled(base, environ):
+                stopped = "off"
+                break
+            if clock() >= deadline:
+                stopped = "budget"
+                kept.extend(e for b in batches[index:] for e in b)
+                break
             body = json.dumps(batch, separators=(",", ":")).encode("utf-8")
             outcome = "failed"
             for attempt in range(ATTEMPTS):
+                left = deadline - clock()
+                if left <= 0 or not enabled(base, environ):
+                    break
                 try:
-                    status = transport(ENDPOINT, body, headers, TIMEOUT_SECONDS)
+                    status = transport(ENDPOINT, body, headers, min(TIMEOUT_SECONDS, left))
                 except OSError:
                     status = None
                 if status is not None and 200 <= status < 300:
@@ -474,14 +534,22 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
                     outcome = "rejected"
                     break
                 if attempt + 1 < ATTEMPTS:
-                    sleep(min(8.0, 1.0 * (2 ** attempt)))
+                    sleep(max(0.0, min(8.0, 1.0 * (2 ** attempt), deadline - clock())))
             if outcome == "sent":
                 sent += len(batch)
             elif outcome == "rejected":
                 rejected += len(batch)
             else:
+                # The host did not take this batch: the later ones would meet the same, so they wait
+                # for the next pass with it rather than spend this pass's budget.
                 failed += len(batch)
-                kept.extend(batch)
+                kept.extend(e for b in batches[index:] for e in b)
+                stopped = "host"
+                break
+        if not enabled(base, environ):
+            # Off while this ran: nothing goes back into a queue the person asked to drop.
+            kept = []
+            write_switch_safe_drop(base)
         if kept:
             # Kept for the next pass in their queued form, so their age still counts.
             with open(queue, "a", encoding="utf-8") as out:
@@ -494,9 +562,11 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
                         ("rejected", rejected), ("send_failed", failed)):
             if n:
                 count(base, name, n)
-        result = "sent" if sent and not failed else "failed" if failed else "empty" if not lines else "nothing-sent"
+        result = ("off" if stopped == "off" else "sent" if sent and not failed and not kept
+                  else "failed" if failed else "budget" if stopped == "budget"
+                  else "empty" if not lines else "nothing-sent")
         return {"result": result, "sent": sent, "expired": expired, "rejected": rejected,
-                "failed": failed, "unreadable": broken}
+                "failed": failed, "kept": len(kept), "unreadable": broken}
     except Exception as exc:  # noqa: BLE001: a flush never stops the job that runs it
         count(base, "flush_error")
         return {"result": "error", "kind": error_kind(exc)}
@@ -557,16 +627,27 @@ def cli_notice(base: Path | None = None, stream=None, environ: dict | None = Non
 
 def dashboard_notice(base: Path | None = None, now: datetime.datetime | None = None,
                      environ: dict | None = None) -> bool:
-    """Whether the dashboard shows the notice in this build: from the first build that showed
-    it, for `DASHBOARD_NOTICE_DAYS` days, and only while collection is on."""
+    """Whether a dashboard build shows the notice on Home: until a person has first opened Home, and
+    then for `DASHBOARD_NOTICE_DAYS` days from that view, only while collection is on. It reads only:
+    the tick builds the page, and nobody has seen a page because it was built."""
     if not collecting(base, environ):
         return False
-    now = now or _now()
     first = _parse_time(notice_state(base).get("dashboard"))
     if first is None:
-        mark_notice(base, "dashboard", now, environ)
         return True
-    return now - first < datetime.timedelta(days=DASHBOARD_NOTICE_DAYS)
+    return (now or _now()) - first < datetime.timedelta(days=DASHBOARD_NOTICE_DAYS)
+
+
+def dashboard_viewed(base: Path | None = None, now: datetime.datetime | None = None,
+                     environ: dict | None = None) -> bool:
+    """A person opened Home through the local server (tools/serverd.py): the notice counts as shown from
+    now, once, and `analytics_notice_shown {surface: dashboard}` is queued. True the first time."""
+    try:
+        if not collecting(base, environ) or notice_state(base).get("dashboard"):
+            return False
+        return mark_notice(base, "dashboard", now, environ)
+    except Exception:  # noqa: BLE001: serving the page never depends on this
+        return False
 
 
 # --- status and the command ----------------------------------------------------------

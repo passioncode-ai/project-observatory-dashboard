@@ -75,7 +75,7 @@ class Catalogue(unittest.TestCase):
         for path, line in listed:
             text = (ROOT / path).read_text(encoding="utf-8").splitlines()
             self.assertGreaterEqual(len(text), int(line), f"{path}:{line} is past the end of the file")
-            self.assertRegex(text[int(line) - 1], r"record\(|_notice\(", f"{path}:{line} is not an emit or a notice")
+            self.assertRegex(text[int(line) - 1], r"record\(|_notice\(|_viewed\(", f"{path}:{line} is not an emit or a notice")
 
     def test_no_em_dash(self):
         self.assertNotIn("\u2014", self.text)

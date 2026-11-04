@@ -558,6 +558,24 @@ class WorkspaceUpgrade(unittest.TestCase):
         own=DeviceKeys.load_or_create(dest/'node'/'device')
         self.assertNotEqual(own.device_id,first.device_id)
 
+    def test_another_machine_never_takes_the_analytics_install_id_or_queue(self):
+        """OBS-324: a second machine makes its own install id and never resends the first one's queue; the
+        person's switch (the file `analytics` in the home) travels with the workspace."""
+        for rel,text in (('store/analytics/install-id','00000000-0000-4000-8000-000000000000\n'),
+                         ('store/analytics/queue.jsonl','{"n": "command_run"}\n'),
+                         ('analytics','off\n')):
+            path=self.home/rel
+            path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            path.write_text(text)
+            path.chmod(0o600)
+        source=self.snapshot()
+        dest=self.base/'second machine'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=upgrade.restore(source,dest)
+        self.assertFalse((dest/'store/analytics').exists())
+        self.assertIn('store/analytics/',result['machine']['left_out'])
+        self.assertEqual((dest/'analytics').read_text(),'off\n','the person\'s choice moves with the workspace')
+
     def test_the_same_machine_restores_the_whole_snapshot_as_before(self):
         self.identity()
         source=self.snapshot()

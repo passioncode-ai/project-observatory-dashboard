@@ -2671,10 +2671,13 @@ data"). For one process, a CI job or a shell profile, `OBSERVATORY_ANALYTICS=off
 without touching the switch; the environment never turns on what you turned off. An update keeps your choice.
 
 **What is sent:** the name of each `full` command, MCP tool call and tick, with its outcome (ok, refused, error,
-failed, skipped), its duration and exit code; the class name of an error (`OSError`, never its message); the engine
-version, the OS name and version and the Python version; and a random install id made only for this, kept in
-`store/analytics/install-id`, never derived from your machine, account or name. Every event and property is listed
-in [the event catalogue](analytics-events.md).
+failed, skipped), its duration, a command's exit code and how many of a tick's steps failed; the class name of an
+error (`OSError`, never its message); whether the install is a release or a development build (`environment`), the
+platform (`macos`, or `server` on Linux and Windows), the engine version, the OS name and version (on Linux only the
+kernel's major.minor) and the Python version; a number that groups the events of one process (`sessionId`: the
+time it started and random digits); and a random install id made only for this, kept in
+`store/analytics/install-id`, never derived from your machine, account or name. Every event, property and wire
+field is listed in [the event catalogue](analytics-events.md).
 
 **What is never sent:** keys or vault values, paths or file names, repository, project, organisation or person
 names, anything from the registry or the store, URLs, prompts, arguments, messages or anything you typed.
@@ -2682,9 +2685,12 @@ names, anything from the registry or the store, URLs, prompts, arguments, messag
 **How it travels:** a command or tool call appends one line to a local queue and returns; it never waits on the
 network. The maintenance job (every 15 minutes) sends the queue to `https://analytics.sshlg.me` in batches of at most
 25 and drops events older than 23 hours; a failure is counted in `store/analytics/counters.json` and never shown as
-an error. `full analytics send` sends the queue now. The first time a command runs at your terminal after this
-release, it prints a one-time notice saying this; the dashboard's Home shows it for a week, and Health shows the
-switch with the command that changes it. A build without an analytics key (a source checkout, for one) collects and
+an error. A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
+for the next pass. `full analytics send` sends the queue now. The first time a command runs at your terminal after
+this release, it prints a one-time notice saying this; the dashboard's Home shows it until you first open Home
+through the local server and for a week after that, and Health shows the switch with the command that changes it.
+A workspace restored on another machine leaves `store/analytics/` behind, so it gets its own install id and never
+resends the first machine's queue; your switch moves with it. A build without an analytics key (a source checkout, for one) collects and
 sends nothing, and `analytics status` says `app_key: absent`.
 
 ## Staying in step

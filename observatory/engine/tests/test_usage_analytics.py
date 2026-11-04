@@ -284,6 +284,108 @@ class Flush(Base):
         self.assertEqual(UA.flush(self.base, transport=Fake(), environ={})["result"], "no-app-key")
 
 
+class Clock:
+    """A fake monotonic clock: the transport and the backoff advance it, nothing really waits."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.t += seconds
+
+
+class Bounded(Base):
+    """M1 and L1 of the #421 review: a flush runs inside the maintenance pass's lock, so it has a total budget,
+    stops at the first batch the host does not take, and stops at once when the switch goes off."""
+
+    def fill(self, n=60):
+        for _ in range(n):
+            self.rec()
+
+    def test_an_unreachable_host_holds_the_pass_for_the_budget_at_most(self):
+        self.fill()
+        clock, calls = Clock(), []
+
+        def timing_out(url, body, headers, timeout):
+            calls.append(timeout)
+            clock.t += timeout
+            raise OSError("timed out")
+        out = UA.flush(self.base, transport=timing_out, environ=self.env, sleep=clock.sleep, clock=clock)
+        self.assertLessEqual(clock.t - 1000.0, UA.FLUSH_BUDGET_SECONDS)
+        self.assertLessEqual(len(calls), UA.ATTEMPTS, "the first batch that fails on transport ends the flush")
+        self.assertEqual(out["sent"], 0)
+        self.assertEqual(len(self.queued()), 60, "every event the flush did not send stays queued")
+
+    def test_a_slow_host_is_cut_at_the_budget_and_the_rest_stays_queued(self):
+        self.fill(100)
+        clock, sent = Clock(), []
+
+        def slow(url, body, headers, timeout):
+            clock.t += 12
+            sent.append(len(json.loads(body)))
+            return 200
+        out = UA.flush(self.base, transport=slow, environ=self.env, sleep=clock.sleep, clock=clock)
+        self.assertLessEqual(clock.t - 1000.0, UA.FLUSH_BUDGET_SECONDS + 12)
+        self.assertEqual(out["sent"] + len(self.queued()), 100)
+        self.assertEqual((out["sent"], out["result"]), (75, "budget"))
+
+    def test_each_request_gets_at_most_what_is_left_of_the_budget(self):
+        self.fill(5)
+        clock, timeouts = Clock(), []
+
+        def fail(url, body, headers, timeout):
+            timeouts.append(timeout)
+            clock.t += timeout
+            return 503
+        UA.flush(self.base, transport=fail, environ=self.env, sleep=clock.sleep, clock=clock, budget=7.0)
+        self.assertLessEqual(clock.t - 1000.0, 7.0)
+        self.assertTrue(all(t <= UA.TIMEOUT_SECONDS for t in timeouts))
+
+    def test_off_during_a_flush_stops_sending_and_keeps_nothing(self):
+        self.fill()
+        requests = []
+
+        def turns_off(url, body, headers, timeout):
+            requests.append(1)
+            UA.write_switch(self.base, False)
+            return 503
+        UA.flush(self.base, transport=turns_off, environ=self.env, sleep=lambda s: None)
+        self.assertEqual(len(requests), 1, "no retry and no next batch once the switch is off")
+        self.assertFalse((UA.folder(self.base) / "queue.jsonl").exists(), "nothing is written back after off")
+
+    def test_off_after_a_sent_batch_stops_before_the_next(self):
+        self.fill()
+        requests = []
+
+        def ok_then_off(url, body, headers, timeout):
+            requests.append(1)
+            UA.write_switch(self.base, False)
+            return 200
+        UA.flush(self.base, transport=ok_then_off, environ=self.env, sleep=lambda s: None)
+        self.assertEqual(len(requests), 1)
+        self.assertFalse((UA.folder(self.base) / "queue.jsonl").exists())
+
+    def test_the_real_transport_is_bounded_even_when_name_resolution_hangs(self):
+        import time as _time
+        started = _time.monotonic()
+        with self.assertRaises(OSError):
+            UA._bounded(lambda: _time.sleep(5), 0.2)
+        self.assertLess(_time.monotonic() - started, 2)
+        self.assertEqual(UA._bounded(lambda: 204, 1.0), 204)
+
+
+class OsVersion(unittest.TestCase):
+    def test_linux_sends_major_and_minor_only(self):
+        self.assertEqual(UA.os_version("linux", "6.5.0-1025-azure"), "6.5")
+        self.assertEqual(UA.os_version("linux", "5.15.167.4-microsoft-standard-WSL2"), "5.15")
+        self.assertEqual(UA.os_version("linux", "weird"), "")
+        self.assertEqual(UA.os_version("win32", "11"), "11")
+        self.assertEqual(UA.os_version("darwin", "", "26.0.1"), "26.0.1")
+
+
 class Notice(Base):
     class Tty(io.StringIO):
         def isatty(self):
@@ -303,12 +405,25 @@ class Notice(Base):
         self.assertEqual(UA.notice_state(self.base), {})
         self.assertFalse(UA.cli_notice(self.base, self.Tty(), {**self.env, "DO_NOT_TRACK": "1"}))
 
-    def test_the_dashboard_shows_it_for_seven_days(self):
+    def test_the_dashboard_shows_it_for_seven_days_from_a_persons_first_view(self):
+        """L2 of the #421 review: the tick's build never marks it shown; the local server does when it serves Home."""
         start = datetime.datetime(2026, 11, 11, tzinfo=datetime.timezone.utc)
-        self.assertTrue(UA.dashboard_notice(self.base, start, self.env))
-        self.assertTrue(UA.dashboard_notice(self.base, start + datetime.timedelta(days=6), self.env))
-        self.assertFalse(UA.dashboard_notice(self.base, start + datetime.timedelta(days=7), self.env))
+        for days in (0, 30):
+            self.assertTrue(UA.dashboard_notice(self.base, start + datetime.timedelta(days=days), self.env),
+                            "until someone opens Home, the built page keeps the notice")
+        self.assertEqual(UA.notice_state(self.base), {}, "building the page marks nothing")
+        self.assertEqual([q for q in self.queued() if q["n"] == "analytics_notice_shown"], [])
+        self.assertTrue(UA.dashboard_viewed(self.base, start + datetime.timedelta(days=1), self.env))
+        self.assertFalse(UA.dashboard_viewed(self.base, start + datetime.timedelta(days=2), self.env), "once")
+        [shown] = [q for q in self.queued() if q["n"] == "analytics_notice_shown"]
+        self.assertEqual(shown["p"], {"surface": "dashboard"})
+        self.assertTrue(UA.dashboard_notice(self.base, start + datetime.timedelta(days=7), self.env))
+        self.assertFalse(UA.dashboard_notice(self.base, start + datetime.timedelta(days=8), self.env))
         self.assertFalse(UA.dashboard_notice(self.base, start, {"DO_NOT_TRACK": "1"}))
+
+    def test_a_view_while_off_marks_nothing(self):
+        self.assertFalse(UA.dashboard_viewed(self.base, None, {**self.env, "DO_NOT_TRACK": "1"}))
+        self.assertEqual(UA.notice_state(self.base), {})
 
 
 class NoKey(Base):

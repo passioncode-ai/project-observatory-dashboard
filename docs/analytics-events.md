@@ -24,9 +24,22 @@ What the sink adds to every event (`wire_event`, `observatory/engine/usage_analy
 | `environment` | `production` (an installed release) or `sandbox` (a checkout, an editable install, a pre-release) |
 | `platform` | `macos` on a Mac, `server` on Linux and Windows (growth's list has no desktop value for them; `systemProps.osName` names the OS) |
 
-The Aptabase system properties carry the engine version (`appVersion`), the OS name and version, the
-Python version (`engineName` `python`, `engineVersion`) and `isDebug` (true exactly when
-`environment` is `sandbox`). No locale and no device model are sent.
+Beside the properties, every event on the wire (`wire_event` and `_system_props`,
+`observatory/engine/usage_analytics.py`) carries:
+
+| Field | Value |
+|---|---|
+| `timestamp` | when the event was recorded, UTC, milliseconds |
+| `sessionId` | one per process (`session_id`): unix seconds x 10^8 plus 8 random digits, the numeric form Aptabase's own SDKs use; it groups the events of one command, MCP server or tick and names nothing |
+| `eventName` | the event's name from the table below |
+| `systemProps.isDebug` | true exactly when `environment` is `sandbox` |
+| `systemProps.osName` | `macOS`, `Windows` or `Linux` |
+| `systemProps.osVersion` | the macOS version, the Windows release (`10`, `11`), or on Linux the kernel's major.minor only (`6.5`; `os_version`) |
+| `systemProps.appVersion` | the engine version that recorded the event |
+| `systemProps.sdkVersion` | `project-observatory@<engine version>` |
+| `systemProps.engineName`, `engineVersion` | `python` and the Python version |
+
+No locale, device model, host name or user name is sent.
 
 ## Events
 
@@ -36,7 +49,7 @@ Python version (`engineName` `python`, `engineVersion`) and `isDebug` (true exac
 | `mcp_tool_called` | live | 2026-11-04 | mcp: `observatory/engine/mcp/capability_tools.py:363` | `surface` (`mcp`), `tool`, `outcome`, `duration_ms` |
 | `tick_finished` | live | 2026-11-04 | tick: `observatory/engine/tools/tick.py:513` | `surface` (`tick`), `outcome`, `steps_failed`, `duration_ms` |
 | `error_raised` | live | 2026-11-04 | cli: `observatory/engine/observatory.py:1734`; mcp: `observatory/engine/mcp/capability_tools.py:366`; tick: `observatory/engine/tools/tick.py:516` | `surface` (`cli`, `mcp`, `tick`), `kind` |
-| `analytics_notice_shown` | live | 2026-11-04 | cli and dashboard: `observatory/engine/usage_analytics.py:536` (reached from `observatory/engine/observatory.py:1735` and `observatory/engine/dashboard/build_dashboard.py:441`) | `surface` (`cli`, `dashboard`) |
+| `analytics_notice_shown` | live | 2026-11-04 | cli and dashboard: `observatory/engine/usage_analytics.py:606` (reached from `observatory/engine/observatory.py:1735` at a person's terminal, and from `observatory/engine/tools/serverd.py:676` when the local server serves Home) | `surface` (`cli`, `dashboard`) |
 
 ## Properties
 
@@ -57,7 +70,7 @@ Python version (`engineName` `python`, `engineVersion`) and `isDebug` (true exac
 | `tick_finished` | `duration_ms` | milliseconds, a number |
 | `error_raised` | `surface` | `cli`, `mcp`, `tick` |
 | `error_raised` | `kind` | the exception's class name (`OSError`, `ConfigurationError` ...); never its message |
-| `analytics_notice_shown` | `surface` | `cli` (printed once on a person's terminal), `dashboard` (the first build that showed it on Home) |
+| `analytics_notice_shown` | `surface` | `cli` (printed once on a person's terminal), `dashboard` (the first time the local server served Home while the notice was on it; a page opened as a file is not counted, and the tick's build never sends it) |
 
 ## Retired
 
