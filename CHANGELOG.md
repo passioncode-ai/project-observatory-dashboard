@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.33.0 (2026-11-04)
+
+Observatory now collects anonymous usage and error data by default, so we can see which commands and tools are
+used and where they fail. An event says what ran and how it ended, how long it took and, on a failure, the error's
+class name; it carries a random install id with the version and platform. It never sends keys, paths, names, registry
+content, URLs, prompts or arguments. A one-time notice says so, and `full analytics off`, the apps' Settings switch,
+`OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1` turn it off. A copy of a repository can now record the prefix of the
+organization it moved to, and Observatory tells you when the copy's name lacks it; a copy's own record may name its
+source as `name@sha`. Nothing needs you after installing.
 
 ### Added
 
@@ -17,6 +25,14 @@ while the major version is 0, a minor release may change behaviour and says so h
   `full doctor` show and change it; `OBSERVATORY_ANALYTICS=off` and `DO_NOT_TRACK=1` turn it off for a process. An
   install that predates this release is on after the update unless a person turned it off. A build without an
   analytics App-Key collects nothing.
+- **The release wheel carries the analytics App-Key** (OBS-329, #426): the release workflow writes it from a
+  repository secret beside `usage_analytics.py`; `tools/check_package.py` admits that one file only in the key's shape.
+  A build without the secret ships no key and collects nothing.
+- **A copy's name prefix** (OBS-332, #428, `docs/COMPATIBILITY.md` "Registry: derivations (OBS-321)"): a curated
+  `config/derivations.json` entry may give `name_prefix`; `copy.name_unprefixed` names a copy whose repository name
+  does not start with it. A wrong value is refused as `bad-prefix`.
+- **A copy's point may be `name@sha`** (OBS-334, #427): `.copy/upstream.json` may write `copy_point` and `last_synced`
+  the way its sync commit's `Source-Revision` line does; the name is checked and dropped.
 
 ## 0.32.0 (2026-11-04)
 

@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-04: release 0.33.0](runs/2026-11-04-release-0.33.0/README.md): engine 0.33.0 (`observatory-log` stays
+0.30.0): anonymous usage and error data on by default (OBS-324, #421), the App-Key in the release wheel (OBS-329,
+#426), a copy's name prefix (OBS-332, #428) and `name@sha` points (OBS-334, #427).
+
+Release pull request open; then the tag `v0.33.0`, verification and installation, with receipts in the record.
+
 [2026-11-04: release 0.32.0](runs/2026-11-04-release-0.32.0/README.md): engine 0.32.0 (`observatory-log` stays
 0.30.0): copies and moves of repositories (OBS-321, #418), `ssh-keys rekey` in the restore plan and the move checklist
 (OBS-300, OBS-306, #409, #414), the disk guard's Docker VM space (OBS-305, #411), the keyserver on Windows (OBS-309,
