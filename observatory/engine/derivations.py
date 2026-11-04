@@ -61,7 +61,7 @@ ALIASES = {"last_synced": "sync_base"}
 #: rewritten by a history filter and a copy made by export are both kept in step (`copy`).
 UPSTREAM_KINDS = {"rewritten": "copy", "export": "copy", "move": "move"}
 ENTRY_FIELDS = {"copy", "source", "kind", "copy_point", "sync_base", "last_synced", "builder", "source_branch",
-                "note", "evidence"}
+                "name_prefix", "note", "evidence"}
 POINT_FIELDS = {"source_commit", "copy_commit", "date"}
 BUILDER_FIELDS = {"path_hint", "rules_count", "rules_sha256"}
 _COMMIT = re.compile(r"^[0-9a-f]{7,64}\Z")
@@ -70,6 +70,9 @@ _COMMIT = re.compile(r"^[0-9a-f]{7,64}\Z")
 _NAMED_COMMIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}@([0-9A-Fa-f]{7,64})\Z")
 _SHA256 = re.compile(r"^[0-9a-f]{64}\Z")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
+#: The prefix the organization a copy moved to puts before its name (OBS-332): lowercase letters,
+#: digits and hyphens, ending in a hyphen. A private value of the curated entry.
+_PREFIX = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}-\Z")
 _BRANCH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
 _REPO = re.compile(r"^repository:\S{1,240}\Z")
 #: The refusal codes, each with what it means. Published in COMPATIBILITY.md.
@@ -86,6 +89,7 @@ CODES = {
     "move-with-sync-base": "a move is never synced, so it carries no sync_base",
     "bad-builder": "builder is not {path_hint, rules_count?, rules_sha256?}",
     "bad-branch": "source_branch is not a branch name",
+    "bad-prefix": "name_prefix is not lowercase letters, digits and hyphens ending in a hyphen",
     "bad-text": "note or evidence is not short plain text, or looks like a credential",
     "duplicate-copy": "two entries name the same copy: a copy has one source",
     "cycle": "the entries form a cycle of derivations",
@@ -217,13 +221,17 @@ def _entry(index: int, raw: Any, repos: dict[str, dict]) -> tuple[dict | None, d
     branch = raw.get("source_branch")
     if branch is not None and (not isinstance(branch, str) or not _BRANCH.match(branch) or ".." in branch):
         return None, _refusal("bad-branch", index, raw, f"source_branch {_shown(branch)} is not a branch name")
+    prefix = raw.get("name_prefix")
+    if prefix is not None and (not isinstance(prefix, str) or not _PREFIX.match(prefix)):
+        return None, _refusal("bad-prefix", index, raw, f"name_prefix {_shown(prefix)} must be lowercase letters, "
+                              "digits and hyphens, up to 32 of them, ending in a hyphen")
     for field in ("note", "evidence"):
         if raw.get(field) is not None and not _text_ok(raw[field]):
             return None, _refusal("bad-text", index, raw, f"`{field}` must be one line of up to 300 characters "
                                   "that does not look like a credential")
     return {"copy": ids["copy"], "source": ids["source"], "kind": kind, "copy_point": points["copy_point"],
             "sync_base": points["sync_base"], "builder": builder, "source_branch": branch,
-            "note": raw.get("note"), "evidence": raw.get("evidence")}, None
+            "name_prefix": prefix, "note": raw.get("note"), "evidence": raw.get("evidence")}, None
 
 
 def read_config(path: Path, repos: dict[str, dict], label: str = "config/derivations.json"
@@ -454,6 +462,7 @@ def _relation(e: dict, repos: dict[str, dict], run: Runner) -> dict:
         "builder": e["builder"], "deny": deny, "provenance": provenance,
         "copy_record": record, "behind": behind,
         "source_archived": source_repo.get("archived"),
+        **({"name_prefix": e["name_prefix"]} if e.get("name_prefix") else {}),
         **({"note": e["note"]} if e["note"] else {}),
         **({"evidence": e["evidence"]} if e["evidence"] else {})}
 
@@ -468,7 +477,8 @@ def _unbuilt(e: dict, repos: dict[str, dict], exc: BaseException) -> dict:
             "copy_record": {"state": "unreadable", "reason": why, "differs": []},
             "behind": ({"state": "unknown", "commits": None, "outside_deny": None, "reason": why,
                         "since": "sync_base" if e["sync_base"] else "copy_point"} if e["kind"] == "copy" else None),
-            "source_archived": repos[e["source"]].get("archived")}
+            "source_archived": repos[e["source"]].get("archived"),
+            **({"name_prefix": e["name_prefix"]} if e.get("name_prefix") else {})}
 
 
 def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Runner | None = None,

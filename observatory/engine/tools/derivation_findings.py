@@ -14,6 +14,9 @@ so to the readers. One row per relation, because each is one decision about one 
   one is used.
 - `copy.moved_source_open`: a move whose old repository is not archived, so a session whose
   clone still points at it would fork the history without a word.
+- `copy.name_unprefixed`: the entry records the prefix the organization a copy or move went to
+  puts before its names (`name_prefix`), and the copy repository's name does not start with it,
+  so in a pair of the original and the copy nobody can tell which one belongs to whom.
 
 NO TIMESTAMP INSIDE A FINDING beyond the document's own and the day it is judged on.
 """
@@ -33,7 +36,8 @@ EVIDENCE = ["registry:derivations.json"]
 CONFIG = "config/derivations.json"
 #: Days an unsynced source commit may wait before being behind is a warning, not news.
 WARN_AFTER_DAYS = 7
-TYPES = ("copy.behind_source", "copy.relation_unrecorded", "copy.record_differs", "copy.moved_source_open")
+TYPES = ("copy.behind_source", "copy.relation_unrecorded", "copy.record_differs", "copy.moved_source_open",
+         "copy.name_unprefixed")
 
 
 def _age_days(day: str | None, today: str) -> int | None:
@@ -130,6 +134,18 @@ def findings(doc: dict | None, today: str | None = None) -> list[dict]:
                                   f"there and fork the history without a word.",
                         "action": f"archive {source} at its host once nothing pushes to it, and point remaining "
                                   f"clones at {copy}",
+                        "evidence": EVIDENCE})
+        prefix = rel.get("name_prefix")
+        name = copy.rsplit("/", 1)[-1]
+        if isinstance(prefix, str) and prefix and not name.startswith(prefix):
+            out.append({"type": "copy.name_unprefixed", "subject": copy, "severity": "info",
+                        **titled("{copy} lacks its organization's name prefix", copy=copy),
+                        "detail": f"{CONFIG} records that {copy} carries the prefix {prefix} of the organization "
+                                  f"it went to, and its name {name} does not start with it, so the original and "
+                                  f"the copy read alike everywhere they are listed.",
+                        "action": f"rename the repository to {prefix}{name} at its host (its title and service "
+                                  f"names too), update clones and links in the same step, then record the new id "
+                                  f"in {CONFIG}; the old name stays an alias (`observatory_propose` with aliases)",
                         "evidence": EVIDENCE})
     for row in doc.get("unrecorded") or []:
         if not isinstance(row, dict) or not row.get("copy"):
