@@ -252,10 +252,11 @@ file on its first tick with the feature on. Until then it is absent, and no read
 New optional curated file `config/derivations.json` (schema `derivations/1`), the operator's own and
 never shipped: `{"schema": "derivations/1", "derivations": [...]}`, each entry `copy` and `source`
 (repository ids as the registry spells them), `kind` (`copy` or `move`), `copy_point` and
-`last_synced` (a source commit of 7 to 64 hex digits, or `{source_commit, copy_commit?, date?}`),
+`sync_base` (a source commit of 7 to 64 hex digits, or `{source_commit, copy_commit?, date?}`),
 and optionally `builder` (`{path_hint, rules_count?, rules_sha256?}`), `source_branch` (default: the
 source repository's `default_branch`), `note` and `evidence` (one line each). A copy needs
-`copy_point`; a move has no `last_synced`. Nothing is created for it: without the file there is no
+`copy_point`; a move has no `sync_base`. `last_synced` is read as an alias of `sync_base`, and an
+entry giving both is refused (`unknown-field`). Nothing is created for it: without the file there is no
 relation, and no reader reports anything missing. A file that is not JSON or not this schema is
 refused whole; an entry is refused alone, by code, in `degraded` and `refused`, and never repaired:
 
@@ -268,9 +269,9 @@ refused whole; an entry is refused alone, by code, in `degraded` and `refused`, 
 | `unknown-repository` | copy or source is not a repository in the registry |
 | `self-derivation` | a repository is recorded as derived from itself |
 | `bad-kind` | kind is neither `copy` nor `move` |
-| `bad-point` | copy_point or last_synced is not a commit or {source_commit, copy_commit?, date?} |
+| `bad-point` | copy_point or sync_base is not a commit or {source_commit, copy_commit?, date?} |
 | `missing-copy-point` | a copy without copy_point: behind cannot be measured |
-| `move-with-last-synced` | a move is never synced, so it carries no last_synced |
+| `move-with-sync-base` | a move is never synced, so it carries no sync_base |
 | `bad-builder` | builder is not {path_hint, rules_count?, rules_sha256?} |
 | `bad-branch` | source_branch is not a branch name |
 | `bad-text` | note or evidence is not short plain text, or looks like a credential |
@@ -278,30 +279,36 @@ refused whole; an entry is refused alone, by code, in `degraded` and `refused`, 
 | `cycle` | the entries form a cycle of derivations |
 
 A copy may carry a tracked `.copy/upstream.json` (read at HEAD of its local clone, at most 64 KiB):
-`kind`, `copy_point`, `last_synced` (same shapes) and `deny` (relative paths the copy never takes).
-Any other field, a `source` among them, is ignored. Where both files give a value the curated one is
+`kind` (`rewritten` for a copy whose history a filter rewrote, `export` for a copy made by export,
+both read as the curated kind `copy`; or `move`), `copy_point`, `sync_base` (the last source commit
+carried into the copy; same shapes as above) and `deny` (relative paths the copy never takes).
+`last_synced` is read there too, as an alias, when `sync_base` is absent. Another kind value is listed in the relation's `copy_record.problems`. Any other field, a `source`
+among them, is ignored. Where both files give a value the curated one is
 used and the difference is listed; a value only the copy gives is used and marked as the copy's.
 
 New file `registry/derivations.json` (`schema_version` 1, `schema` `derivations/1`), rebuilt by every
 emit, declared by the new source `SRC-0023`: `relations[]` with `copy`, `source`, `kind`,
-`source_branch`, `copy_branch`, `copy_point`, `last_synced`, `builder`, `deny`, `provenance` (each
+`source_branch`, `copy_branch`, `copy_point`, `sync_base`, `builder`, `deny`, `provenance` (each
 value's side: `curated` or `copy`), `copy_record` (`state`: `read`, `absent`, `no-clone` or
-`unreadable`; `differs[]`), `behind` (null for a move; `state` `measured` with `commits`,
+`unreadable`; `copy_kind`, the copy's own kind word; `problems[]`; `differs[]`), `behind` (null for a move; `state` `measured` with `commits`,
 `outside_deny`, `ref`, `head`, `on_branch`, `oldest_on`, `since`, or `unknown` with its `reason`) and
 `source_archived`; `unrecorded[]` (copies that carry `.copy/upstream.json` and no accepted entry);
 `refused[]`; `degraded[]`; `totals`. `behind` is counted in the source's local clone (its
 `origin/<branch>`, else the local branch), offline: nothing is fetched and nothing is written to any
-repository. The findings `copy.behind_source` (the source has commits after `last_synced` outside
+repository. The findings `copy.behind_source` (the source has commits after `sync_base` outside
 the deny paths: warning once the oldest is over 7 days old, info before that or when not measured),
 `copy.relation_unrecorded` (a copy that says so with no entry, a recorded copy that does not say so,
 or a record that cannot be read), `copy.record_differs` and `copy.moved_source_open` (a move whose
 source is not archived) are rebuilt from it on every tick.
 
 `project.detail` (`observatory_project`) gains `project.derived_from` and `project.copies`, and
-`project.resolve` (`observatory_resolve`) gains `derived_from` and `copies`: lists of `{copy, source,
-kind, copy_point, last_synced, behind}` (commits as the source spells them; `behind` null when not
+the MCP tool `observatory_resolve` gains `derived_from` and `copies`: lists of `{copy, source,
+kind, copy_point, sync_base, behind}` (commits as the source spells them; `behind` null when not
 measured or for a move), present whenever `registry/derivations.json` exists and absent when no
-relation was ever recorded. Both published output schemas declare them as optional; a refusal naming
+relation was ever recorded. `project.detail`'s `project` object is open in its published schema, so
+the capability carries them; `project.resolve`'s published v0.24.0 answer is closed, so the
+capability's answer is still cut to that shape and leaves them out until the capability is
+versioned. A refusal naming
 one of the answer's repositories is in `degraded`, and a curated file the emit has not turned into
 the registry document yet is named there too. New command `project-observatory full copies list|plan
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both

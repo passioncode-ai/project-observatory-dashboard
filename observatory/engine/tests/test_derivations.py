@@ -119,8 +119,8 @@ class CuratedFile(unittest.TestCase):
         self.assertEqual(self.codes([entry(copy="repository:example-org/nowhere", copy_point="abc1234")]),
                          ["unknown-repository"])
         self.assertEqual(self.codes([entry(source=COPY, copy_point="abc1234")]), ["self-derivation"])
-        self.assertEqual(self.codes([entry(kind="move", copy_point="abc1234", last_synced="abc1234")]),
-                         ["move-with-last-synced"])
+        self.assertEqual(self.codes([entry(kind="move", copy_point="abc1234", sync_base="abc1234")]),
+                         ["move-with-sync-base"])
         self.assertEqual(self.codes([entry(kind="fork", copy_point="abc1234")]), ["bad-kind"])
         self.assertEqual(self.codes([entry(copy_point="abc1234", origin="x")]), ["unknown-field"])
         self.assertEqual(self.codes([entry(copy_point="not-a-commit")]), ["bad-point"])
@@ -157,9 +157,9 @@ class Measured(unittest.TestCase):
     def build(self, estate: Estate, entries: list, **kw) -> dict:
         return derivations.build(config(entries), estate.repos(**kw), "2026-11-04")
 
-    def test_behind_is_counted_in_the_source_clone_from_last_synced(self):
-        estate = Estate({"kind": "copy", "copy_point": "0" * 7, "deny": ["docs/runs"]})
-        doc = self.build(estate, [entry(copy_point=estate.first[:9], last_synced=estate.second[:12])])
+    def test_behind_is_counted_in_the_source_clone_from_sync_base(self):
+        estate = Estate({"kind": "rewritten", "copy_point": "0" * 7, "deny": ["docs/runs"]})
+        doc = self.build(estate, [entry(copy_point=estate.first[:9], sync_base=estate.second[:12])])
         rel = doc["relations"][0]
         behind = rel["behind"]
         self.assertEqual(behind["state"], "measured")
@@ -169,7 +169,7 @@ class Measured(unittest.TestCase):
         self.assertEqual(behind["head"], estate.fourth[:12])
         self.assertTrue(behind["on_branch"])
         self.assertEqual(behind["oldest_on"], "2026-10-02")
-        self.assertEqual(rel["provenance"], {"kind": "curated", "copy_point": "curated", "last_synced": "curated",
+        self.assertEqual(rel["provenance"], {"kind": "curated", "copy_point": "curated", "sync_base": "curated",
                                              "deny": "copy"})
         self.assertEqual(rel["copy_record"]["differs"],
                          [{"field": "copy_point", "curated": estate.first[:9], "copy": "0000000"}])
@@ -177,20 +177,38 @@ class Measured(unittest.TestCase):
 
     def test_the_copy_fills_what_the_curated_entry_leaves_out_and_says_so(self):
         estate = Estate()
-        commit(estate.copy, ".copy/upstream.json", json.dumps({"kind": "copy", "last_synced": estate.third,
+        commit(estate.copy, ".copy/upstream.json", json.dumps({"kind": "export", "last_synced": estate.third,
                                                                "source": "never read"}))
         doc = self.build(estate, [entry(copy_point=estate.first)])
         rel = doc["relations"][0]
-        self.assertEqual(rel["provenance"]["last_synced"], "copy")
+        self.assertEqual(rel["provenance"]["sync_base"], "copy")
         self.assertEqual(rel["behind"]["commits"], 1)
         self.assertIsNone(rel["deny"])
         self.assertIsNone(rel["behind"]["outside_deny"])
         self.assertNotIn("never read", json.dumps(doc))
 
+    def test_the_copy_speaks_its_own_kinds_and_a_curated_alias_is_read(self):
+        estate = Estate({"kind": "rewritten", "sync_base": "1234567"})
+        doc = self.build(estate, [entry(copy_point=estate.first, last_synced=estate.second)])
+        rel = doc["relations"][0]
+        self.assertEqual(rel["sync_base"]["source_commit"], estate.second, "last_synced is an alias of sync_base")
+        self.assertEqual(rel["copy_record"]["copy_kind"], "rewritten")
+        self.assertEqual(rel["copy_record"]["differs"],
+                         [{"field": "sync_base", "curated": estate.second, "copy": "1234567"}])
+        moved = self.build(estate, [entry(kind="move", copy_point=estate.first)])
+        self.assertEqual(moved["relations"][0]["copy_record"]["differs"],
+                         [{"field": "kind", "curated": "move", "copy": "rewritten"}])
+        both = derivations.read_config(config([entry(copy_point="abc1234", sync_base="abc1234",
+                                                     last_synced="abc1234")]), {COPY: {}, SOURCE: {}})
+        self.assertEqual([r["code"] for r in both[1]], ["unknown-field"])
+        odd = Estate({"kind": "copy"})
+        rel = self.build(odd, [entry(copy_point=odd.first)])["relations"][0]
+        self.assertIn("is not `rewritten`, `export` or `move`", rel["copy_record"]["problems"][0])
+
     def test_an_uncommitted_record_does_not_count(self):
         estate = Estate()
         (estate.copy / ".copy").mkdir()
-        (estate.copy / ".copy" / "upstream.json").write_text(json.dumps({"kind": "copy"}), encoding="utf-8")
+        (estate.copy / ".copy" / "upstream.json").write_text(json.dumps({"kind": "rewritten"}), encoding="utf-8")
         doc = self.build(estate, [entry(copy_point=estate.second)])
         self.assertEqual(doc["relations"][0]["copy_record"]["state"], "absent")
         self.assertEqual(doc["unrecorded"], [])
@@ -222,7 +240,7 @@ class Measured(unittest.TestCase):
         self.assertFalse(doc["relations"][0]["behind"]["on_branch"])
 
     def test_a_copy_that_says_so_without_an_entry_is_unrecorded(self):
-        estate = Estate({"kind": "copy", "copy_point": "abc1234"})
+        estate = Estate({"kind": "rewritten", "copy_point": "abc1234"})
         doc = self.build(estate, [])
         self.assertEqual([u["copy"] for u in doc["unrecorded"]], [COPY])
         refused = self.build(estate, [entry(copy_point="abc1234", kind="fork")])
@@ -238,11 +256,11 @@ class Measured(unittest.TestCase):
 class Findings(unittest.TestCase):
     def rel(self, **kw) -> dict:
         base = {"copy": COPY, "source": SOURCE, "kind": "copy",
-                "copy_point": {"source_commit": "1111111"}, "last_synced": {"source_commit": "2222222"},
+                "copy_point": {"source_commit": "1111111"}, "sync_base": {"source_commit": "2222222"},
                 "copy_record": {"state": "read", "differs": []},
                 "behind": {"state": "measured", "commits": 3, "outside_deny": 2, "ref": "origin/main",
                            "head": "333333333333", "on_branch": True, "oldest_on": "2026-10-01",
-                           "since": "last_synced"},
+                           "since": "sync_base"},
                 "source_archived": False}
         base.update(kw)
         return base
@@ -271,12 +289,12 @@ class Findings(unittest.TestCase):
         self.assertEqual(sorted((r["type"], r["subject"]) for r in rows),
                          [("copy.relation_unrecorded", COPY), ("copy.relation_unrecorded", OTHER)])
         [row] = self.rows(self.rel(behind=None, copy_record={
-            "state": "read", "differs": [{"field": "last_synced", "curated": "2222222", "copy": "4444444"}]}))
+            "state": "read", "differs": [{"field": "sync_base", "curated": "2222222", "copy": "4444444"}]}))
         self.assertEqual((row["type"], row["severity"]), ("copy.record_differs", "warning"))
         self.assertIn("4444444", row["detail"])
 
     def test_a_moved_source_must_be_archived(self):
-        [row] = self.rows(self.rel(kind="move", behind=None, last_synced=None))
+        [row] = self.rows(self.rel(kind="move", behind=None, sync_base=None))
         self.assertEqual((row["type"], row["subject"]), ("copy.moved_source_open", SOURCE))
         self.assertEqual(self.rows(self.rel(kind="move", behind=None, source_archived=True)), [])
 
@@ -288,12 +306,12 @@ class Findings(unittest.TestCase):
 class Readers(unittest.TestCase):
     def test_both_ways_and_refusals_are_degraded_for_the_repositories_they_name(self):
         doc = {"relations": [{"copy": COPY, "source": SOURCE, "kind": "copy",
-                              "copy_point": {"source_commit": "1111111"}, "last_synced": None,
+                              "copy_point": {"source_commit": "1111111"}, "sync_base": None,
                               "behind": {"state": "measured", "commits": 4}}],
                "refused": [{"copy": OTHER, "source": SOURCE, "reason": "entry 1 refused (cycle): x"}]}
         derived, copies, degraded = derivations.relations_of(doc, [COPY])
         self.assertEqual(derived, [{"copy": COPY, "source": SOURCE, "kind": "copy", "copy_point": "1111111",
-                                    "last_synced": None, "behind": 4}])
+                                    "sync_base": None, "behind": 4}])
         self.assertEqual(copies, [])
         self.assertEqual(degraded, [])
         derived, copies, degraded = derivations.relations_of(doc, [SOURCE])
@@ -317,7 +335,7 @@ class ThroughTheEngine(unittest.TestCase):
     def setUpClass(cls):
         import workspace
         from emitter_fixture import environment, seed
-        cls.estate = Estate({"kind": "copy", "deny": ["docs/runs"]})
+        cls.estate = Estate({"kind": "rewritten", "deny": ["docs/runs"]})
         root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-derivations-emit-"))
         seed(root)
         workspace.initialize(root / "home", identities=False)
@@ -334,7 +352,7 @@ class ThroughTheEngine(unittest.TestCase):
         (root / "raw" / "model.json").write_text(json.dumps(model), encoding="utf-8")
         (root / "home" / "config" / "derivations.json").write_text(json.dumps({
             "schema": derivations.SCHEMA, "derivations": [
-                entry(copy_point=cls.estate.first, last_synced=cls.estate.second,
+                entry(copy_point=cls.estate.first, sync_base=cls.estate.second,
                       builder={"path_hint": "builders/alpha/build.sh", "rules_count": 2}),
                 {"copy": "repository:fixture/service", "source": "repository:fixture/service", "kind": "copy",
                  "copy_point": "abc1234"}]}), encoding="utf-8")
@@ -376,8 +394,13 @@ class ThroughTheEngine(unittest.TestCase):
                            "print(json.dumps(server.observatory_resolve(id='project:fixture-b')))")
         self.assertEqual([r["copy"] for r in resolved["copies"]], [COPY])
         self.assertEqual(resolved["derived_from"], [])
+        # The capability keeps its published, closed v0.24.0 shape until it is versioned: the cut drops
+        # the two fields there, and only the MCP tool carries them.
+        capability = self.py("import json, sys; sys.path[:0] = ['.', 'mcp']; import server; "
+                             "print(json.dumps(server.capability_project_resolve({'id': 'project:fixture-b'}, None)))")
         schema = json.loads((ROOT / "fabric/schemas/project-resolve-output.schema.json").read_text(encoding="utf-8"))
-        jsonschema.validate(resolved, schema)
+        jsonschema.validate(capability, schema)
+        self.assertNotIn("copies", capability)
 
     def test_the_findings_builder_reads_the_document(self):
         rows = self.py("import json, sys; sys.path[:0] = ['.', 'tools']; import paths, derivation_findings; "

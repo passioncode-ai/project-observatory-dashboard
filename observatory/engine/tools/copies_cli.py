@@ -5,13 +5,13 @@ Reads `registry/derivations.json` (OBS-321, `derivations.py`). PRINTS ONLY: Obse
 syncs, builds, applies or pushes anything to a repository. The plan is the procedure a
 person or a coding session runs, in the copy's own clones:
 
-1. build the source at `last_synced` and at the source branch's head with the copy's own
+1. build the source at `sync_base` and at the source branch's head with the copy's own
    builder (the same rules file, checked by its sha256), so a raw source diff, which holds
    what the builder exists to remove, never reaches the copy;
 2. diff the two builds, minus the copy's deny paths;
 3. apply the patch with `git apply --3way` on a branch `sync/<head12>` of the copy;
 4. run the copy's own audits and tests, open a reviewed pull request, integrate it;
-5. record the new `last_synced` in `config/derivations.json` and the copy's `.copy/upstream.json`.
+5. record the new `sync_base` in `config/derivations.json` and the copy's `.copy/upstream.json`.
 
 A move is never carried: its plan says so.
 """
@@ -43,7 +43,7 @@ def plan(rel: dict) -> dict:
             f"Archive {source} at its host once nothing pushes to it, and point remaining clones at {copy}."],
             "commands": []}
     behind = rel.get("behind") or {}
-    since = (rel.get("last_synced") or rel.get("copy_point") or {}).get("source_commit") or "<last_synced>"
+    since = (rel.get("sync_base") or rel.get("copy_point") or {}).get("source_commit") or "<sync_base>"
     head = behind.get("head") or "<source head>"
     ref = behind.get("ref") or f"origin/{rel.get('source_branch') or '<branch>'}"
     builder = rel.get("builder") or {}
@@ -69,7 +69,7 @@ def plan(rel: dict) -> dict:
         "only be a file a copy-only commit changed by hand.",
         "Run the copy's own audits (secret scan, its tests) on the branch, open a reviewed pull request "
         f"titled \"sync: source at {head[:12]}\", and integrate it the way the copy's history does.",
-        f"Record the new last_synced {head[:12]} in config/derivations.json and in the copy's "
+        f"Record the new sync_base {head[:12]} in config/derivations.json and in the copy's "
         ".copy/upstream.json, then run `project-observatory full emit`.",
         "A fix made in the copy goes back to the source by hand, as a reviewed pull request there; never "
         "push from the copy to the source.",

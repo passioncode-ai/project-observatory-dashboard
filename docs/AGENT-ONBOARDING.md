@@ -17,7 +17,7 @@ Fabric owns the canonical project id. Observatory pulls it from Fabric's hub and
 
 ## Copies and moves of repositories
 
-`config/derivations.json` is mine: it records which repository is a copy (`kind: copy`) or a move (`kind: move`) of which, by registry ids. `observatory_project` and `observatory_resolve` show it both ways as `derived_from` and `copies`, each with `behind`, the commits on the source's branch after `last_synced`, counted in the source's local clone (null when not measured here, never fetched). An entry the registry cannot stand behind is refused by name in `degraded`. Observatory never syncs: `project-observatory full copies plan COPY` prints the steps, and carrying a copy forward is a reviewed pull request in the copy, after which I record the new `last_synced`.
+`config/derivations.json` is mine: it records which repository is a copy (`kind: copy`) or a move (`kind: move`) of which, by registry ids. `observatory_project` and `observatory_resolve` show it both ways as `derived_from` and `copies`, each with `behind`, the commits on the source's branch after `sync_base`, counted in the source's local clone (null when not measured here, never fetched). An entry the registry cannot stand behind is refused by name in `degraded`. Observatory never syncs: `project-observatory full copies plan COPY` prints the steps, and carrying a copy forward is a reviewed pull request in the copy, after which I record the new `sync_base`.
 
 ## The review queue
 

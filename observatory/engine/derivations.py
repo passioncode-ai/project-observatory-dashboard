@@ -14,14 +14,15 @@ Three rules carry the design:
   `derivations/1`) is curated in the private workspace and never shipped. Each entry names
   a copy and its source by the registry's repository ids. An entry the registry cannot
   stand behind is refused BY NAME (`unknown-repository`, `self-derivation`, `cycle`,
-  `move-with-last-synced`, ...) in `degraded` and in `refused`, never repaired by a guess.
+  `move-with-sync-base`, ...) in `degraded` and in `refused`, never repaired by a guess.
 - **The copy may say it too, without naming its source.** A copy can carry a tracked
-  `.copy/upstream.json` (kind, copy_point, last_synced, deny paths). It is read from the
+  `.copy/upstream.json` (kind `rewritten`, `export` or `move`, copy_point, sync_base, deny paths;
+  `rewritten` and `export` are both the curated kind `copy`). It is read from the
   copy's local clone at HEAD, so an uncommitted edit does not count. Where both sides give
   a value the curated one wins, the difference is published (`differs`), and every value
   says which side it came from (`provenance`: `curated` or `copy`).
 - **Behind is measured, never fetched.** The commits on the source branch after
-  `last_synced` are counted in the source's local clone (its `origin/<branch>` as of the
+  `sync_base` are counted in the source's local clone (its `origin/<branch>` as of the
   last fetch, else the local branch). No clone, no branch or no such commit is `unknown`
   with the reason; nothing here starts a network call.
 
@@ -47,7 +48,12 @@ UPSTREAM_FILE = ".copy/upstream.json"
 UPSTREAM_MAX_BYTES = 64 * 1024
 #: The source of the registry document, declared by the emit.
 SOURCE_ID = "SRC-0023"
-ENTRY_FIELDS = {"copy", "source", "kind", "copy_point", "last_synced", "builder", "source_branch",
+#: `last_synced` is read as an alias of `sync_base` (the name the first drafts used); both is a refusal.
+ALIASES = {"last_synced": "sync_base"}
+#: The kinds a copy writes in its own `.copy/upstream.json`, and the curated kind each is: a copy
+#: rewritten by a history filter and a copy made by export are both kept in step (`copy`).
+UPSTREAM_KINDS = {"rewritten": "copy", "export": "copy", "move": "move"}
+ENTRY_FIELDS = {"copy", "source", "kind", "copy_point", "sync_base", "last_synced", "builder", "source_branch",
                 "note", "evidence"}
 POINT_FIELDS = {"source_commit", "copy_commit", "date"}
 BUILDER_FIELDS = {"path_hint", "rules_count", "rules_sha256"}
@@ -65,9 +71,9 @@ CODES = {
     "unknown-repository": "copy or source is not a repository in the registry",
     "self-derivation": "a repository is recorded as derived from itself",
     "bad-kind": "kind is neither `copy` nor `move`",
-    "bad-point": "copy_point or last_synced is not a commit or {source_commit, copy_commit?, date?}",
+    "bad-point": "copy_point or sync_base is not a commit or {source_commit, copy_commit?, date?}",
     "missing-copy-point": "a copy without copy_point: behind cannot be measured",
-    "move-with-last-synced": "a move is never synced, so it carries no last_synced",
+    "move-with-sync-base": "a move is never synced, so it carries no sync_base",
     "bad-builder": "builder is not {path_hint, rules_count?, rules_sha256?}",
     "bad-branch": "source_branch is not a branch name",
     "bad-text": "note or evidence is not short plain text, or looks like a credential",
@@ -156,6 +162,11 @@ def _entry(index: int, raw: Any, repos: dict[str, dict]) -> tuple[dict | None, d
     if extra:
         return None, _refusal("unknown-field", index, raw, "fields this schema does not define: "
                               + ", ".join(_shown(x) for x in extra))
+    for alias, name in ALIASES.items():
+        if alias in raw:
+            if name in raw:
+                return None, _refusal("unknown-field", index, raw, f"`{alias}` is an alias of `{name}`; give one")
+            raw = {**{k: v for k, v in raw.items() if k != alias}, name: raw[alias]}
     ids = {}
     for side in ("copy", "source"):
         value = raw.get(side)
@@ -172,7 +183,7 @@ def _entry(index: int, raw: Any, repos: dict[str, dict]) -> tuple[dict | None, d
     if kind not in KINDS:
         return None, _refusal("bad-kind", index, raw, f"kind must be `copy` or `move`, not {_shown(kind)}")
     points = {}
-    for field in ("copy_point", "last_synced"):
+    for field in ("copy_point", "sync_base"):
         if raw.get(field) is None:
             points[field] = None
             continue
@@ -181,9 +192,9 @@ def _entry(index: int, raw: Any, repos: dict[str, dict]) -> tuple[dict | None, d
             return None, _refusal("bad-point", index, raw,
                                   f"`{field}` must be a source commit (7 to 64 hex digits) or "
                                   "{source_commit, copy_commit?, date?}")
-    if kind == "move" and points["last_synced"] is not None:
-        return None, _refusal("move-with-last-synced", index, raw,
-                              f"{ids['copy']} is a move: nothing is carried after a move, so it has no last_synced")
+    if kind == "move" and points["sync_base"] is not None:
+        return None, _refusal("move-with-sync-base", index, raw,
+                              f"{ids['copy']} is a move: nothing is carried after a move, so it has no sync_base")
     builder = None
     if raw.get("builder") is not None:
         builder = _builder(raw["builder"])
@@ -199,7 +210,7 @@ def _entry(index: int, raw: Any, repos: dict[str, dict]) -> tuple[dict | None, d
             return None, _refusal("bad-text", index, raw, f"`{field}` must be one line of up to 300 characters "
                                   "that does not look like a credential")
     return {"copy": ids["copy"], "source": ids["source"], "kind": kind, "copy_point": points["copy_point"],
-            "last_synced": points["last_synced"], "builder": builder, "source_branch": branch,
+            "sync_base": points["sync_base"], "builder": builder, "source_branch": branch,
             "note": raw.get("note"), "evidence": raw.get("evidence")}, None
 
 
@@ -301,14 +312,16 @@ def read_upstream(clone: str | None, run: Runner) -> dict:
         return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} is not JSON"}
     if not isinstance(doc, dict):
         return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} is not an object"}
-    out: dict[str, Any] = {"state": "read", "kind": None, "copy_point": None, "last_synced": None,
-                           "deny": None, "problems": []}
+    out: dict[str, Any] = {"state": "read", "kind": None, "copy_kind": None, "copy_point": None,
+                           "sync_base": None, "deny": None, "problems": []}
     if doc.get("kind") is not None:
-        if doc["kind"] in KINDS:
-            out["kind"] = doc["kind"]
+        if doc["kind"] in UPSTREAM_KINDS:
+            out["kind"], out["copy_kind"] = UPSTREAM_KINDS[doc["kind"]], doc["kind"]
         else:
-            out["problems"].append(f"kind {_shown(doc['kind'])} is neither `copy` nor `move`")
-    for field in ("copy_point", "last_synced"):
+            out["problems"].append(f"kind {_shown(doc['kind'])} is not `rewritten`, `export` or `move`")
+    if doc.get("sync_base") is None and doc.get("last_synced") is not None:
+        doc = {**doc, "sync_base": doc["last_synced"]}          # the alias, read only when sync_base is absent
+    for field in ("copy_point", "sync_base"):
         if doc.get(field) is not None:
             out[field] = _point(doc[field])
             if out[field] is None:
@@ -331,7 +344,7 @@ def measure_behind(clone: str | None, branch: str | None, since: str | None, den
     Never fetches: the count is as of the clone's last fetch, and says which ref it read."""
     unknown = lambda why: {"state": "unknown", "commits": None, "outside_deny": None, "reason": why}  # noqa: E731
     if since is None:
-        return unknown("no last_synced or copy_point to count from")
+        return unknown("no sync_base or copy_point to count from")
     if not clone:
         return unknown("no local clone of the source on this machine; clone it to measure")
     if not branch:
@@ -385,10 +398,10 @@ def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Run
         upstream = read_upstream(_clone(copy_repo), run)
         provenance = {"kind": "curated"}
         values: dict[str, Any] = {}
-        for field in ("copy_point", "last_synced"):
+        for field in ("copy_point", "sync_base"):
             if e[field] is not None:
                 values[field], provenance[field] = e[field], "curated"
-            elif upstream.get(field) is not None and not (field == "last_synced" and e["kind"] == "move"):
+            elif upstream.get(field) is not None and not (field == "sync_base" and e["kind"] == "move"):
                 values[field], provenance[field] = upstream[field], "copy"
             else:
                 values[field] = None
@@ -398,25 +411,25 @@ def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Run
         differs = []
         if upstream.get("state") == "read":
             if upstream.get("kind") and upstream["kind"] != e["kind"]:
-                differs.append({"field": "kind", "curated": e["kind"], "copy": upstream["kind"]})
-            for field in ("copy_point", "last_synced"):
+                differs.append({"field": "kind", "curated": e["kind"], "copy": upstream["copy_kind"]})
+            for field in ("copy_point", "sync_base"):
                 mine, theirs = e[field], upstream.get(field)
                 if mine and theirs and not same_commit(mine["source_commit"], theirs["source_commit"]):
                     differs.append({"field": field, "curated": mine["source_commit"],
                                     "copy": theirs["source_commit"]})
         branch = e["source_branch"] or source_repo.get("default_branch") or None
-        since_point = values["last_synced"] or values["copy_point"]
+        since_point = values["sync_base"] or values["copy_point"]
         behind = None
         if e["kind"] == "copy":
             behind = measure_behind(_clone(source_repo), branch, since_point and since_point["source_commit"],
                                     deny, run)
-            behind["since"] = "last_synced" if values["last_synced"] else "copy_point"
-        record = {k: v for k, v in upstream.items() if k in ("state", "reason", "problems")}
+            behind["since"] = "sync_base" if values["sync_base"] else "copy_point"
+        record = {k: v for k, v in upstream.items() if k in ("state", "reason", "problems", "copy_kind")}
         record["differs"] = differs
         relations.append({
             "copy": e["copy"], "source": e["source"], "kind": e["kind"], "source_branch": branch,
             "copy_branch": copy_repo.get("default_branch") or None,
-            "copy_point": values["copy_point"], "last_synced": values["last_synced"],
+            "copy_point": values["copy_point"], "sync_base": values["sync_base"],
             "builder": e["builder"], "deny": deny, "provenance": provenance,
             "copy_record": record, "behind": behind,
             "source_archived": source_repo.get("archived"),
@@ -490,7 +503,7 @@ def wire_row(rel: dict) -> dict:
     behind = rel.get("behind") or {}
     return {"copy": rel["copy"], "source": rel["source"], "kind": rel["kind"],
             "copy_point": (rel.get("copy_point") or {}).get("source_commit"),
-            "last_synced": (rel.get("last_synced") or {}).get("source_commit"),
+            "sync_base": (rel.get("sync_base") or {}).get("source_commit"),
             "behind": behind.get("commits") if behind.get("state") == "measured" else None}
 
 

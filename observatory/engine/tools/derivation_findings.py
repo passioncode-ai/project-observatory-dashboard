@@ -6,7 +6,7 @@ each copy's tracked `.copy/upstream.json` and the source's local clone. Silent w
 document is absent: no curated relation is not a clean bill, and `derivations.load` says
 so to the readers. One row per relation, because each is one decision about one copy.
 
-- `copy.behind_source`: the source branch has commits after `last_synced` (outside the
+- `copy.behind_source`: the source branch has commits after `sync_base` (outside the
   copy's deny paths, when it lists them), or the count could not be measured here.
 - `copy.relation_unrecorded`: a copy says it is a copy and nothing here records its source;
   or a recorded copy does not say so, or says it in a record that cannot be read.
@@ -47,7 +47,7 @@ def _behind(rel: dict, today: str) -> dict | None:
     copy, source, behind = rel["copy"], rel["source"], rel.get("behind") or {}
     if rel.get("kind") != "copy" or not behind:
         return None
-    since = behind.get("since") or "last_synced"
+    since = behind.get("since") or "sync_base"
     if behind.get("state") != "measured":
         return {"type": "copy.behind_source", "subject": copy, "severity": "info",
                 **titled("{copy} may be behind its source: not measured", copy=copy),
@@ -75,7 +75,7 @@ def _behind(rel: dict, today: str) -> dict | None:
             **titled("{copy} is {n} commits behind its source", copy=copy, n=counted),
             "detail": detail,
             "action": f"carry the changes into the copy through its own builder and a reviewed pull request, "
-                      f"then record the new last_synced in {CONFIG}; "
+                      f"then record the new sync_base in {CONFIG}; "
                       f"`project-observatory full copies plan {copy}` prints the steps",
             "evidence": EVIDENCE}
 
@@ -99,7 +99,7 @@ def findings(doc: dict | None, today: str | None = None) -> list[dict]:
                         "detail": f"{CONFIG} records {copy} as a copy of {source}, and the copy's clone tracks "
                                   f"no .copy/upstream.json at HEAD, so its own readers cannot tell it is a copy "
                                   f"or what it was last synced to.",
-                        "action": "commit a .copy/upstream.json in the copy (kind, copy_point, last_synced, deny; "
+                        "action": "commit a .copy/upstream.json in the copy (kind rewritten or export, copy_point, sync_base, deny; "
                                   "never the source's name) and a README line saying it is carried forward",
                         "evidence": EVIDENCE})
         elif record.get("state") == "unreadable" or record.get("problems"):
@@ -139,7 +139,7 @@ def findings(doc: dict | None, today: str | None = None) -> list[dict]:
                               f"its source, so nothing measures how far behind it is"
                               + (" (an entry naming it was refused; see `degraded`)." if row.get("refused")
                                  else "."),
-                    "action": f"add an entry for {copy} to {CONFIG}: copy, source, kind, copy_point, last_synced",
+                    "action": f"add an entry for {copy} to {CONFIG}: copy, source, kind, copy_point, sync_base",
                     "evidence": EVIDENCE})
     return out
 
