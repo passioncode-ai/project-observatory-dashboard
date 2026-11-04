@@ -47,7 +47,23 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python`:
 
 ## Receipts
 
-To be filled in after the tag.
+- Release PR #420 merged as `356888ca` (the first `land.sh` merge attempt was refused during GitHub's incident of
+  2026-11-04, the next went through); tag `v0.32.0` (annotated, object `02620378`) pushed on it over HTTPS, because
+  SSH to GitHub was failing intermittently in that incident (Git Operations degraded from 09:42 UTC).
+- Release run `41811575401`: every build job green on the first attempt (guard, manifest, wheel, macos, linux x64 and
+  arm64, windows x64 and arm64, feed). Its `publish` job failed: during the incident an asset upload was retried and
+  answered `422 ReleaseAsset.name already exists`, leaving a complete draft (19 assets). Once githubstatus showed Git
+  Operations and Actions operational, `gh run rerun 41811575401 --failed` reran it; the shared publish workflow uploads
+  with `--clobber` onto an existing draft and publishes it. Published 2026-11-04T11:45:35Z with 19 assets.
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.32.0-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key (EdDSA
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7`); `gh attestation verify` on the wheel with `--signer-repo
+  passioncode-ai/.github`: exit 0.
+- Installed on the operator's Mac with `project-observatory full update --version 0.32.0 --apply` (`status:
+  updated`). `full doctor` reports 0.32.0 and no coverage warnings; its tick verdict is `interrupted` (the tick
+  stopped at its 1500 s ceiling), the known OBS-318. Release wave 1 of OBS-325: the Windows side of this wave is
+  checked in CI (windows x64 and arm64 installers built and receipted); a check of an installed Windows machine waits
+  for one.
 
 ## Next
 

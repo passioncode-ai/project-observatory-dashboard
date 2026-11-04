@@ -22,7 +22,8 @@ expectation. It changes test evidence and documentation, not the published engin
 (OBS-300, OBS-306, #409, #414), the disk guard's Docker VM space (OBS-305, #411), the keyserver on Windows (OBS-309,
 #416).
 
-Release pull request open; then the tag `v0.32.0`, verification and installation, with receipts in the record.
+Released: tag `v0.32.0` on `356888ca`, verified and installed (receipts in the record). Next: OBS-324 (analytics by
+default) for wave 2, then OBS-323.
 
 [2026-11-03: release 0.31.0](runs/2026-11-03-release-0.31.0/README.md): engine 0.31.0 (`observatory-log` stays
 0.30.0): your own relay (OBS-287, part, #400), the Sentry door (OBS-292, #401), a partial restore and the move
