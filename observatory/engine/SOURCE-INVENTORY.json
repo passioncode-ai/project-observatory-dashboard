@@ -927,8 +927,8 @@
       "path": "derivations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d441588758ce328b682495db979217228ac26f2bf32ff365316dc5f2a9d6b3f5",
-      "bytes": 31923
+      "export_sha256": "0fc5410ee51c905a82b5ae1b1fa3503f614b73dbcbab149da607197732bf1b67",
+      "bytes": 32323
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -947,8 +947,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "f5224bab3684ada6ec301046466bd9f7314f3066208f7ab4ce10c9ba4cbc511f",
-      "bytes": 48159,
+      "export_sha256": "86e7eeb0c12cf08db9ad470bff79fa7af1599e521b4205f6778ebed30c37590d",
+      "bytes": 48450,
       "upstream_modified": true
     },
     {
@@ -4500,8 +4500,8 @@
       "path": "tests/test_derivations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2f75b158002f501c1916322f6d88f5bcac48bd25b8ab95fffc13444b535e0306",
-      "bytes": 30118
+      "export_sha256": "3a46405806d3ce1c0ee820a54cf9c12f4cb9c70f6dc7536542197acf99f100ad",
+      "bytes": 31599
     },
     {
       "path": "tests/test_digitalocean_account.py",

@@ -187,6 +187,27 @@ class Measured(unittest.TestCase):
         self.assertIsNone(rel["behind"]["outside_deny"])
         self.assertNotIn("never read", json.dumps(doc))
 
+    def test_a_point_may_name_its_source_as_name_at_commit(self):
+        # OBS-334: a copy's sync writes its points as the `Source-Revision: <name>@<sha12>` line of its
+        # sync commit does; the name is checked by shape and dropped, the commit is compared as before.
+        estate = Estate()
+        commit(estate.copy, ".copy/upstream.json", json.dumps({
+            "schema": 1, "kind": "rewritten", "copy_point": "agent@" + estate.first[:12],
+            "last_synced": "agent@" + estate.third[:12], "synced_at": "2026-11-04T19:00:00Z",
+            "builder": "the copy's own builder", "deny": ["insights/"], "rule": "source to copy"}))
+        doc = self.build(estate, [entry(copy_point=estate.first)])
+        rel = doc["relations"][0]
+        self.assertEqual(rel["copy_record"]["problems"], [])
+        self.assertEqual(rel["copy_record"]["differs"], [])
+        self.assertEqual(rel["provenance"]["sync_base"], "copy")
+        self.assertEqual(rel["sync_base"]["source_commit"], estate.third[:12])
+        self.assertEqual(rel["behind"]["commits"], 1)
+        for bad in ("@" + estate.first[:12], "a b@" + estate.first[:12], "a/b@" + estate.first[:12],
+                    "agent@" + "z" * 12, "agent@" + estate.first[:6], "agent@@" + estate.first[:12]):
+            self.assertIsNone(derivations._point(bad), bad)
+        self.assertEqual(derivations._point("agent-x.v2@" + estate.first[:12].upper())["source_commit"],
+                         estate.first[:12])
+
     def test_the_copy_speaks_its_own_kinds_and_a_curated_alias_is_read(self):
         estate = Estate({"kind": "rewritten", "sync_base": "1234567"})
         doc = self.build(estate, [entry(copy_point=estate.first, last_synced=estate.second)])
