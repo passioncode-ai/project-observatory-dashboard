@@ -254,7 +254,9 @@ never shipped: `{"schema": "derivations/1", "derivations": [...]}`, each entry `
 (repository ids as the registry spells them), `kind` (`copy` or `move`), `copy_point` and
 `sync_base` (a source commit of 7 to 64 hex digits, or `{source_commit, copy_commit?, date?}`),
 and optionally `builder` (`{path_hint, rules_count?, rules_sha256?}`), `source_branch` (default: the
-source repository's `default_branch`), `note` and `evidence` (one line each). A copy needs
+source repository's `default_branch`), `name_prefix` (0.33.0, OBS-332: the prefix the organization a
+copy or move went to puts before its names, lowercase letters, digits and hyphens ending in a hyphen,
+up to 32; a private value, never written in this repository), `note` and `evidence` (one line each). A copy needs
 `copy_point`; a move has no `sync_base`. `last_synced` is read as an alias of `sync_base`, and an
 entry giving both is refused (`unknown-field`). Nothing is created for it: without the file there is no
 relation, and no reader reports anything missing. A file that is not JSON or not this schema is
@@ -274,6 +276,7 @@ refused whole; an entry is refused alone, by code, in `degraded` and `refused`, 
 | `move-with-sync-base` | a move is never synced, so it carries no sync_base |
 | `bad-builder` | builder is not {path_hint, rules_count?, rules_sha256?} |
 | `bad-branch` | source_branch is not a branch name |
+| `bad-prefix` | name_prefix is not lowercase letters, digits and hyphens ending in a hyphen |
 | `bad-text` | note or evidence is not short plain text, or looks like a credential |
 | `duplicate-copy` | two entries name the same copy: a copy has one source |
 | `cycle` | the entries form a cycle of derivations |
@@ -300,14 +303,15 @@ value's side: `curated` or `copy`), `copy_record` (`state`: `read`, `absent`, `n
 `outside_deny` (counted with full history, so commits on merged side branches are not simplified
 away), `ref`, `head`, `on_branch`, `counted_from` (the recorded commit, or, when it is off the branch,
 the merge base the count starts from), `oldest_on`, `since`, or `unknown` with its `reason`) and
-`source_archived`; `unrecorded[]` (copies that carry `.copy/upstream.json` and no accepted entry);
+`source_archived`, and `name_prefix` when the entry gives one; `unrecorded[]` (copies that carry `.copy/upstream.json` and no accepted entry);
 `refused[]`; `degraded[]`; `totals`. `behind` is counted in the source's local clone (its
 `origin/<branch>`, else the local branch), offline: nothing is fetched and nothing is written to any
 repository. The findings `copy.behind_source` (the source has commits after `sync_base` outside
 the deny paths: warning once the oldest is over 7 days old, info before that or when not measured),
 `copy.relation_unrecorded` (a copy that says so with no entry, a recorded copy that does not say so,
-or a record that cannot be read), `copy.record_differs` and `copy.moved_source_open` (a move whose
-source is not archived) are rebuilt from it on every tick.
+or a record that cannot be read), `copy.record_differs`, `copy.moved_source_open` (a move whose
+source is not archived) and, since 0.33.0, `copy.name_unprefixed` (info: the entry gives `name_prefix`
+and the copy repository's name does not start with it) are rebuilt from it on every tick.
 
 `project.detail` (`observatory_project`) gains `project.derived_from` and `project.copies`: lists
 of `{copy, source, kind, copy_point, sync_base, behind}` (commits as the source spells them;

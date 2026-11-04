@@ -66,6 +66,7 @@ LABELS: dict[str, str] = {
     "copy.moved_source_open": "Moved repository still open",
     "copy.record_differs": "Copy record disagrees",
     "copy.relation_unrecorded": "Copy relation not recorded",
+    "copy.name_unprefixed": "Copy name lacks its prefix",
     "credential.expired": "Key expired",
     "credential.expiring": "Key expiring soon",
     "credential.lifetime_cap": "Key with a lifetime ceiling",
