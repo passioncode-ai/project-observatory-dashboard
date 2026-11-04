@@ -5,6 +5,17 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.32.0 (2026-11-04)
+
+Observatory can now record that one of your repositories is a copy of another, or that a project moved to a new
+repository, and tells you when a copy falls behind its source: list the pairs in `config/derivations.json` (it stays
+in your workspace), and `full copies list` and `full copies plan COPY` show each relation and the steps to carry the
+source's changes forward, without running them. A second machine's restore and `full machine-move status` now hand
+out `ssh-keys rekey` for each key, with the other key's fingerprint, in place of separate create and send steps. The
+disk guard, when space is critical, also clears unused Docker build cache and gives a running Colima or Lima VM's
+freed space back to the disk, and only ever acts on a Docker daemon on this machine. On Windows, a request the
+keyserver refuses now gets its answer instead of a reset. Nothing needs you after installing.
+
 ### Added
 
 - **Copies and moves of repositories** (OBS-321, `docs/ONBOARDING.md`, `docs/COMPATIBILITY.md` "Registry:
