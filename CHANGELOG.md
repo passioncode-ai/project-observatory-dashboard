@@ -15,8 +15,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   `sync_base`, counted in the source's local clone, never fetched. A wrong entry (unknown repository, a repository
   derived from itself, a cycle, two sources for one copy, a move with `sync_base`) is refused by name in
   `degraded`. New findings `copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs` and
-  `copy.moved_source_open`; `project.detail` and the `observatory_resolve` tool show the relation both ways (the `project.resolve` capability keeps its closed v0.24.0 shape) (`derived_from`,
-  `copies`); `full copies list|plan COPY` prints the sync steps and runs none. Nothing writes to a repository.
+  `copy.moved_source_open`; `project.detail` shows the relation both ways (`derived_from`, `copies`; `project.resolve` keeps its
+  closed v0.24.0 answer until it is versioned); `full copies list|plan COPY` prints the sync steps and runs none. Nothing writes to a repository.
   Tests: `tests/test_derivations.py`.
 
 ### Changed

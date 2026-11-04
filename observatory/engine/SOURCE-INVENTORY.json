@@ -933,8 +933,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "144426c6434167fd701e341d501180f6f792b48fc26db685cd6a900a8afe3adf",
-      "bytes": 30430,
+      "export_sha256": "b82780cb86b7562da980a3985b2e48b113dc9ddf06e9200560639a31f025624f",
+      "bytes": 30467,
       "upstream_modified": true
     },
     {
@@ -947,15 +947,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "f052035d0cf5d3b61b8cccd8090f04c0caf317ae25f8594cc5afe9f6f42162ca",
-      "bytes": 45105,
+      "export_sha256": "3a8c1ce3be3c662b188cbc973cee75c2ee97922ec4db5daa7debe0f225b4fdbc",
+      "bytes": 45168,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "ec36211c27a55be1994124cc02e0784a004fb5cfbeccd767acb859ce1e89b5f1",
-      "bytes": 240036,
+      "export_sha256": "d6608b102785a54ab6498356acaca6d6e0017b372263cb26f4ca296a9e7bdde7",
+      "bytes": 240011,
       "upstream_modified": true
     },
     {
@@ -2935,8 +2935,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "50ea9fd2473421da5dd5bf87074df3da6d4b08a8d342bae9fe650be1610429c5",
-      "bytes": 116747,
+      "export_sha256": "3c6def0740386891ac5ec33369ae471a856b2e7bb5bbb21309901d2013d28993",
+      "bytes": 116154,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -4500,8 +4500,8 @@
       "path": "tests/test_derivations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c036561a78c867410316b25455f6eb310e1ff0a5adc816fb54352ed036e66014",
-      "bytes": 26343
+      "export_sha256": "60f218218ecd1154c955dfcf63d26f67360aa6af79bb9a39f196ea5b983701ad",
+      "bytes": 26407
     },
     {
       "path": "tests/test_digitalocean_account.py",

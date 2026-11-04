@@ -379,7 +379,7 @@ class ThroughTheEngine(unittest.TestCase):
         self.assertEqual(src["evidence_for"], ["registry:derivations.json"])
         self.assertEqual(src["availability"], "measured-input")
 
-    def test_project_detail_and_resolve_show_the_relation_both_ways(self):
+    def test_project_detail_shows_the_relation_both_ways_and_resolve_keeps_its_shape(self):
         import jsonschema
         detail = self.py("import json, sys; sys.path.insert(0, '.'); import survey; "
                          "print(json.dumps(survey.project_detail('project:fixture-a', timeline_limit=0)))")
@@ -390,17 +390,17 @@ class ThroughTheEngine(unittest.TestCase):
                         "a refusal naming the project's repository is degraded")
         schema = json.loads((ROOT / "fabric/schemas/project-detail-output.schema.json").read_text(encoding="utf-8"))
         jsonschema.validate(detail, schema)
+        source_side = self.py("import json, sys; sys.path.insert(0, '.'); import survey; "
+                              "print(json.dumps(survey.project_detail('project:fixture-b', timeline_limit=0)))")
+        self.assertEqual([r["copy"] for r in source_side["project"]["copies"]], [COPY])
+        self.assertEqual(source_side["project"]["derived_from"], [])
+        # project.resolve's published answer is closed (v0.24.0): the tool that implements it keeps
+        # that shape, and the relation is read through project.detail until the capability is versioned.
         resolved = self.py("import json, sys; sys.path[:0] = ['.', 'mcp']; import server; "
                            "print(json.dumps(server.observatory_resolve(id='project:fixture-b')))")
-        self.assertEqual([r["copy"] for r in resolved["copies"]], [COPY])
-        self.assertEqual(resolved["derived_from"], [])
-        # The capability keeps its published, closed v0.24.0 shape until it is versioned: the cut drops
-        # the two fields there, and only the MCP tool carries them.
-        capability = self.py("import json, sys; sys.path[:0] = ['.', 'mcp']; import server; "
-                             "print(json.dumps(server.capability_project_resolve({'id': 'project:fixture-b'}, None)))")
         schema = json.loads((ROOT / "fabric/schemas/project-resolve-output.schema.json").read_text(encoding="utf-8"))
-        jsonschema.validate(capability, schema)
-        self.assertNotIn("copies", capability)
+        jsonschema.validate(resolved, schema)
+        self.assertNotIn("copies", resolved)
 
     def test_the_findings_builder_reads_the_document(self):
         rows = self.py("import json, sys; sys.path[:0] = ['.', 'tools']; import paths, derivation_findings; "

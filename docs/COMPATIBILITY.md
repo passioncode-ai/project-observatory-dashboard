@@ -301,15 +301,15 @@ the deny paths: warning once the oldest is over 7 days old, info before that or 
 or a record that cannot be read), `copy.record_differs` and `copy.moved_source_open` (a move whose
 source is not archived) are rebuilt from it on every tick.
 
-`project.detail` (`observatory_project`) gains `project.derived_from` and `project.copies`, and
-the MCP tool `observatory_resolve` gains `derived_from` and `copies`: lists of `{copy, source,
-kind, copy_point, sync_base, behind}` (commits as the source spells them; `behind` null when not
-measured or for a move), present whenever `registry/derivations.json` exists and absent when no
-relation was ever recorded. `project.detail`'s `project` object is open in its published schema, so
-the capability carries them; `project.resolve`'s published v0.24.0 answer is closed, so the
-capability's answer is still cut to that shape and leaves them out until the capability is
-versioned. A refusal naming
-one of the answer's repositories is in `degraded`, and a curated file the emit has not turned into
+`project.detail` (`observatory_project`) gains `project.derived_from` and `project.copies`: lists
+of `{copy, source, kind, copy_point, sync_base, behind}` (commits as the source spells them;
+`behind` null when not measured or for a move), present whenever `registry/derivations.json` exists
+and absent when no relation was ever recorded. Its published schema leaves the `project` object
+open, so no schema changes. `project.resolve` (`observatory_resolve`) does not carry them yet: its
+published v0.24.0 answer is closed, a field added there fails every host that validates it, and
+`tools/publish_contract.py --check` holds the bundled schema to the published bytes; the capability
+gains them when it is versioned with a new pinned schema. A refusal naming one of the project's
+repositories is in `degraded`, and a curated file the emit has not turned into
 the registry document yet is named there too. New command `project-observatory full copies list|plan
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.

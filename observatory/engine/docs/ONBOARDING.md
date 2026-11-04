@@ -148,8 +148,8 @@ and never writes to either repository. An entry it cannot stand behind (an unkno
 repository derived from itself, a cycle, two sources for one copy, a move with `sync_base`) is
 refused by name in `degraded` and in `full copies list`, never repaired. The findings
 `copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs` and
-`copy.moved_source_open` say what each relation owes; `observatory_project` and
-`observatory_resolve` show it both ways (`derived_from`, `copies`). To carry a copy forward,
+`copy.moved_source_open` say what each relation owes; `observatory_project` shows it both ways
+(`derived_from`, `copies`). To carry a copy forward,
 `project-observatory full copies plan repository:example-org/alpha-agent` prints the steps (the
 copy's builder at both commits, the diff without the deny paths, `git apply --3way` on a branch
 `sync/<sha12>`, the copy's own audits) and runs none of them; after the pull request lands, write

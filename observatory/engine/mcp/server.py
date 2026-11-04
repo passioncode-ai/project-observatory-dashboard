@@ -456,10 +456,7 @@ def observatory_resolve(
     Reads four registry documents. A missing `identifiers.json` is a registry the
     current engine has not emitted yet: canonical and measured names still resolve,
     and `degraded` says the curated table was not read rather than implying there
-    are no other names.
-
-    `derived_from` and `copies` (OBS-321): the members' repositories' copies and moves, both ways,
-    from `config/derivations.json`; `behind` is null when not measured here."""
+    are no other names."""
     import identifiers
     degraded: list[dict[str, str]] = []
 
@@ -493,20 +490,12 @@ def observatory_resolve(
     else:
         degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
                         for d in fdoc.get("degraded") or [] if isinstance(d, dict))
-    answer = identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
-                                                          fabric_aliases=fabric_attribution.aliases(fdoc),
-                                                          attribute=fabric_attribution.attribute_local))
-    # COPIES AND MOVES of the members' repositories, both ways (OBS-321, derivations.py).
-    if "error" not in answer:
-        import derivations
-        ddoc, ddeg = derivations.load(paths.REGISTRY, paths.config_file("derivations.json"))
-        answer["degraded"] += [d for d in ddeg if d not in answer["degraded"]]
-        if ddoc is not None:
-            repo_ids = [r for m in answer.get("members") or [] for r in m.get("repositories") or []]
-            derived, copies, rdeg = derivations.relations_of(ddoc, repo_ids)
-            answer["derived_from"], answer["copies"] = derived, copies
-            answer["degraded"] += [d for d in rdeg if d not in answer["degraded"]]
-    return answer
+    # COPIES AND MOVES (OBS-321) are NOT added here: this tool is `project.resolve`'s required
+    # feature, and that capability's published v0.24.0 answer is closed, so an added field fails
+    # every host that validates it. `observatory_project` carries them (its `project` is open).
+    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
+                                                        fabric_aliases=fabric_attribution.aliases(fdoc),
+                                                        attribute=fabric_attribution.attribute_local))
 
 
 @server.tool()
