@@ -205,6 +205,52 @@ class Measured(unittest.TestCase):
         rel = self.build(odd, [entry(copy_point=odd.first)])["relations"][0]
         self.assertIn("is not `rewritten`, `export` or `move`", rel["copy_record"]["problems"][0])
 
+    def test_a_hostile_record_is_unreadable_and_never_empties_the_document(self):
+        # 32,000 nested arrays, 64,000 bytes, under the size limit: CPython 3.11 to 3.13 raise
+        # RecursionError from json.loads, which is not a ValueError (review of #418, B1).
+        estate = Estate()
+        commit(estate.copy, ".copy/upstream.json", "[" * 32000 + "]" * 32000)
+        other = new_repo("other")
+        commit(other, ".copy/upstream.json", "[" * 32000 + "]" * 32000)
+        repos = estate.repos() + [repo_row("repository:example-org/gamma", other)]
+        doc = derivations.build(config([entry(copy_point=estate.second)]), repos, "2026-11-04")
+        rel = doc["relations"][0]
+        self.assertEqual(rel["copy_record"]["state"], "unreadable")
+        self.assertEqual(rel["behind"]["commits"], 2, "the relation is still measured")
+        self.assertEqual(doc["unrecorded"], [], "an unreadable record in another clone is skipped, not fatal")
+
+    def test_a_blob_over_the_limit_is_refused_by_its_size_before_it_is_read(self):
+        estate = Estate()
+        commit(estate.copy, ".copy/upstream.json", json.dumps({"kind": "rewritten", "pad": "x" * 70000}))
+        calls = []
+
+        def run(args, repo):
+            calls.append(args[:2])
+            return derivations._run_git(args, repo)
+        upstream = derivations.read_upstream(str(estate.copy), run)
+        self.assertEqual(upstream["state"], "unreadable")
+        self.assertIn("over 65536 bytes", upstream["reason"])
+        self.assertNotIn(["cat-file", "-p"], calls, "the blob is never read")
+
+    def test_one_copy_that_fails_is_named_and_the_others_stand(self):
+        estate = Estate()
+        second = new_repo("second")
+        commit(second, "app.py", "two")
+
+        def run(args, repo):
+            if repo == str(second):
+                raise RuntimeError("planted")
+            return derivations._run_git(args, repo)
+        repos = estate.repos() + [repo_row("repository:example-org/delta", second)]
+        doc = derivations.build(config([entry(copy_point=estate.second),
+                                        entry(copy="repository:example-org/delta", copy_point=estate.second)]),
+                                repos, "2026-11-04", run=run)
+        by_copy = {r["copy"]: r for r in doc["relations"]}
+        self.assertEqual(by_copy[COPY]["behind"]["commits"], 2)
+        broken = by_copy["repository:example-org/delta"]
+        self.assertEqual((broken["copy_record"]["state"], broken["behind"]["state"]), ("unreadable", "unknown"))
+        self.assertTrue(any("example-org/delta: not measured (RuntimeError)" in d["reason"] for d in doc["degraded"]))
+
     def test_an_uncommitted_record_does_not_count(self):
         estate = Estate()
         (estate.copy / ".copy").mkdir()
@@ -237,7 +283,10 @@ class Measured(unittest.TestCase):
         git(estate.source, "switch", "-q", "-c", "side", estate.first)
         side = commit(estate.source, "side.txt", "side")
         doc = self.build(estate, [entry(copy_point=side)])
-        self.assertFalse(doc["relations"][0]["behind"]["on_branch"])
+        behind = doc["relations"][0]["behind"]
+        self.assertFalse(behind["on_branch"])
+        self.assertEqual(behind["counted_from"], estate.first[:12], "counted from where the copy left the branch")
+        self.assertEqual(behind["commits"], 3)
 
     def test_a_copy_that_says_so_without_an_entry_is_unrecorded(self):
         estate = Estate({"kind": "rewritten", "copy_point": "abc1234"})
@@ -301,6 +350,19 @@ class Findings(unittest.TestCase):
     def test_no_document_no_rows(self):
         self.assertEqual(derivation_findings.findings(None), [])
         self.assertEqual(derivation_findings.from_file(pathlib.Path(tmpdir.mkdtemp()) / "x.json"), [])
+
+
+class Plan(unittest.TestCase):
+    def test_a_measured_branch_name_is_quoted_or_replaced_in_the_commands(self):
+        import copies_cli
+        rel = {"copy": COPY, "source": SOURCE, "kind": "copy", "copy_point": {"source_commit": "1111111"},
+               "sync_base": None, "deny": ["docs/runs"], "behind": {"state": "measured", "commits": 1,
+                                                                     "head": "a" * 12, "ref": "origin/main"}}
+        hostile = copies_cli.plan({**rel, "copy_branch": "$(touch pwned)"})["commands"]
+        self.assertFalse(any("pwned" in line for line in hostile), hostile)
+        self.assertTrue(any("origin/<default branch>" in line for line in hostile))
+        plain = copies_cli.plan({**rel, "copy_branch": "main"})["commands"]
+        self.assertTrue(any(line.endswith(" origin/main") for line in plain), plain)
 
 
 class Readers(unittest.TestCase):

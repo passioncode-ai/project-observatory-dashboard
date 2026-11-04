@@ -278,7 +278,10 @@ refused whole; an entry is refused alone, by code, in `degraded` and `refused`, 
 | `duplicate-copy` | two entries name the same copy: a copy has one source |
 | `cycle` | the entries form a cycle of derivations |
 
-A copy may carry a tracked `.copy/upstream.json` (read at HEAD of its local clone, at most 64 KiB):
+A copy may carry a tracked `.copy/upstream.json` (read at HEAD of its local clone; its size is asked of git
+first and a blob over 64 KiB is refused unread; a file that cannot be parsed, a nested-array bomb
+among them, is `unreadable`, and one copy's failure is named in `degraded` without removing the other
+relations):
 `kind` (`rewritten` for a copy whose history a filter rewrote, `export` for a copy made by export,
 both read as the curated kind `copy`; or `move`), `copy_point`, `sync_base` (the last source commit
 carried into the copy; same shapes as above) and `deny` (relative paths the copy never takes).
@@ -291,7 +294,9 @@ emit, declared by the new source `SRC-0023`: `relations[]` with `copy`, `source`
 `source_branch`, `copy_branch`, `copy_point`, `sync_base`, `builder`, `deny`, `provenance` (each
 value's side: `curated` or `copy`), `copy_record` (`state`: `read`, `absent`, `no-clone` or
 `unreadable`; `copy_kind`, the copy's own kind word; `problems[]`; `differs[]`), `behind` (null for a move; `state` `measured` with `commits`,
-`outside_deny`, `ref`, `head`, `on_branch`, `oldest_on`, `since`, or `unknown` with its `reason`) and
+`outside_deny` (counted with full history, so commits on merged side branches are not simplified
+away), `ref`, `head`, `on_branch`, `counted_from` (the recorded commit, or, when it is off the branch,
+the merge base the count starts from), `oldest_on`, `since`, or `unknown` with its `reason`) and
 `source_archived`; `unrecorded[]` (copies that carry `.copy/upstream.json` and no accepted entry);
 `refused[]`; `degraded[]`; `totals`. `behind` is counted in the source's local clone (its
 `origin/<branch>`, else the local branch), offline: nothing is fetched and nothing is written to any
@@ -305,10 +310,9 @@ source is not archived) are rebuilt from it on every tick.
 of `{copy, source, kind, copy_point, sync_base, behind}` (commits as the source spells them;
 `behind` null when not measured or for a move), present whenever `registry/derivations.json` exists
 and absent when no relation was ever recorded. Its published schema leaves the `project` object
-open, so no schema changes. `project.resolve` (`observatory_resolve`) does not carry them yet: its
-published v0.24.0 answer is closed, a field added there fails every host that validates it, and
-`tools/publish_contract.py --check` holds the bundled schema to the published bytes; the capability
-gains them when it is versioned with a new pinned schema. A refusal naming one of the project's
+open, so no schema changes. `project.resolve` (`observatory_resolve`) is deliberately unchanged and does
+not carry them: its published v0.24.0 answer is closed, a field added there fails every host that
+validates it, and agents read the relation through `project.detail`. A refusal naming one of the project's
 repositories is in `degraded`, and a curated file the emit has not turned into
 the registry document yet is named there too. New command `project-observatory full copies list|plan
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both

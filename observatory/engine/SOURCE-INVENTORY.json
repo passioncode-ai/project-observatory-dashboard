@@ -927,14 +927,14 @@
       "path": "derivations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d20338cc377745bda2bc0b0a69262c1c25d80ba13e5d420de1e099f670865ff1",
-      "bytes": 28603
+      "export_sha256": "d441588758ce328b682495db979217228ac26f2bf32ff365316dc5f2a9d6b3f5",
+      "bytes": 31923
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "b82780cb86b7562da980a3985b2e48b113dc9ddf06e9200560639a31f025624f",
-      "bytes": 30467,
+      "export_sha256": "e89308e3797d6e580ab43b89bbf1f000bf20cc084254f82e547a6df2588a9191",
+      "bytes": 30476,
       "upstream_modified": true
     },
     {
@@ -947,8 +947,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "3a8c1ce3be3c662b188cbc973cee75c2ee97922ec4db5daa7debe0f225b4fdbc",
-      "bytes": 45168,
+      "export_sha256": "8fe8f98912a9b3b1336037b5c3065b002a1a2d3f5ce5c64ea130366dfa6d55be",
+      "bytes": 45502,
       "upstream_modified": true
     },
     {
@@ -4500,8 +4500,8 @@
       "path": "tests/test_derivations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60f218218ecd1154c955dfcf63d26f67360aa6af79bb9a39f196ea5b983701ad",
-      "bytes": 26407
+      "export_sha256": "2f75b158002f501c1916322f6d88f5bcac48bd25b8ab95fffc13444b535e0306",
+      "bytes": 30118
     },
     {
       "path": "tests/test_digitalocean_account.py",
@@ -6510,8 +6510,8 @@
       "path": "tools/copies_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6e38062012a7af5d846ac0117567f655b269fa1f2795d759c38bf3bc6bf61763",
-      "bytes": 8313
+      "export_sha256": "6faa2df4a440fde49edc6aeeba1c92814afff90702f415bee2445d6d94e60942",
+      "bytes": 8803
     },
     {
       "path": "tools/corroborate.py",
@@ -6544,8 +6544,8 @@
       "path": "tools/derivation_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "749c148d14ba426aaf13a24cce04c45e034303d879e9695ce48d062f1edb35cf",
-      "bytes": 9171
+      "export_sha256": "371bdea3dba11aae997c1a66f68a73200e01b94900060f3547bdc2541f635558",
+      "bytes": 9361
     },
     {
       "path": "tools/digitalocean.py",

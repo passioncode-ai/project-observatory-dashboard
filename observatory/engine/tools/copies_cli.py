@@ -34,6 +34,16 @@ def _doc() -> tuple[dict | None, list[dict]]:
     return derivations.load(paths.REGISTRY, paths.config_file("derivations.json"))
 
 
+def _branch_arg(branch) -> str:
+    """`origin/<branch>` for a shell line, quoted; a placeholder when the measured name is not a
+    plain branch name. The name comes from a repository's measured default branch, and a value
+    printed into a command a person pastes must not be able to run anything."""
+    import derivations
+    if isinstance(branch, str) and derivations._BRANCH.match(branch) and ".." not in branch:
+        return shlex.quote(f"origin/{branch}")
+    return "origin/<default branch>"
+
+
 def plan(rel: dict) -> dict:
     """The steps for one relation, as data: `steps` (text) and `commands` (shell lines)."""
     copy, source = rel["copy"], rel["source"]
@@ -81,7 +91,7 @@ def plan(rel: dict) -> dict:
         'rsync -a --delete --exclude .git "$NEW"/ "$BASE"/',
         'git -C "$BASE" add -A && git -C "$BASE" diff --cached --binary HEAD -- .'
         + (f" {exclude}" if exclude else "") + " > sync.patch",
-        f"git -C <copy clone> switch -c sync/{head[:12]} origin/{rel.get('copy_branch') or '<default branch>'}",
+        f"git -C <copy clone> switch -c sync/{head[:12]} {_branch_arg(rel.get('copy_branch'))}",
         "git -C <copy clone> apply --3way \"$PWD/sync.patch\"",
     ]
     return {"copy": copy, "source": source, "kind": "copy", "since": since, "head": head, "ref": ref,

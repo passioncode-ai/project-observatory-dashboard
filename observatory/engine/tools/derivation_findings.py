@@ -70,7 +70,9 @@ def _behind(rel: dict, today: str) -> dict | None:
               + ". Counted in the source's local clone as of its last fetch.")
     if behind.get("on_branch") is False:
         detail += (f" The recorded commit is not on {behind.get('ref')}: the copy was taken from another "
-                   "branch, so the count includes work that may never have been meant for it.")
+                   f"branch, so the number counts the branch's commits after {behind.get('counted_from')}, where "
+                   "the copy's history left it, not commits after the recorded one, and includes work that may "
+                   "never have been meant for the copy.")
     return {"type": "copy.behind_source", "subject": copy, "severity": severity,
             **titled("{copy} is {n} commits behind its source", copy=copy, n=counted),
             "detail": detail,

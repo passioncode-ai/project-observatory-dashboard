@@ -27,8 +27,15 @@ Three rules carry the design:
   with the reason; nothing here starts a network call.
 
 The registry document `registry/derivations.json` is rebuilt on every emit; the findings
-(`tools/derivation_findings.py`) and the readers (`project.detail`, `project.resolve`) read
-it. Git runs through `safe_git` with the offline profile.
+(`tools/derivation_findings.py`), `project.detail` and `full copies` read it. `project.resolve`
+does not: its published answer is closed, and it is deliberately left as published. Git runs
+through `safe_git` with the offline profile.
+
+ONE UNTRUSTED CLONE NEVER EMPTIES THE DOCUMENT. A copy's `.copy/upstream.json` is content from
+a repository, read on every tick: its size is asked of git before the blob is read, any
+failure to parse it (a deeply nested array raises RecursionError on CPython 3.11 to 3.13, not
+ValueError) makes that file `unreadable`, and each relation and each unrecorded copy is built
+in its own guard, so a fault in one is named in `degraded` and the others stand.
 """
 from __future__ import annotations
 
@@ -301,6 +308,12 @@ def read_upstream(clone: str | None, run: Runner) -> dict:
     rc, _ = run(["cat-file", "-e", f"HEAD:{UPSTREAM_FILE}"], clone)
     if rc != 0:
         return {"state": "absent", "reason": f"{UPSTREAM_FILE} is not tracked at HEAD of the copy's clone"}
+    # THE SIZE FIRST, from git, so a large blob is refused before it is read into memory.
+    rc, size = run(["cat-file", "-s", f"HEAD:{UPSTREAM_FILE}"], clone)
+    if rc != 0 or not size.strip().isdigit():
+        return {"state": "unreadable", "reason": f"git could not size {UPSTREAM_FILE} (exit {rc})"}
+    if int(size.strip()) > UPSTREAM_MAX_BYTES:
+        return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} is over {UPSTREAM_MAX_BYTES} bytes"}
     rc, text = run(["cat-file", "-p", f"HEAD:{UPSTREAM_FILE}"], clone)
     if rc != 0:
         return {"state": "unreadable", "reason": f"git could not read {UPSTREAM_FILE} (exit {rc})"}
@@ -310,6 +323,8 @@ def read_upstream(clone: str | None, run: Runner) -> dict:
         doc = json.loads(text)
     except ValueError:
         return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} is not JSON"}
+    except Exception as exc:                                            # noqa: BLE001  RecursionError
+        return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} could not be parsed ({type(exc).__name__})"}
     if not isinstance(doc, dict):
         return {"state": "unreadable", "reason": f"{UPSTREAM_FILE} is not an object"}
     out: dict[str, Any] = {"state": "read", "kind": None, "copy_kind": None, "copy_point": None,
@@ -366,16 +381,24 @@ def measure_behind(clone: str | None, branch: str | None, since: str | None, den
         return unknown(f"git could not count the commits after {since} (exit {rc})")
     commits = int(out.strip())
     rc, _ = run(["merge-base", "--is-ancestor", full, ref], clone)
+    # OFF THE BRANCH, `since..ref` is every commit of the branch after the point where the copy's
+    # history left it (their merge base), not after the recorded commit: said, with that point.
+    base = None
+    if rc != 0:
+        brc, bout = run(["merge-base", full, ref], clone)
+        base = bout.strip()[:12] if brc == 0 and bout.strip() else None
     result: dict[str, Any] = {"state": "measured", "commits": commits, "outside_deny": None,
                               "ref": ref.replace("refs/remotes/", "").replace("refs/heads/", ""),
-                              "head": head[:12], "on_branch": rc == 0, "oldest_on": None,
-                              "reason": "as of the source clone's last fetch"}
+                              "head": head[:12], "on_branch": rc == 0, "counted_from": base or full[:12],
+                              "oldest_on": None, "reason": "as of the source clone's last fetch"}
     if deny is not None:
         if not commits or not deny:
             result["outside_deny"] = commits
         else:
             spec = ["."] + [f":(exclude){p}" for p in deny]
-            rc, out = run(["rev-list", "--count", f"{full}..{ref}", "--", *spec], clone)
+            # --full-history: without it a side branch merged back TREESAME is simplified away,
+            # and its commits in kept paths go uncounted.
+            rc, out = run(["rev-list", "--count", "--full-history", f"{full}..{ref}", "--", *spec], clone)
             if rc == 0 and out.strip().isdigit():
                 result["outside_deny"] = int(out.strip())
     if commits:
@@ -383,6 +406,64 @@ def measure_behind(clone: str | None, branch: str | None, since: str | None, den
         first = out.strip().splitlines()[0] if rc == 0 and out.strip() else ""
         result["oldest_on"] = first if _DATE.match(first) else None
     return result
+
+
+def _relation(e: dict, repos: dict[str, dict], run: Runner) -> dict:
+    """One accepted entry, read and measured."""
+    copy_repo, source_repo = repos[e["copy"]], repos[e["source"]]
+    upstream = read_upstream(_clone(copy_repo), run)
+    provenance = {"kind": "curated"}
+    values: dict[str, Any] = {}
+    for field in ("copy_point", "sync_base"):
+        if e[field] is not None:
+            values[field], provenance[field] = e[field], "curated"
+        elif upstream.get(field) is not None and not (field == "sync_base" and e["kind"] == "move"):
+            values[field], provenance[field] = upstream[field], "copy"
+        else:
+            values[field] = None
+    deny = upstream.get("deny") if upstream.get("state") == "read" else None
+    if deny is not None:
+        provenance["deny"] = "copy"
+    differs = []
+    if upstream.get("state") == "read":
+        if upstream.get("kind") and upstream["kind"] != e["kind"]:
+            differs.append({"field": "kind", "curated": e["kind"], "copy": upstream["copy_kind"]})
+        for field in ("copy_point", "sync_base"):
+            mine, theirs = e[field], upstream.get(field)
+            if mine and theirs and not same_commit(mine["source_commit"], theirs["source_commit"]):
+                differs.append({"field": field, "curated": mine["source_commit"],
+                                "copy": theirs["source_commit"]})
+    branch = e["source_branch"] or source_repo.get("default_branch") or None
+    since_point = values["sync_base"] or values["copy_point"]
+    behind = None
+    if e["kind"] == "copy":
+        behind = measure_behind(_clone(source_repo), branch, since_point and since_point["source_commit"],
+                                deny, run)
+        behind["since"] = "sync_base" if values["sync_base"] else "copy_point"
+    record = {k: v for k, v in upstream.items() if k in ("state", "reason", "problems", "copy_kind")}
+    record["differs"] = differs
+    return {
+        "copy": e["copy"], "source": e["source"], "kind": e["kind"], "source_branch": branch,
+        "copy_branch": copy_repo.get("default_branch") or None,
+        "copy_point": values["copy_point"], "sync_base": values["sync_base"],
+        "builder": e["builder"], "deny": deny, "provenance": provenance,
+        "copy_record": record, "behind": behind,
+        "source_archived": source_repo.get("archived"),
+        **({"note": e["note"]} if e["note"] else {}),
+        **({"evidence": e["evidence"]} if e["evidence"] else {})}
+
+
+def _unbuilt(e: dict, repos: dict[str, dict], exc: BaseException) -> dict:
+    """An entry whose reading or measuring failed: the curated values, and why nothing was measured."""
+    why = f"not measured: {type(exc).__name__}"
+    return {"copy": e["copy"], "source": e["source"], "kind": e["kind"],
+            "source_branch": e["source_branch"], "copy_branch": repos[e["copy"]].get("default_branch") or None,
+            "copy_point": e["copy_point"], "sync_base": e["sync_base"], "builder": e["builder"], "deny": None,
+            "provenance": {"kind": "curated", **{f: "curated" for f in ("copy_point", "sync_base") if e[f]}},
+            "copy_record": {"state": "unreadable", "reason": why, "differs": []},
+            "behind": ({"state": "unknown", "commits": None, "outside_deny": None, "reason": why,
+                        "since": "sync_base" if e["sync_base"] else "copy_point"} if e["kind"] == "copy" else None),
+            "source_archived": repos[e["source"]].get("archived")}
 
 
 def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Runner | None = None,
@@ -394,47 +475,11 @@ def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Run
     entries, refused, degraded = read_config(config, repos, label)
     relations = []
     for e in entries:
-        copy_repo, source_repo = repos[e["copy"]], repos[e["source"]]
-        upstream = read_upstream(_clone(copy_repo), run)
-        provenance = {"kind": "curated"}
-        values: dict[str, Any] = {}
-        for field in ("copy_point", "sync_base"):
-            if e[field] is not None:
-                values[field], provenance[field] = e[field], "curated"
-            elif upstream.get(field) is not None and not (field == "sync_base" and e["kind"] == "move"):
-                values[field], provenance[field] = upstream[field], "copy"
-            else:
-                values[field] = None
-        deny = upstream.get("deny") if upstream.get("state") == "read" else None
-        if deny is not None:
-            provenance["deny"] = "copy"
-        differs = []
-        if upstream.get("state") == "read":
-            if upstream.get("kind") and upstream["kind"] != e["kind"]:
-                differs.append({"field": "kind", "curated": e["kind"], "copy": upstream["copy_kind"]})
-            for field in ("copy_point", "sync_base"):
-                mine, theirs = e[field], upstream.get(field)
-                if mine and theirs and not same_commit(mine["source_commit"], theirs["source_commit"]):
-                    differs.append({"field": field, "curated": mine["source_commit"],
-                                    "copy": theirs["source_commit"]})
-        branch = e["source_branch"] or source_repo.get("default_branch") or None
-        since_point = values["sync_base"] or values["copy_point"]
-        behind = None
-        if e["kind"] == "copy":
-            behind = measure_behind(_clone(source_repo), branch, since_point and since_point["source_commit"],
-                                    deny, run)
-            behind["since"] = "sync_base" if values["sync_base"] else "copy_point"
-        record = {k: v for k, v in upstream.items() if k in ("state", "reason", "problems", "copy_kind")}
-        record["differs"] = differs
-        relations.append({
-            "copy": e["copy"], "source": e["source"], "kind": e["kind"], "source_branch": branch,
-            "copy_branch": copy_repo.get("default_branch") or None,
-            "copy_point": values["copy_point"], "sync_base": values["sync_base"],
-            "builder": e["builder"], "deny": deny, "provenance": provenance,
-            "copy_record": record, "behind": behind,
-            "source_archived": source_repo.get("archived"),
-            **({"note": e["note"]} if e["note"] else {}),
-            **({"evidence": e["evidence"]} if e["evidence"] else {})})
+        try:
+            relations.append(_relation(e, repos, run))
+        except Exception as exc:                                        # noqa: BLE001  one copy, not all
+            relations.append(_unbuilt(e, repos, exc))
+            degraded.append({"source": label, "reason": f"{e['copy']}: not measured ({type(exc).__name__})"})
     # THE COPIES THAT SAY SO, AND NOTHING HERE RECORDS. Read only where the worktree holds
     # the file, so a tick does not ask git about every repository on the machine.
     recorded = {e["copy"] for e in entries}
@@ -443,10 +488,14 @@ def build(config: Path, repositories: Iterable[dict], obs_date: str, *, run: Run
     for rid in sorted(repos):
         if rid in recorded:
             continue
-        clone = _clone(repos[rid])
-        if not clone or not os.path.isfile(os.path.join(clone, *UPSTREAM_FILE.split("/"))):
+        try:
+            clone = _clone(repos[rid])
+            if not clone or not os.path.isfile(os.path.join(clone, *UPSTREAM_FILE.split("/"))):
+                continue
+            upstream = read_upstream(clone, run)
+        except Exception as exc:                                        # noqa: BLE001  one clone, not all
+            degraded.append({"source": UPSTREAM_FILE, "reason": f"{rid}: not read ({type(exc).__name__})"})
             continue
-        upstream = read_upstream(clone, run)
         if upstream["state"] != "read":
             continue
         unrecorded.append({"copy": rid, "kind": upstream.get("kind"),
