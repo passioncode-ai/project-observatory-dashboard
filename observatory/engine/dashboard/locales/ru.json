@@ -2415,5 +2415,21 @@
  "Name the folder that holds your project checkouts:": "Укажите папку с рабочими копиями проектов:",
  "Measure this machine's projects:": "Измерьте проекты этой машины:",
  "See which providers can connect:": "Посмотрите, какие провайдеры можно подключить:",
- "Connect your coding agent:": "Подключите агента для программирования:"
+ "Connect your coding agent:": "Подключите агента для программирования:",
+ "Copy behind its source": "Копия отстаёт от источника",
+ "Moved repository still open": "Перенесённый репозиторий не закрыт",
+ "Copy record disagrees": "Запись копии расходится",
+ "Copy relation not recorded": "Связь копии не записана",
+ "{copy} is {n} commits behind its source": {
+  "one": "{copy} отстаёт от источника на {n} коммит",
+  "few": "{copy} отстаёт от источника на {n} коммита",
+  "many": "{copy} отстаёт от источника на {n} коммитов",
+  "other": "{copy} отстаёт от источника на {n} коммита"
+ },
+ "{copy} may be behind its source: not measured": "{copy} может отставать от источника: не измерено",
+ "{copy} is recorded as a copy but does not say so": "{copy} записан как копия, но сам об этом не говорит",
+ "{copy} has a copy record that cannot be read": "у {copy} нечитаемая запись копии",
+ "{copy} and its copy record disagree": "{copy} и его запись копии расходятся",
+ "{copy} says it is a copy, but its source is not recorded": "{copy} называет себя копией, но его источник не записан",
+ "{source} was moved but is not archived": "{source} перенесён, но не архивирован"
 }

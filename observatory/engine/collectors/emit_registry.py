@@ -105,6 +105,7 @@ NEW_SOURCES = [
     ("SRC-0020", "The Fabric service descriptors (fabric-service/0.1) in the services directory `fabric_service.services_dir()` resolves, each one's Fabric manifest for its contract pins, and launchd's own job list (`launchctl list`), read by collectors/scan_agents.py; joined at emit time to the MCP inventory by the origin both name. Never anything of a descriptor's `auth`. Answers WHICH AGENTS ARE INSTALLED ON THIS MACHINE, where each answers, what contract it pins, who supervises it and which MCP declarations reach it.", ["registry:agents.json"]),
     ("SRC-0021", "DigitalOcean's public API through each team's `observatory-read` token (or its stashed team token, named in `token_kind`), read by collectors/scan_digitalocean.py: Droplets with their stated monthly price, App Platform apps with the repositories they deploy from, managed databases (named fields only, never a password), volumes, and each team's month-to-date usage. Answers WHAT RUNS ON DIGITALOCEAN and what its listing says it costs (OBS-235).", ["registry:digitalocean-account.json"]),
     ("SRC-0022", "Cloudflare's API through the read-only `inventory-read` token `tools/cloudflare.py` issues per account, read by collectors/scan_cloudflare_account.py: Workers, Pages projects with their source repository and latest deployment, R2 buckets, D1 databases, and each zone's plan and price, DNS record count and edge certificate expiry. Answers WHAT AN ACCOUNT HOLDS beyond its zones (OBS-271).", ["registry:cloudflare-account.json"]),
+    ("SRC-0023", "The operator's curated derivations in " + paths.config_label("derivations.json") + " (which repository is a copy or a move of which), checked against this registry's repositories; each copy's tracked `.copy/upstream.json` read from its local clone at HEAD; and the commits on the source's branch after the copy's last sync, counted in the source's local clone (`git rev-list`, offline, never fetched). Answers WHICH REPOSITORIES ARE COPIES OR MOVES OF WHICH, and how far each copy has fallen behind (OBS-321).", ["registry:derivations.json"]),
     ("SRC-0011", "Public DNS through `dig`, HTTP reachability through `curl`, and registrar records through RDAP at rdap.org. Answers whether a host resolves and answers, and what a registry says about a domain — measured, never transcribed.", ["registry:domain-liveness.json"]),
 ]
 SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
@@ -114,7 +115,8 @@ SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
     "SRC-0015": SP / "env.json", "SRC-0016": SP / "cloudflare_zones.json",
     "SRC-0017": SP / "mcp.json", "SRC-0018": SP / "remote-env.json",
     "SRC-0019": SP / "google.json", "SRC-0020": SP / "agents.json",
-    "SRC-0021": SP / "digitalocean.json", "SRC-0022": SP / "cloudflare_account.json"}
+    "SRC-0021": SP / "digitalocean.json", "SRC-0022": SP / "cloudflare_account.json",
+    "SRC-0023": paths.config_file("derivations.json")}
 def source_available(sid):
     path = SOURCE_INPUTS.get(sid)
     return bool(path and (path.is_file() or (path.is_dir() and any(p.is_file() and not p.name.startswith("_") for p in path.glob("*.json")))))
@@ -744,6 +746,25 @@ print(f"identifiers.json: {_idoc['totals']['aliases']} alias(es) for {_idoc['tot
       f"target(s), {_idoc['totals']['conflicts']} conflict(s)")
 for _dg in _idoc["degraded"]:
     print(f"  degraded identifiers.json: {_dg['reason'][:110]}")
+
+# ---- copies and moves (derivations.py, OBS-321) ---------------------------
+# Curated relations between repositories, read beside the repositories measured above. An
+# entry the registry cannot stand behind is refused by name in the document's `degraded`;
+# the emit never stops for it, because a wrong row is one copy's problem, not the registry's.
+import derivations as _derivations
+try:
+    _ddoc = _derivations.build(paths.config_file("derivations.json"), out_repos, OBS,
+                               label=paths.config_label("derivations.json"))
+except Exception as _exc:                                                      # noqa: BLE001
+    _ddoc = _derivations.empty_document(OBS)
+    _ddoc["degraded"].append({"source": paths.config_label("derivations.json"),
+                              "reason": f"not built: {type(_exc).__name__}"})
+_stamped("derivations.json", _ddoc)
+_dt = _ddoc["totals"]
+print(f"derivations.json: {_dt['copies']} copy(ies), {_dt['moves']} move(s), {_dt['behind']} behind, "
+      f"{_dt['refused']} refused, {_dt['unrecorded']} unrecorded")
+for _dg in _ddoc["degraded"]:
+    print(f"  degraded derivations.json: {_dg['reason'][:110]}")
 
 endpoints = ({p["id"] for p in out_projs} | {r["id"] for r in out_repos}
              | {a["id"] for a in heroku_apps} | {c["id"] for c in credentials}

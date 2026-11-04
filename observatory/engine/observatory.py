@@ -471,7 +471,8 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: holds `main` to this list and the public help to describing each one (`full node` and
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "agent-binding",
-                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share", "cloud", "relay")
+                       "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share", "cloud", "relay",
+                       "copies")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -551,6 +552,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                rekey OLD plans (--apply does it) this machine's own key where the
                                other machine's is registered, then lists what still accepts only
                                the old one; the private key is never shown or moved
+  copies list|plan COPY        the copies and moves recorded in config/derivations.json, how far
+                               each copy is behind its source, and the steps to carry one forward
+                               (its builder at both commits, diff, `git apply --3way` on
+                               sync/<sha12>, audits); prints only, nothing is synced
   vault-digests [view|write|mark|unmark|key]   every vault slot per machine (same, differs, only
                                here, missing, unreachable), compared by keyed HMAC-SHA-256 digests under
                                the estate key, never values; mark a slot different on purpose; peers'
@@ -897,6 +902,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return argparse_refusal(lambda: ssh_keys.parser().parse_args(rest))
+    if name == "copies":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import copies_cli
+        return argparse_refusal(lambda: copies_cli.parser().parse_args(rest))
     if name == "vault-digests":
         sys.path.insert(0, str(ROOT / "tools"))
         import vault_digests
@@ -1305,6 +1314,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import ssh_keys
         return ssh_keys.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "copies":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import copies_cli
+        return copies_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] == "vault-digests":
         sys.path.insert(0, str(ROOT / "tools"))
         import vault_digests

@@ -428,6 +428,9 @@ def observatory_project(
     shape of this answer is not the shape of a survey, and declaring one schema
     for both would make the tools fail validation against the contract their
     own capability publishes.
+
+    `project.derived_from` and `project.copies` (OBS-321): its repositories' copies and moves, both
+    ways, from `config/derivations.json`, with `behind` counted in the source's local clone.
     """
     return survey_mod.project_detail(projectId, timeline_limit=timelineLimit)
 
@@ -487,6 +490,9 @@ def observatory_resolve(
     else:
         degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
                         for d in fdoc.get("degraded") or [] if isinstance(d, dict))
+    # COPIES AND MOVES (OBS-321) are NOT added here: this tool is `project.resolve`'s required
+    # feature, and that capability's published v0.24.0 answer is closed, so an added field fails
+    # every host that validates it. `observatory_project` carries them (its `project` is open).
     return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
                                                         fabric_aliases=fabric_attribution.aliases(fdoc),
                                                         attribute=fabric_attribution.attribute_local))

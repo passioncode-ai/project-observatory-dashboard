@@ -690,5 +690,9 @@
  "home@@{n} workflows stalled now": {
   "one": "{n} workflow stalled now",
   "other": "{n} workflows stalled now"
+ },
+ "{copy} is {n} commits behind its source": {
+  "one": "{copy} is {n} commit behind its source",
+  "other": "{copy} is {n} commits behind its source"
  }
 }

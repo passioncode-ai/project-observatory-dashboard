@@ -542,6 +542,17 @@ def project_detail(project_id: str, timeline_limit: int = 10,
            "measurements": [], "notes": [], "findings": [],
            "recentEvents": [],
            "evidence": result["evidence"], "degraded": list(result["degraded"])}
+    # COPIES AND MOVES, both ways (OBS-321): which of its repositories derive from another, and
+    # which repositories derive from them. Present (possibly empty) whenever the emit has written
+    # the relations; absent, with nothing degraded, when none were ever recorded.
+    import derivations
+    ddoc, ddeg = derivations.load(paths.REGISTRY, paths.config_file("derivations.json"))
+    out["degraded"] += [d for d in ddeg if d not in out["degraded"]]
+    if ddoc is not None:
+        repo_ids = [r.get("id") for r in out["project"].get("repositories") or [] if isinstance(r, dict)]
+        derived, copies, rdeg = derivations.relations_of(ddoc, repo_ids)
+        out["project"]["derived_from"], out["project"]["copies"] = derived, copies
+        out["degraded"] += [d for d in rdeg if d not in out["degraded"]]
     if timeline_limit:
         tl = timeline(project_id, limit=timeline_limit)
         out["recentEvents"] = tl["events"]

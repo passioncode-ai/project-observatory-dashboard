@@ -121,6 +121,40 @@ for one name, or a name that contradicts a measured repository, deployment or do
 a conflict in `registry/identifiers.json` and withheld. `project.resolve` answers any of these
 names with the one canonical id ([design](design/IDENTITY.md)).
 
+**Which repository is a copy or a move of which** is yours to record, because git cannot see it:
+a copy rewritten for another owner shares no commit with its source, so no fork flag or merge
+base names the relation, and the copy falls behind without a word. Record it in
+`config/derivations.json`:
+
+```json
+{"schema": "derivations/1", "derivations": [
+  {"copy": "repository:example-org/alpha-agent", "source": "repository:personal/alpha", "kind": "copy",
+   "copy_point": "1a2b3c4", "sync_base": {"source_commit": "5d6e7f8", "date": "2026-11-02"},
+   "builder": {"path_hint": "~/builders/alpha/build.sh", "rules_count": 12}},
+  {"copy": "repository:example-org/beta-bot", "source": "repository:personal/beta-bot", "kind": "move"}]}
+```
+
+Both ids are spelled as the registry spells them (`observatory_status` lists them). `kind` is
+`copy` (kept in step with its source) or `move` (the source is frozen and nothing is carried);
+`copy_point` is the source commit the copy was taken from (needed for a copy), `sync_base` the
+source commit it was last carried forward to. A copy may also say so itself, in a tracked
+`.copy/upstream.json` with `kind` (`rewritten` or `export`, both a copy here, or `move`),
+`copy_point`, `sync_base` and `deny` (paths the copy never takes, such as run data), and never the
+source's name. The next tick's emit writes
+`registry/derivations.json`: each relation with which side every value
+came from (your file wins where both give one), and how many commits the source's branch has after
+`sync_base`, counted in the source's local clone as of its last fetch. Observatory never fetches
+and never writes to either repository. An entry it cannot stand behind (an unknown repository, a
+repository derived from itself, a cycle, two sources for one copy, a move with `sync_base`) is
+refused by name in `degraded` and in `full copies list`, never repaired. The findings
+`copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs` and
+`copy.moved_source_open` say what each relation owes; `observatory_project` shows it both ways
+(`derived_from`, `copies`). To carry a copy forward,
+`project-observatory full copies plan repository:example-org/alpha-agent` prints the steps (the
+copy's builder at both commits, the diff without the deny paths, `git apply --3way` on a branch
+`sync/<sha12>`, the copy's own audits) and runs none of them; after the pull request lands, write
+the new `sync_base` into the file.
+
 **Which Fabric project each project is** is Fabric's to say: Fabric owns the canonical project id
 (fabric-agent-contract DEC-0089). Each tick, and `project-observatory full fabric-attribution`,
 asks Fabric's hub for every folder the registry holds and records the answer as a `fabric:<uuid>`
