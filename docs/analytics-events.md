@@ -36,7 +36,7 @@ Python version (`engineName` `python`, `engineVersion`) and `isDebug` (true exac
 | `mcp_tool_called` | live | 2026-11-04 | mcp: `observatory/engine/mcp/capability_tools.py:363` | `surface` (`mcp`), `tool`, `outcome`, `duration_ms` |
 | `tick_finished` | live | 2026-11-04 | tick: `observatory/engine/tools/tick.py:513` | `surface` (`tick`), `outcome`, `steps_failed`, `duration_ms` |
 | `error_raised` | live | 2026-11-04 | cli: `observatory/engine/observatory.py:1734`; mcp: `observatory/engine/mcp/capability_tools.py:366`; tick: `observatory/engine/tools/tick.py:516` | `surface` (`cli`, `mcp`, `tick`), `kind` |
-| `analytics_notice_shown` | live | 2026-11-04 | cli and dashboard: `observatory/engine/usage_analytics.py:535` (reached from `observatory/engine/observatory.py:1735` and `observatory/engine/dashboard/build_dashboard.py:441`) | `surface` (`cli`, `dashboard`) |
+| `analytics_notice_shown` | live | 2026-11-04 | cli and dashboard: `observatory/engine/usage_analytics.py:536` (reached from `observatory/engine/observatory.py:1735` and `observatory/engine/dashboard/build_dashboard.py:441`) | `surface` (`cli`, `dashboard`) |
 
 ## Properties
 

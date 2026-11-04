@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Callable
 
 import configuration as config
+import osprivacy
 
 HOST = "https://analytics.sshlg.me"
 ENDPOINT = HOST + "/api/v0/events"
@@ -143,7 +144,7 @@ def _private_write(path: Path, text: str) -> None:
     if path.is_symlink():
         raise OSError(f"{path.name} is a link")
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(text)
@@ -354,7 +355,7 @@ def record(name: str, base: Path | None = None, environ: dict | None = None, **p
         queue.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if queue.is_symlink():
             return False
-        fd = os.open(queue, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = osprivacy.open(queue, os.O_WRONLY | os.O_CREAT | os.O_APPEND | osprivacy.NOFOLLOW, 0o600)
         try:
             os.write(fd, (line + "\n").encode("utf-8"))
         finally:

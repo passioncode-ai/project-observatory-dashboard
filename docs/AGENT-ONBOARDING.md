@@ -17,7 +17,7 @@ Fabric owns the canonical project id. Observatory pulls it from Fabric's hub and
 
 ## Anonymous usage and error data
 
-Observatory sends anonymous usage and error data to its maintainers, on by default, to help improve it: the name of each command, MCP tool call (yours included) and tick with its outcome and duration, error class names, the version and the platform, under a random install id. It never sends keys, vault values, paths, repository, project or person names, registry content, URLs, prompts, arguments or messages; `docs/analytics-events.md` lists every event and property. Tell me this at setup. It is my switch, not yours: `project-observatory full analytics off` (or `on`, `status`) in the workspace, the Settings switch in the apps, or `OBSERVATORY_ANALYTICS=off` / `DO_NOT_TRACK=1` for one process. Nothing waits on the network: events are queued locally and the maintenance job sends them.
+Observatory sends anonymous usage and error data to its maintainers, on by default, to help improve it: the name of each command, MCP tool call (yours included) and tick with its outcome and duration, error class names, the version and the platform, under a random install id. It never sends keys, vault values, paths, repository, project or person names, registry content, URLs, prompts, arguments or messages; [the event catalogue](analytics-events.md) lists every event and property. Tell me this at setup. It is my switch, not yours: `project-observatory full analytics off` (or `on`, `status`) in the workspace, the Settings switch in the apps, or `OBSERVATORY_ANALYTICS=off` / `DO_NOT_TRACK=1` for one process. Nothing waits on the network: events are queued locally and the maintenance job sends them.
 
 ## Copies and moves of repositories
 

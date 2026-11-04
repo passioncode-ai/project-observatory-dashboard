@@ -933,8 +933,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "d24868f6a0610b3b082da28d4e97205ae7e7d40acb958b415864423b7b378c97",
-      "bytes": 31305,
+      "export_sha256": "97303879ba09a258dcd539f2ddd418f8dc68190e4abc12029051b14167a0f8b2",
+      "bytes": 31400,
       "upstream_modified": true
     },
     {
@@ -6425,8 +6425,8 @@
     {
       "path": "tools/check_docs.py",
       "source_sha256": "6070802532aabac8233f07023015e5d5b4e8e19f625a46001209ad251d65fcce",
-      "export_sha256": "d8d61e2c5c8d4f35cedde4bef019c69a936ac2f359c779919d30f581cf8f704b",
-      "bytes": 34236,
+      "export_sha256": "d11f31aec19de2707b8dc7d7d7ca31a80e148f21f150b4f0c581ca394aa6b40c",
+      "bytes": 34424,
       "python_comments_removed": 148,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -7109,8 +7109,8 @@
       "path": "tools/tick.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b5e10baaac26d6e5d2d7206a8cf288653f2aceb070f9f51e8d024968d3ef9adc",
-      "bytes": 41115
+      "export_sha256": "5bc641dc1647ba2287844fc5c3a3aef723714539af329ae11f77e0134ef42260",
+      "bytes": 40978
     },
     {
       "path": "tools/tick.sh",
@@ -7236,8 +7236,8 @@
       "path": "usage_analytics.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1e64c7f5b8a0c0080b62e532d6b2ab989cdc852b61f14111d50f8c608281f42f",
-      "bytes": 28450
+      "export_sha256": "f8735476c84c980ab89735d505cd72798ead89245898189af762970389435b50",
+      "bytes": 28523
     },
     {
       "path": "vault_project.py",

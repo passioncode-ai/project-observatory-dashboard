@@ -520,18 +520,6 @@ def count_tick(outcome: str, steps_failed: int, started: float, crash: BaseExcep
 
 def run(t: Tick, scratch: Path, dashboard: Path) -> int:
     started = time.monotonic()
-    try:
-        return _run(t, scratch, dashboard, started)
-    except SystemExit:
-        # `bail` ends a tick that cannot go on with SystemExit(0) after writing its report.
-        count_tick("failed", max(1, len(t.failed)), started)
-        raise
-    except Exception as exc:
-        count_tick("failed", max(1, len(t.failed)), started, exc)
-        raise
-
-
-def _run(t: Tick, scratch: Path, dashboard: Path, started: float) -> int:
     log("tick start")
     # The tick's own agent-sync identity: without it the tick IS every shell command in this
     # checkout, and a lease under a shared identity separates nothing.
@@ -548,6 +536,13 @@ def _run(t: Tick, scratch: Path, dashboard: Path, started: float) -> int:
         t.write_report()
         log("tick done")
         count_tick("failed" if t.failed else "ok", len(t.failed), started)
+    except SystemExit:
+        # `bail` ends a tick that cannot go on with SystemExit(0) after writing its report.
+        count_tick("failed", max(1, len(t.failed)), started)
+        raise
+    except Exception as exc:
+        count_tick("failed", max(1, len(t.failed)), started, exc)
+        raise
     finally:
         # Released on every path, a bail and a crash included: a held lease would stop the
         # next tick until its TTL.
