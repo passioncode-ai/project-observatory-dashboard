@@ -62,6 +62,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   `/var/run` or `/run`, or the local named pipe); a context pointing at another machine over ssh or tcp, or one that
   cannot be read, is skipped (`remote-docker-context`, `docker-context-unknown`). A VM whose trim fails no longer
   keeps the next one from its trim. Tests: `tests/test_disk_guard.py` VmCacheAtCritical, DockerDaemonIsLocal.
+- **The keyserver reads off a refused request's body before it closes** (OBS-309, `tools/keyserver.py`
+  `Handler.finish`). A refusal answered before the body was read (a second Host or Origin, a Host or Origin that is
+  not this server, a body over 64 KiB, a framing it refuses, a GET carrying a body) closed the socket with the body
+  unread, and Windows answers such a close with a reset that can lose the answer: the caller saw WinError 10053 or
+  10054 instead of its 403. After the answer the server now half-closes and reads off what the body still owes, at
+  most the declared length capped at 64 KiB and for at most 1 s, then closes; nothing it reads is parsed or acted on,
+  and the checks and their order are unchanged. A Content-Length too long to be a number (over 4300 digits) is
+  answered 400 where the handler failed and closed without an answer. Tests: `tests/test_keyserver_boundary.py`
+  test_a_refusal_before_the_body_reads_the_late_body_off,
+  test_an_over_limit_body_is_answered_then_read_off_up_to_the_limit, test_bad_json_and_body_bounds_do_not_reach_action.
 
 ## 0.31.0 (2026-11-03)
 
