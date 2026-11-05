@@ -5849,8 +5849,8 @@
       "path": "tests/test_service_connections.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fe94d400a06c14586f0252ed8d8744c4c840867b5f25967ab26734ae5e4ec1ee",
-      "bytes": 10539
+      "export_sha256": "f557fdd4a975de0ec51a944e0f88dbb92fca70b34e3d7acaaabd489520e45158",
+      "bytes": 10621
     },
     {
       "path": "tests/test_session_reload.py",

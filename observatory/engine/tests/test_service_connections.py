@@ -41,7 +41,8 @@ class Base(unittest.TestCase):
         self.base = Path(tmp.name).resolve() / "workspace"
         (self.base / "store").mkdir(parents=True)
         (self.base / "workspace.json").write_text("{}", encoding="utf-8")
-        self.scratch = self.base / "store" / "raw"
+        # The collectors' output folder: passed in, as the server passes paths.SCRATCH.
+        self.scratch = self.base / "scratch"
         self.scratch.mkdir()
         self.settings = {"integrations": {}, "features": {}}
         self.env = {}
