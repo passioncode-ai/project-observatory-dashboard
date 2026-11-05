@@ -54,11 +54,11 @@ credential drift and the run should say which one it took.
 """
 from __future__ import annotations
 import argparse
+import errno
 import json
 import os
 import pathlib
 import re
-import stat
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -235,23 +235,39 @@ def workflow_lease() -> str | None:
     """The lease this run presents: OBSERVATORY_WORKFLOW_LEASE, else the file OBSERVATORY_WORKFLOW_LEASE_FILE names,
     else None. The file is read only when it is a regular file (never through a link), owned by this user and with
     no group or other permission; otherwise LeaseFileRefused, so a lease another account could read or swap is
-    never presented."""
+    never presented.
+
+    Every check is made on the OPENED descriptor (OBS-344), not on the path before it: the file is opened without
+    following a link and without waiting on a FIFO, `fstat` of that descriptor says whether it is a regular file,
+    its owner and mode (its access list on Windows) are read from the same descriptor, and at most 4 KiB are read
+    from it. A path checked and then opened could name another file by the time it is opened, swapped in by anyone
+    who may write the folder; a descriptor cannot. On Windows `osprivacy.open` refuses a link by looking at the path
+    first (a window it documents), while the owner and access list are still read from the opened handle."""
     if _WORKFLOW_LEASE:
         return _WORKFLOW_LEASE
     if not _LEASE_FILE:
         return None
     path = pathlib.Path(_LEASE_FILE).expanduser()
+
+    def mine_and_private(fd: int) -> None:
+        if not osprivacy.owned_by_me(fd) or not osprivacy.private(fd):
+            raise LeaseFileRefused("the lease file must be this user's and readable by nobody else (chmod 600)")
+
     try:
-        info = os.lstat(path)
+        raw = osprivacy.read_regular(path, 4096, check=mine_and_private)
+    except LeaseFileRefused:
+        raise
     except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise LeaseFileRefused("the lease file is a link, and a link is never followed") from None
         raise LeaseFileRefused(f"the lease file cannot be read: {type(exc).__name__}") from None
-    if not stat.S_ISREG(info.st_mode):
-        raise LeaseFileRefused("the lease file is not a regular file (a link is never followed)")
-    if not osprivacy.owned_by_me(path) or not osprivacy.private(path):
-        raise LeaseFileRefused("the lease file must be this user's and readable by nobody else (chmod 600)")
+    except ValueError as exc:
+        if str(exc) == "not a regular file":
+            raise LeaseFileRefused("the lease file is not a regular file (a link is never followed)") from None
+        raise LeaseFileRefused(f"the lease file cannot be read: {type(exc).__name__}") from None
     try:
-        text = osprivacy.read_regular(path, 4096).decode("utf-8").strip()
-    except (OSError, ValueError) as exc:
+        text = raw.decode("utf-8").strip()
+    except ValueError as exc:
         raise LeaseFileRefused(f"the lease file cannot be read: {type(exc).__name__}") from None
     if not _LEASE_SHAPE.fullmatch(text):
         raise LeaseFileRefused("the lease file holds no lease (one leaseId, nothing else)")

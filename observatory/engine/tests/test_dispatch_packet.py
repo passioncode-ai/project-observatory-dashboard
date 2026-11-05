@@ -15,10 +15,13 @@ only from the project `fabric-project` resolves to, and only until the deadline.
 - Frozen: the packet is read from the dispatcher's write. A later checkpoint that changes a ref or the credentials
   is refused and the keys stay as they were; one that leaves them out keeps them, across a handoff too. A deadline
   more than seven days after the write is refused, and a row written before that check, or with an unreadable
-  deadline, gets no keys rather than an exception.
+  deadline, gets no keys rather than an exception. Only the first revision carries a packet (OBS-343): a later
+  checkpoint that brings one into a workflow that started without is refused, and an older row whose packet first
+  appears in a later revision is no packet and releases nothing.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import sqlite3
 import sys
@@ -363,6 +366,68 @@ class Frozen(Gate):
         near = (datetime.now(timezone.utc) + timedelta(days=6)).strftime(stamp)
         wf = self.start(body=packet(refs(deadline=near)))
         self.assertEqual(D.keys_state(self.conn, wf["workflowId"])["state"], "open")
+
+    def test_a_packet_added_in_a_later_revision_is_refused_and_releases_nothing(self):
+        plain = {"goal": "answer the request", "credentials": [
+            {"project": "alpha-web", "env": "prod", "name": "ALPHA_TOKEN"}]}
+        wf = self.start(body=plain)
+        for why, body in (("the whole packet", packet()),
+                          ("the refs alone", {"goal": "go", "artifacts": refs()}),
+                          ("one frozen ref", {"goal": "go", "artifacts": [{"kind": "other",
+                                                                          "ref": f"board-request:{REQUEST}"}]})):
+            with self.subTest(why):
+                with self.assertRaises(W.PacketNotFirst) as caught:
+                    self.write(wf, body)
+                self.assertIsInstance(caught.exception, W.PacketFrozen, "a caller of PacketFrozen still catches it")
+                self.assertIn("packet-not-first", str(caught.exception))
+                self.assertNotIn(wf["leaseId"], str(caught.exception))
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
+        self.assertEqual(latest["checkpoint"]["revision"], 1, "a refused write leaves no revision")
+        self.assertNotIn("dispatch", latest)
+        self.assertEqual(D.keys_state(self.conn, wf["workflowId"], now=NOW)["reason"], "packet-incomplete")
+        self.refused("packet-incomplete", wf=wf)
+        # A plain workflow stays plain: its own credentials and a run-ends-at, without the refs, are no packet.
+        self.write(wf, {"goal": "go", "credentials": [{"project": "alpha-web", "env": "prod", "name": "OTHER"}],
+                        "artifacts": [{"kind": "other", "ref": "run-ends-at:2026-11-10T13:00:00Z"}]})
+        self.assertIsNone(D.packet_of(self.conn, wf["workflowId"]))
+
+    def test_an_older_row_whose_packet_first_appears_in_a_later_revision_releases_nothing(self):
+        wf = self.start(body={"goal": "answer the request"})
+        self.write(wf, {"goal": "a step"})
+        # Written before this engine refused it: revision 2 rewritten in place to carry the whole packet.
+        self.conn.execute("UPDATE ledger SET body_json = ? WHERE memory_id = ? AND revision = 2",
+                          (json.dumps(packet()), f"ckpt:{wf['workflowId']}"))
+        self.conn.commit()
+        self.assertIsNone(D.packet_of(self.conn, wf["workflowId"]))
+        self.assertEqual(D.late_packet(self.conn, wf["workflowId"]), 2)
+        state = D.keys_state(self.conn, wf["workflowId"], now=NOW)
+        self.assertEqual((state["state"], state["reason"]), ("closed", "packet-not-first"))
+        self.refused("packet-not-first", wf=wf)
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
+        self.assertNotIn("dispatch", latest, "a packet that is not the first revision's is none in the views")
+        self.assertNotIn("dispatch", W.workflow_list(self.conn)["workflows"][0])
+        with self.assertRaises(W.PacketNotFirst):
+            self.write(wf, packet())  # repeating it does not make it the dispatcher's
+
+    def test_a_packet_in_the_first_revision_works_across_a_handoff(self):
+        wf = self.start()
+        self.assertEqual(D.packet_of(self.conn, wf["workflowId"])["revision"], 1)
+        self.assertIsNone(D.late_packet(self.conn, wf["workflowId"]))
+        offer = W.handoff_create(self.conn, owner=FABRIC, idempotency_key=self.key(), workflow_id=wf["workflowId"],
+                                 to={"provider": "anthropic"}, reason="plan_route", lease_token=wf["leaseId"],
+                                 credential_reader=lambda p: {"vault": [{"name": "ALPHA_TOKEN", "env": "prod"}],
+                                                              "env": []},
+                                 git_reader=lambda p: {}, related_reader=lambda c, **k: ([], []),
+                                 redactor=redactor())
+        taken = W.handoff_accept(self.conn, owner=RUN, idempotency_key=self.key(), handoff_id=offer["handoffId"],
+                                 credential_reader=lambda p: {"vault": [{"name": "ALPHA_TOKEN", "env": "prod"}],
+                                                              "env": []})
+        run = {**wf, "leaseId": taken["leaseId"]}
+        self.write(run, {"goal": "answer the request"})
+        self.write(run, packet())  # the packet repeated unchanged, after the handoff, is no change
+        self.assertEqual(self.authorize(run)["slots"], ["alpha-web/prod/ALPHA_TOKEN"])
+        self.assertEqual(W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {
+            "vault": [], "env": []})["dispatch"]["keys"]["state"], "open")
 
     def rewrite_first(self, wf, old, new):
         """A row written before this engine checked it: its first revision rewritten in place."""

@@ -526,6 +526,80 @@ def test_a_dispatched_run_gets_only_its_packets_keys() -> None:
           and value not in journal and other not in journal, "IT LEAKED")
 
 
+def test_the_lease_file_is_judged_on_its_opened_descriptor() -> None:
+    """OBS-344: the lease file is opened without following a link and without waiting, and whether it is a regular
+    file, this user's and private is read from the OPENED descriptor, never from the path beforehand, so a file
+    swapped in between a look and the open cannot be read. The swap itself cannot be timed in a test; what is shown
+    is that the decision follows the descriptor: with every path-based stat answering a lie, a private file still
+    passes and a readable one is still refused. A FIFO is refused without waiting, a link is refused."""
+    from unittest import mock
+    import osprivacy
+    import use_secret as U
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-lease-fd-"))
+    lease = "wl_" + "L" * 32
+    good = d / "lease"
+    good.write_text(lease + "\n", encoding="utf-8")
+    osprivacy.make_private(good)
+    saved = (U._WORKFLOW_LEASE, U._LEASE_FILE)
+
+    def read(path: pathlib.Path) -> tuple[str | None, str]:
+        U._WORKFLOW_LEASE, U._LEASE_FILE = None, str(path)
+        try:
+            return U.workflow_lease(), ""
+        except U.LeaseFileRefused as exc:
+            return None, str(exc)
+
+    try:
+        got, why = read(good)
+        check("lease fd: a private regular file of this user is read", got == lease, why)
+        check("lease fd: and the refusal text never carries it", lease not in why)
+        if os.name != "nt":  # Windows keeps no permission bits and no FIFOs; its owner-only check is osprivacy's suite
+            real_stat, real_lstat = os.stat, os.lstat
+
+            def lie(real, private: bool):
+                def fake(target, *a, **kw):
+                    info = real(target, *a, **kw)
+                    mode = (info.st_mode & ~0o777) | (0o600 if private else 0o644)
+                    return os.stat_result((mode,) + tuple(info)[1:])
+                return fake
+
+            # Every path-based stat says the file is shared: the descriptor says private, and it is read.
+            with mock.patch.object(os, "stat", lie(real_stat, False)), \
+                    mock.patch.object(os, "lstat", lie(real_lstat, False)):
+                got, why = read(good)
+            check("lease fd: a path stat that lies does not refuse a private file", got == lease, why)
+            shared = d / "shared"
+            shared.write_text(lease + "\n", encoding="utf-8")
+            os.chmod(shared, 0o644)
+            # Every path-based stat says the file is private: the descriptor says 0644, and it is refused.
+            with mock.patch.object(os, "stat", lie(real_stat, True)), \
+                    mock.patch.object(os, "lstat", lie(real_lstat, True)):
+                got, why = read(shared)
+            check("lease fd: a path stat that lies does not pass a shared file", got is None and "chmod 600" in why,
+                  why)
+            got, why = read(shared)
+            check("lease fd: mode 644 is refused", got is None and "chmod 600" in why, why)
+            link = d / "lease-link"
+            link.symlink_to(good)
+            got, why = read(link)
+            check("lease fd: a link is refused, not followed", got is None and "link" in why, why)
+            fifo = d / "lease-fifo"
+            os.mkfifo(fifo)
+            got, why = read(fifo)  # opened non-blocking: a FIFO nobody writes would otherwise hang here
+            check("lease fd: a FIFO is refused without waiting", got is None and "not a regular file" in why, why)
+            folder = d / "lease-folder"
+            folder.mkdir()
+            got, why = read(folder)
+            check("lease fd: a folder is refused", got is None and why != "", why)
+        big = d / "big"
+        big.write_text("x" * 5000, encoding="utf-8")
+        osprivacy.make_private(big)
+        got, why = read(big)
+        check("lease fd: more than 4 KiB is refused", got is None and why != "", why)
+    finally:
+        U._WORKFLOW_LEASE, U._LEASE_FILE = saved
+
+
 def test_where_reports_the_source_it_would_take() -> None:
     d, env = estate()
     p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where",
@@ -741,6 +815,7 @@ if __name__ == "__main__":
                test_serve_starts_a_service_from_the_vault_and_rotation_names_it,
                test_a_slot_is_released_only_under_a_grant,
                test_a_dispatched_run_gets_only_its_packets_keys,
+               test_the_lease_file_is_judged_on_its_opened_descriptor,
                test_the_leak_scan_finds_a_planted_value,
                test_the_file_a_value_lives_in_is_not_a_sighting,
                test_an_undistinctive_value_is_named_rather_than_hunted,

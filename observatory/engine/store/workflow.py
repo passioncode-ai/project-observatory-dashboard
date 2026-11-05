@@ -199,6 +199,12 @@ class PacketFrozen(WorkflowError):
     refs and credentials are frozen at the dispatcher's write. Leaving them out keeps the packet."""
 
 
+class PacketNotFirst(PacketFrozen):
+    """A checkpoint after the first would bring a packet into a workflow whose first checkpoint carried none
+    (OBS-343): a packet is the dispatcher's, written in the checkpoint that starts the workflow, never one the run
+    holding the lease adds later. A PacketFrozen, so a caller that catches that one catches this too."""
+
+
 class DeadlineTooFar(WorkflowError):
     """A packet's deadline is more than seven days after the write that sets it, the board's limit on a request."""
 
@@ -893,12 +899,16 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                 raise L.RevisionConflict(_checkpoint_id(wid), expected_revision,
                                          0 if prior is None else prior["revision"])
         # A session Fabric started for a board request (OBS-323): the packet is frozen at the dispatcher's write, so
-        # the run it constrains cannot widen it by writing the next checkpoint, and may leave it out.
+        # the run it constrains cannot widen it by writing the next checkpoint, and may leave it out. Only the first
+        # checkpoint, the one that starts the workflow, may carry one (OBS-343): a later one cannot bring a packet
+        # into a workflow that started without.
         import dispatch_packet
         try:
-            dispatch_packet.check_write(None if prior is None else dispatch_packet.packet_of(conn, wid), clean, now)
+            dispatch_packet.check_write(None if prior is None else dispatch_packet.packet_of(conn, wid), clean, now,
+                                        first=prior is None)
         except dispatch_packet.Refused as exc:
-            raise (DeadlineTooFar if exc.code == "deadline-too-far" else PacketFrozen)(str(exc)) from None
+            raise {"deadline-too-far": DeadlineTooFar,
+                   "packet-not-first": PacketNotFirst}.get(exc.code, PacketFrozen)(str(exc)) from None
         revision = 1 if prior is None else prior["revision"] + 1
         mid = _checkpoint_id(wid)
         cursor = L.insert_revision(conn, dict(
