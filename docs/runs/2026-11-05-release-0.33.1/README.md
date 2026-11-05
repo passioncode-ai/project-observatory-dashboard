@@ -28,4 +28,16 @@ With `~/.local/share/project-observatory-venv/bin/python3`: the release suites (
 
 ## Receipts
 
-To be filled in after the tag.
+- Release PR #433 merged as `fd33c60f`. Its first Windows run timed out in `harness` and `workflow_memory` (the known
+  list records them as FAIL, a 51-minute run on a slow runner); the rerun passed. Tag `v0.33.1` (annotated, object
+  `35810725`) on `fd33c60f`.
+- Release run `42009673623`: every job green on the first attempt (guard, wheel, manifest, macOS, Linux x64 and arm64,
+  Windows x64 and arm64, feed, publish). Published 2026-11-05T11:10:47Z, 19 assets.
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.33.1-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key; `gh attestation verify`
+  on the wheel with `--signer-repo passioncode-ai/.github`: exit 0. The wheel carries `observatory/engine/analytics-app-key`
+  in the shape `A-XX-0123456789` (the value was not printed).
+- Installed on the operator's Mac with `project-observatory full update --version 0.33.1 --apply` (`status: updated`);
+  `full doctor` reports 0.33.1. `full analytics status`: on, `app_key: build`, `collecting: true`, environment
+  `production`. `full analytics send` at about 11:20 UTC: sent 7, rejected 0, failed 0. The analytics owner checks the
+  first Release events through growth (board thread `b99a99ce`).
