@@ -359,7 +359,9 @@ provider integration that is on (`github`, `bitbucket`, `cloudflare`, `heroku`, 
 schema, vendored at the contract pin (`fabric/interop-schemas/service-connections-extension.schema.json`),
 each id once and no credential-like string; a list that fails is not published and `degraded` names
 `connections`. No file is added; `store/analytics/counters.json` gains `last_send`
-(`at`, `ok`), the state of `usage-analytics`, which an older engine ignores.
+(`at`, `ok`), the state of `usage-analytics`, which an older engine ignores. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console,
+Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release
+downloads (only the feed is declared). The hub reads `down` when it is dead or unverified and `unknown` when no hub is installed.
 
 ## Workspace state: anonymous usage data (OBS-324, 0.33.0)
 

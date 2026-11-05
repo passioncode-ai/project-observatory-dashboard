@@ -162,8 +162,9 @@ class Hub(Base):
         hub = self.by_id()["fabric-hub"]
         self.assertEqual((hub["state"], hub["lastAt"]), ("ok", AT))
 
-    def test_a_hub_that_is_absent_or_dead_is_down_and_a_refusal_degraded(self):
-        for reason, state in (("hub-absent", "down"), ("hub-dead", "down"), ("access-refused", "degraded")):
+    def test_a_dead_hub_is_down_no_hub_is_unknown_and_a_refusal_degraded(self):
+        # No hub on this machine (`hub-absent`) means Fabric is not installed, not an outage.
+        for reason, state in (("hub-absent", "unknown"), ("hub-dead", "down"), ("access-refused", "degraded")):
             with self.subTest(reason=reason):
                 self.receipt("fabric-attribution.json", {"checked_at": AT, "degraded": [
                     {"source": "fabric", "reason": reason}]})

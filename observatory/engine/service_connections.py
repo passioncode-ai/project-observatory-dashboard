@@ -29,7 +29,8 @@ STATE AND TIME come from the engine's own records, never guessed:
 - a provider: its collector's receipt in `store/raw` (`degraded` rows make it `degraded`; an unreadable
   receipt too; a clean one is `ok`); several receipts take the worst state and the latest time; on but
   never run is `unknown`, with no `lastAt`;
-- the hub: `store/raw/fabric-attribution.json`; a hub that is absent, dead or cannot be verified is `down`,
+- the hub: `store/raw/fabric-attribution.json`; a hub that is dead or cannot be verified is `down`; no hub on
+  this machine (`hub-absent`) is `unknown`, because Fabric is simply not installed,
   any other refusal `degraded`;
 - the release feed: the check job's record `store/update-check.json` (`undetermined` is `degraded`);
 - the usage analytics: the last send recorded by `usage_analytics.note_send`.
@@ -66,11 +67,13 @@ PROVIDERS = (
     ("google", "google", "google", ("google.json",), "analytics properties and search console sites"),
     ("openrouter", "openrouter", "openrouter", ("openrouter.json",), "the keys of the OpenRouter accounts you configured"),
     ("domains", "domains", "rdap", ("domains_live.json",), "registration and liveness of your domains"),
-    ("mcp", "mcp-probe", "claude-code", ("mcp.json",), "which MCP servers your agents reach, by `claude mcp list` on request"),
+    ("mcp", "mcp-probe", "claude-code", ("mcp.json",), "which MCP servers your agents' configs declare; a live probe runs only on request"),
 )
 INTEGRATIONS = tuple(p[0] for p in PROVIDERS)
 #: The hub reasons (fabric_hub.HubUnavailable) that mean it could not be reached at all.
-HUB_DOWN = frozenset({"hub-absent", "hub-dead", "hub-origin-refused", "hub-unverified"})
+HUB_DOWN = frozenset({"hub-dead", "hub-origin-refused", "hub-unverified"})
+#: No hub on this machine: Fabric is not installed, which is not an outage.
+HUB_ABSENT = "hub-absent"
 _TIME_KEYS = ("scanned_at", "checked_at", "measured_at", "probed_at")
 _RANK = {"unknown": 0, "ok": 1, "degraded": 2, "down": 3}
 REASONS = {
@@ -78,6 +81,7 @@ REASONS = {
     "unreadable": "its last output cannot be read",
     "never": "not run on this install yet",
     "down": "it could not be reached at the last attempt",
+    "absent": "no Fabric hub was found on this machine",
 }
 #: Why the last declaration was refused by the kit, or None. Read by the local server for `degraded`.
 LAST_PROBLEM: str | None = None
@@ -147,6 +151,11 @@ def _hub(scratch: Path) -> dict:
     reasons = {str(r.get("reason")) for r in rows if isinstance(r, dict)}
     if reasons & HUB_DOWN:
         state = "down"
+    elif HUB_ABSENT in reasons:
+        out: dict = {"state": "unknown", "reason": REASONS["absent"]}
+        if when:
+            out["lastAt"] = when
+        return out
     return _combine([(state, when, rows)])
 
 
