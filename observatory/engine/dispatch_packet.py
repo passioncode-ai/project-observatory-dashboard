@@ -27,10 +27,18 @@ and none to a packet without the request, the project or the deadline, or withou
 THE PACKET IS FROZEN WHEN THE DISPATCHER WRITES IT. Every checkpoint stores its body whole, and the run the packet
 constrains writes the next one: read from the latest revision, the packet would be whatever the run last wrote, so
 it could name itself another slot and a later deadline, and an honest step checkpoint that leaves the refs out would
-shut its own keys. So the refs above (but `run-ends-at`) and `credentials` are read from the FIRST revision that
-carries a packet (`packet_of`), the dispatcher's, written before any handoff. A later checkpoint may leave them out,
-and the frozen packet stands; one that names a frozen ref with another value, a ref the packet did not carry, or
-another set of credentials is refused (`check_write`, `packet-frozen`). The deadline the dispatcher writes is at
+shut its own keys. So the refs above (but `run-ends-at`) and `credentials` are read from the workflow's FIRST
+revision (`packet_of`), the dispatcher's, which starts the workflow before any handoff. A later checkpoint may leave
+them out, and the frozen packet stands; one that names a frozen ref with another value, a ref the packet did not
+carry, or another set of credentials is refused (`check_write`, `packet-frozen`).
+
+ONLY THE FIRST REVISION CARRIES A PACKET (OBS-343). A workflow whose first checkpoint carries none is a plain
+workflow, and the run that holds its lease writes every later checkpoint: were a packet accepted from a later one,
+that run could write its own, with any credentials and a deadline a week out, and the gate would release them. So a
+later checkpoint that brings a frozen ref into a workflow whose first carried none is refused on write
+(`packet-not-first`), and a row written before that check, whose packet first appears in a later revision, is no
+packet: the views show no `dispatch`, and the gate refuses with `packet-not-first`. A plain workflow's own
+`credentials`, without the refs, are no packet and are not touched. The deadline the dispatcher writes is at
 most seven days after that write (`deadline-too-far`), the board's own limit on a request. `run-ends-at` stays per
 dispatch: the last one written is shown, and nothing reads it as a permission, so it cannot widen the deadline.
 
@@ -77,6 +85,8 @@ REFUSALS = {
                         "on a request; it gets no keys",
     "packet-frozen": "the packet is frozen at the dispatcher's write; a later checkpoint may leave its refs and "
                      "credentials out, never change them",
+    "packet-not-first": "a packet is accepted only in the workflow's first checkpoint, the dispatcher's; this "
+                        "workflow's first carried none, so it is no packet and gets no keys",
     "not-lease-holder": "only the holder of the workflow's lease gets keys; take it with observatory_handoff_accept "
                         "and present its leaseId in OBSERVATORY_WORKFLOW_LEASE or a private "
                         "file named in OBSERVATORY_WORKFLOW_LEASE_FILE",
@@ -178,21 +188,28 @@ def _rows(conn: sqlite3.Connection, workflow_id: str, needles: tuple[str, ...], 
                         (f"ckpt:{workflow_id}", *(f"{n}:" for n in needles)))
 
 
-def packet_of(conn: sqlite3.Connection, workflow_id: str) -> dict | None:
-    """The frozen packet of `workflow_id`, or None for a workflow that never carried one: `refs` (the FROZEN refs) and
-    `credentials` of the first revision that carries a packet, that revision and when it was written, and the
-    `run-ends-at` of the last revision that names one. Reads only."""
-    packet = None
+def _first_carrying(conn: sqlite3.Connection, workflow_id: str):
+    """The earliest checkpoint revision of `workflow_id` that carries a FROZEN ref, with its parsed body, or None."""
     for row in _rows(conn, workflow_id, FROZEN, "ASC"):
         body = json.loads(row["body_json"] or "{}")
-        refs = refs_of(body)
-        if any(k in refs for k in FROZEN):
-            packet = {"refs": {k: refs[k] for k in FROZEN if k in refs},
-                      "credentials": body.get("credentials") or [],
-                      "revision": row["revision"], "writtenAt": row["created_at"]}
-            break
-    if packet is None:
+        if any(k in refs_of(body) for k in FROZEN):
+            return row, body
+    return None
+
+
+def packet_of(conn: sqlite3.Connection, workflow_id: str) -> dict | None:
+    """The frozen packet of `workflow_id`, or None for a workflow whose FIRST revision carries none: `refs` (the
+    FROZEN refs) and `credentials` of revision 1, when it was written, and the `run-ends-at` of the last revision
+    that names one. A packet that first appears in a later revision is none (OBS-343; `late_packet` names it).
+    Reads only."""
+    found = _first_carrying(conn, workflow_id)
+    if found is None or found[0]["revision"] != 1:
         return None
+    row, body = found
+    refs = refs_of(body)
+    packet = {"refs": {k: refs[k] for k in FROZEN if k in refs},
+              "credentials": body.get("credentials") or [],
+              "revision": row["revision"], "writtenAt": row["created_at"]}
     for row in _rows(conn, workflow_id, ("run-ends-at",), "DESC"):
         ends = refs_of(json.loads(row["body_json"] or "{}")).get("run-ends-at")
         if ends:
@@ -201,13 +218,23 @@ def packet_of(conn: sqlite3.Connection, workflow_id: str) -> dict | None:
     return packet
 
 
-def check_write(packet: dict | None, body: dict, now: datetime) -> None:
-    """Refuse a checkpoint body that would change the frozen `packet` (raises Refused `packet-frozen`), or that sets
-    a packet whose deadline is more than MAX_HORIZON after `now` (`deadline-too-far`). Omitting the refs or the
-    credentials keeps the packet; a body of a workflow that carries no packet is not touched."""
+def late_packet(conn: sqlite3.Connection, workflow_id: str) -> int | None:
+    """The revision in which `workflow_id`'s packet refs first appear when that is not its first revision, or None.
+    Such a row was written before `check_write` refused it (OBS-343); it is no packet, and the gate says why."""
+    found = _first_carrying(conn, workflow_id)
+    return None if found is None or found[0]["revision"] == 1 else found[0]["revision"]
+
+
+def check_write(packet: dict | None, body: dict, now: datetime, *, first: bool) -> None:
+    """Refuse a checkpoint body that would change the frozen `packet` (raises Refused `packet-frozen`), that brings a
+    packet into a workflow whose first revision carried none (`first` is False: `packet-not-first`), or that sets a
+    packet whose deadline is more than MAX_HORIZON after `now` (`deadline-too-far`). Omitting the refs or the
+    credentials keeps the packet; a body without refs, of a workflow that carries no packet, is not touched."""
     refs = refs_of(body)
     if packet is None:
         if any(k in refs for k in FROZEN):
+            if not first:
+                raise Refused("packet-not-first", "brings " + ", ".join(k for k in FROZEN if k in refs))
             deadline = _time(refs.get("deadline"))
             if deadline is not None and deadline > now + MAX_HORIZON:
                 raise Refused("deadline-too-far", refs["deadline"])
@@ -220,10 +247,13 @@ def check_write(packet: dict | None, body: dict, now: datetime) -> None:
         raise Refused("packet-frozen", "changes credentials")
 
 
-def _shut(status: str, packet: dict | None, now: datetime) -> tuple[str, str] | None:
-    """Why no key can be handed out under this packet whoever asks, as (code, detail), or None."""
+def _shut(status: str, packet: dict | None, now: datetime, late: int | None = None) -> tuple[str, str] | None:
+    """Why no key can be handed out under this packet whoever asks, as (code, detail), or None. `late` is the
+    revision a packet that is not the first revision's appears in (`late_packet`)."""
     if status != "open":
         return "workflow-closed", ""
+    if packet is None and late is not None:
+        return "packet-not-first", f"its refs first appear in revision {late}"
     refs = (packet or {}).get("refs") or {}
     missing = [k for k in REQUIRED_FOR_KEYS if k not in refs]
     if missing:
@@ -241,13 +271,13 @@ def _shut(status: str, packet: dict | None, now: datetime) -> tuple[str, str] | 
     return None
 
 
-def _window(status: str, packet: dict | None, now: datetime) -> dict:
+def _window(status: str, packet: dict | None, now: datetime, late: int | None = None) -> dict:
     credentials = (packet or {}).get("credentials") or []
     out: dict = {"slots": [_slot(c) for c in credentials]}
     deadline = ((packet or {}).get("refs") or {}).get("deadline")
     if deadline:
         out["until"] = deadline
-    shut = _shut(status, packet, now)
+    shut = _shut(status, packet, now, late)
     if shut:
         out.update(state="closed", reason=shut[0])
     elif not credentials:
@@ -258,8 +288,8 @@ def _window(status: str, packet: dict | None, now: datetime) -> dict:
 
 
 def view(packet: dict | None, status: str, *, now: datetime | None = None) -> dict | None:
-    """What a person needs to follow the request, from the frozen `packet` (`packet_of`), or None for a workflow that
-    carries none: the board refs, the run's end and whether keys can be handed out (and why not)."""
+    """What a person needs to follow the request, from the frozen `packet` (`packet_of`), or None for a workflow whose
+    first revision carries none (a packet first written later is none, OBS-343): the board refs, the run's end and whether keys can be handed out (and why not)."""
     if packet is None:
         return None
     refs = packet["refs"]
@@ -277,7 +307,9 @@ def keys_state(conn: sqlite3.Connection, workflow_id: str, *, now: datetime | No
     wf = conn.execute("SELECT status FROM workflows WHERE workflow_id = ?", (workflow_id,)).fetchone()
     if wf is None:
         return {"state": "closed", "reason": "workflow-unknown"}
-    return _window(wf["status"], packet_of(conn, workflow_id), now or datetime.now(timezone.utc))
+    packet = packet_of(conn, workflow_id)
+    late = late_packet(conn, workflow_id) if packet is None else None
+    return _window(wf["status"], packet, now or datetime.now(timezone.utc), late)
 
 
 def resolve_fabric_project(uuid: str) -> tuple[str | None, str | None]:
@@ -305,13 +337,13 @@ def authorize(conn: sqlite3.Connection, workflow_id: str, lease: str | None, *, 
               project_of: Callable[[str], str | None] = project_of) -> dict:
     """The hand-out of `names` from `project`/`env` to the presenter of `lease`, under `workflow_id`'s packet.
     Returns what was allowed (no value); raises Refused with its code. Checks in the order a person would fix
-    them: the workflow, its packet, the deadline, the lease, the slots, the project."""
+    them: the workflow, its packet (and that it is the first revision's), the deadline, the lease, the slots, the project."""
     now = now or datetime.now(timezone.utc)
     wf = conn.execute("SELECT status FROM workflows WHERE workflow_id = ?", (workflow_id,)).fetchone()
     if wf is None:
         raise Refused("workflow-unknown", workflow_id)
     packet = packet_of(conn, workflow_id)
-    shut = _shut(wf["status"], packet, now)
+    shut = _shut(wf["status"], packet, now, late_packet(conn, workflow_id) if packet is None else None)
     if shut:
         raise Refused(*shut)
     refs = packet["refs"]
@@ -340,4 +372,4 @@ def authorize(conn: sqlite3.Connection, workflow_id: str, lease: str | None, *, 
 
 
 __all__ = ["REFS", "FROZEN", "MAX_HORIZON", "REQUIRED_FOR_KEYS", "REFUSALS", "Refused", "Invalid", "validate",
-           "refs_of", "packet_of", "check_write", "view", "keys_state", "authorize"]
+           "refs_of", "packet_of", "late_packet", "check_write", "view", "keys_state", "authorize"]

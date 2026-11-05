@@ -1486,6 +1486,9 @@ _WORKFLOW_REMEDY = {
     "PacketFrozen": "the board refs and credentials of a session Fabric started for a request are the "
                     "dispatcher's; leave them out of your checkpoint (the packet stands) or repeat them "
                     "unchanged, and ask on the board for a key the packet does not name",
+    "PacketNotFirst": "a packet (the board refs) is accepted only in the checkpoint that starts the workflow, "
+                      "the dispatcher's; this workflow started without one, so leave the refs out of your "
+                      "checkpoint, and a run that needs keys for a request is started by Fabric with the packet",
     "DeadlineTooFar": "a packet's deadline is at most 7 days after the write that sets it, the board's "
                       "limit on a request",
     "DeclarationMoved": "the previous executor keeps writing checkpoints that change the keys "

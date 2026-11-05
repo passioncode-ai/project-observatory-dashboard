@@ -355,7 +355,9 @@ member, a prefix is named twice or any artifact holds an absolute path. A body w
 before. The redactor keeps `board-request:`, `board-thread:` and `fabric-project:` refs whole when the UUID ends the
 token: an older engine scrubs their UUIDs. The packet is frozen at its first write: a later checkpoint that changes a
 ref or the credentials is refused with the new workflow error `PacketFrozen`, and one that leaves them out keeps
-them; a packet whose deadline is more than seven days after that write is refused with `DeadlineTooFar`. A workflow
+them; a packet is accepted only in the checkpoint that starts the workflow, so a later one that brings packet refs
+into a workflow that started without is refused with `PacketNotFirst` (a subclass of `PacketFrozen`), and a row whose
+packet first appears in a later revision is no packet (no `dispatch`, keys refused with `packet-not-first`); a packet whose deadline is more than seven days after that write is refused with `DeadlineTooFar`. A workflow
 that never carried a packet is unchanged. `observatory_checkpoint_latest`, `observatory_workflow_list` and
 their `memory/0.1` twins add the member `dispatch` (their output schemas are open). `use_secret.py run` takes
 `--workflow wf_…` and reads `FABRIC_DISPATCH_WORKFLOW`, `OBSERVATORY_WORKFLOW_LEASE` and

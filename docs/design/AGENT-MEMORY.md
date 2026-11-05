@@ -71,10 +71,19 @@ redactor keeps the three UUID refs whole (`memory_redact.KEEP`), as it keeps `se
 
 The packet is frozen when the dispatcher writes it. Every checkpoint stores its body whole, and the run the packet
 constrains writes the next one, so the refs (all but `run-ends-at`) and the body's `credentials` are read from the
-first revision that carries a packet, the dispatcher's, written before any handoff (`dispatch_packet.packet_of`).
-A later checkpoint may leave them out, and the packet stands; one that names a frozen ref with another value, adds a
-ref the packet did not carry, or names another set of credentials is refused with `PacketFrozen`
-(`dispatch_packet.check_write`, called by `checkpoint_write`). The dispatcher's deadline is at most seven days after
+workflow's first revision, the checkpoint the dispatcher writes to start it, before any handoff
+(`dispatch_packet.packet_of`). A later checkpoint may leave them out, and the packet stands; one that names a frozen
+ref with another value, adds a ref the packet did not carry, or names another set of credentials is refused with
+`PacketFrozen` (`dispatch_packet.check_write`, called by `checkpoint_write`).
+
+Only that first revision carries a packet (OBS-343). The dispatcher writes the packet in the checkpoint that starts
+the workflow; a workflow whose first checkpoint carries none is a plain workflow, and the run holding its lease
+writes everything after. A later checkpoint that brings a frozen ref into it is refused with `PacketNotFirst` (a
+`PacketFrozen`, so a caller that catches that one catches this too), so that run cannot write itself a packet with
+any credentials and a week's deadline. A row written before that check, whose packet refs first appear in a later
+revision, is no packet: `observatory_checkpoint_latest` and `observatory_workflow_list` show no `dispatch` for it,
+and the gate refuses with `packet-not-first` (`dispatch_packet.late_packet` names the revision). A plain workflow's
+own `credentials`, without the refs, are no packet and are written as before. The dispatcher's deadline is at most seven days after
 its write, the board's own limit on a request (`DeadlineTooFar`). `run-ends-at` stays per dispatch: the last one
 written is shown, and nothing reads it as a permission, so it cannot widen the deadline, and nothing ends a run at
 that time either: the run keeps it.
@@ -82,7 +91,7 @@ that time either: the run keeps it.
 `observatory_checkpoint_latest` and `observatory_workflow_list` add `dispatch`, read from the frozen packet: the
 request, its thread, the capability, Fabric's project id, the deadline, the run's end and `keys` (`state` `open` or
 `closed`, the `reason` when closed: `packet-incomplete`, `deadline-too-far`, `deadline-passed`, `workflow-closed`,
-`no-credentials`; the slots by name; `until`). A row written before the shapes were checked, whose deadline does
+`no-credentials`, and from `dispatch_packet.keys_state` also `packet-not-first`; the slots by name; `until`). A row written before the shapes were checked, whose deadline does
 not read as a UTC time, reads as `packet-incomplete` rather than failing the read.
 
 The keys: `use_secret.py run --workflow wf_… --env ENV PROJECT NAME -- …` (or with `FABRIC_DISPATCH_WORKFLOW` set
@@ -91,7 +100,11 @@ only for a slot the frozen `credentials` name in that environment; only from the
 to (its `fabric:<uuid>`, as Observatory pulled it from Fabric's hub); only until the deadline; never after the
 final checkpoint closed the workflow; never to a packet without the request, the project or the deadline. The lease
 is presented in `OBSERVATORY_WORKFLOW_LEASE`, or in a file `OBSERVATORY_WORKFLOW_LEASE_FILE` names, read only when it
-is a regular file of this user that nobody else may read (mode 600 on POSIX; a link is never followed). Both are
+is a regular file of this user that nobody else may read (mode 600 on POSIX; a link is never followed). Those checks
+are made on the opened descriptor, not on the path beforehand (OBS-344): the file is opened without following a link
+and without waiting on a FIFO, `fstat` and the owner and mode (the access list on Windows) are read from that
+descriptor, and at most 4 KiB are read from it, so a file swapped in between a look and the open is never read. On
+Windows the link refusal itself is a look at the path before the open, as `osprivacy.open` documents. Both are
 taken out of `use_secret.py`'s environment before anything runs. A refusal exits 2 with its code
 (`workflow-unknown`, `packet-incomplete`, `no-credentials`, `workflow-closed`, `deadline-too-far`,
 `deadline-passed`, `not-lease-holder`, `slot-not-named`, `project-unresolved`, `project-mismatch`, and from the
