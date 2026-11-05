@@ -47,4 +47,22 @@ On this branch, with `~/.local/share/project-observatory-venv/bin/python3`:
 
 ## Receipts
 
-To be filled in after the tag.
+- Release PR #429 merged as `2426ea16`. Its first macOS run timed out in `test_session_reload` at 121.5 s against its
+  120 s budget (run `41921013085`); the same suite took 47 s to 87 s on macOS in #416, #419, #420 and #428, before
+  and after OBS-324, so the rerun was the answer and the thin budget is a backlog row.
+- Tag `v0.33.0` (annotated, object `c599083b`) on `2426ea16`. Release run `41931623833`: guard, wheel, manifest,
+  macOS, Linux x64 and arm64, Windows arm64 green on the first attempt. Windows x64 failed twice at signing:
+  `Invoke-ArtifactSigning` was not recognized after a cache hit on `ArtifactSigning-0.1.8`, the module the Windows
+  arm64 job of the same run had saved at 23:53 UTC (the cache key names no architecture). Deleting that one cache entry
+  (`10030178796`) and rerunning the failed jobs signed and published it: published 2026-11-05T00:25:26Z, 19 assets.
+  The shared `windows-signing@v1` action's cache key is reported to its owner.
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.33.0-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key (EdDSA
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7`); `gh attestation verify` on the wheel with `--signer-repo
+  passioncode-ai/.github`: exit 0. The wheel carries no `analytics-app-key`: the repository secret is not set yet.
+- Installed on the operator's Mac with `project-observatory full update --version 0.33.0 --apply` (`status: updated`).
+  `full doctor` reports 0.33.0 and no coverage warnings. `full analytics status`: on (default), `app_key: absent`,
+  `collecting: false`.
+- The private copies registry now gives `name_prefix` on its 14 entries (no `bad-prefix`). `full copies list` shows 6
+  relations and refuses 8 entries as `unknown-repository`: those copies are not repositories in this machine's
+  registry, a separate open item.

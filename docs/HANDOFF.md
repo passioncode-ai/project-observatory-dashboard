@@ -21,7 +21,8 @@ expectation. It changes test evidence and documentation, not the published engin
 0.30.0): anonymous usage and error data on by default (OBS-324, #421), the App-Key in the release wheel (OBS-329,
 #426), a copy's name prefix (OBS-332, #428) and `name@sha` points (OBS-334, #427).
 
-Release pull request open; then the tag `v0.33.0`, verification and installation, with receipts in the record.
+Released: tag `v0.33.0` on `2426ea16`, verified and installed (receipts in the record). Next: the App-Key secret
+(the operator's step), then OBS-330, OBS-331, OBS-333 and OBS-323 for wave 3, by 2026-11-18.
 
 [2026-11-04: release 0.32.0](runs/2026-11-04-release-0.32.0/README.md): engine 0.32.0 (`observatory-log` stays
 0.30.0): copies and moves of repositories (OBS-321, #418), `ssh-keys rekey` in the restore plan and the move checklist
