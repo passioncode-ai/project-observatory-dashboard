@@ -20,7 +20,8 @@ expectation. It changes test evidence and documentation, not the published engin
 [2026-11-05: release 0.33.1](runs/2026-11-05-release-0.33.1/README.md): engine 0.33.1, a patch whose wheel carries the
 analytics App-Key (OBS-329), so the anonymous data 0.33.0 turned on is sent.
 
-Release pull request open; then the tag `v0.33.1`, verification that the wheel carries the key, and installation.
+Released: tag `v0.33.1` on `fd33c60f`, verified (the wheel carries the key) and installed; anonymous data is sent
+(receipts in the record). Next: OBS-326 and OBS-323, then OBS-330 and OBS-331 once the contract tags DEC-0153.
 
 [2026-11-04: release 0.33.0](runs/2026-11-04-release-0.33.0/README.md): engine 0.33.0 (`observatory-log` stays
 0.30.0): anonymous usage and error data on by default (OBS-324, #421), the App-Key in the release wheel (OBS-329,
