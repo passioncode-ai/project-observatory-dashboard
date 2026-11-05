@@ -1133,6 +1133,16 @@ server; `--uninstall` removes it. The server keeps one copy per workspace
 (`service.lock`; a second copy exits 75) and creates `service.token` for its
 events feed. See the [service design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-SERVICE.md).
 
+Its well-known document also says what Observatory uses (`extensions/connections/0.1`),
+so a host can draw the chain from one agent to the next: Fabric's hub (asked which Fabric
+project each folder is), the release feed (the update check), one connector for each
+provider integration you turned on (GitHub, Bitbucket, Cloudflare, Heroku, DigitalOcean,
+Google, OpenRouter, domains, the MCP servers your agents' configs declare) and, while anonymous usage data is
+collected, the analytics host. Each carries its state (`ok`, `degraded`, `down`, `unknown`)
+and when it last ran, from the collector's own receipt in `store/raw`; an integration you
+never turned on is not listed, and one that never ran reads `unknown`. No key, URL with a
+key, path or name is in it. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console, Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release downloads (only the feed is declared).
+
 ```sh
 project-observatory full configure features scheduler true
 ENGINE="$(project-observatory full-path)"

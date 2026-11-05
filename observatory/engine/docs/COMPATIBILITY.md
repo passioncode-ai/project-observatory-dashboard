@@ -365,6 +365,23 @@ without one, nothing changes. That gate guards a cooperating run; containment st
 `slotsRequireGrant: always` with a delegation token. The secret-use journal's rows gain `workflow`, `request` and
 `dispatch` (a refusal code).
 
+## Service: the connections declaration (OBS-326, the release after 0.33.0)
+
+The always-on server's `/.well-known/fabric-service` gains, under `extensions`, the key
+`https://fabric.passioncode.ai/agent-contract/extensions/connections/0.1` with `{connections: [...]}`
+(fabric-agent-contract DEC-0096, rule FAC-SEM-127): `id`, `kind` (`service` or `connector`), `target`,
+`capability` (the hub only), `state` (`ok`, `degraded`, `down`, `unknown`), `label`, `purpose`, `reason`,
+`lastAt`. Additive: a host that does not know the key ignores it, and `contractVersion` stays `0.1.0`. The
+ids are stable: `fabric-hub` (target `fabric`, capability `project.resolve`), `release-feed`, one per
+provider integration that is on (`github`, `bitbucket`, `cloudflare`, `heroku`, `digitalocean`, `google`,
+`openrouter`, `domains`, `mcp-probe`) and `usage-analytics`. The list is checked against the contract's
+schema, vendored at the contract pin (`fabric/interop-schemas/service-connections-extension.schema.json`),
+each id once and no credential-like string; a list that fails is not published and `degraded` names
+`connections`. No file is added; `store/analytics/counters.json` gains `last_send`
+(`at`, `ok`), the state of `usage-analytics`, which an older engine ignores. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console,
+Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release
+downloads (only the feed is declared). The hub reads `down` when it is dead or unverified and `unknown` when no hub is installed.
+
 ## Workspace state: anonymous usage data (OBS-324, 0.33.0)
 
 New files only; no earlier file changes shape. An upgrade writes none of them: the switch file is

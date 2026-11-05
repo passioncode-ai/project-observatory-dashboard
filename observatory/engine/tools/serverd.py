@@ -121,6 +121,7 @@ import paths
 import service_events  # noqa: E402
 import service_health  # noqa: E402
 import service_identity  # noqa: E402
+import service_connections  # noqa: E402  OBS-326: what this service uses (fabric-connections/0.1)
 from node.lifecycle import service as lifecycle  # noqa: E402
 import secret_prompt  # noqa: E402  OBS-260: the secret-request queue served on POST /mcp to agent bindings
 
@@ -452,7 +453,21 @@ class Runtime:
         with self._lock:
             self._status = "stopping"
 
+    def connections(self) -> dict:
+        """The connections declaration (service_connections.py, OBS-326), rebuilt only when a file it reads
+        changed. A declaration the kit refuses is not published and its reason is a degraded source."""
+        try:
+            base, scratch = pathlib.Path(paths.HOME), pathlib.Path(paths.SCRATCH)
+            value = _memo("connections", service_connections.signature_files(base, scratch),
+                          service_connections.extension)
+            self.note_failure("connections", service_connections.LAST_PROBLEM)
+            return value
+        except Exception as exc:  # noqa: BLE001: the document is always answered
+            self.note_failure("connections", f"the connections declaration failed: {type(exc).__name__}")
+            return {}
+
     def well_known(self) -> dict:
+        declared = self.connections()
         with self._lock:
             snap, status = self._snapshot, self._status
         own = self._own_degraded() + (LIFECYCLE.degraded() if LIFECYCLE else [])
@@ -464,7 +479,7 @@ class Runtime:
             summary=snap["summary"] if snap else None, surfaces=SURFACES)
         # The node.lifecycle entry: this node is the lifecycle manager of what the operator enrolled
         # (`lifecycle.manager: node`), served at `surfaces.mcp`. This server itself stays under launchd.
-        doc["extensions"] = {lifecycle.EXTENSION_KEY: (LIFECYCLE or lifecycle.Host()).entry()}
+        doc["extensions"] = {lifecycle.EXTENSION_KEY: (LIFECYCLE or lifecycle.Host()).entry(), **declared}
         return doc
 
 
