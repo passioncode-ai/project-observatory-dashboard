@@ -286,6 +286,18 @@ def count(base: Path | None, name: str, n: int = 1) -> None:
         pass
 
 
+def note_send(base: Path | None, *, ok: bool, at: datetime.datetime | None = None) -> None:
+    """Record whether the last send reached the host, and when: the `usage-analytics` connection's state
+    in the well-known document (service_connections.py, OBS-326). Never raises."""
+    try:
+        file = folder(base) / "counters.json"
+        doc = _read_json(file)
+        doc["last_send"] = {"at": (at or _now()).isoformat(timespec="seconds").replace("+00:00", "Z"), "ok": bool(ok)}
+        _private_write(file, json.dumps(doc, sort_keys=True) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def counters(base: Path | None = None) -> dict:
     return _read_json(folder(base) / "counters.json")
 
@@ -558,6 +570,9 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
                                           "p": {k: v for k, v in ev["props"].items() if k not in SINK_PROPS},
                                           "v": ev["systemProps"]["appVersion"],
                                           "e": ev["props"]["environment"]}, separators=(",", ":")) + "\n")
+        if sent or failed or rejected:
+            # Only a flush that tried to send says whether the host was reached (OBS-326).
+            note_send(base, ok=bool(sent) and not failed and not rejected)
         for name, n in (("sent", sent), ("dropped_expired", expired), ("dropped_unreadable", broken),
                         ("rejected", rejected), ("send_failed", failed)):
             if n:

@@ -224,6 +224,19 @@ class Sink(Base):
 
 
 class Flush(Base):
+    def test_the_last_send_is_recorded_for_the_connections_declaration(self):
+        self.rec()
+        self.flush(Fake(200))
+        self.assertTrue(UA.counters(self.base)["last_send"]["ok"])
+        self.rec()
+        self.flush(Fake(503, 503, 503))
+        self.assertFalse(UA.counters(self.base)["last_send"]["ok"])
+        self.flush(Fake(200))
+        self.assertTrue(UA.counters(self.base)["last_send"]["ok"], "the kept event went at the next pass")
+        before = UA.counters(self.base)["last_send"]
+        self.assertEqual(self.flush(Fake())["result"], "empty")
+        self.assertEqual(UA.counters(self.base)["last_send"], before, "an empty queue reached nothing: no claim")
+
     def test_batches_of_at_most_twenty_five(self):
         for _ in range(60):
             self.rec()

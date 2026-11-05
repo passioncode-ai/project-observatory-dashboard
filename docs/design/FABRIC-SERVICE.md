@@ -27,7 +27,7 @@ Observatory in advance.
 
 | Route | Auth | Answer |
 |---|---|---|
-| `GET /.well-known/fabric-service` | none; the Host/Origin/`Sec-Fetch-Site` guard applies | identity, build, pid, start time, status, `degraded`, up to six tiles, surfaces |
+| `GET /.well-known/fabric-service` | none; the Host/Origin/`Sec-Fetch-Site` guard applies | identity, build, pid, start time, status, `degraded`, up to six tiles, surfaces; under `extensions` the node.lifecycle entry and the connections declaration (`extensions/connections/0.1`, OBS-326: what Observatory uses, each with its state, from `service_connections.py`) |
 | `GET /fabric/v1/events?after=&limit=` | `Authorization: Bearer <token>` | a page of events, oldest first, with a cursor |
 | `GET /fabric/v1/usage` | `Authorization: Bearer <token>` | the usage report (contract DEC-0021, `service-usage.schema.json`): the last 31 UTC days of the assistant's paid model calls by provider and model, from the receipts `agent/providers.py` writes at each charge into `store/logs/fabric-usage.jsonl` — tokens and cost with its basis (`provider`, or `price-list` when estimated), never a prompt, an output or a caller (OBS-53) |
 | `/`, `/dashboard/*`, `/health`, `/remote`, `/leaks`, `/skills` | none, as before | unchanged; `/health` still recomputes its answer on every request |
@@ -148,6 +148,7 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 |---|---|
 | `observatory/engine/fabric_service.py` | `passioncode-ai/fabric-agent-adapter` `f31c2b2792f7` (v0.5.0), `building-fabric-services/scripts/fabric_service.py` |
 | `observatory/engine/tests/check_service.py`, `observatory/engine/tests/fabric_interop.py` | the same commit, `scripts/check_service.py` and `scripts/fabric_interop.py` (the probe imports it) |
+| `observatory/engine/fabric/interop-schemas/service-connections-extension.schema.json` | the contract pin, by `tools/vendor_contract_schemas.py` with the folder's other schemas: the connections declaration (DEC-0096) is checked against it before it is published (`service_connections.check`, OBS-326). The kit's `fabric_connections` module is not vendored: its secret detector's docstrings hold sample credential URLs the public release scan refuses |
 | `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `7931c1d`, `schemas/`; not at the contract pin until OBS-212 (the folder's README says why and records the digests) |
 
 Never edit them here: update upstream, copy again, and the digest test says whether the copy is

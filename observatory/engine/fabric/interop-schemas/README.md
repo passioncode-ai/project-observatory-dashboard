@@ -25,3 +25,4 @@ below (`test_interop.py` checks the digests, `tests/test_contract_lock.py` holds
 | `interop-result.schema.json` | `8e17dbc0662b95c69ff8efeb2039518afd96a44185207a63e922b3e2893df322` |
 | `mandate.schema.json` | `48013956cb6da53f32928af0202a4f211702b47685287702ae1a7d30e3fcfb64` |
 | `result.schema.json` | `adb36e58c4628ec785d9e5dfd931fe425f69e87535b04e49c395655a47493fea` |
+| `service-connections-extension.schema.json` | `dc0b87265fbcc4c4383f788944955cd207ae670f9029c7011ab387115f220007` |
