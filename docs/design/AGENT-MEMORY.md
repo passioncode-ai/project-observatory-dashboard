@@ -71,8 +71,10 @@ redactor keeps the three UUID refs whole (`memory_redact.KEEP`), as it keeps `se
 
 The packet is frozen when the dispatcher writes it. Every checkpoint stores its body whole, and the run the packet
 constrains writes the next one, so the refs (all but `run-ends-at`) and the body's `credentials` are read from the
-workflow's first revision, the checkpoint the dispatcher writes to start it, before any handoff
-(`dispatch_packet.packet_of`). A later checkpoint may leave them out, and the packet stands; one that names a frozen
+workflow's first revision, the checkpoint Fabric's dispatcher writes to start it, before any handoff
+(`dispatch_packet.packet_of`). Nothing checks who wrote that revision: any caller may start a workflow with
+`observatory_checkpoint_write` and hold its lease, so a run can start its own workflow with a packet; this stays a guard
+for a cooperating run, as the next section says, not a proof that the packet came from Fabric. A later checkpoint may leave them out, and the packet stands; one that names a frozen
 ref with another value, adds a ref the packet did not carry, or names another set of credentials is refused with
 `PacketFrozen` (`dispatch_packet.check_write`, called by `checkpoint_write`).
 

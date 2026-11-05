@@ -28,7 +28,9 @@ THE PACKET IS FROZEN WHEN THE DISPATCHER WRITES IT. Every checkpoint stores its 
 constrains writes the next one: read from the latest revision, the packet would be whatever the run last wrote, so
 it could name itself another slot and a later deadline, and an honest step checkpoint that leaves the refs out would
 shut its own keys. So the refs above (but `run-ends-at`) and `credentials` are read from the workflow's FIRST
-revision (`packet_of`), the dispatcher's, which starts the workflow before any handoff. A later checkpoint may leave
+revision (`packet_of`), which Fabric's dispatcher writes to start the workflow before any handoff. Nothing checks who
+wrote that revision: any caller may start a workflow and hold its lease, so this is a guard for a cooperating run, not
+containment (containment is `slotsRequireGrant: always` with a hub-minted token). A later checkpoint may leave
 them out, and the frozen packet stands; one that names a frozen ref with another value, a ref the packet did not
 carry, or another set of credentials is refused (`check_write`, `packet-frozen`).
 

@@ -934,8 +934,8 @@
       "path": "dispatch_packet.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5ffafc1205c53493c6401e12490d7800efe54a8f76f26a21c3d88cf0d675ed5c",
-      "bytes": 20818
+      "export_sha256": "5ac6ff5e3991fcff88a3ba10b319dc6ca6affd464e3940a6f5b4dc00c9e2c6d5",
+      "bytes": 21049
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "465673d6a59c11da5467199f80188dbc2d9e10f6ae3929685c14e59c8dbb2e75",
-      "bytes": 53237,
+      "export_sha256": "dd105cde94ae76852678671f4adbdfca3d59a9c9e9354c983c684c46bcbb08a4",
+      "bytes": 53417,
       "upstream_modified": true
     },
     {
