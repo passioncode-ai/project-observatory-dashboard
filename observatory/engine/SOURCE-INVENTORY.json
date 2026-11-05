@@ -947,15 +947,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "301199b21c5d9caacc70c262cfacba229d87576b39cb88c2f1d768965753eaa4",
-      "bytes": 49244,
+      "export_sha256": "99aae5c7e925cba45d0dd91e155fb95c48f9df54ee66f1d5ad44a1dc7b2a1a38",
+      "bytes": 49434,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "3f8adb20f9b095ecfdfbe178da72b1cb1eb3cf597507ae7920a71250c470bfa9",
-      "bytes": 243844,
+      "export_sha256": "b7673137192734c05217fa6b7ae2ee2412f9bf428ad47ba68f35ad520ffacc72",
+      "bytes": 244081,
       "upstream_modified": true
     },
     {
@@ -983,8 +983,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1ed07ebc7891a8b9313f3aa4822f67eedecffd1f3e0fe5a2ff4c53ce2e892cfa",
-      "bytes": 93795
+      "export_sha256": "6076ebd9d959e7014bb7fab1db0bb21c5d470265612afd57f0225289032c9f82",
+      "bytes": 94250
     },
     {
       "path": "estate.py",
@@ -2908,8 +2908,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0c83eab0118a677a46ff062d96c2b8e519a70ba71fec97f262a52cc4aebc8b78",
-      "bytes": 105968
+      "export_sha256": "fa7f1bfdafdb8795b6361f312f8c0dae05bb7d3492af64818a3961933c595295",
+      "bytes": 107192
     },
     {
       "path": "mcp/capability_tools.py",
@@ -4570,8 +4570,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "873b1b348be88f29a5dd87b52ca00968f0865250d3de542d841582c41b132f18",
-      "bytes": 76120
+      "export_sha256": "e3c6c2d83f4a3b9887d8ec436b0c748aed3f5823765bcb2fe51b83d5ec361131",
+      "bytes": 76901
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -5086,8 +5086,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "859ced282b579b1b1881b20ae4394d1773d9a431f10fedd0841ab74d80036984",
-      "bytes": 147180
+      "export_sha256": "392efb6a08ed01497a32f1795bf19678d2514ab3409d51d980e2b22ff393351e",
+      "bytes": 148948
     },
     {
       "path": "tests/test_manifest_urls.py",

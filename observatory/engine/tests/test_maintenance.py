@@ -1595,6 +1595,10 @@ class CheckJob(Base):
     def test_the_announcement_is_in_status_doctor_and_auto_update_status_while_off(self):
         (self.home / "auto-update").write_text("off\n")
         self.check()
+        import workspace
+        with patch.object(M, "schedule_for", return_value=FakeSchedule()):
+            doctor = workspace.doctor(self.home)
+        self.assertEqual(doctor["maintenance"]["available"]["version"], "9.9.9", "`full doctor` says it")
         status = M.status(self.home, schedule=FakeSchedule())
         self.assertEqual(status["available"]["version"], "9.9.9")
         self.assertEqual(status["available"]["install"], "project-observatory full update --apply")
@@ -1614,6 +1618,31 @@ class CheckJob(Base):
         (self.home / "auto-update").unlink()
         self.assertIsNone(M.available_update(self.home), "on: the job installs it, nothing to announce")
         self.assertNotIn("available", M.status(self.home, schedule=FakeSchedule()))
+
+    def test_the_legacy_off_announces_too(self):
+        """Off through `updates.auto: false` (before 0.19.0) is off for the check as for everything else."""
+        M.set_setting(self.home, "auto", False)
+        self.assertEqual(self.check()["announce"]["version"], "9.9.9")
+        self.assertEqual(M.read_check(self.home)["available"]["version"], "9.9.9",
+                         "the record carries the engine's decision, which the Mac app reads")
+
+    def test_turning_updates_on_drops_the_announcement_at_once(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check()
+        code, doc, _ = self.cli("auto-update", "on")
+        self.assertEqual(code, 0)
+        self.assertNotIn("available", doc)
+        self.assertNotIn("available", M.read_check(self.home), "the Mac app's item goes with it")
+
+    def test_installing_that_version_drops_the_announcement(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check(latest="9.9.9")
+        self.assertEqual(M.settle_available(self.home, installed="9.9.8"), {"version": "9.9.9", "found_at": M.iso(AT)})
+        self.assertIn("available", M.read_check(self.home), "an older install leaves it")
+        self.assertIsNone(M.settle_available(self.home, installed="9.9.9"))
+        self.assertNotIn("available", M.read_check(self.home))
+        self.assertEqual(M.read_switch(self.home), "off", "still the person's off")
+        self.assertIsNone(M.settle_available(self.home), "nothing to settle is no error")
 
     def test_turned_on_again_the_next_check_starts_the_pass_as_before(self):
         (self.home / "auto-update").write_text("off\n")

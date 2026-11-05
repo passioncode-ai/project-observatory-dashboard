@@ -1246,6 +1246,32 @@ def announcement(version: str) -> str:
             f"`{INSTALL_COMMAND}`")
 
 
+def settle_available(base: Path, installed: str | None = None) -> dict | None:
+    """Keep the check record's `available` true right away, not at the next check five minutes on: it
+    is dropped once updates are on (the job installs) or once `installed` (default: this engine) is
+    that version or a later one. The Mac app reads the record as the engine's decision (OBS-333).
+    Answers what stays recorded; never raises, under the check job's lock when it can take it."""
+    try:
+        with check_lock(base) as held:
+            record = read_check(base)
+            found = record.get("available") or {}
+            if not found:
+                return None
+            try:
+                stale = auto_enabled(base) or (
+                    config.version_tuple(str(installed or config.VERSION)) >= config.version_tuple(str(found.get("version"))))
+            except (ValueError, TypeError, config.ConfigurationError):
+                stale = True
+            if not stale:
+                return found
+            if held:
+                record.pop("available", None)
+                write_check(base, record)
+            return None
+    except OSError:
+        return None
+
+
 def available_update(base: Path) -> dict | None:
     """The newer version the check job found while automatic updates are off (OBS-333), or None:
     None while they are on (the job installs it), and once the engine runs that version or a later one."""
@@ -2010,6 +2036,7 @@ def auto_update_main(argv: list[str]) -> int:
         if a.action in ("on", "off"):
             write_switch(base, a.action == "on")
             update_events.emit("auto_update", a.action, base=base)
+            settle_available(base)
         result = {"auto_update": auto_enabled(base), "switch": switch_status(base)}
         available = available_update(base)
         if available:

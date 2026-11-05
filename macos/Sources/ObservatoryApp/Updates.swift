@@ -62,7 +62,7 @@ import ObservatoryCore
     /// Reads the workspace's maintenance record now.
     @discardableResult func check() -> StagedUpdate? {
         staged = UpdateState.read(workspace: configured.workspace, running: running)
-        available = staged == nil ? UpdateState.readAvailable(workspace: configured.workspace, running: running) : nil
+        available = staged == nil ? UpdateState.readAvailable(workspace: configured.workspace) : nil
         return staged
     }
 

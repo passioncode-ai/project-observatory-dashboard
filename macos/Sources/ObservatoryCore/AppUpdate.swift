@@ -78,28 +78,26 @@ extension UpdateState {
         URL(fileURLWithPath: workspace).appendingPathComponent("store/update-check.json")
     }
 
-    /// The version the record names as `available`, when the switch file says `off` (absent or any
-    /// other word is on, as the engine reads it) and the version is newer than the running app.
-    public static func available(_ data: Data?, switchText: String?, running: String) -> AvailableUpdate? {
-        guard switchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "off",
-              let data, let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    /// The version the check record names as `available`. That key is the engine's own decision
+    /// (`maintenance.check_pass`, `settle_available`): written only while automatic updates are off,
+    /// by the switch file or the legacy `updates.auto: false`, and dropped once the engine runs that
+    /// version or updates are on. So the app compares nothing with its own version: the engine may
+    /// lag the app, and only the engine knows. Only a version the releases can carry is read.
+    public static func available(_ data: Data?) -> AvailableUpdate? {
+        guard let data, let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let found = doc["available"] as? [String: Any], let version = found["version"] as? String,
-              AppVersion.isNewer(version, than: running) else { return nil }
+              AppVersion.parse(version) != nil else { return nil }
         return AvailableUpdate(version: version)
     }
 
-    /// Reads the workspace's switch and check record. A symbolic link or a file over 1 MB is not read.
-    public static func readAvailable(workspace: String, running: String) -> AvailableUpdate? {
+    /// Reads the workspace's check record. A symbolic link or a file over 1 MB is not read.
+    public static func readAvailable(workspace: String) -> AvailableUpdate? {
         guard workspace.hasPrefix("/") else { return nil }
-        func regular(_ url: URL) -> Data? {
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  attrs[.type] as? FileAttributeType == .typeRegular,
-                  (attrs[.size] as? NSNumber)?.intValue ?? .max <= 1_048_576 else { return nil }
-            return try? Data(contentsOf: url)
-        }
-        let switchURL = URL(fileURLWithPath: workspace).appendingPathComponent("auto-update")
-        let switchText = regular(switchURL).map { String(decoding: $0.prefix(64), as: UTF8.self) }
-        return available(regular(checkFile(workspace: workspace)), switchText: switchText, running: running)
+        let url = checkFile(workspace: workspace)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attrs[.type] as? FileAttributeType == .typeRegular,
+              (attrs[.size] as? NSNumber)?.intValue ?? .max <= 1_048_576 else { return nil }
+        return available(try? Data(contentsOf: url))
     }
 }
 
