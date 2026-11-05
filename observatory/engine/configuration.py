@@ -279,10 +279,20 @@ def source_path(name: str, fallback: str, env: str | None = None) -> Path:
     value = load().get("sources", {}).get(name)
     return Path(value).expanduser() if value else home() / "unconfigured" / fallback
 
-def enabled(name: str, section: str = "integrations") -> bool:
-    if section == "integrations" and os.environ.get("OBSERVATORY_OFFLINE") == "1":
+def offline(environ=None) -> bool:
+    """`OBSERVATORY_OFFLINE=1`: every integration reads as off for this process (`local` and the demo run so)."""
+    return (os.environ if environ is None else environ).get("OBSERVATORY_OFFLINE") == "1"
+
+
+def enabled(name: str, section: str = "integrations", *, settings: dict | None = None, environ=None) -> bool:
+    """Whether `name` is on in `section`. An integration is off while `offline(environ)`, whatever the settings say.
+    `settings` is a document `load()` returned (default: load it now); `environ` the process environment (default
+    `os.environ`). The collectors and the connections declaration (service_connections.py, OBS-340) both ask here,
+    so they cannot disagree about what runs."""
+    if section == "integrations" and offline(environ):
         return False
-    return load().get(section, {}).get(name, False) is True
+    doc = load() if settings is None else (settings or {})
+    return (doc.get(section) or {}).get(name, False) is True
 
 REGISTRY_VERSIONS = {"projects.json": 2, "repositories.json": 2, "relations.json": 2}
 

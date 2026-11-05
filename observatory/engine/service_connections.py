@@ -24,14 +24,27 @@ ONLY WHAT THE ENGINE ACTUALLY CALLS, and only when it is set to:
 - `usage-analytics` (connector, `aptabase`): the anonymous usage events, only while they are collected
   (`usage_analytics.collecting`).
 
+An integration is on when `configuration.enabled` says so, the collectors' own rule: with
+`OBSERVATORY_OFFLINE=1` in this process every integration is off and none is declared (OBS-340).
+
 STATE AND TIME come from the engine's own records, never guessed:
 
 - a provider: its collector's receipt in `store/raw` (`degraded` rows make it `degraded`; an unreadable
   receipt too; a clean one is `ok`); several receipts take the worst state and the latest time; on but
   never run is `unknown`, with no `lastAt`;
-- the hub: `store/raw/fabric-attribution.json`; a hub that is dead or cannot be verified is `down`; no hub on
-  this machine (`hub-absent`) is `unknown`, because Fabric is simply not installed,
-  any other refusal `degraded`;
+- a receipt older than `STALE_FACTOR` times its collector's interval in the tick (`INTERVAL_HOURS`), and
+  never younger than `STALE_FLOOR_HOURS`, is STALE (OBS-339): its collector has stopped running, so what it
+  last saw no longer says whether the connection works. A stale receipt reads `degraded` (never better), with
+  a reason naming that it is stale, and keeps its old `lastAt`. `degraded`, not `unknown`: the engine counts
+  on that collector and it is not running, which is a fault a host should show; `unknown` here means "never
+  used" or "not installed", which are not faults, and an `unknown` receipt would rank below a fresh `ok` one
+  and vanish when the two are combined. The age is measured at `now`, so the local server adds a clock
+  bucket (`clock_bucket`, ten minutes) to its cache key: a receipt that turns stale reads so at most ten
+  minutes late, however long no file changes;
+- the hub: `store/raw/fabric-attribution.json`; a hub that is dead or cannot be verified is `down`; any other
+  refusal `degraded`, even beside `hub-absent` (OBS-342: a refusal is a fault, absence alone is not); no hub
+  on this machine (`hub-absent` and nothing else) is `unknown`, because Fabric is simply not installed; a
+  stale receipt `degraded`, as for a provider, unless the hub was `down`;
 - the release feed: the check job's record `store/update-check.json` (`undetermined` is `degraded`);
 - the usage analytics: the last send recorded by `usage_analytics.note_send`.
 
@@ -54,6 +67,32 @@ SCHEMA = "service-connections-extension.schema.json"
 #: run. Stricter than the contract's detector on purpose: every string declared here is this module's own.
 _CREDENTIALISH = re.compile(r"://|@|\b(?:sk-|gh[pousr]_|xox[abposr]-|AKIA|glpat-|eyJ)|[A-Za-z0-9+/=_-]{40,}")
 _STRINGS = ("id", "target", "capability", "label", "purpose", "reason")
+
+#: How often the tick runs (`tools/install_launchd.py --interval`, default 1800 seconds), in hours.
+TICK_HOURS = 0.5
+#: Each receipt's collector interval in the tick (`tools/tick.py`): every tick, or the hours its `stale(...)`
+#: gate waits before it runs the collector again. Bitbucket runs with the remotes, gated on `remotes.json`
+#: (`STALE_HOURS`, 6). `tests/test_service_connections.py` reads tick.py and fails when the two disagree.
+INTERVAL_HOURS = {
+    "gh/_degraded.json": TICK_HOURS,
+    "bitbucket.json": 6,
+    "cloudflare_zones.json": TICK_HOURS,
+    "cloudflare_account.json": 24,
+    "heroku.json": 24,
+    "digitalocean.json": 24,
+    "google.json": TICK_HOURS,
+    "openrouter.json": 24,
+    "domains_live.json": 24,
+    "mcp.json": TICK_HOURS,
+    "fabric-attribution.json": TICK_HOURS,
+}
+#: A receipt is stale past this many of its collector's intervals: generous, because the collectors take
+#: turns when the machine is loaded (`tick.py` `Rotation`) and a step out of time waits for the next tick.
+STALE_FACTOR = 3
+#: ...and never sooner than this: the tick's interval is a setting, and a computer that slept did not tick.
+STALE_FLOOR_HOURS = 6
+#: How long the local server may keep a declaration before measuring the receipts' age again, in seconds.
+CLOCK_BUCKET_SECONDS = 600
 
 #: Provider integrations whose collector calls out: (integration, id, target, receipts in store/raw, purpose).
 PROVIDERS = (
@@ -79,6 +118,7 @@ _RANK = {"unknown": 0, "ok": 1, "degraded": 2, "down": 3}
 REASONS = {
     "degraded": "its last run did not read everything; the local server's degraded list says what",
     "unreadable": "its last output cannot be read",
+    "stale": "its last run is older than its schedule allows, so its collector has stopped running; the tick's log says why",
     "never": "not run on this install yet",
     "down": "it could not be reached at the last attempt",
     "absent": "no Fabric hub was found on this machine",
@@ -107,56 +147,96 @@ def _written(path: Path) -> str | None:
         return None
 
 
-def _receipt(path: Path) -> tuple[str, str | None, list] | None:
-    """(state, lastAt, degraded rows) of one receipt, or None when it does not exist."""
+def _now(now: datetime.datetime | None) -> datetime.datetime:
+    return now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+
+
+def stale_after(name: str) -> datetime.timedelta:
+    """How old the receipt `name` may be before it is stale (OBS-339): `STALE_FACTOR` intervals of its
+    collector, never less than `STALE_FLOOR_HOURS`."""
+    hours = INTERVAL_HOURS.get(name, TICK_HOURS)
+    return datetime.timedelta(hours=max(STALE_FACTOR * hours, STALE_FLOOR_HOURS))
+
+
+def _is_stale(name: str, when: str | None, now: datetime.datetime) -> bool:
+    """True when the receipt's own time is older than `stale_after(name)`. A receipt with no time at all is
+    never called stale: its age cannot be said. A time ahead of `now` (a clock moved back) is not stale."""
+    if when is None:
+        return False
+    at = datetime.datetime.strptime(when, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    return now - at > stale_after(name)
+
+
+def _receipt(path: Path, name: str | None = None, now: datetime.datetime | None = None) \
+        -> tuple[str, str | None, list, bool] | None:
+    """(state, lastAt, degraded rows, stale) of one receipt, or None when it does not exist. `name` is the
+    receipt's name in `INTERVAL_HOURS`, default the file name."""
     if path.is_symlink() or not path.is_file():
         return None
+    name, now = name or path.name, _now(now)
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "degraded", _written(path), [{"reason": "unreadable"}]
+        when = _written(path)
+        return "degraded", when, [{"reason": "unreadable"}], _is_stale(name, when, now)
     rows = doc if isinstance(doc, list) else doc.get("degraded") if isinstance(doc, dict) else None
     if not isinstance(rows, list):
-        return "degraded", _written(path), [{"reason": "unreadable"}]
+        when = _written(path)
+        return "degraded", when, [{"reason": "unreadable"}], _is_stale(name, when, now)
     when = None
     if isinstance(doc, dict):
         when = next((s for s in (_stamp(doc.get(k)) for k in _TIME_KEYS) if s), None)
-    return ("degraded" if rows else "ok"), when or _written(path), rows
+    when = when or _written(path)
+    return ("degraded" if rows else "ok"), when, rows, _is_stale(name, when, now)
 
 
-def _combine(found: list[tuple[str, str | None, list]]) -> dict:
-    """The worst state and the latest time of several receipts; nothing found is `unknown`."""
+def _combine(found: list[tuple[str, str | None, list, bool]]) -> dict:
+    """The worst state and the latest time of several receipts; nothing found is `unknown`. A stale receipt
+    counts as at least `degraded`. The reason, by precedence: down, unreadable, stale, degraded."""
     if not found:
         return {"state": "unknown", "reason": REASONS["never"]}
-    state = max((f[0] for f in found), key=_RANK.__getitem__)
+
+    def state_of(f) -> str:
+        return max(f[0], "degraded", key=_RANK.__getitem__) if f[3] else f[0]
+
+    state = max((state_of(f) for f in found), key=_RANK.__getitem__)
     times = [f[1] for f in found if f[1]]
     out: dict = {"state": state}
     if times:
         out["lastAt"] = max(times)
     if state != "ok":
         unreadable = any(r.get("reason") == "unreadable" for f in found for r in f[2] if isinstance(r, dict))
-        out["reason"] = REASONS["unreadable" if unreadable and state == "degraded" else state]
+        stale = any(f[3] for f in found)
+        why = state
+        if state == "degraded":
+            why = "unreadable" if unreadable else "stale" if stale else "degraded"
+        out["reason"] = REASONS[why]
     return out
 
 
-def _on(settings: dict, integration: str) -> bool:
-    return ((settings or {}).get("integrations") or {}).get(integration) is True
+def _on(settings: dict, integration: str, environ: dict | None) -> bool:
+    """The collectors' own rule (`configuration.enabled`): off while `OBSERVATORY_OFFLINE=1` (OBS-340)."""
+    import configuration
+    return configuration.enabled(integration, settings=settings or {}, environ=environ)
 
 
-def _hub(scratch: Path) -> dict:
-    got = _receipt(scratch / "fabric-attribution.json")
+def _hub(scratch: Path, now: datetime.datetime | None = None) -> dict:
+    """The hub's state from the attribution step's receipt. Precedence, explicit (OBS-342): a dead or
+    unverifiable hub is `down`; any other refusal is `degraded`, even beside `hub-absent`; `hub-absent` and
+    nothing else is `unknown` (Fabric is not installed, not an outage), unless the receipt is stale."""
+    got = _receipt(scratch / "fabric-attribution.json", now=now)
     if got is None:
         return {"state": "unknown", "reason": REASONS["never"]}
-    state, when, rows = got
+    state, when, rows, stale = got
     reasons = {str(r.get("reason")) for r in rows if isinstance(r, dict)}
     if reasons & HUB_DOWN:
         state = "down"
-    elif HUB_ABSENT in reasons:
+    elif reasons == {HUB_ABSENT} and not stale:
         out: dict = {"state": "unknown", "reason": REASONS["absent"]}
         if when:
             out["lastAt"] = when
         return out
-    return _combine([(state, when, rows)])
+    return _combine([(state, when, rows, stale)])
 
 
 def _release_feed(base: Path) -> dict:
@@ -194,18 +274,21 @@ def _analytics(base: Path, environ: dict | None) -> dict | None:
     return out
 
 
-def declared(base: Path, scratch: Path, settings: dict, *, environ: dict | None = None) -> list[dict]:
-    """Every connection this install makes, with its state, in the contract's members."""
+def declared(base: Path, scratch: Path, settings: dict, *, environ: dict | None = None,
+             now: datetime.datetime | None = None) -> list[dict]:
+    """Every connection this install makes, with its state, in the contract's members. `now` is the time a
+    receipt's age is measured at (OBS-339), default the clock."""
+    now = _now(now)
     out = [{"id": "fabric-hub", "kind": "service", "target": "fabric", "capability": "project.resolve",
             "label": "Fabric's hub", "purpose": "which Fabric project each folder is, asked by the tick",
-            **_hub(scratch)},
+            **_hub(scratch, now)},
            {"id": "release-feed", "kind": "connector", "target": "github-releases", "label": "release feed",
             "purpose": "the newest release's SHA256SUMS, read every five minutes to find an update",
             **_release_feed(base)}]
     for integration, ident, target, receipts, purpose in PROVIDERS:
-        if not _on(settings, integration):
+        if not _on(settings, integration, environ):
             continue
-        found = [r for r in (_receipt(scratch / name) for name in receipts) if r is not None]
+        found = [r for r in (_receipt(scratch / name, name, now) for name in receipts) if r is not None]
         out.append({"id": ident, "kind": "connector", "target": target, "purpose": purpose, **_combine(found)})
     analytics = _analytics(base, environ)
     if analytics is not None:
@@ -242,7 +325,8 @@ def check(value: dict) -> list[str]:
 
 
 def extension(base: Path | None = None, scratch: Path | None = None, settings: dict | None = None, *,
-              environ: dict | None = None, declared: Callable[..., list[dict]] | None = None) -> dict:
+              environ: dict | None = None, declared: Callable[..., list[dict]] | None = None,
+              now: datetime.datetime | None = None) -> dict:
     """The `extensions` entry for the well-known document, or {} when the kit refuses the list (its reason
     is kept in LAST_PROBLEM): a declaration a host would hide is never published. Never raises."""
     global LAST_PROBLEM
@@ -254,7 +338,8 @@ def extension(base: Path | None = None, scratch: Path | None = None, settings: d
             scratch = Path(paths.SCRATCH) if scratch is None else scratch
             settings = configuration.load() if settings is None else settings
         build = declared if declared is not None else globals()["declared"]
-        value = {"connections": build(base, scratch, settings, environ=environ)}
+        kwargs = {"environ": environ} if now is None else {"environ": environ, "now": now}
+        value = {"connections": build(base, scratch, settings, **kwargs)}
         problems = check(value)
         if problems:
             LAST_PROBLEM = "the connections declaration was not published: " + "; ".join(problems)[:240]
@@ -275,4 +360,13 @@ def signature_files(base: Path, scratch: Path) -> list[Path]:
     return files
 
 
-__all__ = ["KEY", "SCHEMA", "PROVIDERS", "INTEGRATIONS", "check", "declared", "extension", "signature_files"]
+def clock_bucket(now: float | None = None) -> int:
+    """The part of the local server's cache key that moves with the clock: a receipt's state depends on its
+    age (OBS-339), so a declaration is rebuilt at least every `CLOCK_BUCKET_SECONDS` even when no file it
+    reads changed."""
+    import time
+    return int((time.time() if now is None else now) // CLOCK_BUCKET_SECONDS)
+
+
+__all__ = ["KEY", "SCHEMA", "PROVIDERS", "INTEGRATIONS", "INTERVAL_HOURS", "STALE_FACTOR", "STALE_FLOOR_HOURS",
+           "check", "clock_bucket", "declared", "extension", "signature_files", "stale_after"]

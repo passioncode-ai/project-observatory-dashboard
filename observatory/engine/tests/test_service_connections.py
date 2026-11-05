@@ -12,12 +12,17 @@ each class holds:
   a clean receipt is `ok`; `lastAt` is the collector's own time, never invented.
 - Fabric's hub, the release feed and the usage analytics: each from the engine's own record.
 - Nothing private: a reason never echoes a collector's text (a path, a name, a key).
+- Stale (OBS-339): a receipt older than its collector's schedule allows reads `degraded` with the stale
+  reason; the schedule is the tick's, read from `tools/tick.py`.
+- Offline (OBS-340): `OBSERVATORY_OFFLINE=1` declares no provider, as `configuration.enabled` runs none.
+- The hub's precedence (OBS-342): a refusal beside `hub-absent` is `degraded`; absent alone `unknown`.
 """
 from __future__ import annotations
 
 import datetime
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -32,6 +37,12 @@ KINDS = ("service", "model", "connector", "store", "channel")
 SCHEMA = interop.contract_validator("service-connections-extension.schema.json")
 
 AT = "2026-11-05T10:00:00Z"
+#: The time every case measures a receipt's age at: an hour after AT, so AT is fresh for every collector.
+NOW = datetime.datetime(2026, 11, 5, 11, tzinfo=datetime.timezone.utc)
+
+
+def stamp(when: datetime.datetime) -> str:
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class Base(unittest.TestCase):
@@ -57,15 +68,15 @@ class Base(unittest.TestCase):
         for name in names:
             self.settings["integrations"][name] = True
 
-    def declared(self):
-        return sc.declared(self.base, self.scratch, self.settings, environ=self.env)
+    def declared(self, now=NOW):
+        return sc.declared(self.base, self.scratch, self.settings, environ=self.env, now=now)
 
     def by_id(self):
         return {c["id"]: c for c in self.declared()}
 
     def view(self):
         """The declaration as a host reads it: declared when the key is there and the value is valid."""
-        ext = sc.extension(self.base, self.scratch, self.settings, environ=self.env)
+        ext = sc.extension(self.base, self.scratch, self.settings, environ=self.env, now=NOW)
         value = ext.get(sc.KEY)
         errors = [] if value is None else [e.message for e in SCHEMA.iter_errors(value)] + sc.check(value)
         return {"declared": value is not None and not errors, "reported": bool(errors), "errors": errors,
@@ -148,10 +159,11 @@ class State(Base):
     def test_a_receipt_without_a_time_takes_the_time_the_engine_wrote_it(self):
         self.on("github")
         path = self.receipt("gh/_degraded.json", [])
-        os.utime(path, (1_793_000_000, 1_793_000_000))
+        written = int(NOW.timestamp()) - 3600
+        os.utime(path, (written, written))
         c = self.by_id()["github"]
         self.assertEqual(c["state"], "ok")
-        self.assertEqual(c["lastAt"], datetime.datetime.fromtimestamp(1_793_000_000, datetime.timezone.utc)
+        self.assertEqual(c["lastAt"], datetime.datetime.fromtimestamp(written, datetime.timezone.utc)
                          .strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.assertEqual(sc.check({"connections": [c]}), [])
 
@@ -162,6 +174,19 @@ class Hub(Base):
         hub = self.by_id()["fabric-hub"]
         self.assertEqual((hub["state"], hub["lastAt"]), ("ok", AT))
 
+    def test_a_refusal_beside_hub_absent_is_degraded_and_absent_alone_unknown(self):
+        # OBS-342: the precedence is explicit. A refusal is a fault; no hub alone is not.
+        for reasons, state in ((["hub-absent"], "unknown"), (["hub-absent", "access-refused"], "degraded"),
+                               (["access-refused", "hub-absent"], "degraded"), (["hub-absent", "hub-dead"], "down"),
+                               (["hub-absent", "hub-absent"], "unknown")):
+            with self.subTest(reasons=reasons):
+                self.receipt("fabric-attribution.json", {"checked_at": AT, "degraded": [
+                    {"source": "fabric", "reason": r} for r in reasons]})
+                hub = self.by_id()["fabric-hub"]
+                self.assertEqual((hub["state"], hub["lastAt"]), (state, AT))
+                if state == "degraded":
+                    self.assertEqual(hub["reason"], sc.REASONS["degraded"])
+
     def test_a_dead_hub_is_down_no_hub_is_unknown_and_a_refusal_degraded(self):
         # No hub on this machine (`hub-absent`) means Fabric is not installed, not an outage.
         for reason, state in (("hub-absent", "unknown"), ("hub-dead", "down"), ("access-refused", "degraded")):
@@ -169,6 +194,123 @@ class Hub(Base):
                 self.receipt("fabric-attribution.json", {"checked_at": AT, "degraded": [
                     {"source": "fabric", "reason": reason}]})
                 self.assertEqual(self.by_id()["fabric-hub"]["state"], state)
+
+
+class Stale(Base):
+    """OBS-339: a receipt older than its collector's schedule allows is `degraded`, never a lasting `ok`."""
+
+    def at(self, hours_ago: float) -> str:
+        return stamp(NOW - datetime.timedelta(hours=hours_ago))
+
+    def test_the_threshold_is_three_intervals_never_under_six_hours(self):
+        self.assertEqual(sc.STALE_FACTOR, 3)
+        self.assertEqual(sc.stale_after("gh/_degraded.json"), datetime.timedelta(hours=6), "every tick: the floor")
+        self.assertEqual(sc.stale_after("bitbucket.json"), datetime.timedelta(hours=18))
+        self.assertEqual(sc.stale_after("heroku.json"), datetime.timedelta(hours=72))
+
+    def test_a_fresh_receipt_is_ok_and_an_old_one_degraded_with_the_stale_reason(self):
+        self.on("github", "heroku")
+        for name, ident, fresh, old in (("gh/_degraded.json", "github", 5.5, 6.5), ("heroku.json", "heroku", 71, 73)):
+            with self.subTest(ident=ident):
+                self.receipt(name, {"scanned_at": self.at(fresh), "degraded": []})
+                c = self.by_id()[ident]
+                self.assertEqual((c["state"], c["lastAt"]), ("ok", self.at(fresh)))
+                self.assertNotIn("reason", c)
+                self.receipt(name, {"scanned_at": self.at(old), "degraded": []})
+                c = self.by_id()[ident]
+                self.assertEqual((c["state"], c["lastAt"]), ("degraded", self.at(old)), "the old time is kept")
+                self.assertEqual(c["reason"], sc.REASONS["stale"])
+        self.assertTrue(self.view()["declared"])
+
+    def test_the_same_receipt_turns_stale_as_the_clock_moves(self):
+        self.on("google")
+        self.receipt("google.json", {"scanned_at": AT, "degraded": []})
+        self.assertEqual(self.declared(NOW)[-1]["state"], "ok")
+        later = NOW + datetime.timedelta(hours=6)
+        self.assertEqual(self.declared(later)[-1]["state"], "degraded")
+
+    def test_a_receipt_without_its_own_time_is_aged_by_when_it_was_written(self):
+        self.on("github")
+        path = self.receipt("gh/_degraded.json", [])
+        for hours, state in ((5, "ok"), (7, "degraded")):
+            with self.subTest(hours=hours):
+                written = int(NOW.timestamp()) - hours * 3600
+                os.utime(path, (written, written))
+                self.assertEqual(self.by_id()["github"]["state"], state)
+
+    def test_a_fresh_and_a_stale_receipt_combine_to_degraded(self):
+        self.on("cloudflare")
+        self.receipt("cloudflare_zones.json", {"scanned_at": self.at(0.5), "degraded": []})
+        self.receipt("cloudflare_account.json", {"scanned_at": self.at(80), "degraded": []})
+        c = self.by_id()["cloudflare"]
+        self.assertEqual((c["state"], c["lastAt"], c["reason"]), ("degraded", self.at(0.5), sc.REASONS["stale"]))
+
+    def test_an_old_receipt_with_degraded_rows_names_the_staleness(self):
+        self.on("openrouter")
+        self.receipt("openrouter.json", {"scanned_at": self.at(100), "degraded": [{"source": "a", "reason": "b"}]})
+        c = self.by_id()["openrouter"]
+        self.assertEqual((c["state"], c["reason"]), ("degraded", sc.REASONS["stale"]))
+
+    def test_the_hub_old_receipt(self):
+        old = self.at(7)
+        for rows, state, reason in (([], "degraded", "stale"), ([{"reason": "hub-absent"}], "degraded", "stale"),
+                                    ([{"reason": "hub-dead"}], "down", "down")):
+            with self.subTest(rows=rows):
+                self.receipt("fabric-attribution.json", {"checked_at": old, "degraded": rows})
+                hub = self.by_id()["fabric-hub"]
+                self.assertEqual((hub["state"], hub["reason"], hub["lastAt"]), (state, sc.REASONS[reason], old))
+
+    def test_every_receipt_has_the_interval_the_tick_gives_its_collector(self):
+        # The intervals are the tick's schedule (tools/tick.py), not a second opinion: read them from the source.
+        tick = (ROOT / "tools" / "tick.py").read_text(encoding="utf-8")
+        stale_hours = float(re.search(r"^STALE_HOURS = (\d+(?:\.\d+)?)$", tick, re.M).group(1))
+        receipts = {name for _, _, _, names, _ in sc.PROVIDERS for name in names} | {"fabric-attribution.json"}
+        self.assertEqual(set(sc.INTERVAL_HOURS), receipts, "every receipt has an interval, and only those")
+        for name, hours in sc.INTERVAL_HOURS.items():
+            with self.subTest(receipt=name):
+                written = name.split("/")[0]
+                self.assertIn(f'SCRATCH / "{written}"', tick, "the tick runs the collector that writes it")
+                gate = re.search(r'stale\(SCRATCH / "' + re.escape(written) + r'", (\w+|\d+)\)', tick)
+                if name == "bitbucket.json":
+                    gate = re.search(r'stale\(SCRATCH / "remotes\.json", (\w+)\)', tick)
+                    self.assertIn('SCRATCH / "bitbucket.json"', tick[gate.end():gate.end() + 400])
+                if gate is None:
+                    self.assertEqual(hours, sc.TICK_HOURS, "no gate: the collector runs every tick")
+                else:
+                    value = stale_hours if gate.group(1) == "STALE_HOURS" else float(gate.group(1))
+                    self.assertEqual(hours, value)
+
+    def test_the_tick_interval_is_the_schedulers_default(self):
+        launchd = (ROOT / "tools" / "install_launchd.py").read_text(encoding="utf-8")
+        self.assertRegex(launchd, r'"--interval", type=int, default=%d\b' % int(sc.TICK_HOURS * 3600))
+
+    def test_the_clock_bucket_moves_every_ten_minutes(self):
+        self.assertEqual(sc.clock_bucket(6000.0), sc.clock_bucket(6599.0))
+        self.assertNotEqual(sc.clock_bucket(6599.0), sc.clock_bucket(6600.0))
+
+
+class Offline(Base):
+    """OBS-340: the declaration asks `configuration.enabled`, so `OBSERVATORY_OFFLINE=1` declares no provider."""
+
+    def test_offline_declares_no_provider_and_online_does(self):
+        self.on("github", "heroku")
+        self.receipt("heroku.json", {"scanned_at": AT, "degraded": []})
+        self.assertLessEqual({"github", "heroku"}, set(self.by_id()))
+        self.env = {"OBSERVATORY_OFFLINE": "1"}
+        found = self.by_id()
+        self.assertFalse({"github", "heroku"} & set(found), "offline: no collector runs, none is declared")
+        self.assertLessEqual({"fabric-hub", "release-feed"}, set(found))
+        self.env = {"OBSERVATORY_OFFLINE": "0"}
+        self.assertIn("heroku", self.by_id(), "only the value 1 is offline, as for the collectors")
+
+    def test_the_same_rule_as_the_collectors(self):
+        import configuration
+        self.on("github")
+        for env in ({}, {"OBSERVATORY_OFFLINE": "1"}):
+            with self.subTest(env=env):
+                self.env = env
+                self.assertEqual("github" in self.by_id(),
+                                 configuration.enabled("github", settings=self.settings, environ=env))
 
 
 class ReleaseFeed(Base):

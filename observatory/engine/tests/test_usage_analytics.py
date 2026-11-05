@@ -14,6 +14,9 @@ What each class holds:
 - Flush: batches of at most 25, expired events dropped, 400 and 404 never retried, a transport error
   or 5xx retried then kept, a test sandbox never sent.
 - Notice: once on a terminal, never into a log, never when off; the dashboard's for seven days.
+- Counters (OBS-341): updates are serialised by a lock, so concurrent writers (threads or processes)
+  lose no count and no `last_send`; a replace the OS refuses for a moment is tried again, and one it keeps
+  refusing is named in `status` as `degraded`, never raised.
 """
 from __future__ import annotations
 
@@ -22,10 +25,14 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -58,6 +65,8 @@ class Base(unittest.TestCase):
         self.base.mkdir()
         (self.base / "workspace.json").write_text("{}", encoding="utf-8")
         self.env = {UA.APP_KEY_ENV: KEY, UA.ENVIRONMENT_ENV: "production"}
+        UA.WRITE_PROBLEM = None
+        self.addCleanup(setattr, UA, "WRITE_PROBLEM", None)
 
     def rec(self, name="command_run", env=None, **props):
         props = props or {"surface": "cli", "command": "doctor", "outcome": "ok", "exit_code": 0, "duration_ms": 12}
@@ -158,7 +167,9 @@ class Record(Base):
     def test_an_unwritable_folder_never_raises(self):
         (self.base / "store").mkdir()
         (self.base / "store" / "analytics").write_text("a file where the folder goes", encoding="utf-8")
-        self.assertFalse(self.rec())
+        with mock.patch("sys.stderr", io.StringIO()):
+            self.assertFalse(self.rec())
+        self.assertIn("FileExistsError", UA.WRITE_PROBLEM, "the lost count is named, by its class only")
 
     def test_error_kind_is_the_class_name_never_the_message(self):
         self.assertEqual(UA.error_kind(OSError("/srv/someone/secret")), "OSError")
@@ -295,6 +306,102 @@ class Flush(Base):
 
     def test_no_key_sends_nothing(self):
         self.assertEqual(UA.flush(self.base, transport=Fake(), environ={})["result"], "no-app-key")
+
+
+class Counters(Base):
+    """OBS-341: `count` and `note_send` read, change and write counters.json under one lock."""
+
+    def test_concurrent_threads_lose_no_count_and_no_last_send(self):
+        real = UA._read_json
+
+        def slow(path):  # widen the read-to-write window so an unserialised update would be lost
+            doc = real(path)
+            time.sleep(0.002)
+            return doc
+
+        at = datetime.datetime(2026, 11, 5, 10, tzinfo=datetime.timezone.utc)
+
+        def counting():
+            for _ in range(15):
+                UA.count(self.base, "sent")
+
+        def sending():
+            time.sleep(0.01)
+            UA.note_send(self.base, ok=True, at=at)
+
+        with mock.patch.object(UA, "_read_json", slow):
+            workers = [threading.Thread(target=counting) for _ in range(6)] + [threading.Thread(target=sending)]
+            for w in workers:
+                w.start()
+            for w in workers:
+                w.join()
+        doc = UA.counters(self.base)
+        self.assertEqual(doc["sent"], 90)
+        self.assertEqual(doc["last_send"], {"at": "2026-11-05T10:00:00Z", "ok": True})
+        self.assertIsNone(UA.WRITE_PROBLEM)
+
+    def test_concurrent_processes_lose_no_count_and_no_last_send(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import usage_analytics as UA; from pathlib import Path\n"
+                "base = Path(sys.argv[2])\n"
+                "for i in range(40):\n"
+                "    UA.count(base, 'sent')\n"
+                "    if i == 20 and sys.argv[3] == 'send': UA.note_send(base, ok=False)\n")
+        procs = [subprocess.Popen([sys.executable, "-c", code, str(ROOT), str(self.base), role])
+                 for role in ("count", "send", "count")]
+        self.assertEqual([p.wait(timeout=60) for p in procs], [0, 0, 0])
+        doc = UA.counters(self.base)
+        self.assertEqual(doc["sent"], 120)
+        self.assertIs(doc["last_send"]["ok"], False)
+
+    def test_a_held_lock_is_waited_for_then_named_never_raised(self):
+        import oslocks
+        import osprivacy
+        UA.count(self.base, "sent")
+        fd = osprivacy.open(UA.folder(self.base) / ".counters.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, fd)
+        oslocks.flock(fd, oslocks.LOCK_EX)
+        with mock.patch.object(UA, "COUNTERS_LOCK_SECONDS", 0.05), mock.patch("sys.stderr", io.StringIO()) as err:
+            UA.count(self.base, "sent")
+            UA.count(self.base, "sent")
+        self.assertEqual(UA.counters(self.base)["sent"], 1, "nothing written while another writer holds the lock")
+        self.assertIn("TimeoutError", UA.WRITE_PROBLEM)
+        self.assertEqual(err.getvalue().count("usage-analytics:"), 1, "logged once, not per call")
+        self.assertEqual(UA.status(self.base, self.env)["degraded"][0]["source"], "analytics-counters")
+        oslocks.flock(fd, oslocks.LOCK_UN)
+        UA.count(self.base, "sent")
+        self.assertEqual(UA.counters(self.base)["sent"], 2)
+
+    def test_a_replace_refused_for_a_moment_is_tried_again(self):
+        real, calls = os.replace, []
+
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) <= 2:
+                raise PermissionError(13, "in use")
+            return real(src, dst)
+
+        with mock.patch.object(UA, "REPLACE_PAUSE_SECONDS", 0), mock.patch.object(UA.os, "replace", flaky):
+            UA.note_send(self.base, ok=True)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(UA.counters(self.base)["last_send"]["ok"])
+        self.assertIsNone(UA.WRITE_PROBLEM)
+
+    def test_a_replace_always_refused_is_named_in_status_never_lost_silently(self):
+        UA.count(self.base, "sent")
+
+        def refused(src, dst):
+            raise PermissionError(13, "in use")
+
+        with mock.patch.object(UA, "REPLACE_PAUSE_SECONDS", 0), mock.patch.object(UA.os, "replace", refused), \
+                mock.patch("sys.stderr", io.StringIO()) as err:
+            UA.note_send(self.base, ok=True)
+        self.assertNotIn("last_send", UA.counters(self.base))
+        self.assertIn("PermissionError", UA.WRITE_PROBLEM)
+        self.assertNotIn(str(self.base), err.getvalue() + UA.WRITE_PROBLEM, "no path in the reason")
+        self.assertEqual(UA.status(self.base, self.env)["degraded"],
+                         [{"source": "analytics-counters", "reason": UA.WRITE_PROBLEM}])
+        self.assertEqual([p.name for p in UA.folder(self.base).iterdir() if p.name.endswith(".tmp")], [],
+                         "no temporary file is left behind")
 
 
 class Clock:
