@@ -39,17 +39,23 @@ never the REST API's 60 requests an hour and never the pass above, whose guard, 
 update may take longer than five minutes (LC-03: a job never runs past its own interval). When it
 finds a newer release it starts the pass at once (`kick`), unless that release is held for a
 person or was tried in the last 15 minutes; the pass applies it at a safe point as before. A check
-that finds what the last one found prints nothing and logs nothing new (`update_events`).
+that finds what the last one found prints nothing and logs nothing new (`update_events`). With
+automatic updates off the job still reads the feed on the same schedule (OBS-333, ADR-0188 item 4)
+but never starts the pass: a newer version is recorded as `available` in `update-check.json` and
+announced once per version (the job's output, `full doctor`, `full auto-update status`, Home and
+Health in the dashboard, the Mac app's menu), with the command that installs it,
+`full update --apply`. Where no scheduler exists the plugin hook runs this check while off.
 
 THE SWITCH (LC-16) is the file `auto-update` in the workspace home: absent means on, and
 only the word `off` turns automatic updates off. `full auto-update on|off` writes it; an
 update, a reinstall or an uninstall never does. Installs that turned updates off before
 0.19.0 did it with `updates.auto: false` in config/settings.json: that is still honoured
 as off while the file is absent, and the next `auto-update` command moves it into the file
-and says so. Off stops the checks, the downloads and the installs, the app's included;
-the daily backup keeps running.
+and says so. Off stops the downloads and the installs, the app's included, and never starts
+the pass for a release; the check keeps reading the feed so a newer version is still announced
+(OBS-333), and the daily backup keeps running. An update never turns a person's off back on.
 
-    full auto-update status|on|off     the switch; off keeps the backups
+    full auto-update status|on|off     the switch, and a newer version waiting while it is off
     full maintain run                  one pass now (what the scheduler runs)
     full maintain ensure               schedule the pass and mirror the passphrase
     full maintain uninstall            remove the schedule; it stays off until `ensure`
@@ -1179,9 +1185,11 @@ def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, ki
     answer means the check found what the last one found: `main` prints nothing then."""
     at = at or now()
     config.validate_workspace(base, required=True)
-    if not auto_enabled(base):
-        return {"status": "off", "quiet": True}
-    kick_to = None
+    # OFF STILL ANNOUNCES (OBS-333, ADR-0188 item 4): with automatic updates off the feed is read
+    # on the same schedule, nothing is downloaded or installed and the pass is never started; a
+    # newer version is recorded in `available` and announced once per version.
+    off = not auto_enabled(base)
+    kick_to, announce = None, None
     with check_lock(base) as held:
         if not held:
             return {"status": "busy", "quiet": True}
@@ -1203,20 +1211,76 @@ def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, ki
             newer = _newer(latest)
             check.update(result="update-available" if newer else "up-to-date", latest=latest)
             update_events.emit("update_check", "ready" if newer else "current", base=base)
-            if newer and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
+            if newer and off:
+                if (record.get("available") or {}).get("version") != latest:
+                    announce = record["available"] = {"version": latest, "found_at": iso(at)}
+            else:
+                record.pop("available", None)
+            if newer and not off and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
                 kick_to = latest
                 record["kick"] = {"at": iso(at), "to": latest}
         record["check"] = check
         write_check(base, record)
     report: dict = {"status": "checked", "at": iso(at), "check": check}
+    if off:
+        report["auto_update"] = False
+    if announce:
+        report["announce"] = {**announce, "install": INSTALL_COMMAND,
+                              "text": announcement(announce["version"])}
     if kick_to:
         try:
             report["kick"] = (kick or (lambda: schedule_for(base).kick()))()
         except Exception as exc:  # noqa: BLE001: the scheduled pass still comes within 15 minutes
             report["kick"] = {"result": "failed", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
-    report["quiet"] = not kick_to and previous.get("result") == check["result"] \
+    report["quiet"] = not kick_to and not announce and previous.get("result") == check["result"] \
         and previous.get("latest") == check.get("latest")
     return report
+
+
+#: How a person installs a release while automatic updates are off.
+INSTALL_COMMAND = "project-observatory full update --apply"
+
+
+def announcement(version: str) -> str:
+    return (f"version {version} is available; automatic updates are off, so it waits for you: "
+            f"`{INSTALL_COMMAND}`")
+
+
+def settle_available(base: Path, installed: str | None = None) -> dict | None:
+    """Keep the check record's `available` true right away, not at the next check five minutes on: it
+    is dropped once updates are on (the job installs) or once `installed` (default: this engine) is
+    that version or a later one. The Mac app reads the record as the engine's decision (OBS-333).
+    Answers what stays recorded; never raises, under the check job's lock when it can take it."""
+    try:
+        with check_lock(base) as held:
+            record = read_check(base)
+            found = record.get("available") or {}
+            if not found:
+                return None
+            try:
+                stale = auto_enabled(base) or (
+                    config.version_tuple(str(installed or config.VERSION)) >= config.version_tuple(str(found.get("version"))))
+            except (ValueError, TypeError, config.ConfigurationError):
+                stale = True
+            if not stale:
+                return found
+            if held:
+                record.pop("available", None)
+                write_check(base, record)
+            return None
+    except OSError:
+        return None
+
+
+def available_update(base: Path) -> dict | None:
+    """The newer version the check job found while automatic updates are off (OBS-333), or None:
+    None while they are on (the job installs it), and once the engine runs that version or a later one."""
+    if auto_enabled(base):
+        return None
+    found = read_check(base).get("available") or {}
+    if not _newer(found.get("version")):
+        return None
+    return {"version": str(found["version"]), "found_at": found.get("found_at"), "install": INSTALL_COMMAND}
 
 
 def _reload_after_pass(base: Path, spawn=None) -> str | None:
@@ -1728,6 +1792,9 @@ def status(base: Path, *, schedule=None) -> dict:
                               "`project-observatory full maintain ensure`")
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
+    available = available_update(base)
+    if available:
+        warn("update-available", announcement(available["version"]), version=available["version"])
     update = state.get("update") or {}
     if state.get("services_not_restarted") or update.get("result") == "updated-services-not-restarted":
         # This engine's own interpreter, as the dashboard's commands carry it: a Mac has no
@@ -1804,6 +1871,7 @@ def status(base: Path, *, schedule=None) -> dict:
             "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
             "machine_backup": machine,
             "app": state.get("app"), "log_retention": retention,
+            **({"available": available} if available else {}),
             "warnings": warnings, "warning_items": items}
 
 
@@ -1895,11 +1963,15 @@ def hook(base: Path) -> dict:
 
     It schedules the job where nothing is scheduled yet (respecting `maintain uninstall`),
     and where no scheduler exists — Linux without a systemd user manager — it runs the
-    pass itself, which is cheap when nothing is due."""
+    pass itself, which is cheap when nothing is due. With automatic updates off the pass
+    looks for nothing, so the hook also runs the check there: a newer version is still
+    announced (OBS-333), and the check never starts or installs anything while off."""
     result = ensure(base)
     sched = result.get("schedule") or {}
     if sched.get("result") == "unscheduled":
         result["pass"] = run_pass(base)
+        if not auto_enabled(base):
+            result["check"] = check_pass(base)
     return result
 
 
@@ -1964,7 +2036,11 @@ def auto_update_main(argv: list[str]) -> int:
         if a.action in ("on", "off"):
             write_switch(base, a.action == "on")
             update_events.emit("auto_update", a.action, base=base)
+            settle_available(base)
         result = {"auto_update": auto_enabled(base), "switch": switch_status(base)}
+        available = available_update(base)
+        if available:
+            result["available"] = available
         if a.action == "on" and system_setup_allowed(base):
             result["ensure"] = ensure(base, explicit=True)
         elif a.action == "status":

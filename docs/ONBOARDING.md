@@ -2750,14 +2750,22 @@ excluded. Synthetic evidence: `test_lifecycle.LogRetentionEvidence` and the
 **The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
 home. Without it, updates are on; only the word `off` in it turns them off. The commands
 below write it, and you can write it yourself. An update, a reinstall or an uninstall never
-writes it, neither `on` nor `off`. Off stops the checks, the downloads and the installs, the
-Mac app's included; the daily backup keeps running. An install that turned updates off before
+writes it, neither `on` nor `off`. Off stops the downloads and the installs, the Mac app's
+included; the daily backup keeps running. Off still tells you when a newer version exists: the
+check job keeps reading the release feed every five minutes, never downloads or installs, and
+announces each newer version once (the job's log line, `full auto-update status`,
+`full doctor`, a calm row on the dashboard's Home and on Health, and the Mac app's menu), with
+the command that installs it when you choose, `project-observatory full update --apply`. The
+version it found is kept as `available` in `store/update-check.json`: `full update --apply`
+removes it when it installs that version or a later one, `full auto-update on` removes it at
+once, and otherwise the next check does. Off by the older `updates.auto: false` counts the
+same. The Mac app shows its menu item exactly while that key is there. An install that turned updates off before
 0.19.0 did it with `updates.auto: false` in `config/settings.json`: that still counts as off,
 and the next `auto-update` command moves it into the file and says so.
 
 ```sh
-project-observatory full auto-update status   # on or off, last check, last result, warnings
-project-observatory full auto-update off      # writes `off`; new releases wait for you, the daily backup keeps running
+project-observatory full auto-update status   # on or off, last check, last result, warnings, a newer version waiting
+project-observatory full auto-update off      # writes `off`; new releases wait for you and are announced, the daily backup keeps running
 project-observatory full auto-update on
 project-observatory full maintain status      # everything the job last did
 project-observatory full maintain run         # one pass now
@@ -2776,7 +2784,8 @@ How the job gets scheduled:
 - `full upgrade --apply` (run by `full update`) schedules the job when it runs from a
   terminal.
 - The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
-  without a systemd user manager, the hook runs the pass itself.
+  without a systemd user manager, the hook runs the pass itself, and the check too while
+  updates are off.
 
 `OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
 systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,

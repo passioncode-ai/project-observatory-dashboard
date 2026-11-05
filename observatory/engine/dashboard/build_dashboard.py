@@ -449,6 +449,9 @@ def from_store() -> dict:
             ms = maintenance.status(Path(paths.HOME))
             out["health"]["maintenance"] = {
                 "auto": ms["auto_update"], "wanted": ms["schedule_wanted"],
+                # A newer version the check found while automatic updates are off (OBS-333):
+                # announced on Home and here, installed only by `full update --apply`.
+                "available": (ms.get("available") or {}).get("version"),
                 # Installed AND loaded, as `maintain status` says it (A14); None where this
                 # process may not ask launchd (a sandbox or a test), never a guessed "no".
                 "scheduled": None if (ms.get("schedule") or {}).get("probed") is False else bool(ms.get("scheduled")),
@@ -2356,6 +2359,9 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
   if (!MT.wanted || MT.scheduled === false)
     hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),
       fullCommand("maintain ensure")]);
+  else if (!MT.auto && MT.available)
+    hb.push([T("Install updates automatically"), T("off: version {version} is available and waits for you",
+      {version: MT.available}), fullCommand("update --apply")]);
   else if (!MT.auto)
     hb.push([T("Install updates automatically"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
   else {
@@ -2373,7 +2379,7 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     hb.push([T("installed"), T("engine {v}", {v: V.engine}) + (V.app ? ", " + T("app {v}", {v: V.app}) : ""), status]);
   // Every warning the job raised, in the reader's language, each its own row (A14) —
   // except what a row above or below already says (A14 review: every problem twice).
-  const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "no-backup", "not-encrypted", "passphrase",
+  const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "update-available", "no-backup", "not-encrypted", "passphrase",
                         "machine-backup-missing"]);
   const WARN = {
     "services-not-restarted": () => [T("a background job did not start again after the last backup or update"),

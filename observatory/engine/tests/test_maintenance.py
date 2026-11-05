@@ -1547,14 +1547,111 @@ class CheckJob(Base):
         self.assertEqual(self.check(feed=offline, at=AT + datetime.timedelta(minutes=5))["check"]["failures"], 2)
         self.assertEqual(events(), [("update_check", "check_failed")])
 
-    def test_off_means_no_read_and_a_running_check_means_no_second_one(self):
-        (self.home / "auto-update").write_text("off\n")
+    def test_a_running_check_means_no_second_one(self):
         reads = []
-        self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "off")
-        (self.home / "auto-update").unlink()
         with M.check_lock(self.home):
             self.assertEqual(self.check(feed=lambda base: reads.append(1) or "9.9.9")["status"], "busy")
         self.assertEqual(reads, [])
+
+    # --- OBS-324's sibling OBS-333: off still announces a new version (ADR-0188 item 4) ----------
+
+    def test_off_still_reads_the_feed_on_its_schedule_and_never_starts_the_pass(self):
+        (self.home / "auto-update").write_text("off\n")
+        kicks, reads = [], []
+        report = self.check(kicks=kicks, feed=lambda base: reads.append(1) or "9.9.9")
+        self.assertEqual((report["status"], report["check"]["result"]), ("checked", "update-available"))
+        self.assertNotIn("kick", report)
+        self.assertEqual((kicks, reads), ([], [1]))
+        not_due = self.check(kicks=kicks, at=AT + datetime.timedelta(minutes=2),
+                             feed=lambda base: reads.append(1) or "9.9.9")
+        self.assertEqual(not_due["status"], "not-due", "the same five-minute schedule, the same LC-03 limits")
+        self.assertEqual(reads, [1])
+        self.assertEqual(M.read_switch(self.home), "off", "the person's off is never reversed")
+
+    def test_off_announces_a_newer_version_once_per_version(self):
+        (self.home / "auto-update").write_text("off\n")
+        first = self.check()
+        self.assertEqual(first["announce"]["version"], "9.9.9")
+        self.assertFalse(first["quiet"])
+        for minutes in (5, 10):
+            again = self.check(at=AT + datetime.timedelta(minutes=minutes))
+            self.assertNotIn("announce", again)
+            self.assertTrue(again["quiet"], "the same version is not said again")
+        self.assertEqual(events(), [("update_check", "ready")])
+        newer = self.check(latest="9.9.10", at=AT + datetime.timedelta(minutes=15))
+        self.assertEqual(newer["announce"]["version"], "9.9.10", "a newer version is announced in its turn")
+        self.assertEqual(M.available_update(self.home)["version"], "9.9.10")
+
+    def test_off_never_downloads_or_installs_what_the_check_found(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check()
+        commands, app = FakeCommands(check=10, latest="9.9.9"), RecordingApp()
+        with patch.object(M, "_services", return_value=object()):
+            report = M.run_pass(self.home, at=AT + datetime.timedelta(minutes=1), commands=commands,
+                                services=FakeServices(), store=self.store, app=app, sleep=lambda s: None)
+        self.assertEqual((report["update"]["result"], report["app"]["result"]), ("off", "off"))
+        self.assertEqual((commands.calls, app.calls), ([], []))
+
+    def test_the_announcement_is_in_status_doctor_and_auto_update_status_while_off(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check()
+        import workspace
+        with patch.object(M, "schedule_for", return_value=FakeSchedule()):
+            doctor = workspace.doctor(self.home)
+        self.assertEqual(doctor["maintenance"]["available"]["version"], "9.9.9", "`full doctor` says it")
+        status = M.status(self.home, schedule=FakeSchedule())
+        self.assertEqual(status["available"]["version"], "9.9.9")
+        self.assertEqual(status["available"]["install"], "project-observatory full update --apply")
+        code, doc, _ = self.cli("auto-update", "status")
+        self.assertEqual((code, doc["available"]["version"]), (0, "9.9.9"))
+        code, doc, _ = self.cli("auto-update", "off")
+        self.assertEqual(doc["available"]["version"], "9.9.9")
+        [item] = [i for i in status["warning_items"] if i["code"] == "update-available"]
+        self.assertEqual(item["version"], "9.9.9")
+
+    def test_nothing_is_announced_when_up_to_date_or_while_on(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check()
+        self.check(latest=config.VERSION, at=AT + datetime.timedelta(minutes=5))
+        self.assertIsNone(M.available_update(self.home), "the engine is current: nothing waits")
+        self.check(at=AT + datetime.timedelta(minutes=10))
+        (self.home / "auto-update").unlink()
+        self.assertIsNone(M.available_update(self.home), "on: the job installs it, nothing to announce")
+        self.assertNotIn("available", M.status(self.home, schedule=FakeSchedule()))
+
+    def test_the_legacy_off_announces_too(self):
+        """Off through `updates.auto: false` (before 0.19.0) is off for the check as for everything else."""
+        M.set_setting(self.home, "auto", False)
+        self.assertEqual(self.check()["announce"]["version"], "9.9.9")
+        self.assertEqual(M.read_check(self.home)["available"]["version"], "9.9.9",
+                         "the record carries the engine's decision, which the Mac app reads")
+
+    def test_turning_updates_on_drops_the_announcement_at_once(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check()
+        code, doc, _ = self.cli("auto-update", "on")
+        self.assertEqual(code, 0)
+        self.assertNotIn("available", doc)
+        self.assertNotIn("available", M.read_check(self.home), "the Mac app's item goes with it")
+
+    def test_installing_that_version_drops_the_announcement(self):
+        (self.home / "auto-update").write_text("off\n")
+        self.check(latest="9.9.9")
+        self.assertEqual(M.settle_available(self.home, installed="9.9.8"), {"version": "9.9.9", "found_at": M.iso(AT)})
+        self.assertIn("available", M.read_check(self.home), "an older install leaves it")
+        self.assertIsNone(M.settle_available(self.home, installed="9.9.9"))
+        self.assertNotIn("available", M.read_check(self.home))
+        self.assertEqual(M.read_switch(self.home), "off", "still the person's off")
+        self.assertIsNone(M.settle_available(self.home), "nothing to settle is no error")
+
+    def test_turned_on_again_the_next_check_starts_the_pass_as_before(self):
+        (self.home / "auto-update").write_text("off\n")
+        kicks = []
+        self.check(kicks=kicks)
+        (self.home / "auto-update").write_text("on\n")
+        report = self.check(kicks=kicks, at=AT + datetime.timedelta(minutes=5))
+        self.assertEqual((report.get("kick"), len(kicks)), ({"result": "started"}, 1))
+        self.assertNotIn("available", M.read_check(self.home))
 
     def test_a_check_and_a_pass_at_the_same_moment_both_run(self):
         # Review H1: the check held the pass lock (and slept 90 s in it), so the 15-minute pass found
@@ -1733,6 +1830,17 @@ class Schedule(Base):
         self.assertIn("plugin", out["schedule"]["fallback"])
         self.assertEqual(out["pass"], {"status": "ran"})
         run.assert_called_once()
+        self.assertNotIn("check", out, "on: the pass's own check covers it")
+
+    def test_with_no_scheduler_and_updates_off_the_hook_still_checks(self):
+        (self.home / "auto-update").write_text("off\n")
+        with patch.object(M, "schedule_for", return_value=FakeSchedule(fail="no systemd user manager")), \
+                patch.object(backup_vault_store(), "SecretStore", return_value=self.store), \
+                patch.object(M, "run_pass", return_value={"status": "ran"}), \
+                patch.object(M, "check_pass", return_value={"status": "checked"}) as check:
+            out = M.hook(self.home)
+        self.assertEqual(out["check"], {"status": "checked"})
+        check.assert_called_once()
 
     def test_system_setup_needs_a_person_or_the_flag_and_never_a_temporary_home(self):
         # A person at a terminal is `osprivacy.is_terminal` (OBS-279: on Windows `isatty` is true for NUL).

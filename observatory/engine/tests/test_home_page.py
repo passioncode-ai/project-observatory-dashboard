@@ -329,5 +329,19 @@ class ReviewFixes(unittest.TestCase):
         self.assertIn("Анонимные данные об использовании", ru)
 
 
+    def test_a_newer_version_waiting_while_updates_are_off_is_one_calm_row(self):
+        """OBS-333: off still announces; the row carries the command that installs it, and nothing else."""
+        off = {"rows": [], "health": {"maintenance": {"auto": False, "available": "9.9.9"}}}
+        shown = home_page.home_html(off, EN)
+        self.assertIn('id="home-update-h"', shown)
+        self.assertIn("Version 9.9.9 is available", shown)
+        self.assertIn("update --apply", shown)
+        self.assertNotIn("auto-update on", shown, "it never asks the person to undo their off")
+        self.assertEqual(shown.count('id="home-update-h"'), 1)
+        for maintenance in ({"auto": True, "available": "9.9.9"}, {"auto": False, "available": None}, {}):
+            self.assertNotIn("home-update-h", home_page.home_html({"rows": [], "health": {"maintenance": maintenance}}, EN))
+        self.assertIn("Доступна версия 9.9.9", home_page.home_html(off, RU))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -688,6 +688,18 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(doc["machine_backup"]["result"], "taken")
         self.assertFalse([c for c in seen[0] if c[0] == "stop"], "taken before any job was stopped")
 
+    def test_installing_the_announced_version_drops_the_announcement(self):
+        # OBS-333: with updates off the check recorded the newer version as `available`; once
+        # `full update --apply` installs it, nothing (the Mac app's menu included) names it any more.
+        import maintenance
+        (self.home / "auto-update").write_text("off\n")
+        maintenance.write_check(self.home, {"available": {"version": NEWER, "found_at": "2026-11-05T10:00:00Z"}})
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        self.assertNotIn("available", maintenance.read_check(self.home))
+        self.assertEqual(maintenance.read_switch(self.home), "off", "the person's off stays")
+
     def test_a_failed_machine_backup_is_degraded_and_the_update_goes_on(self):
         self.gh.publish(NEWER)
 

@@ -71,7 +71,9 @@ downloads, verifies and installs it (`full update --apply --unattended`; a relea
 that declares a step needing a person is verified and held, not installed), and on
 macOS the matching app, never while the app runs. Once a day it writes an encrypted
 snapshot of the workspace to the backups folder. `full auto-update off` stops the
-checks, downloads and installs and keeps the daily backup; `full maintain uninstall`
+downloads and installs and keeps the daily backup; the check job still reads the release
+feed on its schedule, so a newer version is announced, and installs only on a person's
+`full update --apply`; `full maintain uninstall`
 removes the schedule, and `full init` and `full update` leave it removed until
 `full maintain ensure` or `full auto-update on`. `full init` schedules the job only
 from a person's terminal or with `OBSERVATORY_SYSTEM_SETUP=1`

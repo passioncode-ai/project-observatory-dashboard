@@ -391,6 +391,19 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     # so and offers no accept/reject button; nothing calls them "awaiting a decision".
     check("the agents' records say nothing here needs the person",
           n["Здесь ничего не требует действий"] >= 1 and n["Команда: принять"] == 0 and n["ждут решения"] == 0, str(n))
+    # OBS-333: off still announces a newer version, once, with the command that installs it.
+    maintenance.write_check(home, {"check": {"at": at, "result": "update-available", "latest": "9.9.9"},
+                                   "available": {"version": "9.9.9", "found_at": at}})
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the health page builds with a newer version waiting", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
+    words = ("версия 9.9.9 доступна и ждёт вас", "update --apply", "is available; automatic updates are off")
+    n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
+    check("off with a newer version: the switch row says it waits, in Russian",
+          n["версия 9.9.9 доступна и ждёт вас"] == 1, str(n))
+    check("and hands over `update --apply`", n["update --apply"] >= 1, str(n))
+    check("the job's own warning is not repeated in English", n["is available; automatic updates are off"] == 0, str(n))
 
 
 def test_the_mcp_page_says_how_to_probe_and_names_a_command_once() -> None:

@@ -27,6 +27,29 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertFalse(AppVersion.isNewer("０.19.0", than: "0.18.0"), "ASCII digits only")
     }
 
+    /// OBS-333: with automatic updates off, the engine's check records a newer version as `available`,
+    /// and only then: the record is the engine's decision (the switch file and the legacy
+    /// `updates.auto: false` alike, and dropped once the engine runs that version). The app reads it
+    /// as it is and installs nothing (its menu item copies the command).
+    func testANewerVersionTheEngineRecordedIsWhatTheAppShows() throws {
+        let found = try JSONSerialization.data(withJSONObject: ["available": ["version": "0.19.0", "found_at": "2026-11-05T10:00:00Z"]])
+        XCTAssertEqual(UpdateState.available(found), AvailableUpdate(version: "0.19.0"))
+        let none = try JSONSerialization.data(withJSONObject: ["check": ["result": "up-to-date"]])
+        XCTAssertNil(UpdateState.available(none), "no `available`: the engine runs it, or updates are on")
+        XCTAssertNil(UpdateState.available(Data("{}".utf8)))
+        XCTAssertNil(UpdateState.available(Data("{not json".utf8)))
+        let unreadable = try JSONSerialization.data(withJSONObject: ["available": ["version": "0.19"]])
+        XCTAssertNil(UpdateState.available(unreadable), "only a version the engine's releases can carry")
+        let workspace = try temp()
+        XCTAssertNil(UpdateState.readAvailable(workspace: workspace.path), "no record yet")
+        try FileManager.default.createDirectory(at: workspace.appendingPathComponent("store"), withIntermediateDirectories: true)
+        try found.write(to: UpdateState.checkFile(workspace: workspace.path))
+        XCTAssertEqual(UpdateState.readAvailable(workspace: workspace.path), AvailableUpdate(version: "0.19.0"),
+                       "legacy off has no switch file; the record alone decides")
+        XCTAssertNil(UpdateState.readAvailable(workspace: "relative"))
+        XCTAssertEqual(UpdateState.installCommand, "project-observatory full update --apply")
+    }
+
     func testAStagedUpdateIsReadFromTheMaintenanceRecord() {
         let waiting = record(["result": "waiting-for-quit", "version": "0.18.0", "pending": "0.19.0", "target": "0.19.0"])
         XCTAssertEqual(UpdateState.pending(waiting, running: "0.18.0"), StagedUpdate(version: "0.19.0"))
