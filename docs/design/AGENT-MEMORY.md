@@ -58,6 +58,57 @@ purpose}` — and every read and handoff reports where each one is now
 to read is state that silently does not travel. The body is at most 64 KiB; a log is linked as
 an artifact, not pasted. `checkpoint_body` in `store/workflow.py` holds every bound.
 
+### A session Fabric starts for a board request (OBS-323)
+
+When a board request reaches a project with no live responder, Fabric may start a session that does it, reports and
+ends (Fabric's on-demand sessions specification, §3.4). Fabric writes the workflow as `service:fabric`, and its
+checkpoint `artifacts` carry references only, each `{"kind": "other", "ref": …}`: `board-request:<uuid>`,
+`board-thread:<uuid>`, `capability:<name>`, `fabric-project:<uuid>`, `deadline:<ISO 8601 UTC>`, and
+`run-ends-at:<ISO 8601 UTC>` on each dispatch's own checkpoint. `dispatch_packet.validate` (called by
+`checkpoint_body`) refuses a ref in another shape, a ref with any other member (no note, path or text), a prefix
+named twice and an absolute path anywhere in such a packet; a workflow without those refs is not touched. The
+redactor keeps the three UUID refs whole (`memory_redact.KEEP`), as it keeps `session:` and `commit:`.
+
+The packet is frozen when the dispatcher writes it. Every checkpoint stores its body whole, and the run the packet
+constrains writes the next one, so the refs (all but `run-ends-at`) and the body's `credentials` are read from the
+first revision that carries a packet, the dispatcher's, written before any handoff (`dispatch_packet.packet_of`).
+A later checkpoint may leave them out, and the packet stands; one that names a frozen ref with another value, adds a
+ref the packet did not carry, or names another set of credentials is refused with `PacketFrozen`
+(`dispatch_packet.check_write`, called by `checkpoint_write`). The dispatcher's deadline is at most seven days after
+its write, the board's own limit on a request (`DeadlineTooFar`). `run-ends-at` stays per dispatch: the last one
+written is shown, and nothing reads it as a permission, so it cannot widen the deadline, and nothing ends a run at
+that time either: the run keeps it.
+
+`observatory_checkpoint_latest` and `observatory_workflow_list` add `dispatch`, read from the frozen packet: the
+request, its thread, the capability, Fabric's project id, the deadline, the run's end and `keys` (`state` `open` or
+`closed`, the `reason` when closed: `packet-incomplete`, `deadline-too-far`, `deadline-passed`, `workflow-closed`,
+`no-credentials`; the slots by name; `until`). A row written before the shapes were checked, whose deadline does
+not read as a UTC time, reads as `packet-incomplete` rather than failing the read.
+
+The keys: `use_secret.py run --workflow wf_… --env ENV PROJECT NAME -- …` (or with `FABRIC_DISPATCH_WORKFLOW` set
+by Switchboard) releases a value only through `dispatch_packet.authorize`: to the holder of the workflow's lease;
+only for a slot the frozen `credentials` name in that environment; only from the project `fabric-project` resolves
+to (its `fabric:<uuid>`, as Observatory pulled it from Fabric's hub); only until the deadline; never after the
+final checkpoint closed the workflow; never to a packet without the request, the project or the deadline. The lease
+is presented in `OBSERVATORY_WORKFLOW_LEASE`, or in a file `OBSERVATORY_WORKFLOW_LEASE_FILE` names, read only when it
+is a regular file of this user that nobody else may read (mode 600 on POSIX; a link is never followed). Both are
+taken out of `use_secret.py`'s environment before anything runs. A refusal exits 2 with its code
+(`workflow-unknown`, `packet-incomplete`, `no-credentials`, `workflow-closed`, `deadline-too-far`,
+`deadline-passed`, `not-lease-holder`, `slot-not-named`, `project-unresolved`, `project-mismatch`, and from the
+command itself `env-required`, `share-refused`, `lease-file-refused`, `store-unreadable`), and the journal
+`secret-use.jsonl` records each release with its workflow and request and each refusal with its code, never a value
+or the lease.
+
+What the gate is, and is not. It is a guard for a cooperating run: it holds a session that names its workflow to
+the slots, project and deadline Fabric wrote. It is not containment. It applies only when `--workflow` or
+`FABRIC_DISPATCH_WORKFLOW` is set, and a session that unsets the variable takes the ordinary path of
+`use_secret.py run`, with the vault's ordinary rules. Which children lack the lease is narrow too: a command
+`use_secret.py` runs inherits neither lease variable, so a nested `use_secret.py` call from it is refused, but a
+process the session starts by any other route inherits whatever the session's own environment holds. Real
+containment is the vault's `slotsRequireGrant: always` with a hub-minted delegation token scoped to the packet
+(`FABRIC_DELEGATION_TOKEN`, [the meter, M5](METER.md)): then no slot is released without a grant whose limits name
+it, whatever the session sets.
+
 ## One executor at a time
 
 The lease token (`leaseId`, `wl_…`) is the only thing that tells two sessions apart. Both are

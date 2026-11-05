@@ -33,6 +33,10 @@ rest waits for me. You may run `full review batch prepare`, read the file it wri
 `policy disable` and `undo-policy` are mine, at my terminal. Never try to apply a batch or enable
 the policy for me.
 
+## A session Fabric started for a board request
+
+If Fabric started you for a board request, your first prompt line is `fabric-dispatch/1 workflow=wf_… handoff=… request=…` and `FABRIC_DISPATCH_WORKFLOW` names the same workflow. Read the packet with `observatory_checkpoint_latest` (its `dispatch` names the request, its thread, the capability, the project, the deadline and whether keys can be handed out), take the workflow with `observatory_handoff_accept`, and keep its `leaseId` off every command line: write it once, with your file tool rather than a shell command, to a file outside the repository that only you can read (`chmod 600 FILE`), and set `OBSERVATORY_WORKFLOW_LEASE_FILE=FILE` (the path is no secret). A key the packet's `credentials` name then reaches your command only as `python "$(project-observatory full-path)/tools/use_secret.py" run --env ENV --workflow wf_… PROJECT NAME -- <command>`, from the project the packet resolves to and until its deadline; anything else is refused with its code, and the lease never reaches the command. The packet is frozen at Fabric's write: your checkpoints may leave its refs and `credentials` out (Observatory keeps the packet), and one that changes them is refused with `PacketFrozen`. Your final checkpoint closes the workflow: `status: done` for a completed request, `failed` otherwise. This gate keeps a cooperating run to its packet; it is not a sandbox, and the vault's own rules still apply to everything else.
+
 ## A key the vault does not hold
 
 Never ask me for a token, a key or a password in the chat. Call `observatory_secret_request`

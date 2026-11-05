@@ -57,8 +57,14 @@ def credential_kind(text: str) -> str | None:
 
 #: References a shape filter would destroy and that carry no value: a session
 #: is named by its UUID, and a commit by a short id. They are kept whole; known
-#: secret values inside them are still replaced.
+#: secret values inside them are still replaced. A board request, its thread and
+#: Fabric's project id are UUIDs too, in the packet of a session Fabric starts for
+#: a request (dispatch_packet.py, OBS-323): scrubbed, the run could not find its request.
 KEEP = re.compile(r"session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                  r"|(?:board-request|board-thread|fabric-project):"
+                  # The UUID ends the ref: one followed by more of a token's characters is not
+                  # this reference, and none of it is set aside from the shape filter.
+                  r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Za-z_-])"
                   r"|commit:[0-9a-f]{7,12}\b")
 
 

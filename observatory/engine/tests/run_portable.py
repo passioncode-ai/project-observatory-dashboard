@@ -171,6 +171,8 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('identifiers',)
 # One repository derived from another: copies, moves, how far a copy is behind (OBS-321).
 BOUNDARY += ('derivations',)
+# A session Fabric starts for a board request: its packet, its view, its keys (OBS-323).
+BOUNDARY += ('dispatch_packet',)
 # Anonymous usage and error events: on by default, off by a switch, never a private fact (OBS-324).
 BOUNDARY += ('usage_analytics',)
 # What Observatory uses, declared in its well-known document (fabric-connections/0.1, OBS-326).
@@ -362,7 +364,7 @@ ROOT_FILES = (
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
     'ed25519_order.py',
-    'fabric_service.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )

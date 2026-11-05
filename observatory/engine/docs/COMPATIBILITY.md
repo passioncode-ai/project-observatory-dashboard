@@ -346,6 +346,25 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Workflow memory: a session Fabric starts for a board request (OBS-323, the release after 0.33.1)
+
+Additive, with no new file, table or migration. A checkpoint body's `artifacts` may carry the packet refs of
+Fabric's on-demand sessions (`board-request:`, `board-thread:`, `capability:`, `fabric-project:`, `deadline:`,
+`run-ends-at:`, each `{kind: "other", ref}`); a body that carries one is refused when a ref has another shape or
+member, a prefix is named twice or any artifact holds an absolute path. A body without those refs is accepted as
+before. The redactor keeps `board-request:`, `board-thread:` and `fabric-project:` refs whole when the UUID ends the
+token: an older engine scrubs their UUIDs. The packet is frozen at its first write: a later checkpoint that changes a
+ref or the credentials is refused with the new workflow error `PacketFrozen`, and one that leaves them out keeps
+them; a packet whose deadline is more than seven days after that write is refused with `DeadlineTooFar`. A workflow
+that never carried a packet is unchanged. `observatory_checkpoint_latest`, `observatory_workflow_list` and
+their `memory/0.1` twins add the member `dispatch` (their output schemas are open). `use_secret.py run` takes
+`--workflow wf_…` and reads `FABRIC_DISPATCH_WORKFLOW`, `OBSERVATORY_WORKFLOW_LEASE` and
+`OBSERVATORY_WORKFLOW_LEASE_FILE` (a private file holding the lease): with a workflow named, a value is released only
+under its packet ([agent memory](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/AGENT-MEMORY.md#a-session-fabric-starts-for-a-board-request-obs-323));
+without one, nothing changes. That gate guards a cooperating run; containment stays the vault's
+`slotsRequireGrant: always` with a delegation token. The secret-use journal's rows gain `workflow`, `request` and
+`dispatch` (a refusal code).
+
 ## Service: the connections declaration (OBS-326, the release after 0.33.0)
 
 The always-on server's `/.well-known/fabric-service` gains, under `extensions`, the key

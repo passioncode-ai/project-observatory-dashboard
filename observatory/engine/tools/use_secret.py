@@ -58,6 +58,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -204,6 +205,70 @@ def vault_only_default() -> bool:
 #: from the environment before anything runs, so no child inherits it, and it is never logged.
 DELEGATION_ENV = "FABRIC_DELEGATION_TOKEN"
 _DELEGATION_TOKEN: str | None = None
+
+#: A SESSION FABRIC STARTED FOR A BOARD REQUEST (OBS-323, Fabric's on-demand sessions spec §3.4). Switchboard gives the
+#: run its workflow in FABRIC_DISPATCH_WORKFLOW; `--workflow` names it too. Under such a workflow a value is released
+#: only by dispatch_packet.authorize: to the holder of the workflow's lease, only for slots the packet's frozen
+#: `credentials` name, only from the project its `fabric-project` resolves to, and only until its deadline.
+#: The lease is presented in OBSERVATORY_WORKFLOW_LEASE, or in a file OBSERVATORY_WORKFLOW_LEASE_FILE names (a regular
+#: file of this user that nobody else may read, mode 600 on POSIX), so it never sits in a command line, a shell's
+#: history or `ps eww`. Both variables are taken out of this process's environment before anything runs, so no child
+#: of use_secret inherits them; a child of use_secret that calls it again carries FABRIC_DISPATCH_WORKFLOW without the
+#: lease and is refused. A process the session starts by any other route inherits whatever the session's environment
+#: holds, the lease included if the session exported it there.
+#: THIS IS A GUARD FOR A COOPERATING RUN, NOT CONTAINMENT: the gate applies only when a workflow is named, and a
+#: session that unsets FABRIC_DISPATCH_WORKFLOW takes the ordinary path. Containment is the vault's
+#: `slotsRequireGrant: always` with a hub-minted delegation token scoped to the packet (FABRIC_DELEGATION_TOKEN).
+DISPATCH_ENV = "FABRIC_DISPATCH_WORKFLOW"
+LEASE_ENV = "OBSERVATORY_WORKFLOW_LEASE"
+LEASE_FILE_ENV = "OBSERVATORY_WORKFLOW_LEASE_FILE"
+_WORKFLOW_LEASE: str | None = None
+_LEASE_FILE: str | None = None
+_LEASE_SHAPE = re.compile(r"[A-Za-z0-9_-]{8,128}")
+
+
+class LeaseFileRefused(Exception):
+    """The lease file is not a private regular file of this user, or holds no lease. Never names its content."""
+
+
+def workflow_lease() -> str | None:
+    """The lease this run presents: OBSERVATORY_WORKFLOW_LEASE, else the file OBSERVATORY_WORKFLOW_LEASE_FILE names,
+    else None. The file is read only when it is a regular file (never through a link), owned by this user and with
+    no group or other permission; otherwise LeaseFileRefused, so a lease another account could read or swap is
+    never presented."""
+    if _WORKFLOW_LEASE:
+        return _WORKFLOW_LEASE
+    if not _LEASE_FILE:
+        return None
+    path = pathlib.Path(_LEASE_FILE).expanduser()
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise LeaseFileRefused(f"the lease file cannot be read: {type(exc).__name__}") from None
+    if not stat.S_ISREG(info.st_mode):
+        raise LeaseFileRefused("the lease file is not a regular file (a link is never followed)")
+    if not osprivacy.owned_by_me(path) or not osprivacy.private(path):
+        raise LeaseFileRefused("the lease file must be this user's and readable by nobody else (chmod 600)")
+    try:
+        text = osprivacy.read_regular(path, 4096).decode("utf-8").strip()
+    except (OSError, ValueError) as exc:
+        raise LeaseFileRefused(f"the lease file cannot be read: {type(exc).__name__}") from None
+    if not _LEASE_SHAPE.fullmatch(text):
+        raise LeaseFileRefused("the lease file holds no lease (one leaseId, nothing else)")
+    return text
+
+
+def dispatch_grant(workflow: str, project: str, env: str | None, names: list[str]) -> dict:
+    """The packet's permission for this release (raises dispatch_packet.Refused or LeaseFileRefused). Reads only."""
+    import sqlite3
+    import dispatch_packet
+    lease = workflow_lease()
+    conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        return dispatch_packet.authorize(conn, workflow, lease, project=project, env=env, names=names)
+    finally:
+        conn.close()
 
 
 class SlotRefused(Exception):
@@ -498,6 +563,30 @@ def cmd_run(args) -> int:
         return 2
     values: dict[str, str] = {}
     wheres: dict[str, str] = {}
+    workflow = getattr(args, "workflow", None) or os.environ.get(DISPATCH_ENV) or None
+    dispatch: dict | None = None
+    if workflow:
+        import dispatch_packet
+        code, why = None, None
+        if args.share:
+            code, why = "share-refused", "a dispatched run takes keys from its packet's project, never a share"
+        elif args.env is None:
+            code, why = "env-required", "a dispatched run names the environment with --env"
+        else:
+            try:
+                dispatch = dispatch_grant(workflow, args.project, args.env, names)
+            except dispatch_packet.Refused as exc:
+                code, why = exc.code, str(exc)
+            except LeaseFileRefused as exc:
+                code, why = "lease-file-refused", str(exc)
+            except Exception as exc:  # noqa: BLE001: a store that cannot be read gives nothing
+                code, why = "store-unreadable", f"the workflow store could not be read: {type(exc).__name__}"
+        if dispatch is None:
+            audit("use-refused", f"{args.project}:{','.join(names)}",
+                  {"command": args.command[0], "workflow": workflow, "dispatch": code})
+            print(f"use_secret: {why if why.startswith('refused:') else f'refused: {code}: {why}'}",
+                  file=sys.stderr)
+            return 2
     try:
         if args.share:
             # A key another person shared with this machine: never a project's vault slot (DEC-0142 PS-3).
@@ -506,9 +595,10 @@ def cmd_run(args) -> int:
             verdict = "share"
         else:
             for n in names:
+                # A dispatched run reads the vault only: its keys are the packet's named slots.
                 values[n], wheres[n] = resolve(args.project, n, args.env,
                                                vault_only=args.vault_only or vault_only_default()
-                                               or grant_required())
+                                               or grant_required() or dispatch is not None)
             verdict = check_slots(wheres)
     except LookupError as exc:
         print(str(exc), file=sys.stderr)
@@ -523,7 +613,8 @@ def cmd_run(args) -> int:
     # written afterwards loses the run that never came back.
     audit("use", f"{args.project}:{','.join(names)}",
           {"from": wheres, "command": args.command[0],
-           "argv_len": len(args.command), "grant": verdict})
+           "argv_len": len(args.command), "grant": verdict,
+           **({"workflow": workflow, "request": dispatch["request"]} if dispatch else {})})
     child_env = dict(os.environ)
     child_env.update(values)
     if args.as_name and len(names) == 1:
@@ -888,10 +979,13 @@ def _audit_quietly(action: str, detail: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
-    global _DELEGATION_TOKEN
+    global _DELEGATION_TOKEN, _WORKFLOW_LEASE, _LEASE_FILE
     # Taken out of the environment before anything else runs: no child, no `exec`, no traceback's
     # environment dump ever carries it (OBS-57).
     _DELEGATION_TOKEN = os.environ.pop(DELEGATION_ENV, None) or None
+    # The same for a dispatched run's lease (OBS-323): it proves the run holds its workflow, and no child gets it.
+    _WORKFLOW_LEASE = os.environ.pop(LEASE_ENV, None) or None
+    _LEASE_FILE = os.environ.pop(LEASE_FILE_ENV, None) or None
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -923,6 +1017,11 @@ def main(argv: list[str]) -> int:
     p.add_argument("--vault-only", action="store_true",
                    help=f"read the vault and never a project's .env ({VAULT_ONLY_ENV}=1 "
                         f"makes it the default; the rule for agents and services)")
+    p.add_argument("--workflow", metavar="wf_ID",
+                   help=f"a session Fabric started for a board request ({DISPATCH_ENV} names it too): only the "
+                        f"lease holder ({LEASE_ENV}, or a mode-600 file named in {LEASE_FILE_ENV}) gets the "
+                        f"slots the packet names, until its deadline. A guard for a cooperating run, not "
+                        f"containment")
     p.add_argument("command", nargs=argparse.REMAINDER,
                    help="after `--`, the command to run")
     p.set_defaults(fn=cmd_run)
