@@ -27,6 +27,25 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertFalse(AppVersion.isNewer("０.19.0", than: "0.18.0"), "ASCII digits only")
     }
 
+    /// OBS-333: with automatic updates off, the engine's check still records a newer version, and the app
+    /// says so; it installs nothing (its menu item copies the command).
+    func testANewerVersionFoundWhileOffIsReadFromTheCheckRecord() throws {
+        let found = try JSONSerialization.data(withJSONObject: ["available": ["version": "0.19.0", "found_at": "2026-11-05T10:00:00Z"]])
+        XCTAssertEqual(UpdateState.available(found, switchText: "off\n", running: "0.18.0"), AvailableUpdate(version: "0.19.0"))
+        XCTAssertNil(UpdateState.available(found, switchText: nil, running: "0.18.0"), "on: the job installs it")
+        XCTAssertNil(UpdateState.available(found, switchText: "on", running: "0.18.0"))
+        XCTAssertNil(UpdateState.available(found, switchText: "off", running: "0.19.0"), "already running it")
+        XCTAssertNil(UpdateState.available(Data("{}".utf8), switchText: "off", running: "0.18.0"))
+        XCTAssertNil(UpdateState.available(Data("{not json".utf8), switchText: "off", running: "0.18.0"))
+        let workspace = try temp()
+        try FileManager.default.createDirectory(at: workspace.appendingPathComponent("store"), withIntermediateDirectories: true)
+        try found.write(to: UpdateState.checkFile(workspace: workspace.path))
+        XCTAssertNil(UpdateState.readAvailable(workspace: workspace.path, running: "0.18.0"), "no switch file: on")
+        try Data("off\n".utf8).write(to: workspace.appendingPathComponent("auto-update"))
+        XCTAssertEqual(UpdateState.readAvailable(workspace: workspace.path, running: "0.18.0"), AvailableUpdate(version: "0.19.0"))
+        XCTAssertEqual(UpdateState.installCommand, "project-observatory full update --apply")
+    }
+
     func testAStagedUpdateIsReadFromTheMaintenanceRecord() {
         let waiting = record(["result": "waiting-for-quit", "version": "0.18.0", "pending": "0.19.0", "target": "0.19.0"])
         XCTAssertEqual(UpdateState.pending(waiting, running: "0.18.0"), StagedUpdate(version: "0.19.0"))

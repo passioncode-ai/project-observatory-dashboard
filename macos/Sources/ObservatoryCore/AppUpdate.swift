@@ -62,6 +62,47 @@ public enum UpdateState {
     }
 }
 
+/// A newer version the engine's update check found while automatic updates are off (OBS-333):
+/// announced, never downloaded or installed by the app.
+public struct AvailableUpdate: Equatable, Sendable {
+    public let version: String
+    public init(version: String) { self.version = version }
+}
+
+extension UpdateState {
+    /// What installs a release while automatic updates are off.
+    public static let installCommand = "project-observatory full update --apply"
+
+    /// The check job's record (`maintenance.check_pass`), beside the pass's.
+    public static func checkFile(workspace: String) -> URL {
+        URL(fileURLWithPath: workspace).appendingPathComponent("store/update-check.json")
+    }
+
+    /// The version the record names as `available`, when the switch file says `off` (absent or any
+    /// other word is on, as the engine reads it) and the version is newer than the running app.
+    public static func available(_ data: Data?, switchText: String?, running: String) -> AvailableUpdate? {
+        guard switchText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "off",
+              let data, let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let found = doc["available"] as? [String: Any], let version = found["version"] as? String,
+              AppVersion.isNewer(version, than: running) else { return nil }
+        return AvailableUpdate(version: version)
+    }
+
+    /// Reads the workspace's switch and check record. A symbolic link or a file over 1 MB is not read.
+    public static func readAvailable(workspace: String, running: String) -> AvailableUpdate? {
+        guard workspace.hasPrefix("/") else { return nil }
+        func regular(_ url: URL) -> Data? {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  attrs[.type] as? FileAttributeType == .typeRegular,
+                  (attrs[.size] as? NSNumber)?.intValue ?? .max <= 1_048_576 else { return nil }
+            return try? Data(contentsOf: url)
+        }
+        let switchURL = URL(fileURLWithPath: workspace).appendingPathComponent("auto-update")
+        let switchText = regular(switchURL).map { String(decoding: $0.prefix(64), as: UTF8.self) }
+        return available(regular(checkFile(workspace: workspace)), switchText: switchText, running: running)
+    }
+}
+
 /// When an unattended app may restart itself to activate a staged update.
 public enum IdleRestart {
     /// No window on screen and no input for this long.

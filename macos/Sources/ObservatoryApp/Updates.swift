@@ -19,6 +19,9 @@ import ObservatoryCore
     @Published private(set) var staged: StagedUpdate? {
         didSet { badge(staged == nil ? nil : Self.badgeLabel) }
     }
+    /// A newer version the engine found while automatic updates are off (OBS-333): shown in the
+    /// app menu with the command that installs it; the app never installs it by itself.
+    @Published private(set) var available: AvailableUpdate?
     /// Why the last *Restart to update* could not start, as a code; nil after a success.
     @Published private(set) var refusal: String?
 
@@ -59,7 +62,14 @@ import ObservatoryCore
     /// Reads the workspace's maintenance record now.
     @discardableResult func check() -> StagedUpdate? {
         staged = UpdateState.read(workspace: configured.workspace, running: running)
+        available = staged == nil ? UpdateState.readAvailable(workspace: configured.workspace, running: running) : nil
         return staged
+    }
+
+    /// The menu item's act while updates are off: the install command on the clipboard, nothing run.
+    func copyInstallCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(UpdateState.installCommand, forType: .string)
     }
 
     /// Asks «Restart to finish updating» once per staged version, when a window is on
@@ -155,7 +165,8 @@ import ObservatoryCore
     }
 }
 
-/// The app menu's *Restart to update*, shown only while an update is staged.
+/// The app menu's *Restart to update*, shown only while an update is staged; with automatic updates
+/// off, the newer version the engine found and an item that copies its install command (OBS-333).
 struct UpdateCommands: Commands {
     @ObservedObject var model: Model
     @ObservedObject var updates: Updates
@@ -164,6 +175,12 @@ struct UpdateCommands: Commands {
             if let staged = updates.staged {
                 Button(model.t("Restart to update")) { updates.restartToUpdate() }
                     .help(model.t("Version {version} is ready. Restart to update; it also installs when you quit.", ["version": staged.version]))
+            } else if let available = updates.available {
+                Button(model.t("Version {version} is available: copy the install command", ["version": available.version])) {
+                    updates.copyInstallCommand()
+                }
+                .help(model.t("Automatic updates are off, so this version waits for you. Run {command} in a terminal to install it.",
+                              ["command": UpdateState.installCommand]))
             }
         }
     }

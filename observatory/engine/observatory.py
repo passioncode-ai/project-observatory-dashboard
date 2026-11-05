@@ -514,7 +514,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
-  auto-update status|on|off    install each new stable release by itself (on by default)
+  auto-update status|on|off    install each new stable release by itself (on by default); off still
+                               announces a newer version once: `full update --apply` installs it
   analytics status|on|off|send  anonymous usage and error data that helps improve the product
                                (on by default): command, tool and error names, outcomes, versions,
                                platform; never keys, paths, names or workspace content.
