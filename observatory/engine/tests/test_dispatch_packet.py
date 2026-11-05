@@ -125,8 +125,9 @@ class Packet(Store):
         self.start(body=packet(refs() + [{"kind": "file", "path": "docs/answer.md"}]))
 
     def test_a_workflow_that_is_no_packet_is_unchanged(self):
-        wf = self.start(body={"goal": "ship", "artifacts": [{"kind": "git", "path": "/srv/someone/project"}]},
-                        owner=RUN)
+        # Absolute on every OS: a POSIX `/srv/...` is not absolute on Windows, where a git path needs a drive.
+        checkout = str(pathlib.Path(self.dir.name).resolve() / "project")
+        wf = self.start(body={"goal": "ship", "artifacts": [{"kind": "git", "path": checkout}]}, owner=RUN)
         self.assertTrue(wf["workflowId"].startswith("wf_"))
 
 
