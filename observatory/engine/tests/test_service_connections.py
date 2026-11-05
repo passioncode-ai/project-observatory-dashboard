@@ -226,7 +226,7 @@ class Stale(Base):
         self.on("google")
         self.receipt("google.json", {"scanned_at": AT, "degraded": []})
         self.assertEqual(self.declared(NOW)[-1]["state"], "ok")
-        later = NOW + datetime.timedelta(hours=6)
+        later = NOW + sc.stale_after("google.json")  # 36 hours: scan_google's own 12-hour gate, three times
         self.assertEqual(self.declared(later)[-1]["state"], "degraded")
 
     def test_a_receipt_without_its_own_time_is_aged_by_when_it_was_written(self):
@@ -274,11 +274,22 @@ class Stale(Base):
                 if name == "bitbucket.json":
                     gate = re.search(r'stale\(SCRATCH / "remotes\.json", (\w+)\)', tick)
                     self.assertIn('SCRATCH / "bitbucket.json"', tick[gate.end():gate.end() + 400])
-                if gate is None:
-                    self.assertEqual(hours, sc.TICK_HOURS, "no gate: the collector runs every tick")
-                else:
-                    value = stale_hours if gate.group(1) == "STALE_HOURS" else float(gate.group(1))
-                    self.assertEqual(hours, value)
+                value = sc.TICK_HOURS if gate is None else (
+                    stale_hours if gate.group(1) == "STALE_HOURS" else float(gate.group(1)))
+                # A collector with an age gate of its own writes nothing inside it, so its healthy receipt can
+                # be that old (scan_google: 12 hours): the interval is the longer of the two.
+                runs = re.search(r'collectors/(\w+)\.py"[^\n]*SCRATCH / "' + re.escape(written) + '"', tick)
+                if runs:
+                    source = (ROOT / "collectors" / f"{runs.group(1)}.py").read_text(encoding="utf-8")
+                    own = re.search(r"^MAX_AGE_HOURS = (\d+(?:\.\d+)?)$", source, re.M)
+                    if own:
+                        value = max(value, float(own.group(1)))
+                self.assertEqual(hours, value)
+
+    def test_a_google_receipt_inside_its_own_twelve_hours_is_not_stale(self):
+        # The #442 review: scan_google skips a scan younger than 12 hours, so a 9-hour-old receipt is healthy.
+        self.assertGreaterEqual(sc.INTERVAL_HOURS["google.json"], 12)
+        self.assertGreater(sc.stale_after("google.json"), datetime.timedelta(hours=12.5))
 
     def test_the_tick_interval_is_the_schedulers_default(self):
         launchd = (ROOT / "tools" / "install_launchd.py").read_text(encoding="utf-8")

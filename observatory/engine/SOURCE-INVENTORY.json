@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "73c941ac04b187f43957b4c22f6d9a7513d392e8bb21ee2030def144b70dbf1d",
-      "bytes": 54649,
+      "export_sha256": "0c8885e3121cad3cd001ab100eaf4dc2935471343ce7ccdf1d20da65d3934021",
+      "bytes": 54716,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "cf4f406238e4ed10de57280d86a8b65fb0d7511a077bfccd955e7a668c4a667f",
-      "bytes": 245561,
+      "export_sha256": "bbb7e2b56c058cdff50548ce73425403e6d9b2d10e0b345fee588b3e7ded268f",
+      "bytes": 245673,
       "upstream_modified": true
     },
     {
@@ -3560,8 +3560,8 @@
       "path": "service_connections.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "63c43afcec8dc527974c2a3f858754bdffc86b99670a1b0ae8f560c40ca3ddba",
-      "bytes": 20405
+      "export_sha256": "77a05ea3c5dd0c36fa86b5ac19a9fd7ce4eef7e80238de3d6c57ad20f97d50b7",
+      "bytes": 20616
     },
     {
       "path": "service_events.py",
@@ -4671,8 +4671,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8c7038a20a6e89551c34ca8064acae9c95950af9f4e5e1eb28cba0ba734f3fb3",
-      "bytes": 63255
+      "export_sha256": "675f226758fd0da6123911754544c78ea1fa939a5f06194e0b3714e02b3bfa62",
+      "bytes": 63320
     },
     {
       "path": "tests/test_facts_learning.py",
@@ -5863,8 +5863,8 @@
       "path": "tests/test_service_connections.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ddf84e8fcab1570d52ab4b13f14e4ecaffb59137acdab8207d102a435045079d",
-      "bytes": 19175
+      "export_sha256": "c7c5017f751e7724cc56cac8402083977f406896aaf7a3eeedde030692ab36d7",
+      "bytes": 20100
     },
     {
       "path": "tests/test_session_reload.py",
@@ -6146,8 +6146,8 @@
       "path": "tests/test_usage_analytics.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7b754b7b4c957375f129ad8cfa48d7ee40de39a43b6ea2b03577384b7e0838ec",
-      "bytes": 31256
+      "export_sha256": "41c5e0951276df3ed183dd333db80b7f22becb24c106d75e7f2170e181a6348b",
+      "bytes": 32456
     },
     {
       "path": "tests/test_use_secret.py",
@@ -7271,8 +7271,8 @@
       "path": "usage_analytics.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d0fec100810ffdb2fd14113dadf656b34a1624d90ad759bb8d6bf476c074f9d3",
-      "bytes": 36865
+      "export_sha256": "740b837bfaa8596f510d22d7b9468b0765832aad99f38dde0c521e4185d8ec10",
+      "bytes": 37964
     },
     {
       "path": "vault_project.py",

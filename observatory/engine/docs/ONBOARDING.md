@@ -2700,7 +2700,7 @@ names, anything from the registry or the store, URLs, prompts, arguments, messag
 **How it travels:** a command or tool call appends one line to a local queue and returns; it never waits on the
 network. The maintenance job (every 15 minutes) sends the queue to `https://analytics.sshlg.me` in batches of at most
 25 and drops events older than 23 hours; a failure is counted in `store/analytics/counters.json` and never shown as
-an error. A count that cannot be written is named in `full analytics status` under `degraded`. A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
+an error. A count that cannot be written is named in `full analytics status` under `degraded`, whichever process failed to write it (the reason is kept beside the counters until the next update is written). A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
 for the next pass. `full analytics send` sends the queue now. The first time a command runs at your terminal after
 this release, it prints a one-time notice saying this; the dashboard's Home shows it until you first open Home
 through the local server and for a week after that, and Health shows the switch with the command that changes it.

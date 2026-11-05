@@ -386,6 +386,27 @@ class Counters(Base):
         self.assertTrue(UA.counters(self.base)["last_send"]["ok"])
         self.assertIsNone(UA.WRITE_PROBLEM)
 
+    def test_a_failed_count_is_named_in_status_in_another_process_and_cleared_by_the_next_write(self):
+        # The #442 review: `full analytics status` runs in its own process and never writes counters, so the
+        # problem a job's failed update left must outlive that job's process.
+        real = UA._private_write
+
+        def refuse_counters(path, text):
+            if path.name == "counters.json":
+                raise FileExistsError(17, "taken")
+            return real(path, text)
+
+        with mock.patch.object(UA, "_private_write", refuse_counters), mock.patch("sys.stderr", io.StringIO()):
+            UA.count(self.base, "sent")
+        UA.WRITE_PROBLEM = None  # another process: nothing in memory
+        degraded = UA.status(self.base, self.env).get("degraded")
+        self.assertEqual(len(degraded or []), 1)
+        self.assertIn("FileExistsError", degraded[0]["reason"])
+        self.assertNotIn(str(self.base), degraded[0]["reason"], "no path in the reason")
+        UA.count(self.base, "sent")
+        self.assertNotIn("degraded", UA.status(self.base, self.env), "a written update clears it")
+        self.assertFalse((UA.folder(self.base) / UA.PROBLEM_FILE).exists())
+
     def test_a_replace_always_refused_is_named_in_status_never_lost_silently(self):
         UA.count(self.base, "sent")
 

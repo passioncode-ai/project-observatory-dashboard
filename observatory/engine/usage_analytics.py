@@ -84,6 +84,9 @@ REPLACE_ATTEMPTS = 10
 REPLACE_PAUSE_SECONDS = 0.05
 #: Why this process last failed to write the counters, or None: shown by `status` as `degraded`, logged once.
 WRITE_PROBLEM: str | None = None
+#: Where a failed counter update is kept for another process (`full analytics status` runs in its own and never
+#: writes counters): the reason only, cleared by the next update that is written.
+PROBLEM_FILE = "counters-problem.json"
 #: One request's timeout, and how many times a batch is tried (the first try included).
 TIMEOUT_SECONDS = 5.0
 ATTEMPTS = 3
@@ -299,8 +302,9 @@ def install_id(base: Path | None = None, *, create: bool = True) -> str | None:
     return value
 
 
-def _write_failed(what: str, exc: BaseException) -> None:
-    """A counter update that could not be written: kept in `WRITE_PROBLEM` (`status` shows it as `degraded`)
+def _write_failed(base: Path | None, what: str, exc: BaseException) -> None:
+    """A counter update that could not be written: kept in `WRITE_PROBLEM` and in `PROBLEM_FILE`, so `status`
+    in any process shows it as `degraded`,
     and logged once per process, by its exception class only (never a path or a message), to a job's log:
     a person's terminal never gets it, as no analytics failure is shown to a person."""
     global WRITE_PROBLEM
@@ -312,12 +316,26 @@ def _write_failed(what: str, exc: BaseException) -> None:
         except Exception:  # noqa: BLE001
             pass
     WRITE_PROBLEM = problem
+    try:
+        _private_write(folder(base) / PROBLEM_FILE, json.dumps({"reason": problem}, sort_keys=True) + "\n")
+    except Exception:  # noqa: BLE001: the counters' own folder is the one that failed; WRITE_PROBLEM still holds it
+        pass
+
+
+def write_problem(base: Path | None) -> str | None:
+    """The last counter update that could not be written, from this process or another, or None."""
+    if WRITE_PROBLEM:
+        return WRITE_PROBLEM
+    reason = _read_json(folder(base) / PROBLEM_FILE).get("reason")
+    return reason[:300] if isinstance(reason, str) and reason else None
 
 
 def _update_counters(base: Path | None, what: str, change: Callable[[dict], None]) -> None:
     """Read, change and write `counters.json` under an exclusive lock on `.counters.lock` beside it, so two
     writers (a command and the maintenance job, or two threads) never lose each other's update (OBS-341).
-    The lock is waited for at most `COUNTERS_LOCK_SECONDS`. Never raises: a failure is `_write_failed`."""
+    The lock is waited for at most `COUNTERS_LOCK_SECONDS`. Never raises: a failure is `_write_failed`, and a
+    write that succeeds clears the problem a failed one left."""
+    global WRITE_PROBLEM
     lock_fd = None
     try:
         file = folder(base) / "counters.json"
@@ -336,8 +354,10 @@ def _update_counters(base: Path | None, what: str, change: Callable[[dict], None
         doc = _read_json(file)
         change(doc)
         _private_write(file, json.dumps(doc, sort_keys=True) + "\n")
+        WRITE_PROBLEM = None
+        (folder(base) / PROBLEM_FILE).unlink(missing_ok=True)
     except Exception as exc:  # noqa: BLE001: the counter is the last resort; nothing above it
-        _write_failed(what, exc)
+        _write_failed(base, what, exc)
     finally:
         if lock_fd is not None:
             try:
@@ -757,8 +777,9 @@ def status(base: Path | None = None, environ: dict | None = None) -> dict:
            "what_is_sent": WHAT_IS_SENT, "never_sent": NEVER_SENT,
            "turn_off": "project-observatory full analytics off", "notice": notice_state(base),
            "counters": counters(base)}
-    if WRITE_PROBLEM:
-        out["degraded"] = [{"source": "analytics-counters", "reason": WRITE_PROBLEM}]
+    problem = write_problem(base)
+    if problem:
+        out["degraded"] = [{"source": "analytics-counters", "reason": problem}]
     try:
         out["queued"] = sum(1 for _ in (folder(base) / "queue.jsonl").open(encoding="utf-8"))
     except OSError:

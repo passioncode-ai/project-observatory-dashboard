@@ -388,7 +388,8 @@ downloads (only the feed is declared). The hub reads `down` when it is dead or u
 
 In the same release (OBS-339 to OBS-342): a collector receipt older than three times its collector's interval in
 the tick, and never less than six hours (`service_connections.STALE_FACTOR`, `STALE_FLOOR_HOURS`,
-`INTERVAL_HOURS`: 6 hours for a collector that runs every tick, 18 for Bitbucket, 72 for a daily one), reads
+`INTERVAL_HOURS`: 6 hours for a collector that runs every tick, 18 for Bitbucket, 36 for Google, whose collector skips a scan younger
+than 12 hours, 72 for a daily one), reads
 `degraded` with a reason saying its collector has stopped running, and keeps its old `lastAt`; the local server
 measures the age again at least every ten minutes. With `OBSERVATORY_OFFLINE=1` in the server's environment no
 provider is declared, the collectors' own rule (`configuration.enabled`); the server cannot see a tick's

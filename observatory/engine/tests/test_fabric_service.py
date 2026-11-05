@@ -648,7 +648,7 @@ class Connections(Sandbox):
             {"scanned_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "degraded": []}),
             encoding="utf-8")
         self.assertEqual(self.state_of("google"), "ok")
-        later = now + timedelta(hours=8)
+        later = now + sc.stale_after("google.json")  # past the receipt's threshold (36 hours for Google)
         bucket = sc.clock_bucket()
         with mock.patch.object(sc, "_now", lambda when=None: when or later), \
                 mock.patch.object(sc, "clock_bucket", return_value=bucket):

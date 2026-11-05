@@ -72,7 +72,9 @@ _STRINGS = ("id", "target", "capability", "label", "purpose", "reason")
 TICK_HOURS = 0.5
 #: Each receipt's collector interval in the tick (`tools/tick.py`): every tick, or the hours its `stale(...)`
 #: gate waits before it runs the collector again. Bitbucket runs with the remotes, gated on `remotes.json`
-#: (`STALE_HOURS`, 6). `tests/test_service_connections.py` reads tick.py and fails when the two disagree.
+#: (`STALE_HOURS`, 6). A collector with an age gate of its own (`MAX_AGE_HOURS`: `scan_google` skips a scan
+#: younger than 12 hours and writes nothing) takes the longer of the two, since a healthy receipt can be that
+#: old. `tests/test_service_connections.py` reads tick.py and the collectors and fails when they disagree.
 INTERVAL_HOURS = {
     "gh/_degraded.json": TICK_HOURS,
     "bitbucket.json": 6,
@@ -80,7 +82,7 @@ INTERVAL_HOURS = {
     "cloudflare_account.json": 24,
     "heroku.json": 24,
     "digitalocean.json": 24,
-    "google.json": TICK_HOURS,
+    "google.json": 12,
     "openrouter.json": 24,
     "domains_live.json": 24,
     "mcp.json": TICK_HOURS,
