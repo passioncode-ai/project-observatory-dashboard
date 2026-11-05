@@ -58,6 +58,33 @@ purpose}` — and every read and handoff reports where each one is now
 to read is state that silently does not travel. The body is at most 64 KiB; a log is linked as
 an artifact, not pasted. `checkpoint_body` in `store/workflow.py` holds every bound.
 
+### A session Fabric starts for a board request (OBS-323)
+
+When a board request reaches a project with no live responder, Fabric may start a session that does it, reports and
+ends (Fabric's on-demand sessions specification, §3.4). Fabric writes the workflow as `service:fabric`, and its
+checkpoint `artifacts` carry references only, each `{"kind": "other", "ref": …}`: `board-request:<uuid>`,
+`board-thread:<uuid>`, `capability:<name>`, `fabric-project:<uuid>`, `deadline:<ISO 8601 UTC>`, and
+`run-ends-at:<ISO 8601 UTC>` on each dispatch's own checkpoint. `dispatch_packet.validate` (called by
+`checkpoint_body`) refuses a ref in another shape, a ref with any other member (no note, path or text), a prefix
+named twice and an absolute path anywhere in such a packet; a workflow without those refs is not touched. The
+redactor keeps the three UUID refs whole (`memory_redact.KEEP`), as it keeps `session:` and `commit:`.
+
+`observatory_checkpoint_latest` and `observatory_workflow_list` add `dispatch`: the request, its thread, the
+capability, Fabric's project id, the deadline, the run's end and `keys` (`state` `open` or `closed`, the `reason`
+when closed: `packet-incomplete`, `deadline-passed`, `workflow-closed`, `no-credentials`; the slots by name; `until`).
+
+The keys: `use_secret.py run --workflow wf_… --env ENV PROJECT NAME -- …` (or with `FABRIC_DISPATCH_WORKFLOW` set
+by Switchboard) releases a value only through `dispatch_packet.authorize`: to the holder of the workflow's lease,
+presented in `OBSERVATORY_WORKFLOW_LEASE` and taken out of the environment before anything runs; only for a slot
+the body's `credentials` name in that environment; only from the project `fabric-project` resolves to (its
+`fabric:<uuid>`, as Observatory pulled it from Fabric's hub); only until the deadline; never after the final
+checkpoint closed the workflow; never to a packet without the request, the project or the deadline. A refusal
+exits 2 with its code (`workflow-unknown`, `packet-incomplete`, `no-credentials`, `workflow-closed`,
+`deadline-passed`, `not-lease-holder`, `slot-not-named`, `project-unresolved`, `project-mismatch`, and from the
+command itself `env-required`, `share-refused`, `store-unreadable`), and the journal `secret-use.jsonl` records
+each release with its workflow and request and each refusal with its code, never a value or the lease. A helper
+the run starts inherits `FABRIC_DISPATCH_WORKFLOW` but not the lease, so it is refused.
+
 ## One executor at a time
 
 The lease token (`leaseId`, `wl_…`) is the only thing that tells two sessions apart. Both are

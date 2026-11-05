@@ -33,6 +33,10 @@ rest waits for me. You may run `full review batch prepare`, read the file it wri
 `policy disable` and `undo-policy` are mine, at my terminal. Never try to apply a batch or enable
 the policy for me.
 
+## A session Fabric started for a board request
+
+If Fabric started you for a board request, your first prompt line is `fabric-dispatch/1 workflow=wf_… handoff=… request=…` and `FABRIC_DISPATCH_WORKFLOW` names the same workflow. Read the packet with `observatory_checkpoint_latest` (its `dispatch` names the request, its thread, the capability, the project, the deadline and whether keys can be handed out), take the workflow with `observatory_handoff_accept`, and keep its `leaseId`. A key the packet's `credentials` name reaches your command only as `OBSERVATORY_WORKFLOW_LEASE=<leaseId> python "$(project-observatory full-path)/tools/use_secret.py" run --env ENV --workflow wf_… PROJECT NAME -- <command>`, from the project the packet resolves to and until its deadline; anything else is refused with its code. Every checkpoint you write carries the packet's body unchanged (Observatory replaces a body whole), and your final one closes the workflow: `status: done` for a completed request, `failed` otherwise.
+
 ## A key the vault does not hold
 
 Never ask me for a token, a key or a password in the chat. Call `observatory_secret_request`

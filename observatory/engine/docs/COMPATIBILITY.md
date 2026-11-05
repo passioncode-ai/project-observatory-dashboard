@@ -346,6 +346,19 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Workflow memory: a session Fabric starts for a board request (OBS-323, the release after 0.33.1)
+
+Additive, with no new file, table or migration. A checkpoint body's `artifacts` may carry the packet refs of
+Fabric's on-demand sessions (`board-request:`, `board-thread:`, `capability:`, `fabric-project:`, `deadline:`,
+`run-ends-at:`, each `{kind: "other", ref}`); a body that carries one is refused when a ref has another shape or
+member, a prefix is named twice or any artifact holds an absolute path. A body without those refs is accepted as
+before. The redactor keeps `board-request:`, `board-thread:` and `fabric-project:` refs whole: an older engine
+scrubs their UUIDs. `observatory_checkpoint_latest`, `observatory_workflow_list` and their `memory/0.1` twins add
+the member `dispatch` (their output schemas are open). `use_secret.py run` takes `--workflow wf_…` and reads
+`FABRIC_DISPATCH_WORKFLOW` and `OBSERVATORY_WORKFLOW_LEASE`: with a workflow named, a value is released only under
+its packet ([agent memory](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/AGENT-MEMORY.md#a-session-fabric-starts-for-a-board-request-obs-323)); without
+one, nothing changes. The secret-use journal's rows gain `workflow`, `request` and `dispatch` (a refusal code).
+
 ## Workspace state: anonymous usage data (OBS-324, 0.33.0)
 
 New files only; no earlier file changes shape. An upgrade writes none of them: the switch file is

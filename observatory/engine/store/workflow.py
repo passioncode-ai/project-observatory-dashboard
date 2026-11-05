@@ -322,6 +322,13 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
             raise InvalidInput(f"body.artifacts[{i}].kind must be git, file, url or other")
         if a["kind"] == "git" and a.get("path") and not pathlib.PurePath(a["path"]).is_absolute():
             raise InvalidInput(f"body.artifacts[{i}].path must be absolute for a git artifact")
+    # A session Fabric starts for a board request (OBS-323): its packet's refs in their exact shape, one of each,
+    # and no absolute folder in a packet. A workflow without those refs is not touched.
+    import dispatch_packet
+    try:
+        dispatch_packet.validate(body["artifacts"])
+    except dispatch_packet.Invalid as exc:
+        raise InvalidInput(str(exc)) from None
     for a in body["artifacts"]:
         for key in ("head", "ref"):
             if key in a:
@@ -605,7 +612,15 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str,
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
             "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed,
-            **_credential_view(ckpt, credential_reader)}
+            **_credential_view(ckpt, credential_reader), **_dispatch_view(wf["status"], ckpt, now)}
+
+
+def _dispatch_view(status: str, ckpt: sqlite3.Row | None, now: datetime) -> dict:
+    """The board refs of a session Fabric started for a request, and its key window (OBS-323); {} otherwise."""
+    import dispatch_packet
+    body = json.loads(ckpt["body_json"] or "{}") if ckpt else {}
+    seen = dispatch_packet.view({"status": status, "checkpoint": {"body": body}}, now=now)
+    return {"dispatch": seen} if seen else {}
 
 
 def _credential_view(ckpt: sqlite3.Row | None, reader) -> dict:
@@ -698,7 +713,7 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
             and quiet > STALL_SECONDS,
             "lease": _lease_view(held),
             "pendingHandoff": _lease_view(offer) if live_offer else None,
-            "handoffs": handoffs, "keptSteps": kept})
+            "handoffs": handoffs, "keptSteps": kept, **_dispatch_view(w["status"], ckpt, now)})
     answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
               "workflows": out}
     if more and out:

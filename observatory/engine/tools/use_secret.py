@@ -205,6 +205,28 @@ def vault_only_default() -> bool:
 DELEGATION_ENV = "FABRIC_DELEGATION_TOKEN"
 _DELEGATION_TOKEN: str | None = None
 
+#: A SESSION FABRIC STARTED FOR A BOARD REQUEST (OBS-323, Fabric's on-demand sessions spec §3.4). Switchboard gives the
+#: run its workflow in FABRIC_DISPATCH_WORKFLOW; `--workflow` names it too. Under such a workflow a value is released
+#: only by dispatch_packet.authorize: to the holder of the workflow's lease, presented in OBSERVATORY_WORKFLOW_LEASE
+#: (taken out of the environment before anything runs, as the delegation token), only for slots the packet's
+#: `credentials` name, only from the project its `fabric-project` resolves to, and only until its deadline. A helper
+#: the run starts inherits FABRIC_DISPATCH_WORKFLOW and not the lease, so it is refused rather than served.
+DISPATCH_ENV = "FABRIC_DISPATCH_WORKFLOW"
+LEASE_ENV = "OBSERVATORY_WORKFLOW_LEASE"
+_WORKFLOW_LEASE: str | None = None
+
+
+def dispatch_grant(workflow: str, project: str, env: str | None, names: list[str]) -> dict:
+    """The packet's permission for this release (raises dispatch_packet.Refused). Reads the store only."""
+    import sqlite3
+    import dispatch_packet
+    conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True, timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        return dispatch_packet.authorize(conn, workflow, _WORKFLOW_LEASE, project=project, env=env, names=names)
+    finally:
+        conn.close()
+
 
 class SlotRefused(Exception):
     """A slot release the grant check refused: `code` is the contract's refusal code."""
@@ -498,6 +520,28 @@ def cmd_run(args) -> int:
         return 2
     values: dict[str, str] = {}
     wheres: dict[str, str] = {}
+    workflow = getattr(args, "workflow", None) or os.environ.get(DISPATCH_ENV) or None
+    dispatch: dict | None = None
+    if workflow:
+        import dispatch_packet
+        code, why = None, None
+        if args.share:
+            code, why = "share-refused", "a dispatched run takes keys from its packet's project, never a share"
+        elif args.env is None:
+            code, why = "env-required", "a dispatched run names the environment with --env"
+        else:
+            try:
+                dispatch = dispatch_grant(workflow, args.project, args.env, names)
+            except dispatch_packet.Refused as exc:
+                code, why = exc.code, str(exc)
+            except Exception as exc:  # noqa: BLE001: a store that cannot be read gives nothing
+                code, why = "store-unreadable", f"the workflow store could not be read: {type(exc).__name__}"
+        if dispatch is None:
+            audit("use-refused", f"{args.project}:{','.join(names)}",
+                  {"command": args.command[0], "workflow": workflow, "dispatch": code})
+            print(f"use_secret: {why if why.startswith('refused:') else f'refused: {code}: {why}'}",
+                  file=sys.stderr)
+            return 2
     try:
         if args.share:
             # A key another person shared with this machine: never a project's vault slot (DEC-0142 PS-3).
@@ -506,9 +550,10 @@ def cmd_run(args) -> int:
             verdict = "share"
         else:
             for n in names:
+                # A dispatched run reads the vault only: its keys are the packet's named slots.
                 values[n], wheres[n] = resolve(args.project, n, args.env,
                                                vault_only=args.vault_only or vault_only_default()
-                                               or grant_required())
+                                               or grant_required() or dispatch is not None)
             verdict = check_slots(wheres)
     except LookupError as exc:
         print(str(exc), file=sys.stderr)
@@ -523,7 +568,8 @@ def cmd_run(args) -> int:
     # written afterwards loses the run that never came back.
     audit("use", f"{args.project}:{','.join(names)}",
           {"from": wheres, "command": args.command[0],
-           "argv_len": len(args.command), "grant": verdict})
+           "argv_len": len(args.command), "grant": verdict,
+           **({"workflow": workflow, "request": dispatch["request"]} if dispatch else {})})
     child_env = dict(os.environ)
     child_env.update(values)
     if args.as_name and len(names) == 1:
@@ -888,10 +934,12 @@ def _audit_quietly(action: str, detail: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
-    global _DELEGATION_TOKEN
+    global _DELEGATION_TOKEN, _WORKFLOW_LEASE
     # Taken out of the environment before anything else runs: no child, no `exec`, no traceback's
     # environment dump ever carries it (OBS-57).
     _DELEGATION_TOKEN = os.environ.pop(DELEGATION_ENV, None) or None
+    # The same for a dispatched run's lease (OBS-323): it proves the run holds its workflow, and no child gets it.
+    _WORKFLOW_LEASE = os.environ.pop(LEASE_ENV, None) or None
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -923,6 +971,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--vault-only", action="store_true",
                    help=f"read the vault and never a project's .env ({VAULT_ONLY_ENV}=1 "
                         f"makes it the default; the rule for agents and services)")
+    p.add_argument("--workflow", metavar="wf_ID",
+                   help=f"a session Fabric started for a board request ({DISPATCH_ENV} names it too): only the "
+                        f"lease holder ({LEASE_ENV}) gets the slots the packet names, until its deadline")
     p.add_argument("command", nargs=argparse.REMAINDER,
                    help="after `--`, the command to run")
     p.set_defaults(fn=cmd_run)
