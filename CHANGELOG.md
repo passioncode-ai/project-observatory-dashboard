@@ -3,6 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.33.1 (2026-11-05)
+
+A patch release. This build carries the analytics App-Key, so the anonymous usage and error data that 0.33.0 turned
+on by default is now sent; 0.33.0 itself had no key and sent nothing. What is sent, and how to turn it off, is
+unchanged: `full analytics status` shows both. Nothing needs you after installing.
+
+### Changed
+
+- **The release wheel carries the analytics App-Key** (OBS-329): the repository secret the release workflow reads was
+  set on 2026-11-05, after 0.33.0 was built without it. No code changed.
+
 ## 0.33.0 (2026-11-04)
 
 Observatory now collects anonymous usage and error data by default, so we can see which commands and tools are
