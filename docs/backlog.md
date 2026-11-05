@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-343`
+**Next free ID:** `OBS-346`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91)
 
@@ -368,3 +368,6 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-340 | `OBSERVATORY_OFFLINE=1` turns integrations off for the collectors but the server's connections declaration (OBS-326) reads raw settings, so an offline tick and an online server declare connectors that never ran (they read `unknown`, not a false `ok`). The declaration should apply the same offline rule as the collectors | open | the independent review of #436 (2026-11-05, finding LOW 4) |
 | OBS-341 | The analytics counters file is read, changed and written by `note_send` and `count` without a lock, so a concurrent write can lose `last_send` (read by the connections declaration, OBS-326); on Windows a failed `os.replace` over a reader is swallowed and the update is lost. Serialize the writes | open | the independent review of #436 (2026-11-05, finding LOW 5) |
 | OBS-342 | In the connections declaration (OBS-326) a receipt reason `hub-absent` wins over any other refusal in the same receipt, so absent plus `access-refused` would read `unknown` rather than `degraded`. Today the attribution step records only that one reason when no hub exists; keep the precedence explicit and tested | open | the independent review of #436 (2026-11-05, finding the confirming round's nit) |
+| OBS-343 | A dispatch packet (OBS-323) is frozen only once one exists: when the dispatcher's first checkpoint carries none, the lease holder can add a packet later with any credentials and a deadline up to 7 days, and the gate then releases those slots. Accept a packet only from the workflow's first revision (or from the dispatcher before any handoff), or state in AGENT-MEMORY and AGENT-ONBOARDING that the dispatcher must write it first; test both | open | the confirming review of #437 (2026-11-05, LOW 1) |
+| OBS-344 | The workflow lease file (OBS-323, `OBSERVATORY_WORKFLOW_LEASE_FILE`) is checked for owner and mode on its path before it is opened, so someone able to write the folder could swap in another regular file between the check and the read. Check owner and mode on the opened descriptor (`fstat`) instead | open | the confirming review of #437 (2026-11-05, LOW 2) |
+| OBS-345 | An operator's erasure nulls every revision body of a workflow, which also clears its frozen dispatch packet (OBS-323), so a later write could set a new one. Erasure needs the workflow closed today, so nothing is released; record the rule (an erased packet stays shut) and test it | open | the confirming review of #437 (2026-11-05, LOW 3) |
