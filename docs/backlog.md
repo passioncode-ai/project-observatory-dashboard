@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-346`
+**Next free ID:** `OBS-347`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91)
 
@@ -371,3 +371,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-343 | A dispatch packet (OBS-323) is frozen only once one exists: when the dispatcher's first checkpoint carries none, the lease holder can add a packet later with any credentials and a deadline up to 7 days, and the gate then releases those slots. Accept a packet only from the workflow's first revision (or from the dispatcher before any handoff), or state in AGENT-MEMORY and AGENT-ONBOARDING that the dispatcher must write it first; test both | open | the confirming review of #437 (2026-11-05, LOW 1) |
 | OBS-344 | The workflow lease file (OBS-323, `OBSERVATORY_WORKFLOW_LEASE_FILE`) is checked for owner and mode on its path before it is opened, so someone able to write the folder could swap in another regular file between the check and the read. Check owner and mode on the opened descriptor (`fstat`) instead | open | the confirming review of #437 (2026-11-05, LOW 2) |
 | OBS-345 | An operator's erasure nulls every revision body of a workflow, which also clears its frozen dispatch packet (OBS-323), so a later write could set a new one. Erasure needs the workflow closed today, so nothing is released; record the rule (an erased packet stays shut) and test it | open | the confirming review of #437 (2026-11-05, LOW 3) |
+| OBS-346 | A dispatch packet (OBS-323, OBS-343) is read from a workflow's first revision, but nothing proves Fabric's dispatcher wrote it: any caller may start a workflow with `observatory_checkpoint_write`, hold its lease and name itself slots for up to 7 days, so the gate is a guard for a cooperating run. Make it a proof: accept a packet only when revision 1 was written by `service:fabric` over the hub's authenticated transport (a delegation token the hub minted), or require a hub countersignature over the packet; test that a self-started workflow with a packet releases nothing | open | the independent review of #440 (2026-11-05, finding M1) |
