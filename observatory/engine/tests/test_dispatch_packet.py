@@ -12,6 +12,10 @@ only from the project `fabric-project` resolves to, and only until the deadline.
 - View: `observatory_checkpoint_latest` and `observatory_workflow_list` show the board refs and whether keys
   can be handed out, and why not.
 - Gate: every refusal path, by its code, and the deadline.
+- Frozen: the packet is read from the dispatcher's write. A later checkpoint that changes a ref or the credentials
+  is refused and the keys stay as they were; one that leaves them out keeps them, across a handoff too. A deadline
+  more than seven days after the write is refused, and a row written before that check, or with an unreadable
+  deadline, gets no keys rather than an exception.
 """
 from __future__ import annotations
 
@@ -84,6 +88,16 @@ class Store(unittest.TestCase):
 
 
 class Packet(Store):
+    def test_a_board_ref_is_kept_only_when_its_uuid_ends_the_token(self):
+        self.assertIsNotNone(memory_redact.KEEP.fullmatch(f"board-request:{REQUEST}"))
+        for tail in ("abc", "_x", "-9", "Zq9xK2mP7vL4nR8tW3yB6cD1fG5hJ0kA"):
+            with self.subTest(tail=tail):
+                glued = f"board-request:{REQUEST}{tail}"
+                self.assertIsNone(memory_redact.KEEP.search(glued), "no part of a longer token is set aside")
+        self.assertIsNotNone(memory_redact.KEEP.search(f"see board-thread:{THREAD}, then answer"))
+        long = f"fabric-project:{FPROJECT}Zq9xK2mP7vL4nR8tW3yB6cD1fG5hJ0kA"
+        self.assertNotEqual(redactor().scrub({"x": long})[0]["x"], long)
+
     def test_the_refs_are_kept_whole_through_redaction(self):
         wf = self.start(body=packet(refs() + [{"kind": "other", "ref": "run-ends-at:2026-11-10T13:00:00Z"}]))
         body = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})[
@@ -132,10 +146,6 @@ class Packet(Store):
 
 
 class View(Store):
-    def latest(self, wf, now=None):
-        return D.view(W.checkpoint_latest(self.conn, wf["workflowId"],
-                                          credential_reader=lambda p: {"vault": [], "env": []}), now=now or NOW)
-
     def test_latest_and_list_show_the_board_refs_and_the_key_window(self):
         wf = self.start()
         latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
@@ -255,6 +265,127 @@ class Gate(Store):
         plain = self.start(body={"goal": "ship", "credentials": [{"project": "alpha-web", "env": "prod",
                                                                    "name": "ALPHA_TOKEN"}]})
         self.refused("packet-incomplete", wf=plain)
+
+
+class Frozen(Gate):
+    """The packet is the dispatcher's write (B1 of the OBS-323 review): the run it constrains writes every later
+    checkpoint, so nothing it writes there may widen it, and an ordinary step that leaves the packet out keeps it."""
+
+    def write(self, wf, body, owner=RUN, **kw):
+        return W.checkpoint_write(self.conn, owner=owner, idempotency_key=self.key(), step_id="step",
+                                  status="in_progress", body=body, workflow_id=wf["workflowId"],
+                                  lease_token=wf["leaseId"], redactor=redactor(), **kw)
+
+    def wider(self) -> dict:
+        return packet(refs(deadline="2099-01-01T00:00:00Z"), credentials=[
+            {"project": "alpha-web", "env": "prod", "name": "ALPHA_TOKEN"},
+            {"project": "alpha-web", "env": "prod", "name": "OTHER_TOKEN"}])
+
+    def test_a_later_checkpoint_cannot_widen_the_packet(self):
+        wf = self.start()
+        before = D.keys_state(self.conn, wf["workflowId"], now=NOW)
+        for why, body in (("another slot and a later deadline", self.wider()),
+                          ("another slot", packet(credentials=[{"project": "alpha-web", "env": "prod",
+                                                                "name": "OTHER_TOKEN"}])),
+                          ("a later deadline", packet(refs(deadline="2026-11-11T14:00:00Z"))),
+                          ("another request", packet(refs(**{"board-request": THREAD}))),
+                          ("another project", packet(refs(**{"fabric-project": THREAD}))),
+                          ("credentials without the refs", {"goal": "go", "credentials": [
+                              {"project": "beta-api", "env": "prod", "name": "BETA_TOKEN"}]})):
+            with self.subTest(why):
+                with self.assertRaises(W.PacketFrozen) as caught:
+                    self.write(wf, body)
+                self.assertIn("packet-frozen", str(caught.exception))
+                self.assertNotIn(wf["leaseId"], str(caught.exception))
+        self.refused("slot-not-named", wf=wf, names=("OTHER_TOKEN",))
+        self.refused("deadline-passed", wf=wf, now=NOW + timedelta(hours=3))
+        self.assertEqual(D.keys_state(self.conn, wf["workflowId"], now=NOW), before)
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
+        self.assertEqual(latest["checkpoint"]["revision"], 1, "a refused write leaves no revision")
+
+    def test_a_ref_the_packet_did_not_carry_cannot_be_added(self):
+        wf = self.start(body=packet(refs(**{"board-thread": None})))
+        with self.assertRaises(W.PacketFrozen):
+            self.write(wf, packet())
+        self.assertNotIn("thread", W.checkpoint_latest(self.conn, wf["workflowId"],
+                                                       credential_reader=lambda p: {"vault": [], "env": []})["dispatch"])
+
+    def test_a_checkpoint_that_leaves_the_packet_out_keeps_it(self):
+        wf = self.start()
+        self.write(wf, {"goal": "answer the request", "done": [{"step_id": "read", "result": "read the request"}]})
+        self.write(wf, {"goal": "answer the request", "artifacts": [{"kind": "other", "ref":
+                                                                    "run-ends-at:2026-11-10T13:30:00Z"}]})
+        self.write(wf, packet())  # the packet repeated unchanged is no change
+        self.assertEqual(self.authorize(wf)["slots"], ["alpha-web/prod/ALPHA_TOKEN"])
+        self.assertEqual(D.keys_state(self.conn, wf["workflowId"], now=NOW)["state"], "open")
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
+        dispatch = latest["dispatch"]
+        self.assertEqual((dispatch["request"], dispatch["deadline"], dispatch["keys"]["slots"]),
+                         (f"board-request:{REQUEST}", DEADLINE, ["alpha-web/prod/ALPHA_TOKEN"]))
+        row = W.workflow_list(self.conn)["workflows"][0]
+        self.assertEqual(row["dispatch"]["keys"]["slots"], ["alpha-web/prod/ALPHA_TOKEN"])
+
+    def test_run_ends_at_is_per_dispatch_and_never_moves_the_deadline(self):
+        wf = self.start(body=packet(refs() + [{"kind": "other", "ref": "run-ends-at:2026-11-10T13:00:00Z"}]))
+        self.write(wf, {"goal": "go", "artifacts": [{"kind": "other", "ref": "run-ends-at:2026-11-10T13:45:00Z"}]})
+        seen = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                   credential_reader=lambda p: {"vault": [], "env": []})["dispatch"]
+        self.assertEqual((seen["runEndsAt"], seen["deadline"], seen["keys"]["until"]),
+                         ("2026-11-10T13:45:00Z", DEADLINE, DEADLINE))
+        self.write(wf, {"goal": "go", "artifacts": [{"kind": "other", "ref": "run-ends-at:2099-01-01T00:00:00Z"}]})
+        self.refused("deadline-passed", wf=wf, now=NOW + timedelta(hours=2))
+
+    def test_across_a_handoff_the_next_executor_keeps_the_packet_and_cannot_change_it(self):
+        wf = self.start()
+        offer = W.handoff_create(self.conn, owner=FABRIC, idempotency_key=self.key(), workflow_id=wf["workflowId"],
+                                 to={"provider": "anthropic"}, reason="plan_route", lease_token=wf["leaseId"],
+                                 credential_reader=lambda p: {"vault": [{"name": "ALPHA_TOKEN", "env": "prod"}],
+                                                              "env": []},
+                                 git_reader=lambda p: {}, related_reader=lambda c, **k: ([], []),
+                                 redactor=redactor())
+        taken = W.handoff_accept(self.conn, owner=RUN, idempotency_key=self.key(), handoff_id=offer["handoffId"],
+                                 credential_reader=lambda p: {"vault": [{"name": "ALPHA_TOKEN", "env": "prod"}],
+                                                              "env": []})
+        run = {**wf, "leaseId": taken["leaseId"]}
+        self.write(run, {"goal": "answer the request", "done": [{"step_id": "claim", "result": "claimed"}]})
+        self.assertEqual(self.authorize(run)["slots"], ["alpha-web/prod/ALPHA_TOKEN"])
+        with self.assertRaises(W.PacketFrozen):
+            self.write(run, self.wider())
+        self.refused("slot-not-named", wf=run, names=("OTHER_TOKEN",))
+        self.refused("not-lease-holder", wf=wf)
+
+    def test_a_deadline_more_than_seven_days_out_is_refused_on_write(self):
+        stamp = "%Y-%m-%dT%H:%M:%SZ"
+        far = (datetime.now(timezone.utc) + timedelta(days=8)).strftime(stamp)
+        with self.assertRaises(W.DeadlineTooFar) as caught:
+            self.start(body=packet(refs(deadline=far)))
+        self.assertIn("deadline-too-far", str(caught.exception))
+        near = (datetime.now(timezone.utc) + timedelta(days=6)).strftime(stamp)
+        wf = self.start(body=packet(refs(deadline=near)))
+        self.assertEqual(D.keys_state(self.conn, wf["workflowId"])["state"], "open")
+
+    def rewrite_first(self, wf, old, new):
+        """A row written before this engine checked it: its first revision rewritten in place."""
+        self.conn.execute("UPDATE ledger SET body_json = replace(body_json, ?, ?) WHERE memory_id = ? AND revision = 1",
+                          (old, new, f"ckpt:{wf['workflowId']}"))
+        self.conn.commit()
+
+    def test_an_earlier_row_with_a_far_deadline_gets_no_keys(self):
+        wf = self.start()
+        self.rewrite_first(wf, f"deadline:{DEADLINE}", "deadline:2099-01-01T00:00:00Z")
+        self.assertEqual(D.keys_state(self.conn, wf["workflowId"], now=NOW)["reason"], "deadline-too-far")
+        self.refused("deadline-too-far", wf=wf)
+
+    def test_an_unreadable_deadline_is_an_incomplete_packet_not_an_exception(self):
+        for bad in ("2026-13-45T00:00:00Z", "tomorrow"):
+            with self.subTest(bad=bad):
+                wf = self.start()
+                self.rewrite_first(wf, f"deadline:{DEADLINE}", f"deadline:{bad}")
+                self.assertEqual(D.keys_state(self.conn, wf["workflowId"], now=NOW)["reason"], "packet-incomplete")
+                latest = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                             credential_reader=lambda p: {"vault": [], "env": []})
+                self.assertEqual(latest["dispatch"]["keys"]["reason"], "packet-incomplete")
+                self.refused("packet-incomplete", wf=wf)
 
 
 if __name__ == "__main__":

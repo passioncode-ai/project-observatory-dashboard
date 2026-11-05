@@ -24,6 +24,16 @@ say which. Observatory gives a value only:
 and none to a packet without the request, the project or the deadline, or without `credentials`. Each refusal is
 `Refused` with a code (`REFUSALS`), never a value or a lease in its text.
 
+THE PACKET IS FROZEN WHEN THE DISPATCHER WRITES IT. Every checkpoint stores its body whole, and the run the packet
+constrains writes the next one: read from the latest revision, the packet would be whatever the run last wrote, so
+it could name itself another slot and a later deadline, and an honest step checkpoint that leaves the refs out would
+shut its own keys. So the refs above (but `run-ends-at`) and `credentials` are read from the FIRST revision that
+carries a packet (`packet_of`), the dispatcher's, written before any handoff. A later checkpoint may leave them out,
+and the frozen packet stands; one that names a frozen ref with another value, a ref the packet did not carry, or
+another set of credentials is refused (`check_write`, `packet-frozen`). The deadline the dispatcher writes is at
+most seven days after that write (`deadline-too-far`), the board's own limit on a request. `run-ends-at` stays per
+dispatch: the last one written is shown, and nothing reads it as a permission, so it cannot widen the deadline.
+
 `validate` runs inside `store.workflow.checkpoint_body`, so a malformed packet is refused on the way in; `view`
 adds what a person needs to follow the request to `observatory_checkpoint_latest` and `observatory_workflow_list`.
 """
@@ -33,7 +43,7 @@ import hmac
 import json
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -47,6 +57,10 @@ REFS = {
     "deadline": re.compile(_UTC),
     "run-ends-at": re.compile(_UTC),
 }
+#: The refs frozen with the packet at the dispatcher's write; `run-ends-at` belongs to each dispatch's own checkpoint.
+FROZEN = ("board-request", "board-thread", "capability", "fabric-project", "deadline")
+#: How far after the write that sets it a packet's deadline may be: the board's own limit on a request (7 days).
+MAX_HORIZON = timedelta(days=7)
 #: What keys need: without any of these a packet gets none (§3.4).
 REQUIRED_FOR_KEYS = ("board-request", "fabric-project", "deadline")
 #: The refs memory_redact keeps whole (a UUID inside them is no credential).
@@ -59,8 +73,13 @@ REFUSALS = {
     "no-credentials": "the packet names no credentials, so it gets none",
     "workflow-closed": "the workflow's final checkpoint closed it; nothing more is handed out",
     "deadline-passed": "the request's deadline has passed; nothing more is handed out",
+    "deadline-too-far": "the packet's deadline is more than 7 days after the dispatcher wrote it, the board's limit "
+                        "on a request; it gets no keys",
+    "packet-frozen": "the packet is frozen at the dispatcher's write; a later checkpoint may leave its refs and "
+                     "credentials out, never change them",
     "not-lease-holder": "only the holder of the workflow's lease gets keys; take it with observatory_handoff_accept "
-                        "and pass its leaseId in OBSERVATORY_WORKFLOW_LEASE",
+                        "and present its leaseId in OBSERVATORY_WORKFLOW_LEASE or a private "
+                        "file named in OBSERVATORY_WORKFLOW_LEASE_FILE",
     "slot-not-named": "the packet's credentials do not name this slot in this environment",
     "project-unresolved": "the packet's fabric-project does not resolve to one project of this registry",
     "project-mismatch": "the slot is not the project the packet's fabric-project resolves to",
@@ -129,20 +148,108 @@ def _parse(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _time(value: Any) -> datetime | None:
+    """A packet time in its exact shape, or None: a row written before refs were validated may hold anything, and
+    an unreadable deadline is a packet without one, never an exception in a reader or the gate."""
+    if not isinstance(value, str) or not REFS["deadline"].fullmatch(value):
+        return None
+    try:
+        return _parse(value)
+    except ValueError:
+        return None
+
+
 def _slot(c: dict) -> str:
     return f"{str(c['project']).split(':', 1)[-1]}/{c['env']}/{c['name']}"
 
 
-def _window(status: str, refs: dict, credentials: list, now: datetime) -> dict:
-    out: dict = {"slots": [_slot(c) for c in credentials]}
-    if refs.get("deadline"):
-        out["until"] = refs["deadline"]
+def _slots(credentials: list) -> set[tuple[str, str, str]]:
+    return {(str(c.get("project")), str(c.get("env")), str(c.get("name"))) for c in credentials or []
+            if isinstance(c, dict)}
+
+
+def _rows(conn: sqlite3.Connection, workflow_id: str, needles: tuple[str, ...], order: str):
+    """The checkpoint revisions of `workflow_id` whose body mentions one of `needles`, in `order` of revision. The
+    text filter only narrows the read; `refs_of` decides."""
+    where = " OR ".join("instr(l.body_json, ?) > 0" for _ in needles)
+    return conn.execute("SELECT l.revision, l.body_json, l.created_at FROM ledger l LEFT JOIN tombstones t"
+                        " ON t.memory_id = l.memory_id WHERE l.memory_id = ? AND t.memory_id IS NULL"
+                        f" AND ({where}) ORDER BY l.revision {order}",
+                        (f"ckpt:{workflow_id}", *(f"{n}:" for n in needles)))
+
+
+def packet_of(conn: sqlite3.Connection, workflow_id: str) -> dict | None:
+    """The frozen packet of `workflow_id`, or None for a workflow that never carried one: `refs` (the FROZEN refs) and
+    `credentials` of the first revision that carries a packet, that revision and when it was written, and the
+    `run-ends-at` of the last revision that names one. Reads only."""
+    packet = None
+    for row in _rows(conn, workflow_id, FROZEN, "ASC"):
+        body = json.loads(row["body_json"] or "{}")
+        refs = refs_of(body)
+        if any(k in refs for k in FROZEN):
+            packet = {"refs": {k: refs[k] for k in FROZEN if k in refs},
+                      "credentials": body.get("credentials") or [],
+                      "revision": row["revision"], "writtenAt": row["created_at"]}
+            break
+    if packet is None:
+        return None
+    for row in _rows(conn, workflow_id, ("run-ends-at",), "DESC"):
+        ends = refs_of(json.loads(row["body_json"] or "{}")).get("run-ends-at")
+        if ends:
+            packet["runEndsAt"] = ends
+            break
+    return packet
+
+
+def check_write(packet: dict | None, body: dict, now: datetime) -> None:
+    """Refuse a checkpoint body that would change the frozen `packet` (raises Refused `packet-frozen`), or that sets
+    a packet whose deadline is more than MAX_HORIZON after `now` (`deadline-too-far`). Omitting the refs or the
+    credentials keeps the packet; a body of a workflow that carries no packet is not touched."""
+    refs = refs_of(body)
+    if packet is None:
+        if any(k in refs for k in FROZEN):
+            deadline = _time(refs.get("deadline"))
+            if deadline is not None and deadline > now + MAX_HORIZON:
+                raise Refused("deadline-too-far", refs["deadline"])
+        return
+    changed = [k for k in FROZEN if k in refs and refs[k] != packet["refs"].get(k)]
+    if changed:
+        raise Refused("packet-frozen", "changes " + ", ".join(changed))
+    credentials = body.get("credentials") or []
+    if credentials and _slots(credentials) != _slots(packet["credentials"]):
+        raise Refused("packet-frozen", "changes credentials")
+
+
+def _shut(status: str, packet: dict | None, now: datetime) -> tuple[str, str] | None:
+    """Why no key can be handed out under this packet whoever asks, as (code, detail), or None."""
     if status != "open":
-        out.update(state="closed", reason="workflow-closed")
-    elif any(k not in refs for k in REQUIRED_FOR_KEYS):
-        out.update(state="closed", reason="packet-incomplete")
-    elif now >= _parse(refs["deadline"]):
-        out.update(state="closed", reason="deadline-passed")
+        return "workflow-closed", ""
+    refs = (packet or {}).get("refs") or {}
+    missing = [k for k in REQUIRED_FOR_KEYS if k not in refs]
+    if missing:
+        return "packet-incomplete", "missing " + ", ".join(missing)
+    deadline = _time(refs["deadline"])
+    if deadline is None:
+        return "packet-incomplete", "the deadline does not read as a UTC time"
+    written = _time(packet.get("writtenAt"))
+    if written is None:
+        return "packet-incomplete", "the packet's write time does not read"
+    if deadline > written + MAX_HORIZON:
+        return "deadline-too-far", refs["deadline"]
+    if now >= deadline:
+        return "deadline-passed", refs["deadline"]
+    return None
+
+
+def _window(status: str, packet: dict | None, now: datetime) -> dict:
+    credentials = (packet or {}).get("credentials") or []
+    out: dict = {"slots": [_slot(c) for c in credentials]}
+    deadline = ((packet or {}).get("refs") or {}).get("deadline")
+    if deadline:
+        out["until"] = deadline
+    shut = _shut(status, packet, now)
+    if shut:
+        out.update(state="closed", reason=shut[0])
     elif not credentials:
         out.update(state="closed", reason="no-credentials")
     else:
@@ -150,20 +257,18 @@ def _window(status: str, refs: dict, credentials: list, now: datetime) -> dict:
     return out
 
 
-def view(latest: dict, *, now: datetime | None = None) -> dict | None:
-    """What a person needs to follow the request, from a `checkpoint_latest` answer, or None for a workflow that
-    carries no packet: the board refs, the run's end and whether keys can be handed out (and why not)."""
-    body = ((latest or {}).get("checkpoint") or {}).get("body") or {}
-    refs = refs_of(body)
-    if not refs:
+def view(packet: dict | None, status: str, *, now: datetime | None = None) -> dict | None:
+    """What a person needs to follow the request, from the frozen `packet` (`packet_of`), or None for a workflow that
+    carries none: the board refs, the run's end and whether keys can be handed out (and why not)."""
+    if packet is None:
         return None
+    refs = packet["refs"]
     out = {"request": f"board-request:{refs['board-request']}" if "board-request" in refs else None,
            "thread": f"board-thread:{refs['board-thread']}" if "board-thread" in refs else None,
            "capability": refs.get("capability"),
            "fabricProject": f"fabric-project:{refs['fabric-project']}" if "fabric-project" in refs else None,
-           "deadline": refs.get("deadline"), "runEndsAt": refs.get("run-ends-at"),
-           "keys": _window(latest.get("status") or "open", refs, body.get("credentials") or [],
-                           now or datetime.now(timezone.utc))}
+           "deadline": refs.get("deadline"), "runEndsAt": packet.get("runEndsAt"),
+           "keys": _window(status or "open", packet, now or datetime.now(timezone.utc))}
     return {k: v for k, v in out.items() if v is not None}
 
 
@@ -172,15 +277,7 @@ def keys_state(conn: sqlite3.Connection, workflow_id: str, *, now: datetime | No
     wf = conn.execute("SELECT status FROM workflows WHERE workflow_id = ?", (workflow_id,)).fetchone()
     if wf is None:
         return {"state": "closed", "reason": "workflow-unknown"}
-    body = _body(conn, workflow_id)
-    return _window(wf["status"], refs_of(body), body.get("credentials") or [], now or datetime.now(timezone.utc))
-
-
-def _body(conn: sqlite3.Connection, workflow_id: str) -> dict:
-    row = conn.execute("SELECT l.body_json FROM ledger l LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
-                       " WHERE l.memory_id = ? AND t.memory_id IS NULL ORDER BY l.revision DESC LIMIT 1",
-                       (f"ckpt:{workflow_id}",)).fetchone()
-    return json.loads(row["body_json"] or "{}") if row else {}
+    return _window(wf["status"], packet_of(conn, workflow_id), now or datetime.now(timezone.utc))
 
 
 def resolve_fabric_project(uuid: str) -> tuple[str | None, str | None]:
@@ -213,20 +310,16 @@ def authorize(conn: sqlite3.Connection, workflow_id: str, lease: str | None, *, 
     wf = conn.execute("SELECT status FROM workflows WHERE workflow_id = ?", (workflow_id,)).fetchone()
     if wf is None:
         raise Refused("workflow-unknown", workflow_id)
-    body = _body(conn, workflow_id)
-    refs = refs_of(body)
-    if wf["status"] != "open":
-        raise Refused("workflow-closed")
-    missing = [k for k in REQUIRED_FOR_KEYS if k not in refs]
-    if missing:
-        raise Refused("packet-incomplete", "missing " + ", ".join(missing))
-    if now >= _parse(refs["deadline"]):
-        raise Refused("deadline-passed", refs["deadline"])
+    packet = packet_of(conn, workflow_id)
+    shut = _shut(wf["status"], packet, now)
+    if shut:
+        raise Refused(*shut)
+    refs = packet["refs"]
     active = conn.execute("SELECT token FROM workflow_leases WHERE workflow_id = ? AND state = 'active'",
                           (workflow_id,)).fetchone()
     if not lease or active is None or active["token"] is None or not hmac.compare_digest(active["token"], lease):
         raise Refused("not-lease-holder")
-    credentials = body.get("credentials") or []
+    credentials = packet["credentials"]
     if not credentials:
         raise Refused("no-credentials")
     pid, why = resolve_fabric_project(refs["fabric-project"])
@@ -246,5 +339,5 @@ def authorize(conn: sqlite3.Connection, workflow_id: str, lease: str | None, *, 
             "slots": allowed, "until": refs["deadline"]}
 
 
-__all__ = ["REFS", "REQUIRED_FOR_KEYS", "REFUSALS", "Refused", "Invalid", "validate", "refs_of", "view",
-           "keys_state", "authorize"]
+__all__ = ["REFS", "FROZEN", "MAX_HORIZON", "REQUIRED_FOR_KEYS", "REFUSALS", "Refused", "Invalid", "validate",
+           "refs_of", "packet_of", "check_write", "view", "keys_state", "authorize"]

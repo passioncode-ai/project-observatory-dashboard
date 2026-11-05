@@ -62,7 +62,9 @@ def credential_kind(text: str) -> str | None:
 #: a request (dispatch_packet.py, OBS-323): scrubbed, the run could not find its request.
 KEEP = re.compile(r"session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
                   r"|(?:board-request|board-thread|fabric-project):"
-                  r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                  # The UUID ends the ref: one followed by more of a token's characters is not
+                  # this reference, and none of it is set aside from the shape filter.
+                  r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Za-z_-])"
                   r"|commit:[0-9a-f]{7,12}\b")
 
 

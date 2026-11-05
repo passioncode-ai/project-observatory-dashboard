@@ -352,12 +352,18 @@ Additive, with no new file, table or migration. A checkpoint body's `artifacts` 
 Fabric's on-demand sessions (`board-request:`, `board-thread:`, `capability:`, `fabric-project:`, `deadline:`,
 `run-ends-at:`, each `{kind: "other", ref}`); a body that carries one is refused when a ref has another shape or
 member, a prefix is named twice or any artifact holds an absolute path. A body without those refs is accepted as
-before. The redactor keeps `board-request:`, `board-thread:` and `fabric-project:` refs whole: an older engine
-scrubs their UUIDs. `observatory_checkpoint_latest`, `observatory_workflow_list` and their `memory/0.1` twins add
-the member `dispatch` (their output schemas are open). `use_secret.py run` takes `--workflow wf_…` and reads
-`FABRIC_DISPATCH_WORKFLOW` and `OBSERVATORY_WORKFLOW_LEASE`: with a workflow named, a value is released only under
-its packet ([agent memory](design/AGENT-MEMORY.md#a-session-fabric-starts-for-a-board-request-obs-323)); without
-one, nothing changes. The secret-use journal's rows gain `workflow`, `request` and `dispatch` (a refusal code).
+before. The redactor keeps `board-request:`, `board-thread:` and `fabric-project:` refs whole when the UUID ends the
+token: an older engine scrubs their UUIDs. The packet is frozen at its first write: a later checkpoint that changes a
+ref or the credentials is refused with the new workflow error `PacketFrozen`, and one that leaves them out keeps
+them; a packet whose deadline is more than seven days after that write is refused with `DeadlineTooFar`. A workflow
+that never carried a packet is unchanged. `observatory_checkpoint_latest`, `observatory_workflow_list` and
+their `memory/0.1` twins add the member `dispatch` (their output schemas are open). `use_secret.py run` takes
+`--workflow wf_…` and reads `FABRIC_DISPATCH_WORKFLOW`, `OBSERVATORY_WORKFLOW_LEASE` and
+`OBSERVATORY_WORKFLOW_LEASE_FILE` (a private file holding the lease): with a workflow named, a value is released only
+under its packet ([agent memory](design/AGENT-MEMORY.md#a-session-fabric-starts-for-a-board-request-obs-323));
+without one, nothing changes. That gate guards a cooperating run; containment stays the vault's
+`slotsRequireGrant: always` with a delegation token. The secret-use journal's rows gain `workflow`, `request` and
+`dispatch` (a refusal code).
 
 ## Workspace state: anonymous usage data (OBS-324, 0.33.0)
 

@@ -194,6 +194,15 @@ class InvalidInput(WorkflowError):
     """An argument is outside its declared shape. The message names which."""
 
 
+class PacketFrozen(WorkflowError):
+    """A checkpoint would change the packet of a session Fabric started for a board request (OBS-323): its board
+    refs and credentials are frozen at the dispatcher's write. Leaving them out keeps the packet."""
+
+
+class DeadlineTooFar(WorkflowError):
+    """A packet's deadline is more than seven days after the write that sets it, the board's limit on a request."""
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -612,14 +621,15 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str,
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
             "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed,
-            **_credential_view(ckpt, credential_reader), **_dispatch_view(wf["status"], ckpt, now)}
+            **_credential_view(ckpt, credential_reader),
+            **_dispatch_view(conn, workflow_id, wf["status"], now)}
 
 
-def _dispatch_view(status: str, ckpt: sqlite3.Row | None, now: datetime) -> dict:
-    """The board refs of a session Fabric started for a request, and its key window (OBS-323); {} otherwise."""
+def _dispatch_view(conn: sqlite3.Connection, workflow_id: str, status: str, now: datetime) -> dict:
+    """The board refs of a session Fabric started for a request, and its key window (OBS-323); {} otherwise. Read
+    from the frozen packet, never the latest body: a later checkpoint may leave the packet out."""
     import dispatch_packet
-    body = json.loads(ckpt["body_json"] or "{}") if ckpt else {}
-    seen = dispatch_packet.view({"status": status, "checkpoint": {"body": body}}, now=now)
+    seen = dispatch_packet.view(dispatch_packet.packet_of(conn, workflow_id), status, now=now)
     return {"dispatch": seen} if seen else {}
 
 
@@ -713,7 +723,8 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
             and quiet > STALL_SECONDS,
             "lease": _lease_view(held),
             "pendingHandoff": _lease_view(offer) if live_offer else None,
-            "handoffs": handoffs, "keptSteps": kept, **_dispatch_view(w["status"], ckpt, now)})
+            "handoffs": handoffs, "keptSteps": kept,
+            **_dispatch_view(conn, w["workflow_id"], w["status"], now)})
     answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
               "workflows": out}
     if more and out:
@@ -881,6 +892,13 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                                                   prior["revision"] != expected_revision):
                 raise L.RevisionConflict(_checkpoint_id(wid), expected_revision,
                                          0 if prior is None else prior["revision"])
+        # A session Fabric started for a board request (OBS-323): the packet is frozen at the dispatcher's write, so
+        # the run it constrains cannot widen it by writing the next checkpoint, and may leave it out.
+        import dispatch_packet
+        try:
+            dispatch_packet.check_write(None if prior is None else dispatch_packet.packet_of(conn, wid), clean, now)
+        except dispatch_packet.Refused as exc:
+            raise (DeadlineTooFar if exc.code == "deadline-too-far" else PacketFrozen)(str(exc)) from None
         revision = 1 if prior is None else prior["revision"] + 1
         mid = _checkpoint_id(wid)
         cursor = L.insert_revision(conn, dict(
