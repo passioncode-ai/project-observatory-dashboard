@@ -472,7 +472,7 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 #: `scan-digitalocean` existed for a release with no line in the help).
 OWN_PARSER_COMMANDS = ("assistant", "workflow", "embedding-policy", "access-binding", "agent-binding",
                        "memory-http", "forget", "ssh-keys", "vault-digests", "org", "lifecycle", "review", "share", "cloud", "relay",
-                       "copies")
+                       "copies", "learning-review")
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -481,6 +481,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   version / doctor             the engine version; workspace health and one verdict (clean)
   configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
   configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
+  configure learning_review settle_hour_utc HOUR  the UTC hour of the next day the learning review is due (6)
   local                        filesystem → registry → events → findings → dashboard
   track local-folder PATH      declare one exact Git checkout for the next local pass
   untrack local-folder PATH    remove that declaration and keep SessionStart from restoring it
@@ -501,6 +502,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                daily from `maintain` and before each update
   machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
                   [--second-machine|--same-machine] [--only|--skip CATEGORY[,...]] [--projects NAME[,...]]
+                  [--passphrase-stdin]
                                put a machine bundle back: the plan by default, per category; --apply
                                writes only what is missing; --overwrite moves a conflict aside first;
                                a bundle from another machine writes no private SSH key and stages its
@@ -513,7 +515,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                against the other machine's facts
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
-                               --latest finds the newest backup a workspace at this path left
+                               --latest finds the newest backup a workspace at this path left;
+                               --passphrase-stdin reads another machine's passphrase once, stored nowhere
   auto-update status|on|off    install each new stable release by itself (on by default); off still
                                announces a newer version once: `full update --apply` installs it
   analytics status|on|off|send  anonymous usage and error data that helps improve the product
@@ -557,6 +560,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                rekey OLD plans (--apply does it) this machine's own key where the
                                other machine's is registered, then lists what still accepts only
                                the old one; the private key is never shown or moved
+  learning-review show|list|run [--day YYYY-MM-DD] [--again]   the daily learning review: once a UTC day,
+                               a local report of new, revised, replaced and promoted lessons by class and
+                               rising failures from products' daily digests, each with its source; run
+                               writes what is due (the tick does it daily), show prints it and names its
+                               page under store/learning-review/; nothing is sent anywhere
   copies list|plan COPY        the copies and moves recorded in config/derivations.json, how far
                                each copy is behind its source, and the steps to carry one forward
                                (its builder at both commits, diff, `git apply --3way` on
@@ -911,6 +919,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import copies_cli
         return argparse_refusal(lambda: copies_cli.parser().parse_args(rest))
+    if name == "learning-review":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import learning_review_cli
+        return argparse_refusal(lambda: learning_review_cli.parser().parse_args(rest))
     if name == "vault-digests":
         sys.path.insert(0, str(ROOT / "tools"))
         import vault_digests
@@ -1323,6 +1335,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import copies_cli
         return copies_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "learning-review":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import learning_review_cli
+        return learning_review_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] == "vault-digests":
         sys.path.insert(0, str(ROOT / "tools"))
         import vault_digests

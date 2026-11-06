@@ -347,7 +347,8 @@ class EveryStepHasAWatchdog(Workspace):
     def test_every_step_after_the_merge_is_a_tail_step(self):
         sys.path.insert(0, str(ROOT / "tests"))
         import tick_reader
-        calls = tick_reader.tick_calls(ROOT)
+        # Probes run under the same watchdog as steps: one after the merge is a tail step too (OBS-331).
+        calls = tick_reader.tick_calls(ROOT, ("step", "bounded", "probe"))
         merge = next((i for i, c in enumerate(calls) if c[1:3] == ("bounded", "merge")), None)
         self.assertIsNotNone(merge, "the tick no longer runs `bounded(\"merge\", …)`")
         after = {c[2] for c in calls[merge:]}

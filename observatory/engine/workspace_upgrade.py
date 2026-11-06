@@ -8,8 +8,11 @@ import oslocks
 import osprivacy
 import hashlib
 import json
+import ntpath
 import os
-from pathlib import Path, PurePosixPath
+import posixpath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+import re
 import shutil
 import sqlite3
 import stat
@@ -42,8 +45,17 @@ EXCLUDED_DIRS = {'.git', '__pycache__', '.venv', 'backups', 'migration-backups'}
 #: The anonymous usage data's install id and unsent queue (`store/analytics/`, OBS-324) stay behind too:
 #: two machines with one install id would read as one install, and the queue would be sent twice. The
 #: person's switch, the file `analytics` in the home, moves with the workspace.
+#: So does the backup passphrase (`secrets/backup-passphrase`, OBS-348): each machine keeps its own, so
+#: one leaked passphrase never opens both machines' backups. Restored here, `ensure_passphrase` would
+#: have taken the other machine's as this one's and mirrored it into this machine's store; without it the
+#: next `full init` or maintenance pass makes this machine's own, as on a fresh install.
+#: Said in every second-machine restore answer (OBS-348 review): the first machine's passphrase no longer
+#: travels, so a retired first machine would take with it the only key to its backups, this snapshot's included.
+OTHER_PASSPHRASE_NOTE = ("this machine does not keep the other machine's backup passphrase: if that machine may be "
+                         "retired, keep its passphrase somewhere off both machines now, because its backups, this "
+                         "snapshot included, open only with it")
 ANOTHER_MACHINE_LEAVES = ('node/device', 'node/orgs', 'node/records', 'node/shares', 'config/cloud.json',
-                          'store/maintenance.json', 'store/analytics')
+                          'store/maintenance.json', 'store/analytics', 'secrets/backup-passphrase')
 LIFECYCLE = 'config/node-lifecycle.json'
 
 
@@ -279,6 +291,13 @@ def _snapshot(base: Path, output: Path) -> dict:
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     'machine_id':machine_identity.machine_id(),
+                    # The home the paths in settings were written under (OBS-347): a restore under
+                    # another home rewrites that prefix. Additive; an older reader ignores it.
+                    # Absent when this process has no home (`this_home`): nothing is rewritten then.
+                    **({'home_path':str(home),
+                        # The same home with its links resolved: `tracked.json` keeps resolved paths
+                        # (`tracked.canonical`), so a home behind a link is matched in both forms.
+                        'home_path_resolved':_canonical(home)} if (home := this_home()) else {}),
                     'files':entries, 'directories':sorted(before_dirs), 'external_sources_included':False,
                     'excluded':['backup collections', 'runtime locks', 'Git metadata', 'Python environments/caches']}
         workspace.write_json(stage / 'manifest.json', manifest)
@@ -420,19 +439,231 @@ def _as_another_machine(stage: Path) -> dict:
     workspace.write_json(marker_file, marker)
     return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True, 'held_off': held,
             'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
+            'notes': [OTHER_PASSPHRASE_NOTE],
             'next': ['project-observatory full node --init  (this machine\'s own device id)',
+                     # The passphrase file stayed behind (OBS-348): until this machine makes its own, every
+                     # snapshot it takes stays unencrypted inside the workspace, secrets included.
+                     'project-observatory full maintain ensure  (this machine\'s own backup passphrase, kept '
+                     'outside the workspace too; until then snapshots stay unencrypted in the workspace)',
                      *(f'project-observatory full lifecycle policy {target} --desired always_on  (only on the one '
                        f'machine that runs it)' for target in held)]}
 
 
+# --- paths written under another home (OBS-347) -----------------------------------------------
+
+#: Settings that hold a path a restore under another home rewrites and checks.
+PATH_FILES = {'settings': 'config/settings.json', 'machine': 'config/machine-backup.json',
+              'tracked': 'config/tracked.json'}
+
+
+def _recorded_home(value: str) -> PurePath:
+    """The flavour of path the snapshot's machine wrote: a Windows home (`C:\\Users\\a`, a UNC
+    share) compares as Windows parts, everything else as POSIX parts, whatever this machine is."""
+    if re.match(r'^[A-Za-z]:[\\/]', value) or value.startswith('\\\\'):
+        return PureWindowsPath(value)
+    return PurePosixPath(value)
+
+
+def _home_rest(value: str, old_home: str) -> tuple[str, ...] | None:
+    """The parts of `value` below `old_home`, compared part by part (so `/Users/ann` never
+    matches `/Users/anna`); None when `value` is not the old home or under it. A home that is
+    a filesystem root is no home: everything would be under it."""
+    if not isinstance(value, str) or not isinstance(old_home, str) or not value or not old_home:
+        return None
+    home = _recorded_home(old_home)
+    # Lexically normalised first: `<home>/../other` leaves the home and is outside it, never `~/../other`.
+    flavour = ntpath if isinstance(home, PureWindowsPath) else posixpath
+    path = type(home)(flavour.normpath(value))
+    if not home.is_absolute() or not path.is_absolute() or home.parent == home:
+        return None
+    fold = (lambda parts: tuple(p.casefold() for p in parts)) if isinstance(home, PureWindowsPath) else tuple
+    n = len(home.parts)
+    if fold(path.parts[:n]) != fold(home.parts):
+        return None
+    return tuple(path.parts[n:])
+
+
+def _rest_in_any(value: str, homes: tuple[str, ...]) -> tuple[str, ...] | None:
+    """`_home_rest` against each recorded form of the old home, the first that holds `value`."""
+    for home in homes:
+        rest = _home_rest(value, home)
+        if rest is not None:
+            return rest
+    return None
+
+
+def relative_to_home(value: str, old_home: str, *also: str) -> str | None:
+    """`~/<rest>` (POSIX separators) for a value equal to `old_home` (or one of `also`, the same
+    home in another form) or under it, else None."""
+    rest = _rest_in_any(value, (old_home, *(h for h in also if h)))
+    if rest is None:
+        return None
+    return '~' if not rest else '~/' + '/'.join(rest)
+
+
+def fix_for(setting: str) -> str:
+    """The exact step that points a setting a restore could not resolve somewhere else."""
+    section, _, source = setting.partition('.')
+    if section == 'storage':
+        return 'project-observatory full configure storage backups PATH'
+    return f'project-observatory full configure sources {source} PATH'
+
+
+def _path_settings(doc: dict):
+    """(setting, value) for every source and the backups root a settings document names."""
+    for name, value in sorted((doc.get('sources') or {}).items()):
+        yield f'sources.{name}', value
+    storage = doc.get('storage') if isinstance(doc.get('storage'), dict) else {}
+    if 'backups' in storage:
+        yield 'storage.backups', storage['backups']
+
+
+def this_home() -> Path | None:
+    """This process's home folder, or None when it has none.
+
+    `Path.home()` raises on Windows when neither USERPROFILE nor HOMEDRIVE and HOMEPATH are set
+    (a service account, a scheduled task without a profile, a test environment built from
+    scratch); a snapshot or a restore must not fail for it, it only cannot rewrite home paths."""
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _exists(value: str) -> bool:
+    """Whether a stored path exists here; `~/...` with no home to expand into does not."""
+    try:
+        return Path(value).expanduser().exists()
+    except (RuntimeError, KeyError, OSError):
+        return False
+
+
+def _canonical(path: Path) -> str:
+    """A declared folder in `tracked.json`'s own form (`tracked.canonical`: resolved, not strict)."""
+    try:
+        return str(path.resolve())
+    except (OSError, RuntimeError):
+        return str(path)
+
+
+def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path | None,
+                       old_home_resolved: str | None = None) -> dict:
+    """Make a restored workspace's paths resolve under THIS home (OBS-347).
+
+    WHY. `configure` stores a path under the home as `~/...` now, but a workspace written by
+    an older release, or a value typed absolute, names the first machine's home
+    (`<home of a>/...`). Restored under another user name or another platform's home, every source,
+    the backups root and the external secret store pointed at a home that is not there. This
+    rewrites the snapshot's recorded home (`manifest.home_path`) and nothing else: a value
+    outside it is kept as given, however much it looks like another account's home (no
+    inference from a name). It changes strings only: it never follows a link and never
+    creates a folder.
+
+    - `config/settings.json`: `sources.*` and `storage.backups` become `~/<rest>`;
+    - `config/machine-backup.json`: `include` and `roots` entries become `~/<rest>`;
+    - `config/tracked.json`: each declared folder's `path` stays ABSOLUTE (the file's rule),
+      under the new home and resolved as `tracked.canonical` writes it; every other field of the
+      row is kept. A declared folder that does not exist afterwards is named in `unresolved`.
+
+    The old home is matched as recorded and, when the snapshot names it, with its links resolved
+    (`home_path_resolved`): `tracked.json` holds resolved paths, so a home behind a link would
+    otherwise never match them. A value is normalised lexically first, so one that leaves the old
+    home through `..` is outside it.
+
+    A file is written only when something in it changed, so a same-home restore keeps every
+    byte. `unresolved` names every source and backups root that does not exist afterwards,
+    whatever the home did, with its `configure` step; a missing one is not a refusal."""
+    new = str(new_home) if new_home is not None else None
+    rewrite = bool(old_home) and new is not None and old_home != new
+    homes = tuple(dict.fromkeys(h for h in (old_home, old_home_resolved) if isinstance(h, str) and h))
+    rewritten, unresolved = [], []
+
+    def read(key: str):
+        file = stage / PATH_FILES[key]
+        if not file.is_file() or file.is_symlink():
+            return file, None
+        try:
+            doc = json.loads(file.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            doc = 'unreadable'
+        if doc == 'unreadable' or not isinstance(doc, dict):
+            unresolved.append({'file': PATH_FILES[key], 'reason': 'unreadable'})
+            return file, None
+        return file, doc
+
+    file, doc = read('settings')
+    if doc is not None:
+        changed = False
+        for setting, value in list(_path_settings(doc)):
+            to = relative_to_home(value, *homes) if rewrite else None
+            if to is None:
+                continue
+            section, _, name = setting.partition('.')
+            doc[section][name] = to
+            rewritten.append({'file': PATH_FILES['settings'], 'setting': setting, 'to': to})
+            changed = True
+        if changed:
+            workspace.write_json(file, doc)
+        for setting, value in _path_settings(doc):
+            if isinstance(value, str) and value and not _exists(value):
+                unresolved.append({'file': PATH_FILES['settings'], 'setting': setting, 'value': value,
+                                   'exists': False, 'reason': 'missing-after-restore', 'fix': fix_for(setting)})
+    if rewrite:
+        file, doc = read('machine')
+        if doc is not None:
+            changed = False
+            for key in ('include', 'roots'):
+                values = doc.get(key)
+                if not isinstance(values, list):
+                    continue
+                for i, value in enumerate(values):
+                    to = relative_to_home(value, *homes)
+                    if to is not None:
+                        values[i] = to
+                        rewritten.append({'file': PATH_FILES['machine'], 'setting': f'{key}[{i}]', 'to': to})
+                        changed = True
+            if changed:
+                workspace.write_json(file, doc)
+    file, doc = read('tracked')
+    if doc is not None:
+        changed = False
+        for key in ('local_folders', 'dismissed_local_folders'):
+            rows = doc.get(key)
+            if not isinstance(rows, list):
+                continue
+            for i, row in enumerate(rows):
+                rest = _rest_in_any(row.get('path'), homes) if rewrite and isinstance(row, dict) else None
+                if rest is None:
+                    continue
+                row['path'] = _canonical(new_home.joinpath(*rest))
+                rewritten.append({'file': PATH_FILES['tracked'], 'setting': f'{key}[{i}].path', 'to': row['path']})
+                changed = True
+        if changed:
+            workspace.write_json(file, doc)
+        # A declared folder this home does not hold (outside the old home, or not cloned yet) reads nothing.
+        for i, row in enumerate(doc.get('local_folders') if isinstance(doc.get('local_folders'), list) else []):
+            value = row.get('path') if isinstance(row, dict) else None
+            if isinstance(value, str) and value and not _exists(value):
+                unresolved.append({'file': PATH_FILES['tracked'], 'setting': f'local_folders[{i}].path',
+                                   'value': value, 'exists': False, 'reason': 'missing-after-restore',
+                                   'fix': 'project-observatory full track local-folder PATH'})
+    return {'home_from': old_home or None, 'home_to': new, 'rewritten': rewritten, 'unresolved': unresolved}
+
+
 def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None,
-            second_machine: bool | None = None, unknown: str = 'second') -> dict:
+            second_machine: bool | None = None, unknown: str = 'second', stdin_value: str | None = None,
+            prompt: bool = True) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
-    The encrypted file is authenticated in full and decrypted beside the new home;
-    the passphrase is `secret` when the caller found it (the OS credential store,
-    `maintenance.restore_latest`), else OBSERVATORY_BACKUP_PASSPHRASE or a terminal
-    prompt, because a new machine has no workspace to keep it in yet.
+    The encrypted file is authenticated in full and decrypted beside the new home. Its
+    passphrase is the first of `backup_vault.open_with`'s candidates that opens it: `secret`
+    when the caller found it (`maintenance.restore_latest`), OBSERVATORY_BACKUP_PASSPHRASE,
+    `stdin_value` (`--passphrase-stdin`), the OS credential store under the backups folder's
+    label, then one terminal prompt (`prompt`). Another machine's passphrase is used for this
+    restore and kept nowhere (OBS-348); the answer's `passphrase_source` says which opened it.
+
+    Paths written under the snapshot's home are rewritten under this one before the restored
+    copy is checked (`rewrite_home_paths`, OBS-347); the answer's `paths` names each.
 
     The snapshot's `machine_id` against this machine's decides how (OBS-284): taken here, the
     copy is restored whole, as before; taken on another machine, or naming none (before 0.30.1),
@@ -442,13 +673,22 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     a snapshot that names no machine whole and answers `machine.mode: unknown` with the step that
     restores it as a second machine; only a known other machine id is restored without its identity."""
     if source.is_file() and not source.is_symlink():
-        secret = secret or backup_vault.require_passphrase(destination, prompt=True)
+        # Refused before anyone is asked for a passphrase (the same refusal as below).
+        if destination.exists() and not destination.is_symlink() and destination.is_dir() and any(destination.iterdir()):
+            raise config.ConfigurationError('Restore requires a new empty destination; existing state is never overwritten')
+        own = destination if (destination / 'workspace.json').is_file() else None
+        # verify=False: extract_tree authenticates the whole file before it writes a byte.
+        secret, _header, opened_by = backup_vault.open_with(
+            source.resolve(), base=own, label=source.resolve().parent.name, given=secret, stdin_value=stdin_value,
+            prompt=prompt, verify=False)
         stage = backup_vault.extract_tree(source.resolve(), destination.resolve().parent, secret)
         try:
-            return restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
-                           unknown=unknown)
+            result = restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
+                             unknown=unknown)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
+        result['passphrase_source'] = opened_by
+        return result
     workspace.reject_symlinks(source)
     workspace.reject_symlinks(destination)
     source, destination = source.resolve(), destination.resolve()
@@ -475,6 +715,9 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
                 if digest(stage / row['path']) != row['sha256']:
                     raise config.ConfigurationError('Restored file hash mismatch')
             machine = _as_another_machine(stage) if another else None
+            # The same in either mode: the rewrite depends on the home, never on the machine.
+            paths = rewrite_home_paths(stage, old_home=manifest.get('home_path'), new_home=this_home(),
+                                       old_home_resolved=manifest.get('home_path_resolved'))
             preflight(stage)
             sync_tree(stage)
             if destination.exists():
@@ -486,7 +729,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             raise
     restored = len(manifest['files']) - (sum(1 for row in manifest['files'] if _left_out(row['path'])) if another else 0)
     return {'status':'restored','files':restored,'scheduler_activated':False,
-            'external_sources_included':False, 'machine':{**placing, **(machine or {})}}
+            'external_sources_included':False, 'machine':{**placing, **(machine or {})}, 'paths':paths}
 
 
 def add_missing(current: dict, defaults: dict) -> dict:
@@ -659,7 +902,7 @@ def parser() -> argparse.ArgumentParser:
     res.add_argument('snapshot',type=Path,nargs='?')
     res.add_argument('--latest',action='store_true',
                      help='the newest backup a workspace at this path left, opened with the passphrase '
-                          'kept in the OS credential store')
+                          'kept in the OS credential store, else asked once at a terminal')
     res.add_argument('--label',help='with --latest: which workspace\'s backups, when several exist')
     res.add_argument('--second-machine',action='store_true',
                      help='restore as another machine: no device identity, enrollments, shares, mailbox or schedule '
@@ -667,12 +910,17 @@ def parser() -> argparse.ArgumentParser:
     res.add_argument('--same-machine',action='store_true',
                      help='restore a snapshot taken on another machine, or one that names none, whole: its '
                           'device identity, enrollments and schedule state included; only at a terminal')
+    res.add_argument('--passphrase-stdin',action='store_true',
+                     help='read the backup\'s passphrase (another machine\'s) from stdin once, a file or a pipe, '
+                          'never a terminal; used for this restore and stored nowhere')
     return ap
 
 
 def main(argv: list[str]) -> int:
     args = parser().parse_args(argv)
     try:
+        # Read once, before any other work: a refusal of the value comes before anything is touched.
+        stdin_value = backup_vault.read_passphrase_stdin() if getattr(args, 'passphrase_stdin', False) else None
         base = config.home()
         if args.command == 'backup':
             result = snapshot(base,args.output,writers_stopped=args.writers_stopped)
@@ -698,7 +946,8 @@ def main(argv: list[str]) -> int:
                 raise config.ConfigurationError('Give a snapshot or --latest, not both')
             import maintenance
             result = maintenance.restore_latest(base, label=args.label, same_machine=args.same_machine or None,
-                                                second_machine=args.second_machine or None)
+                                                second_machine=args.second_machine or None,
+                                                stdin_value=stdin_value, ask=True)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2
@@ -706,7 +955,7 @@ def main(argv: list[str]) -> int:
             if args.snapshot is None:
                 raise config.ConfigurationError('Name a snapshot, or pass --latest')
             result = restore(args.snapshot,base,same_machine=args.same_machine or None,
-                             second_machine=args.second_machine or None)
+                             second_machine=args.second_machine or None,stdin_value=stdin_value)
         print(json.dumps(result,indent=2))
         return 0
     # The same voice as every other command: `Observatory: <reason>`. A refusal

@@ -487,6 +487,26 @@ def _tick_health(base: Path, doc: dict) -> dict:
                               scheduler_enabled=bool((doc.get("features") or {}).get("scheduler")))
 
 
+def storable_path(path: Path) -> tuple[str, str]:
+    """(the value `configure` stores, its form) for an absolute path (OBS-347).
+
+    A path that is this account's home or lies under it is stored `~/<rel>` (`~` for the home
+    itself), so a workspace restored under another home (another user name, another platform's
+    home layout) still finds it: every reader expands `~` (`configuration.load` accepts it since
+    the loader validates `expanduser()`). Compared resolved, without requiring the path to exist.
+    Anything else is stored absolute, as before."""
+    try:
+        rel = path.resolve(strict=False).relative_to(Path.home().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return str(path), "absolute"
+    return ("~" if not rel.parts else "~/" + rel.as_posix()), "home-relative"
+
+
+def path_form(value: str) -> str:
+    """How a stored path reads: `home-relative` (`~` or `~/...`) or `absolute`."""
+    return "home-relative" if value == "~" or value.startswith(("~/", "~\\")) else "absolute"
+
+
 def _switches(doc: dict, section: str) -> dict:
     """{name: on} for every known name, sorted; a switch is on only when `true`,
     the rule `configuration.enabled` applies."""
@@ -513,7 +533,9 @@ def doctor(base: Path) -> dict:
             # EVERY name `configure` accepts, on or off: the onboarding says
             # "list current settings with doctor", and a fresh workspace listed
             # `{}`. Unknown names a hand-edited file carries are kept as found.
-            "sources": {**{k: {"configured": True, "exists": Path(v).expanduser().exists()}
+            # `form` (OBS-347): whether the value moves with the home (`~/...`) or names one path.
+            # An absolute value an older release stored is named as it is, never migrated.
+            "sources": {**{k: {"configured": True, "exists": Path(v).expanduser().exists(), "form": path_form(v)}
                            for k, v in doc.get("sources", {}).items()},
                         **{k: {"configured": False} for k in sorted(config.known_names("sources"))
                            if not doc.get("sources", {}).get(k)}},
@@ -523,7 +545,9 @@ def doctor(base: Path) -> dict:
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
             "open_unlinked": __import__("open_unlinked").saved_summary(base=base),
-            "backups": __import__("backup_vault").status(base),
+            "backups": {**__import__("backup_vault").status(base),
+                        **({"form": path_form(doc["storage"]["backups"])}
+                           if isinstance(doc.get("storage"), dict) and doc["storage"].get("backups") else {})},
             # The machine's agent setup (OBS-157): the newest bundle, its age and size, and
             # what it did not carry. Its warnings are also in `maintenance.warnings`.
             "machine_backup": __import__("machine_backup").status(base),
@@ -726,7 +750,8 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
+                                                 "learning_review", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -904,13 +929,21 @@ def main(argv: list[str]) -> int:
                     f"Unknown {a.section[:-1]}: {a.name}; known: {', '.join(sorted(config.known_names(a.section)))}")
             if a.section in ("model", "budget"):
                 return _configure_models(base, a)
+            stored_as = None
             if a.section == "storage":
                 if a.name not in config.STORAGE_SETTINGS:
                     raise config.ConfigurationError(f"Unknown storage setting: {a.name}; known: {', '.join(config.STORAGE_SETTINGS)}")
                 value = Path(a.value).expanduser()
                 if not value.is_absolute():
                     raise config.ConfigurationError("Storage path must be absolute")
-                value = str(value)
+                value, stored_as = storable_path(value)
+            elif a.section == "learning_review":
+                if a.name not in config.LEARNING_REVIEW_SETTINGS:
+                    raise config.ConfigurationError(f"Unknown learning_review setting: {a.name}; known: "
+                                                    f"{', '.join(config.LEARNING_REVIEW_SETTINGS)}")
+                if not (a.value.isascii() and a.value.isdigit() and len(a.value) <= 2 and int(a.value) <= 23):
+                    raise config.ConfigurationError("learning_review settle_hour_utc is a whole hour from 0 to 23")
+                value = int(a.value)
             elif a.section == "interface":
                 choices = config.INTERFACE_SETTINGS.get(a.name)
                 if choices is None:
@@ -922,7 +955,7 @@ def main(argv: list[str]) -> int:
                 value = Path(a.value).expanduser()
                 if not value.is_absolute():
                     raise config.ConfigurationError("Source path must be absolute")
-                value = str(value)
+                value, stored_as = storable_path(value)
             else:
                 if a.value not in {"true", "false"}:
                     raise config.ConfigurationError("Use true or false")
@@ -932,6 +965,8 @@ def main(argv: list[str]) -> int:
                 doc.setdefault(a.section, {})[a.name] = value
                 write_json(base / "config/settings.json", doc)
             result = {"status": "configured", "section": a.section, "name": a.name}
+            if stored_as:
+                result["stored_as"] = stored_as
             if a.section == "interface":
                 # The pages carry the language they were built in; say how to see it.
                 result["next"] = "project-observatory full open --rebuild"

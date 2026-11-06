@@ -236,6 +236,12 @@
       "failing": [
         "BeforeUpdateInventory.test_local_update_is_counted_with_and_without_passphrase",
         "BeforeUpdateInventory.test_update_migrates_encrypted_and_restores_while_foreign_kind_stays",
+        "ForeignPassphrase.test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored",
+        "ForeignPassphrase.test_a_wrong_candidate_costs_one_chunk_not_a_whole_file",
+        "ForeignPassphrase.test_restore_latest_asks_once_per_foreign_label",
+        "ForeignPassphrase.test_the_command_line_refuses_an_empty_stdin_and_restores_with_a_value",
+        "ForeignPassphrase.test_the_prompt_is_asked_once_and_only_after_every_other_candidate_failed",
+        "ForeignPassphrase.test_without_a_terminal_and_without_stdin_the_refusal_names_the_sources_tried",
         "Format.test_ciphertext_does_not_contain_plaintext",
         "Format.test_dropping_whole_final_chunks_refused",
         "Format.test_rewritten_header_field_refused",
@@ -250,6 +256,7 @@
         "Snapshots.test_encrypted_rotation_keeps_newest",
         "Snapshots.test_encrypted_snapshot_restores_identically",
         "Snapshots.test_export_failure_keeps_local_copy",
+        "Snapshots.test_latest_under_another_home_names_the_backups_it_found_elsewhere",
         "Snapshots.test_restore_without_passphrase_refused_cleanly",
         "Snapshots.test_upgrade_exports_before_upgrade_snapshot",
         "Snapshots.test_upgrade_survives_export_failure",
@@ -855,6 +862,7 @@
         "TIMEOUT"
       ],
       "failing": [
+        "CommandLine.test_machine_restore_reads_the_passphrase_from_stdin",
         "Refusals.test_transcripts_are_carried_only_when_asked",
         "Restore.test_a_backup_sweeps_what_a_killed_one_left",
         "Restore.test_a_conflict_is_kept_unless_overwrite_moves_it_aside",
@@ -1691,9 +1699,10 @@
     "workflow_memory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FAILED (errors=1)",
+      "reason": "FAILED (errors=1); times out on windows-latest in some runs (runs 42175857857 and 42178294453, 2026-11-06)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "ReviewFindings.test_h10_references_survive_and_the_report_names_fields"
@@ -1763,7 +1772,16 @@
         "TIMEOUT"
       ],
       "failing": [
+        "HomeRelativeSources.test_a_prefix_by_string_only_is_not_rewritten",
+        "HomeRelativeSources.test_a_snapshot_names_its_home",
+        "HomeRelativeSources.test_a_value_outside_the_old_home_is_kept_and_named_when_missing",
+        "HomeRelativeSources.test_an_older_snapshot_without_a_home_rewrites_nothing_and_names_what_is_missing",
+        "HomeRelativeSources.test_an_unreadable_declaration_is_named_and_the_restore_completes",
+        "HomeRelativeSources.test_restore_under_another_home_rewrites_settings_backup_and_tracked_paths",
+        "HomeRelativeSources.test_the_same_home_restores_settings_byte_for_byte",
+        "HomeRelativeSources.test_without_a_home_a_snapshot_and_a_restore_still_work",
         "WorkspaceUpgrade.test_a_failed_live_migration_puts_the_files_back",
+        "WorkspaceUpgrade.test_a_second_machine_never_takes_the_snapshots_backup_passphrase",
         "WorkspaceUpgrade.test_a_settings_file_changed_while_staged_still_refuses",
         "WorkspaceUpgrade.test_a_snapshot_names_the_machine_it_was_taken_on",
         "WorkspaceUpgrade.test_a_snapshot_naming_no_machine_is_another_machines_unless_asked",

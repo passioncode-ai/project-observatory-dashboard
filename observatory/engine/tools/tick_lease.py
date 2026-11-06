@@ -391,7 +391,10 @@ DEFAULT_STEP_SECONDS = 900
 STEP_SECONDS = {"leaks": 1200, "integrity": 240,
                 #: The standing review policy (OBS-227) decides at most 500 rows a run; a queue past that
                 #: is decided over several ticks, so it never needs more than this.
-                "review-policy": 120}
+                "review-policy": 120,
+                #: The daily learning review (OBS-331): the probe reads a few file names; the review itself reads
+                #: the ledger, git's root commit of each registered clone (once a day) and the digest store.
+                "learning-review-due": 30, "learning-review": 180}
 #: The whole tick's ceiling and each collector's share of it live in tick_budget.py
 #: (OBS-52), read there by the watchdog, the stage receipt and the findings alike.
 import tick_budget  # noqa: E402
@@ -414,6 +417,8 @@ STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
 TAIL_STEPS = frozenset({
     "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "plugins", "rollup",
     "agent", "index", "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "findings",
+    # The daily learning review (OBS-331): its probe and its step, both optional, after `rollup`.
+    "learning-review-due", "learning-review",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",
 })

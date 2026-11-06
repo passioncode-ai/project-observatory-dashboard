@@ -698,6 +698,12 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         step("lost", PY, "tools/record_lost_projects.py")
         step("plugins", PY, "collectors/run_plugins.py")
     step("rollup", PY, "store/rollup.py", "refresh")
+    # THE DAILY LEARNING REVIEW (OBS-331): once a UTC day, after the day has settled, one local report of the lessons
+    # agents recorded and the failures products' digests show. It reads the ledger, the digest store and the registry
+    # as they stand, so it runs whether or not this tick refreshed the registry; out of time, it is simply due again at
+    # the next tick. The probe answers 3 (not due) on every other tick.
+    if t.probe("learning-review-due", PY, "learning_review.py", "--due"):
+        step("learning-review", PY, "learning_review.py", "run")
     if t.registry_refreshed:
         if re.search(r"nothing moved|nothing to compare", diff):
             log("quiet tick — no model called, 0 tokens")

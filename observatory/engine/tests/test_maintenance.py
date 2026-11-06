@@ -2257,7 +2257,11 @@ class Reinstall(Base):
         out = M.restore_latest(self.home, store=FakeStore())
         self.assertEqual(out["status"], "backups-found-locked")
         self.assertIn("--home NEW_EMPTY_HOME full restore", out["next"])
-        self.assertNotIn("PASSPHRASE", out["next"].upper().replace("ASKS FOR THE PASSPHRASE", ""))
+        # The steps name the passphrase (the prompt, the --passphrase-stdin flag, the file it reads): never a value.
+        named = out["next"].upper()
+        for words in ("ASKS FOR THE PASSPHRASE", "--PASSPHRASE-STDIN", "PASSPHRASE FILE"):
+            named = named.replace(words, "")
+        self.assertNotIn("PASSPHRASE", named)
 
     def test_a_backup_taken_before_a_passphrase_change_still_restores(self):
         self.backed_up()

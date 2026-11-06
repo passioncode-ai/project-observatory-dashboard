@@ -258,6 +258,13 @@ class HelpCoversTheDispatcher(unittest.TestCase):
         handed = re.findall(r'argv\[1\] == "([a-z-]+)"', source)
         self.assertEqual(sorted(handed), sorted(cli.OWN_PARSER_COMMANDS))
 
+    def test_both_restores_read_a_passphrase_from_stdin(self):
+        # OBS-348: the agent route for another machine's passphrase; a flag, never a value in argv.
+        for argv in (["restore", "/srv/example-ws/snapshot.obsnap", "--passphrase-stdin"],
+                     ["restore", "--latest", "--passphrase-stdin"],
+                     ["machine-restore", "--latest", "--passphrase-stdin"]):
+            self.assertEqual(cli.refusal(argv), "", argv)
+
     def test_every_command_and_group_is_described_in_the_help(self):
         public = cli.public_profile()
         names = (set(cli.WORKSPACE_COMMANDS) | set(cli.OWN_PARSER_COMMANDS) | set(cli.GROUPS)
