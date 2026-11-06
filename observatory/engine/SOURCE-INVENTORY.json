@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "f4f7468407a452ee065715639a4f99c8f22600459d2f5e73697226ac4ec0a3d8",
+      "export_sha256": "fc5ee88b8c53dd8dfa5b9c2176e08e6d0496b456feb7e6efcd14336bafbc885c",
       "bytes": 17513,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -947,15 +947,15 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "9b366bbe00474941d32fae983d488d519388db26a9effe6030c7546d7883f7ee",
-      "bytes": 15346,
+      "export_sha256": "f0c26c5760e5d77891036f6878a61b8c79d8a31167bf6886dc0fb73cf60d461c",
+      "bytes": 15328,
       "upstream_modified": true
     },
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "dc72224d1e9e2787ad42ceba1847d8e40d5240a279987df2de585abcce614ef3",
-      "bytes": 71639,
+      "export_sha256": "e7e26e6e86e03ad272427b56259b8af40b3828e075ebd4d9a7945f8184a379de",
+      "bytes": 71389,
       "upstream_modified": true
     },
     {
@@ -1006,8 +1006,8 @@
     {
       "path": "fabric-agent.json",
       "source_sha256": "47102010501764ba9275f011f8f6d13250f619bc1d855312eecd53af23647e34",
-      "export_sha256": "03489fb314e96c803db8b9f5a59759ceea3a5f54a00050d41216b4c612005bdb",
-      "bytes": 23118,
+      "export_sha256": "a19938162bc35f1d003c943ebf313725f2e21279f549271984fc938fbe5c46d6",
+      "bytes": 26114,
       "upstream_modified": true
     },
     {
@@ -1020,8 +1020,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "a3eb8eda2191a94ff2123f20df87629ff4e53886ff0666637ff6040d2b194ae4",
-      "bytes": 21063,
+      "export_sha256": "6cfb9f588c2d0e4eb15507e595bef216074d1e082fb4880c34f7a4a5943d90a2",
+      "bytes": 21102,
       "upstream_modified": true
     },
     {
@@ -3038,8 +3038,8 @@
       "path": "fabric/unreleased-capabilities.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e2295eebd92e008f0bffc3425cad4cb7f98f4cf61502d1fc117e92fb269ccda0",
-      "bytes": 3524
+      "export_sha256": "cdf12a6bf3fc8a918e63d9c231bccd5686a7e1adfbdc1045e14a1caa62d8114f",
+      "bytes": 711
     },
     {
       "path": "fabric_attribution.py",
@@ -4659,8 +4659,8 @@
       "path": "tests/test_conformance_receipt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "088359e161e2db045b58826f634f340b96a9ab4fc8996541fdbc2f7e27f20311",
-      "bytes": 26513
+      "export_sha256": "a27cd2e8a3e219b08c83b87f62293efa53a646882b77faf9edc9f587231c0920",
+      "bytes": 26590
     },
     {
       "path": "tests/test_contract_lock.py",
@@ -4864,8 +4864,8 @@
       "path": "tests/test_docs_current.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8f742355f434595860ebd27458ecf16b3eeb2b20baa2db78079a7e7c858f74b6",
-      "bytes": 19104
+      "export_sha256": "0975041ad8767a1730b1b02a817251293e4ce360df76615adbb850a4fd72e8ef",
+      "bytes": 19140
     },
     {
       "path": "tests/test_domain_probe.py",
@@ -5715,8 +5715,8 @@
       "path": "tests/test_ops_digest_record.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2f6796bfa283c88befc824d35ef246c5f5bcfd1c4e56ff4e3fe369fec90d56d",
-      "bytes": 22285
+      "export_sha256": "2135a9886e964be070e70d4d8207fd721cbbc62f213dd6dc3acb844bf8e2c16e",
+      "bytes": 22465
     },
     {
       "path": "tests/test_organizations.py",
