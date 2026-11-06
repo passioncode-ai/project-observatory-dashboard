@@ -56,6 +56,32 @@ class WorkspaceBoundaryTests(unittest.TestCase):
             with patch.dict(os.environ, {"OBSERVATORY_HOME": str(outside)}):
                 self.assertEqual(configuration.home(), outside)
 
+    def test_a_repository_above_the_installed_package_is_not_the_code(self):
+        # An installed engine sits in site-packages; a Git repository above it (a home folder someone made a
+        # repository) is not its source checkout, and must not refuse every home under that folder.
+        with tempfile.TemporaryDirectory() as tmp:
+            top = Path(tmp).resolve()
+            (top / ".git").mkdir()
+            engine = top / "venv" / "lib" / "python3.14" / "site-packages" / "observatory" / "engine"
+            engine.mkdir(parents=True)
+            (engine.parent / "__init__.py").write_text("", encoding="utf-8")
+            roots = configuration._code_roots(engine)
+            self.assertNotIn(top, roots, "a repository above site-packages is not the engine's checkout")
+            self.assertIn(engine, roots)
+            self.assertIn(engine.parent, roots, "the installed package itself still refuses a home")
+            for name in ("dist-packages",):
+                other = top / "lib" / name / "observatory" / "engine"
+                other.mkdir(parents=True)
+                self.assertNotIn(top, configuration._code_roots(other))
+
+    def test_a_source_checkout_is_still_the_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            top = Path(tmp).resolve()
+            (top / ".git").mkdir()
+            engine = top / "observatory" / "engine"
+            engine.mkdir(parents=True)
+            self.assertIn(top, configuration._code_roots(engine), "a checkout's work tree refuses a home inside it")
+
     def test_initializer_rechecks_after_acquiring_lock(self):
         base = self.root / "home"
         real_lock = workspace.lock
