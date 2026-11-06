@@ -436,6 +436,28 @@ code. Each write drops days older than 400. An older engine ignores the folder; 
 `ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
 never the retros written.
 
+## Servers: another OS account's connection refused (OBS-355 part 1, the release after 0.33.1)
+
+A behaviour change on hosts with more than one person's OS account only. There, the local server, memory over HTTP
+and the keyserver answer a connection from another account's (or root's, or launchd's) process
+`403 {"error":"peer-foreign-account"}`, and one whose owner cannot be read `403 {"error":"peer-unverified"}`, both with
+`Connection: close` and before reading the request, on every path including the dashboard pages and
+`/.well-known/fabric-service`. A client of another account that used to read this account's pages, `/health` or the
+well-known document gets the 403 instead. A one-account host (`host_accounts.count()` is 1) answers exactly as before
+and reads no socket table. The count joins the local accounts that can log in (hidden administrators and an enabled
+Guest included) with the people's uids running processes; a host bound to a directory (a non-local search node on
+macOS, `sss`, `ldap`, `winbind` or `nis` for `passwd` on Linux) or an unreadable count reads as several.
+`config/local.json` may set `{"loopback": {"peerCheck": "always"}}` to switch the check on with one account; `auto` is
+the default, there is no `off`, and any other value or a file that does not read reads as `always`. Memory over HTTP
+now runs uvicorn with `proxy_headers` off (no proxy stands in front of it) and refuses WebSocket upgrades. Nothing writes that
+file yet (the `full configure loopback` section arrives with the per-account settings file); an older engine ignores
+it. Additive elsewhere: the receipt `store/raw/serverd.json` gains `peer` (`setting`, `active`, `accountsOnHost`,
+`method`, `refused` with a count per code and `since`), outside its change comparison, and `full doctor` gains
+`loopback`: `accountsOnHost`, `accountsReason` (`local`, `directory-bound`, `unreadable`), `peerCheck` (`setting`,
+`active`, `method`, and `problem` when the setting did not read), `refused` (the local server's counters from that
+receipt, or null; memory over HTTP and the keyserver count in their own process only) and `clientCheck`, null until
+the clients check their server (OBS-355 part 2). The relay is unchanged.
+
 ## Doctor: one verdict and the secret store (OBS-349, the release after 0.33.1)
 
 Additive, with no migration. `full doctor` gains `attention` (rows `{area, code, severity, text, step}`, area
@@ -491,6 +513,23 @@ Slot metadata gains `this_machine_only` (`why`, `at`), set by `full vault-digest
 TEXT` and cleared by `unkeep-here`; a `vault-digests/1` manifest row may carry `"this_machine_only": true`, which an
 older reader ignores and this one refuses with any other value; the view's cell may carry
 `"on_purpose": "this-machine-only"` (a string, where a difference on purpose carries an object).
+
+## Workspace state: the daily learning review (OBS-331 part a, the release after 0.33.1)
+
+Additive. A new command, `project-observatory full learning-review show|list|run`, and two new tick entries after
+`rollup`: the probe `learning-review-due` and the step `learning-review` (both optional, never among the steps that
+must finish). New workspace state under `<state>/learning-review/`: `state.json` (`observatory-learning-review-state/1`,
+the last report written and the newest 30 runs, codes and counts only), `.lock`, and one report per UTC day,
+`<YYYY-MM>/<YYYY-MM-DD>.json` (`observatory-learning-review/1`) with its page `<YYYY-MM-DD>.html`, and a revision
+`run --again` replaced kept beside it as `<YYYY-MM-DD>.r<n>.json`, and a report file that no longer read moved aside as
+`<YYYY-MM-DD>.damaged-<n>.json`; folders and files owner-only, reports older than 400 days pruned. A new optional settings section, `learning_review` with `settle_hour_utc` (a whole hour from 0 to 23, 6
+when absent), set with `full configure learning_review settle_hour_utc`: an older engine never reads it, and this one
+refuses another key or value in it, as it does in `updates`. `ops_digest_store.first_lines` also answers the first
+revision's `receivedAt`, and `first_lines_of(project, month)` reads one month. `tools/corroborate.py`
+`corroborate_lessons` takes three optional keyword arguments (`keys`, `deadline`, `revalidate`); without them it behaves
+as before. No MCP tool, finding type, Health or doctor key changes in this part; the review writes no ledger row itself
+(the corroborator it runs may write promotions, never revalidation archives); nothing migrates and no SQLite table is
+added. An older engine ignores the folder.
 
 ## Service: the connections declaration (OBS-326, the release after 0.33.0)
 

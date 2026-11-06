@@ -150,7 +150,8 @@ def resolve_origin(origin: dict, keys: dict[str, list[pathlib.Path]], *,
     return False, f"commit:{sha} is not an object in any clone of {project} here"
 
 
-def corroborate_lessons(conn, dry: bool) -> dict:
+def corroborate_lessons(conn, dry: bool, *, keys: dict[str, list[pathlib.Path]] | None = None,
+                        deadline: float | None = None, revalidate: bool = True) -> dict:
     """Promote `proposed` lessons whose class a second, distinct project also holds.
 
     A lesson is promoted when its own commit resolves in its project's clone here and at
@@ -159,7 +160,13 @@ def corroborate_lessons(conn, dry: bool) -> dict:
     resolutions; the ledger's own guards still apply (`L.corroborate`: never the owner,
     never the operator, only from `proposed`). Four outcomes: promoted, waiting (resolved,
     no second resolved project yet), unresolvable (no registered clone carries the key),
-    contradicted (the clone does not hold the commit)."""
+    contradicted (the clone does not hold the commit).
+
+    The three keyword arguments are for a caller that is not the tick's own run (the daily learning review,
+    OBS-331): `keys` is a `project_keys()` sweep it already made, so the clones are not asked twice; `deadline`
+    (a `time.monotonic()` value) bounds every git question, a commit not asked in time reading as not resolvable;
+    `revalidate=False` leaves observed lessons as they are, so only the tick's run after a registry refresh
+    archives an observation whose support is gone. Without them the behaviour is the tick's, unchanged."""
     from store import lessons as LS
     rows = LS.current_lessons(conn)
     # The clones are asked only when some class could be promoted: a proposed lesson whose
@@ -171,8 +178,9 @@ def corroborate_lessons(conn, dry: bool) -> dict:
             (r["body"].get("origin") or {}).get("projectId"))
     askable = any(len(claimed.get(r["body"].get("classKey"), ())) >= LESSON_PROJECTS
                   for r in rows if r["state"] in ("proposed", "observed"))
-    keys = project_keys() if askable else {}
-    resolution = {r["memory_id"]: resolve_origin((r["body"].get("origin") or {}), keys)
+    if keys is None:
+        keys = project_keys(deadline=deadline) if askable else {}
+    resolution = {r["memory_id"]: resolve_origin((r["body"].get("origin") or {}), keys, deadline=deadline)
                   for r in rows}
     by_class: dict[str, list[dict]] = {}
     for r in rows:
@@ -187,6 +195,8 @@ def corroborate_lessons(conn, dry: bool) -> dict:
         projects = {m["body"]["origin"]["projectId"] for m in standing}
         for m in members:
             if m["state"] == "observed" and m["owner"] != L.OPERATOR:
+                if not revalidate:
+                    continue
                 if resolution[m["memory_id"]][0] is not True or len(projects) < LESSON_PROJECTS:
                     if dry:
                         invalidated.append({"memory_id": m["memory_id"], "dry_run": True})

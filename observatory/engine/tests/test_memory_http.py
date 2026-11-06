@@ -281,7 +281,12 @@ class TheGateAlone(unittest.TestCase):
             self.reached.append(self.ws.MA.current())
             await send({"type": "http.response.start", "status": 200, "headers": []})
             await send({"type": "http.response.body", "body": b"{}"})
-        self.gate = http_service.BindingGate(stub, port=4242, rate=100)
+        import peer_check
+        # These scopes are no connection at all (no `client`, no `server`): the door is driven as on a
+        # one-account host. On a host with several accounts the peer check refuses such a scope first
+        # (tests/test_peer_check.py), which is not what this class is about.
+        self.gate = http_service.BindingGate(stub, port=4242, rate=100,
+                                             peers=peer_check.Gate(accounts=lambda: 1))
 
     def tearDown(self) -> None:
         self.ws.MA.serve_stdio()

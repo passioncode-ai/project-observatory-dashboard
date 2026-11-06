@@ -105,7 +105,9 @@ it: tell me, do not retry. `held_off` means I switched it off on purpose: do not
 `denied` means I have not allowed you that tool or target, or your bearer is not the binding
 your grant names; the command is mine, at my terminal (`full lifecycle allow --binding`), and so
 are enrolling, holding and forced stops. Nothing is served until I enroll a target: until then
-this `/mcp` answers 403. Where a lifecycle broker of its own already serves this machine, keep
+this `/mcp` answers 403. On a computer with several OS accounts, any port of mine answers a
+process of another account `403 peer-foreign-account` (or `peer-unverified` when its owner cannot
+be read) before reading anything: run as the account whose Observatory you mean to reach. Where a lifecycle broker of its own already serves this machine, keep
 using it until I import its enrollments here (OBS-79 step L5); do not switch on your own. On
 Linux and Windows every tool answers `unsupported_platform`.
 

@@ -1361,6 +1361,60 @@ at most 16 revisions (`revisions-exhausted`), a project's day at most 8 source l
 dropped. In those counts, the `ok` of a host's `retro-after-work` operation counts the
 retro requests answered by a retro the host saw written, never the retros themselves.
 
+The daily learning review (next section) is the reader of these lines.
+
+### The daily learning review: what agents learned, what failed
+
+Once a UTC day the tick writes one local report of what agents recorded about what they
+learned and what failed, by arithmetic and with no model. It reads:
+
+- **lessons** (`observatory_lesson`): each lesson minted, revised, replaced, promoted or
+  invalidated that day, with its class, its pseudonymous project key, the project the key's
+  clone belongs to when a registered clone carries it, and its record
+  (`ledger:<memoryId>@<revision>`, readable with `observatory_recall`);
+- **classes held by two or more projects** (`class-repeated`), with what the corroborator says
+  of them: promoted, waiting for a second project, not resolvable here, or contradicted by git.
+  Only the corroborator promotes a lesson, by its own rule. When no tick that refreshed the
+  registry ran it within a day, the review runs it (bounded in time; it promotes there but never
+  archives an observation), so a lesson two projects hold is promoted at least daily;
+- **products' daily digests** (previous section): every rise the product itself recorded in an
+  hour (`risen-in-hour`), an operation whose failures reached at least 10 and at least twice the
+  day before (`rose-since-yesterday`), and one that rose on at least 3 of the last 7 days
+  (`rising-repeatedly`); a line sent after its day's report was written is reported once, in
+  the next report (`arrived-late`). Only the first revision of a day's line is read;
+- per project, the lessons recorded and the `retro-after-work` counts as asked, answered by a
+  retro the host saw written, refused and not seen. They are never read as retros written.
+
+The day is a UTC day, as a digest's is. The report of a day is due at 06:00 UTC the next day,
+so an overnight machine's catch-up arrives first; the hour is a setting:
+
+```sh
+project-observatory full configure learning_review settle_hour_utc 9
+```
+
+A complete report is never rewritten by the tick. A report a source could not be read for is
+`partial`, says which source and why, and is written again when what it reads changes (or every
+6 hours) until it is complete or until a day later. A damaged digest month that only the search
+for late lines reaches is named without making the report partial, and a report file that no
+longer reads is moved aside as `<day>.damaged-<n>.json` before the day is written again. After the machine was off, up to 7 missing days are written, oldest first;
+older ones are named under "days not reviewed". To read and run it:
+
+```sh
+project-observatory full learning-review show              # the newest report; prints where its page is
+project-observatory full learning-review show --json       # the report itself
+project-observatory full learning-review list              # the last 14 days: state, revision, counts
+project-observatory full learning-review run               # write what is due now
+project-observatory full learning-review run --day 2026-11-05 --again   # a new revision, keeping the previous
+```
+
+The report is `store/learning-review/<YYYY-MM>/<YYYY-MM-DD>.json` with the same report as a
+self-contained page beside it (`.html`, no script and nothing loaded from elsewhere),
+owner-only, kept 400 days. Every item names its source. The report carries no path, account or
+person, a lesson's text is scrubbed again of known values before it enters, and nothing is sent
+anywhere: not to the registry, the wiki, the board or Fabric. Not yet read: the `insights/`
+lines and the digest lines Observatory refused (the report's notes say so); the review is not
+yet on Health, in `doctor`, in the findings or over MCP.
+
 ### Give an agent a key without pasting it into a chat: the secret prompt
 
 An agent that needs a key the vault does not hold calls `observatory_secret_request` (project, env,

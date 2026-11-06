@@ -75,7 +75,11 @@ It also carries `clients.recent`: whether anything other than a host's probe
 (PROBE_ROUTES) asked within CLIENT_WINDOW_SECONDS. The maintenance job reads it and
 activates a new release only when no person or agent is using the server (LC-16).
 
-SECURITY. Binds 127.0.0.1 only. Serves NO secret values anywhere: `/leaks` is
+SECURITY. Binds 127.0.0.1 only. Loopback is one per machine, so on a host with several OS
+accounts (or with `loopback.peerCheck` set to `always` in `config/local.json`) another account's
+connection is answered 403 `peer-foreign-account` (or `peer-unverified` when its owner cannot be
+read) and closed before its request line is read, on every path (`peer_check.py`, OBS-355).
+Serves NO secret values anywhere: `/leaks` is
 names, places and dates from the register, which never held values to begin
 with. GET only, with one exception: `POST /mcp` serves node.lifecycle's six
 tools (OBS-79 step L3, `node/lifecycle/service.py`), which wake, stop and
@@ -124,6 +128,7 @@ import service_identity  # noqa: E402
 import service_connections  # noqa: E402  OBS-326: what this service uses (fabric-connections/0.1)
 from node.lifecycle import service as lifecycle  # noqa: E402
 import secret_prompt  # noqa: E402  OBS-260: the secret-request queue served on POST /mcp to agent bindings
+import peer_check  # noqa: E402  OBS-355: another OS account's connection refused before it is read
 
 PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 RECEIPT = paths.SCRATCH / "serverd.json"
@@ -341,8 +346,11 @@ def heartbeat() -> dict:
                  "lease_holder": lease.get("holder"),
                  # Alive or not, judged from outside the tick (tick_health, PB-132).
                  "health": _tick_health()},
+        # OBS-355: the peer check's setting, whether it is active, and how many connections it refused.
+        # Out of the change comparison below: a flood of refusals is written with the next keepalive only.
+        "peer": peer_check.GATE.snapshot(),
     }
-    content = json.dumps({k: v for k, v in doc.items() if k not in ("at", "uptime_s")},
+    content = json.dumps({k: v for k, v in doc.items() if k not in ("at", "uptime_s", "peer")},
                          sort_keys=True, ensure_ascii=False, default=str)
     stamp = time.time()
     if content != _LAST_RECEIPT[0] or stamp - _LAST_RECEIPT[1] >= KEEPALIVE_SECONDS:
@@ -537,6 +545,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # region client-disconnect — docs: docs/runs/2026-10-01-client-disconnect/README.md
     def handle(self):
+        # OBS-355: on a host with several OS accounts, another account's connection is answered 403 and closed
+        # before its request line is read (peer_check.py, docs/design/ACCESS.md rule 10). Once per connection.
+        refused = peer_check.GATE.check_socket(self.connection)
+        if refused:
+            self.close_connection = True
+            peer_check.refuse(self.connection, refused)
+            return
         # Browsers and polling clients may leave while a response is in flight.
         # This ends that connection, not the service; other I/O errors propagate.
         try:
@@ -746,7 +761,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif route == "/health":
             # The published health document keeps its shape (fabric-service/0.1): the
             # `clients` field is the update job's input and stays in the receipt file.
-            self._json({k: v for k, v in heartbeat().items() if k != "clients"})
+            # `clients` and the peer check's `peer` are the receipt's, not /health's: its answer is unchanged.
+            self._json({k: v for k, v in heartbeat().items() if k not in ("clients", "peer")})
         elif route == "/remote":
             self._json(refresh_remote())
         elif route == "/leaks":

@@ -515,6 +515,14 @@ def _switches(doc: dict, section: str) -> dict:
     return {name: found.get(name) is True for name in names}
 
 
+def _loopback(base: Path) -> dict:
+    try:
+        import peer_check
+        return peer_check.status(base)
+    except Exception as exc:  # noqa: BLE001 - doctor reports, it never fails on one block
+        return {"error": f"{type(exc).__name__}"}
+
+
 def doctor(base: Path) -> dict:
     runtime = require_runtime()
     config.validate_workspace(base, required=True)
@@ -566,6 +574,10 @@ def doctor(base: Path) -> dict:
             "vector_namespaces": _vector_namespaces(base),
             # PB-137 N-008: who may reach memory over HTTP besides the local stdio agent.
             "access_bindings": _access_bindings(base),
+            # OBS-355: loopback is one per machine. How many people's accounts the host has, whether the
+            # servers' peer check is on (`config/local.json` loopback.peerCheck: auto or always) and how many
+            # connections of another OS account the local server refused before reading them.
+            "loopback": _loopback(base),
             # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
             # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
             "meter": _meter_readiness(base),
@@ -738,7 +750,8 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
+                                                 "learning_review", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -924,6 +937,13 @@ def main(argv: list[str]) -> int:
                 if not value.is_absolute():
                     raise config.ConfigurationError("Storage path must be absolute")
                 value, stored_as = storable_path(value)
+            elif a.section == "learning_review":
+                if a.name not in config.LEARNING_REVIEW_SETTINGS:
+                    raise config.ConfigurationError(f"Unknown learning_review setting: {a.name}; known: "
+                                                    f"{', '.join(config.LEARNING_REVIEW_SETTINGS)}")
+                if not (a.value.isascii() and a.value.isdigit() and len(a.value) <= 2 and int(a.value) <= 23):
+                    raise config.ConfigurationError("learning_review settle_hour_utc is a whole hour from 0 to 23")
+                value = int(a.value)
             elif a.section == "interface":
                 choices = config.INTERFACE_SETTINGS.get(a.name)
                 if choices is None:
