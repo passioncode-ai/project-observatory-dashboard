@@ -630,6 +630,42 @@ class Connections(Sandbox):
         [heroku] = [c for c in self.view(doc)["connections"] if c["id"] == "heroku"]
         self.assertEqual((heroku["state"], heroku["lastAt"]), ("degraded", "2026-11-05T10:00:00Z"))
 
+    def turn_on(self, name):
+        settings = json.loads((self.home / "config/settings.json").read_text(encoding="utf-8"))
+        settings.setdefault("integrations", {})[name] = True
+        (self.home / "config/settings.json").write_text(json.dumps(settings), encoding="utf-8")
+
+    def state_of(self, ident):
+        doc = self.serverd.Runtime("t" * 43).well_known()
+        return {c["id"]: c["state"] for c in self.view(doc)["connections"]}.get(ident)
+
+    def test_a_receipt_turns_stale_through_the_cache_when_the_clock_moves_on(self):
+        # OBS-339: the state depends on the receipt's age, so the server's cache key carries a clock bucket.
+        import service_connections as sc
+        self.turn_on("google")
+        now = datetime.now(timezone.utc)
+        (self.home / "store/raw/google.json").write_text(json.dumps(
+            {"scanned_at": (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), "degraded": []}),
+            encoding="utf-8")
+        self.assertEqual(self.state_of("google"), "ok")
+        later = now + sc.stale_after("google.json")  # past the receipt's threshold (36 hours for Google)
+        bucket = sc.clock_bucket()
+        with mock.patch.object(sc, "_now", lambda when=None: when or later), \
+                mock.patch.object(sc, "clock_bucket", return_value=bucket):
+            self.assertEqual(self.state_of("google"), "ok", "the same bucket: the cached declaration")
+        with mock.patch.object(sc, "_now", lambda when=None: when or later), \
+                mock.patch.object(sc, "clock_bucket", return_value=bucket + 48):
+            self.assertEqual(self.state_of("google"), "degraded", "the next bucket measures the age again")
+
+    def test_offline_declares_no_provider(self):
+        # OBS-340: the server applies the collectors' rule (`configuration.enabled`).
+        self.turn_on("heroku")
+        self.assertEqual(self.state_of("heroku"), "unknown")
+        self.serverd._MEMO.pop("connections", None)
+        with mock.patch.dict(os.environ, {"OBSERVATORY_OFFLINE": "1"}):
+            self.assertIsNone(self.state_of("heroku"))
+            self.assertEqual(self.state_of("fabric-hub"), "unknown", "the hub is still declared")
+
     def test_a_refused_declaration_is_named_in_degraded_and_never_published(self):
         import service_connections
         with mock.patch.object(service_connections, "declared",
