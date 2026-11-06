@@ -1140,7 +1140,11 @@ provider integration you turned on (GitHub, Bitbucket, Cloudflare, Heroku, Digit
 Google, OpenRouter, domains, the MCP servers your agents' configs declare) and, while anonymous usage data is
 collected, the analytics host. Each carries its state (`ok`, `degraded`, `down`, `unknown`)
 and when it last ran, from the collector's own receipt in `store/raw`; an integration you
-never turned on is not listed, and one that never ran reads `unknown`. No key, URL with a
+never turned on is not listed, and one that never ran reads `unknown`. A receipt older than three
+times its collector's interval in the tick, and never less than six hours, reads `degraded`: its
+collector has stopped running, and the tick's log says why. With `OBSERVATORY_OFFLINE=1` set for the
+server no provider is listed, as no collector runs. Fabric's hub reads `unknown` when Fabric is not
+installed and `degraded` when the hub refused anything else. No key, URL with a
 key, path or name is in it. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console, Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release downloads (only the feed is declared).
 
 ```sh
@@ -2696,7 +2700,7 @@ names, anything from the registry or the store, URLs, prompts, arguments, messag
 **How it travels:** a command or tool call appends one line to a local queue and returns; it never waits on the
 network. The maintenance job (every 15 minutes) sends the queue to `https://analytics.sshlg.me` in batches of at most
 25 and drops events older than 23 hours; a failure is counted in `store/analytics/counters.json` and never shown as
-an error. A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
+an error. A count that cannot be written is named in `full analytics status` under `degraded`, whichever process failed to write it (the reason is kept beside the counters until the next update is written). A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
 for the next pass. `full analytics send` sends the queue now. The first time a command runs at your terminal after
 this release, it prints a one-time notice saying this; the dashboard's Home shows it until you first open Home
 through the local server and for a week after that, and Health shows the switch with the command that changes it.
