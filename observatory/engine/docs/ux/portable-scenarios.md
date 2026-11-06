@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-99`
+**Next free OSS id:** `OSS-100`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -1064,3 +1064,42 @@ Coverage: `tests/test_node_ceremony.py` (`ScreensFromTheVectors` over the contra
 the Windows and Linux app `desktop/src-tauri/src/main.rs` `the_pairing_window_sends_only_the_ceremonys_steps` and
 `tests/test_desktop_app.py`. Status: built against the contract fixtures (OBS-197); the live ceremony waits for the
 hub's side; product outcome unobserved.
+
+## Doctor's verdict and the move checklist for agents (OBS-349 part 1, 2026-11-06)
+
+### OSS-99: know in one answer whether this setup needs me, and whether my keys would follow me
+
+Trigger: "is my Observatory clean?", or the move runbook's proof step "`full doctor` clean".
+
+Funnel: `full doctor` ends with `attention` (each row: area, code, severity, sentence, step) and `clean`. A row is a
+`warning` unless it is news or a choice the person made (`update-available`, `auto-off`, `deferred`,
+`schedule-off`, decision WA-5), so a deliberate setting never keeps doctor from reading clean; a dead, interrupted
+or stuck tick is a warning. The verdict does not read the organizations, meter, session servers, analytics or review
+sections yet; they keep their own fields. A secret store the
+settings name outside the workspace is named under `backups.secret_store`, with a warning when no recent encrypted
+snapshot carried it, when the folder is missing here, or when the environment points the vault elsewhere; the
+same rows appear on Health under "maintenance", in the reader's language, with the step as a command. An agent
+reads the move checklist with `observatory_machine` and `section: "move"`, the answer `full machine-move status
+--json` gives.
+
+Failure paths: a carry record that does not read cannot prove the store was carried, so the warning stays; a release
+whose snapshots do not carry the store says to copy it by hand rather than sending the person to take a snapshot that
+would not carry it either; a server built before this release refuses `section: "move"` through its schema, and the
+agent runs `full machine-move status --json`.
+
+Acceptance: doctor exits 0 whatever the verdict; every existing doctor key and backup sentence is unchanged; the move
+section writes nothing and makes no machine id.
+Coverage: `tests/test_workspace.py` (`test_doctor_attention_unions_maintenance_items_and_coverage_by_code`,
+`test_doctor_attention_takes_each_code_once_from_its_first_area`, `test_doctor_is_clean_with_only_info_items`,
+`test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not`);
+`tests/test_backup_vault.py` Doctor (`test_an_external_store_not_carried_is_a_coded_warning`,
+`test_without_a_carrier_the_step_says_the_store_is_copied_by_hand`, `test_a_carried_store_is_not`,
+`test_a_missing_configured_store_is_named_with_its_configure_step`, `test_nested_settings_name_the_outer_store_once`,
+`test_existing_backup_warnings_keep_their_text_and_gain_codes`, `test_the_environment_override_is_named`,
+`test_observatory_secrets_moves_nothing_while_secret_store_is_set`,
+`test_observatory_secrets_moves_the_vault_when_only_secrets_is_set`, `test_a_vault_dir_elsewhere_is_named`,
+`test_a_store_only_the_environment_names_is_reported_as_external`);
+`tests/test_machine_backup.py` Schedule `test_maintenance_status_joins_backup_items`; `tests/test_mcp_wire.py`
+(the move section is the CLI's checklist and writes nothing); `tests/test_dashboard_render.py`
+`test_the_health_page_names_versions_kinds_and_dollars` (the secret store row in Russian). Status: built (OBS-349
+part 1); the restore and CLI sign-in items wait for parts 2 and 3; product outcome unobserved.

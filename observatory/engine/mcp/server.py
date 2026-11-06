@@ -131,12 +131,12 @@ server = InteropServer(
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
         "START with `observatory_overview` (counts, tiers, recent projects, worst findings, "
         "disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
-        "local pass; no grants or registry writes.\n"
-        "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the whole "
+        "pass; no grants or registry writes.\n"
+        "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` filters by `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
-        "Also `observatory_machine` (`section` or `explainPid`); `observatory_ssh_keys` (no private key); "
+        "Also `observatory_machine` (`section`, `move`, or `explainPid`); `observatory_ssh_keys` (no private key); "
         "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
         "Fabric capabilities (fabric-interop/0.1), exact schemas: "
         "`estate.survey`, `project.detail`, `project.resolve`, "
@@ -604,9 +604,11 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move"],
                        Field(description="overview = totals and the top few of each (default); "
-                                         "a named section = that section in full, except coverage which always stays bounded.")] = "overview",
+                                         "a named section = that section in full, except coverage which always stays bounded; "
+                                         "move = the checklist of a move between machines, as "
+                                         "`full machine-move status --json` gives it.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
@@ -629,7 +631,21 @@ def observatory_machine(
     retrying. `.wrangler` local state is never classified as build output.
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
+
+    `section="move"` answers the move checklist (M1 to M4: one release, the restore,
+    its own SSH key and device id, the vault the same, no job on both) under `move`,
+    from this machine and the other machine's facts in the data folder's peers folder:
+    the same function `full machine-move status` runs. It writes nothing and makes no
+    machine id; every step it names is a CLI verb a person or an agent runs.
     """
+    if section == "move" and explainPid is None:
+        # The agent's path to the checklist (decision D13): the CLI's own function and peers.
+        import machine_backup
+        import machine_move
+        home = pathlib.Path.home()
+        peers, unreadable = machine_move.load_peers(home)
+        view = machine_move.status(home, machine_backup._home_or_none(), peers=peers, unreadable=unreadable)
+        return {"measuredAt": view["generated_at"], "degraded": view["degraded"], "move": view}
     if section == "coverage" and explainPid is None:
         import coverage_view
         coverage = coverage_view.summary()

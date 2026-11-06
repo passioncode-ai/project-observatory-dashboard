@@ -1760,6 +1760,9 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 
 # --- what doctor and the Health page read -------------------------------------------
 
+#: Backup warning codes a maintenance item already says in its own words (OBS-349).
+BACKUP_TWINS = frozenset({"backups-no-passphrase", "backups-unencrypted-local"})
+
 def status(base: Path, *, schedule=None) -> dict:
     """Whether updates and backups run by themselves, and what they last found. No value."""
     state = read_state(base)
@@ -1852,6 +1855,20 @@ def status(base: Path, *, schedule=None) -> dict:
     except Exception as exc:  # noqa: BLE001: a status never fails doctor
         machine = {"error": f"{type(exc).__name__}"}
     for item in machine.get("warning_items") or []:
+        warnings.append(item["text"])
+        items.append(item)
+    # The backups' own warnings (OBS-349), with their codes, except the two a maintenance item
+    # above already says: no passphrase (`passphrase`, `not-encrypted`) and unencrypted local
+    # copies (`not-encrypted`). The rest (a secret store left out of the snapshot, a copy left by a
+    # rolled-back update, a root inside the workspace) no other item names.
+    try:
+        import backup_vault
+        backups = backup_vault.status(base)
+    except Exception:  # noqa: BLE001: a status never fails doctor
+        backups = {}
+    for item in backups.get("warning_items") or []:
+        if item.get("code") in BACKUP_TWINS:
+            continue
         warnings.append(item["text"])
         items.append(item)
     versions = {"engine": config.VERSION}

@@ -87,6 +87,44 @@ def typed_error(result) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
+def listing(*folders: pathlib.Path) -> dict:
+    """Every file under the folders, by path, with its size and modification time."""
+    out = {}
+    for folder in folders:
+        if folder.is_dir():
+            for path in folder.rglob("*"):
+                if path.is_file():
+                    stat = path.stat()
+                    out[str(path)] = (stat.st_size, stat.st_mtime_ns)
+    return out
+
+
+async def check_move_section(session, machine_tool) -> None:
+    """OBS-349 (decision D13): an agent reads the move checklist over MCP, read-only, and it is
+    the checklist `full machine-move status` prints."""
+    import machine_backup
+    import machine_identity
+    import machine_move
+    check("machine move is advertised in the actual input enum",
+          "move" in machine_tool.input_schema["properties"]["section"]["enum"])
+    home = pathlib.Path.home()
+    watched = (machine_identity.data_dir(home), pathlib.Path(os.environ["OBSERVATORY_HOME"]) / "node")
+    before = listing(*watched)
+    answer = payload(await session.call_tool("observatory_machine", {"section": "move"}))
+    after = listing(*watched)
+    peers, bad = machine_move.load_peers(home)
+    local = machine_move.status(home, machine_backup._home_or_none(), peers=peers, unreadable=bad)
+    move = answer.get("move") or {}
+    check("the move section is the CLI's checklist",
+          move.get("schema") == machine_move.STATUS_SCHEMA
+          and [(i["id"], i["state"]) for i in move.get("items") or []]
+          == [(i["id"], i["state"]) for i in local["items"]]
+          and answer.get("degraded") == local["degraded"] and answer.get("measuredAt") == move.get("generated_at"),
+          json.dumps(answer)[:300])
+    check("the move section writes nothing under the data folder or the device folder", before == after,
+          f"{sorted(set(before) ^ set(after))[:5]}")
+
+
 async def run() -> None:
     # A throwaway store: the write tools are exercised for real, and the live
     # ledger never sees a test row.
@@ -125,6 +163,7 @@ async def run() -> None:
                   not coverage_result["coverage"]["actionable"]
                   and coverage_result["coverage"]["checkouts"]["snapshot_count"] is None
                   and coverage_result["coverage"]["caches"]["reclaimable_bytes"] is None)
+            await check_move_section(session, machine_tool)
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")

@@ -404,6 +404,23 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
           n["версия 9.9.9 доступна и ждёт вас"] == 1, str(n))
     check("and hands over `update --apply`", n["update --apply"] >= 1, str(n))
     check("the job's own warning is not repeated in English", n["is available; automatic updates are off"] == 0, str(n))
+    # OBS-349: a secret store outside the workspace that no snapshot carried is its own row, in the
+    # reader's language, with the step doctor names; without one the row is absent.
+    words = ("лежит вне папки данных, и последняя зашифрованная копия его не включила", "did not carry it")
+    n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
+    check("no secret store row while the store is inside the workspace", n[words[0]] == 0 and n[words[1]] == 0, str(n))
+    store = d / "external-store"
+    store.mkdir()
+    settings = home / "config" / "settings.json"
+    doc = json.loads(settings.read_text(encoding="utf-8"))
+    doc.setdefault("sources", {})["secret_store"] = str(store)
+    settings.write_text(json.dumps(doc), encoding="utf-8")
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the health page builds with an external secret store", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
+    n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
+    check("an uncarried secret store reads in Russian, once", n[words[0]] == 1 and n[words[1]] == 0, str(n))
 
 
 def test_the_mcp_page_says_how_to_probe_and_names_a_command_once() -> None:

@@ -179,6 +179,23 @@ folders under the projects root and `config/folder_exclusions.json` as declared 
 `stage` are read as their full names). An app with neither is listed as `unassigned` in
 `registry/environments.json`. Its name is never read as a hint.
 
+**One verdict** (OBS-349). `full doctor` ends with `attention` and `clean`. Each `attention` row names its
+`area` (`backups`, `machine_backup`, `maintenance`, `sources` or `tick`), its `code`, a `severity`, the sentence and
+the `step` that fixes it (`null` when the fix is by hand); a code is listed once, each missing source is its own
+`source-missing` row with the `configure sources` command, and a tick that is `interrupted`, `stale` or
+`running-long` (below) is a `tick-<verdict>` row with the tick's own reason. `clean` is true when no row is a `warning`: a release
+announced (`update-available`), automatic updates or the schedule turned off on purpose (`auto-off`,
+`schedule-off`) and an update waiting for a quiet moment (`deferred`) are `info`, so a deliberate setting does not
+keep doctor from reading clean. `clean` does not cover the other sections yet: an expiring or removed
+organization certificate (`organizations`), a meter without an issuer (`meter`), refused session servers
+(`session_servers`), `analytics`, the review policy (`review`) and the embedding and vector state keep their own
+fields, so read those too before taking `clean` as the whole answer. Doctor is a report, not a gate: it exits 0
+either way. To read the verdict alone:
+
+```sh
+project-observatory full doctor | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["clean"], [a["code"] for a in d["attention"]])'
+```
+
 `full doctor` also reports whether the scheduled tick is alive (`tick.verdict`): `disabled` while
 `features.scheduler` is off (the default), `never` before the first tick, `running` during one and
 `ok` after a recent one. A tick that did not finish is `interrupted`, and the reason says how it
@@ -2257,6 +2274,30 @@ which is why nothing reaches the root unencrypted: **without a passphrase,
 copies stay inside the workspace, plaintext, on this disk only**, and `full
 doctor` says so under `backups.warnings`.
 
+Each of those sentences has a code under `backups.warning_items`, with its step (`backups-no-passphrase`,
+`backups-root-inside-workspace`, `backups-failed-update-copy`, `backups-unencrypted-local`, and
+`backups-root-unusable` or `backups-passphrase-unreadable` when the root or the passphrase file is refused).
+
+**A secret store outside the workspace** (`sources.secret_store`, else `sources.secrets`, when either names a
+folder outside the workspace) is not part of the workspace, so a snapshot of the workspace does not hold it.
+`backups.secret_store` in `full doctor` and `full backups status` names it (`path`, `settings_keys`, `exists`) and
+the newest record of a snapshot carrying it (`last_carry`, read from `store/raw/secret-store-carry.json`), and three
+warnings follow from it:
+
+| Code | When | Step |
+|---|---|---|
+| `backups-vault-store-not-carried` | the store exists and no snapshot carried it, the last one did not (its reason), or the last carry is more than 48 hours old | `full workspace-backup --writers-stopped`, or `full backup-passphrase set` when the reason is `no-passphrase`; a release whose snapshots do not carry the store names a copy by hand instead |
+| `backups-secret-store-missing` | the folder the settings name does not exist on this machine | `full configure sources secret_store PATH` (or `secrets`, the setting that names it) |
+| `backups-secret-store-env-override` | the environment moves the vault away from the folder the settings choose: `OBSERVATORY_VAULT_DIR` names another slot folder than `<store>/projects`, or `OBSERVATORY_SECRETS` names another folder while `sources.secret_store` is unset (with it set, `OBSERVATORY_SECRETS` moves nothing) | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
+
+This release reads the carry record and writes none: until a release that carries the store, an external store
+reads `backups-vault-store-not-carried` with the reason "no snapshot has carried it yet" and the step to copy it to
+the other machine yourself. A store inside the workspace reads `{"external": false}` and is carried with it. With no
+setting naming a store and `OBSERVATORY_SECRETS` pointing outside the workspace, the section reports that folder
+as external, with `settings_keys: []` and `environment: "OBSERVATORY_SECRETS"`, and only the env-override row. These
+codes, except the two a maintenance row already says (no passphrase, unencrypted local copies), join `full maintain
+status` and the Health page's maintenance rows, and so doctor's `attention`.
+
 **From 0.17.0 a passphrase exists by default.** When none is configured, the maintenance job
 (or `full init` in a terminal) generates one from 32 random bytes. The passphrase lives in
 `<home>/secrets/backup-passphrase` (mode 600) and is **also kept outside the workspace**, so
@@ -2696,6 +2737,10 @@ format cannot carry keeps its fingerprint under a masked name, a job label it ca
 and `omitted` (and a line on stderr) says how many. Status writes nothing and starts, stops or asks
 launchctl about no job; on a machine with no platform identifier and no kept id it does not make one
 either, and names this machine `unknown` (`full machine-move show` makes the id).
+
+An agent reads the same checklist over MCP: `observatory_machine` with `section: "move"` returns it under `move`
+(with `measuredAt` and `degraded` as every answer), from the same function and the same peers folder, and writes
+nothing. Every step it names stays a command a person or an agent runs.
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires

@@ -436,6 +436,24 @@ code. Each write drops days older than 400. An older engine ignores the folder; 
 `ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
 never the retros written.
 
+## Doctor: one verdict and the secret store (OBS-349, the release after 0.33.1)
+
+Additive, with no migration. `full doctor` gains `attention` (rows `{area, code, severity, text, step}`, area
+`backups`, `machine_backup`, `maintenance`, `sources` or `tick`) and `clean` (no row is a `warning`;
+`update-available`, `auto-off`, `deferred` and `schedule-off` are `info`; a `tick` verdict of `interrupted`, `stale`
+or `running-long` is a `tick-<verdict>` warning; the other sections are not read by the verdict yet). Its exit code is unchanged. `backups` (also `full backups
+status`) gains `secret_store` (`{"external": false}`, or `external`, `path` in its home-relative form,
+`settings_keys`, `exists`, `env_override`, `last_carry`, and `environment` when only `OBSERVATORY_SECRETS` names it) and `warning_items`, one per sentence of `warnings`, in the
+same order and with the same text: `backups-root-unusable`, `backups-passphrase-unreadable`, `backups-no-passphrase`,
+`backups-root-inside-workspace`, `backups-failed-update-copy`, `backups-unencrypted-local`, then
+`backups-secret-store-env-override`, `backups-secret-store-missing` and `backups-vault-store-not-carried`, which are
+new sentences. `full maintain status` and `maintenance.warning_items` gain those codes, except
+`backups-no-passphrase` and `backups-unencrypted-local`, which a maintenance item already says. Doctor reads
+`store/raw/secret-store-carry.json` when it exists (written by a release whose workspace snapshot carries an external
+store); this release writes no such file, and a file that does not read is `{"state": "unknown"}`. The MCP tool
+`observatory_machine` accepts `section: "move"`, the `machine-move status` checklist under `move`; an older server
+refuses the value through its schema, and `full machine-move status --json` answers the same.
+
 ## Service: the connections declaration (OBS-326, the release after 0.33.0)
 
 The always-on server's `/.well-known/fabric-service` gains, under `extensions`, the key
