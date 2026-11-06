@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-373`
+**Next free ID:** `OBS-377`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91)
 
@@ -398,3 +398,7 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-370 | Follow-ups of OBS-347 and OBS-348: stored paths keep the resolved form under links into the home; restore of a single file queries the keychain under the folder label; damaged headers read as locked; a truncated file reads as a refused passphrase; `full backups decrypt` has no stdin passphrase; values with `..` are treated as outside the home | open | the reviews of #446, 2026-11-06 |
 | OBS-371 | Follow-ups of OBS-330: child processes inherit `OBSERVATORY_BINDING_TOKEN_FILE`; no access-journal row for digest calls; a binding may name an unregistered project slug; service aliases can relabel a service inside its own project | open | the reviews of #447, 2026-11-06 |
 | OBS-372 | `full curation forget --context`: remove from the personal workspace the curated entries already exported to another context, after the operator confirms the import there | open | proposed with OBS-364, 2026-11-06 |
+| OBS-373 | Declare this service's connections in its well-known document (`extensions/connections/0.1`, every target named with its instance, such as `copylot-agent.appvillis`) and move its dashboard kit to the current release, so the Connections map of Fabric Dashboards sees what it depends on | open | a fleet check of the local services, 2026-11-06 |
+| OBS-374 | Keep the tick finishing under a load average of 15 or more: the last 10 of 10 ticks timed out on 2026-11-06, with the Heroku, git hygiene and local folder collectors timing out and the Fabric attribution collector answering `hub-error`; shed or defer slow collectors by load and name the shed ones in `degraded` | open | a fleet check of the local services, 2026-11-06 (its `degraded` list read at 10:44Z) |
+| OBS-375 | The agents collector reports that it could not read the contract pins of a local service because a manifest file is missing (`FileNotFoundError` on the service's Fabric manifest); find whether the engine looks in the wrong place or the service ships no manifest, and say which in `degraded` | open | a fleet check of the local services, 2026-11-06 |
+| OBS-376 | Follow-ups of OBS-331 part a: tests for `ledger-unreadable`, `corroborator-failed`, `digest-store-unreadable`, a clock set back, a lesson dated after the run and `hours` below 24; an operator promotion read as `lesson-revised`; `resolved` counts keys with a clone rather than commits that resolve; an unused `damaged` list in `failures_of`; a person's run racing the tick's corroborate step can report a false `contradicted` | open | the review of the pull request of OBS-331 part a, 2026-11-06 |
