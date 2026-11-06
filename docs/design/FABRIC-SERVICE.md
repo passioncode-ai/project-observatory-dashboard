@@ -57,9 +57,12 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 2. **The well-known document is answered from memory.** The heartbeat thread computes a
    snapshot (`service_health.snapshot`) every 20 seconds; the route reads it under a lock and
    never calls the `/health` computation. Registry documents are parsed again only when their
-   mtime or size moved.
+   mtime or size moved. The connections declaration (`service_connections.py`) is rebuilt when a
+   file it reads moved or when the ten-minute clock bucket (`clock_bucket`) changes: a receipt's
+   state depends on its age (OBS-339), so an unchanged file must still turn stale.
    - `test_the_route_reads_memory_only`, `test_a_registry_is_parsed_once_until_it_changes`,
-     `test_well_known_is_valid_fast_and_names_this_process` (schema-valid, median under 100 ms).
+     `test_well_known_is_valid_fast_and_names_this_process` (schema-valid, median under 100 ms),
+     `test_a_receipt_turns_stale_through_the_cache_when_the_clock_moves_on`.
 3. **`degraded` says why the picture is partial.** One row per collector receipt that reports
    degraded sources (`degradations.every_collector()` plus `model.json`), a row for a tick that
    was interrupted, went stale or runs too long (`tick_health`), and a row for a registry, findings

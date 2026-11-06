@@ -195,9 +195,10 @@ def _signature(files) -> tuple:
     return tuple(sig)
 
 
-def _memo(name: str, files, compute):
-    """`compute()` again only when one of `files` changed since the last call."""
-    sig = _signature(files)
+def _memo(name: str, files, compute, salt=None):
+    """`compute()` again only when one of `files` changed since the last call, or `salt` did (a value that
+    moves on its own, such as the clock bucket of a state that depends on age)."""
+    sig = _signature(files) + ((("salt", salt),) if salt is not None else ())
     with _MEMO_LOCK:
         hit = _MEMO.get(name)
         if hit and hit[0] == sig:
@@ -454,12 +455,13 @@ class Runtime:
             self._status = "stopping"
 
     def connections(self) -> dict:
-        """The connections declaration (service_connections.py, OBS-326), rebuilt only when a file it reads
-        changed. A declaration the kit refuses is not published and its reason is a degraded source."""
+        """The connections declaration (service_connections.py, OBS-326), rebuilt when a file it reads
+        changed or the clock moved to the next bucket: a receipt's state depends on its age (OBS-339). A
+        declaration the kit refuses is not published and its reason is a degraded source."""
         try:
             base, scratch = pathlib.Path(paths.HOME), pathlib.Path(paths.SCRATCH)
             value = _memo("connections", service_connections.signature_files(base, scratch),
-                          service_connections.extension)
+                          service_connections.extension, salt=service_connections.clock_bucket())
             self.note_failure("connections", service_connections.LAST_PROBLEM)
             return value
         except Exception as exc:  # noqa: BLE001: the document is always answered

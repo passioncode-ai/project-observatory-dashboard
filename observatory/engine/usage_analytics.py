@@ -23,7 +23,8 @@ network, no wait, and it never raises. The maintenance job (every 15 minutes) ca
 which sends the queue in batches of at most 25 to the analytics host, drops events older than
 23 hours (the host refuses anything older than a day), retries a transport error, 429 or 5xx a
 bounded number of times and never retries 400 or 404. Every failure lands in a local counter
-(`store/analytics/counters.json`), never in an exception or a message to the person. The queue
+(`store/analytics/counters.json`, updated under the lock `.counters.lock` beside it, OBS-341), never in an
+exception or a message to the person. The queue
 is bounded (`QUEUE_LIMIT_BYTES`); past it a new event is counted as dropped.
 
 THE SWITCH is the file `analytics` in the workspace home, like `auto-update`: absent means on,
@@ -47,12 +48,14 @@ import platform as _platform
 import random
 import re
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Callable
 
 import configuration as config
+import oslocks
 import osprivacy
 
 HOST = "https://analytics.sshlg.me"
@@ -73,6 +76,17 @@ BATCH = 25
 MAX_AGE = datetime.timedelta(hours=23)
 #: The queue never grows past this: about 2,000 events, a few days of heavy use.
 QUEUE_LIMIT_BYTES = 512 * 1024
+#: How long a counter update waits for another writer's lock on `counters.json` before it gives up (OBS-341).
+COUNTERS_LOCK_SECONDS = 2.0
+#: How many times a replace refused by the OS is tried again, and how long apart: on Windows a reader that
+#: holds the file open makes `os.replace` fail with PermissionError for a moment (OBS-341).
+REPLACE_ATTEMPTS = 10
+REPLACE_PAUSE_SECONDS = 0.05
+#: Why this process last failed to write the counters, or None: shown by `status` as `degraded`, logged once.
+WRITE_PROBLEM: str | None = None
+#: Where a failed counter update is kept for another process (`full analytics status` runs in its own and never
+#: writes counters): the reason only, cleared by the next update that is written.
+PROBLEM_FILE = "counters-problem.json"
 #: One request's timeout, and how many times a batch is tried (the first try included).
 TIMEOUT_SECONDS = 5.0
 ATTEMPTS = 3
@@ -141,17 +155,31 @@ def switch_path(base: Path | None = None) -> Path:
     return _base(base) / SWITCH_FILE
 
 
+def _replace(tmp: Path, path: Path) -> None:
+    """`os.replace`, tried again for a moment when the OS refuses it (PermissionError: on Windows another
+    process holds `path` open). The last refusal is raised, never swallowed."""
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_PAUSE_SECONDS)
+
+
 def _private_write(path: Path, text: str) -> None:
-    """Owner-only, atomic, never through a link."""
+    """Owner-only, atomic, never through a link. The temporary name carries the process and the thread, so
+    two writers never share one."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if path.is_symlink():
         raise OSError(f"{path.name} is a link")
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
             out.write(text)
-        os.replace(tmp, path)
+        _replace(tmp, path)
     finally:
         try:
             tmp.unlink()
@@ -274,28 +302,90 @@ def install_id(base: Path | None = None, *, create: bool = True) -> str | None:
     return value
 
 
-def count(base: Path | None, name: str, n: int = 1) -> None:
-    """Add to a local counter. Never raises: a counter that cannot be written is lost."""
+def _write_failed(base: Path | None, what: str, exc: BaseException) -> None:
+    """A counter update that could not be written: kept in `WRITE_PROBLEM` and in `PROBLEM_FILE`, so `status`
+    in any process shows it as `degraded`,
+    and logged once per process, by its exception class only (never a path or a message), to a job's log:
+    a person's terminal never gets it, as no analytics failure is shown to a person."""
+    global WRITE_PROBLEM
+    problem = f"the analytics counters were not updated ({what}): {error_kind(exc)}"
+    if WRITE_PROBLEM != problem:
+        try:
+            if not sys.stderr.isatty():
+                print(f"usage-analytics: {problem}", file=sys.stderr)
+        except Exception:  # noqa: BLE001
+            pass
+    WRITE_PROBLEM = problem
+    try:
+        _private_write(folder(base) / PROBLEM_FILE, json.dumps({"reason": problem}, sort_keys=True) + "\n")
+    except Exception:  # noqa: BLE001: the counters' own folder is the one that failed; WRITE_PROBLEM still holds it
+        pass
+
+
+def write_problem(base: Path | None) -> str | None:
+    """The last counter update that could not be written, from this process or another, or None."""
+    if WRITE_PROBLEM:
+        return WRITE_PROBLEM
+    reason = _read_json(folder(base) / PROBLEM_FILE).get("reason")
+    return reason[:300] if isinstance(reason, str) and reason else None
+
+
+def _update_counters(base: Path | None, what: str, change: Callable[[dict], None]) -> None:
+    """Read, change and write `counters.json` under an exclusive lock on `.counters.lock` beside it, so two
+    writers (a command and the maintenance job, or two threads) never lose each other's update (OBS-341).
+    The lock is waited for at most `COUNTERS_LOCK_SECONDS`. Never raises: a failure is `_write_failed`, and a
+    write that succeeds clears the problem a failed one left."""
+    global WRITE_PROBLEM
+    lock_fd = None
     try:
         file = folder(base) / "counters.json"
+        file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        lock_fd = osprivacy.open(file.with_name(".counters.lock"),
+                                 os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
+        deadline = time.monotonic() + COUNTERS_LOCK_SECONDS
+        while True:
+            try:
+                oslocks.flock(lock_fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("the counters lock is held") from None
+                time.sleep(0.01)
         doc = _read_json(file)
+        change(doc)
+        _private_write(file, json.dumps(doc, sort_keys=True) + "\n")
+        WRITE_PROBLEM = None
+        (folder(base) / PROBLEM_FILE).unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001: the counter is the last resort; nothing above it
+        _write_failed(base, what, exc)
+    finally:
+        if lock_fd is not None:
+            try:
+                oslocks.flock(lock_fd, oslocks.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+
+
+def count(base: Path | None, name: str, n: int = 1) -> None:
+    """Add to a local counter. Never raises: a counter that cannot be written is named in `status`."""
+    def change(doc: dict) -> None:
         doc[name] = int(doc.get(name) or 0) + n
         doc["updated_at"] = _now().isoformat(timespec="seconds").replace("+00:00", "Z")
-        _private_write(file, json.dumps(doc, sort_keys=True) + "\n")
-    except Exception:  # noqa: BLE001: the counter is the last resort; nothing above it
-        pass
+    _update_counters(base, "count", change)
 
 
 def note_send(base: Path | None, *, ok: bool, at: datetime.datetime | None = None) -> None:
     """Record whether the last send reached the host, and when: the `usage-analytics` connection's state
     in the well-known document (service_connections.py, OBS-326). Never raises."""
-    try:
-        file = folder(base) / "counters.json"
-        doc = _read_json(file)
-        doc["last_send"] = {"at": (at or _now()).isoformat(timespec="seconds").replace("+00:00", "Z"), "ok": bool(ok)}
-        _private_write(file, json.dumps(doc, sort_keys=True) + "\n")
-    except Exception:  # noqa: BLE001
-        pass
+    stamp = (at or _now()).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def change(doc: dict) -> None:
+        doc["last_send"] = {"at": stamp, "ok": bool(ok)}
+    _update_counters(base, "last send", change)
 
 
 def counters(base: Path | None = None) -> dict:
@@ -687,6 +777,9 @@ def status(base: Path | None = None, environ: dict | None = None) -> dict:
            "what_is_sent": WHAT_IS_SENT, "never_sent": NEVER_SENT,
            "turn_off": "project-observatory full analytics off", "notice": notice_state(base),
            "counters": counters(base)}
+    problem = write_problem(base)
+    if problem:
+        out["degraded"] = [{"source": "analytics-counters", "reason": problem}]
     try:
         out["queued"] = sum(1 for _ in (folder(base) / "queue.jsonl").open(encoding="utf-8"))
     except OSError:

@@ -424,6 +424,18 @@ each id once and no credential-like string; a list that fails is not published a
 Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release
 downloads (only the feed is declared). The hub reads `down` when it is dead or unverified and `unknown` when no hub is installed.
 
+In the same release (OBS-339 to OBS-342): a collector receipt older than three times its collector's interval in
+the tick, and never less than six hours (`service_connections.STALE_FACTOR`, `STALE_FLOOR_HOURS`,
+`INTERVAL_HOURS`: 6 hours for a collector that runs every tick, 18 for Bitbucket, 36 for Google, whose collector skips a scan younger
+than 12 hours, 72 for a daily one), reads
+`degraded` with a reason saying its collector has stopped running, and keeps its old `lastAt`; the local server
+measures the age again at least every ten minutes. With `OBSERVATORY_OFFLINE=1` in the server's environment no
+provider is declared, the collectors' own rule (`configuration.enabled`); the server cannot see a tick's
+environment, so an offline tick beside an online server still declares what is configured. The hub reads
+`degraded` when its receipt holds any other refusal beside `hub-absent`, and `unknown` only for `hub-absent`
+alone. `store/analytics/counters.json` is now written under a lock, the new empty file
+`store/analytics/.counters.lock`; an older engine ignores it and writes without it.
+
 ## Workspace state: anonymous usage data (OBS-324, 0.33.0)
 
 New files only; no earlier file changes shape. An upgrade writes none of them: the switch file is
@@ -439,6 +451,7 @@ What is sent and what never is: [the event catalogue](https://github.com/passion
 | `store/analytics/install-id` | 0.33.0 | a random UUID made for analytics only, never derived from the machine, an account or a person | deleted when the switch is turned off; a new one is made when it is turned on again. A snapshot restored on another machine leaves the whole `store/analytics/` folder behind (`ANOTHER_MACHINE_LEAVES`), so that machine makes its own id and never resends this one's queue; the switch file `analytics` moves |
 | `store/analytics/queue.jsonl` | 0.33.0 | events waiting to be sent: name, catalogued properties, time, version; at most 512 KiB, sent by the maintenance job, dropped after 23 hours | deleted when the switch is turned off; deleting it loses only unsent events |
 | `store/analytics/counters.json` | 0.33.0 | counts of what was sent, refused, expired, rejected or failed; never an event | deleting it resets the counts |
+| `store/analytics/.counters.lock` | the release after 0.33.1 | empty; its lock serialises every update of `counters.json` (OBS-341) | deleting it is harmless; it is made again at the next update |
 | `store/analytics/notice.json` | 0.33.0 | when the first-run notice was shown on the terminal, and when a person first opened Home through the local server, and in which version | deleting it shows the notice again |
 
 Settings outside the workspace: `OBSERVATORY_ANALYTICS=off` (also `0`, `false`, `no`) and `DO_NOT_TRACK`
