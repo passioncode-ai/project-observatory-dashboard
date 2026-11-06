@@ -2232,6 +2232,24 @@ class Schedule(Base):
         self.assertIn('machine-backup-missing', [w['code'] for w in status['warning_items']])
         self.assertIn('machine_backup', workspace.doctor(self.ws))
 
+    def test_maintenance_status_joins_backup_items(self):
+        # OBS-349: the backup warnings no maintenance item already says reach Health and doctor's
+        # verdict; the two with a maintenance twin (`passphrase`, `not-encrypted`) do not repeat.
+        import maintenance as M
+        store = self.base / 'external-store'
+        store.mkdir()
+        file = self.ws / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {})['secret_store'] = str(store)
+        file.write_text(json.dumps(doc))
+        self.assertIn('backups-no-passphrase', [w['code'] for w in vault.status(self.ws)['warning_items']])
+        status = M.status(self.ws)
+        codes = [w['code'] for w in status['warning_items']]
+        self.assertIn('backups-vault-store-not-carried', codes)
+        self.assertNotIn('backups-no-passphrase', codes)
+        self.assertNotIn('backups-unencrypted-local', codes)
+        self.assertEqual(len(status['warnings']), len(status['warning_items']))
+
 
 class _NoCommands:
     def apply(self, *args, **kw):

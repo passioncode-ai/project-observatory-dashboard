@@ -500,7 +500,7 @@ def doctor(base: Path) -> dict:
     config.validate_workspace(base, required=True)
     doc = config.load(base)
     database = validate_data(base, integrity=True)
-    return {"version": config.VERSION, "runtime": runtime, "database": database, "workspace_format": config.WORKSPACE_VERSION,
+    report = {"version": config.VERSION, "runtime": runtime, "database": database, "workspace_format": config.WORKSPACE_VERSION,
             "configuration_schema": doc["schema_version"],
             # EVERY name `configure` accepts, on or off: the onboarding says
             # "list current settings with doctor", and a fresh workspace listed
@@ -555,6 +555,48 @@ def doctor(base: Path) -> dict:
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
                if (doc.get("features") or {}).get("agent") is True else {})}
+    # OBS-349: one verdict over the sections above, so "doctor is clean" is a value, not a reading.
+    report.update(verdict(report))
+    return report
+
+
+#: What the verdict reads as news or a person's own choice, never as a gap (decision WA-5): a
+#: release announced, automatic updates or the schedule turned off on purpose, an update waiting
+#: for a quiet moment. A deliberate setting must not keep doctor from ever reading clean.
+INFO_CODES = frozenset({"update-available", "auto-off", "deferred", "schedule-off"})
+
+
+def verdict(report: dict) -> dict:
+    """`attention` (what needs a look, each with its area, code, severity, text and step) and
+    `clean` (no item is a warning), from doctor's own sections.
+
+    The maintenance items already join the backups' and the machine bundle's (maintenance.status),
+    so they are the source; each is credited to the section that raised it, and a code is taken
+    once, from its first row. Each missing source is its own `source-missing` row (one per source:
+    two switches needing one folder have one fix). Doctor stays a report: its exit code does not
+    follow the verdict."""
+    areas: dict = {}
+    for area in ("backups", "machine_backup"):
+        for item in (report.get(area) or {}).get("warning_items") or []:
+            areas.setdefault(item.get("code"), area)
+    attention: list[dict] = []
+    seen: set = set()
+
+    def add(key, area: str, code: str, text: str, step) -> None:
+        if key in seen:
+            return
+        seen.add(key)
+        attention.append({"area": area, "code": code, "severity": "info" if code in INFO_CODES else "warning",
+                          "text": text, "step": step if isinstance(step, str) and step else None})
+
+    for item in (report.get("maintenance") or {}).get("warning_items") or []:
+        code = str(item.get("code") or "maintenance")
+        add(code, areas.get(code, "maintenance"), code, str(item.get("text") or ""), item.get("step"))
+    for row in report.get("coverage_warnings") or []:
+        source = str(row.get("source") or "")
+        add(("source-missing", source), "sources", "source-missing", f"{source}: {row.get('problem')}",
+            row.get("fix"))
+    return {"attention": attention, "clean": not any(row["severity"] == "warning" for row in attention)}
 
 
 def _analytics(base: Path) -> dict:
@@ -650,7 +692,7 @@ def _parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init", help="create the private workspace, or complete one; an empty home "
                                        "first restores the newest backup a workspace at this path left")
     init.add_argument("--fresh", action="store_true", help="start empty even when backups exist")
-    sub.add_parser("doctor", help="workspace health, sources and backups")
+    sub.add_parser("doctor", help="workspace health, sources, backups and one verdict (attention, clean)")
     sub.add_parser("version", help="the engine, workspace and configuration versions")
     sub.add_parser("onboard", help="print the agent onboarding guide")
     migration = sub.add_parser("migrate-local", help="copy an original full-engine installation into a new workspace; previews without --apply")
