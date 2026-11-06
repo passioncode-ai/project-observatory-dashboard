@@ -249,6 +249,19 @@ class DaysAndTiming(Workspace):
         self.assertEqual(self.report(D)["state"], "complete")
         self.assertEqual(self.report(D)["revision"], 1, "a rewrite of a partial report is not a new revision")
 
+    def test_the_registry_emit_rewriting_the_same_projects_does_not_rebuild_a_partial_day(self) -> None:
+        folder = pathlib.Path(self.paths.STATE) / "ops-digests" / "alpha-web"
+        folder.mkdir(parents=True)
+        (folder / "2026-11.json").write_text("not this store's document")
+        self.review(at(D + timedelta(days=1), 7))
+        projects = pathlib.Path(self.paths.REGISTRY) / "projects.json"
+        same = json.loads(projects.read_text())
+        projects.write_text(json.dumps(same, indent=2) + "\n")             # same ids, new bytes and mtime
+        os.utime(projects, ns=(projects.stat().st_atime_ns, projects.stat().st_mtime_ns + 10 ** 9))
+        self.assertNotIn(D, self.LR.plan(at(D + timedelta(days=1), 9), 6)["days"])
+        projects.write_text(json.dumps({"projects": same["projects"] + [{"id": "project:gamma-ops"}]}))
+        self.assertIn(D, self.LR.plan(at(D + timedelta(days=1), 9), 6)["days"], "another project set: due")
+
     def test_a_damaged_report_is_kept_aside_and_written_again(self) -> None:
         self.review(at(D + timedelta(days=1), 7))
         self.LR.report_path(D).write_bytes(b"\x00damaged report")
@@ -498,6 +511,16 @@ class Failures(Workspace):
         self.review(at(D + timedelta(days=2), 7))
         self.assertEqual(self.report(D + timedelta(days=1))["arrivedLate"], [], "and no other report lists it")
 
+    def test_an_older_day_written_after_newer_ones_lists_no_late_line(self) -> None:
+        self.review(at(D - timedelta(days=8), 7))                               # D-15 to D-9
+        self.review(at(D + timedelta(days=1), 7))                               # D-6 to D; D-8 and D-7 missing
+        self.digest(ALPHA, D - timedelta(days=9), {"ipc.call": [2, 12]}, received=at(D + timedelta(days=1), 10))
+        self.review(at(D + timedelta(days=1), 11), day=D - timedelta(days=8))
+        self.assertEqual(self.report(D - timedelta(days=8))["arrivedLate"], [], "the newer reports' span, not its own")
+        self.review(at(D + timedelta(days=2), 7))
+        self.assertEqual([x["day"] for x in self.report(D + timedelta(days=1))["arrivedLate"]],
+                         [(D - timedelta(days=9)).isoformat()], "listed once, in the next new report")
+
     def test_damage_only_the_late_scan_reads_is_a_note_not_partial(self) -> None:
         day = date(2026, 11, 20)
         self.review(at(date(2026, 10, 26), 7))                                 # reports of 19 to 25 October
@@ -596,6 +619,18 @@ class Privacy(Workspace):
             for name in CLONES:
                 self.assertNotIn(str(CLONES[name][0]), text)
             self.assertNotIn(str(self.home), text)
+
+    def test_a_scrubbed_class_key_is_still_its_class(self) -> None:
+        import memory_redact
+        self.lesson("alpha-web")
+        self.lesson("beta-api")
+        self.receipt((D + timedelta(days=1)).isoformat())
+        with patch.object(self.LR, "_redactor",
+                          lambda: memory_redact.Redactor(known_loader=lambda: {"needs-its-own": "FIXTURE_KEY"})):
+            self.review(at(D + timedelta(days=1), 7))
+        classes = self.report(D)["classes"]
+        self.assertEqual(len(classes), 1, "compared by the raw key, scrubbed only for display")
+        self.assertNotIn("needs-its-own", classes[0]["classKey"])
 
     def test_nothing_is_sent_outward(self) -> None:
         self.lesson("alpha-web")

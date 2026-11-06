@@ -95,6 +95,7 @@ REPORT_NAME = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})\.json")
 RETRO_OP = "retro-after-work"
 LESSON_CORROBORATOR = "agent:lesson-corroborator"
 RISE_CODES = ("risen-in-hour", "rose-since-yesterday", "rising-repeatedly")
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 #: Every refusal of the CLI, with what to do about it.
 HINTS = {
@@ -367,11 +368,10 @@ def input_stamp(day: date) -> str:
             conn.close()
     except Exception:  # noqa: BLE001
         parts.append("ledger-unreadable")
-    try:
-        st = (Path(paths.REGISTRY) / "projects.json").stat()
-        parts.append([st.st_size, st.st_mtime_ns])
-    except OSError:
-        parts.append("registry-unreadable")
+    # What the report reads of the registry, not the file's stamp: the tick's emit rewrites projects.json at every
+    # refreshing tick even when nothing in it changed.
+    projects = registry_projects()
+    parts.append(sorted(projects) if projects is not None else "registry-unreadable")
     return "sha256:" + hashlib.sha256(json.dumps(parts, default=str).encode("utf-8")).hexdigest()
 
 
@@ -811,7 +811,9 @@ class Run:
             ck = r["body"].get("classKey")
             if isinstance(ck, str):
                 by_class.setdefault(ck, []).append(r)
-        touched = {i["classKey"] for i in lessons}
+        # Raw class keys of the day's revisions: the items carry the scrubbed key, for display only.
+        of_day = [r for r in self.classified if str(r.get("created_at") or "")[:10] == iso]
+        touched = {r["body"].get("classKey") for r in of_day}
         outcomes = self.outcomes()
         listed, others = [], 0
         for ck, members in sorted(by_class.items()):
@@ -823,7 +825,7 @@ class Run:
                 others += 1
                 continue
             got = outcomes.get(ck, {})
-            promoted_today = any(i["classKey"] == ck and i["code"] == "lesson-promoted" for i in lessons)
+            promoted_today = any(r["body"].get("classKey") == ck and r["code"] == "lesson-promoted" for r in of_day)
             if got.get("promoted") and self.corroborator_source.get("state") == "corroborator-dry" \
                     and not promoted_today:
                 # A dry run's "promoted" is what the corroborator WOULD promote: the tick's next run does it.
@@ -1243,6 +1245,10 @@ def run(now: datetime | None = None, *, day: date | None = None, again: bool = F
                     after = parse_stamp(existing.get("lateAfter"))
                     later = newest_on_disk is not None and newest_on_disk > d
                     until = parse_stamp(existing.get("lateUntil") or existing.get("writtenAt")) if later else now
+                elif newest_on_disk is not None and newest_on_disk > d:
+                    # An older day written for the first time while newer reports exist (`run --day D`): those reports
+                    # already cover every late line, so its span is empty.
+                    after = until = previous or EPOCH
                 else:
                     after, until = previous, now
                 doc = build(review, d, revision=revision, late_after=after, late_until=until,
