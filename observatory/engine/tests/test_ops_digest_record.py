@@ -61,10 +61,30 @@ def structured(result) -> dict:
     return out
 
 
+def fresh_registry_readers() -> None:
+    """`fabric_attribution` binds `paths` at import; a new workspace must not read the last one's files."""
+    for name in ("fabric_attribution", "identifiers"):
+        sys.modules.pop(name, None)
+
+
+def write_registry(projects=(ALPHA, BETA), fabric: dict | None = None, aliases: list | None = None) -> None:
+    import paths
+    reg = pathlib.Path(paths.REGISTRY)
+    (reg / "projects.json").write_text(json.dumps({"projects": [{"id": p} for p in projects]}))
+    if aliases is not None:
+        (reg / "identifiers.json").write_text(json.dumps({"aliases": aliases}))
+    if fabric is not None:
+        scratch = pathlib.Path(paths.SCRATCH)
+        scratch.mkdir(parents=True, exist_ok=True)
+        (scratch / "fabric-attribution.json").write_text(json.dumps(
+            {"aliases": {pid: {"alias": alias} for pid, alias in fabric.items()}}))
+
+
 class OverStdio(unittest.TestCase):
     def setUp(self) -> None:
         self.ws = Workspace()
         self.ws.MA.serve_stdio()
+        fresh_registry_readers()
         os.environ.pop("OBSERVATORY_BINDING_TOKEN_FILE", None)
 
     def tearDown(self) -> None:
@@ -189,6 +209,66 @@ class OverStdio(unittest.TestCase):
         self.assertEqual(S.first_lines(ALPHA), [])
         self.assertEqual(len(S.first_lines(BETA)), 1)
 
+    def test_a_record_keeps_at_most_its_revisions_and_a_day_its_sources(self) -> None:
+        """OBS-330 review M3: a sender looping on new bodies or labels is refused before the month file grows."""
+        import ops_digest_store as S
+        self.bind()
+        for n in range(S.MAX_REVISIONS):
+            self.assertTrue(self.call({"digest": daily(failed=10 + n)})["accepted"])
+        out = self.call({"digest": daily(failed=99)})
+        self.assertEqual(out["code"], "revisions-exhausted", out)
+        self.assertTrue(self.call({"digest": daily(failed=10)})["repeated"], "a body already kept still answers")
+        for n in range(1, S.MAX_SOURCES):
+            self.assertTrue(self.call({"digest": daily(), "source": f"s{n}"})["accepted"])
+        out = self.call({"digest": daily(), "source": "one-too-many"})
+        self.assertEqual(out["code"], "sources-exhausted", out)
+        self.assertTrue(self.call({"digest": daily(days_ago=2), "source": "one-too-many"})["accepted"],
+                        "another day has its own labels")
+        month = next(self.store().rglob("*.json")).read_text(encoding="utf-8")
+        self.assertNotIn("\n ", month, "written compact")
+
+    def test_a_prune_that_fails_never_refuses_a_kept_line(self) -> None:
+        import ops_digest_store as S
+        self.bind()
+        real = S._prune_locked
+
+        def broken(today):
+            raise KeyError("damaged")
+        S._prune_locked = broken
+        try:
+            self.assertTrue(self.call({"digest": daily()})["accepted"])
+        finally:
+            S._prune_locked = real
+        # A damaged entry in an old month is skipped by the prune, which keeps the month as it is.
+        old = self.store() / "alpha-web" / "2000-01.json"
+        old.write_text(json.dumps({"schema": S.STORE_SCHEMA, "lines": [1, {"day": None}]}), encoding="utf-8")
+        self.assertTrue(self.call({"digest": daily(days_ago=2)})["accepted"])
+        self.assertTrue(old.exists())
+
+    @unittest.skipIf(os.name == "nt", "a symbolic link needs a privilege on Windows")
+    def test_a_link_planted_as_the_lock_is_refused(self) -> None:
+        self.bind()
+        self.store().mkdir(parents=True)
+        (self.store() / ".lock").symlink_to(self.ws.home / "elsewhere")
+        out = self.call({"digest": daily()})
+        self.assertEqual(out["code"], "store-unwritable", out)
+        self.assertFalse((self.ws.home / "elsewhere").exists())
+
+    def test_issue_refuses_a_digest_binding_of_several_projects(self) -> None:
+        import access_binding_cli as C
+        token = self.ws.home / "several.token"
+        args = C.parser().parse_args(["issue", "service:fabric", "--project", ALPHA, "--project", BETA,
+                                      "--scope", "ops.digest.record", "--effect", "propose",
+                                      "--token-file", str(token)])
+        real = C._is_terminal
+        C._is_terminal = lambda: True
+        try:
+            with self.assertRaisesRegex(SystemExit, "exactly one project"):
+                C.cmd_issue(args)
+        finally:
+            C._is_terminal = real
+        self.assertFalse(token.exists())
+
     def test_a_damaged_month_is_refused_and_kept(self) -> None:
         self.bind()
         line = daily()
@@ -269,6 +349,8 @@ class TheWaitingDeclaration(unittest.TestCase):
 class OverHttp(Base):
     def setUp(self) -> None:
         super().setUp()
+        fresh_registry_readers()
+        write_registry()
         import paths
         self.estate = Estate()
         (self.ws.home / "jwks.json").write_text(json.dumps(self.estate.jwks))
@@ -302,12 +384,27 @@ class OverHttp(Base):
                            ({"aud": "copylot"}, "delegation-refused"),
                            ({"effect": ["none"]}, "delegation-refused"),
                            ({"project": None}, "project-required"),
-                           ({"project": "urn:project:a"}, "project-unknown")):
+                           ({"project": "urn:project:a"}, "project-unknown"),
+                           # OBS-330 review M1: a project: claim is taken only when the registry holds it.
+                           ({"project": "project:no-such-project"}, "project-unknown")):
             with self.subTest(over=over):
                 out = self.call(self.token(**over), TOOL, {"digest": daily()})
                 self.assertEqual(out["code"], code, out)
         import ops_digest_store as S
         self.assertFalse(S.store_root().exists() and any(S.store_root().rglob("*.json")))
+
+    def test_a_fabric_id_is_taken_from_fabrics_attribution_alone(self) -> None:
+        """OBS-330 review M2: a curated alias may not redirect a fabric: id; Fabric's attribution names it."""
+        attributed, curated = "fabric:00000000-0000-4000-8000-0000000000a1", "fabric:00000000-0000-4000-8000-0000000000b2"
+        write_registry(fabric={ALPHA: attributed},
+                       aliases=[{"id": curated, "resolves_to": BETA, "owner": "agent:x", "source": "a host"},
+                                {"id": attributed, "resolves_to": BETA, "owner": "agent:x", "source": "a host"}])
+        out = self.call(self.token(project=attributed), TOOL, {"digest": daily()})
+        self.assertEqual((out.get("accepted"), out.get("project")), (True, ALPHA), out)
+        out = self.call(self.token(project=curated), TOOL, {"digest": daily()})
+        self.assertEqual(out["code"], "project-unknown", out)
+        import ops_digest_store as S
+        self.assertFalse((S.store_root() / "beta-api").exists())
 
 
 if __name__ == "__main__":

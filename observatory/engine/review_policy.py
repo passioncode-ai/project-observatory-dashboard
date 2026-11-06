@@ -669,6 +669,11 @@ def _aliases(p, rules_on, ctx, plan, decide, leave, room, on, measured, member_o
         return leave(p, problem)
     if plan.identifiers is None:
         return leave(p, ctx.identifiers_problem or "config/identifiers.json cannot be read")
+    # A `fabric:` name is Fabric's own id for a project (OBS-160, DEC-0089). A curated alias overrides that
+    # attribution in `identifiers.resolve`, so one accepted without a person could send what Fabric addresses to one
+    # project (its operations digests among them, OBS-330) to another: it waits for the operator, whatever the rule.
+    if any(str(a.get("id", "")).casefold().startswith("fabric:") for a in p["patch"]["aliases"]):
+        return leave(p, "a fabric: name is Fabric's own id for a project; an alias for one waits for the operator")
     for a in p["patch"]["aliases"]:
         owners = measured.get(a["id"].casefold())
         if owners:

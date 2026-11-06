@@ -380,7 +380,10 @@ DEC-0153 as a JSON object (the contract's closed schema inline under `$defs/dail
 optional `service {id, instance}`. It has no project field: over stdio the project is the one project of the access
 binding the server runs under (the new server option `--binding-token-file PATH`, or `OBSERVATORY_BINDING_TOKEN_FILE`;
 without it the answer is `binding-required`), and on the memory-http door it is the `project` claim of a delegation
-token minted for `project-observatory` with the scope `ops.digest.record` (without one, `delegation-required`). The
+token minted for `project-observatory` with the scope `ops.digest.record` (without one, `delegation-required`): a
+`project:<slug>` the registry holds or a `fabric:<uuid>` Fabric's attribution records, never a curated alias. The
+review policy's `registry.aliases-clean` no longer accepts a proposal that names a `fabric:` alias: it waits for the
+operator. The
 contract's schemas, vectors and fixtures are vendored at its release tag `v0.1.0+2026-11-06.1` in
 `observatory/engine/fabric/ops-digest/`, which the engine's contract pin predates (`contract_lock` lists the folder).
 
@@ -389,8 +392,9 @@ an older engine refuses a registry that holds it (an unknown scope is a broken r
 alone), so issue such a binding only after the upgrade. The built-in `local:stdio` binding does not hold it. New
 workspace state: `<state>/ops-digests/<project slug>/<YYYY-MM>.json`, owner-only, one record per (project, service,
 source, UTC day) with every revision that arrived and the channel that sent it (`binding:<id>` or
-`delegation:<agent>`), never a token; a reader takes the first revision of a day. Each write drops days older than
-400. An older engine ignores the folder; nothing migrates and no SQLite table is added. In a digest's counters, the
+`delegation:<agent>`), never a token, written compact; a reader takes the first revision of a day. A record keeps at
+most 16 revisions, a project's day at most 8 source labels and a month file at most 64 MiB, each refused with its own
+code. Each write drops days older than 400. An older engine ignores the folder; nothing migrates and no SQLite table is added. In a digest's counters, the
 `ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
 never the retros written.
 

@@ -101,6 +101,9 @@
             "digest-refused",
             "day-not-closed",
             "day-outside-retention",
+            "revisions-exhausted",
+            "sources-exhausted",
+            "store-full",
             "store-unreadable",
             "store-unwritable"
           ]

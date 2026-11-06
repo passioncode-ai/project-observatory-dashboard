@@ -18,8 +18,10 @@ owner grants nothing:
   agent is not a product, and its stdio channel names no project.
 - **Over the memory-http door** the project is the `project` claim of a delegation token Fabric's hub minted for
   `project-observatory` with the scope `ops.digest.record` and an effect ceiling that admits `draft`, verified by
-  `delegation.verify_delegation` with the meter's trusted issuer and keys (`meter.Meter.verify_call`, DL-13). A
-  request on that door without such a token answers `delegation-required`, a bearer binding included.
+  `delegation.verify_delegation` with the meter's trusted issuer and keys (`meter.Meter.verify_call`, DL-13). The
+  claim must be a `project:<slug>` the registry holds or a `fabric:<uuid>` Fabric's own attribution records for one
+  project; a curated alias is never taken (`resolve_project`). A request on that door without such a token answers
+  `delegation-required`, a bearer binding included.
 
 The optional `service {id, instance}` must be a service the registry attributes to that project: a curated name
 `agent:<id>.<instance>` in `registry/identifiers.json`, or the agent row's source repository in
@@ -30,7 +32,9 @@ WHAT IS KEPT: the line itself (counts and operation names, which `FAC-SEM-167` h
 home folders), the label, the service, the day and which channel sent it. Nothing else: no free text, no token, no
 bearer, no log line. One record per (project, service, source, UTC day). The same body again changes nothing
 (`repeated: true`); a different body is a new revision, and a reader reads the FIRST line of a day (OD-6), so a
-product's restart or catch-up never rewrites a day already sent. Files are owner-only JSON under
+product's restart or catch-up never rewrites a day already sent. What one project can make the store hold is bounded:
+`MAX_REVISIONS` per record, `MAX_SOURCES` labels per day and `MONTH_FILE_MAX` bytes per month file, each refused
+with its own code before anything is written. Files are owner-only compact JSON under
 `<state>/ops-digests/<project slug>/<YYYY-MM>.json`, one per month of `day`; every write prunes days older than
 `KEEP_DAYS`. A file that cannot be read is never overwritten: the call is refused with `store-unreadable`.
 
@@ -62,6 +66,13 @@ REQUEST_FIELDS = ("digest", "service", "source")
 DEFAULT_SOURCE = "app"
 #: Days kept: a day older than this is refused on the way in and pruned on every write.
 KEEP_DAYS = 400
+#: Bounds on what one project can make the store hold (OBS-330 review M3): revisions kept per (day, service, source),
+#: distinct `source` labels per (project, day), and the bytes of one month file. Past a bound the call is refused
+#: with a typed code and nothing is written, so a sender looping on new bodies or labels cannot grow a month file
+#: until it can no longer be read.
+MAX_REVISIONS = 16
+MAX_SOURCES = 8
+MONTH_FILE_MAX = 64 * 1024 * 1024
 TOKEN_FILE_ENV = "OBSERVATORY_BINDING_TOKEN_FILE"
 TOKEN_FILE_MAX = 4096
 STORE_DIR = "ops-digests"
@@ -85,13 +96,18 @@ HINTS = {
                            "with the scope ops.digest.record (Authorization: Bearer or Fabric-Delegation)",
     "delegation-refused": "the delegation token was refused; the detail names the verifier's code (DL-13)",
     "project-required": "the delegation token names no project; the hub mints it for the project the lines are of",
-    "project-unknown": "the project the token names is no project of this registry",
+    "project-unknown": "the token's project must be a project of this registry by its id (project:<slug>), or the "
+                       "fabric:<uuid> Fabric's own attribution records for one; a curated other name is not taken",
     "service-not-of-project": "the registry attributes this service to no such project; name the service the "
                               "lines came from, or leave service out",
     "source-refused": "source is a lower-case label (`app` by default), never a value",
     "digest-refused": "the line fails the contract (DEC-0153); the findings name each place, never its value",
     "day-not-closed": "a daily line is of a closed UTC day: yesterday or earlier",
     "day-outside-retention": f"Observatory keeps {KEEP_DAYS} days of digests; an older day is not taken",
+    "revisions-exhausted": f"a day's record of one service and source keeps at most {MAX_REVISIONS} revisions; "
+                           "the first is the day's line, and later bodies change nothing a reader sees",
+    "sources-exhausted": f"a project's day takes at most {MAX_SOURCES} distinct source labels",
+    "store-full": "this project's month of digests reached its size bound; nothing was written",
     "store-unreadable": "the digest store cannot be read; nothing was written, and the file is kept as it is",
     "store-unwritable": "the digest store cannot be written; nothing was recorded",
 }
@@ -144,9 +160,13 @@ def caller() -> Caller:
 
 
 def _token_file_check(fd: int) -> None:
-    import stat
-    if os.name != "nt" and stat.S_IMODE(os.fstat(fd).st_mode) & 0o077:
+    """Owner-only, on every OS: no group or world bit on POSIX, no access entry for another account on Windows
+    (`osprivacy.private`), and owned by this account."""
+    import osprivacy
+    if not osprivacy.private(fd):
         raise ValueError("readable by others")
+    if not osprivacy.owned_by_me(fd):
+        raise ValueError("owned by another account")
 
 
 def _bound() -> Caller:
@@ -210,20 +230,32 @@ def _delegated(token: Any) -> Caller:
 # ── which project, and whose service ──────────────────────────────────────────────────────────────────────────
 
 def resolve_project(caller_: Caller, registry: Callable[[], Any] | None) -> str:
-    """The registry id of the caller's project. A binding's project is the operator's own grant and is taken as
-    written; a token's claim is taken when it is a registry id, else resolved by `identifiers.resolve` (Fabric's
-    `fabric:<uuid>` for a project, or a curated other name)."""
-    if PROJECT_ID.fullmatch(caller_.project):
-        return caller_.project
+    """The registry id of the caller's project.
+
+    A binding's project is the operator's own grant at a terminal and is taken as written. A token's claim is taken
+    only two ways, both checked against the registry: a `project:<slug>` the registry holds, or a `fabric:<uuid>`
+    that Fabric's own attribution (`fabric_attribution`, the registry's `fabric` map) records for exactly one
+    project. A curated other name (`config/identifiers.json`) is never taken here: an alias an agent proposed and a
+    policy accepted could otherwise send one project's digests to another (OBS-330 review M2)."""
     if not caller_.claimed:
+        if PROJECT_ID.fullmatch(caller_.project):
+            return caller_.project
         raise Refused("project-unknown", "the binding's project is not a registry id")
-    import identifiers
     if registry is None:
         raise Refused("project-unknown", "no registry to resolve the token's project against")
-    answer = identifiers.resolve(caller_.project, registry())
-    if answer.get("kind") == "project" and isinstance(answer.get("canonical"), str):
-        return answer["canonical"]
-    raise Refused("project-unknown", f"the token's project resolves to {answer.get('error') or answer.get('kind')}")
+    reg = registry()
+    claim = caller_.project
+    if PROJECT_ID.fullmatch(claim):
+        if claim in reg.projects:
+            return claim
+        raise Refused("project-unknown", "the token's project is not in this registry")
+    if claim.startswith("fabric:"):
+        owners = sorted(pid for pid, alias in reg.fabric.items() if alias == claim and pid in reg.projects)
+        if len(owners) == 1:
+            return owners[0]
+        raise Refused("project-unknown", "Fabric's attribution records this fabric: id for "
+                                         f"{'several projects' if owners else 'no project'} of this registry")
+    raise Refused("project-unknown", "the token's project is neither a project: id nor a fabric: id")
 
 
 def _repository_ids(url: str) -> set[str]:
@@ -303,15 +335,18 @@ def _read(path: Path) -> dict | None:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         raise StoreUnreadable(f"{path.name} is not JSON") from None
-    if not (isinstance(doc, dict) and doc.get("schema") == STORE_SCHEMA and isinstance(doc.get("lines"), list)):
+    if not (isinstance(doc, dict) and doc.get("schema") == STORE_SCHEMA and isinstance(doc.get("lines"), list)
+            and all(isinstance(x, dict) and isinstance(x.get("day"), str) and isinstance(x.get("revisions"), list)
+                    and all(isinstance(r, dict) for r in x["revisions"]) for x in doc["lines"])):
         raise StoreUnreadable(f"{path.name} is not an {STORE_SCHEMA} document")
     return doc
 
 
 def _write(path: Path, doc: dict) -> None:
+    """Compact (no indent): the store is read by this module, not by a person in a diff."""
     import atomic
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    atomic.write_json(path, doc)
+    atomic.write_json(path, doc, indent=None)
 
 
 class _Lock:
@@ -322,7 +357,9 @@ class _Lock:
         import osprivacy
         root = store_root()
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.fd = osprivacy.open(root / ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+        # NOFOLLOW: a link planted as the lock file is refused, never opened through.
+        self.fd = osprivacy.open(root / ".lock", os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW | osprivacy.NONBLOCK,
+                                 0o600)
         oslocks.flock(self.fd, oslocks.LOCK_EX)
         return self
 
@@ -344,19 +381,32 @@ def record(project: str, service: dict | None, source: str, digest: dict, via: s
         line = next((x for x in doc["lines"] if x.get("day") == day and x.get("source") == source
                      and x.get("service") == service), None)
         if line is None:
+            sources = {x.get("source") for x in doc["lines"] if x.get("day") == day}
+            if source not in sources and len(sources) >= MAX_SOURCES:
+                raise Refused("sources-exhausted", f"{day} already holds {len(sources)} source labels")
             line = {"day": day, "service": service, "source": source, "revisions": []}
             doc["lines"].append(line)
         same = next((r for r in line["revisions"] if r.get("sha256") == sha), None)
         if same is not None:
             revision, repeated = same["revision"], True
         else:
+            if len(line["revisions"]) >= MAX_REVISIONS:
+                raise Refused("revisions-exhausted", f"{day} of this service and source holds "
+                                                     f"{len(line['revisions'])} revisions")
             revision, repeated = len(line["revisions"]) + 1, False
             line["revisions"].append({"revision": revision, "sha256": sha, "via": via,
                                       "receivedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                       "digest": json.loads(body)})
-            doc["lines"].sort(key=lambda x: (x["day"], x["source"], _canonical(x["service"] or {})))
+            doc["lines"].sort(key=lambda x: (x["day"], str(x.get("source")), _canonical(x.get("service") or {})))
+            if len(json.dumps(doc, ensure_ascii=False).encode("utf-8")) > MONTH_FILE_MAX:
+                raise Refused("store-full", f"{day[:7]} would pass {MONTH_FILE_MAX // (1024 * 1024)} MiB")
             _write(path, doc)
-        _prune_locked(today or today_utc())
+        # The line is kept: pruning other days is housekeeping, and its failure never turns an accepted line into
+        # a refusal (OBS-330 review LOW 1). The next write prunes again.
+        try:
+            _prune_locked(today or today_utc())
+        except Exception:  # noqa: BLE001
+            pass
     return {"accepted": True, "repeated": repeated, "revision": revision, "project": project, "service": service,
             "source": source, "day": day}
 
@@ -378,9 +428,10 @@ def _prune_locked(today: date) -> int:
                 doc = _read(path)
             except OSError:
                 continue          # a damaged or unreadable month is kept for a person to look at
-            if doc is None:
+            if doc is None or not isinstance(doc.get("lines"), list):
                 continue
-            kept = [x for x in doc["lines"] if isinstance(x.get("day"), str) and x["day"] >= oldest]
+            kept = [x for x in doc["lines"] if isinstance(x, dict) and isinstance(x.get("day"), str)
+                    and x["day"] >= oldest]
             dropped += len(doc["lines"]) - len(kept)
             if not kept:
                 path.unlink()

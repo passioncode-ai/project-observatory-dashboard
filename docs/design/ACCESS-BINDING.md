@@ -52,7 +52,7 @@ and the project is the transport's. Over stdio that is a binding too: the connec
 file, hashes the bearer and resolves it with `resolve` exactly as an HTTP request is resolved (this server's audience,
 expiry, revocation, rule 11), then authorizes the scope `ops.digest.record` with the effect `propose` on the
 binding's project. A binding that names more than one project is refused (`binding-not-one-project`): the line names
-no project, so the binding must. The flag changes nothing else: every other tool of that stdio server is still
+no project, so the binding must; `full access-binding issue` refuses to issue one with this scope. The flag changes nothing else: every other tool of that stdio server is still
 `local:stdio`'s, and `local:stdio` does not hold the scope, so a server without the flag answers `binding-required`.
 On the memory-http door the same tool takes no binding's bearer (`delegation-required`): it takes a delegation token
 the hub minted for `project-observatory` with that scope, verified as the meter verifies its own (DL-13), and reads the

@@ -144,6 +144,9 @@ def cmd_issue(a: argparse.Namespace) -> int:
                          f"file only, never over another")
     if not 1 <= a.days <= MAX_DAYS:
         raise SystemExit(f"access-binding: --days must be 1..{MAX_DAYS}; a binding always expires")
+    if "ops.digest.record" in (a.scopes or []) and len(set(a.projects)) != 1:
+        raise SystemExit("access-binding: a binding with the scope ops.digest.record names exactly one project: the "
+                         "digests it records name none, so the binding says whose they are; issue one per project")
     now = datetime.now(timezone.utc)
     bearer = secrets.token_urlsafe(32)
     binding = {
