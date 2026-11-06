@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "af389a39879c692ca184a6c61269babc45ed38d145bd4b6b202a42bf2427ab04",
-      "bytes": 60836,
+      "export_sha256": "d6fe1998dc32b48b2e8cada54779d6212209109f950c0c64c78230072d137161",
+      "bytes": 61606,
       "upstream_modified": true
     },
     {
@@ -3080,8 +3080,8 @@
       "path": "host_accounts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7058c693e8535b5b6efed52bff766324c2575753e14dc8b9e509277459f5a3f2",
-      "bytes": 4737
+      "export_sha256": "f0f73595bec9400aab91e93282142e8402cc5b14bf37ed5b7c91933e4e249106",
+      "bytes": 9972
     },
     {
       "path": "identifiers.py",
@@ -3181,8 +3181,8 @@
       "path": "mcp/http_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "499e909f74c46fce1be15118172bb814b081c74111f909889d87de36778538d4",
-      "bytes": 13308
+      "export_sha256": "74215b8cf366d6d1b30c4297e0224965bae0f669919deb891c240397a1d6e9aa",
+      "bytes": 14091
     },
     {
       "path": "mcp/memory_wire.py",
@@ -3568,15 +3568,15 @@
       "path": "peer_check.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "de5bad52e2560de3cccffd209a399e3843c52c25a2d14728d4b5e927554eb642",
-      "bytes": 10034
+      "export_sha256": "bbee33f445ef5a906a0718370d8aab357205c35f5628fff56530846fbf5367d7",
+      "bytes": 12011
     },
     {
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "48c52e57d16f7ed6a809a61ed1b92aadf850340a565f24b87d9f2710fd3d0eea",
-      "bytes": 31825
+      "export_sha256": "3a441ccf6c25664289a7a613fd5ee3a1dae1774c00d0da7ecb447ba2a51bf46a",
+      "bytes": 36260
     },
     {
       "path": "plugins/README.md",
@@ -4267,8 +4267,8 @@
       "path": "tests/peer_owner_fixtures.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "09e67d8daa5f976292120f161eb4d0c6ede70bd4ca270daefaab1d52b9f189e2",
-      "bytes": 8411
+      "export_sha256": "7ede64a42f006687249ba4f590b90d4965af7fb0196bb3a918deeb74a785fc0f",
+      "bytes": 9088
     },
     {
       "path": "tests/pgp_fixture.py",
@@ -5746,15 +5746,15 @@
       "path": "tests/test_peer_check.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fcb72b8f960ba67c120ea562ef1c58ec6a13af5eb3a480839c4a53649d9f62df",
-      "bytes": 14302
+      "export_sha256": "debb684556817d193f69e622c87445b6711d28652b926d29c5660a51cec7062f",
+      "bytes": 18416
     },
     {
       "path": "tests/test_peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fe37e3ce31c67eee508107fe272096d7b5f19c818b84e502650c878c108723dd",
-      "bytes": 15219
+      "export_sha256": "d2514f1bc91bfabdc615577817c0407358f3b3bcd2620f72776b681f526e7756",
+      "bytes": 20466
     },
     {
       "path": "tests/test_pipeline.py",

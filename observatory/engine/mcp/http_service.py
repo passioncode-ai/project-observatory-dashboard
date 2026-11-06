@@ -125,16 +125,20 @@ class BindingGate:
         self.known: collections.OrderedDict[str, None] = collections.OrderedDict()
 
     async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "websocket":
+            # The service speaks HTTP only; a WebSocket would pass every check below unasked. Closing
+            # before `websocket.accept` makes the server answer the upgrade with 403.
+            return await send({"type": "websocket.close", "code": 1008})
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        # OBS-355: another OS account's peer, before Host, Origin and the bearer. The socket table is read
-        # off the event loop; on a one-account host `active()` is a clock comparison and nothing is read.
-        if self.peers.active():
-            import asyncio
-            refused = await asyncio.get_running_loop().run_in_executor(
-                None, self.peers.check_addresses, scope.get("server"), scope.get("client"))
-            if refused:
-                return await _answer(send, 403, {"error": refused}, [(b"connection", b"close")])
+        # OBS-355: another OS account's peer, before Host, Origin and the bearer. The whole check runs off
+        # the event loop: deciding whether it is active may read the account count (a subprocess every ten
+        # minutes), and an active check reads the socket table. On a one-account host nothing is read.
+        import asyncio
+        refused = await asyncio.get_running_loop().run_in_executor(
+            None, self.peers.check_addresses, scope.get("server"), scope.get("client"))
+        if refused:
+            return await _answer(send, 403, {"error": refused}, [(b"connection", b"close")])
         headers = {k.decode("latin-1").lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         if headers.get("host") not in self.hosts:
@@ -213,6 +217,14 @@ def build_app(*, port: int, rate: int = DEFAULT_RATE, audience: str | None = Non
     return BindingGate(inner, port=port, rate=rate, audience=audience)
 
 
+def serve_options(port: int) -> dict:
+    """uvicorn's settings for this door. `proxy_headers` off: uvicorn would otherwise let an
+    `X-Forwarded-For` from a loopback peer rewrite `scope["client"]`, the address the peer check
+    (OBS-355) looks up in the socket table; no proxy stands in front of this service."""
+    return {"host": HOST, "port": port, "log_level": "warning", "lifespan": "on",
+            "proxy_headers": False, "forwarded_allow_ips": ""}
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="project-observatory full memory-http",
                                 description="Serve agent memory over loopback HTTP to callers "
@@ -238,7 +250,7 @@ def main(argv: list[str]) -> int:
           f"bindings in force: {state.get('inForce', 0)} · {a.rate}/min per binding. "
           f"Issue one with `project-observatory full access-binding issue PRINCIPAL --project "
           f"PROJECT --token-file PATH`.", flush=True)
-    uvicorn.run(app, host=HOST, port=a.port, log_level="warning", lifespan="on")
+    uvicorn.run(app, **serve_options(a.port))
     return 0
 
 

@@ -77,14 +77,32 @@ class Parsers(unittest.TestCase):
 
     def test_pcblist_n_pairs_each_socket_with_its_owner(self):
         rows = P.parse_pcblist_n(F.pcblist_n(F.PCBLIST_MULTI_ROWS))
-        got = sorted((r.local, r.remote, r.uid, r.pid, r.listening) for r in rows)
-        want = sorted((tuple(l), ("*", 0) if r == ("*", 0) else tuple(r), u, p, r == ("*", 0))
+        got = sorted((r.local, r.remote, r.uid, r.pid, r.listening, r.time_wait) for r in rows)
+        want = sorted((tuple(l), ("*", 0) if r == ("*", 0) else tuple(r), u, p, r == ("*", 0), False)
                       for l, r, u, p in F.PCBLIST_MULTI_ROWS)
         self.assertEqual(got, want)
+
+    def test_pcblist_n_reads_the_tcp_state(self):
+        rows = P.parse_pcblist_n(F.pcblist_n([(F.OWN_CLIENT, SERVER, 0, 0, F.TCPS_TIME_WAIT),
+                                              (("127.0.0.1", 47999), ("*", 0), 501, 9, F.TCPS_ESTABLISHED)]))
+        self.assertEqual([(r.time_wait, r.listening) for r in rows], [(True, False), (False, False)])
 
     def test_pcblist_n_refuses_an_unknown_header(self):
         with self.assertRaises(P.TableUnreadable):
             P.parse_pcblist_n(b"\xff" * 64)
+
+    def test_pcblist_n_refuses_a_record_past_the_end(self):
+        blob = F.pcblist_n(F.PCBLIST_MULTI_ROWS[:1])
+        with self.assertRaises(P.TableUnreadable):
+            P.parse_pcblist_n(blob[:24 + 60])                          # the first xinpcb_n cut short
+
+    def test_calibration_needs_the_listener_and_both_ends_exactly(self):
+        rows = P.parse_pcblist_n(F.pcblist_n([(SERVER, ("*", 0), 501, 7), (SERVER, F.OWN_CLIENT, 501, 7),
+                                              (F.OWN_CLIENT, SERVER, 501, 7)]))
+        self.assertTrue(P.calibration_holds(rows, SERVER, F.OWN_CLIENT, uid=501, pid=7))
+        self.assertFalse(P.calibration_holds(rows, SERVER, F.OWN_CLIENT, uid=501, pid=8))
+        self.assertFalse(P.calibration_holds(rows[:2], SERVER, F.OWN_CLIENT, uid=501, pid=7))
+        self.assertFalse(P.calibration_holds(rows + rows[2:], SERVER, F.OWN_CLIENT, uid=501, pid=7))
 
     def test_windows_tables(self):
         rows = P.parse_windows_tcp_table(F.windows_table(F.WINDOWS_MULTI_ROWS, socket.AF_INET), socket.AF_INET)
@@ -156,6 +174,23 @@ class Selection(unittest.TestCase):
             owner = P.peer_at(("::ffff:127.0.0.1", F.SERVER_PORT, 0, 0), ("::ffff:127.0.0.1", 50002, 0, 0))
         self.assertEqual(owner.kind, P.ANOTHER_ACCOUNT)
 
+    def test_a_time_wait_row_is_never_the_answer(self):
+        with self.table(F.NETSTAT_TIME_WAIT):
+            owner = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
+        self.assertEqual((owner.kind, owner.pid), (P.THIS_ACCOUNT, F.OWN_CLIENT_PID))
+
+    def test_two_live_rows_are_unknown(self):
+        rows = [P.Row(F.FOREIGN_CLIENT, SERVER, False, 501, 1), P.Row(F.FOREIGN_CLIENT, SERVER, False, 502, 2)]
+        with mock.patch.object(P, "read_table", return_value=(rows, "sysctl")):
+            owner = P.peer(FakeSocket(SERVER, F.FOREIGN_CLIENT))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "several-rows"))
+
+    def test_two_listeners_are_unknown(self):
+        rows = [P.Row(SERVER, ("*", 0), True, 501, 1), P.Row(SERVER, ("*", 0), True, 502, 2)]
+        with mock.patch.object(P, "read_table", return_value=(rows, "sysctl")):
+            owner = P.listener(F.SERVER_PORT)
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "several-rows"))
+
     def test_no_row_is_unknown(self):
         with self.table():
             owner = P.peer(FakeSocket(SERVER, ("127.0.0.1", 59999)))
@@ -199,10 +234,14 @@ class OwnConnection(unittest.TestCase):
         outer = self
 
         class Recorder(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
             def do_GET(self):  # noqa: N802
                 outer.received.append(self.headers.get("Authorization"))
                 self.send_response(204)
+                self.send_header("Connection", "close")                 # http.client reconnects by itself
                 self.end_headers()
+                self.close_connection = True
 
             def log_message(self, *a):
                 pass
@@ -237,6 +276,21 @@ class OwnConnection(unittest.TestCase):
 
     def test_this_accounts_server_gets_the_request(self):
         self.assertEqual(self.send(P.Owner(P.THIS_ACCOUNT, 501, 9, "x"), 9), 204)
+        self.assertEqual(self.received, ["Bearer synthetic"])
+
+    def test_the_reconnect_after_connection_close_is_checked_again(self):
+        """The server answers `Connection: close`; http.client's next request opens a new connection
+        by itself (auto_open), and that one reaches another account's listener: refused, unsent."""
+        ends = [P.Owner(P.THIS_ACCOUNT, 501, 9, "x"), P.Owner(P.ANOTHER_ACCOUNT, 502, 10, "x")]
+        with mock.patch.object(P, "server_end", side_effect=ends) as checked:
+            conn = P.own_connection(self.port, timeout=3)
+            conn.request("GET", "/", headers={"Authorization": "Bearer synthetic"})
+            self.assertEqual(conn.getresponse().status, 204)
+            with self.assertRaises(P.ListenerRefused) as caught:
+                conn.request("GET", "/", headers={"Authorization": "Bearer synthetic"})
+            conn.close()
+        self.assertEqual(caught.exception.code, P.SERVER_NOT_OWN)
+        self.assertEqual(checked.call_count, 2)
         self.assertEqual(self.received, ["Bearer synthetic"])
 
 
@@ -300,23 +354,46 @@ class SelfContained(unittest.TestCase):
 
 
 class HostAccounts(unittest.TestCase):
-    def test_dscl_counts_people_from_501(self):
-        self.assertEqual(host_accounts.parse_dscl("_www 70\nnobody -2\nroot 0\nalpha 501\n"), 1)
-        self.assertEqual(host_accounts.parse_dscl("alpha 501\nbeta 502\nhidden 503\n"), 3)
+    def test_dscl_counts_people_hidden_admins_and_guest_not_service_accounts(self):
+        self.assertEqual(host_accounts.parse_dscl("_www 70\nnobody -2\nroot 0\ndaemon 1\nalpha 501\n"), {501})
+        self.assertEqual(host_accounts.parse_dscl("alpha 501\nbeta 502\nhidden 503\n"), {501, 502, 503})
+        listed = "alpha 501\nGuest 201\nadmin2 450\nrunner 451\n"
+        shells = "alpha /bin/zsh\nGuest /bin/zsh\nadmin2 /bin/bash\nrunner /usr/bin/false\n"
+        self.assertEqual(host_accounts.parse_dscl(listed, shells), {501, 201, 450})
+
+    def test_a_directory_binding_is_several(self):
+        self.assertFalse(host_accounts.parse_search_path("CSPSearchPath: /Local/Default\n"))
+        self.assertFalse(host_accounts.parse_search_path("CSPSearchPath:\n /Local/Default\n /BSD/local\n"))
+        self.assertTrue(host_accounts.parse_search_path("CSPSearchPath:\n /Local/Default\n /Active Directory/EX\n"))
+        self.assertTrue(host_accounts.parse_nsswitch("passwd:   files sss\ngroup: files\n"))
+        self.assertTrue(host_accounts.parse_nsswitch("passwd: files [NOTFOUND=return] ldap\n"))
+        self.assertFalse(host_accounts.parse_nsswitch("# passwd: ldap\npasswd: files systemd\n"))
+
+    def test_running_people_are_counted_with_the_database(self):
+        procs = host_accounts.parse_ps_uids("0\n  1\n 262\n 501\n 501\n 1702\n")
+        self.assertEqual(host_accounts.people(procs, {501}, 501, 2 ** 31 - 1), {501, 1702})
+
+    def test_directory_bound_reads_as_none(self):
+        host_accounts._CACHE[:] = [None, None]
+        with mock.patch.object(host_accounts, "_read", return_value={"count": None, "reason": "directory-bound"}):
+            self.assertIsNone(host_accounts.count())
+            self.assertEqual(host_accounts.detail()["reason"], "directory-bound")
+        host_accounts._CACHE[:] = [None, None]
 
     def test_linux_people_who_can_log_in(self):
         lo, hi = host_accounts.parse_login_defs("# comment\nUID_MIN 1000\nUID_MAX 60000\n")
         pw = [SimpleNamespace(pw_uid=1000, pw_shell="/bin/bash"), SimpleNamespace(pw_uid=1001, pw_shell="/usr/sbin/nologin"),
               SimpleNamespace(pw_uid=65534, pw_shell="/bin/sh"), SimpleNamespace(pw_uid=1002, pw_shell="/bin/zsh")]
-        self.assertEqual(host_accounts.count_passwd(pw, lo, hi), 2)
+        self.assertEqual(host_accounts.passwd_uids(pw, lo, hi), {1000, 1002})
 
-    def test_windows_profiles(self):
-        self.assertEqual(host_accounts.count_profiles(["S-1-5-18", "S-1-5-21-1-2-3-500", "S-1-5-21-1-2-3-1001",
-                                                       "S-1-5-21-1-2-3-1002"]), 2)
+    def test_windows_profiles_whose_folder_exists(self):
+        self.assertEqual(host_accounts.count_profiles([("S-1-5-18", True), ("S-1-5-21-1-2-3-500", True),
+                                                       ("S-1-5-21-1-2-3-1001", True), ("S-1-5-21-1-2-3-1002", True),
+                                                       ("S-1-5-21-1-2-3-1003", False)]), 2)
 
     def test_count_is_cached_and_unreadable_is_none(self):
         host_accounts._CACHE[:] = [None, None]
-        with mock.patch.object(host_accounts, "_read", return_value=None) as read:
+        with mock.patch.object(host_accounts, "_read", return_value={"count": None, "reason": "unreadable"}) as read:
             self.assertIsNone(host_accounts.count())
             self.assertIsNone(host_accounts.count())
         self.assertEqual(read.call_count, 1)

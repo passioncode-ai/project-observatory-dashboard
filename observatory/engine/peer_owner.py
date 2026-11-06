@@ -1,6 +1,6 @@
 """peer_owner: which OS account owns each end of a loopback TCP connection.
 
-    peer_owner 1.0.0. One file, Python standard library only, no imports from any other
+    peer_owner 1.1.0. One file, Python standard library only, no imports from any other
     module of its project, so another project can vendor it by commit: copy this file and
     record the commit it came from. Its tests and their fixtures live beside the engine's
     tests (`tests/test_peer_owner.py`, `tests/peer_owner_fixtures.py`).
@@ -14,8 +14,10 @@ question from the host's socket table, read without privileges:
     server_end(sock) -> Owner     for a client's connected socket: who accepted it
     peer(sock) -> Owner           for a server's accepted socket: who connected
     peer_at(server, client)       the same as `peer`, from two (host, port) addresses
-    own_connection(port, ...)     an http.client connection whose server end is this account's,
-                                  or ListenerRefused before a byte of the request is sent
+    own_connection(port, ...)     a CheckedHTTPConnection, connected: every connect, the first and
+                                  any reconnect http.client makes after `Connection: close`, checks
+                                  that the server end is this account's, or raises ListenerRefused
+                                  before a byte of the request is sent
 
 `Owner.kind` is one of:
 
@@ -31,16 +33,21 @@ host about to read a request) treats everything but `this-account` as a refusal,
 included: fail closed.
 
 HOW, ON EACH OS. Every read is bounded (MAX_TABLE_BYTES of table, TIMEOUT_SECONDS) and the
-answer is never cached across connections; only `listener` is cached, for LISTENER_TTL.
+answer is never cached across connections; only `listener` is cached, for LISTENER_TTL. A
+TIME_WAIT row is a connection already closed and is never an answer; two live rows with the same
+addresses are `unknown` (`several-rows`), never a guess.
 
 - macOS, primary (`sysctl`): `sysctl net.inet.tcp.pcblist_n` through ctypes, the record list
   `netstat` itself reads. Each connection is an `xinpcb_n` (addresses and ports) followed by an
   `xsocket_n` that carries `so_uid` and `so_last_pid` (XNU `bsd/netinet/in_pcb.h` and
   `bsd/sys/socketvar.h`, both under `#pragma pack(4)`); the two are paired by the pcb handle
   (`xi_inpp` equals `so_pcb`). Measured on macOS 26: about 4 ms for 770 sockets, every pid equal
-  to the one `netstat` printed. The layout is not an API, so the first read in a process
-  calibrates it: it listens on a fresh port of its own and the row it reads back must carry
-  this process's uid and pid. A layout that fails calibration is not used again in that process.
+  to the one `netstat` printed. The `xtcpcb_n` record that follows gives the TCP state
+  (`t_state`), so listeners and TIME_WAIT rows are told apart. The layout is not an API, so the
+  first read in a process calibrates it: it opens a connected pair of its own (listen, connect,
+  accept) and the listener and both ends of the pair must read back with their exact addresses,
+  this process's uid and its pid. A layout that fails calibration is not used again in that
+  process.
 - macOS, fallback (`netstat`): `/usr/sbin/netstat -anv -p tcp`, its `process:pid` column, then
   `ps -o uid= -p PID` for the owner of the one row a question needs. Measured: about 20 ms over
   846 sockets, and it names the pids of root's listeners, which `lsof` run by an ordinary account
@@ -78,7 +85,7 @@ import sys
 import threading
 import time
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 THIS_ACCOUNT = "this-account"
 ANOTHER_ACCOUNT = "another-account"
@@ -127,6 +134,7 @@ class Row:
     listening: bool
     uid: int | None = None
     pid: int | None = None
+    time_wait: bool = False
 
 
 class TableUnreadable(Exception):
@@ -213,7 +221,7 @@ def parse_netstat(text: str) -> list[Row]:
         if ":" in process:
             tail = process.rsplit(":", 1)[1]
             pid = int(tail) if tail.isdigit() else None
-        rows.append(Row(local, remote, tok[5] == "LISTEN", None, pid))
+        rows.append(Row(local, remote, tok[5] == "LISTEN", None, pid, tok[5] == "TIME_WAIT"))
     return rows
 
 
@@ -250,7 +258,7 @@ def parse_proc_net_tcp(text: str, *, family: int, byteorder: str | None = None) 
             uid = int(tok[7])
         except ValueError:
             continue
-        rows.append(Row(local, remote, tok[3].upper() == "0A", uid, None))
+        rows.append(Row(local, remote, tok[3].upper() == "0A", uid, None, tok[3].upper() == "06"))
     return rows
 
 
@@ -268,6 +276,11 @@ def _proc_address(text: str, family: int, order: str) -> tuple[str, int]:
 #: XNU's export records (`#pragma pack(4)`): kinds and the offsets this module reads.
 XSO_SOCKET = 0x001
 XSO_INPCB = 0x010
+XSO_TCPCB = 0x020
+_TCP_STATE = 36                   # xtcpcb_n.t_state: TCPS_LISTEN 1, TCPS_TIME_WAIT 10
+_TCP_MIN = 40
+_TCPS_LISTEN = 1
+_TCPS_TIME_WAIT = 10
 _INP_HANDLE = slice(8, 16)        # xinpcb_n.xi_inpp
 _INP_PORTS = 16                   # inp_fport, inp_lport, network order
 _INP_VFLAG = 44                   # inp_vflag: INP_IPV4 0x1, INP_IPV6 0x2
@@ -291,12 +304,16 @@ def parse_pcblist_n(blob: bytes) -> list[Row]:
     off = (first + 7) & ~7
     pcbs: dict[bytes, tuple] = {}
     owners: dict[bytes, tuple[int, int]] = {}
+    states: dict[bytes, int] = {}
+    current: bytes | None = None                                    # the inpcb the records that follow belong to
     while off + 8 <= len(blob):
         length, kind = struct.unpack_from("<II", blob, off)
         if length < 8:
             break
         if length == first and off + length >= len(blob) - 8:
             break                                                   # the closing xinpgen
+        if off + length > len(blob):
+            raise TableUnreadable("pcblist_n: a record runs past the table")
         if kind == XSO_INPCB and length >= _INP_MIN:
             rec = blob[off:off + length]
             fport, lport = struct.unpack_from(">HH", rec, _INP_PORTS)
@@ -306,21 +323,27 @@ def parse_pcblist_n(blob: bytes) -> list[Row]:
             else:
                 foreign = socket.inet_ntop(socket.AF_INET6, rec[_INP_FOREIGN:_INP_FOREIGN + 16])
                 local = socket.inet_ntop(socket.AF_INET6, rec[_INP_LOCAL:_INP_LOCAL + 16])
-            pcbs[bytes(rec[_INP_HANDLE])] = (norm_host(local), lport, norm_host(foreign), fport)
+            current = bytes(rec[_INP_HANDLE])
+            pcbs[current] = (norm_host(local), lport, norm_host(foreign), fport)
         elif kind == XSO_SOCKET and length >= _SO_MIN:
             uid, pid = struct.unpack_from("<Ii", blob, off + _SO_UID)
             owners[bytes(blob[off + _SO_PCB.start:off + _SO_PCB.stop])] = (uid, pid)
+        elif kind == XSO_TCPCB and length >= _TCP_MIN and current is not None:
+            states[current] = struct.unpack_from("<i", blob, off + _TCP_STATE)[0]
         off += (length + 7) & ~7
     rows = []
     for handle, (local, lport, foreign, fport) in pcbs.items():
         uid, pid = owners.get(handle, (None, None))
-        # A listener has no peer: its foreign port is 0 and its foreign address the wildcard.
-        rows.append(Row((local, lport), (foreign, fport), fport == 0 and foreign == "*", uid, pid))
+        state = states.get(handle)
+        # Without a tcpcb, a listener is the row with no peer: foreign port 0, foreign address the wildcard.
+        listening = state == _TCPS_LISTEN if state is not None else (fport == 0 and foreign == "*")
+        rows.append(Row((local, lport), (foreign, fport), listening, uid, pid, state == _TCPS_TIME_WAIT))
     return rows
 
 
-#: Windows' MIB rows (iphlpapi): sizes and the LISTEN state.
+#: Windows' MIB rows (iphlpapi): sizes and the LISTEN and TIME_WAIT states.
 _MIB_TCP_STATE_LISTEN = 2
+_MIB_TCP_STATE_TIME_WAIT = 11
 
 
 def parse_windows_tcp_table(blob: bytes, family: int) -> list[Row]:
@@ -351,7 +374,7 @@ def parse_windows_tcp_table(blob: bytes, family: int) -> list[Row]:
             state = struct.unpack_from("<I", blob, at + 48)[0]
             pid = struct.unpack_from("<I", blob, at + 52)[0]
         rows.append(Row((norm_host(local), lport), (norm_host(remote), rport),
-                        state == _MIB_TCP_STATE_LISTEN, None, pid))
+                        state == _MIB_TCP_STATE_LISTEN, None, pid, state == _MIB_TCP_STATE_TIME_WAIT))
     return rows
 
 
@@ -376,7 +399,10 @@ def _run(argv: list[str]) -> str:
 
 
 def _sysctl_blob(name: bytes = b"net.inet.tcp.pcblist_n") -> bytes:
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    except OSError as exc:
+        raise TableUnreadable(f"sysctl: libc: {type(exc).__name__}") from None
     fn = libc.sysctlbyname
     fn.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p,
                    ctypes.c_size_t]
@@ -397,21 +423,37 @@ def _sysctl_blob(name: bytes = b"net.inet.tcp.pcblist_n") -> bytes:
     raise TableUnreadable("sysctl: the table kept growing")
 
 
+def calibration_holds(rows: list[Row], server: tuple[str, int], client: tuple[str, int], *,
+                      uid: int, pid: int) -> bool:
+    """The listener and both ends of one connected pair, each exactly once, live, with their exact
+    addresses and this uid and pid: what a layout must read back to be trusted."""
+    def one(local, remote, listening):
+        hits = [r for r in rows if r.local == local and r.remote == remote and r.listening == listening
+                and not r.time_wait]
+        return len(hits) == 1 and hits[0].uid == uid and hits[0].pid == pid
+    return (one(server, ("*", 0), True) and one(server, client, False) and one(client, server, False))
+
+
 def _calibrate_sysctl() -> bool:
-    """Listen on a fresh port and read it back: the row must carry this uid and pid. A layout
-    that does not is never trusted in this process, and `netstat` answers instead."""
+    """Open a connected pair of this process's own (listen, connect, accept) and read it back
+    (`calibration_holds`). A layout that does not hold is never trusted in this process, and
+    `netstat` answers instead."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = accepted = None
     try:
         probe.bind(("127.0.0.1", 0))
         probe.listen(1)
-        port = probe.getsockname()[1]
+        client = socket.create_connection(probe.getsockname(), timeout=TIMEOUT_SECONDS)
+        accepted, _ = probe.accept()
         rows = parse_pcblist_n(_sysctl_blob())
-        mine = [r for r in rows if r.local == ("127.0.0.1", port) and r.listening]
-        return len(mine) == 1 and mine[0].uid == os.getuid() and mine[0].pid == os.getpid()
+        return calibration_holds(rows, _address(probe.getsockname()), _address(client.getsockname()),
+                                 uid=os.getuid(), pid=os.getpid())
     except (TableUnreadable, OSError, struct.error, ValueError):
         return False
     finally:
-        probe.close()
+        for s in (client, accepted, probe):
+            if s is not None:
+                s.close()
 
 
 def method() -> str:
@@ -584,12 +626,11 @@ def _windows_owner(pid: int | None, how: str) -> Owner:  # pragma: no cover - ex
 
 # -- the questions ----------------------------------------------------------------------------------------------------
 
-def find(rows: list[Row], local: tuple[str, int], remote: tuple[str, int]) -> Row | None:
-    """The one connected row with exactly this local and remote address."""
-    for row in rows:
-        if not row.listening and row.local == local and row.remote == remote:
-            return row
-    return None
+def find(rows: list[Row], local: tuple[str, int], remote: tuple[str, int]) -> list[Row]:
+    """The live connected rows with exactly this local and remote address: one, or the caller
+    cannot tell. A TIME_WAIT row is a connection already closed and is left out."""
+    return [row for row in rows
+            if not row.listening and not row.time_wait and row.local == local and row.remote == remote]
 
 
 def _owner_of(local: tuple[str, int], remote: tuple[str, int]) -> Owner:
@@ -597,10 +638,12 @@ def _owner_of(local: tuple[str, int], remote: tuple[str, int]) -> Owner:
         rows, how = read_table()
     except TableUnreadable as exc:
         return Owner(UNKNOWN, None, None, method(), str(exc))
-    row = find(rows, local, remote)
-    if row is None:
+    found = find(rows, local, remote)
+    if not found:
         return Owner(UNKNOWN, None, None, how, "no-row")
-    return resolve(row, how)
+    if len(found) > 1:
+        return Owner(UNKNOWN, None, None, how, "several-rows")
+    return resolve(found[0], how)
 
 
 def peer_at(server: tuple, client: tuple) -> Owner:
@@ -637,17 +680,20 @@ _LISTENERS: dict[int, tuple[float, Owner]] = {}
 _LISTEN_ORDER = ("127.0.0.1", "*", "::1")
 
 
-def pick_listener(rows: list[Row], port: int) -> Row | None:
+def pick_listener(rows: list[Row], port: int) -> list[Row]:
+    """The listeners a connection to 127.0.0.1:<port> reaches: those on the most specific bind
+    that has any. More than one (a port reused by two sockets) cannot be told apart."""
     for host in _LISTEN_ORDER:
-        for row in rows:
-            if row.listening and row.local == (host, port):
-                return row
-    return None
+        hits = [row for row in rows if row.listening and row.local == (host, port)]
+        if hits:
+            return hits
+    return []
 
 
 def listener(port: int) -> Owner:
     """Who listens on 127.0.0.1:<port>, or on 0.0.0.0 or ::1, which take the same connections.
-    `none` when nothing does. Cached for LISTENER_TTL seconds."""
+    `none` when nothing does, `unknown` (`several-rows`) when two sockets do. Cached for
+    LISTENER_TTL seconds."""
     now = time.monotonic()
     hit = _LISTENERS.get(port)
     if hit is not None and now - hit[0] < LISTENER_TTL:
@@ -657,35 +703,64 @@ def listener(port: int) -> Owner:
     except TableUnreadable as exc:
         owner = Owner(UNKNOWN, None, None, method(), str(exc))
     else:
-        row = pick_listener(rows, port)
-        owner = Owner(NONE, None, None, how) if row is None else resolve(row, how)
+        found = pick_listener(rows, port)
+        if not found:
+            owner = Owner(NONE, None, None, how)
+        elif len(found) > 1:
+            owner = Owner(UNKNOWN, None, None, how, "several-rows")
+        else:
+            owner = resolve(found[0], how)
     _LISTENERS[port] = (now, owner)
     return owner
 
 
+def refusal(owner: Owner, port: int, expect_pid: int | None = None) -> tuple[str, str] | None:
+    """(code, why) when a client must not send on a connection whose server end is `owner`."""
+    if owner.kind in (ANOTHER_ACCOUNT, SYSTEM):
+        return SERVER_NOT_OWN, f"the server on port {port} belongs to {owner.kind}"
+    if owner.kind != THIS_ACCOUNT:
+        return SERVER_UNVERIFIED, f"the owner of the server on port {port} could not be read ({owner.reason})"
+    if expect_pid is not None and owner.pid is not None and owner.pid != expect_pid:
+        return SERVER_NOT_THIS_WORKSPACE, (f"the server on port {port} is pid {owner.pid}, "
+                                           f"not the expected pid {expect_pid}")
+    return None
+
+
+class CheckedHTTPConnection(http.client.HTTPConnection):
+    """An `http.client.HTTPConnection` whose every `connect()` checks the server end before
+    returning. `http.client` connects again by itself (`auto_open`) when the server answered
+    `Connection: close` or the caller closed the connection, and that new connection may reach a
+    different listener; so the check is in `connect()`, not once in `own_connection`. A refused
+    connect closes the socket and raises ListenerRefused before any byte of a request is sent."""
+
+    def __init__(self, host: str, port: int, *, expect_pid: int | None = None, timeout: float = 10.0) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self.expect_pid = expect_pid
+
+    def set_tunnel(self, *args, **kwargs):  # noqa: D401 - a tunnel would put a proxy's socket under the check
+        raise ListenerRefused(SERVER_UNVERIFIED, "a tunnel would check the proxy, not the server; nothing was sent")
+
+    def connect(self) -> None:
+        super().connect()
+        owner = server_end(self.sock)
+        refused = refusal(owner, self.port, self.expect_pid)
+        if refused is not None:
+            self.close()
+            raise ListenerRefused(refused[0], f"{refused[1]}; nothing was sent", owner)
+
+
 def own_connection(port: int, *, expect_pid: int | None = None, timeout: float = 10.0,
-                   host: str = "127.0.0.1") -> http.client.HTTPConnection:
-    """An `http.client.HTTPConnection` to `host:port`, connected, whose server end is this
-    account's (and, with `expect_pid`, that process's), checked on the very connection the
-    caller then sends on, so no listener can change between the check and the request.
-    No proxy is consulted. Raises ListenerRefused after closing the connection:
+                   host: str = "127.0.0.1") -> CheckedHTTPConnection:
+    """A `CheckedHTTPConnection` to `host:port`, connected, whose server end is this account's
+    (and, with `expect_pid`, that process's). The check runs on the very connection the caller
+    then sends on, so no listener can change between the check and the request, and it runs
+    again on every reconnect `http.client` makes. No proxy is consulted. Raises ListenerRefused
+    after closing the connection:
 
         server-not-own             another account's or the system's process accepted it
         server-unverified          its owner could not be told (nothing is sent: fail closed)
         server-not-this-workspace  this account's process, but not the pid expected
     """
-    conn = http.client.HTTPConnection(host, port, timeout=timeout)
+    conn = CheckedHTTPConnection(host, port, expect_pid=expect_pid, timeout=timeout)
     conn.connect()
-    owner = server_end(conn.sock)
-    code = None
-    if owner.kind in (ANOTHER_ACCOUNT, SYSTEM):
-        code, why = SERVER_NOT_OWN, f"the server on port {port} belongs to {owner.kind}"
-    elif owner.kind != THIS_ACCOUNT:
-        code, why = SERVER_UNVERIFIED, f"the owner of the server on port {port} could not be read ({owner.reason})"
-    elif expect_pid is not None and owner.pid is not None and owner.pid != expect_pid:
-        code, why = SERVER_NOT_THIS_WORKSPACE, (f"the server on port {port} is pid {owner.pid}, "
-                                                f"not the expected pid {expect_pid}")
-    if code is not None:
-        conn.close()
-        raise ListenerRefused(code, f"{why}; nothing was sent", owner)
     return conn

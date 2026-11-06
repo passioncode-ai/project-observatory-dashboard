@@ -72,20 +72,30 @@ a referer are labels at most.
    account and this workspace.)**
 10. **On a host with several OS accounts another account's connection is refused before it is
     read.** Loopback is one per machine: every account's processes reach every port any account
-    listens on. When the host has more than one person's account (`host_accounts.count()`; an
-    unreadable count counts as several) or `config/local.json` sets `{"loopback": {"peerCheck":
-    "always"}}`, the local server, memory over HTTP and the keyserver find the OS account of each
+    listens on. When the host has more than one person's account (`host_accounts.count()`: the
+    local accounts that can log in, hidden administrators and an enabled Guest included, joined
+    with the people's uids that run processes now; a host bound to a directory, or a count that
+    cannot be read, counts as several) or `config/local.json` sets `{"loopback": {"peerCheck":
+    "always"}}` (a value other than `auto` or `always`, or a file that does not read, reads as
+    `always`), the local server, memory over HTTP and the keyserver find the OS account of each
     connecting peer from the host's socket table (`peer_owner.py`) and answer anything but this
     account with `403 {"error":"peer-foreign-account"}` (another account, root, launchd) or
     `403 {"error":"peer-unverified"}` (the owner could not be read), `Connection: close`, on every
     path, the dashboard pages and `/.well-known/fabric-service` included. Nothing of the request is
-    read or logged; memory over HTTP gets the request line and headers parsed by uvicorn first and
-    uses none of them. On a one-account host nothing changes and no table is read. Each refused
-    connection writes one JSON line on the server's stderr (at most one per peer uid and code a
-    minute) and is counted in the receipt `store/raw/serverd.json` (`peer`) and in `full doctor`
-    (`loopback`).
+    parsed or logged: after the 403 is written, the bytes the peer had already sent are received
+    and discarded unparsed (at most 64 KiB, half a second) so the close does not reset the answer
+    away. Memory over HTTP gets the request line and headers parsed by uvicorn first and uses none
+    of them; `X-Forwarded-For` cannot change the address it checks (`proxy_headers` off), and a
+    WebSocket upgrade is refused. Any failure of the check is a `peer-unverified` refusal, never an
+    admission. On a one-account host nothing changes and no table is read. Each refused connection
+    writes one JSON line on the server's stderr (at most one per peer uid and code a minute). The
+    local server's refusals are counted in its receipt `store/raw/serverd.json` (`peer`) and shown
+    by `full doctor` (`loopback.refused`); memory over HTTP and the keyserver count in their own
+    process only.
     - `test_foreign_and_unverified_are_refused_before_the_request_line`;
-    - `test_foreign_refused_before_host_origin_and_bearer`;
+    - `test_foreign_refused_before_host_origin_and_bearer`,
+      `test_x_forwarded_for_does_not_change_the_peer_address`, `test_a_websocket_is_refused`;
+    - `test_any_failure_is_a_typed_peer_unverified`;
     - `test_foreign_is_refused_before_the_handler_exists`;
     - `test_one_account_serves_as_before`, `test_one_account_and_auto_never_reads_the_table`;
     - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`.

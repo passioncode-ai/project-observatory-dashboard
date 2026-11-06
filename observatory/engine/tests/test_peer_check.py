@@ -104,6 +104,27 @@ class Decision(unittest.TestCase):
         self.assertEqual((snap["setting"], snap["active"]), ("always", True))
         self.assertIn("read as always", snap["problem"])
 
+    def test_a_local_json_that_does_not_read_reads_as_always(self):
+        for text in ("{not json", "[]", '{"loopback": "always"}'):
+            with self.subTest(text=text):
+                cfg = pathlib.Path(tmpdir.mkdtemp())
+                (cfg / "local.json").write_text(text)
+                self.assertEqual(peer_check.read_setting(cfg)[0], "always")
+
+    def test_any_failure_is_a_typed_peer_unverified(self):
+        def boom(*_a):
+            raise RuntimeError("table reader crashed")
+        g = peer_check.Gate(accounts=lambda: 2, config_dir=lambda: pathlib.Path(tmpdir.mkdtemp()), peer=boom,
+                            peer_at=boom, method=lambda: "t", log=lambda line: None, clock=Clock())
+        self.assertEqual(g.check_socket(object()), peer_check.UNVERIFIED)
+        self.assertEqual(g.check_addresses(("127.0.0.1", 1), ("127.0.0.1", 2)), peer_check.UNVERIFIED)
+
+        def broken_count():
+            raise OSError("dscl")
+        g2 = peer_check.Gate(accounts=broken_count, config_dir=lambda: pathlib.Path(tmpdir.mkdtemp()),
+                             peer=lambda s: FOREIGN, method=lambda: "t", log=lambda line: None, clock=Clock())
+        self.assertEqual(g2.check_socket(object()), peer_check.FOREIGN)   # a count that fails is "several"
+
     def test_codes(self):
         self.assertEqual(peer_check.code_for(FOREIGN), peer_check.FOREIGN)
         self.assertEqual(peer_check.code_for(ROOTS), peer_check.FOREIGN)
@@ -288,6 +309,64 @@ class MemoryHttp(unittest.TestCase):
         self.assertEqual(sent[0]["status"], 421)
         self.assertEqual(g.calls, [])
 
+    def test_a_websocket_is_refused(self):
+        inner_calls = []
+
+        async def inner(scope, receive, send):
+            inner_calls.append(scope)
+
+        door = http_service.BindingGate(inner, port=47313, rate=10, peers=gate(accounts=1))
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        asyncio.run(door({"type": "websocket", "server": ("127.0.0.1", 47313), "client": ("127.0.0.1", 50002),
+                          "headers": []}, None, send))
+        self.assertEqual(sent, [{"type": "websocket.close", "code": 1008}])
+        self.assertEqual(inner_calls, [])
+
+    def test_x_forwarded_for_does_not_change_the_peer_address(self):
+        """A real uvicorn with the door's own options: the address the check looks up is the socket's."""
+        import uvicorn
+        g = gate(owner=FOREIGN)
+
+        async def inner(scope, receive, send):
+            if scope["type"] == "lifespan":                             # the door passes lifespan through
+                while (message := await receive())["type"] != "lifespan.shutdown":
+                    await send({"type": "lifespan.startup.complete"})
+                return await send({"type": "lifespan.shutdown.complete"})
+            raise AssertionError("the request passed the door")
+
+        port = _free_port()
+        app = http_service.BindingGate(inner, port=port, rate=10, peers=g)
+        server = uvicorn.Server(uvicorn.Config(app, **http_service.serve_options(port)))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        try:
+            for _ in range(400):
+                if server.started:
+                    break
+                threading.Event().wait(0.025)
+            self.assertTrue(server.started, "uvicorn did not start")
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/mcp", headers={"X-Forwarded-For": "10.9.9.9", "Forwarded": "for=10.9.9.9"})
+            response = conn.getresponse()
+            self.assertEqual((response.status, json.loads(response.read())), (403, {"error": "peer-foreign-account"}))
+            conn.close()
+        finally:
+            server.should_exit = True
+            thread.join(5)
+        (_server_addr, client_addr), = g.calls
+        self.assertEqual(client_addr[0], "127.0.0.1")
+        self.assertFalse(http_service.serve_options(port)["proxy_headers"])
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
 
 class Relay(unittest.TestCase):
     def test_the_relay_is_exempt(self):
@@ -308,11 +387,13 @@ class Doctor(unittest.TestCase):
         import paths
         with mock.patch.object(paths, "SCRATCH", scratch), \
                 mock.patch.object(peer_check.host_accounts, "count", return_value=1), \
+                mock.patch.object(peer_check.host_accounts, "detail", return_value={"count": 1, "reason": "local"}), \
                 mock.patch.object(peer_check.peer_owner, "method", return_value="sysctl"):
             doc = peer_check.status(base)
-        self.assertEqual((doc["setting"], doc["active"], doc["accountsOnHost"], doc["method"]),
-                         ("always", True, 1, "sysctl"))
-        self.assertEqual(doc["serverRefused"]["peer-foreign-account"], 3)
+        self.assertEqual(set(doc), {"accountsOnHost", "accountsReason", "peerCheck", "refused", "clientCheck"})
+        self.assertEqual(doc["peerCheck"], {"setting": "always", "active": True, "method": "sysctl"})
+        self.assertEqual((doc["accountsOnHost"], doc["accountsReason"], doc["clientCheck"]), (1, "local", None))
+        self.assertEqual(doc["refused"]["peer-foreign-account"], 3)
 
 
 if __name__ == "__main__":

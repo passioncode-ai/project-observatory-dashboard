@@ -11,7 +11,8 @@ uids are invented, and no address leaves loopback. Copy this file beside the ven
     PS_UID                    pid -> what `ps -o uid= -p PID` prints for it ("" when gone)
     PROC_NET_TCP_*            `/proc/net/tcp` (Linux, little-endian host), one and two accounts
     PROC_NET_TCP6_MULTI       `/proc/net/tcp6`, an IPv6 loopback pair of two accounts
-    pcblist_n(rows)           a `net.inet.tcp.pcblist_n` blob built from XNU's pack(4) layout
+    pcblist_n(rows)           a `net.inet.tcp.pcblist_n` blob built from XNU's pack(4) layout,
+                              with each socket's TCP state in its xtcpcb_n
     windows_table(rows, af)   a `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` buffer
 
 The server in every fixture listens on 127.0.0.1:47311; this account's client is port 50001
@@ -58,6 +59,9 @@ NETSTAT_MULTI_ACCOUNT = NETSTAT_SINGLE_ACCOUNT + "".join((
     _ns("tcp4", "*.47555", "*.*", "LISTEN", "example-daemon:300"),
 ))
 
+#: A TIME_WAIT row whose addresses equal a live connection's: a closed connection, never an answer.
+NETSTAT_TIME_WAIT = NETSTAT_MULTI_ACCOUNT + _ns("tcp4", "127.0.0.1.50001", "127.0.0.1.47311", "TIME_WAIT", ":0")
+
 #: An older netstat without the process column: unreadable, so the caller fails closed.
 NETSTAT_NO_PROCESS = (
     "Active Internet connections (including servers)\n"
@@ -97,8 +101,12 @@ PROC_NET_TCP6_MULTI = _PROC_HEADER + "".join((
 ))
 
 
+TCPS_LISTEN, TCPS_ESTABLISHED, TCPS_TIME_WAIT = 1, 4, 10
+
+
 def pcblist_n(rows) -> bytes:
-    """A `pcblist_n` blob: rows of (local (host, port), remote (host, port), uid, pid). Each
+    """A `pcblist_n` blob: rows of (local (host, port), remote (host, port), uid, pid[, t_state]);
+    the state defaults to LISTEN for a row with no peer, else ESTABLISHED. Each
     socket is the record run the kernel writes: xinpcb_n (104), xsocket_n (104), two xsockbuf_n
     (32), xsockstat_n (136), xtcpcb_n (204), each padded to 8, between two xinpgen headers."""
     def pad(rec: bytes) -> bytes:
@@ -108,7 +116,9 @@ def pcblist_n(rows) -> bytes:
         return pad(struct.pack("<IIQQ", 24, count, 7, 7))
 
     out = [header(len(rows))]
-    for i, (local, remote, uid, pid) in enumerate(rows):
+    for i, row in enumerate(rows):
+        local, remote, uid, pid = row[:4]
+        state = row[4] if len(row) > 4 else (TCPS_LISTEN if remote == ("*", 0) else TCPS_ESTABLISHED)
         handle = struct.pack("<Q", 0x1000 + i)
         inp = bytearray(104)
         struct.pack_into("<II", inp, 0, 104, 0x10)
@@ -130,6 +140,8 @@ def pcblist_n(rows) -> bytes:
         for kind, length in ((0x2, 32), (0x4, 32), (0x8, 136), (0x20, 204)):
             rec = bytearray(length)
             struct.pack_into("<II", rec, 0, length, kind)
+            if kind == 0x20:
+                struct.pack_into("<i", rec, 36, state)                  # xtcpcb_n.t_state
             out.append(pad(bytes(rec)))
     out.append(header(len(rows)))
     return b"".join(out)

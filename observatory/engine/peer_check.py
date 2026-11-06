@@ -18,14 +18,17 @@ account or root.
 
 WHEN IT IS ACTIVE. When `host_accounts.count()` is not 1 (an unreadable count is "several"), or
 when `config/local.json` sets `{"loopback": {"peerCheck": "always"}}`. `auto` is the default and
-there is no `off`: a value other than `auto` or `always` reads as `always`, the safe reading.
+there is no `off`: a value other than `auto` or `always`, and a `local.json` that does not read,
+read as `always`, the safe reading. Any failure while deciding or while asking for the peer's
+owner is an answer too: the check on, the peer `unknown`, the connection refused `peer-unverified`.
 Both are read at the first connection and every ACTIVE_TTL seconds after, so an account added
 later turns the check on without a restart. On a one-account host the check costs a clock
 comparison per connection: no table read, no subprocess.
 
-WHAT IS READ. Nothing of the request: no request line, no header, no body. Bytes the peer had
-already sent are discarded unread after the answer (at most DRAIN_BYTES, for DRAIN_SECONDS), so
-the close does not reset the connection before the peer reads its 403 (a "lingering close").
+WHAT IS READ. Nothing of the request: no request line, no header, no body. After the 403 is
+written, bytes the peer had already sent are received and discarded unparsed (at most
+DRAIN_BYTES, for DRAIN_SECONDS), so the close does not reset the connection before the peer reads
+its answer (a "lingering close"); they are never parsed, kept or logged.
 Memory over HTTP is the exception the ASGI server imposes: uvicorn has parsed the request line
 and headers before the door runs, and the door uses none of them, reads no body and resolves no
 bearer.
@@ -77,11 +80,17 @@ def read_setting(config_dir: pathlib.Path) -> tuple[str, str | None]:
     except FileNotFoundError:
         return "auto", None
     except (OSError, ValueError) as exc:
-        return "auto", f"local.json unreadable: {type(exc).__name__}"
-    value = ((doc or {}).get("loopback") or {}).get("peerCheck", "auto") if isinstance(doc, dict) else "auto"
+        # A file someone wrote but that does not read may have said `always`: the safe reading.
+        return "always", f"local.json unreadable ({type(exc).__name__}); read as always"
+    if not isinstance(doc, dict):
+        return "always", "local.json is not an object; read as always"
+    loopback = doc.get("loopback", {})
+    if not isinstance(loopback, dict):
+        return "always", "loopback in local.json is not an object; read as always"
+    value = loopback.get("peerCheck", "auto")
     if value in SETTINGS:
         return value, None
-    return "always", f"loopback.peerCheck {value!r} is not auto or always; read as always"
+    return "always", f"loopback.peerCheck {str(value)[:40]!r} is not auto or always; read as always"
 
 
 def code_for(owner: peer_owner.Owner) -> str | None:
@@ -154,19 +163,32 @@ class Gate:
                 pass
         return code
 
+    def _active_or_failed(self) -> bool:
+        try:
+            return self.active()
+        except Exception:  # noqa: BLE001 - a decision that cannot be made is the check switched on
+            return True
+
+    def _owner(self, ask, *args) -> peer_owner.Owner:
+        """Every failure of the question is an answer: `unknown`, refused as `peer-unverified`."""
+        try:
+            return ask(*args)
+        except Exception as exc:  # noqa: BLE001
+            return peer_owner.Owner(peer_owner.UNKNOWN, method="none", reason=type(exc).__name__)
+
     def check_socket(self, sock: socket.socket) -> str | None:
         """For an accepted socket: None to serve it, or the refusal code. Reads nothing from it."""
-        if not self.active():
+        if not self._active_or_failed():
             return None
-        return self._judge(self._peer(sock))
+        return self._judge(self._owner(self._peer, sock))
 
     def check_addresses(self, server, client) -> str | None:
         """For a server that has the two addresses only (ASGI's `scope["server"]` and `["client"]`)."""
-        if not self.active():
+        if not self._active_or_failed():
             return None
         if not server or not client:
             return self._judge(peer_owner.Owner(peer_owner.UNKNOWN, method="none", reason="no-address"))
-        return self._judge(self._peer_at(tuple(server), tuple(client)))
+        return self._judge(self._owner(self._peer_at, tuple(server), tuple(client)))
 
     def counters(self) -> dict:
         with self._lock:
@@ -217,16 +239,28 @@ GATE = Gate()
 
 
 def status(base: pathlib.Path | None = None) -> dict:
-    """Doctor's `loopback` block: this process's view of the setting and the account count, and the
-    local server's refusal counters from its receipt (`store/raw/serverd.json`, key `peer`)."""
+    """Doctor's `loopback` block, the shape of the spec's doctor view:
+
+        {"accountsOnHost": n or null, "accountsReason": "local" | "directory-bound" | ...,
+         "peerCheck": {"setting", "active", "method"[, "problem"]},
+         "refused": the LOCAL SERVER's counters from its receipt (`store/raw/serverd.json`, `peer`),
+                    or null; memory over HTTP and the keyserver count in their own process only,
+         "clientCheck": null until the clients check their server (OBS-355 part 2)}
+    """
     gate = GATE if base is None else Gate(config_dir=lambda: pathlib.Path(base) / "config")
-    doc = gate.snapshot()
-    doc.pop("refused", None)
+    snap = gate.snapshot()
     try:
         import paths
         receipt = json.loads((pathlib.Path(paths.SCRATCH) / "serverd.json").read_text(encoding="utf-8"))
         refused = ((receipt or {}).get("peer") or {}).get("refused")
-    except (OSError, ValueError, ImportError):
+    except (OSError, ValueError, ImportError, AttributeError):
         refused = None
-    doc["serverRefused"] = refused
-    return doc
+    check = {"setting": snap["setting"], "active": snap["active"], "method": snap["method"]}
+    if snap.get("problem"):
+        check["problem"] = snap["problem"]
+    try:
+        reason = host_accounts.detail()["reason"]
+    except Exception as exc:  # noqa: BLE001 - doctor reports, it never fails on one block
+        reason = f"unreadable: {type(exc).__name__}"
+    return {"accountsOnHost": snap["accountsOnHost"], "accountsReason": reason, "peerCheck": check,
+            "refused": refused, "clientCheck": None}
