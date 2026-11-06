@@ -1367,8 +1367,8 @@ learned and what failed, by arithmetic and with no model. It reads:
 - **classes held by two or more projects** (`class-repeated`), with what the corroborator says
   of them: promoted, waiting for a second project, not resolvable here, or contradicted by git.
   Only the corroborator promotes a lesson, by its own rule. When no tick that refreshed the
-  registry ran it within a day, the review runs it, so a lesson two projects hold is promoted at
-  least daily;
+  registry ran it within a day, the review runs it (bounded in time; it promotes there but never
+  archives an observation), so a lesson two projects hold is promoted at least daily;
 - **products' daily digests** (previous section): every rise the product itself recorded in an
   hour (`risen-in-hour`), an operation whose failures reached at least 10 and at least twice the
   day before (`rose-since-yesterday`), and one that rose on at least 3 of the last 7 days
@@ -1385,8 +1385,10 @@ project-observatory full configure learning_review settle_hour_utc 9
 ```
 
 A complete report is never rewritten by the tick. A report a source could not be read for is
-`partial`, says which source and why, and is written again at each tick until it is complete or
-until a day later. After the machine was off, up to 7 missing days are written, oldest first;
+`partial`, says which source and why, and is written again when what it reads changes (or every
+6 hours) until it is complete or until a day later. A damaged digest month that only the search
+for late lines reaches is named without making the report partial, and a report file that no
+longer reads is moved aside as `<day>.damaged-<n>.json` before the day is written again. After the machine was off, up to 7 missing days are written, oldest first;
 older ones are named under "days not reviewed". To read and run it:
 
 ```sh

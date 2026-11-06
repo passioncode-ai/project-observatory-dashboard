@@ -239,12 +239,32 @@ class DaysAndTiming(Workspace):
         (folder / "2026-11.json").write_text("not this store's document")
         self.review(at(D + timedelta(days=1), 7))
         self.assertEqual(self.report(D)["state"], "partial")
-        self.assertIn(D, self.LR.plan(at(D + timedelta(days=1), 9), 6)["days"], "partial: due again")
+        self.assertNotIn(D, self.LR.plan(at(D + timedelta(days=1), 9), 6)["days"],
+                         "nothing it reads changed: not rebuilt at every tick")
+        self.assertIn(D, self.LR.plan(at(D + timedelta(days=1), 13), 6)["days"], "retried after RETRY_HOURS")
         self.assertNotIn(D, self.LR.plan(at(D + timedelta(days=2), 6), 6)["days"], "kept partial after D+2 06:00")
         (folder / "2026-11.json").unlink()
+        self.assertIn(D, self.LR.plan(at(D + timedelta(days=1), 9), 6)["days"], "its input changed: due again")
         self.review(at(D + timedelta(days=1), 9))
         self.assertEqual(self.report(D)["state"], "complete")
         self.assertEqual(self.report(D)["revision"], 1, "a rewrite of a partial report is not a new revision")
+
+    def test_a_damaged_report_is_kept_aside_and_written_again(self) -> None:
+        self.review(at(D + timedelta(days=1), 7))
+        self.LR.report_path(D).write_bytes(b"\x00damaged report")
+        with self.assertRaises(self.LR.Refused) as caught:
+            self.LR.read_report(D)
+        self.assertEqual(caught.exception.code, "report-unreadable")
+        self.assertIn("damaged-", self.LR.HINTS["report-unreadable"])
+        self.assertEqual(self.review(at(D + timedelta(days=1), 9), day=D, again=True)["outcome"], "written")
+        kept = self.LR.report_path(D).parent / f"{D.isoformat()}.damaged-1.json"
+        self.assertEqual(kept.read_bytes(), b"\x00damaged report")
+        if os.name != "nt":
+            self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
+        doc = self.report(D)
+        self.assertEqual(doc["state"], "complete", "a kept damaged file is a note, not a partial source")
+        self.assertIn("report-damaged-kept", [d["code"] for d in doc["degraded"]])
+        self.assertIn(D, self.LR.report_days(), "the damaged copy is not read as a report of its own")
 
     def test_a_day_not_closed_or_out_of_retention_is_refused(self) -> None:
         now = at(D + timedelta(days=1), 7)
@@ -340,6 +360,66 @@ class Lessons(Workspace):
         self.assertEqual(self.state(stray["memoryId"]), "proposed")
 
 
+class Bounded(Workspace):
+    def test_the_corroborator_out_of_time_makes_the_report_partial(self) -> None:
+        a, b = self.lesson("alpha-web"), self.lesson("beta-api")
+        with patch.object(self.LR, "CORROBORATOR_SECONDS", 0.0):
+            self.review(at(D + timedelta(days=1), 7))
+        doc = self.report(D)
+        self.assertEqual((doc["state"], doc["sources"]["corroborator"]["state"]), ("partial", "corroborator-failed"))
+        self.assertIn("out of time", next(d["reason"] for d in doc["degraded"] if d["code"] == "corroborator-failed"))
+        self.assertEqual(doc["summary"]["lessonsNew"], 2, "the lessons are listed all the same")
+        self.assertEqual((self.state(a["memoryId"]), self.state(b["memoryId"])), ("proposed", "proposed"))
+
+    def test_the_clones_are_swept_once_and_the_sweep_is_bounded(self) -> None:
+        self.lesson("alpha-web")
+        from tools import corroborate as C
+        calls = []
+        real = C.project_keys
+
+        def counted(**kw):
+            calls.append(kw.get("deadline"))
+            return real(**kw)
+        with patch.object(C, "project_keys", counted):
+            self.review(at(D + timedelta(days=1), 7))
+        self.assertEqual(len(calls), 1, "one sweep, shared with the corroborator")
+        self.assertIsNotNone(calls[0], "and it has a deadline")
+        with patch.object(self.LR, "KEYS_SECONDS", 0.0):
+            self.review(at(D + timedelta(days=1), 9), day=D, again=True)
+        self.assertEqual(self.report(D)["sources"]["corroborator"]["state"], "corroborator-failed")
+
+    def test_the_reviews_own_corroborator_run_promotes_but_never_archives(self) -> None:
+        a, b = self.lesson("alpha-web"), self.lesson("beta-api")
+        self.review(at(D + timedelta(days=1), 7))
+        self.assertEqual(self.state(a["memoryId"]), "observed")
+        reg = pathlib.Path(self.paths.REGISTRY) / "repositories.json"
+        doc = json.loads(reg.read_text())
+        doc["repositories"] = [r for r in doc["repositories"] if not r["id"].endswith("beta-api")]
+        reg.write_text(json.dumps(doc))                    # beta's support is gone from this machine
+        self.review(at(D + timedelta(days=2), 7))
+        self.assertEqual(self.state(a["memoryId"]), "observed",
+                         "revalidation stays the tick's run after a registry refresh")
+
+    def test_lines_and_late_arrivals_are_bounded(self) -> None:
+        self.digest(ALPHA, D, {"ipc.call": [1]})
+        self.digest(BETA, D, {"ipc.call": [1]})
+        with patch.object(self.LR, "MAX_LINES", 1):
+            self.review(at(D + timedelta(days=1), 7))
+        doc = self.report(D)
+        self.assertEqual((len(doc["lines"]), doc["truncated"]["lines"]), (1, 1))
+        self.assertIn("arrivedLate", doc["truncated"])
+        self.assertIn("items-truncated", [d["code"] for d in doc["degraded"]])
+
+    def test_an_unreadable_registry_is_named_not_every_project_flagged(self) -> None:
+        self.digest(ALPHA, D, {"ipc.call": [1]})
+        (pathlib.Path(self.paths.REGISTRY) / "projects.json").write_text("{not json")
+        self.review(at(D + timedelta(days=1), 7))
+        doc = self.report(D)
+        self.assertEqual([f for f in doc["failures"] if f["code"] == "project-not-in-registry"], [])
+        self.assertIn("registry-unreadable", [d["code"] for d in doc["degraded"]])
+        self.assertEqual(doc["state"], "partial")
+
+
 class Failures(Workspace):
     def failures(self, day: date = D, code: str | None = None) -> list[dict]:
         return [f for f in self.report(day)["failures"] if code is None or f["code"] == code]
@@ -398,6 +478,38 @@ class Failures(Workspace):
         self.assertEqual([f["code"] for f in late[0]["failures"]], ["risen-in-hour", "rose-since-yesterday"])
         self.review(at(D + timedelta(days=3), 7))
         self.assertEqual(self.report(D + timedelta(days=2))["arrivedLate"], [], "once, never again")
+
+    def test_a_rebuilt_report_keeps_its_late_lines(self) -> None:
+        self.review(at(D, 7))                                                   # D-7 to D-1, complete
+        self.digest(ALPHA, D - timedelta(days=2), {"ipc.call": [2, 12]}, received=at(D, 10))
+        folder = pathlib.Path(self.paths.STATE) / "ops-digests" / "beta-api"
+        folder.mkdir(parents=True)
+        (folder / "2026-11.json").write_text("not this store's document")      # D's own read: partial
+        self.review(at(D + timedelta(days=1), 7))
+        late = lambda: [x["line"] for x in self.report(D)["arrivedLate"]]       # noqa: E731
+        first = late()
+        self.assertEqual(len(first), 1)
+        self.assertEqual(self.report(D)["state"], "partial")
+        self.review(at(D + timedelta(days=1), 14))                             # retried: rewritten in place
+        self.assertEqual(self.report(D)["writtenAt"], "2026-11-06T14:00:00Z")
+        self.assertEqual(late(), first, "a rewritten partial report keeps the late line it listed")
+        self.review(at(D + timedelta(days=1), 15), day=D, again=True)
+        self.assertEqual((self.report(D)["revision"], late()), (2, first), "--again keeps it too")
+        self.review(at(D + timedelta(days=2), 7))
+        self.assertEqual(self.report(D + timedelta(days=1))["arrivedLate"], [], "and no other report lists it")
+
+    def test_damage_only_the_late_scan_reads_is_a_note_not_partial(self) -> None:
+        day = date(2026, 11, 20)
+        self.review(at(date(2026, 10, 26), 7))                                 # reports of 19 to 25 October
+        folder = pathlib.Path(self.paths.STATE) / "ops-digests" / "alpha-web"
+        folder.mkdir(parents=True)
+        (folder / "2026-10.json").write_text("not this store's document")
+        self.review(at(day + timedelta(days=1), 7))
+        doc = self.report(day)
+        self.assertEqual(doc["state"], "complete")
+        notes = [d for d in doc["degraded"] if d["code"] == "digest-month-damaged"]
+        self.assertEqual([d.get("partial") for d in notes], [False])
+        self.assertEqual(doc["daysNotReviewed"][0], "2026-10-26")
 
     def test_a_project_not_in_the_registry_is_shown_by_its_slug(self) -> None:
         self.digest("project:gamma-ops", D, {"ipc.call": [1]})

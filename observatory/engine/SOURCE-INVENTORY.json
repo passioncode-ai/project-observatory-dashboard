@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "1d898ce0fb19a8f77a6b53923ed1cb43700f675466b8996e8004a94f09dfad30",
-      "bytes": 60843,
+      "export_sha256": "edaf0cd8d3630f5a3729c4f4e7809c1506e9164a6f9ff0d84e7d9f9f53fc21b4",
+      "bytes": 61111,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "84ed879c96f79d63afab0361bd82dd5fd011a483f36f8fd53e1a0205d9a49d35",
-      "bytes": 256254,
+      "export_sha256": "d561e5c45a7bf9c48df15258c79657adb5a86afe02122e69ba8f3e1359f2a035",
+      "bytes": 256584,
       "upstream_modified": true
     },
     {
@@ -3125,8 +3125,8 @@
       "path": "learning_review.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8e49310c790ef5f7ab4c9f1798c9a4ec5cb7cc0c445952389cd56a8de5fe594f",
-      "bytes": 61356
+      "export_sha256": "d56f8dd799439ec20ceba24d8fb2a837efcb617080050c66521d3b0cb8f310a8",
+      "bytes": 70285
     },
     {
       "path": "log_policy.py",
@@ -5272,8 +5272,8 @@
       "path": "tests/test_learning_review.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60d713113bfaf21fc44bebcfe6b97892a63692644d59cd8c9aecfb370220963a",
-      "bytes": 31362
+      "export_sha256": "2c872ed48c4ac9113a53a23daee25a3205393d1e6e5ee8da12ed37d342c50d42",
+      "bytes": 38265
     },
     {
       "path": "tests/test_ledger.py",
@@ -6838,8 +6838,8 @@
     {
       "path": "tools/corroborate.py",
       "source_sha256": "77df7399988a799d52fdaf33faf0bf8e3457f2578863ad33cc37a91374e369e6",
-      "export_sha256": "a1d8527b4fbe119481d675fd212803df1907df87b084255b747ee2b0e58f6f78",
-      "bytes": 28537,
+      "export_sha256": "5eeac50c3399d52a887945a66ad7b8fba1ecad044bc005a06b70ca5690914160",
+      "bytes": 29343,
       "python_comments_removed": 52,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

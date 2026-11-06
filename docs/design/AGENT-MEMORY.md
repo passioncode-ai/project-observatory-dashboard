@@ -463,15 +463,22 @@ replaced it, a new commit), `lesson-promoted` (a revision the lesson corroborato
 `observed`) and `observation-invalidated` (a replacement by revalidation, the same commit). A
 class whose current lessons come from two or more distinct origin keys is `class-repeated`,
 with the corroborator's outcome for it. The review promotes nothing by a rule of its own: it
-calls `corroborate_lessons` unchanged, for real when the corroborator's receipt is absent or
-older than yesterday (no tick that refreshed the registry ran it within a day), else dry. A
-lesson's project is named only through a registered clone that carries its key and the
-project that clone's repository implements; otherwise `project: null`. Every lesson field is
-scrubbed again (`memory_redact`) before it enters the report, because the known-value list
-grows after a lesson is written. The report and its page stay under
-`<state>/learning-review/`: no ledger row, wiki page, board message or Fabric call is written.
-`tests/test_learning_review.py` (`Lessons`, `Privacy`) verifies the codes, the promotion rule
-and the scrub. An identical repeat writes nothing (`store/lessons.py`), so the review cannot
+calls `corroborate_lessons`, for real when the corroborator's receipt is absent or older than
+yesterday (no tick that refreshed the registry ran it within a day), else dry. It hands the
+corroborator the one bounded sweep of the clones' root commits it already made and a deadline
+(`keys`, `deadline`), and `revalidate=False`: run by the review, the corroborator may promote,
+but archiving an observation whose support is gone stays the tick's run after a registry
+refresh. Out of time, its outcome is not used and the report is partial
+(`corroborator-failed`). A lesson's project is named only through a registered clone that
+carries its key and the project that clone's repository implements; otherwise
+`project: null`. The lesson fields a report carries (`classKey`, `title`, `origin.projectId`,
+`origin.commit`) and the corroborator's reasons are scrubbed again (`memory_redact`) before they
+enter it, because the known-value list grows after a lesson is written; `trigger`, `check` and
+`nouns` are not carried. The report and its page stay under `<state>/learning-review/`. The
+review writes no ledger row itself; the corroborator it runs may write promotions (never, run
+from the review, revalidation archives). No wiki page, board message or Fabric call is written.
+`tests/test_learning_review.py` (`Lessons`, `Bounded`, `Privacy`) verifies the codes, the promotion rule,
+the bounds and the scrub. An identical repeat writes nothing (`store/lessons.py`), so the review cannot
 count it, and the report says so.
 
 ## MCP tools

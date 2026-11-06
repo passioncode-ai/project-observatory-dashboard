@@ -72,6 +72,8 @@ LATE_DAYS = 31
 MAX_LESSONS = 500
 MAX_CLASSES = 200
 MAX_FAILURES = 500
+MAX_LATE = 200
+MAX_LINES = 500
 MAX_BYTES = 8 * 1024 * 1024
 #: How long a second writer waits for the first before it answers `review-locked`.
 LOCK_WAIT_SECONDS = 30.0
@@ -79,6 +81,14 @@ LOCK_WAIT_SECONDS = 30.0
 RUNS_KEPT = 30
 #: Time the review gives git to name the projects of lesson keys (one root-commit read per registered clone).
 KEYS_SECONDS = 60.0
+#: Time the review gives the corroborator's own git questions; past it the corroborator's outcome is not used and
+#: the report is partial (`corroborator-failed`), rather than the whole step being stopped by its watchdog.
+CORROBORATOR_SECONDS = 60.0
+#: The share of the step's remaining time (the tick's watchdog, `step_budget`) each of the two git sweeps may take.
+GIT_SHARE = 0.3
+#: A partial report whose inputs did not change is tried again at most this often until D+2 at the settle hour, so a
+#: transient fault (the corroborator out of time) is retried without the review rebuilding every tick.
+RETRY_HOURS = 6
 
 DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 REPORT_NAME = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})\.json")
@@ -94,7 +104,7 @@ HINTS = {
     "no-report": "no review has been written for that day yet: `project-observatory full learning-review run` "
                  "writes what is due",
     "report-unreadable": "the report file is damaged; `project-observatory full learning-review run --again` with "
-                         "its day writes a new revision and keeps the damaged one beside it",
+                         "its day writes it again and keeps the damaged file beside it as <day>.damaged-<n>.json",
     "review-locked": "another review is being written; run it again in a minute",
     "review-unwritable": "the review folder cannot be written (a full disk, or a folder that is not this "
                          "account's); nothing was written and the previous report stands",
@@ -313,7 +323,10 @@ def plan(now: datetime, hour: int | None = None) -> dict:
         if doc is None:
             days.append(day)
         elif doc.get("state") == "partial" and now < due_at(day + timedelta(days=1), hour):
-            days.append(day)
+            written = parse_stamp(doc.get("writtenAt"))
+            if doc.get("inputs") != input_stamp(day) or written is None \
+                    or now - written >= timedelta(hours=RETRY_HOURS):
+                days.append(day)
     on_disk = [d for d in report_days() if window and d < window[0]]
     not_reviewed = []
     if on_disk and window:
@@ -321,6 +334,45 @@ def plan(now: datetime, hour: int | None = None) -> dict:
         gap = (window[0] - last).days - 1
         not_reviewed = [last + timedelta(days=n) for n in range(1, gap + 1) if last + timedelta(days=n) >= oldest_kept]
     return {"days": days, "notReviewed": not_reviewed, "newest": newest, "settleHourUtc": hour}
+
+
+def input_stamp(day: date) -> str:
+    """A digest of what the report of `day` reads, from file stamps and one count: the digest month files of the day
+    and its REPEAT_DAYS history, the lesson rows of the ledger, and the registry's project list. A partial report is
+    rebuilt when this changes (or RETRY_HOURS after its last try), never on every tick."""
+    import hashlib
+    import paths
+    parts: list[Any] = []
+    months = sorted({(day - timedelta(days=n)).isoformat()[:7] for n in range(REPEAT_DAYS + 1)})
+    try:
+        import ops_digest_store as S
+        base = S.store_root()
+        folders = sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink()) if base.is_dir() else []
+    except OSError:
+        folders = []
+    for folder in folders:
+        for month in months:
+            try:
+                st = (folder / f"{month}.json").stat()
+                parts.append([folder.name, month, st.st_size, st.st_mtime_ns])
+            except OSError:
+                parts.append([folder.name, month, None])
+    try:
+        import sqlite3
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
+        try:
+            parts.append(list(conn.execute("SELECT COUNT(*), MAX(created_at) FROM ledger WHERE kind = 'lesson'")
+                              .fetchone()))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        parts.append("ledger-unreadable")
+    try:
+        st = (Path(paths.REGISTRY) / "projects.json").stat()
+        parts.append([st.st_size, st.st_mtime_ns])
+    except OSError:
+        parts.append("registry-unreadable")
+    return "sha256:" + hashlib.sha256(json.dumps(parts, default=str).encode("utf-8")).hexdigest()
 
 
 def is_due(now: datetime | None = None) -> bool:
@@ -339,9 +391,18 @@ def _registry_doc(name: str, key: str) -> list:
     return rows if isinstance(rows, list) else []
 
 
-def registry_projects() -> set[str]:
-    return {p["id"] for p in _registry_doc("projects.json", "projects")
-            if isinstance(p, dict) and isinstance(p.get("id"), str)}
+def registry_projects() -> set[str] | None:
+    """The registry's project ids, or None when `projects.json` does not read (then no digest project is called
+    `project-not-in-registry`: the report says the registry could not be read instead)."""
+    import paths
+    try:
+        doc = json.loads((Path(paths.REGISTRY) / "projects.json").read_text(encoding="utf-8"))
+        rows = doc["projects"]
+        if not isinstance(rows, list):
+            raise ValueError("projects is not a list")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return {p["id"] for p in rows if isinstance(p, dict) and isinstance(p.get("id"), str)}
 
 
 def key_projects(keys: dict[str, list[Path]]) -> dict[str, str | None]:
@@ -469,19 +530,35 @@ def corroborator_receipt_age(now: datetime) -> tuple[str | None, int | None]:
     return (checked if isinstance(checked, str) else None), age
 
 
-def run_corroborator(conn, now: datetime) -> tuple[dict | None, dict]:
+def git_budget(cap: float) -> float:
+    """Seconds one git sweep may take: `cap`, or GIT_SHARE of what the step's watchdog leaves, whichever is less."""
+    import step_budget
+    left = step_budget.remaining()
+    return max(0.0, min(cap, GIT_SHARE * left)) if left != float("inf") else cap
+
+
+def run_corroborator(conn, now: datetime, keys: dict | None = None,
+                     seconds: float | None = None) -> tuple[dict | None, dict]:
     """The corroborator's lesson outcomes, and the source block. For real when no refreshing tick ran it within a
-    day (its receipt is absent or older than yesterday), else dry."""
+    day (its receipt is absent or older than yesterday), else dry. It is handed the keys the review already swept
+    and a deadline; it may promote, but it never revalidates an observation here (`revalidate=False`): archiving an
+    observation whose support is gone stays the tick's run after a registry refresh. Out of time, its outcome is not
+    used and the report is partial."""
     checked, age = corroborator_receipt_age(now)
     yesterday = (now.astimezone(timezone.utc).date() - timedelta(days=1)).isoformat()
     dry = checked is not None and checked >= yesterday
+    budget = git_budget(CORROBORATOR_SECONDS) if seconds is None else seconds
+    deadline = time.monotonic() + budget
     try:
         from tools import corroborate as C
-        result = C.corroborate_lessons(conn, dry)
+        result = C.corroborate_lessons(conn, dry, keys=keys, deadline=deadline, revalidate=False)
         if not dry:
             conn.commit()
     except Exception as exc:  # noqa: BLE001: a failed corroborator makes the report partial, never the run
         return None, {"state": "corroborator-failed", "receiptAge": age, "reason": type(exc).__name__}
+    if time.monotonic() >= deadline:
+        return None, {"state": "corroborator-failed", "receiptAge": age,
+                      "reason": f"out of time: its git questions took more than {budget:.0f} s"}
     return result, {"state": "corroborator-dry" if dry else "corroborator-ran", "receiptAge": age}
 
 
@@ -630,6 +707,10 @@ class Run:
         self.key_project: dict[str, str | None] = {}
         self.resolvable: set[str] = set()
         self.registry = registry_projects()
+        if self.registry is None:
+            self.degraded.append({"source": "registry", "code": "registry-unreadable",
+                                  "reason": "registry/projects.json does not read; no digest project is checked "
+                                            "against it"})
         self.digests = Digests()
         self._read_ledger()
 
@@ -645,10 +726,32 @@ class Run:
             self.degraded.append({"source": "lessons", "code": "ledger-unreadable", "reason": type(exc).__name__})
             return
         try:
-            self.corroborator, self.corroborator_source = run_corroborator(conn, self.now)
+            self.rows = lesson_rows(conn)
+            # ONE git sweep, bounded, shared with the corroborator: the clones' root commits name the projects of the
+            # lesson keys, and the corroborator asks its commits of the same clones.
+            found: dict = {}
+            complete = True
+            if self.rows:
+                try:
+                    from tools import corroborate as C
+                    budget = git_budget(KEYS_SECONDS)
+                    deadline = time.monotonic() + budget
+                    found = C.project_keys(deadline=deadline)
+                    complete = time.monotonic() < deadline
+                except Exception:  # noqa: BLE001: unnamed projects, never a failed review
+                    found, complete = {}, False
+            self.resolvable = set(found)
+            self.key_project = key_projects(found)
+            if complete:
+                self.corroborator, self.corroborator_source = run_corroborator(conn, self.now, found)
+            else:
+                self.corroborator, self.corroborator_source = None, {
+                    "state": "corroborator-failed", "receiptAge": corroborator_receipt_age(self.now)[1],
+                    "reason": "out of time: the clones' root commits were not all read, so the corroborator did not run"}
             if self.corroborator is None:
                 self.degraded.append({"source": "corroborator", "code": "corroborator-failed",
                                       "reason": self.corroborator_source.pop("reason", "")})
+            # Read again: the corroborator may have written promotions.
             self.rows = lesson_rows(conn)
             self.current = LS.current_lessons(conn)
         except Exception as exc:  # noqa: BLE001
@@ -659,16 +762,6 @@ class Run:
             conn.close()
         self.lessons_source["records"] = len({r["memory_id"] for r in self.rows})
         self.classified = classify(self.rows)
-        keys = {((r["body"].get("origin") or {}).get("projectId")) for r in self.rows}
-        keys.discard(None)
-        if keys:
-            try:
-                from tools import corroborate as C
-                found = C.project_keys(deadline=time.monotonic() + KEYS_SECONDS)
-            except Exception:  # noqa: BLE001: unnamed projects, never a failed review
-                found = {}
-            self.resolvable = set(found)
-            self.key_project = key_projects(found)
 
     def project_of(self, key: Any) -> str | None:
         return self.key_project.get(key) if isinstance(key, str) else None
@@ -686,7 +779,7 @@ class Run:
                 continue
             origin = r["body"].get("origin") or {}
             item = {"code": r["code"], "memoryId": r["memory_id"], "revision": r["revision"],
-                    "classKey": r["body"].get("classKey"), "title": self.scrub(r["body"].get("title")),
+                    "classKey": self.scrub(r["body"].get("classKey")), "title": self.scrub(r["body"].get("title")),
                     "origin": {"projectId": self.scrub(origin.get("projectId")),
                                "commit": self.scrub(origin.get("commit"))},
                     "project": self.project_of(origin.get("projectId")),
@@ -750,7 +843,7 @@ class Run:
                 outcome, why = None, "the corroborator did not run, so its outcome is unknown"
             else:
                 outcome, why = None, "no member of this class waits for the corroborator"
-            listed.append({"code": "class-repeated", "classKey": ck, "keys": len(keys),
+            listed.append({"code": "class-repeated", "classKey": self.scrub(ck), "keys": len(keys),
                            "resolved": len(keys & self.resolvable), "outcome": outcome,
                            "why": self.scrub(why) if why else why,
                            "members": sorted(f"ledger:{m['memory_id']}@{m['revision']}" for m in members),
@@ -764,7 +857,7 @@ class Run:
         for slug in self.digests.slugs:
             project = f"project:{slug}"
             items, rows, retro = failures_for(self.digests, slug, project, day)
-            if project not in self.registry and (items or rows):
+            if self.registry is not None and project not in self.registry and (items or rows):
                 for row in rows:
                     row["projectNotInRegistry"] = True
                 failures.append({"code": "project-not-in-registry", "project": project, "service": None,
@@ -777,9 +870,12 @@ class Run:
         failures.sort(key=_failure_order)
         return failures, lines, retros, damaged
 
-    def late_of(self, day: date, previous_written: datetime | None) -> list[dict]:
-        """Digest lines of an earlier day that arrived after that day's report was written and after the previous
-        report of this run: each is reported once, in the first report written after it arrived."""
+    def late_of(self, day: date, after: datetime | None, until: datetime | None = None) -> list[dict]:
+        """Digest lines of an earlier day that arrived after that day's report was written, and within this report's
+        own span (`after`, `until`]: after the cut-off the report before it covered, and no later than the time the
+        next report took over. Each is reported once, in the first report written after it arrived, and a report
+        rebuilt later (a partial one rewritten, `--again`) keeps the span it first had."""
+        until = until or self.now
         out = []
         for back in range(1, LATE_DAYS + 1):
             d = day - timedelta(days=back)
@@ -790,9 +886,9 @@ class Run:
             for slug in self.digests.slugs:
                 for line in self.digests.lines(slug, d):
                     received = parse_stamp(line.get("receivedAt"))
-                    if received is None or received <= written or received > self.now:
+                    if received is None or received <= written or received > until:
                         continue
-                    if previous_written is not None and received <= previous_written:
+                    if after is not None and received <= after:
                         continue
                     rises = day_rises(self.digests, slug, d).get(_line_key(line), [])
                     import ops_digest as OD
@@ -810,21 +906,27 @@ def _cut(doc: dict, name: str, limit: int) -> None:
         doc[name] = items[:limit]
 
 
-def build(run: Run, day: date, *, revision: int, previous_written: datetime | None,
+def build(run: Run, day: date, *, revision: int, late_after: datetime | None, late_until: datetime | None = None,
           not_reviewed: list[date]) -> dict:
     """The report of `day` as a document (nothing written)."""
     lessons = run.lessons_of(day)
     classes, others = run.classes_of(day, lessons)
     failures, lines, retros_by_project, _ = run.failures_of(day)
-    late = run.late_of(day, previous_written)
+    late = run.late_of(day, late_after, late_until)
     degraded = [dict(d) for d in run.degraded]
-    months = {day.isoformat()[:7], (day - timedelta(days=REPEAT_DAYS)).isoformat()[:7],
-              (day - timedelta(days=LATE_DAYS)).isoformat()[:7]}
-    damaged = sorted((s, m) for s, m in run.digests.damaged
-                     if min(months) <= m <= max(months))
+    # ONLY THE DAY'S OWN READS make it partial: the day and the REPEAT_DAYS days its rises are compared with. A
+    # damaged month that only the late-arrival scan reached is named, without making the report partial (it would
+    # otherwise keep every report partial for weeks).
+    own = {(day - timedelta(days=n)).isoformat()[:7] for n in range(REPEAT_DAYS + 1)}
+    scanned = {(day - timedelta(days=n)).isoformat()[:7] for n in range(LATE_DAYS + 1)} - own
+    damaged = sorted((s, m) for s, m in run.digests.damaged if m in own)
     for slug, month in damaged:
         degraded.append({"source": "digests", "code": "digest-month-damaged",
                          "reason": f"project:{slug} {month}: the month file is not readable; it is kept as it is"})
+    notes_only = [{"source": "digests", "code": "digest-month-damaged", "partial": False,
+                   "reason": f"project:{slug} {month}: a month only the late-arrival scan reads is not readable; "
+                             f"late lines of it cannot be seen"}
+                  for slug, month in sorted((s, m) for s, m in run.digests.damaged if m in scanned)]
     if run.digests.unreadable:
         degraded.append({"source": "digests", "code": "digest-store-unreadable", "reason": run.digests.unreadable})
     digest_state = ("digest-store-unreadable" if run.digests.unreadable
@@ -852,6 +954,9 @@ def build(run: Run, day: date, *, revision: int, previous_written: datetime | No
         "schema": SCHEMA, "day": day.isoformat(), "boundary": "utc",
         "window": {"from": stamp(start), "to": stamp(start + timedelta(days=1)), "localOffset": local_offset()},
         "writtenAt": stamp(run.now), "revision": revision,
+        "lateAfter": stamp(late_after) if late_after else None,
+        "lateUntil": stamp(late_until or run.now),
+        "inputs": input_stamp(day),
         "state": "partial" if degraded else "complete",
         "engine": __import__("configuration").VERSION,
         "rules": {"settleHourUtc": settle_hour(), "riseMinFailed": _od().RISE_MIN_FAILED,
@@ -868,15 +973,16 @@ def build(run: Run, day: date, *, revision: int, previous_written: datetime | No
         "lessons": lessons, "classes": classes, "failures": failures, "lines": lines, "retros": retros,
         "insights": [], "arrivedLate": late,
         "daysNotReviewed": [d.isoformat() for d in not_reviewed],
-        "truncated": {"lessons": 0, "classes": 0, "failures": 0},
+        "truncated": {"lessons": 0, "classes": 0, "failures": 0, "lines": 0, "arrivedLate": 0},
         "notes": sorted(NOTES),
-        "degraded": [{**d, "reason": run.scrub(d.get("reason") or "")} for d in degraded],
+        "degraded": [{**d, "reason": run.scrub(d.get("reason") or "")} for d in degraded + notes_only],
     }
-    _cut(doc, "lessons", MAX_LESSONS)
-    _cut(doc, "classes", MAX_CLASSES)
-    _cut(doc, "failures", MAX_FAILURES)
+    bounds = {"lessons": MAX_LESSONS, "classes": MAX_CLASSES, "failures": MAX_FAILURES, "lines": MAX_LINES,
+              "arrivedLate": MAX_LATE}
+    for name, limit in bounds.items():
+        _cut(doc, name, limit)
     while len(json.dumps(doc, ensure_ascii=False).encode("utf-8")) > MAX_BYTES:
-        longest = max(("lessons", "classes", "failures"), key=lambda k: len(doc[k]))
+        longest = max(bounds, key=lambda k: len(doc[k]))
         if not doc[longest]:
             break
         _cut(doc, longest, len(doc[longest]) // 2)
@@ -1034,6 +1140,26 @@ def write_report(doc: dict, *, keep_previous: bool) -> None:
     atomic.write_json(report_path(day), doc)
 
 
+def set_aside_damaged(day: date) -> str | None:
+    """A report file of `day` that is there and does not read is moved aside, never overwritten:
+    `<day>.damaged-<n>.json`, owner-only, for a person to look at. Answers its new name, or None."""
+    path = report_path(day)
+    if path.is_symlink() or not path.exists():
+        return None
+    try:
+        read_report(day)
+        return None
+    except Refused:
+        pass
+    n = 1
+    while (path.parent / f"{day.isoformat()}.damaged-{n}.json").exists():
+        n += 1
+    target = path.parent / f"{day.isoformat()}.damaged-{n}.json"
+    os.replace(path, target)
+    os.chmod(target, 0o600)
+    return target.name
+
+
 def prune(today: date) -> int:
     """Reports of days older than KEEP_DAYS, every revision and page, and the month folders they leave empty."""
     oldest, dropped = today - timedelta(days=KEEP_DAYS), 0
@@ -1085,6 +1211,7 @@ def run(now: datetime | None = None, *, day: date | None = None, again: bool = F
             revision = (existing or {}).get("revision", 1) if existing else 1
             todo = [(day, revision + 1 if (existing and again) else revision, bool(existing and again))]
             not_reviewed: list[date] = []
+            newest = day
         else:
             p = plan(now)
             todo = []
@@ -1092,20 +1219,41 @@ def run(now: datetime | None = None, *, day: date | None = None, again: bool = F
                 old = _report_or_none(d)
                 todo.append((d, (old or {}).get("revision", 1) if old else 1, False))
             not_reviewed = p["notReviewed"]
+            # Days older than the window are named on the newest day's report, and only when that day is written.
+            newest = p["newest"]
         if not todo:
             answer = {"outcome": "not-due", "written": [], "next": stamp(due_at(newest_due_day(now, settle_hour())
                                                                                + timedelta(days=1), settle_hour()))}
             _record(state, now, answer, started)
             return answer
         review = Run(now)
-        previous = parse_stamp((state.get("lastWritten") or {}).get("writtenAt"))
+        last = state.get("lastWritten") or {}
+        # The cut-off of a NEW report's late-arrival span: where the newest report before it stopped.
+        previous = parse_stamp(last.get("lateUntil") or last.get("writtenAt"))
+        newest_on_disk = max(report_days(), default=None)
         written, docs = [], []
         try:
-            for i, (d, revision, keep) in enumerate(todo):
-                doc = build(review, d, revision=revision, previous_written=previous,
-                            not_reviewed=not_reviewed if i == len(todo) - 1 else [])
+            for d, revision, keep in todo:
+                aside = set_aside_damaged(d)
+                existing = _report_or_none(d)
+                if existing is not None and "lateAfter" in existing:
+                    # A day rebuilt (a partial report rewritten, `--again`) keeps the span it was first given, and
+                    # stops where the next report took over when there is one, so a late line stays in exactly one
+                    # report.
+                    after = parse_stamp(existing.get("lateAfter"))
+                    later = newest_on_disk is not None and newest_on_disk > d
+                    until = parse_stamp(existing.get("lateUntil") or existing.get("writtenAt")) if later else now
+                else:
+                    after, until = previous, now
+                doc = build(review, d, revision=revision, late_after=after, late_until=until,
+                            not_reviewed=not_reviewed if d == newest else [])
+                if aside:
+                    doc["degraded"].append({"source": "report", "code": "report-damaged-kept", "partial": False,
+                                            "reason": f"the report file did not read; it is kept beside this one "
+                                                      f"as {aside}"})
                 write_report(doc, keep_previous=keep)
-                previous = parse_stamp(doc["writtenAt"])
+                if newest_on_disk is None or d >= newest_on_disk:
+                    previous, newest_on_disk = until, d
                 written.append(line_of(doc))
                 docs.append(doc)
             prune(today)
@@ -1126,8 +1274,11 @@ def _record(state: dict, now: datetime, answer: dict, started: float, docs: list
     """The run record: what the last report was, and the newest RUNS_KEPT runs (codes and counts only)."""
     import atomic
     for doc in docs or []:
-        state["lastWritten"] = {"day": doc["day"], "revision": doc["revision"], "state": doc["state"],
-                                "writtenAt": doc["writtenAt"]}
+        # The newest day only: rebuilding an older day (`--again`) must not move the cut-off the next new report's
+        # late-arrival span starts from.
+        if doc["day"] >= ((state.get("lastWritten") or {}).get("day") or ""):
+            state["lastWritten"] = {"day": doc["day"], "revision": doc["revision"], "state": doc["state"],
+                                    "writtenAt": doc["writtenAt"], "lateUntil": doc.get("lateUntil")}
     last = (docs or [None])[-1]
     state["runs"] = (state.get("runs") or [])[-(RUNS_KEPT - 1):] + [{
         "at": stamp(now), "outcome": answer["outcome"], "day": last["day"] if last else answer.get("day"),
