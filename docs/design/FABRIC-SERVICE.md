@@ -145,6 +145,22 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
     - `test_the_conformance_probe_passes`; the kit's and the probe's bytes are checked against
       the digests in their headers by `test_kit_and_probe_are_the_upstream_bytes`.
 
+11. **On a host with several OS accounts, another account's connection is refused before it is
+    read** (OBS-355; [ACCESS.md](ACCESS.md) rule 10). Loopback is one per machine, so before
+    `BaseHTTPRequestHandler` reads a request line, `Handler.handle()` asks `peer_check` which
+    account the peer is and answers another account's or the system's process
+    `403 {"error":"peer-foreign-account"}`, an owner it cannot read `403 {"error":"peer-unverified"}`,
+    with `Connection: close`. Every route, `/.well-known/fabric-service` included: a host such as
+    Fabric Dashboards running as this account is served, another account's is refused. The check
+    is active when the host has more than one person's account or `config/local.json` sets
+    `loopback.peerCheck` to `always`; on a one-account host it costs a clock comparison per
+    connection and the answers are byte for byte the ones before. Active, it costs one read of the
+    socket table per connection: measured on macOS about 5 ms through `sysctl` (about 20 ms through
+    the `netstat` fallback), inside the contract's 100 ms for the well-known document. Refusals are
+    counted in the receipt under `peer`, which the change comparison ignores.
+    - `test_foreign_and_unverified_are_refused_before_the_request_line`,
+      `test_one_account_serves_as_before`, `test_counters_ride_the_receipt_but_never_cause_a_write`.
+
 ## Vendored parts
 
 | File | Upstream |

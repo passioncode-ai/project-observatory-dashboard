@@ -264,6 +264,11 @@ class Boundary(unittest.TestCase):
     #: scheduler per OS; until then `os.getuid` there names a launchd domain.
     MACOS_ONLY = {"tools/install_launchd.py", "app_update.py", "tools/serverd.py",
                   "engine_update.py", "agent/assistant.py", "node/lifecycle/macos.py"}
+    #: One file meant to be vendored by other projects, standard library only, so it cannot call
+    #: this module: `peer_owner.py` reads this process's uid in its `_posix_uid()` alone, on its
+    #: POSIX paths (Windows compares SIDs), and `tests/test_peer_owner.py` pins that it is the only
+    #: place. Allowed for the uid read only, never for a mode or ownership decision.
+    STANDALONE_UID = {"peer_owner.py"}
     FLAGS = re.compile(r"os\.O_(NOFOLLOW|DIRECTORY|NONBLOCK)\b|getattr\(os,\s*['\"]O_|\bos\.open\(")
     MODES = re.compile(r"st_mode\s*&\s*0o0[0-7][0-7]\b|S_IMODE\([^)]*\)\s*&\s*0o0|\bmode\s*&\s*0o0[0-7][0-7]\b|\bst_uid\b")
 
@@ -295,7 +300,7 @@ class Boundary(unittest.TestCase):
         self.assertEqual(self.offenders(re.compile(r"(?<!`)\bsys\.stdin\.isatty\(")), [])
 
     def test_the_uid_is_read_only_on_the_macos_paths(self):
-        self.assertEqual(self.offenders(re.compile(r"\bos\.getuid\(\)"), self.MACOS_ONLY), [])
+        self.assertEqual(self.offenders(re.compile(r"\bos\.getuid\(\)"), self.MACOS_ONLY | self.STANDALONE_UID), [])
 
 
 if __name__ == "__main__":
