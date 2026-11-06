@@ -9,9 +9,9 @@ WHOSE LINE IT IS COMES FROM THE TRANSPORT, NEVER FROM AN ARGUMENT. The input has
 owner grants nothing:
 
 - **Over stdio** the project is the one project of the access binding (access-bindings/1) the server runs under: the
-  operator issues a binding with the scope `ops.digest.record` and the effect `propose` for one project
-  (`project-observatory full access-binding issue service:<name> --project project:<slug> --scope ops.digest.record
-  --effect propose --token-file PATH`), and the connection that starts the stdio server passes
+  operator issues a binding with the scope `ops.digest.record` and the effect `propose` for one project:
+  `project-observatory full access-binding issue PRINCIPAL --project PROJECT --scope ops.digest.record --effect propose --token-file PATH`
+  (PRINCIPAL `service:<name>`, PROJECT `project:<slug>`), and the connection that starts the stdio server passes
   `--binding-token-file PATH` (or sets `OBSERVATORY_BINDING_TOKEN_FILE`). The server reads the owner-only file,
   hashes the bearer and resolves it against `config/access-bindings.json` exactly as the HTTP door does: the same
   audience, expiry and revocation. A server started without one answers `binding-required`: the operator's own local

@@ -1311,8 +1311,7 @@ The project is never an argument; it comes from the connection:
   effect the tool needs. `issue` prints the server line that goes with it:
 
   ```sh
-  project-observatory full access-binding issue service:fabric --project PROJECT \
-    --scope ops.digest.record --effect propose --days 365 --token-file PATH
+  project-observatory full access-binding issue service:fabric --project PROJECT --scope ops.digest.record --effect propose --days 365 --token-file PATH
   # then the connection starts the server with: .../mcp/server.py --stdio --binding-token-file PATH
   ```
 

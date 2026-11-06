@@ -61,6 +61,12 @@ def structured(result) -> dict:
     return out
 
 
+def private(path: pathlib.Path) -> None:
+    """Owner-only on every OS: 0600 on POSIX, a protected access list on Windows (the token file's check)."""
+    import osprivacy
+    osprivacy.make_private(path)
+
+
 def fresh_registry_readers() -> None:
     """`fabric_attribution` binds `paths` at import; a new workspace must not read the last one's files."""
     for name in ("fabric_attribution", "identifiers"):
@@ -95,7 +101,7 @@ class OverStdio(unittest.TestCase):
         self.ws.bind("service:fabric", list(projects), bearer=bearer, scopes=scopes, effect=effect, **over)
         path = self.ws.home / f"{bearer}.token"
         path.write_text(bearer + "\n", encoding="utf-8")
-        path.chmod(0o600)
+        private(path)
         os.environ["OBSERVATORY_BINDING_TOKEN_FILE"] = str(path)
         return path
 
@@ -157,7 +163,7 @@ class OverStdio(unittest.TestCase):
         self.assertEqual((out["code"], out["detail"]), ("binding-refused", "binding-expired"), out)
         path = self.ws.home / "stranger.token"
         path.write_text("tok-stranger", encoding="utf-8")
-        path.chmod(0o600)
+        private(path)
         os.environ["OBSERVATORY_BINDING_TOKEN_FILE"] = str(path)
         self.assertEqual(self.call({"digest": daily()})["detail"], "no-binding")
 
