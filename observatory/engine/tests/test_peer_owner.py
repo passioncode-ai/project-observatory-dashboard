@@ -360,6 +360,9 @@ class HostAccounts(unittest.TestCase):
         listed = "alpha 501\nGuest 201\nadmin2 450\nrunner 451\n"
         shells = "alpha /bin/zsh\nGuest /bin/zsh\nadmin2 /bin/bash\nrunner /usr/bin/false\n"
         self.assertEqual(host_accounts.parse_dscl(listed, shells), {501, 201, 450})
+        # A person's account from 501 up counts whatever its shell: a desktop login does not use it.
+        self.assertEqual(host_accounts.parse_dscl("alpha 501\nbeta 502\n", "alpha /bin/zsh\nbeta /usr/bin/false\n"),
+                         {501, 502})
 
     def test_a_directory_binding_is_several(self):
         self.assertFalse(host_accounts.parse_search_path("CSPSearchPath: /Local/Default\n"))

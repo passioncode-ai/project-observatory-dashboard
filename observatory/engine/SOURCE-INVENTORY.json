@@ -3080,8 +3080,8 @@
       "path": "host_accounts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f0f73595bec9400aab91e93282142e8402cc5b14bf37ed5b7c91933e4e249106",
-      "bytes": 9972
+      "export_sha256": "aa2fe842cebf9fbbba96bd5dbd3944c7efe3f523e90d879687e0e3b6ed33d2db",
+      "bytes": 10233
     },
     {
       "path": "identifiers.py",
@@ -5753,8 +5753,8 @@
       "path": "tests/test_peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dd7353e889a205869a327434c04daabce48fcff1ce9f362f30f19c937b6f220a",
-      "bytes": 20488
+      "export_sha256": "95d6dc30a95d14e97a5623d6e7add9067fdeac14a446d7c84be0143331a9971f",
+      "bytes": 20743
     },
     {
       "path": "tests/test_pipeline.py",

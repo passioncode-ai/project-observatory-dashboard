@@ -55,7 +55,9 @@ _CACHE: list = [None, None]
 def parse_dscl(text: str, shells: str = "") -> set[int]:
     """`dscl . -list /Users UniqueID` (a name and a uid per line) and, optionally, `dscl . -list
     /Users UserShell`. People's accounts: every name not starting with `_` except root, daemon and
-    nobody, with a positive uid, whose shell (when listed) is not `false` or `nologin`."""
+    nobody, with a positive uid. The shell (when listed) excludes only hidden service accounts: a uid
+    below 501 whose shell is `false` or `nologin`. From 501 up every account counts whatever its shell,
+    because a desktop login does not use the login shell."""
     shell = {}
     for line in shells.splitlines():
         parts = line.split()
@@ -69,7 +71,7 @@ def parse_dscl(text: str, shells: str = "") -> set[int]:
         name, uid = parts[0], int(parts[-1])
         if uid <= 0 or name.startswith("_") or name in _MAC_SYSTEM_NAMES:
             continue
-        if any(shell.get(name, "").endswith(x) for x in _NO_LOGIN):
+        if uid < 501 and any(shell.get(name, "").endswith(x) for x in _NO_LOGIN):
             continue
         uids.add(uid)
     return uids
@@ -155,7 +157,9 @@ def _read() -> dict:
     try:
         if sys.platform == "darwin":
             search = _run(["/usr/bin/dscl", "/Search", "-read", "/", "CSPSearchPath"])
-            if search is not None and parse_search_path(search):
+            if search is None:
+                return {"count": None, "reason": "unreadable"}
+            if parse_search_path(search):
                 return {"count": None, "reason": "directory-bound"}
             listed = _run(["/usr/bin/dscl", ".", "-list", "/Users", "UniqueID"])
             if listed is None:
