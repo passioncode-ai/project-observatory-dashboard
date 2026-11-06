@@ -23,7 +23,8 @@ encrypted (OBS-350 part 1, #453), home-relative paths and another computer's pas
 doctor verdict (OBS-349 part 1, #445), `ops.digest.record` declared as manifest revision 10 (OBS-330, #447), the daily
 learning review (OBS-331 part a, #450), and an update announced with automatic updates off (OBS-333, #432).
 
-Next: tag `v0.34.0`, verify and install (receipts in the record), then tell Fabric, Fabric Dashboards and Workspace.
+Released: tag `v0.34.0` on `fa4c39ec`, verified, installed and announced (receipts in the record). Next: the next row
+after the shared source of truth.
 
 [2026-11-05: release 0.33.1](runs/2026-11-05-release-0.33.1/README.md): engine 0.33.1, a patch whose wheel carries the
 analytics App-Key (OBS-329), so the anonymous data 0.33.0 turned on is sent.

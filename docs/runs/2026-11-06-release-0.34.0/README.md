@@ -47,8 +47,30 @@ check passed. `docs/COMPATIBILITY.md` sections that read "the release after 0.33
 - The operator issues the digest binding for each product that sends digests over stdio:
   `project-observatory full access-binding issue service:fabric --project project:SLUG --scope ops.digest.record --effect propose --days 365 --token-file PATH`.
 
+## Receipts
+
+- Release PR #454 merged as `fa4c39ec`. Its `check.yml` run on main (`42266308925`) first failed on Windows with three
+  TIMEOUTs the known list does not admit (`docs_current`, `export_scope`, `filesystem_scan`) and passed on a rerun of
+  the Windows job. Tag `v0.34.0` (annotated, object `46af1e6f`) on `fa4c39ec`.
+- Release run `42279745113`: the guard refused the first attempt because the `check.yml` run the tag started
+  (`42279744699`) failed on Windows with a `harness` TIMEOUT; after a rerun of that Windows job passed, a rerun of
+  the release passed every job (guard, wheel, manifest, Linux x64 and arm64, Windows x64 and arm64, macOS, feed,
+  publish). Published 2026-11-06T21:21:34Z, 19 assets. The four Windows TIMEOUTs are filed as a row (known list or
+  budgets, OBS-278).
+- Verified after publishing: `shasum -a 256 -c` OK on `project_observatory-0.34.0-py3-none-any.whl`;
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature from the PassionCode.ai releases key; `gh attestation verify`
+  on the wheel with `--signer-repo passioncode-ai/.github`: exit 0; the wheel carries `analytics-app-key`.
+- Installed on the operator's Mac with `project-observatory full update --version 0.34.0 --apply`; `full doctor` reports
+  0.34.0 and the service `project-observatory.default` answers 0.34.0 on its well-known document. Doctor's verdict:
+  `clean: false` with two warnings, `machine-backup-not-carried` and `backups-vault-store-not-carried` (the external
+  vault is named and no snapshot has carried it yet; the next snapshot with a passphrase does). `loopback`: one person's
+  account on this host, so the peer check is `auto` and inactive.
+- Told: Fabric (board thread `f7758225`, message `dd2b63da`), Fabric Dashboards (thread `5d2a61f1`, `661bd511`),
+  Workspace with the runbook steps 2.3 to 2.6 (thread `0159c474`, `6e83433c`).
+
 ## State now
 
-- Open: the release PR, then the tag `v0.34.0`, its run, verification and the local install.
-- Waits: none beyond the release run (watched by this session).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here.
+- Done: 0.34.0 released, verified, installed and announced.
+- Open: OBS-350 part 2 (the restore side), OBS-355 part 2 (after the contract tag with DEC-0154), the Windows TIMEOUT row.
+- Waits: none for this release.
+- Next task: the next row after the shared source of truth (the operator's reconciliation pause).
