@@ -1009,14 +1009,27 @@ def _settings_stores(base: Path, doc: dict) -> tuple[Path, list[dict]]:
     return effective, stores
 
 
-def _env_override(effective: Path) -> list[str]:
-    """The environment names that move the vault away from the folder the settings name."""
-    moved = []
-    for name, expected in ((SECRETS_ENV, effective), (VAULT_DIR_ENV, effective / "projects")):
-        value = os.environ.get(name)
-        if value and Path(value).expanduser().resolve() != expected:
-            moved.append(name)
-    return moved
+def _env_override(effective: Path, doc: dict) -> tuple[list[str], Path | None]:
+    """(the environment names that move the vault away from the folder the settings name, the store
+    root the environment chose when it chose one).
+
+    The vault's precedence (`paths.SECRETS`, `tools/vault.py` STORE): the slots live in
+    `OBSERVATORY_VAULT_DIR`, else `<root>/projects`; the root is `sources.secret_store`, else
+    `OBSERVATORY_SECRETS`, else `sources.secrets`, else `<home>/secrets`. So `OBSERVATORY_SECRETS`
+    moves nothing while `sources.secret_store` is set, and either variable moves the vault only when it
+    names another folder than the one the settings choose (the one a snapshot can carry)."""
+    sources = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+    moved, root = [], None
+    value = os.environ.get(SECRETS_ENV)
+    if value and not sources.get("secret_store"):
+        chosen = Path(value).expanduser().resolve()
+        if chosen != effective:
+            moved.append(SECRETS_ENV)
+            root = chosen
+    value = os.environ.get(VAULT_DIR_ENV)
+    if value and Path(value).expanduser().resolve() != effective / "projects":
+        moved.append(VAULT_DIR_ENV)
+    return moved, root
 
 
 def _last_carry(base: Path) -> dict | None:
@@ -1054,7 +1067,7 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
     except config.ConfigurationError:
         doc = {}
     effective, stores = _settings_stores(base, doc)
-    moved = _env_override(effective)
+    moved, env_root = _env_override(effective, doc)
     items: list[dict] = []
 
     def warn(code: str, text: str, step: str | None, **params) -> None:
@@ -1067,6 +1080,11 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
              "only the folder the settings name is carried",
              "project-observatory full configure sources secret_store PATH", names=names)
     if not stores:
+        if env_root is not None and not _within(env_root, base.resolve()):
+            # No setting names a store outside the workspace, but the environment does: the vault's keys
+            # live there and no snapshot carries them. The env-override row above says what to do.
+            return {"external": True, "path": _display(env_root), "settings_keys": [], "environment": SECRETS_ENV,
+                    "exists": env_root.is_dir(), "env_override": True, "last_carry": _last_carry(base)}, items
         return {"external": False}, items
     # One store is the answer's subject: the tools read the first candidate, so it is the one
     # whose keys another machine needs.

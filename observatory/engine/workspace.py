@@ -555,7 +555,10 @@ def doctor(base: Path) -> dict:
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
                if (doc.get("features") or {}).get("agent") is True else {})}
-    # OBS-349: one verdict over the sections above, so "doctor is clean" is a value, not a reading.
+    # OBS-349: one verdict over the maintenance items (which join the backups' and the machine
+    # bundle's), the missing sources and the tick, so "doctor is clean" is a value, not a reading.
+    # It does not cover the other sections yet (organizations, meter, session_servers, analytics,
+    # review, embedding and vector state): those keep their own fields.
     report.update(verdict(report))
     return report
 
@@ -564,6 +567,10 @@ def doctor(base: Path) -> dict:
 #: release announced, automatic updates or the schedule turned off on purpose, an update waiting
 #: for a quiet moment. A deliberate setting must not keep doctor from ever reading clean.
 INFO_CODES = frozenset({"update-available", "auto-off", "deferred", "schedule-off"})
+#: Tick verdicts (tick_health, PB-132) that say no tick finished as it should: the scheduler is
+#: on, and a dead or stuck tick is the gap a person most often misses. `never` (no tick yet on a
+#: fresh install), `disabled`, `running` and `ok` are not gaps.
+TICK_WARNINGS = frozenset({"interrupted", "stale", "running-long"})
 
 
 def verdict(report: dict) -> dict:
@@ -573,8 +580,9 @@ def verdict(report: dict) -> dict:
     The maintenance items already join the backups' and the machine bundle's (maintenance.status),
     so they are the source; each is credited to the section that raised it, and a code is taken
     once, from its first row. Each missing source is its own `source-missing` row (one per source:
-    two switches needing one folder have one fix). Doctor stays a report: its exit code does not
-    follow the verdict."""
+    two switches needing one folder have one fix). A dead, interrupted or stuck tick is a `tick-<verdict>`
+    row. Other sections (organizations, meter, session servers, analytics, review) are not read yet.
+    Doctor stays a report: its exit code does not follow the verdict."""
     areas: dict = {}
     for area in ("backups", "machine_backup"):
         for item in (report.get(area) or {}).get("warning_items") or []:
@@ -596,6 +604,12 @@ def verdict(report: dict) -> dict:
         source = str(row.get("source") or "")
         add(("source-missing", source), "sources", "source-missing", f"{source}: {row.get('problem')}",
             row.get("fix"))
+    tick = report.get("tick") if isinstance(report.get("tick"), dict) else {}
+    if tick.get("verdict") in TICK_WARNINGS:
+        code = f"tick-{tick['verdict']}"
+        # No single command fixes every cause (a scheduler not loaded, a ceiling, a sleep), so the
+        # row carries the tick's own reason and no step.
+        add(code, "tick", code, f"the scheduled tick is {tick['verdict']}: {tick.get('why') or ''}".rstrip(": "), None)
     return {"attention": attention, "clean": not any(row["severity"] == "warning" for row in attention)}
 
 

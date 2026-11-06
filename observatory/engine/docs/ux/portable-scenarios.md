@@ -1073,7 +1073,9 @@ Trigger: "is my Observatory clean?", or the move runbook's proof step "`full doc
 
 Funnel: `full doctor` ends with `attention` (each row: area, code, severity, sentence, step) and `clean`. A row is a
 `warning` unless it is news or a choice the person made (`update-available`, `auto-off`, `deferred`,
-`schedule-off`, decision WA-5), so a deliberate setting never keeps doctor from reading clean. A secret store the
+`schedule-off`, decision WA-5), so a deliberate setting never keeps doctor from reading clean; a dead, interrupted
+or stuck tick is a warning. The verdict does not read the organizations, meter, session servers, analytics or review
+sections yet; they keep their own fields. A secret store the
 settings name outside the workspace is named under `backups.secret_store`, with a warning when no recent encrypted
 snapshot carried it, when the folder is missing here, or when the environment points the vault elsewhere; the
 same rows appear on Health under "maintenance", in the reader's language, with the step as a command. An agent
@@ -1088,11 +1090,15 @@ agent runs `full machine-move status --json`.
 Acceptance: doctor exits 0 whatever the verdict; every existing doctor key and backup sentence is unchanged; the move
 section writes nothing and makes no machine id.
 Coverage: `tests/test_workspace.py` (`test_doctor_attention_unions_maintenance_items_and_coverage_by_code`,
-`test_doctor_attention_takes_each_code_once_from_its_first_area`, `test_doctor_is_clean_with_only_info_items`);
+`test_doctor_attention_takes_each_code_once_from_its_first_area`, `test_doctor_is_clean_with_only_info_items`,
+`test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not`);
 `tests/test_backup_vault.py` Doctor (`test_an_external_store_not_carried_is_a_coded_warning`,
 `test_without_a_carrier_the_step_says_the_store_is_copied_by_hand`, `test_a_carried_store_is_not`,
 `test_a_missing_configured_store_is_named_with_its_configure_step`, `test_nested_settings_name_the_outer_store_once`,
-`test_existing_backup_warnings_keep_their_text_and_gain_codes`, `test_the_environment_override_is_named`);
+`test_existing_backup_warnings_keep_their_text_and_gain_codes`, `test_the_environment_override_is_named`,
+`test_observatory_secrets_moves_nothing_while_secret_store_is_set`,
+`test_observatory_secrets_moves_the_vault_when_only_secrets_is_set`, `test_a_vault_dir_elsewhere_is_named`,
+`test_a_store_only_the_environment_names_is_reported_as_external`);
 `tests/test_machine_backup.py` Schedule `test_maintenance_status_joins_backup_items`; `tests/test_mcp_wire.py`
 (the move section is the CLI's checklist and writes nothing); `tests/test_dashboard_render.py`
 `test_the_health_page_names_versions_kinds_and_dollars` (the secret store row in Russian). Status: built (OBS-349

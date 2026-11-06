@@ -180,12 +180,17 @@ folders under the projects root and `config/folder_exclusions.json` as declared 
 `registry/environments.json`. Its name is never read as a hint.
 
 **One verdict** (OBS-349). `full doctor` ends with `attention` and `clean`. Each `attention` row names its
-`area` (`backups`, `machine_backup`, `maintenance` or `sources`), its `code`, a `severity`, the sentence and the
-`step` that fixes it (`null` when the fix is by hand); a code is listed once, and each missing source is its own
-`source-missing` row with the `configure sources` command. `clean` is true when no row is a `warning`: a release
+`area` (`backups`, `machine_backup`, `maintenance`, `sources` or `tick`), its `code`, a `severity`, the sentence and
+the `step` that fixes it (`null` when the fix is by hand); a code is listed once, each missing source is its own
+`source-missing` row with the `configure sources` command, and a tick that is `interrupted`, `stale` or
+`running-long` (below) is a `tick-<verdict>` row with the tick's own reason. `clean` is true when no row is a `warning`: a release
 announced (`update-available`), automatic updates or the schedule turned off on purpose (`auto-off`,
 `schedule-off`) and an update waiting for a quiet moment (`deferred`) are `info`, so a deliberate setting does not
-keep doctor from reading clean. Doctor is a report, not a gate: it exits 0 either way. To read the verdict alone:
+keep doctor from reading clean. `clean` does not cover the other sections yet: an expiring or removed
+organization certificate (`organizations`), a meter without an issuer (`meter`), refused session servers
+(`session_servers`), `analytics`, the review policy (`review`) and the embedding and vector state keep their own
+fields, so read those too before taking `clean` as the whole answer. Doctor is a report, not a gate: it exits 0
+either way. To read the verdict alone:
 
 ```sh
 project-observatory full doctor | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["clean"], [a["code"] for a in d["attention"]])'
@@ -2228,11 +2233,13 @@ warnings follow from it:
 |---|---|---|
 | `backups-vault-store-not-carried` | the store exists and no snapshot carried it, the last one did not (its reason), or the last carry is more than 48 hours old | `full workspace-backup --writers-stopped`, or `full backup-passphrase set` when the reason is `no-passphrase`; a release whose snapshots do not carry the store names a copy by hand instead |
 | `backups-secret-store-missing` | the folder the settings name does not exist on this machine | `full configure sources secret_store PATH` (or `secrets`, the setting that names it) |
-| `backups-secret-store-env-override` | `OBSERVATORY_VAULT_DIR` or `OBSERVATORY_SECRETS` points the vault away from the folder the settings name | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
+| `backups-secret-store-env-override` | the environment moves the vault away from the folder the settings choose: `OBSERVATORY_VAULT_DIR` names another slot folder than `<store>/projects`, or `OBSERVATORY_SECRETS` names another folder while `sources.secret_store` is unset (with it set, `OBSERVATORY_SECRETS` moves nothing) | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
 
 This release reads the carry record and writes none: until a release that carries the store, an external store
 reads `backups-vault-store-not-carried` with the reason "no snapshot has carried it yet" and the step to copy it to
-the other machine yourself. A store inside the workspace reads `{"external": false}` and is carried with it. These
+the other machine yourself. A store inside the workspace reads `{"external": false}` and is carried with it. With no
+setting naming a store and `OBSERVATORY_SECRETS` pointing outside the workspace, the section reports that folder
+as external, with `settings_keys: []` and `environment: "OBSERVATORY_SECRETS"`, and only the env-override row. These
 codes, except the two a maintenance row already says (no passphrase, unencrypted local copies), join `full maintain
 status` and the Health page's maintenance rows, and so doctor's `attention`.
 

@@ -372,10 +372,11 @@ without one, nothing changes. That gate guards a cooperating run; containment st
 ## Doctor: one verdict and the secret store (OBS-349, the release after 0.33.1)
 
 Additive, with no migration. `full doctor` gains `attention` (rows `{area, code, severity, text, step}`, area
-`backups`, `machine_backup`, `maintenance` or `sources`) and `clean` (no row is a `warning`; `update-available`,
-`auto-off`, `deferred` and `schedule-off` are `info`). Its exit code is unchanged. `backups` (also `full backups
+`backups`, `machine_backup`, `maintenance`, `sources` or `tick`) and `clean` (no row is a `warning`;
+`update-available`, `auto-off`, `deferred` and `schedule-off` are `info`; a `tick` verdict of `interrupted`, `stale`
+or `running-long` is a `tick-<verdict>` warning; the other sections are not read by the verdict yet). Its exit code is unchanged. `backups` (also `full backups
 status`) gains `secret_store` (`{"external": false}`, or `external`, `path` in its home-relative form,
-`settings_keys`, `exists`, `env_override`, `last_carry`) and `warning_items`, one per sentence of `warnings`, in the
+`settings_keys`, `exists`, `env_override`, `last_carry`, and `environment` when only `OBSERVATORY_SECRETS` names it) and `warning_items`, one per sentence of `warnings`, in the
 same order and with the same text: `backups-root-unusable`, `backups-passphrase-unreadable`, `backups-no-passphrase`,
 `backups-root-inside-workspace`, `backups-failed-update-copy`, `backups-unencrypted-local`, then
 `backups-secret-store-env-override`, `backups-secret-store-missing` and `backups-vault-store-not-carried`, which are

@@ -163,6 +163,19 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(verdict['clean'])
         self.assertTrue(workspace.verdict({})['clean'], 'nothing to say is clean')
 
+    def test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        for verdict in ('interrupted', 'stale', 'running-long'):
+            out = workspace.verdict({'tick': {'verdict': verdict, 'why': 'synthetic reason'}})
+            self.assertFalse(out['clean'], verdict)
+            row = out['attention'][0]
+            self.assertEqual((row['area'], row['code'], row['severity']), ('tick', f'tick-{verdict}', 'warning'))
+            self.assertIn('synthetic reason', row['text'])
+        for verdict in ('never', 'disabled', 'running', 'ok'):
+            self.assertTrue(workspace.verdict({'tick': {'verdict': verdict}})['clean'], verdict)
+
     def configure_projects(self):
         projects = self.base / 'projects'
         projects.mkdir(exist_ok=True)
