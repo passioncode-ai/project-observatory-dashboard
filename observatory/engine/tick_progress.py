@@ -25,7 +25,7 @@ STAGES = frozenset("""integrity scan-fs scan-gh scan-vault scan-sessions remotes
     domains backup-due backup heroku openrouter env scan-cloudflare scan-digitalocean scan-cloudflare-account scan-mcp scan-harness
     scan-spend remote-env google leaks scrub-companion machine scan-agents git-hygiene lifecycle cleanup
     merge emit validate events snapshot diff fabric-attribution index retention sweep corroborate review-policy ledger lost plugins
-    rollup agent findings dashboard smoke findings-recheck notify registry project-into-vault
+    rollup learning-review-due learning-review agent findings dashboard smoke findings-recheck notify registry project-into-vault
     projection links logs unknown""".split())
 #: `not_due` is a probe's "no" (`Tick.probe`, exit NOT_DUE_EXIT): an answer, not a failure.
 NOT_DUE_EXIT = 3

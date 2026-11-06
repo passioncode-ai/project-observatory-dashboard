@@ -454,6 +454,23 @@ store); this release writes no such file, and a file that does not read is `{"st
 `observatory_machine` accepts `section: "move"`, the `machine-move status` checklist under `move`; an older server
 refuses the value through its schema, and `full machine-move status --json` answers the same.
 
+## Workspace state: the daily learning review (OBS-331 part a, the release after 0.33.1)
+
+Additive. A new command, `project-observatory full learning-review show|list|run`, and two new tick entries after
+`rollup`: the probe `learning-review-due` and the step `learning-review` (both optional, never among the steps that
+must finish). New workspace state under `<state>/learning-review/`: `state.json` (`observatory-learning-review-state/1`,
+the last report written and the newest 30 runs, codes and counts only), `.lock`, and one report per UTC day,
+`<YYYY-MM>/<YYYY-MM-DD>.json` (`observatory-learning-review/1`) with its page `<YYYY-MM-DD>.html`, and a revision
+`run --again` replaced kept beside it as `<YYYY-MM-DD>.r<n>.json`, and a report file that no longer read moved aside as
+`<YYYY-MM-DD>.damaged-<n>.json`; folders and files owner-only, reports older than 400 days pruned. A new optional settings section, `learning_review` with `settle_hour_utc` (a whole hour from 0 to 23, 6
+when absent), set with `full configure learning_review settle_hour_utc`: an older engine never reads it, and this one
+refuses another key or value in it, as it does in `updates`. `ops_digest_store.first_lines` also answers the first
+revision's `receivedAt`, and `first_lines_of(project, month)` reads one month. `tools/corroborate.py`
+`corroborate_lessons` takes three optional keyword arguments (`keys`, `deadline`, `revalidate`); without them it behaves
+as before. No MCP tool, finding type, Health or doctor key changes in this part; the review writes no ledger row itself
+(the corroborator it runs may write promotions, never revalidation archives); nothing migrates and no SQLite table is
+added. An older engine ignores the folder.
+
 ## Service: the connections declaration (OBS-326, the release after 0.33.0)
 
 The always-on server's `/.well-known/fabric-service` gains, under `extensions`, the key
