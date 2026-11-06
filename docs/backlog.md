@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-382`
+**Next free ID:** `OBS-383`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91)
 
@@ -407,3 +407,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-379 | Gap G6: export lessons (the ledger's `lesson` records with their corroboration) as one store of record that fabric-workspace promotes into rules weekly, so failure classes stop living in five stores. Design by 2026-11-13 with fabric-workspace; code after the shared source of truth. | open | the organization's North Star, gap table (fabric-workspace `knowledge/north-star.md` at `adfade60`, board thread `eefa7959`, message `4a65469b`) |
 | OBS-380 | Gap G11: one decision each, with Fabric and Vesta, on the records two products keep for the same thing: the grant registry (Observatory or the hub), agent learning (Fabric or Observatory), the memory boundary, and who signs the organization record; amend the record that loses. Proposal by 2026-11-13 (Vesta's VES-ORG-SYSTEM-MODEL register). | open | the organization's North Star, gap table (fabric-workspace `knowledge/north-star.md` at `adfade60`, board thread `eefa7959`, message `4a65469b`) |
 | OBS-381 | Gap G15: a written and rehearsed «machine lost» procedure for the vault and the workspace: restore the encrypted snapshot with its external secret store on another computer (OBS-350 part 2), rotate what the lost machine held, and time the drill; then one procedure per service vault with each owner. Procedure by 2026-11-13, first drill after OBS-350 part 2. | open | the organization's North Star, gap table (fabric-workspace `knowledge/north-star.md` at `adfade60`, board thread `eefa7959`, message `4a65469b`) |
+| OBS-382 | Windows suites that time out on a slow runner stop a release: on 2026-11-06 `docs_current` (the known list records only FAIL), `export_scope` and `filesystem_scan` (not listed) timed out on main at `fa4c39ec`, then `harness` (only FAIL listed) on the tag's own `check.yml` run, and the release guard refused v0.34.0 until two reruns passed. Either record TIMEOUT for these suites in `tools/windows-known.json` or give them a measured budget on Windows, so a timeout that is not a new failure no longer needs a rerun. | open | the release record `docs/runs/2026-11-06-release-0.34.0/README.md`, runs `42266308925` and `42279744699` |
