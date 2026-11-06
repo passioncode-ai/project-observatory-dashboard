@@ -642,11 +642,20 @@ def read_passphrase_stdin(stream=None) -> str:
     terminal on stdin is refused: there the prompt is the route, and it never echoes what is
     typed, where a value typed into a shell's stdin is echoed. The value is never logged."""
     stream = sys.stdin if stream is None else stream
+    if stream is None:   # no standard input at all (a detached process, pythonw on Windows)
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin found no standard input to read; redirect "
+                          "the passphrase file into the command (`... --passphrase-stdin < FILE`)",
+                          code="passphrase-stdin-empty")
     if osprivacy.is_terminal(stream):
         raise BackupError("passphrase-stdin-terminal: --passphrase-stdin reads a file or a pipe, not a terminal; "
                           "run the command without it to be asked once (nothing typed is shown)",
                           code="passphrase-stdin-terminal")
-    raw = getattr(stream, "buffer", stream).read(STDIN_LIMIT + 3)
+    try:
+        raw = getattr(stream, "buffer", stream).read(STDIN_LIMIT + 3)
+    except (AttributeError, OSError, ValueError):   # closed, or not readable
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin could not read standard input; redirect "
+                          "the passphrase file into the command (`... --passphrase-stdin < FILE`)",
+                          code="passphrase-stdin-empty") from None
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
     raw = raw or b""
@@ -1170,8 +1179,13 @@ def status(base: Path) -> dict:
         configured, warnings = False, [str(exc)]
     root = info["path"]
     if not configured:
+        # `maintain ensure` first: it makes this machine's own and keeps it outside the workspace too,
+        # which is what a workspace restored from another machine needs (it left that one's behind,
+        # OBS-348) and what a fresh install would get from its first maintenance pass.
         warnings.append("no backup passphrase: copies stay inside the workspace, unencrypted, on this "
-                        "disk only; run `project-observatory full backup-passphrase set`")
+                        "disk only; run `project-observatory full maintain ensure` to make this machine's own "
+                        "(also kept outside the workspace), or choose one with "
+                        "`project-observatory full backup-passphrase set`")
     if configured and info["inside_workspace"]:
         # Encryption protects a copy that leaves this disk; a root inside the
         # workspace never leaves it. The fallback root (<home>/backups, chosen when

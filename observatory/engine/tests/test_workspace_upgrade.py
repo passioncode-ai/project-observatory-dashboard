@@ -632,6 +632,16 @@ class WorkspaceUpgrade(unittest.TestCase):
             result=upgrade.restore(source,dest)
         self.assertFalse((dest/'secrets/backup-passphrase').exists())
         self.assertIn('secrets/backup-passphrase',result['machine']['left_out'])
+        # Until this machine makes its own, every snapshot stays unencrypted: the answer names the step.
+        self.assertTrue(any(step.startswith('project-observatory full maintain ensure ')
+                            for step in result['machine']['next']),result['machine']['next'])
+        # The first machine's passphrase no longer travels: a fixed sentence says to keep it, never a value.
+        self.assertEqual(result['machine']['notes'],[upgrade.OTHER_PASSPHRASE_NOTE])
+        self.assertNotIn('a synthetic passphrase of the first machine',json.dumps(result))
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUPS':str(self.base/'roots')}):
+            report=backup_vault.status(dest)
+        self.assertEqual((report['encrypted'],report['passphrase']),(False,'missing'))
+        self.assertIn('project-observatory full maintain ensure',' '.join(report['warnings']))
         self.assertEqual((dest/'secrets/demo-slot').read_text(),'synthetic opaque private value','the vault moves')
         same=self.base/'same machine'
         upgrade.restore(source,same)
@@ -795,6 +805,42 @@ class HomeRelativeSources(unittest.TestCase):
         self.assertIsNone(rewrite('/srv/people/anna/src','/srv/people/ann'))
         self.assertIsNone(rewrite('~/src','/srv/people/ann'),'already home-relative')
         self.assertIsNone(rewrite('/anything','/'),'a root is no home')
+        # Normalised lexically first: a value that leaves the old home through `..` is outside it.
+        self.assertIsNone(rewrite('/srv/people/ann/../bob/x','/srv/people/ann'))
+        self.assertIsNone(rewrite('/srv/people/ann/..','/srv/people/ann'))
+        self.assertEqual(rewrite('/srv/people/ann/src/../x','/srv/people/ann'),'~/x')
+        self.assertIsNone(rewrite('C:\\Users\\ann\\..\\bob','C:\\Users\\ann'))
+        self.assertEqual(rewrite('/srv/linked/ann/x','/srv/people/ann','/srv/linked/ann'),'~/x','either form of the home')
+
+    @unittest.skipIf(os.name=='nt','a home behind a symbolic link is a POSIX layout')
+    def test_a_home_behind_a_link_matches_the_resolved_paths_tracked_json_keeps(self):
+        real_ann,real_bob=self.base/'real'/'ann',self.base/'real'/'bob'
+        for home in (real_ann,real_bob):
+            home.mkdir(parents=True)
+        (self.base/'Users').mkdir()
+        ann,bob=self.base/'Users'/'ann',self.base/'Users'/'bob'
+        ann.symlink_to(real_ann,target_is_directory=True)
+        bob.symlink_to(real_bob,target_is_directory=True)
+        self.settings({'projects':str(ann/'code')})
+        # `full track local-folder` writes resolved paths (`tracked.canonical`).
+        workspace.write_json(self.home/'config/tracked.json',
+                             {'schema_version':1,'local_folders':[{'path':str(real_ann/'src/alpha')},
+                                                                   {'path':str(self.base/'elsewhere/beta')}],
+                              'dismissed_local_folders':[]})
+        source=self.snapshot_as(ann)
+        manifest=config.read_json(source/'manifest.json')
+        self.assertEqual((manifest['home_path'],manifest['home_path_resolved']),(str(ann),str(real_ann)))
+        (real_bob/'src/alpha').mkdir(parents=True)
+        (real_bob/'code').mkdir()
+        result=self.restore_as(bob,source,self.base/'restored')
+        tracked=config.read_json(self.base/'restored/config/tracked.json')
+        self.assertEqual([r['path'] for r in tracked['local_folders']],
+                         [str(real_bob/'src/alpha'),str(self.base/'elsewhere/beta')],
+                         'written in tracked.json\'s canonical form, under the new home')
+        self.assertEqual(config.read_json(self.base/'restored/config/settings.json')['sources']['projects'],'~/code')
+        self.assertEqual([(r['setting'],r['value'],r['fix']) for r in result['paths']['unresolved']],
+                         [('local_folders[1].path',str(self.base/'elsewhere/beta'),
+                           'project-observatory full track local-folder PATH')])
 
 if __name__=='__main__':
     unittest.main()

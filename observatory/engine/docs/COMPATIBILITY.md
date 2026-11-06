@@ -335,9 +335,9 @@ key and stages its jobs, and a snapshot leaves out `node/device/`, `node/orgs/`,
 `<home>/store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
 `--same-machine` at a terminal restores either whole, as before. An update's own rollback restores its snapshot whole.
 From the release after 0.33.1 (OBS-348) a second-machine restore also leaves out `secrets/backup-passphrase`: each
-machine keeps its own backup passphrase, and the second machine makes its own at its next `full init` in a terminal
-or maintenance pass. This is a behaviour change for second-machine restores only; a same-machine restore keeps the
-file.
+machine keeps its own backup passphrase, and the second machine makes its own with `full maintain ensure`, which the
+answer's `machine.next` names, beside `machine.notes` (keep the other machine's passphrase off both machines if it
+may be retired). This is a behaviour change for second-machine restores only; a same-machine restore keeps the file.
 
 These files live outside the workspace, in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/` on every
 platform, so neither a machine bundle nor a workspace snapshot carries them:
@@ -360,10 +360,13 @@ the backups root exist (`configuration.load`). A path outside the home is stored
 is never migrated. The `configure` answer gains `stored_as` (`home-relative` or `absolute`), and `doctor` gains `form`
 for each configured source and, when `storage.backups` is set, under `backups`.
 
-A restore whose snapshot names another home than this one rewrites, in the restored copy before it is checked, every
+The manifest also gains `home_path_resolved` (the same home with its links resolved), because `config/tracked.json`
+keeps resolved paths; both forms are matched, and a value is normalised lexically first, so one that leaves the home
+through `..` is outside it. A restore whose snapshot names another home than this one rewrites, in the restored copy before it is checked, every
 `sources.*` and `storage.backups` value and every `include` and `roots` entry of `config/machine-backup.json` that is
 that home or under it to `~/<rel>`, and every `path` of `config/tracked.json` (`local_folders` and
-`dismissed_local_folders`) to the same place under this home, still absolute. Paths are compared part by part, as
+`dismissed_local_folders`) to the same place under this home, absolute and resolved as `full track` writes it; a
+declared folder that does not exist afterwards is named in `unresolved` with `full track local-folder PATH`. Paths are compared part by part, as
 Windows parts when the recorded home is a Windows path. A value outside the recorded home is kept; a snapshot without
 `home_path` (an older engine's) rewrites nothing. A file is written only when something in it changed, so a same-home
 restore is byte for byte as before. The restore answer gains `paths` (`home_from`, `home_to`, `rewritten[]` of

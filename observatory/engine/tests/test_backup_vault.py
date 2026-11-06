@@ -672,6 +672,13 @@ class ForeignPassphrase(Base):
         with self.assertRaises(vault.BackupError) as caught:
             read(Typed(io.BytesIO(b'typed\n'), encoding='utf-8'))
         self.assertEqual(caught.exception.code, 'passphrase-stdin-terminal')
+        closed = stdin_of(b'never read\n')
+        closed.close()
+        for stream in (None, closed):   # no standard input at all, or one already closed: a typed refusal
+            with self.subTest(stream=stream), patch.object(sys, 'stdin', None), \
+                    self.assertRaises(vault.BackupError) as caught:
+                read(stream)
+            self.assertEqual(caught.exception.code, 'passphrase-stdin-empty')
         # From the command line: refused before any write, exit 2, the code named.
         dest = self.base / 'never made'
         err = io.StringIO()

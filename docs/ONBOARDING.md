@@ -2287,9 +2287,12 @@ Without such access, the person at the second machine types it once at the promp
 was taken under (`home_path` in its manifest). Restored under another home, every source and the
 backups root (`config/settings.json`) and every `include` and `roots` entry of
 `config/machine-backup.json` that named the old home become `~/...`, and each folder declared in
-`config/tracked.json` moves to the same place under the new home, still absolute. A value outside
-the old home is kept as given; `/Users/ann` never matches `/Users/anna`. The answer's `paths`
-block lists what was rewritten and, in `unresolved`, every source or backups root that does not
+`config/tracked.json` moves to the same place under the new home, still absolute and resolved, as
+`full track` writes it. A home behind a symbolic link is matched as recorded and resolved. A value
+outside the old home is kept as given; `/Users/ann` never matches `/Users/anna`, and a value that
+leaves the home through `..` is outside it. The answer's `paths`
+block lists what was rewritten and, in `unresolved`, every declared folder (with
+`full track local-folder PATH`), source or backups root that does not
 exist afterwards (`reason: missing-after-restore`) with the exact `configure` step that points it
 elsewhere; a declaration file that cannot be read is named there too and left as it is. A missing
 source is not a refusal: the restore completes and `doctor`'s `coverage_warnings` keeps naming it.
@@ -2458,9 +2461,15 @@ of that:
   they share it again to the second machine if it needs it; the shares you sent are renewed and
   revoked from the machine that made them), `config/cloud.json` (the second machine deploys its
   own mailbox with `full cloud deploy` if it sends shares), `<home>/store/maintenance.json` and
-  `secrets/backup-passphrase` (OBS-348: each machine keeps its own backup passphrase; the next
-  `full init` in a terminal, or the maintenance pass, makes the second machine's own, and `doctor`
-  shows `passphrase: missing` until then; a same-machine restore keeps the snapshot's). It
+  `secrets/backup-passphrase` (OBS-348: each machine keeps its own backup passphrase; a
+  same-machine restore keeps the snapshot's). Until the second machine makes its own, every
+  snapshot it takes, `secrets/` included, stays unencrypted inside the workspace: run
+  `project-observatory full maintain ensure`, which the restore's `next` names (a `full init` at a
+  terminal does it too; one run over SSH without a terminal does not). Until then `doctor` shows
+  `backups.encrypted: false`, `backups.passphrase: missing` and a warning that names the same step.
+  The first machine's passphrase does not travel either, so its backups, the snapshot just
+  restored included, open only with it: if that machine may be retired, keep its passphrase
+  somewhere off both machines now (the restore answer's `machine.notes` says so). It
   turns `features.scheduler` off, holds off every app enrolled `always_on` (the restore names the
   `full lifecycle policy` step that turns it back on, to run on one machine only) and gives the
   workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
