@@ -1878,13 +1878,25 @@ def status(base: Path, *, schedule=None) -> dict:
 # --- a reinstall restores ------------------------------------------------------------
 
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
-                   second_machine: bool | None = None, unknown: str = "second") -> dict:
+                   second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
+                   ask: bool = False) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
     not find its passphrase starts a second, empty workspace with its own daily backups),
     nothing is chosen: the answer lists them and `--label` picks one (audit A06). Within
-    one workspace the newest snapshot that opens is restored, falling back to older ones."""
+    one workspace the newest snapshot that opens is restored, falling back to older ones.
+
+    Each snapshot is opened with `backup_vault.open_with`: OBSERVATORY_BACKUP_PASSPHRASE,
+    `stdin_value` (`--passphrase-stdin`) and every passphrase the OS store keeps under the
+    folder's label. A backup copied from another machine sits under THAT machine's label,
+    which this store does not hold (OBS-348): with `ask` (`full restore --latest`, never
+    `init`) and a terminal, the person is asked once per label and that label's snapshots are
+    tried again with the answer. The value is used for this restore and kept nowhere.
+
+    Nothing found for this exact path: the answer is `no-backup`, plus `elsewhere` when the
+    same workspace left backups under another home (`backup_vault.elsewhere`, OBS-347), with
+    the explicit-file step; nothing is chosen."""
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
@@ -1894,7 +1906,15 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
         if not found:
             return {"status": "no-backup", "detail": f"no backups under the label {label!r}"}
     if not found:
-        return {"status": "no-backup", "detail": f"no backups of a workspace named {base.name!r} were found"}
+        out = {"status": "no-backup", "detail": f"no backups of a workspace named {base.name!r} were found"}
+        other = backup_vault.elsewhere(base)
+        if other:
+            snap = other[0]["newest"]
+            out.update({"elsewhere": other,
+                        "detail": out["detail"] + " at this path; the same workspace left backups under another "
+                                                  "home, listed in `elsewhere`, and none is chosen",
+                        "next": f"project-observatory full restore '{snap}'"})
+        return out
     labels: dict[str, dict] = {}
     for c in found:  # newest first, so the first one seen per label is its newest
         entry = labels.setdefault(c["label"], {"label": c["label"], "newest": str(c["snapshot"]),
@@ -1906,43 +1926,77 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
                 "next": "project-observatory full restore --latest --label LABEL"}
     # OBSERVATORY_SYSTEM_SETUP=0 keeps this process away from the Keychain (audit A25);
     # a store handed in by the caller is its own choice and is used.
-    env_secret = os.environ.get(backup_vault.PASS_ENV)
-    if store is None and os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0":
-        secrets_for = lambda _label: [env_secret] if env_secret else []  # noqa: E731
-    else:
-        store = store or backup_vault.SecretStore()
-        secrets_for = lambda lbl: ([env_secret] if env_secret else []) + backup_vault.stored_passphrases(store, lbl)  # noqa: E731
+    use_store = store if store is not None or os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" \
+        else backup_vault.SecretStore()
     problems: list[dict] = []
     tried_any = False
+
+    def attempt(candidate: dict, typed: str | None = None) -> dict | None:
+        """The restore of one snapshot, or None after recording why it did not happen."""
+        nonlocal tried_any
+        try:
+            if typed is None:
+                secret, _, source = backup_vault.open_with(
+                    candidate["snapshot"], base=None, label=candidate["label"] if use_store is not None else None,
+                    stdin_value=stdin_value, store=use_store, verify=False)
+            elif backup_vault.opens(candidate["snapshot"], typed):
+                secret, source = typed, "prompt"
+            else:
+                problems.append({"snapshot": candidate["snapshot"].name, "code": "passphrase-refused",
+                                 "detail": "the passphrase typed does not open it"})
+                return None
+        except backup_vault.BackupError as exc:
+            tried_any = tried_any or bool(getattr(exc, "tried", None))
+            problems.append({"snapshot": candidate["snapshot"].name, "code": exc.code or "unreadable",
+                             "detail": str(exc)[:200]})
+            return None
+        tried_any = True
+        try:
+            result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret, prompt=False,
+                                               same_machine=same_machine, second_machine=second_machine,
+                                               unknown=unknown)
+        except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
+            # A damaged copy or one that needs a newer release: try the next older backup (review F10).
+            problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
+            if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
+                return None
+            raise
+        result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"],
+                       "passphrase_source": source})
+        if problems:
+            result["skipped"] = problems
+        return result
+
     for candidate in found:
-        for secret in secrets_for(candidate["label"]):
-            tried_any = True
-            try:
-                result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret,
-                                                   same_machine=same_machine, second_machine=second_machine,
-                                                   unknown=unknown)
-            except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
-                # A wrong passphrase, a damaged copy or one that needs a newer release: try
-                # the next passphrase, then the next older backup (review F10).
-                problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
-                if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
-                    continue
-                raise
-            result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"]})
-            if problems:
-                result["skipped"] = problems
+        result = attempt(candidate)
+        if result is not None:
             return result
+    refused = {p["snapshot"] for p in problems if p.get("code") == "passphrase-refused"}
+    locked = [lbl for lbl in labels if any(c["snapshot"].name in refused for c in found if c["label"] == lbl)]
+    if ask and locked:
+        for lbl in locked:   # newest first; one question per label, never one per snapshot
+            typed = backup_vault.ask(lbl)
+            if not typed:
+                continue
+            for candidate in (c for c in found if c["label"] == lbl):
+                result = attempt(candidate, typed)
+                if result is not None:
+                    return result
     newest = found[0]
     # The command a person can run as given: an EMPTY home (a fresh `init` already made
-    # this one non-empty), and no passphrase on the command line — `restore` asks for it
-    # at a terminal (audit A05).
+    # this one non-empty), and no passphrase on the command line: `restore` asks for it
+    # at a terminal (audit A05), or reads it from a file on stdin (OBS-348).
     by_hand = f"project-observatory --home NEW_EMPTY_HOME full restore '{newest['snapshot']}'"
-    if tried_any and not all("authentication" in p["detail"] for p in problems):
+    by_stdin = f"project-observatory --home NEW_EMPTY_HOME full restore '{newest['snapshot']}' --passphrase-stdin < FILE"
+    if tried_any and not all(p.get("code") == "passphrase-refused" or "authentication" in p["detail"]
+                             for p in problems):
         return {"status": "restore-failed", "newest": str(newest["snapshot"]), "skipped": problems,
                 "next": "`project-observatory full init --fresh` starts empty; the backups are left as they are"}
     return {"status": "backups-found-locked", "newest": str(newest["snapshot"]),
-            "detail": "no passphrase that opens these backups was found in the OS credential store",
-            "next": by_hand + " (it asks for the passphrase)"}
+            "detail": "no passphrase that opens these backups was found in the OS credential store; a backup "
+                      "another machine took opens with that machine's passphrase",
+            "next": by_hand + " (it asks for the passphrase at a terminal); without a terminal, redirect the "
+                              "other machine's passphrase file: " + by_stdin}
 
 
 # --- CLI ------------------------------------------------------------------------------

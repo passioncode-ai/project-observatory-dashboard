@@ -23,7 +23,9 @@ authentication rather than decrypting to something shorter.
     root_info(base)          where backups go, and which setting chose it
     passphrase(base)         OBSERVATORY_BACKUP_PASSPHRASE, else secrets/backup-passphrase
     ensure_passphrase(base)  one by default, mirrored outside the workspace (SecretStore)
+    open_with(path, ...)     the first passphrase that opens an artifact, and where it came from
     candidates(base)         every backup set of a workspace at this path, newest first
+    elsewhere(base)          backup sets the same workspace left under another home
     encrypt_file / encrypt_tree / decrypt_to / extract_tree
     after_snapshot(...)      export a finished snapshot, or rotate it locally
     migrate(base)            move the newest legacy copies into the root
@@ -81,7 +83,16 @@ LEGACY_DB_PREFIX = "observatory.db.backup-"
 
 
 class BackupError(config.ConfigurationError):
-    """A backup could not be written, proven or read. Never carries a value."""
+    """A backup could not be written, proven or read. Never carries a value.
+
+    `code` names a refusal a caller or an agent acts on without parsing the text (OBS-348):
+    `passphrase-refused`, `passphrase-stdin-empty`, `passphrase-stdin-too-long`,
+    `passphrase-stdin-not-text`, `passphrase-stdin-terminal`; `authentication` marks a chunk that
+    did not open. None for every other failure."""
+
+    def __init__(self, message: str = "", code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 # --- where ---------------------------------------------------------------
@@ -168,6 +179,61 @@ def candidates(base: Path) -> list[dict]:
     return sorted(found, key=lambda c: c["stamp"], reverse=True)
 
 
+def _home_tail(base: Path) -> tuple[str, ...] | None:
+    """`base` relative to this account's home, as parts; None when it is not under the home."""
+    try:
+        rel = base.resolve().relative_to(Path.home().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return rel.parts or None
+
+
+def elsewhere(base: Path) -> list[dict]:
+    """Backup sets a workspace at the SAME place under ANOTHER home left (OBS-347).
+
+    `candidates` keeps its exact-path rule: a folder whose owner file names another path is
+    another workspace. Restored under another user name, though, the owner file names the
+    first machine's home (`<home of a>/...`) and this home is another (`<home of b>/...`), so `--latest` found
+    nothing while the backups were there. This lists, and never chooses, the folders of the
+    same name pattern whose owner path ends in the same home-relative tail as `base` (`<other
+    home>/<rel>` with this workspace's `<rel>`). Only that tail is shown: the other home is a
+    person's path, and the explicit-file restore (`full restore FILE`) needs no owner match."""
+    tail = _home_tail(base)
+    if tail is None:
+        return []
+    roots, seen, out = [], set(), []
+    try:
+        roots.append(root_info(base)["path"].parent)
+    except config.ConfigurationError:
+        pass
+    if sys.platform == "darwin":
+        roots.append(documents_dir() / "Project Observatory" / "Backups")
+    roots.append(data_dir() / "project-observatory-backups")
+    exact = re.compile(rf"{re.escape(base.name)}-(?:[0-9a-f]{{8}}|unknown)")
+    own = str(base.resolve())
+    for root in roots:
+        if root in seen or not root.is_dir():
+            continue
+        seen.add(root)
+        for folder in sorted(root.iterdir()):
+            owner = folder / OWNER_FILE
+            if not exact.fullmatch(folder.name) or not folder.is_dir() or folder.is_symlink() or not owner.is_file():
+                continue
+            try:
+                named = owner.read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                continue
+            parts = Path(named).parts
+            if named == own or len(parts) <= len(tail) or tuple(parts[-len(tail):]) != tail:
+                continue
+            snaps = sorted([f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
+                           key=lambda f: _artifact_stamp(f.name))
+            if snaps:
+                out.append({"label": folder.name, "owner_home_relative": "~/" + "/".join(tail),
+                            "newest": str(snaps[-1]), "snapshots": len(snaps)})
+    return sorted(out, key=lambda e: _artifact_stamp(Path(e["newest"]).name), reverse=True)
+
+
 def _artifact_stamp(name: str) -> str:
     """`<kind>-<YYYYmmddTHHMMSSZ>-…` → the stamp, so kinds sort together by time."""
     for part in name.split("-"):
@@ -187,6 +253,11 @@ def passphrase(base: Path | None = None) -> str | None:
     value = os.environ.get(PASS_ENV)
     if value:
         return value
+    return _file_passphrase(base)
+
+
+def _file_passphrase(base: Path | None = None) -> str | None:
+    """The workspace's own passphrase file, whatever the environment says."""
     file = passphrase_file(base)
     if file.is_symlink():
         raise BackupError("The backup passphrase file must not be a symbolic link")
@@ -560,6 +631,144 @@ def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
     return out
 
 
+#: The most `--passphrase-stdin` reads (OBS-348): a passphrase, never a file someone piped by mistake.
+STDIN_LIMIT = 4096
+
+
+def read_passphrase_stdin(stream=None) -> str:
+    """The value `--passphrase-stdin` hands over (OBS-348), read once before any other work.
+
+    At most STDIN_LIMIT bytes of UTF-8, one trailing newline (LF or CRLF) removed. A
+    terminal on stdin is refused: there the prompt is the route, and it never echoes what is
+    typed, where a value typed into a shell's stdin is echoed. The value is never logged."""
+    stream = sys.stdin if stream is None else stream
+    if osprivacy.is_terminal(stream):
+        raise BackupError("passphrase-stdin-terminal: --passphrase-stdin reads a file or a pipe, not a terminal; "
+                          "run the command without it to be asked once (nothing typed is shown)",
+                          code="passphrase-stdin-terminal")
+    raw = getattr(stream, "buffer", stream).read(STDIN_LIMIT + 3)
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    raw = raw or b""
+    if raw.endswith(b"\r\n"):
+        raw = raw[:-2]
+    elif raw.endswith(b"\n"):
+        raw = raw[:-1]
+    if len(raw) > STDIN_LIMIT:
+        raise BackupError(f"passphrase-stdin-too-long: --passphrase-stdin takes at most {STDIN_LIMIT} bytes",
+                          code="passphrase-stdin-too-long")
+    try:
+        value = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise BackupError("passphrase-stdin-not-text: --passphrase-stdin read bytes that are not UTF-8 text",
+                          code="passphrase-stdin-not-text") from None
+    if not value:
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin read nothing; redirect the passphrase "
+                          "file into the command (`... --passphrase-stdin < FILE`)", code="passphrase-stdin-empty")
+    return value
+
+
+def _first_chunk(path: Path, secret: str) -> dict | None:
+    """The header when `secret` opens the first chunk of `path`, else None.
+
+    One key derivation and one chunk: a wrong passphrase fails there, so trying several
+    candidates costs one chunk each instead of a whole-file pass each. A header that is not
+    ours, or a file cut short before its first chunk, is no passphrase's fault and raises."""
+    with path.open("rb") as stream:
+        reader = _Reader(stream, secret)
+        try:
+            reader._open_next()
+        except BackupError as exc:
+            if exc.code == "authentication":
+                return None
+            raise
+        return reader.header
+
+
+def opens(path: Path, secret: str) -> bool:
+    """Whether `secret` opens `path`'s first chunk (the cheap test before a full pass)."""
+    return _first_chunk(path, secret) is not None
+
+
+def _store_allowed() -> bool:
+    """OBSERVATORY_SYSTEM_SETUP=0 keeps a process away from the OS credential store (audit A25)."""
+    return os.environ.get("OBSERVATORY_SYSTEM_SETUP") != "0"
+
+
+def ask(label: str) -> str | None:
+    """One prompt at a terminal, naming the backups folder the passphrase is for; None elsewhere."""
+    if not osprivacy.is_terminal(sys.stdin):
+        return None
+    import getpass
+    return getpass.getpass(f"Backup passphrase for {label}: ") or None
+
+
+def open_with(path: Path, *, base: Path | None, label: str | None, given: str | None = None,
+              stdin_value: str | None = None, prompt: bool = False, store: "SecretStore | None" = None,
+              verify: bool = True) -> tuple[str, dict, str]:
+    """(secret, header, source) for the first candidate that opens `path` (OBS-348).
+
+    WHY. A restore used to try one passphrase: this workspace's, or the environment's. A backup
+    another machine took opens with THAT machine's passphrase, which this one does not hold, and
+    the only way in was to make it this machine's own (`backup-passphrase set`), overwriting the
+    passphrase every local backup opens with. Each machine keeps its own (decision D2); the
+    other's is handed over once and dropped.
+
+    Candidates, in order, each tried once, a value already tried skipped: `given` (a caller that
+    holds one), OBSERVATORY_BACKUP_PASSPHRASE, `stdin_value` (`--passphrase-stdin`), this
+    workspace's own file (`base`), the OS credential store under the artifact's folder `label`
+    (`stored`, then each earlier one, `stored-previous`), and last, only when `prompt` and stdin
+    is a terminal, one prompt naming the label. Each candidate costs one chunk (`opens`); the
+    winner is then authenticated in full once (`verify`; a caller that authenticates the whole
+    file itself, as `extract_tree` does, passes verify=False).
+
+    THE VALUE IS NEVER KEPT: it is returned to the caller for this one operation and written
+    nowhere, the store included (`SecretStore.put` is never called here). A refusal names the
+    sources tried, never a value."""
+    seen: set[str] = set()
+    tried: list[str] = []
+    name = label or path.parent.name
+
+    def candidates_in_order():
+        yield "given", given
+        yield "environment", os.environ.get(PASS_ENV)
+        yield "stdin", stdin_value
+        if base is not None and (base / "workspace.json").is_file():
+            try:
+                yield "this-workspace", _file_passphrase(base)
+            except BackupError:
+                pass
+        chosen = store if store is not None else (SecretStore() if label and _store_allowed() else None)
+        if label and chosen is not None:
+            for entry in (label, *_previous_labels(label)):
+                try:
+                    value = chosen.get(entry)
+                except (BackupError, OSError):
+                    value = None   # a locked or silent store contributes nothing
+                if value is None and entry != label:
+                    break
+                yield ("stored" if entry == label else "stored-previous"), value
+        if prompt:
+            yield "prompt", ask(name)
+
+    for source, value in candidates_in_order():
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        tried.append(source)
+        header = _first_chunk(path, value)
+        if header is None:
+            continue
+        return value, (verify_file(path, value) if verify else header), source
+    error = BackupError(
+        f"passphrase-refused: no passphrase opens {path.name} (backups folder {name}); tried: "
+        f"{', '.join(dict.fromkeys(tried)) or 'none'}. Hand the other machine's passphrase over once with "
+        f"--passphrase-stdin (`... --passphrase-stdin < FILE`), set {PASS_ENV}, or run the command at a "
+        "terminal to be asked; it is used for this restore and kept nowhere", code="passphrase-refused")
+    error.tried = list(dict.fromkeys(tried))
+    raise error
+
+
 def require_passphrase(base: Path | None = None, *, prompt: bool = False) -> str:
     value = passphrase(base)
     if value:
@@ -686,7 +895,7 @@ class _Reader(io.RawIOBase):
             plain = self.aes.decrypt(_nonce(self.prefix, self.counter, final), sealed, self.aad)
         except InvalidTag:
             raise BackupError("Encrypted backup failed authentication: wrong passphrase, "
-                              "or the file was truncated or changed") from None
+                              "or the file was truncated or changed", code="authentication") from None
         self.counter += 1
         self.done = final
         return plain

@@ -2257,6 +2257,12 @@ class _Store:
         return "file"
 
 
+def cli_refusal(argv):
+    sys.path.insert(0, str(ROOT))
+    import observatory as cli
+    return cli.refusal(argv)
+
+
 class CommandLine(Base):
     def test_the_full_cli_routes_both_commands(self):
         sys.path.insert(0, str(ROOT))
@@ -2271,6 +2277,29 @@ class CommandLine(Base):
         with contextlib.redirect_stdout(out):
             self.assertEqual(workspace.main(['machine-backup', 'status']), 0)
         self.assertIsNone(json.loads(out.getvalue())['newest'])
+
+    def test_machine_restore_reads_the_passphrase_from_stdin(self):
+        # OBS-348: an agent hands another machine's passphrase over on stdin (a file or an ssh channel),
+        # never in argv; it is used for this restore and kept nowhere.
+        vault.set_passphrase(self.ws, PASS)
+        self.write('.zshrc', 'export EXAMPLE=1\n')
+        self.take(at=AT)
+        bundle = MB.newest(self.ws)
+        vault.passphrase_file(self.ws).unlink()   # this workspace no longer holds it
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO((PASS + '\n').encode()), encoding='utf-8')
+        with patch.object(sys, 'stdin', stdin), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(workspace.main(['machine-restore', str(bundle), '--passphrase-stdin']), 0, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())['passphrase_source'], 'stdin')
+        self.assertNotIn(PASS, out.getvalue() + err.getvalue())
+        self.assertFalse(vault.passphrase_file(self.ws).exists(), 'nothing is stored')
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(b'a wrong value, long enough\n'), encoding='utf-8')
+        with patch.object(sys, 'stdin', stdin), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(workspace.main(['machine-restore', str(bundle), '--passphrase-stdin']), 2)
+        self.assertIn('passphrase-refused', err.getvalue())
+        self.assertIn('stdin', err.getvalue())
+        self.assertEqual(cli_refusal(['machine-restore', '--latest', '--passphrase-stdin']), '')
 
 
 if __name__ == '__main__':

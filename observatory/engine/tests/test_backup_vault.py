@@ -7,6 +7,7 @@ temporary directory, so no test can reach the operator's real Documents folder.
 from __future__ import annotations
 import importlib
 import io
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -300,6 +301,31 @@ class Snapshots(Base):
         self.assertTrue(Path(result['snapshot']).is_dir())
 
 
+    def test_latest_under_another_home_names_the_backups_it_found_elsewhere(self):
+        # OBS-347: the owner file names the first machine's home, so the exact-path rule finds
+        # nothing under another user name; the backups are named, never chosen.
+        import maintenance
+        vault.set_passphrase(self.home, PASS)
+        made = Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot'])
+        ann, bob = self.base / 'Users' / 'ann', self.base / 'Users' / 'bob'
+        folder = self.root / 'obs-0badc0de'
+        folder.mkdir(parents=True)
+        (folder / made.name).write_bytes(made.read_bytes())
+        (folder / vault.OWNER_FILE).write_text(str(ann / '.local/share/obs') + '\n')
+        unrelated = self.root / 'obs-1badc0de'
+        unrelated.mkdir()
+        (unrelated / made.name).write_bytes(made.read_bytes())
+        (unrelated / vault.OWNER_FILE).write_text(str(ann / 'elsewhere/obs') + '\n')
+        with patch.dict(os.environ, {'HOME': str(bob), 'USERPROFILE': str(bob)}):
+            out = maintenance.restore_latest(bob / '.local/share/obs', store=FakeStore())
+        self.assertEqual(out['status'], 'no-backup')
+        self.assertEqual(out['elsewhere'], [{'label': 'obs-0badc0de', 'owner_home_relative': '~/.local/share/obs',
+                                             'newest': str(folder / made.name), 'snapshots': 1}])
+        self.assertEqual(out['next'], f"project-observatory full restore '{folder / made.name}'")
+        self.assertNotIn(str(ann), json.dumps(out), 'only the home-relative tail of the owner file is shown')
+        self.assertFalse((bob / '.local/share/obs').exists(), 'nothing is chosen or restored')
+
+
 class StoreCopies(Base):
     def run_backup(self, *args):
         sys.path.insert(0, str(ROOT / 'tools'))
@@ -495,6 +521,197 @@ class Doctor(Base):
             report = vault.status(self.home)
         self.assertFalse(report['inside_workspace'])
         self.assertEqual(report['warnings'], [])
+
+
+class FakeStore:
+    """The OS credential store, in memory: what a restore reads, and proof it never writes."""
+
+    def __init__(self, items=None):
+        self.items, self.puts = dict(items or {}), []
+
+    def get(self, label):
+        return self.items.get(label)
+
+    def put(self, label, value, replace=False):
+        self.puts.append(label)
+        self.items[label] = value
+        return 'file'
+
+    def kind(self):
+        return 'file'
+
+
+def stdin_of(data: bytes):
+    return io.TextIOWrapper(io.BytesIO(data), encoding='utf-8')
+
+
+class Typed(io.TextIOWrapper):
+    def isatty(self):
+        return True
+
+
+class ForeignPassphrase(Base):
+    """OBS-348 (D2): another machine's backup opens with its passphrase given once, on stdin or
+    at a terminal; it is never stored and never replaces this machine's own."""
+    OTHER = 'a synthetic passphrase of the second machine'
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        vault.set_passphrase(self.home, PASS)
+        self.file = Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot'])
+        # The second machine: its own workspace, its own passphrase, its own store.
+        self.second = self.base / 'second workspace'
+        workspace.initialize(self.second)
+        vault.set_passphrase(self.second, self.OTHER)
+        self.store = FakeStore({vault._workspace_label(self.second): self.OTHER})
+
+    def sealed(self):
+        """The second machine's passphrase file and store, as digests: compared, never printed."""
+        import hashlib
+        return (hashlib.sha256(vault.passphrase_file(self.second).read_bytes()).hexdigest(),
+                hashlib.sha256(json.dumps(self.store.items, sort_keys=True).encode()).hexdigest())
+
+    def test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored(self):
+        before = self.sealed()
+        dest = self.base / 'restored on the second machine'
+        with patch.object(vault, 'SecretStore', return_value=self.store):
+            result = upgrade.restore(self.file, dest, stdin_value=PASS, second_machine=True)
+        self.assertEqual(result['passphrase_source'], 'stdin')
+        self.assertEqual(self.sealed(), before)
+        self.assertEqual(self.store.puts, [])
+        self.assertFalse((dest / 'secrets/backup-passphrase').exists(), 'the second machine makes its own')
+        self.assertEqual((dest / 'secrets/demo-slot').read_text(), 'synthetic opaque private value')
+        self.assertNotIn(PASS, json.dumps(result))
+
+    def test_the_prompt_is_asked_once_and_only_after_every_other_candidate_failed(self):
+        asked = []
+
+        def typed(prompt):
+            asked.append(prompt)
+            return PASS
+
+        wrong = FakeStore({self.file.parent.name: 'a stored value that is not it'})
+        with patch.object(vault, 'SecretStore', return_value=wrong), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=typed), \
+                patch.dict(os.environ, {vault.PASS_ENV: 'an environment value that is not it'}):
+            result = upgrade.restore(self.file, self.base / 'asked', stdin_value='a piped value that is not it')
+        self.assertEqual(result['passphrase_source'], 'prompt')
+        self.assertEqual(asked, [f'Backup passphrase for {self.file.parent.name}: '])
+        asked.clear()
+        with patch.object(vault, 'SecretStore', return_value=FakeStore()), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=lambda prompt: asked.append(prompt) or 'typed wrong'):
+            with self.assertRaises(vault.BackupError) as caught:
+                upgrade.restore(self.file, self.base / 'typed wrong')
+        self.assertEqual(caught.exception.code, 'passphrase-refused')
+        self.assertEqual(len(asked), 1, 'one prompt per run, so a script cannot loop on it')
+        self.assertFalse((self.base / 'typed wrong').exists())
+        with patch.object(vault, 'SecretStore', return_value=FakeStore({self.file.parent.name: PASS})), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=AssertionError('no prompt when a stored value opens it')):
+            self.assertEqual(upgrade.restore(self.file, self.base / 'stored')['passphrase_source'], 'stored')
+
+    def test_without_a_terminal_and_without_stdin_the_refusal_names_the_sources_tried(self):
+        wrong = FakeStore({self.file.parent.name: 'a stored value that is not it',
+                           self.file.parent.name + vault.PREVIOUS: 'an earlier stored value that is not it'})
+        with patch.object(vault, 'SecretStore', return_value=wrong), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=False), \
+                patch.dict(os.environ, {vault.PASS_ENV: 'an environment value that is not it'}):
+            with self.assertRaises(vault.BackupError) as caught:
+                upgrade.restore(self.file, self.base / 'refused')
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.code, 'passphrase-refused')
+        for source in ('environment', 'stored', 'stored-previous'):
+            self.assertIn(source, message)
+        self.assertIn('--passphrase-stdin', message)
+        self.assertNotIn('not it', message, 'a value is never in a refusal')
+        self.assertFalse((self.base / 'refused').exists())
+
+    def test_a_wrong_candidate_costs_one_chunk_not_a_whole_file(self):
+        src, enc = self.base / 'plain.bin', self.base / 'many chunks' / 'out.obsdb'
+        src.write_bytes(os.urandom(20_000))
+        with patch.object(vault, 'CHUNK', 1024):
+            vault.encrypt_file(src, enc, PASS, kind='observatory-db')
+        opened = []
+        original = vault._Reader._open_next
+
+        def counting(reader):
+            opened.append(1)
+            return original(reader)
+
+        with patch.object(vault._Reader, '_open_next', counting):
+            self.assertFalse(vault.opens(enc, 'not the passphrase at all'))
+            self.assertEqual(len(opened), 1)
+            opened.clear()
+            secret, header, source = vault.open_with(enc, base=None, label=None, given='not the passphrase at all',
+                                                     stdin_value=PASS)
+        self.assertEqual((secret == PASS, source, header['kind']), (True, 'stdin', 'observatory-db'))
+        self.assertEqual(len(opened), 1 + 1 + 20, 'one chunk for the wrong one, then the winner once in full')
+        with open(enc, 'r+b') as f:   # a damaged header is not a passphrase problem
+            f.write(b'NOTOURS\n')
+        with self.assertRaises(vault.BackupError) as caught:
+            vault.open_with(enc, base=None, label=None, given=PASS)
+        self.assertIsNone(caught.exception.code)
+
+    def test_stdin_is_refused_when_it_is_a_terminal_empty_or_too_long(self):
+        read = vault.read_passphrase_stdin
+        self.assertEqual(read(stdin_of(b'a value from a file\n')), 'a value from a file')
+        self.assertEqual(read(stdin_of(b'a value from windows\r\n')), 'a value from windows')
+        self.assertEqual(read(stdin_of(b' kept as typed \n\n')), ' kept as typed \n', 'only one newline goes')
+        self.assertEqual(read(stdin_of(b'x' * vault.STDIN_LIMIT + b'\n')), 'x' * vault.STDIN_LIMIT)
+        for data, code in ((b'', 'passphrase-stdin-empty'), (b'\n', 'passphrase-stdin-empty'),
+                           (b'x' * (vault.STDIN_LIMIT + 1), 'passphrase-stdin-too-long'),
+                           (b'\xff\xfe', 'passphrase-stdin-not-text')):
+            with self.subTest(code=code), self.assertRaises(vault.BackupError) as caught:
+                read(stdin_of(data))
+            self.assertEqual(caught.exception.code, code)
+        with self.assertRaises(vault.BackupError) as caught:
+            read(Typed(io.BytesIO(b'typed\n'), encoding='utf-8'))
+        self.assertEqual(caught.exception.code, 'passphrase-stdin-terminal')
+        # From the command line: refused before any write, exit 2, the code named.
+        dest = self.base / 'never made'
+        err = io.StringIO()
+        with patch.dict(os.environ, {'OBSERVATORY_HOME': str(dest)}), patch.object(sys, 'stdin', stdin_of(b'')), \
+                patch.object(sys, 'stderr', err), patch.object(sys, 'stdout', io.StringIO()):
+            self.assertEqual(upgrade.main(['restore', str(self.file), '--passphrase-stdin']), 2)
+        self.assertIn('passphrase-stdin-empty', err.getvalue())
+        self.assertFalse(dest.exists())
+        out = io.StringIO()
+        with patch.dict(os.environ, {'OBSERVATORY_HOME': str(dest), 'OBSERVATORY_SYSTEM_SETUP': '0'}), \
+                patch.object(sys, 'stdin', stdin_of(PASS.encode() + b'\n')), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(sys, 'stdout', out):
+            self.assertEqual(upgrade.main(['restore', str(self.file), '--passphrase-stdin']), 0)
+        self.assertEqual(json.loads(out.getvalue())['passphrase_source'], 'stdin')
+
+    def test_restore_latest_asks_once_per_foreign_label(self):
+        import maintenance
+        upgrade.snapshot(self.home, writers_stopped=True)   # two snapshots under one label
+        import shutil
+        shutil.rmtree(self.home)
+        asked = []
+        foreign = FakeStore()   # this machine's store never held the other machine's passphrase
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=False):
+            out = maintenance.restore_latest(self.home, store=foreign, ask=True)
+        self.assertEqual(out['status'], 'backups-found-locked')
+        self.assertIn('--passphrase-stdin < FILE', out['next'])
+        self.assertFalse(self.home.exists() and any(self.home.iterdir()))
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=lambda prompt: asked.append(prompt) or PASS):
+            self.assertEqual(maintenance.restore_latest(self.home, store=foreign)['status'], 'backups-found-locked',
+                             'only `restore --latest` asks; `init` names the backups and the steps')
+            self.assertEqual(asked, [])
+            out = maintenance.restore_latest(self.home, store=foreign, ask=True)
+        self.assertEqual((out['status'], out['passphrase_source']), ('restored', 'prompt'))
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(foreign.puts, [], 'nothing is stored')
+        shutil.rmtree(self.home)
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=False):
+            out = maintenance.restore_latest(self.home, store=foreign, stdin_value=PASS)
+        self.assertEqual((out['status'], out['passphrase_source']), ('restored', 'stdin'))
 
 
 if __name__ == '__main__':

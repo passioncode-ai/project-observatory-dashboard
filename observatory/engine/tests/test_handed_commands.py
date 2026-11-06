@@ -339,6 +339,20 @@ class HandedCommands(unittest.TestCase):
             with self.subTest(argv):
                 self.assertEqual(cli.refusal(argv), "", f"{argv} was refused")
 
+    def test_a_restores_unresolved_paths_hand_steps_the_dispatcher_accepts(self):
+        # OBS-347: every source or backups root a restore could not find carries the exact step
+        # that points it elsewhere; each is checked, not only the ones the scanner happens to see.
+        import configuration
+        import workspace_upgrade
+        settings = [f"sources.{name}" for name in sorted(configuration.KNOWN_SOURCES)] + ["storage.backups"]
+        for setting in settings:
+            fix = workspace_upgrade.fix_for(setting)
+            with self.subTest(setting):
+                self.assertTrue(fix.startswith(COMMAND), fix)
+                words, unknown = concrete(tuple(fix[len(COMMAND):].split()))
+                self.assertEqual(unknown, [], fix)
+                self.assertEqual(cli.refusal(words), "", fix)
+
     def test_the_scanner_reads_prose_the_way_a_person_copies_it(self):
         text = ("run `project-observatory full scan-vault`, then project-observatory "
                 "full local — or project-observatory full wallet if the ceiling stopped it; "
