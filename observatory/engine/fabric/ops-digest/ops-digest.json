@@ -1,0 +1,881 @@
+{
+  "about": "Vectors for the operations digests (DEC-0153), written by tools/vectors/ops-digest.ts, never by hand. hour: foldHour(input.counts, input.from, input.previous), counts a list of {op, ok, failed, unknown} (an op may repeat and is summed), from a whole UTC hour, previous the hour before's digest or null; the answer is the ops.digest.hourly@1 digest, from and to as Date.prototype.toISOString writes them. day: foldDay(input.day, input.hourly); the answer is the ops.digest.daily@1 digest, or null for a day with no hour of its own, which has no digest (OD-5). A rise is at least 10 failures in the hour and at least twice the hour before's, an hour before with none (or not closed) counting as one (OD-4).",
+  "hour": [
+    {
+      "name": "counts by operation and outcome, sorted by name, with the hour's window and totals",
+      "input": {
+        "counts": [
+          {
+            "op": "ipc.work:home",
+            "ok": 5,
+            "failed": 0,
+            "unknown": 0
+          },
+          {
+            "op": "board.tick",
+            "ok": 3,
+            "failed": 2,
+            "unknown": 0
+          },
+          {
+            "op": "mcp.unparsed",
+            "ok": 0,
+            "failed": 0,
+            "unknown": 1
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "board.tick",
+            "ok": 3,
+            "failed": 2,
+            "unknown": 0
+          },
+          {
+            "op": "ipc.work:home",
+            "ok": 5,
+            "failed": 0,
+            "unknown": 0
+          },
+          {
+            "op": "mcp.unparsed",
+            "ok": 0,
+            "failed": 0,
+            "unknown": 1
+          }
+        ],
+        "total": {
+          "ok": 8,
+          "failed": 2,
+          "unknown": 1
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "one operation's counts written twice are summed",
+      "input": {
+        "counts": [
+          {
+            "op": "board.tick",
+            "ok": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          {
+            "op": "board.tick",
+            "ok": 2,
+            "failed": 1,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "board.tick",
+            "ok": 3,
+            "failed": 1,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 3,
+          "failed": 1,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "an hour with nothing recorded is a digest with no operation",
+      "input": {
+        "counts": [],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [],
+        "total": {
+          "ok": 0,
+          "failed": 0,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "twice the hour before and at least 10: a rise",
+      "input": {
+        "counts": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": {
+          "schema": "ops.digest.hourly@1",
+          "from": "2026-11-04T16:00:00.000Z",
+          "to": "2026-11-04T17:00:00.000Z",
+          "ops": [
+            {
+              "op": "cycle.receipt",
+              "ok": 0,
+              "failed": 5,
+              "unknown": 0
+            }
+          ],
+          "total": {
+            "ok": 0,
+            "failed": 5,
+            "unknown": 0
+          },
+          "risen": []
+        }
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 10,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "cycle.receipt",
+            "failed": 10,
+            "previous": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "9 failures after 5: below the minimum of 10 (and short of twice), no rise",
+      "input": {
+        "counts": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 9,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": {
+          "schema": "ops.digest.hourly@1",
+          "from": "2026-11-04T16:00:00.000Z",
+          "to": "2026-11-04T17:00:00.000Z",
+          "ops": [
+            {
+              "op": "cycle.receipt",
+              "ok": 0,
+              "failed": 5,
+              "unknown": 0
+            }
+          ],
+          "total": {
+            "ok": 0,
+            "failed": 5,
+            "unknown": 0
+          },
+          "risen": []
+        }
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 9,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 9,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "10 failures after 6: at least 10 but short of twice the hour before, no rise",
+      "input": {
+        "counts": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": {
+          "schema": "ops.digest.hourly@1",
+          "from": "2026-11-04T16:00:00.000Z",
+          "to": "2026-11-04T17:00:00.000Z",
+          "ops": [
+            {
+              "op": "cycle.receipt",
+              "ok": 0,
+              "failed": 6,
+              "unknown": 0
+            }
+          ],
+          "total": {
+            "ok": 0,
+            "failed": 6,
+            "unknown": 0
+          },
+          "risen": []
+        }
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "cycle.receipt",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 10,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "9 failures with none the hour before: below the minimum, no rise",
+      "input": {
+        "counts": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 9,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 9,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 9,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "10 failures with none the hour before: none counts as one, a rise",
+      "input": {
+        "counts": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 10,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "x",
+            "failed": 10,
+            "previous": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "after a gap the earlier hour is no baseline",
+      "input": {
+        "counts": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 20,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": {
+          "schema": "ops.digest.hourly@1",
+          "from": "2026-11-04T14:00:00.000Z",
+          "to": "2026-11-04T15:00:00.000Z",
+          "ops": [
+            {
+              "op": "x",
+              "ok": 0,
+              "failed": 40,
+              "unknown": 0
+            }
+          ],
+          "total": {
+            "ok": 0,
+            "failed": 40,
+            "unknown": 0
+          },
+          "risen": [
+            {
+              "op": "x",
+              "failed": 40,
+              "previous": 0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 20,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 20,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "x",
+            "failed": 20,
+            "previous": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "an MCP method's name, with a slash, is an operation",
+      "input": {
+        "counts": [
+          {
+            "op": "mcp.tools/list",
+            "ok": 4,
+            "failed": 0,
+            "unknown": 0
+          },
+          {
+            "op": "mcp.notifications/cancelled",
+            "ok": 0,
+            "failed": 0,
+            "unknown": 1
+          }
+        ],
+        "from": "2026-11-04T17:00:00.000Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "mcp.notifications/cancelled",
+            "ok": 0,
+            "failed": 0,
+            "unknown": 1
+          },
+          {
+            "op": "mcp.tools/list",
+            "ok": 4,
+            "failed": 0,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 4,
+          "failed": 0,
+          "unknown": 1
+        },
+        "risen": []
+      }
+    },
+    {
+      "name": "a from written without a fraction is the same hour",
+      "input": {
+        "counts": [
+          {
+            "op": "x",
+            "ok": 1,
+            "failed": 0,
+            "unknown": 0
+          }
+        ],
+        "from": "2026-11-04T17:00:00Z",
+        "previous": null
+      },
+      "expected": {
+        "schema": "ops.digest.hourly@1",
+        "from": "2026-11-04T17:00:00.000Z",
+        "to": "2026-11-04T18:00:00.000Z",
+        "ops": [
+          {
+            "op": "x",
+            "ok": 1,
+            "failed": 0,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 1,
+          "failed": 0,
+          "unknown": 0
+        },
+        "risen": []
+      }
+    }
+  ],
+  "day": [
+    {
+      "name": "the day's hours summed and counted, each rise with the hours it rose in, the most failures first; another day's hour left out",
+      "input": {
+        "day": "2026-11-04",
+        "hourly": [
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-04T01:00:00.000Z",
+            "to": "2026-11-04T02:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 12,
+                "unknown": 0
+              },
+              {
+                "op": "y",
+                "ok": 1,
+                "failed": 0,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 1,
+              "failed": 12,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 12,
+                "previous": 0
+              }
+            ]
+          },
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-04T02:00:00.000Z",
+            "to": "2026-11-04T03:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 30,
+                "unknown": 0
+              },
+              {
+                "op": "z",
+                "ok": 0,
+                "failed": 11,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 0,
+              "failed": 41,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 30,
+                "previous": 12
+              },
+              {
+                "op": "z",
+                "failed": 11,
+                "previous": 0
+              }
+            ]
+          },
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-05T00:00:00.000Z",
+            "to": "2026-11-05T01:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 99,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 0,
+              "failed": 99,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 99,
+                "previous": 0
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "schema": "ops.digest.daily@1",
+        "day": "2026-11-04",
+        "hours": 2,
+        "ops": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 42,
+            "unknown": 0
+          },
+          {
+            "op": "y",
+            "ok": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          {
+            "op": "z",
+            "ok": 0,
+            "failed": 11,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 1,
+          "failed": 53,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "x",
+            "hours": 2,
+            "failed": 42
+          },
+          {
+            "op": "z",
+            "hours": 1,
+            "failed": 11
+          }
+        ]
+      }
+    },
+    {
+      "name": "an hour written twice is folded once, the first line kept",
+      "input": {
+        "day": "2026-11-04",
+        "hourly": [
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-04T01:00:00.000Z",
+            "to": "2026-11-04T02:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 12,
+                "unknown": 0
+              },
+              {
+                "op": "y",
+                "ok": 1,
+                "failed": 0,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 1,
+              "failed": 12,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 12,
+                "previous": 0
+              }
+            ]
+          },
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-04T01:00:00.000Z",
+            "to": "2026-11-04T02:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 50,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 0,
+              "failed": 50,
+              "unknown": 0
+            },
+            "risen": []
+          }
+        ]
+      },
+      "expected": {
+        "schema": "ops.digest.daily@1",
+        "day": "2026-11-04",
+        "hours": 1,
+        "ops": [
+          {
+            "op": "x",
+            "ok": 0,
+            "failed": 12,
+            "unknown": 0
+          },
+          {
+            "op": "y",
+            "ok": 1,
+            "failed": 0,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 1,
+          "failed": 12,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "x",
+            "hours": 1,
+            "failed": 12
+          }
+        ]
+      }
+    },
+    {
+      "name": "rises of equal failures ordered by name",
+      "input": {
+        "day": "2026-11-05",
+        "hourly": [
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-05T00:00:00.000Z",
+            "to": "2026-11-05T01:00:00.000Z",
+            "ops": [
+              {
+                "op": "b",
+                "ok": 0,
+                "failed": 10,
+                "unknown": 0
+              },
+              {
+                "op": "a",
+                "ok": 0,
+                "failed": 10,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 0,
+              "failed": 20,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "a",
+                "failed": 10,
+                "previous": 0
+              },
+              {
+                "op": "b",
+                "failed": 10,
+                "previous": 0
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "schema": "ops.digest.daily@1",
+        "day": "2026-11-05",
+        "hours": 1,
+        "ops": [
+          {
+            "op": "a",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          },
+          {
+            "op": "b",
+            "ok": 0,
+            "failed": 10,
+            "unknown": 0
+          }
+        ],
+        "total": {
+          "ok": 0,
+          "failed": 20,
+          "unknown": 0
+        },
+        "risen": [
+          {
+            "op": "a",
+            "hours": 1,
+            "failed": 10
+          },
+          {
+            "op": "b",
+            "hours": 1,
+            "failed": 10
+          }
+        ]
+      }
+    },
+    {
+      "name": "a day with no hour of its own has no digest",
+      "input": {
+        "day": "2026-11-06",
+        "hourly": [
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-04T01:00:00.000Z",
+            "to": "2026-11-04T02:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 12,
+                "unknown": 0
+              },
+              {
+                "op": "y",
+                "ok": 1,
+                "failed": 0,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 1,
+              "failed": 12,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 12,
+                "previous": 0
+              }
+            ]
+          },
+          {
+            "schema": "ops.digest.hourly@1",
+            "from": "2026-11-05T00:00:00.000Z",
+            "to": "2026-11-05T01:00:00.000Z",
+            "ops": [
+              {
+                "op": "x",
+                "ok": 0,
+                "failed": 99,
+                "unknown": 0
+              }
+            ],
+            "total": {
+              "ok": 0,
+              "failed": 99,
+              "unknown": 0
+            },
+            "risen": [
+              {
+                "op": "x",
+                "failed": 99,
+                "previous": 0
+              }
+            ]
+          }
+        ]
+      },
+      "expected": null
+    }
+  ]
+}

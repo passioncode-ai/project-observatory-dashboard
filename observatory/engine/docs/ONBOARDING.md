@@ -1278,8 +1278,9 @@ The agent your own configuration starts over stdio is the **local agent**. It re
 project and writes only proposals, as before. Any other caller reaches memory only through a
 **binding** you issue at your terminal (PB-137 N-008). A binding names one principal, its
 projects, its scopes, the highest class it may read and whether it may write proposals, and
-it always expires. It reaches only the memory tools. Everything else (the estate, credentials,
-the machine) stays with the local agent.
+it always expires. It reaches only the memory tools, and, with the scope `ops.digest.record`,
+the one tool that records a product's daily operations digests (below). Everything else (the
+estate, credentials, the machine) stays with the local agent.
 
 ```sh
 project-observatory full access-binding show                        # who may reach memory; nobody by default
@@ -1310,6 +1311,47 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   ([design/HTTP-TRANSPORT.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/HTTP-TRANSPORT.md)).
 
 Rules and reasons: [design/ACCESS-BINDING.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/ACCESS-BINDING.md).
+
+### Products' daily operations digests: ops.digest.record
+
+A product that keeps an operations log folds each closed UTC day into one line of counts,
+`ops.digest.daily@1` (fabric-agent-contract DEC-0153): operations by outcome, the operations
+whose failures rose, and nothing else. Fabric collects those lines on the machine and sends
+each one to Observatory with the MCP tool `ops.digest.record` (shown as `ops_digest_record`
+where a client turns dots into underscores). Its input is `digest` (the line as a JSON object),
+`source` (the label the line was read under, `app` by default) and an optional `service`
+(`{id, instance}`, the Fabric service it came from).
+
+The project is never an argument; it comes from the connection:
+
+- **Over stdio**, from an access binding you issue for that one project, with the scope and the
+  effect the tool needs. `issue` prints the server line that goes with it:
+
+  ```sh
+  project-observatory full access-binding issue service:fabric --project PROJECT --scope ops.digest.record --effect propose --days 365 --token-file PATH
+  # then the connection starts the server with: .../mcp/server.py --stdio --binding-token-file PATH
+  ```
+
+  A stdio server started without `--binding-token-file` (your own agent's, for one) answers
+  `binding-required`: the local agent is not a product and names no project.
+  `issue` refuses such a binding when it names more than one project.
+- **On the memory-http door**, from a delegation token Fabric's hub minted for
+  `project-observatory` with the scope `ops.digest.record` and the project the lines are of:
+  a `project:<slug>` this registry holds, or the `fabric:<uuid>` Fabric's own attribution
+  records for one project (a curated alias is not taken, and the review policy never accepts
+  an alias for a `fabric:` name by itself: it waits for you). Without a token, the answer is
+  `delegation-required`.
+
+Observatory checks every line against the contract (its closed schema, the arithmetic of
+`FAC-SEM-166`, and `FAC-SEM-167`: no operation named like a key or a home folder), takes only
+closed days within the last 400, and checks that a named `service` is one the registry
+attributes to that project. It keeps one record per project, service, source and day under
+`store/ops-digests/` (owner-only): the same line again changes nothing (`repeated: true`), a
+different one becomes the next revision, and the first one is the day's line. A record keeps
+at most 16 revisions (`revisions-exhausted`), a project's day at most 8 source labels
+(`sources-exhausted`) and a month file at most 64 MiB (`store-full`). Days older than 400 are
+dropped. In those counts, the `ok` of a host's `retro-after-work` operation counts the
+retro requests answered by a retro the host saw written, never the retros themselves.
 
 ### Give an agent a key without pasting it into a chat: the secret prompt
 

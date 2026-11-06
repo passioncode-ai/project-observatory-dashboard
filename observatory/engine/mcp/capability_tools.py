@@ -201,6 +201,9 @@ def _name_unknown_arguments(result: Any, tool: Any, arguments: dict) -> Any:
 #: The meter's capability (OBS-55), declared in fabric-agent.json (OBS-67) and listed from it like every
 #: capability; its call is answered by `_grant_check`, which reads the delegation token from the channel.
 GRANT_CHECK = "grant.check"
+#: A product's daily operations digest (OBS-330): reached over stdio under a binding, or on the HTTP door with a
+#: delegation token, so it passes the local-only door and decides who calls in `ops_digest_store.caller`.
+OPS_DIGEST_RECORD = "ops.digest.record"
 
 
 class InteropServer(MCPServer):
@@ -376,7 +379,7 @@ class InteropServer(MCPServer):
         # agent only, and a binding is refused here before any handler runs.
         if name == GRANT_CHECK:
             return await self._grant_check(arguments or {})
-        if name not in memory_access.TOOLS:
+        if name not in memory_access.TOOLS and name != OPS_DIGEST_RECORD:
             refused = memory_access.local_only(name)
             if refused is not None:
                 return CallToolResult(content=[_text(refused)], is_error=True)

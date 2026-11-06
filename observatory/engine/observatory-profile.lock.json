@@ -18,7 +18,9 @@
     "fabric/schemas/project-resolve-input.schema.json",
     "fabric/schemas/project-resolve-output.schema.json",
     "fabric/schemas/grant-check-input.schema.json",
-    "fabric/schemas/grant-check-output.schema.json"
+    "fabric/schemas/grant-check-output.schema.json",
+    "fabric/schemas/ops-digest-record-input.schema.json",
+    "fabric/schemas/ops-digest-record-output.schema.json"
   ],
   "releases": [
     {
@@ -68,6 +70,15 @@
         "fixtures/grant-check-input.json",
         "schemas/grant-check-input.schema.json",
         "schemas/grant-check-output.schema.json"
+      ]
+    },
+    {
+      "release": "v0.34.0",
+      "repository": "passioncode-ai/project-observatory-dashboard",
+      "files": [
+        "fixtures/ops-digest-record-input.json",
+        "schemas/ops-digest-record-input.schema.json",
+        "schemas/ops-digest-record-output.schema.json"
       ]
     }
   ],

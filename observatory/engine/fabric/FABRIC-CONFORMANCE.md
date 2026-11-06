@@ -105,6 +105,7 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `grant.check` | `none` | `grant.check`; a token-carrying call goes to the same tool on the memory-http door (loopback streamable-http, token in `Authorization`), while over stdio it answers `principal-unproven` | — |
 | `machine.mcp.inventory` | `none` | `machine.mcp.inventory` | — |
 | `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
+| `ops.digest.record` (served, declared at `v0.34.0`) | `draft` | `ops.digest.record`; over stdio under an access binding with its scope (`--binding-token-file`), else `binding-required`; on the memory-http door with a delegation token of its scope, else `delegation-required` | none |
 
 The older `observatory_*` tools stay, unchanged, for hosts that call them. The complete
 published tool list — the `observatory_*` tools, the capability tools, the job tools and the
@@ -198,6 +199,22 @@ not on the contract.
 Schemas live in `schemas/`, with fictional requests in `fixtures/`. Published
 schema URLs are pinned to the release selected by the lock. An application patch
 release does not silently move that schema pin.
+
+## Operations digests (`ops.digest.record`, OBS-330)
+
+`ops.digest.record` takes a product's daily operations digest, `ops.digest.daily@1` of the contract's DEC-0153, as
+Fabric collects it on the machine. It is served now and declared at the release that publishes its schemas: its
+declaration waits in `unreleased-capabilities.json`, pinned at `v0.34.0`, because a manifest may not pin a tag newer
+than the release that ships it (`../tools/check_manifest_urls.py`, ENG-018). `../interop.py` serves a waiting
+declaration like a declared one, and the release that reaches `v0.34.0` moves it into `../fabric-agent.json` as
+revision 10; `../tests/test_ops_digest_record.py` fails that release until it does. The shapes, rules, vectors and fixtures are vendored byte for byte in
+`ops-digest/` at the contract's release tag `v0.1.0+2026-11-06.1`, which the engine's pin predates; the folder's
+README holds the digests, and `contract_lock` lists it among the folders copied at another commit. `../ops_digest.py`
+ports the rules (`FAC-SEM-166`, `FAC-SEM-167`, the `source` clause of `FAC-SEM-168`) and the reference folds, and
+`../tests/test_ops_digest.py` runs every vector and fixture through them. The input schema carries the contract's
+closed daily schema inline under `$defs/daily`, so a host compiles it without fetching anything. The project is never
+an argument: `../ops_digest_store.py` takes it from the transport (an access binding over stdio, a delegation token
+on the memory-http door), and `../tests/test_ops_digest_record.py` covers both doors and every refusal.
 
 ## Local service extension
 

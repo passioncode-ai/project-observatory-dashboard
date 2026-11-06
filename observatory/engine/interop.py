@@ -177,9 +177,31 @@ def bundled(uri: str) -> dict:
     return json.loads((ROOT / "fabric" / name).read_text(encoding="utf-8"))
 
 
-def mcp_capabilities(doc: Mapping[str, Any] | None = None) -> list[dict]:
+#: Capabilities served before the release that publishes their schemas declares them (OBS-330): a capability added
+#: between releases pins its schemas at the tag of the release that will ship it, and `fabric-agent.json` may not pin
+#: a tag newer than the engine's version (`tools/check_manifest_urls.py`, ENG-018). The file says how its entries move.
+UNRELEASED = ROOT / "fabric" / "unreleased-capabilities.json"
+
+
+def unreleased_capabilities() -> list[dict]:
+    """The waiting declarations, each in the manifest's own capability shape; [] when the file is absent."""
+    try:
+        doc = json.loads(UNRELEASED.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    return list(doc.get("capabilities") or [])
+
+
+def mcp_capabilities(doc: Mapping[str, Any] | None = None, *, unreleased: bool = True) -> list[dict]:
+    """The manifest's `mcp` capabilities, then the waiting ones it does not declare yet (`unreleased=False` leaves
+    them out: the published manifest alone)."""
     doc = doc or manifest()
-    return [c for c in doc.get("capabilities", []) if (c.get("profile") or {}).get("kind") == "mcp"]
+    caps = [c for c in doc.get("capabilities", []) if (c.get("profile") or {}).get("kind") == "mcp"]
+    if unreleased:
+        declared = {c.get("name") for c in caps}
+        caps += [c for c in unreleased_capabilities()
+                 if c.get("name") not in declared and (c.get("profile") or {}).get("kind") == "mcp"]
+    return caps
 
 
 def object_rooted(schema: dict) -> dict:

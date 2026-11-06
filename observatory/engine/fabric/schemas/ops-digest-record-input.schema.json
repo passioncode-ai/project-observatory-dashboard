@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/schemas/ops-digest-record-input.schema.json",
+  "title": "ops.digest.record: input",
+  "description": "One product's daily operations digest, ops.digest.daily@1 of fabric-agent-contract DEC-0153 (release tag v0.1.0+2026-11-06.1), as a JSON object, with the label its collector read it under and, optionally, the Fabric service it came from. No project field: the project is the transport's (over stdio, the one project of the access binding the server runs under; on the memory-http door, the project claim of a delegation token minted for project-observatory with the scope ops.digest.record). $defs/daily is the contract's closed schema, self-contained; the server also applies FAC-SEM-166, FAC-SEM-167 and the source clause of FAC-SEM-168.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "digest"
+  ],
+  "properties": {
+    "digest": {
+      "$ref": "#/$defs/daily",
+      "description": "The daily line itself: an object, never a string holding one."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$",
+      "default": "app",
+      "description": "The label the collector sends with the line (DEC-0153 OD-9): `app` for a product's one folder."
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "instance"
+      ],
+      "description": "The Fabric service the line came from, as its local descriptor names it; it must be a service the registry attributes to the transport's project.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$"
+        },
+        "instance": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "daily": {
+      "title": "ops.digest.daily@1 (DEC-0153): one closed UTC day of a product's hourly operations digests (one line for each hour it observed itself running in), folded",
+      "description": "One line of daily-YYYY-MM.jsonl. Counts only: no log line, no path, no identifier, no free text. FAC-SEM-166: day a real UTC day, each op once in ops and at most once in risen, total each counter's sum over ops, every rise an op of ops in at most the day's hours with at least 10 failures an hour it rose and no more than the day's failures. FAC-SEM-167: no op shaped like a credential or holding a home folder.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "day",
+        "hours",
+        "ops",
+        "total",
+        "risen"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ops.digest.daily@1"
+        },
+        "day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "The UTC day, YYYY-MM-DD."
+        },
+        "hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "description": "How many hourly digests of the day were folded (hours folded, never uptime: OD-1)."
+        },
+        "ops": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/opCount"
+          },
+          "description": "Every operation of the day's hours, summed, once each."
+        },
+        "total": {
+          "$ref": "#/$defs/counters"
+        },
+        "risen": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "op",
+              "hours",
+              "failed"
+            ],
+            "properties": {
+              "op": {
+                "$ref": "#/$defs/op"
+              },
+              "hours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 24,
+                "description": "The hours of the day op rose in."
+              },
+              "failed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "The failures of op in the hours it rose in."
+              }
+            }
+          },
+          "description": "Each operation that rose in some hour of the day (OD-4), the most failures first."
+        }
+      }
+    },
+    "op": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][A-Za-z0-9_]*(?:[.:/-][A-Za-z0-9_]+)*$",
+      "description": "An operation's name (OD-2): a lower-case letter, then letters, digits and underscores in segments joined by '.', ':', '/' or '-' (mcp.tools/list), at most 64 characters. No absolute path, URL, space, empty segment, '.' or '..' fits; a credential's shape or a home folder is FAC-SEM-167."
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok",
+        "failed",
+        "unknown"
+      ],
+      "properties": {
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "opCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "ok",
+        "failed",
+        "unknown"
+      ],
+      "properties": {
+        "op": {
+          "$ref": "#/$defs/op"
+        },
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}
