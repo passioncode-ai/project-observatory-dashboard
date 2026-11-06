@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/schemas/ops-digest-record-output.schema.json",
+  "title": "ops.digest.record: output",
+  "description": "The line was kept, or a typed refusal. One record per (project, service, source, UTC day): the same body again changes nothing (repeated true, the revision it matched); a different body becomes the next revision; a reader reads the first revision of a day (DEC-0153 OD-6).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/accepted"
+    },
+    {
+      "$ref": "#/$defs/refused"
+    }
+  ],
+  "$defs": {
+    "accepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accepted",
+        "repeated",
+        "revision",
+        "project",
+        "service",
+        "source",
+        "day"
+      ],
+      "properties": {
+        "accepted": {
+          "const": true
+        },
+        "repeated": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "project": {
+          "type": "string",
+          "pattern": "^project:[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "service": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "instance"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "instance": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        }
+      }
+    },
+    "refused": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error",
+        "code",
+        "detail",
+        "hint",
+        "degraded"
+      ],
+      "properties": {
+        "error": {
+          "const": "ops digest refused"
+        },
+        "code": {
+          "enum": [
+            "binding-required",
+            "binding-unreadable",
+            "registry-unreadable",
+            "binding-refused",
+            "binding-not-one-project",
+            "delegation-required",
+            "delegation-refused",
+            "project-required",
+            "project-unknown",
+            "service-not-of-project",
+            "source-refused",
+            "digest-refused",
+            "day-not-closed",
+            "day-outside-retention",
+            "revisions-exhausted",
+            "sources-exhausted",
+            "store-full",
+            "store-unreadable",
+            "store-unwritable"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "instancePath",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "enum": [
+                  "schema",
+                  "FAC-SEM-166",
+                  "FAC-SEM-167"
+                ]
+              },
+              "instancePath": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "degraded": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    }
+  }
+}

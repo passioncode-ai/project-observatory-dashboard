@@ -58,6 +58,17 @@ def _home_argument(argv: list[str]) -> None:
             raise SystemExit("--agent needs an agent name: lowercase letters, digits, '.', '_' or '-'")
         import os
         os.environ["OBSERVATORY_AGENT"] = name
+    # `--binding-token-file PATH`: the access binding (access-bindings/1) this stdio server records a product's
+    # operations digests under (`ops.digest.record`, OBS-330). The connection that starts the server names the
+    # owner-only file the operator's `full access-binding issue` wrote; the bearer is read from it at each call, never
+    # from an argument, and only that capability reads it.
+    if "--binding-token-file" in argv:
+        at = argv.index("--binding-token-file")
+        named = argv[at + 1] if at + 1 < len(argv) else ""
+        if not named or not pathlib.Path(named).is_absolute():
+            raise SystemExit("--binding-token-file needs the absolute path of the binding's token file")
+        import os
+        os.environ["OBSERVATORY_BINDING_TOKEN_FILE"] = named
 
 
 if __name__ == "__main__":
@@ -458,6 +469,14 @@ def observatory_resolve(
     and `degraded` says the curated table was not read rather than implying there
     are no other names."""
     import identifiers
+    return identifiers.resolve(id, _resolve_registry())
+
+
+def _resolve_registry():
+    """The four registry documents and Fabric's aliases `identifiers.resolve` reads, each missing or unreadable one
+    named in `degraded`. One reader for `observatory_resolve` and `ops.digest.record`'s project and service
+    attribution (OBS-330), so the two never disagree about which project a name is."""
+    import identifiers
     degraded: list[dict[str, str]] = []
 
     def doc(name: str, key: str) -> list[dict]:
@@ -493,9 +512,9 @@ def observatory_resolve(
     # COPIES AND MOVES (OBS-321) are NOT added here: this tool is `project.resolve`'s required
     # feature, and that capability's published v0.24.0 answer is closed, so an added field fails
     # every host that validates it. `observatory_project` carries them (its `project` is open).
-    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded,
-                                                        fabric_aliases=fabric_attribution.aliases(fdoc),
-                                                        attribute=fabric_attribution.attribute_local))
+    return identifiers.Registry(projects, products, relations, idoc, degraded,
+                                fabric_aliases=fabric_attribution.aliases(fdoc),
+                                attribute=fabric_attribution.attribute_local)
 
 
 @server.tool()
@@ -1838,6 +1857,15 @@ def capability_grant_check(arguments: dict[str, Any], span: Any) -> dict[str, An
     `grant.check` first, in `_grant_check`, because the delegation token comes from the channel the
     HTTP door built and never from the arguments; this path is never reached by a call."""
     raise RuntimeError("grant.check is answered by InteropServer._grant_check")
+
+
+@server.capability("ops.digest.record")
+def capability_ops_digest_record(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    """A product's daily operations digest (OBS-330, contract DEC-0153): who sends it and for which project come
+    from the transport (`ops_digest_store.caller`), never from an argument; the answer, or a typed refusal the
+    published output schema describes."""
+    import ops_digest_store
+    return ops_digest_store.record_call(arguments, registry=_resolve_registry)
 
 
 @server.capability("project.resolve")

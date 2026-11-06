@@ -369,6 +369,35 @@ without one, nothing changes. That gate guards a cooperating run; containment st
 `slotsRequireGrant: always` with a delegation token. The secret-use journal's rows gain `workflow`, `request` and
 `dispatch` (a refusal code).
 
+## Capability: products' daily operations digests (OBS-330, the release after 0.33.1)
+
+Additive. One new capability, `ops.digest.record` (effect `draft`, idempotency `supported`), served as the MCP tool
+of that name (`ops_digest_record` where a client turns dots into underscores) with schemas published at `v0.34.0`;
+the release that publishes them declares it in the manifest as revision 10 (until then a build of `main` serves it
+from `observatory/engine/fabric/unreleased-capabilities.json`, because a manifest may not pin a tag newer than its
+release). No existing tool name, argument or answer field changes, and `contractVersion` stays `0.1.0`. Its input is `digest`, one `ops.digest.daily@1` line of fabric-agent-contract
+DEC-0153 as a JSON object (the contract's closed schema inline under `$defs/daily`), `source` (default `app`) and an
+optional `service {id, instance}`. It has no project field: over stdio the project is the one project of the access
+binding the server runs under (the new server option `--binding-token-file PATH`, or `OBSERVATORY_BINDING_TOKEN_FILE`;
+without it the answer is `binding-required`), and on the memory-http door it is the `project` claim of a delegation
+token minted for `project-observatory` with the scope `ops.digest.record` (without one, `delegation-required`): a
+`project:<slug>` the registry holds or a `fabric:<uuid>` Fabric's attribution records, never a curated alias. The
+review policy's `registry.aliases-clean` no longer accepts a proposal that names a `fabric:` alias: it waits for the
+operator. The
+contract's schemas, vectors and fixtures are vendored at its release tag `v0.1.0+2026-11-06.1` in
+`observatory/engine/fabric/ops-digest/`, which the engine's contract pin predates (`contract_lock` lists the folder).
+
+access-bindings/1 gains the scope `ops.digest.record` (`config/access-bindings.json`, `defaults/access-binding.schema.json`):
+an older engine refuses a registry that holds it (an unknown scope is a broken registry, served to the local stdio agent
+alone), so issue such a binding only after the upgrade. The built-in `local:stdio` binding does not hold it. New
+workspace state: `<state>/ops-digests/<project slug>/<YYYY-MM>.json`, owner-only, one record per (project, service,
+source, UTC day) with every revision that arrived and the channel that sent it (`binding:<id>` or
+`delegation:<agent>`), never a token, written compact; a reader takes the first revision of a day. A record keeps at
+most 16 revisions, a project's day at most 8 source labels and a month file at most 64 MiB, each refused with its own
+code. Each write drops days older than 400. An older engine ignores the folder; nothing migrates and no SQLite table is added. In a digest's counters, the
+`ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
+never the retros written.
+
 ## Service: the connections declaration (OBS-326, the release after 0.33.0)
 
 The always-on server's `/.well-known/fabric-service` gains, under `extensions`, the key

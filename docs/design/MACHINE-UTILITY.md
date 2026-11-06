@@ -236,7 +236,7 @@ meter. Moving a machine's identity stays a ceremony, never a folder copy (NODE.m
 **Context.** The plan's OE-04 asked for an instance id bound to the device and a binding type for the organization's
 server. v4 (CROSSWALK-v4 row OE-04) changed it to: the node's inbound gateway admits a connection only for a current
 member or a live binding, before any MCP parsing, with a rate limit. Today a binding's audience is the instance,
-`observatory:<instance>` ([`access_binding.py:53`](../../observatory/engine/access_binding.py)); `POST /mcp` refuses
+`observatory:<instance>` ([`access_binding.py:56`](../../observatory/engine/access_binding.py)); `POST /mcp` refuses
 before reading the body; memory over HTTP limits each binding's rate (`AGENTS.md:204`); lifecycle is a separate grant
 outside every binding's ceiling ([ACCESS-BINDING.md](ACCESS-BINDING.md)). Since then the contract decided that an
 enrollment never shows the estate's identity to an organization (DEC-0128) and that an organization's members reach
