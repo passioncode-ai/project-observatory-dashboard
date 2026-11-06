@@ -6,7 +6,9 @@ temporary directory, so no test can reach the operator's real Documents folder.
 """
 from __future__ import annotations
 import importlib
+import datetime
 import io
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -495,6 +497,199 @@ class Doctor(Base):
             report = vault.status(self.home)
         self.assertFalse(report['inside_workspace'])
         self.assertEqual(report['warnings'], [])
+
+    # OBS-349 part 1: the secret store the settings name, and a code on every warning.
+
+    def configure(self, **sources):
+        file = self.home / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {}).update({k: str(v) for k, v in sources.items()})
+        file.write_text(json.dumps(doc))
+
+    def carry(self, **record):
+        file = self.home / 'store' / 'raw' / 'secret-store-carry.json'
+        file.parent.mkdir(parents=True, exist_ok=True)
+        at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        file.write_text(json.dumps({'at': at, 'kind': 'daily', 'file': 'daily-20261106T000000Z.obsnap',
+                                    'state': 'carried', 'reason': None, 'files': 3, 'size': 120, **record}))
+
+    def codes(self, report):
+        return [item['code'] for item in report['warning_items']]
+
+    def item(self, report, code):
+        return next(i for i in report['warning_items'] if i['code'] == code)
+
+    def test_a_store_inside_the_workspace_is_not_external(self):
+        self.assertEqual(vault.status(self.home)['secret_store'], {'external': False})
+        self.configure(secret_store=self.home / 'secrets')
+        self.assertEqual(vault.status(self.home)['secret_store'], {'external': False})
+
+    def test_an_external_store_not_carried_is_a_coded_warning(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        report = vault.status(self.home)
+        section = report['secret_store']
+        self.assertTrue(section['external'])
+        self.assertTrue(section['exists'])
+        self.assertFalse(section['env_override'])
+        self.assertEqual(section['settings_keys'], ['secret_store'])
+        self.assertIsNone(section['last_carry'])
+        item = self.item(report, 'backups-vault-store-not-carried')
+        self.assertIn(str(store), item['text'])
+        self.assertIn('another machine restored from these backups would not get these keys', item['text'])
+        self.assertTrue(item['step'])
+        self.assertIn(item['text'], report['warnings'])
+        # A snapshot that could not encrypt names the passphrase as the step.
+        self.carry(state='not-carried', reason='no-passphrase')
+        item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertIn('no-passphrase', item['text'])
+        self.assertIn('backup-passphrase set', item['step'])
+        # A carry older than 48 hours proves nothing about the store as it is now.
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=49)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.carry(at=old)
+        self.assertIn('backups-vault-store-not-carried', self.codes(vault.status(self.home)))
+        # A record that does not read cannot prove the store was carried.
+        (self.home / 'store' / 'raw' / 'secret-store-carry.json').write_text('{not json')
+        report = vault.status(self.home)
+        self.assertEqual(report['secret_store']['last_carry'], {'state': 'unknown'})
+        self.assertIn('backups-vault-store-not-carried', self.codes(report))
+
+    def test_without_a_carrier_the_step_says_the_store_is_copied_by_hand(self):
+        # A release whose snapshots never carry an external store must not send a person to take
+        # another snapshot: that snapshot would not carry it either.
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        with patch.object(vault, 'secret_store_carrier', return_value=False):
+            item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertNotIn('workspace-backup', item['step'])
+        self.assertIn(str(store), item['step'])
+        with patch.object(vault, 'secret_store_carrier', return_value=True):
+            item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertIn('workspace-backup --writers-stopped', item['step'])
+
+    def test_a_carried_store_is_not(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        report = vault.status(self.home)
+        self.assertEqual(report['secret_store']['last_carry']['state'], 'carried')
+        self.assertEqual(report['secret_store']['last_carry']['files'], 3)
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report))
+
+    def test_a_missing_configured_store_is_named_with_its_configure_step(self):
+        store = self.base / 'gone-store'
+        self.configure(secrets=store)
+        report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['exists'])
+        self.assertEqual(report['secret_store']['settings_keys'], ['secrets'])
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report), 'the missing store says more')
+        item = self.item(report, 'backups-secret-store-missing')
+        self.assertIn(str(store), item['text'])
+        self.assertIn('configure sources secrets PATH', item['step'])
+
+    def test_nested_settings_name_the_outer_store_once(self):
+        outer = self.base / 'outer-store'
+        (outer / 'inner').mkdir(parents=True)
+        self.configure(secret_store=outer / 'inner', secrets=outer)
+        section = vault.status(self.home)['secret_store']
+        self.assertEqual(section['path'], str(outer))
+        self.assertEqual(section['settings_keys'], ['secret_store', 'secrets'])
+
+    def test_existing_backup_warnings_keep_their_text_and_gain_codes(self):
+        report = vault.status(self.home)
+        self.assertEqual(self.codes(report), ['backups-no-passphrase'])
+        self.assertEqual([i['text'] for i in report['warning_items']], report['warnings'])
+        vault.set_passphrase(self.home, PASS)
+        (self.home.parent / f'{self.home.name}.failed-update-20261101T000000Z').mkdir()
+        (self.home / 'backups' / 'daily-20261101T000000Z').mkdir(parents=True)
+        with patch.dict(os.environ, {'OBSERVATORY_BACKUPS': str(self.home / 'nested')}):
+            report = vault.status(self.home)
+        self.assertEqual(self.codes(report), ['backups-root-inside-workspace', 'backups-failed-update-copy',
+                                              'backups-unencrypted-local'])
+        self.assertEqual([i['text'] for i in report['warning_items']], report['warnings'])
+        steps = {i['code']: i['step'] for i in report['warning_items']}
+        self.assertIn('configure storage backups', steps['backups-root-inside-workspace'])
+        self.assertIn('backups migrate', steps['backups-unencrypted-local'])
+        self.assertNotIn(PASS, repr(report))
+
+    def test_the_environment_override_is_named(self):
+        store = self.base / 'external-store'
+        (store / 'projects').mkdir(parents=True)
+        self.configure(secret_store=store)
+        self.carry()
+        # The environment repeating what the settings name moves nothing.
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(store / 'projects')}):
+            report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['env_override'])
+        self.assertNotIn('backups-secret-store-env-override', self.codes(report))
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        item = self.item(report, 'backups-secret-store-env-override')
+        self.assertIn('OBSERVATORY_VAULT_DIR', item['text'])
+        self.assertIn('configure sources secret_store PATH', item['step'])
+        # A store inside the workspace is carried whole, but a slot folder the environment names is not.
+        self.configure(secret_store=self.home / 'secrets')
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertEqual(report['secret_store'], {'external': False})
+        self.assertIn('backups-secret-store-env-override', self.codes(report))
+
+    def test_observatory_secrets_moves_nothing_while_secret_store_is_set(self):
+        # The vault's root is `sources.secret_store` first; OBSERVATORY_SECRETS is only its fallback.
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['env_override'])
+        self.assertEqual(self.codes(report), ['backups-no-passphrase'])
+
+    def test_observatory_secrets_moves_the_vault_when_only_secrets_is_set(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secrets=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(store)}):
+            self.assertNotIn('backups-secret-store-env-override', self.codes(vault.status(self.home)))
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        self.assertIn('OBSERVATORY_SECRETS', self.item(report, 'backups-secret-store-env-override')['text'])
+
+    def test_a_vault_dir_elsewhere_is_named(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'other-slots')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        self.assertIn('OBSERVATORY_VAULT_DIR', self.item(report, 'backups-secret-store-env-override')['names'])
+
+    def test_a_store_only_the_environment_names_is_reported_as_external(self):
+        # No setting names a store, OBSERVATORY_SECRETS points outside the workspace: the vault's keys
+        # live there, no snapshot carries them, and doctor says where they came from.
+        store = self.base / 'env-store'
+        store.mkdir()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(store)}):
+            report = vault.status(self.home)
+        section = report['secret_store']
+        self.assertTrue(section['external'])
+        self.assertEqual(section['path'], str(store))
+        self.assertEqual(section['settings_keys'], [])
+        self.assertEqual(section['environment'], 'OBSERVATORY_SECRETS')
+        self.assertTrue(section['env_override'])
+        self.assertIn('backups-secret-store-env-override', self.codes(report))
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report), 'one row for one cause')
+        # Inside the workspace it is carried with it.
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.home / 'other-secrets')}):
+            report = vault.status(self.home)
+        self.assertEqual(report['secret_store'], {'external': False})
 
 
 if __name__ == '__main__':
