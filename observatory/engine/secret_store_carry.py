@@ -58,13 +58,15 @@ EXTERNAL = "external"
 ENVS = ("local", "stage", "prod")
 SLOT_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,127}")
 META_SUFFIX = ".meta.json"
+#: The largest metadata file read for a mark; a bigger one is not the vault's and fails closed.
+META_LIMIT = 65536
 #: The slot metadata key `full vault-digests keep-here` writes (OBS-350, spec 3.2a).
 KEEP_HERE = "this_machine_only"
 STORE_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 #: Snapshot-side reasons an entry is `not-carried`, stable and kebab-case.
 REASONS = ("plaintext-output", "no-passphrase", "too-large", "changed-during-copy", "unreadable", "missing",
-           "export-failed", "contains-workspace")
+           "export-failed", "contains-workspace", "update-snapshot")
 
 
 class CarryRefused(config.ConfigurationError):
@@ -156,15 +158,17 @@ def _is_slot(rel: PurePosixPath) -> bool:
     return len(parts) == 4 and parts[0] == "projects" and parts[2] in ENVS and bool(SLOT_NAME.fullmatch(parts[3]))
 
 
-def kept_here(store: Path) -> set[str]:
-    """The slots (`projects/<project>/<env>/<NAME>`) whose metadata says they stay on this machine.
+def held_back(store: Path) -> dict[str, str]:
+    """{`projects/<project>/<env>/<NAME>`: why} for every slot no snapshot may carry: `this-machine-only`
+    when its metadata says it stays here (`full vault-digests keep-here`), `unreadable` when its metadata
+    is not a small, regular, UTF-8 JSON object. FAIL CLOSED: a mark that cannot be read may be a mark, so
+    the slot stays here rather than travelling against its owner's word.
 
-    Reads metadata files only (`<NAME>.meta.json`: dates and marks, never a value); a metadata file that
-    does not read keeps nothing back, as the vault itself refuses to act on it."""
-    kept: set[str] = set()
+    Reads metadata files only (`<NAME>.meta.json`: dates and marks, never a value)."""
+    held: dict[str, str] = {}
     projects = store / "projects"
     if projects.is_symlink() or not projects.is_dir():
-        return kept
+        return held
     for project in sorted(projects.iterdir()):
         if project.is_symlink() or not project.is_dir():
             continue
@@ -172,17 +176,40 @@ def kept_here(store: Path) -> set[str]:
             folder = project / env
             if folder.is_symlink() or not folder.is_dir():
                 continue
-            for meta in sorted(folder.glob("*" + META_SUFFIX)):
+            for meta in sorted(folder.iterdir()):
+                if not meta.name.endswith(META_SUFFIX):
+                    continue
                 name = meta.name[:-len(META_SUFFIX)]
-                if not SLOT_NAME.fullmatch(name) or meta.is_symlink() or not meta.is_file():
+                if not SLOT_NAME.fullmatch(name):
                     continue
+                key = f"projects/{project.name}/{env}/{name}"
                 try:
-                    doc = json.loads(osprivacy.read_regular(meta, 65536).decode("utf-8"))
-                except (OSError, ValueError):
+                    if meta.is_symlink():
+                        raise ValueError("a link")
+                    doc = json.loads(osprivacy.read_regular(meta, META_LIMIT).decode("utf-8"))
+                    if not isinstance(doc, dict):
+                        raise ValueError("not an object")
+                except (OSError, ValueError, RecursionError):
+                    held[key] = "unreadable"
                     continue
-                if isinstance(doc, dict) and isinstance(doc.get(KEEP_HERE), dict):
-                    kept.add(f"projects/{project.name}/{env}/{name}")
-    return kept
+                if isinstance(doc.get(KEEP_HERE), dict):
+                    held[key] = "this-machine-only"
+    return held
+
+
+def kept_here(store: Path) -> set[str]:
+    """The slots marked to stay on this machine (`held_back` with the reason `this-machine-only`)."""
+    return {slot for slot, why in held_back(store).items() if why == "this-machine-only"}
+
+
+def _held(rel: str, held: dict[str, str]) -> str | None:
+    """Why a file is held back, when it is a held slot or one of its siblings: `<NAME>`, its metadata
+    `<NAME>.meta.json` and every archive `vault.py rotate` leaves (`<NAME>.retired-<stamp>`). A slot NAME
+    holds no dot, so everything from its first dot on is the sibling's suffix."""
+    parts = rel.split("/")
+    if len(parts) != 4 or parts[0] != "projects" or parts[2] not in ENVS:
+        return None
+    return held.get("/".join((*parts[:3], parts[3].split(".", 1)[0])))
 
 
 @contextlib.contextmanager
@@ -261,7 +288,7 @@ def _inside(target: str, store_real: str) -> bool:
 def _copy_once(store: Path, dest: Path, cap: int) -> dict:
     """One pass: walk, copy, then prove nothing carried changed. Raises `_Changed` or `_TooLarge`."""
     store_real = os.path.realpath(store)
-    kept = kept_here(store)
+    held = held_back(store)
     files: list[dict] = []
     dirs: list[dict] = []
     links: list[dict] = []
@@ -301,6 +328,10 @@ def _copy_once(store: Path, dest: Path, cap: int) -> dict:
             rel = path.relative_to(store).as_posix()
             if _skipped(name):
                 continue
+            why = _held(rel, held)
+            if why:
+                not_carried.append({"path": rel, "reason": why})
+                continue
             if path.is_symlink():
                 link(path, rel)
                 continue
@@ -318,10 +349,9 @@ def _copy_once(store: Path, dest: Path, cap: int) -> dict:
             rel = PurePosixPath(path.relative_to(store).as_posix())
             if _skipped(name):
                 continue
-            slot = rel.as_posix()[:-len(META_SUFFIX)] if name.endswith(META_SUFFIX) else rel.as_posix()
-            if slot in kept:
-                if slot == rel.as_posix():
-                    not_carried.append({"path": slot, "reason": "this-machine-only"})
+            why = _held(rel.as_posix(), held)
+            if why:
+                not_carried.append({"path": rel.as_posix(), "reason": why})
                 continue
             try:
                 info = path.lstat()
@@ -350,25 +380,25 @@ def _copy_once(store: Path, dest: Path, cap: int) -> dict:
     # STILLNESS: what was carried must be what is there now. Under the vault lock no slot moves; the doors
     # keep their own locks outside `projects/`, so a stash written mid-copy is caught here. An append-only
     # journal (`*.jsonl`) may grow: the copy holds what was read, and a later line is in the next snapshot.
-    if kept_here(store) != kept:
+    if held_back(store) != held:
         raise _Changed("a keep-here mark changed")
     seen_files = {f["path"] for f in files}
     seen_dirs = {d["path"] for d in dirs}
     after_files, after_dirs = set(), set()
     for current, children, names in os.walk(store, followlinks=False):
         here = Path(current)
-        children[:] = [c for c in children if not _skipped(c) and not (here / c).is_symlink()]
+        children[:] = [c for c in children if not _skipped(c) and not (here / c).is_symlink()
+                       and not _held((here / c).relative_to(store).as_posix(), held)]
         after_dirs |= {(here / c).relative_to(store).as_posix() for c in children}
         for name in names:
             path = here / name
             rel = path.relative_to(store).as_posix()
             if _skipped(name) or path.is_symlink() or not path.is_file():
                 continue
-            slot = rel[:-len(META_SUFFIX)] if name.endswith(META_SUFFIX) else rel
-            if slot not in kept:
+            if not _held(rel, held):
                 after_files.add(rel)
     # A folder that could not be read is named in not_carried and missing from both walks alike.
-    unread = {n["path"] for n in not_carried if n["reason"] == "unreadable"}
+    unread = {n["path"] for n in not_carried if n["reason"] == "unreadable" and not _held(n["path"], held)}
     if after_files - unread != seen_files - unread or after_dirs - unread != seen_dirs - unread:
         raise _Changed("files appeared or vanished")
     for row in files:
@@ -383,7 +413,8 @@ def _copy_once(store: Path, dest: Path, cap: int) -> dict:
         elif size != row["size"] or sha != row["sha256"]:
             raise _Changed(row["path"])
     return {"state": "carried", "reason": None, "files": files, "directories": dirs, "links": links,
-            "not_carried": not_carried, "size": total, "vault_slots": slots, "kept_here": len(kept)}
+            "not_carried": not_carried, "size": total, "vault_slots": slots,
+            "kept_here": sum(1 for why in held.values() if why == "this-machine-only")}
 
 
 def not_carried(reason: str, size: int = 0) -> dict:
@@ -465,6 +496,13 @@ def verify(source: Path, manifest: dict) -> None:
             continue
         if root.is_symlink() or not root.is_dir():
             raise _mismatch(f"{name} is missing")
+        # Links and special files first, before any file is opened for its digest.
+        actual_files, actual_dirs = set(), set()
+        for path in root.rglob("*"):
+            rel = path.relative_to(root).as_posix()
+            if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                raise _mismatch(f"{name}: a link or a special file")
+            (actual_files if path.is_file() else actual_dirs).add(rel)
         listed_files: set[str] = set()
         for row in entry.get("files") or []:
             if not isinstance(row, dict):
@@ -496,12 +534,6 @@ def verify(source: Path, manifest: dict) -> None:
                 raise _mismatch("a link whose target leaves its store")
             if rel in listed_files or rel in listed_dirs:
                 raise _mismatch("a link that is also a file or a folder")
-        actual_files, actual_dirs = set(), set()
-        for path in root.rglob("*"):
-            rel = path.relative_to(root).as_posix()
-            if path.is_symlink() or not (path.is_file() or path.is_dir()):
-                raise _mismatch(f"{name}: a link or a special file")
-            (actual_files if path.is_file() else actual_dirs).add(rel)
         if actual_files != listed_files or actual_dirs != listed_dirs:
             raise _mismatch(f"{name}: missing or unlisted files or folders")
     if os.path.lexists(folder):
@@ -545,21 +577,65 @@ def carry_into(stage: Path, stores: list[dict], cap: int | None = None) -> list[
     return rows
 
 
-def strip(snapshot: Path, reason: str) -> None:
-    """Remove every carried store from a snapshot that stays plaintext (its export failed) and say why in its
-    manifest: the plaintext copy kept under the workspace's backups never holds an external store."""
-    manifest_file = snapshot / "manifest.json"
-    manifest = config.read_json(manifest_file)
-    changed = False
-    for row in manifest.get("externals") or []:
-        if row.get("state") == "carried":
-            row.update({k: v for k, v in not_carried(reason).items()})
-            changed = True
-    shutil.rmtree(snapshot / EXTERNAL, ignore_errors=True)
-    if changed:
-        manifest["external_sources_included"] = False
-        import workspace
-        workspace.write_json(manifest_file, manifest)
+def strip(snapshot: Path, reason: str) -> bool:
+    """Remove every carried store from a snapshot that stays plaintext (its export failed or was
+    interrupted) and say why in its manifest: a copy kept under the workspace's backups never holds an
+    external store. The store goes first, whatever the manifest says or whether it reads; True when a
+    store folder was there."""
+    folder = snapshot / EXTERNAL
+    had = os.path.lexists(folder)
+    try:
+        if had:
+            if folder.is_symlink() or not folder.is_dir():
+                folder.unlink()
+            else:
+                shutil.rmtree(folder)
+    finally:
+        manifest_file = snapshot / "manifest.json"
+        try:
+            manifest = config.read_json(manifest_file)
+        except (OSError, ValueError, config.ConfigurationError):
+            manifest = None
+        rows = (manifest or {}).get("externals")
+        if isinstance(rows, list):
+            changed = False
+            for row in rows:
+                if isinstance(row, dict) and row.get("state") == "carried":
+                    row.update(not_carried(reason))
+                    changed = True
+            if changed:
+                manifest["external_sources_included"] = False
+                import workspace
+                workspace.write_json(manifest_file, manifest)
+    return had
+
+
+def sweep(backups: Path, *, stage_age_seconds: float = 3600) -> dict:
+    """Before a snapshot: no plaintext copy under the workspace's backups keeps an external store. Every
+    snapshot folder there loses its `external/` (a copy an interrupted export left, or one an older run
+    of this release left after a kill), and every `.snapshot-*` stage older than `stage_age_seconds` is
+    removed whole (a stage is renamed or removed by the run that made it, so an old one is a dead run's).
+    Runs under the workspace's operation lock, so no snapshot of this workspace is being written."""
+    stripped, stages = 0, 0
+    if backups.is_symlink() or not backups.is_dir():
+        return {"stripped": 0, "stages_removed": 0}
+    now = time.time()
+    for child in backups.iterdir():
+        if child.is_symlink() or not child.is_dir():
+            continue
+        if child.name.startswith(".snapshot-"):
+            try:
+                old = now - child.lstat().st_mtime > stage_age_seconds
+            except OSError:
+                continue
+            if old:
+                shutil.rmtree(child, ignore_errors=True)
+                stages += 1
+            continue
+        if os.path.lexists(child / EXTERNAL):
+            strip(child, "export-failed")
+            stripped += 1
+    return {"stripped": stripped, "stages_removed": stages}
 
 
 def summary(rows: list[dict]) -> dict:
@@ -568,4 +644,5 @@ def summary(rows: list[dict]) -> dict:
         return {"state": "not-applicable"}
     first = rows[0]
     return {"state": first["state"], "reason": first["reason"], "files": len(first["files"]),
-            "size": first["size"], "kept_here": first.get("kept_here", 0)}
+            "size": first["size"], "kept_here": first.get("kept_here", 0),
+            "not_carried": len(first.get("not_carried") or [])}

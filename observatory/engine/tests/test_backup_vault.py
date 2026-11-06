@@ -1009,5 +1009,40 @@ class ThisMachineOnly(Base):
         self.assertFalse((store / self.SLOT).exists())
 
 
+    def test_a_rotated_kept_slot_leaves_its_archives_behind_too(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault.py', 'rotate', 'alpha', 'prod', 'API_KEY', value='fixture-value-008')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        retired = sorted(p.name for p in (self.store / 'projects/alpha/prod').iterdir() if '.retired-' in p.name)
+        self.assertTrue(retired, 'rotate archives the old value beside the slot')
+        store, entry = self.carried()
+        carried = [f['path'] for f in entry['files']]
+        self.assertFalse([p for p in carried if p.startswith(self.SLOT)], carried)
+        self.assertFalse([p for p in store.rglob('*') if p.name.startswith('API_KEY')])
+        held = {r['path'] for r in entry['not_carried'] if r['reason'] == 'this-machine-only'}
+        self.assertEqual(held, {self.SLOT, self.SLOT + '.meta.json',
+                                *(f'projects/alpha/prod/{name}' for name in retired)})
+
+    def test_a_mark_that_does_not_read_keeps_the_slot_here(self):
+        # Fail closed: a metadata file that may carry a keep-here mark but does not read is not a reason
+        # to carry the slot.
+        meta = self.store / (self.SLOT + '.meta.json')
+        for name, damage in (('not json', lambda: meta.write_text('{not json')),
+                             ('not utf-8', lambda: meta.write_bytes(b'\xff\xfe{}')),
+                             ('too large', lambda: meta.write_text('{"x": "' + 'a' * 70000 + '"}')),
+                             ('not an object', lambda: meta.write_text('[]')),
+                             ('a folder', lambda: (meta.unlink(), meta.mkdir()))):
+            with self.subTest(name):
+                if meta.is_dir():
+                    meta.rmdir()
+                damage()
+                store, entry = self.carried()
+                self.assertFalse((store / self.SLOT).exists())
+                self.assertIn({'path': self.SLOT, 'reason': 'unreadable'}, entry['not_carried'])
+                self.assertEqual(entry['state'], 'carried')
+                __import__('shutil').rmtree(self.base / 'opened', True)
+
+
 if __name__ == '__main__':
     unittest.main()

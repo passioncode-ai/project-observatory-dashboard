@@ -458,27 +458,32 @@ refuses the value through its schema, and `full machine-move status --json` answ
 
 Additive; `format_version` stays 1 and nothing migrates. A snapshot's manifest gains `externals` (one row per
 store the settings name outside the workspace: `name`, `settings_keys`, `path` in its home-relative form,
-`state` `carried` or `not-carried`, `reason` `plaintext-output`, `no-passphrase`, `export-failed`, `too-large`,
-`changed-during-copy`, `unreadable`, `missing` or `contains-workspace` (a setting naming a folder that holds the
-workspace itself), and for a carried store `files` (relative path, SHA-256, size,
+`state` `carried` or `not-carried`, `reason` `plaintext-output`, `no-passphrase`, `export-failed`,
+`update-snapshot`, `too-large`, `changed-during-copy`, `unreadable`, `missing` or `contains-workspace` (a setting
+naming a folder that holds the workspace itself), and for a carried store `files` (relative path, SHA-256, size,
 mode), `directories`, `links` (relative path and a relative target inside the store, recorded and never written),
-`not_carried` (relative path and `link-outside-store`, `special-file`, `unreadable` or `this-machine-only`),
-`size`, `vault_slots` and `kept_here`) and `external_warnings` (`secret-store-env-override` when the environment
-moves the vault away from the folder the settings name). `external_sources_included` is true only when a store
-outside the workspace exists and every one was carried; external source folders such as `sources.projects` are
-never carried. A carried store sits in `<snapshot>/external/<name>/` beside `data/`, files 0600 and folders 0700,
-only inside an `OBSENC1` artifact: an explicit `--output`, a snapshot without a passphrase, a failed export kept
-in the workspace and the pre-update snapshot never hold it. `verify_snapshot` checks every listed file's size and
-digest and refuses an unlisted file or folder, a link, a special file or a folder of a store not carried, with the
-code `secret-store-manifest-mismatch` (a `ConfigurationError`, so exit codes are unchanged). An older engine
+`not_carried` (relative path and `link-outside-store`, `special-file`, `unreadable` or `this-machine-only`; a held
+slot's metadata and rotation archives are listed beside it, and a slot whose metadata does not read is held as
+`unreadable`), `size`, `vault_slots` and `kept_here`) and `external_warnings` (`secret-store-env-override` when the
+environment moves the vault away from the folder the settings name). `external_sources_included` is true only when
+a store outside the workspace exists and every one was carried; external source folders such as `sources.projects`
+are never carried. A carried store sits in `<snapshot>/external/<name>/` beside `data/`, files 0600 and folders
+0700, only inside an `OBSENC1` artifact: an explicit `--output`, a snapshot without a passphrase, a failed or
+interrupted export kept in the workspace and the update's snapshots never hold it. Each `snapshot()` first strips
+`external/` from every copy under the workspace's `backups/` and removes `.snapshot-*` stages older than an hour;
+`workspace_upgrade.snapshot` gains the keyword `update` (the pre-update snapshot passes it). `verify_snapshot`
+refuses a link, a special file, an unlisted file or folder, a changed file or a folder of a store not carried, with
+the code `secret-store-manifest-mismatch` (a `ConfigurationError`, so exit codes are unchanged). An older engine
 verifies and restores `data/` alone and ignores `external/`; so does this release's `full restore`, which does not
 write the store into place yet (the restore side is part 2). New workspace state: `store/raw/secret-store-carry.json`,
 owner-only, written atomically after each snapshot the backups keep or export when a store is external (`at`,
-`kind`, `file`, `state`, `reason`, `files`, `size`; never a value), read by doctor since OBS-349. The daily run's
-maintenance record gains `snapshot.secret_store` (`state`, `reason`); the snapshot answer gains `secret_store`
-(`state`, `reason`, `files`, `size`, `kept_here`, or `{"state": "not-applicable"}`). The machine bundle skips any
-path inside such a store (`skipped`, reason `carried encrypted in the workspace snapshot (sources.<setting>)`),
-and its `inventories/observatory.json` gains `secret_store` (`external`, `carried_in`, `newest_snapshot_carried`).
+`kind`, `file`, `state`, `reason`, `files`, `size`, `not_carried`; never a value), read by doctor since OBS-349
+(doctor's `last_carry` gains `not_carried`); a write that fails is said on stderr and as `carry_record_error`. The
+daily run's maintenance record gains `snapshot.secret_store` (`state`, `reason`); the snapshot answer gains
+`secret_store` (`state`, `reason`, `files`, `size`, `kept_here`, `not_carried`, or `{"state": "not-applicable"}`).
+The machine bundle skips any path inside a store the snapshot carries (`skipped`, reason `carried encrypted in the
+workspace snapshot (sources.<setting>)`), and its `inventories/observatory.json` gains `secret_store` (`external`,
+`carried_in`, `newest_snapshot_carried`; or `carried_in: null` with `reason` for a store no snapshot carries).
 Slot metadata gains `this_machine_only` (`why`, `at`), set by `full vault-digests keep-here PROJECT ENV NAME --why
 TEXT` and cleared by `unkeep-here`; a `vault-digests/1` manifest row may carry `"this_machine_only": true`, which an
 older reader ignores and this one refuses with any other value; the view's cell may carry

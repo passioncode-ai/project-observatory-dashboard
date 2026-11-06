@@ -1121,7 +1121,10 @@ snapshot carry it. The machine bundle skips the store and says it travels in the
 
 Failure paths: a plaintext `--output` snapshot, no passphrase, a failed export, the pre-update snapshot, a store over
 256 MB, one that changed during two copies, or one that cannot be read is never carried, and the snapshot, the carry
-record and doctor name the reason; the snapshot itself never fails because of the store. A link leaving the store,
+record and doctor name the reason; the snapshot itself never fails because of the store. An interrupt inside
+the encryption, or a run killed there, never leaves the store in the plaintext copy: it is removed at once, or
+by the next snapshot. A kept slot's rotation archives stay with it, and a slot whose metadata does not read
+stays here (`unreadable`). A link leaving the store,
 a socket and lock files stay behind; a link inside it is recorded, never followed or written. A damaged or unlisted
 carried file is refused at verification (`secret-store-manifest-mismatch`). Marking a slot this machine does not
 hold, or clearing a mark that is not there, exits 2. Writing the store into place on the other machine is part 2:
@@ -1138,6 +1141,12 @@ Coverage: `tests/test_workspace_upgrade.py` ExternalSecretStore (`test_an_extern
 `test_a_restore_by_this_release_restores_the_home_and_leaves_the_store_alone`,
 `test_a_store_inside_the_workspace_travels_in_data_as_before`, `test_the_update_snapshot_never_carries_the_store`,
 `test_the_environment_override_is_named_in_the_manifest`,
-`test_the_daily_maintenance_record_says_whether_the_store_was_carried`); `tests/test_backup_vault.py` ThisMachineOnly;
+`test_the_daily_maintenance_record_says_whether_the_store_was_carried`,
+`test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext`,
+`test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups`,
+`test_a_failed_carry_record_is_said_not_swallowed`, `test_the_carry_record_counts_what_stayed_behind`,
+`test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot`); `tests/test_backup_vault.py`
+ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
+`test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
 `tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore. Status: built
 (OBS-350 part 1); the restore side waits for part 2; product outcome unobserved.

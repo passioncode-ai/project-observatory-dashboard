@@ -2285,19 +2285,26 @@ it in `external/<setting>/`, next to the home in `data/`. Every slot, the moveme
 register, the estate digest key and the doors' stashes go with it, copied under the vault's own lock and
 listed in the snapshot's manifest by relative path, size, mode and SHA-256, never by value. A snapshot
 that stays plaintext never holds it: `--output DIR` (reason `plaintext-output`), no passphrase
-(`no-passphrase`), an export that failed and left the copy in the workspace (`export-failed`), and the
-snapshot an update takes before it upgrades. Nor does a store over 256 MB (`too-large`), one that kept
-changing during two copies (`changed-during-copy`), one that cannot be read (`unreadable`, `missing`), or a
-folder that holds the workspace itself (`contains-workspace`):
-each is named in the manifest and the snapshot itself still succeeds. Lock files, temporaries, a link
-leaving the store, a socket and a slot kept here on purpose (below) stay behind; a link inside the store
-is recorded, not followed. Each snapshot the backups keep or export leaves
-`store/raw/secret-store-carry.json` (when, which file, carried or not and why, how many files and bytes),
-the record doctor reads; the daily run also keeps the state in its maintenance record. The machine bundle
-skips the store, naming it in its `skipped` list, so no second copy can drift. Putting it back on another
-machine (`full restore --secret-store POLICY`, `--secret-store-only`) is the next part of this work; until
-then this release restores the home and leaves the carried store in the snapshot: `full backups decrypt
-FILE DIR` opens it, and `DIR/external/secret_store/` is the store to copy into place.
+(`no-passphrase`), an export that failed or was interrupted and left the copy in the workspace
+(`export-failed`: the store is removed from that copy before the failure goes on), and the snapshots an
+update takes before it installs and upgrades (`update-snapshot`). Each snapshot first removes the store
+from any copy a killed run left under the workspace's `backups/`, and removes that run's unfinished
+`.snapshot-*` folders once they are an hour old. Nor is a store carried when it is over 256 MB
+(`too-large`), kept changing during two copies (`changed-during-copy`), cannot be read (`unreadable`,
+`missing`), or holds the workspace itself (`contains-workspace`): each is named in the manifest and the
+snapshot itself still succeeds. Lock files, temporaries, a link leaving the store, a socket and a slot kept
+here on purpose (below) stay behind; a link inside the store is recorded, not followed. Each snapshot the
+backups keep or export leaves `store/raw/secret-store-carry.json` (when, which file, carried or not and
+why, how many files and bytes, how many entries stayed behind), the record doctor reads; a record that
+cannot be written is said on stderr and in the answer's `carry_record_error`. The daily run also keeps the
+state in its maintenance record. The machine bundle skips a store the snapshot carries, naming it in its
+`skipped` list, so no second copy can drift; a store the snapshot never carries (`contains-workspace`) is
+walked like any other path. Putting it back on another machine (`full restore --secret-store POLICY`,
+`--secret-store-only`) is the next part of this work; until then this release restores the home and
+leaves the carried store in the snapshot: `full backups decrypt FILE DIR` opens it, and
+`DIR/external/secret_store/` is the store to copy into place. A copy by hand must recreate each link the
+manifest lists under `externals[].links` (`ln -s TARGET PATH` inside the store: links are recorded, never
+stored as links), and then delete `DIR`, which holds every key in plaintext.
 
 **A slot that stays on this machine on purpose** (a root seed, an administrator token whose single home is
 this machine) is marked once, and no snapshot carries it from then on:
@@ -2307,8 +2314,11 @@ project-observatory full vault-digests keep-here PROJECT ENV NAME --why "..."   
 project-observatory full vault-digests unkeep-here PROJECT ENV NAME            # the next snapshot carries it again
 ```
 
-The mark lives in the slot's metadata, survives a new value, and is journaled; the snapshot names the slot
-with the reason `this-machine-only` and still reads as carried. `full vault-digests` shows it as `only here
+The mark lives in the slot's metadata, survives a new value, and is journaled; the snapshot leaves the slot,
+its metadata and every archive `vault.py rotate` kept of it (`NAME.retired-*`) behind, names each with the
+reason `this-machine-only`, and still reads as carried. A slot whose metadata does not read (not JSON, not
+UTF-8, over 64 KiB, not a regular file) stays behind the same way with the reason `unreadable`: a mark that
+cannot be read may be a mark. `full vault-digests` shows it as `only here
 on purpose` here and `only on <machine> on purpose` on the other machine, neither of which counts as a
 difference.
 

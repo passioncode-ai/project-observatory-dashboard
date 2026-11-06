@@ -481,6 +481,20 @@ class ExternalSecretStore(Base):
         workspace.write_json(self.ws / 'config' / 'settings.json', doc)
         self.assertEqual(MB.workspace_pointer(self.ws, self.user)['secret_store'], {'external': False})
 
+    def test_a_store_no_snapshot_carries_is_not_skipped(self):
+        # A setting naming a folder that holds the workspace is never carried by the snapshot; the
+        # bundle must not drop what its entries name because of it.
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc['sources']['secret_store'] = str(self.base)
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.assertEqual(MB.workspace_pointer(self.ws, self.user)['secret_store'],
+                         {'external': True, 'carried_in': None, 'reason': 'contains-workspace'})
+        self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        self.assertFalse([s for s in manifest['skipped'] if 'workspace snapshot' in s['reason']], manifest['skipped'])
+        self.assertTrue(any(p.name == 'agent.toml' for p in stage.rglob('*')))
+
 
 class Refusals(Base):
     def test_without_a_passphrase_nothing_is_written_anywhere(self):

@@ -332,11 +332,12 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
 
 
 def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = False,
-             kind: str = 'snapshot') -> dict:
+             kind: str = 'snapshot', update: bool = False) -> dict:
     """An explicit --output is honoured as a plaintext directory, exactly as before.
     Without one the snapshot is staged under <home>/backups and then handed to
     backup_vault: exported encrypted to the backups root when a passphrase is
-    configured, otherwise kept locally under rotation."""
+    configured, otherwise kept locally under rotation. `update` names the snapshot an
+    update takes before it installs (its reason for not carrying a secret store)."""
     managed_layout(base)
     preflight(base)  # unknown versions refuse before locks or other writes
     require_stopped(writers_stopped)
@@ -345,8 +346,11 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
         raise config.ConfigurationError(f'Unknown snapshot kind: {kind}')
     output = output or base / 'backups' / (f'{kind}-' + uuid.uuid4().hex)
     with operation_lock(base):
+        # No plaintext copy under the workspace's backups keeps an external store: a run killed
+        # between the copy and the encryption left one; this one removes it first (OBS-350).
+        secret_store_carry.sweep(base / 'backups')
         if explicit:
-            result = _snapshot(base, output, not_carried='plaintext-output')
+            result = _snapshot(base, output, not_carried='update-snapshot' if update else 'plaintext-output')
             result['encrypted'] = False
             return result
         # The store is carried only into a snapshot about to be encrypted: the condition
@@ -357,7 +361,14 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
             secret = None
         result = _snapshot(base, output, carry_stores=bool(secret), not_carried='no-passphrase')
         staged = Path(result['snapshot'])
-        result.update(backup_vault.after_snapshot(base, staged, kind))
+        try:
+            result.update(backup_vault.after_snapshot(base, staged, kind))
+        except BaseException:
+            # Interrupted or failed inside the encryption (a signal, a missing library, a bug):
+            # the plaintext copy that stays must not keep the store. Then the failure goes on.
+            if staged.is_dir():
+                secret_store_carry.strip(staged, 'export-failed')
+            raise
         if not result.get('encrypted') and result['secret_store'].get('state') == 'carried':
             # The export failed and the copy stays plaintext under the workspace's backups:
             # it must not keep the external store.
@@ -366,22 +377,29 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
                                       'files': 0, 'size': 0}
             result['external_sources_included'] = False
         if result['secret_store'].get('state') != 'not-applicable':
-            _record_carry(base, kind, Path(result['snapshot']).name, result['secret_store'])
+            problem = _record_carry(base, kind, Path(result['snapshot']).name, result['secret_store'])
+            if problem:
+                result['carry_record_error'] = problem
         return result
 
 
-def _record_carry(base: Path, kind: str, file: str, store: dict) -> None:
+def _record_carry(base: Path, kind: str, file: str, store: dict) -> str | None:
     """`store/raw/secret-store-carry.json`: what the newest exported or kept snapshot did with the
     external secret store (names, counts, times; never a value), the record doctor reads (OBS-349).
     Written only for snapshots `backup_vault` keeps or exports, never for an explicit `--output`, so a
     plaintext copy taken by hand never hides whether the daily encrypted one carried the store."""
     record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'kind':kind,
               'file':file, 'state':store.get('state'), 'reason':store.get('reason'),
-              'files':store.get('files', 0), 'size':store.get('size', 0)}
+              'files':store.get('files', 0), 'size':store.get('size', 0),
+              'not_carried':store.get('not_carried', 0)}
     try:
         workspace.write_json(base.joinpath(*backup_vault.CARRY_RECORD), record)
-    except (OSError, config.ConfigurationError):
-        pass  # doctor then reads the previous record, or none, and keeps warning
+    except (OSError, config.ConfigurationError) as exc:
+        # The snapshot stands; doctor then reads the previous record, or none, and keeps warning.
+        problem = f'the secret store carry record was not written: {type(exc).__name__}'
+        print(f'Observatory: {problem}', file=sys.stderr)
+        return problem
+    return None
 
 
 def safe_relative(value: object) -> str:
@@ -861,7 +879,8 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         databases = {name for name in before if not name.endswith(('-wal', '-journal', '-shm'))
                      and sqlite_file(base / name)}
         steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
-        receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex))
+        receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex),
+                            not_carried='update-snapshot')
         stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))  # paths-check: allow — removed by the finally below on every path
         rollback = base / 'backups' / ('rollback-' + uuid.uuid4().hex)
         replaced = []

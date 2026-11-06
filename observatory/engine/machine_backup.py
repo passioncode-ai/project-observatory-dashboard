@@ -1120,7 +1120,10 @@ def workspace_pointer(base: Path, home: Path) -> dict:
         root = None
     # Where the secret store kept outside the workspace travels (OBS-350): inside the workspace's
     # encrypted snapshot, never in this bundle. `newest_snapshot_carried` is the carry record's word.
-    if secret_store_carry.external_stores(base):
+    stores = secret_store_carry.plan(base, carry_now=True, why_not=None)
+    if stores and stores[0]["reason"]:
+        store = {"external": True, "carried_in": None, "reason": stores[0]["reason"]}
+    elif stores:
         last = backup_vault._last_carry(base)
         carried = None if not last or last.get("state") == "unknown" else last.get("state") == "carried"
         store = {"external": True, "carried_in": "workspace snapshot", "newest_snapshot_carried": carried}
@@ -1170,7 +1173,10 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                           f"{limits['min_free_gb']} GB a machine backup leaves (limits.min_free_gb in "
                           f"config/{CONFIG_NAME}); the disk holds {root}")
     col = Collection(home, limits)
-    col.store_roots = secret_store_carry.store_roots(secret_store_carry.external_stores(base), home)
+    # Only a store the encrypted workspace snapshot carries is left to it (OBS-350): one it would never
+    # carry (a folder that holds the workspace itself) is walked like any other path the entries name.
+    col.store_roots = secret_store_carry.store_roots(
+        [s for s in secret_store_carry.plan(base, carry_now=True, why_not=None) if not s["reason"]], home)
     excludes = tuple(settings["exclude"])
     for entry in builtin_entries(home, transcripts=settings["transcripts"]):
         col.walk(entry, excludes)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 import contextlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
@@ -1111,13 +1112,19 @@ class ExternalSecretStore(unittest.TestCase):
         self.assertFalse((self.home/'store/raw/secret-store-carry.json').exists())
 
     def test_the_update_snapshot_never_carries_the_store(self):
-        # `upgrade` and the pre-update snapshot take the home through `_snapshot` directly.
-        out=self.home/'backups'/'before-upgrade-test'
-        receipt=upgrade._snapshot(self.home,out)
+        # The pre-update snapshot (`update=True`, an explicit output) and `upgrade`'s own `_snapshot`
+        # are named for what they are, not as a plaintext copy taken by hand.
+        out=self.home/'backups'/'before-update-test'
+        receipt=upgrade.snapshot(self.home,out,writers_stopped=True,update=True)
         manifest=config.read_json(out/'manifest.json')
         self.outputs+= [json.dumps(receipt),json.dumps(manifest)]
-        self.assertEqual(manifest['externals'][0]['reason'],'plaintext-output')
+        self.assertEqual(manifest['externals'][0]['reason'],'update-snapshot')
         self.assertFalse((out/'external').exists())
+        out=self.home/'backups'/'before-upgrade-test'
+        upgrade._snapshot(self.home,out,not_carried='update-snapshot')
+        self.assertEqual(config.read_json(out/'manifest.json')['externals'][0]['reason'],'update-snapshot')
+        self.assertIn("not_carried='update-snapshot'",Path(upgrade.__file__).read_text(),
+                      'upgrade takes its snapshot as an update snapshot')
 
     def test_the_environment_override_is_named_in_the_manifest(self):
         with patch.dict(os.environ,{'OBSERVATORY_VAULT_DIR':str(self.base/'elsewhere')}):
@@ -1145,6 +1152,77 @@ class ExternalSecretStore(unittest.TestCase):
         self.assertEqual(report['result'],'taken',report)
         self.outputs.append(json.dumps(state))
         self.assertEqual(state['snapshot']['secret_store'],{'state':'carried','reason':None})
+
+    def test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext(self):
+        # SIGTERM (SystemExit) in a maintenance run, ^C, a library that does not import, a bug: each is
+        # raised past `after_snapshot`, and none may leave the store in the plaintext copy that stays.
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        for error in (KeyboardInterrupt(),SystemExit(143),ImportError('cryptography'),ValueError('bug')):
+            with self.subTest(type(error).__name__):
+                with patch.object(self.vault,'encrypt_tree',side_effect=error):
+                    with self.assertRaises(type(error)):
+                        upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
+                left=[p for p in (self.home/'backups').iterdir() if p.name.startswith('daily-')]
+                self.assertTrue(left,'the plaintext copy stays, as before')
+                for copy in left:
+                    self.assertFalse((copy/'external').exists(),copy)
+                    rows=config.read_json(copy/'manifest.json')['externals']
+                    self.assertEqual({r['state'] for r in rows},{'not-carried'})
+                for path in (self.home/'backups').rglob('*'):
+                    if path.is_file():
+                        self.assertNotIn(b'fixture-value-001',path.read_bytes(),path)
+                for copy in left:   # so the next case proves its own path, not the next run's sweep
+                    shutil.rmtree(copy)
+
+    def test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups(self):
+        import secret_store_carry
+        backups=self.home/'backups'
+        killed=backups/'daily-killed'
+        (killed/'external/secret_store/projects').mkdir(parents=True)
+        (killed/'external/secret_store/projects/K').write_text('fixture-value-001')
+        workspace.write_json(killed/'manifest.json',{'externals':[{'name':'secret_store','state':'carried'}],
+                                                     'external_sources_included':True})
+        dead=backups/'.snapshot-dead'
+        (dead/'external').mkdir(parents=True)
+        os.utime(dead,(1,1))
+        fresh=backups/'.snapshot-fresh'
+        fresh.mkdir()
+        upgrade.snapshot(self.home,self.base/'by-hand',writers_stopped=True)
+        self.assertFalse((killed/'external').exists())
+        manifest=config.read_json(killed/'manifest.json')
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason'],
+                          manifest['external_sources_included']),('not-carried','export-failed',False))
+        self.assertFalse(dead.exists(),'a stage older than an hour is a dead run\'s')
+        self.assertTrue(fresh.exists(),'a recent stage may be a live run\'s')
+        # A copy whose manifest is gone or broken still loses its store.
+        for broken in ('missing','garbage'):
+            copy=backups/('daily-'+broken)
+            (copy/'external/secret_store').mkdir(parents=True)
+            if broken=='garbage':
+                (copy/'manifest.json').write_text('{not json')
+            self.assertTrue(secret_store_carry.strip(copy,'export-failed'))
+            self.assertFalse((copy/'external').exists())
+
+    def test_a_failed_carry_record_is_said_not_swallowed(self):
+        real=workspace.write_json
+
+        def refuse(path,value):
+            if Path(path).name=='secret-store-carry.json':
+                raise OSError('read-only')
+            return real(path,value)
+        err=io.StringIO()
+        with patch.object(workspace,'write_json',refuse),patch.object(sys,'stderr',err):
+            result,_,_=self.encrypted()
+        self.assertIn('carry record was not written',result['carry_record_error'])
+        self.assertIn('carry record was not written',err.getvalue())
+
+    def test_the_carry_record_counts_what_stayed_behind(self):
+        (self.store/'outside').symlink_to(self.base)
+        result,_,manifest=self.encrypted()
+        count=len(manifest['externals'][0]['not_carried'])
+        self.assertGreaterEqual(count,1)
+        self.assertEqual((self.record()['not_carried'],result['secret_store']['not_carried']),(count,count))
+        self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['not_carried'],count)
 
 if __name__=='__main__':
     unittest.main()
