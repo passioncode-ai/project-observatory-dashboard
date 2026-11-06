@@ -142,14 +142,27 @@ def _run(argv: list[str]) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
+def parse_proc_status_uid(text: str) -> int | None:
+    """`/proc/<pid>/status`: the real uid, the first number of its `Uid:` line. Read from the
+    status file rather than from the folder's owner, which is root for a non-dumpable process."""
+    for line in text.splitlines():
+        if line.startswith("Uid:"):
+            parts = line.split()
+            return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+    return None
+
+
 def _linux_process_uids() -> set[int]:
     uids = set()
     for name in os.listdir("/proc"):
         if name.isdigit():
             try:
-                uids.add(os.stat(f"/proc/{name}").st_uid)
+                with open(f"/proc/{name}/status", encoding="ascii", errors="replace") as fh:
+                    uid = parse_proc_status_uid(fh.read(4096))
             except OSError:
                 continue
+            if uid is not None:
+                uids.add(uid)
     return uids
 
 

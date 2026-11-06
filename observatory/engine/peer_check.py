@@ -213,24 +213,36 @@ def response(code: str) -> bytes:
             b"Cache-Control: no-store\r\nConnection: close\r\n\r\n" + body)
 
 
-def refuse(sock: socket.socket, code: str) -> None:
-    """Write the 403, end the sending side, discard what the peer already sent unread, so the
-    close does not reset the answer away, and leave the close to the server's own shutdown."""
+#: The peer leaving, or the drain's own deadline: the end of a refusal, never a server failure.
+_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
+
+
+def refuse(sock, code: str) -> None:
+    """Write the 403, end the sending side, discard what the peer already sent unparsed, so the
+    close does not reset the answer away, and leave the close to the server's own shutdown.
+
+    A peer that left (a broken pipe, a reset) ends the refusal quietly, as it ends a served
+    request; any other I/O failure is not hidden and reaches the server's error handling. A
+    connection object without `shutdown`, `settimeout` or `recv` (a server's own wrapper) gets
+    the answer and no drain."""
     try:
         sock.sendall(response(code))
-        sock.shutdown(socket.SHUT_WR)
+        shutdown, settimeout, recv = (getattr(sock, name, None) for name in ("shutdown", "settimeout", "recv"))
+        if shutdown is None or settimeout is None or recv is None:
+            return
+        shutdown(socket.SHUT_WR)
         deadline = time.monotonic() + DRAIN_SECONDS
         left = DRAIN_BYTES
         while left > 0:
             wait = deadline - time.monotonic()
             if wait <= 0:
                 break
-            sock.settimeout(wait)
-            chunk = sock.recv(min(left, 8192))
+            settimeout(wait)
+            chunk = recv(min(left, 8192))
             if not chunk:
                 break
             left -= len(chunk)
-    except OSError:
+    except _GONE:
         pass
 
 

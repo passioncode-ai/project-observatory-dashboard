@@ -180,12 +180,19 @@ def _address(addr) -> tuple[str, int]:
 
 # -- classification ---------------------------------------------------------------------------------------------------
 
+def _posix_uid() -> int | None:
+    """This process's uid, or None where the OS has none (Windows compares SIDs instead). The one
+    place this module reads it: this file is vendored without its project's OS layer, so the uid
+    is read here, once, on the POSIX paths only (an engine boundary test names this function)."""
+    return os.getuid() if hasattr(os, "getuid") else None
+
+
 def classify(uid: int | None, pid: int | None, *, method: str, own_uid: int | None = None) -> Owner:
     """`system` for uid 0 or pid 1, `this-account` for this process's uid, else `another-account`."""
     if uid is None:
         return Owner(UNKNOWN, None, pid, method, "no-owner")
     if own_uid is None:
-        own_uid = os.getuid() if hasattr(os, "getuid") else None
+        own_uid = _posix_uid()
     if uid == 0 or pid == 1:
         return Owner(SYSTEM, uid, pid, method)
     if own_uid is not None and uid == own_uid:
@@ -448,7 +455,7 @@ def _calibrate_sysctl() -> bool:
         accepted, _ = probe.accept()
         rows = parse_pcblist_n(_sysctl_blob())
         return calibration_holds(rows, _address(probe.getsockname()), _address(client.getsockname()),
-                                 uid=os.getuid(), pid=os.getpid())
+                                 uid=_posix_uid(), pid=os.getpid())
     except (TableUnreadable, OSError, struct.error, ValueError):
         return False
     finally:

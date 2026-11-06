@@ -174,6 +174,51 @@ class Decision(unittest.TestCase):
         self.assertTrue(out[0].endswith(b'{"error":"peer-foreign-account"}'))
 
 
+class NotASocket:
+    """A connection wrapper with `sendall` only, as some servers hand a handler."""
+
+    def __init__(self, error=None):
+        self.error, self.sent = error, b""
+
+    def sendall(self, data):
+        if self.error is not None:
+            raise self.error
+        self.sent += data
+
+
+class Refuse(unittest.TestCase):
+    def test_a_refusal_to_a_peer_that_is_no_socket(self):
+        peer = NotASocket()
+        peer_check.refuse(peer, peer_check.UNVERIFIED)                 # no shutdown: answered, no drain
+        self.assertTrue(peer.sent.endswith(b'{"error":"peer-unverified"}'))
+
+    def test_a_peer_that_left_ends_quietly_and_an_io_failure_surfaces(self):
+        for gone in (BrokenPipeError(32, "peer closed"), ConnectionResetError(54, "peer reset")):
+            peer_check.refuse(NotASocket(gone), peer_check.FOREIGN)
+        failure = OSError(5, "synthetic storage failure")
+        with self.assertRaises(OSError) as caught:
+            peer_check.refuse(NotASocket(failure), peer_check.FOREIGN)
+        self.assertIs(caught.exception, failure)
+
+    def test_the_local_server_refuses_a_peer_that_is_no_socket(self):
+        class Unread:
+            def __getattr__(self, name):
+                if name in ("close", "closed"):
+                    return (lambda: None) if name == "close" else False
+                raise AssertionError(f"the request was read ({name})")
+
+        class Peer(NotASocket):
+            def makefile(self, *args):
+                return Unread()
+
+        peer = Peer()
+        with mock.patch.object(serverd.peer_check, "GATE", peer_check.Gate(
+                accounts=lambda: 2, config_dir=lambda: pathlib.Path(tmpdir.mkdtemp()), log=lambda line: None)):
+            serverd.Handler(peer, ("127.0.0.1", 1), mock.Mock(server_address=("127.0.0.1", 43210)))
+        self.assertTrue(peer.sent.startswith(b"HTTP/1.1 403"))
+        self.assertTrue(peer.sent.endswith(b'{"error":"peer-unverified"}'))
+
+
 class LocalServer(unittest.TestCase):
     def serve(self, g) -> int:
         patch = mock.patch.object(serverd.peer_check, "GATE", g)

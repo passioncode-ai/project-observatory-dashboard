@@ -345,6 +345,14 @@ class SelfContained(unittest.TestCase):
         names.discard("__future__")
         self.assertTrue(names <= set(sys.stdlib_module_names), names - set(sys.stdlib_module_names))
 
+    def test_the_uid_is_read_in_one_function(self):
+        # The engine's OS boundary (tests/test_osprivacy.py, STANDALONE_UID) lets this vendorable file
+        # read the uid itself, and only in `_posix_uid`.
+        tree = ast.parse((ROOT / "peer_owner.py").read_text(encoding="utf-8"))
+        readers = {fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+                   for node in ast.walk(fn) if isinstance(node, ast.Attribute) and node.attr == "getuid"}
+        self.assertEqual(readers, {"_posix_uid"})
+
     def test_names_and_version(self):
         self.assertRegex(P.PEER_OWNER_VERSION, r"^\d+\.\d+\.\d+$")
         self.assertIn(f"peer_owner {P.PEER_OWNER_VERSION}", P.__doc__)
@@ -388,6 +396,11 @@ class HostAccounts(unittest.TestCase):
         pw = [SimpleNamespace(pw_uid=1000, pw_shell="/bin/bash"), SimpleNamespace(pw_uid=1001, pw_shell="/usr/sbin/nologin"),
               SimpleNamespace(pw_uid=65534, pw_shell="/bin/sh"), SimpleNamespace(pw_uid=1002, pw_shell="/bin/zsh")]
         self.assertEqual(host_accounts.passwd_uids(pw, lo, hi), {1000, 1002})
+
+    def test_linux_process_owner_is_the_status_real_uid(self):
+        text = "Name:\tbash\nUmask:\t0022\nState:\tS (sleeping)\nUid:\t1001\t1001\t1001\t1001\nGid:\t1001\n"
+        self.assertEqual(host_accounts.parse_proc_status_uid(text), 1001)
+        self.assertIsNone(host_accounts.parse_proc_status_uid("Name:\tkthreadd\n"))
 
     def test_windows_profiles_whose_folder_exists(self):
         self.assertEqual(host_accounts.count_profiles([("S-1-5-18", True), ("S-1-5-21-1-2-3-500", True),
