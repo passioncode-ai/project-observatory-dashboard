@@ -1699,9 +1699,10 @@
     "workflow_memory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FAILED (errors=1)",
+      "reason": "FAILED (errors=1); times out on windows-latest in some runs (runs 42175857857 and 42178294453, 2026-11-06)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "ReviewFindings.test_h10_references_survive_and_the_report_names_fields"
