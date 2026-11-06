@@ -2,7 +2,7 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 9. `observatory-profile.lock.json` selects profile `observatory-local-mcp`
+is revision 10. `observatory-profile.lock.json` selects profile `observatory-local-mcp`
 version `1.2.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
 separate version axes.
 
@@ -80,7 +80,7 @@ schemas and six fixtures at `v0.2.0`, under the repository's address at the time
 (`ssheleg/project-observatory-open-source`, which GitHub redirects), and the
 `machine.mcp.inventory` and `machine.mcp.refresh` schemas and fixtures at `v0.9.0`, and the
 `project.resolve` ones at `v0.24.0` (revision 8), and the `grant.check` ones at `v0.24.1`
-(revision 9), all under
+(revision 9), and the `ops.digest.record` ones at `v0.34.0` (revision 10), all under
 `passioncode-ai/project-observatory-dashboard`. Published identifiers are never
 rewritten, so a capability added later is pinned to the release that adds it
 instead of moving the old ones. `tools/publish_contract.py --local` refuses a file
@@ -105,7 +105,7 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `grant.check` | `none` | `grant.check`; a token-carrying call goes to the same tool on the memory-http door (loopback streamable-http, token in `Authorization`), while over stdio it answers `principal-unproven` | — |
 | `machine.mcp.inventory` | `none` | `machine.mcp.inventory` | — |
 | `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
-| `ops.digest.record` (served, declared at `v0.34.0`) | `draft` | `ops.digest.record`; over stdio under an access binding with its scope (`--binding-token-file`), else `binding-required`; on the memory-http door with a delegation token of its scope, else `delegation-required` | none |
+| `ops.digest.record` | `draft` | `ops.digest.record`; over stdio under an access binding with its scope (`--binding-token-file`), else `binding-required`; on the memory-http door with a delegation token of its scope, else `delegation-required` | none |
 
 The older `observatory_*` tools stay, unchanged, for hosts that call them. The complete
 published tool list — the `observatory_*` tools, the capability tools, the job tools and the
@@ -203,11 +203,11 @@ release does not silently move that schema pin.
 ## Operations digests (`ops.digest.record`, OBS-330)
 
 `ops.digest.record` takes a product's daily operations digest, `ops.digest.daily@1` of the contract's DEC-0153, as
-Fabric collects it on the machine. It is served now and declared at the release that publishes its schemas: its
-declaration waits in `unreleased-capabilities.json`, pinned at `v0.34.0`, because a manifest may not pin a tag newer
-than the release that ships it (`../tools/check_manifest_urls.py`, ENG-018). `../interop.py` serves a waiting
-declaration like a declared one, and the release that reaches `v0.34.0` moves it into `../fabric-agent.json` as
-revision 10; `../tests/test_ops_digest_record.py` fails that release until it does. The shapes, rules, vectors and fixtures are vendored byte for byte in
+Fabric collects it on the machine. It is declared in `../fabric-agent.json` since 0.34.0 (revision 10), its
+schemas pinned at `v0.34.0`, the release that publishes them. Until that release its declaration waited in
+`unreleased-capabilities.json`, because a manifest may not pin a tag newer than the release that ships it
+(`../tools/check_manifest_urls.py`, ENG-018); `../interop.py` serves a waiting declaration like a declared one, and
+`../tests/test_ops_digest_record.py` fails a release that reaches a waiting entry's tag without moving it. The shapes, rules, vectors and fixtures are vendored byte for byte in
 `ops-digest/` at the contract's release tag `v0.1.0+2026-11-06.1`, which the engine's pin predates; the folder's
 README holds the digests, and `contract_lock` lists it among the folders copied at another commit. `../ops_digest.py`
 ports the rules (`FAC-SEM-166`, `FAC-SEM-167`, the `source` clause of `FAC-SEM-168`) and the reference folds, and

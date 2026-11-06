@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.33.1**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.34.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -334,7 +334,7 @@ one that names another machine, or none (taken before 0.30.1), as a second machi
 key and stages its jobs, and a snapshot leaves out `node/device/`, `node/orgs/`, `node/records/` and
 `<home>/store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
 `--same-machine` at a terminal restores either whole, as before. An update's own rollback restores its snapshot whole.
-From the release after 0.33.1 (OBS-348) a second-machine restore also leaves out `secrets/backup-passphrase`: each
+From 0.34.0 (OBS-348) a second-machine restore also leaves out `secrets/backup-passphrase`: each
 machine keeps its own backup passphrase, and the second machine makes its own with `full maintain ensure`, which the
 answer's `machine.next` names, beside `machine.notes` (keep the other machine's passphrase off both machines if it
 may be retired). This is a behaviour change for second-machine restores only; a same-machine restore keeps the file.
@@ -350,7 +350,7 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
-## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, the release after 0.33.1)
+## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, 0.34.0)
 
 Additive, with no new file, table or migration. A workspace snapshot's `manifest.json` gains `home_path`, the home
 folder it was taken under (`str(Path.home())`); an older engine ignores it. `full configure sources NAME PATH` and
@@ -384,7 +384,7 @@ one terminal prompt; the value that opens the file is kept nowhere. The refusals
 exit 2 before any write (`backup_vault.BackupError.code`). `full restore --latest` asks once per backups folder at a
 terminal when no kept passphrase opens it; `full init` never asks, and names the backups and the steps as before.
 
-## Workflow memory: a session Fabric starts for a board request (OBS-323, the release after 0.33.1)
+## Workflow memory: a session Fabric starts for a board request (OBS-323, 0.34.0)
 
 Additive, with no new file, table or migration. A checkpoint body's `artifacts` may carry the packet refs of
 Fabric's on-demand sessions (`board-request:`, `board-thread:`, `capability:`, `fabric-project:`, `deadline:`,
@@ -407,12 +407,12 @@ without one, nothing changes. That gate guards a cooperating run; containment st
 `slotsRequireGrant: always` with a delegation token. The secret-use journal's rows gain `workflow`, `request` and
 `dispatch` (a refusal code).
 
-## Capability: products' daily operations digests (OBS-330, the release after 0.33.1)
+## Capability: products' daily operations digests (OBS-330, 0.34.0)
 
 Additive. One new capability, `ops.digest.record` (effect `draft`, idempotency `supported`), served as the MCP tool
 of that name (`ops_digest_record` where a client turns dots into underscores) with schemas published at `v0.34.0`;
-the release that publishes them declares it in the manifest as revision 10 (until then a build of `main` serves it
-from `observatory/engine/fabric/unreleased-capabilities.json`, because a manifest may not pin a tag newer than its
+0.34.0 declares it in the manifest as revision 10 (before that release a build of `main` served it from
+`observatory/engine/fabric/unreleased-capabilities.json`, because a manifest may not pin a tag newer than its
 release). No existing tool name, argument or answer field changes, and `contractVersion` stays `0.1.0`. Its input is `digest`, one `ops.digest.daily@1` line of fabric-agent-contract
 DEC-0153 as a JSON object (the contract's closed schema inline under `$defs/daily`), `source` (default `app`) and an
 optional `service {id, instance}`. It has no project field: over stdio the project is the one project of the access
@@ -436,7 +436,7 @@ code. Each write drops days older than 400. An older engine ignores the folder; 
 `ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
 never the retros written.
 
-## Servers: another OS account's connection refused (OBS-355 part 1, the release after 0.33.1)
+## Servers: another OS account's connection refused (OBS-355 part 1, 0.34.0)
 
 A behaviour change on hosts with more than one person's OS account only. There, the local server, memory over HTTP
 and the keyserver answer a connection from another account's (or root's, or launchd's) process
@@ -458,7 +458,7 @@ it. Additive elsewhere: the receipt `store/raw/serverd.json` gains `peer` (`sett
 receipt, or null; memory over HTTP and the keyserver count in their own process only) and `clientCheck`, null until
 the clients check their server (OBS-355 part 2). The relay is unchanged.
 
-## Doctor: one verdict and the secret store (OBS-349, the release after 0.33.1)
+## Doctor: one verdict and the secret store (OBS-349, 0.34.0)
 
 Additive, with no migration. `full doctor` gains `attention` (rows `{area, code, severity, text, step}`, area
 `backups`, `machine_backup`, `maintenance`, `sources` or `tick`) and `clean` (no row is a `warning`;
@@ -476,7 +476,7 @@ store); this release writes no such file, and a file that does not read is `{"st
 `observatory_machine` accepts `section: "move"`, the `machine-move status` checklist under `move`; an older server
 refuses the value through its schema, and `full machine-move status --json` answers the same.
 
-## Workspace state: the daily learning review (OBS-331 part a, the release after 0.33.1)
+## Workspace state: the daily learning review (OBS-331 part a, 0.34.0)
 
 Additive. A new command, `project-observatory full learning-review show|list|run`, and two new tick entries after
 `rollup`: the probe `learning-review-due` and the step `learning-review` (both optional, never among the steps that
@@ -537,7 +537,7 @@ What is sent and what never is: [the event catalogue](analytics-events.md).
 | `store/analytics/install-id` | 0.33.0 | a random UUID made for analytics only, never derived from the machine, an account or a person | deleted when the switch is turned off; a new one is made when it is turned on again. A snapshot restored on another machine leaves the whole `store/analytics/` folder behind (`ANOTHER_MACHINE_LEAVES`), so that machine makes its own id and never resends this one's queue; the switch file `analytics` moves |
 | `store/analytics/queue.jsonl` | 0.33.0 | events waiting to be sent: name, catalogued properties, time, version; at most 512 KiB, sent by the maintenance job, dropped after 23 hours | deleted when the switch is turned off; deleting it loses only unsent events |
 | `store/analytics/counters.json` | 0.33.0 | counts of what was sent, refused, expired, rejected or failed; never an event | deleting it resets the counts |
-| `store/analytics/.counters.lock` | the release after 0.33.1 | empty; its lock serialises every update of `counters.json` (OBS-341) | deleting it is harmless; it is made again at the next update |
+| `store/analytics/.counters.lock` | 0.34.0 | empty; its lock serialises every update of `counters.json` (OBS-341) | deleting it is harmless; it is made again at the next update |
 | `store/analytics/notice.json` | 0.33.0 | when the first-run notice was shown on the terminal, and when a person first opened Home through the local server, and in which version | deleting it shows the notice again |
 
 Settings outside the workspace: `OBSERVATORY_ANALYTICS=off` (also `0`, `false`, `no`) and `DO_NOT_TRACK`

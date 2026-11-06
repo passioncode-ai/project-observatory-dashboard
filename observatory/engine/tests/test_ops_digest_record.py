@@ -321,8 +321,9 @@ class OverStdio(unittest.TestCase):
 
 
 class TheWaitingDeclaration(unittest.TestCase):
-    """`ops.digest.record` is served from `fabric/unreleased-capabilities.json` until the release that publishes its
-    schemas declares it in `fabric-agent.json` (a manifest may not pin a tag newer than its release, ENG-018)."""
+    """A capability is served from `fabric/unreleased-capabilities.json` until the release that publishes its schemas
+    declares it in `fabric-agent.json` (a manifest may not pin a tag newer than its release, ENG-018).
+    `ops.digest.record` waited there until 0.34.0, which declares it (revision 10)."""
 
     def test_it_waits_only_until_its_release(self) -> None:
         import re
@@ -348,8 +349,9 @@ class TheWaitingDeclaration(unittest.TestCase):
     def test_it_is_served_with_its_handler(self) -> None:
         import interop
         names = [c["name"] for c in interop.mcp_capabilities()]
-        self.assertIn(TOOL, names)
-        self.assertNotIn(TOOL, [c["name"] for c in interop.mcp_capabilities(unreleased=False)])
+        self.assertEqual(names.count(TOOL), 1, names)
+        self.assertIn(TOOL, [c["name"] for c in interop.mcp_capabilities(unreleased=False)])
+        self.assertNotIn(TOOL, [c["name"] for c in interop.unreleased_capabilities()])
 
 
 class OverHttp(Base):

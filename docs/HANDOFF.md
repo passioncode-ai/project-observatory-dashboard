@@ -17,6 +17,14 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-06: release 0.34.0](runs/2026-11-06-release-0.34.0/README.md): engine 0.34.0 (`observatory-log` stays
+0.30.0): another OS account's loopback connection refused (OBS-355 part 1, #451), an external secret store carried
+encrypted (OBS-350 part 1, #453), home-relative paths and another computer's passphrase (OBS-347, OBS-348, #446), one
+doctor verdict (OBS-349 part 1, #445), `ops.digest.record` declared as manifest revision 10 (OBS-330, #447), the daily
+learning review (OBS-331 part a, #450), and an update announced with automatic updates off (OBS-333, #432).
+
+Next: tag `v0.34.0`, verify and install (receipts in the record), then tell Fabric, Fabric Dashboards and Workspace.
+
 [2026-11-05: release 0.33.1](runs/2026-11-05-release-0.33.1/README.md): engine 0.33.1, a patch whose wheel carries the
 analytics App-Key (OBS-329), so the anonymous data 0.33.0 turned on is sent.
 
