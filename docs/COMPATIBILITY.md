@@ -60,7 +60,7 @@ Semantic versioning applies to the declared public API even before 1.0 as a proj
 4. Apply supported migrations under a lock, validate, then restart the chosen application version. Interrupted upgrades leave a marker that prevents ordinary runtime from treating partial state as healthy.
 5. To roll back, restore a verified pre-upgrade snapshot into a separate home and use its matching application release. An older executable must never silently rewrite a newer database. New observations made after the backup are not present in that backup.
 
-External source directories and externally referenced credential stores are **references**, not bundled backup contents. Their independent backup/recovery policy remains the user's responsibility. Internal credential files, when included in a private snapshot, retain private modes and must never be attached to an issue or public release.
+External source directories are **references**, not bundled backup contents. Their independent backup/recovery policy remains the user's responsibility. A credential store the settings name outside the workspace (`sources.secret_store`, else `sources.secrets`) is carried inside an encrypted workspace snapshot from the release after 0.33.1 (OBS-350, below), and stays a reference for a plaintext `--output` snapshot, a snapshot taken without a passphrase and the snapshot an update takes before it upgrades. Internal credential files, when included in a private snapshot, retain private modes and must never be attached to an issue or public release.
 
 **Encrypted artifacts (0.4.1).** Backups written to the backups root use the `OBSENC1` format, version 1: magic `OBSENC1\n`, a length-prefixed JSON header (`format`, `cipher` AES-256-GCM, `kdf` scrypt with `n`/`r`/`p`/`salt`, `nonce_prefix`, `chunk`, `kind`, `content`, `application_version`, `created_at`), then length-prefixed sealed chunks whose nonce is prefix ‖ counter ‖ final-flag, with magic and header as associated data. A reader refuses any other `format`, `cipher` or `kdf`. `.obsnap` holds a gzip tar of a snapshot directory (manifest verified again after decryption); `.obsdb` holds one SQLite file. `.obmachine` (kind `machine`, OBS-157) holds a gzip tar of a machine bundle: `files/`, `abs/`, `inventories/`, `checkouts/` and `MANIFEST.json` (`format` `observatory-machine/1`); a reader refuses another `format`. Three artifacts per kind are kept. The passphrase cannot be recovered; a lost passphrase means a lost backup.
 
@@ -472,9 +472,47 @@ same order and with the same text: `backups-root-unusable`, `backups-passphrase-
 new sentences. `full maintain status` and `maintenance.warning_items` gain those codes, except
 `backups-no-passphrase` and `backups-unencrypted-local`, which a maintenance item already says. Doctor reads
 `store/raw/secret-store-carry.json` when it exists (written by a release whose workspace snapshot carries an external
-store); this release writes no such file, and a file that does not read is `{"state": "unknown"}`. The MCP tool
+store; OBS-350, below), and a file that does not read is `{"state": "unknown"}`. The MCP tool
 `observatory_machine` accepts `section: "move"`, the `machine-move status` checklist under `move`; an older server
 refuses the value through its schema, and `full machine-move status --json` answers the same.
+
+## Workspace snapshot: an external secret store carried encrypted (OBS-350 part 1, the release after 0.33.1)
+
+Additive; `format_version` stays 1 and nothing migrates. A snapshot's manifest gains `externals` (one row per
+store the settings name outside the workspace: `name`, `settings_keys`, `path` in its home-relative form,
+`state` `carried` or `not-carried`, `reason` `plaintext-output`, `no-passphrase`, `export-failed`,
+`update-snapshot`, `too-large`, `changed-during-copy`, `unreadable`, `missing` or `contains-workspace` (a setting
+naming a folder that holds the workspace itself), and for a carried store `files` (relative path, SHA-256, size,
+mode), `directories`, `links` (relative path and a relative target inside the store, recorded and never written),
+`not_carried` (relative path and `link-outside-store`, `special-file`, `unreadable` or `this-machine-only`; a held
+slot's metadata and rotation archives are listed beside it, and a slot whose metadata does not read is held as
+`unreadable`), `size`, `vault_slots` and `kept_here`) and `external_warnings` (`secret-store-env-override` when the
+environment moves the vault away from the folder the settings name). `external_sources_included` is true only when
+a store outside the workspace exists and every one was carried; external source folders such as `sources.projects`
+are never carried. A carried store sits in `<snapshot>/external/<name>/` beside `data/`, files 0600 and folders
+0700, only inside an `OBSENC1` artifact: an explicit `--output`, a snapshot without a passphrase, a failed or
+interrupted export kept in the workspace and the update's snapshots never hold it. Each `snapshot()` first strips
+`external/` from every snapshot copy under the workspace's `backups/` (named `<kind>-` for a snapshot kind, or with a
+manifest listing `externals`) and removes `.snapshot-*` stages older than an hour; a folder it cannot clean is named
+in the answer's `secret_store_sweep.failed` (folder name, error class) and counted in the carry record's
+`sweep_failed`, and never stops the snapshot;
+`workspace_upgrade.snapshot` gains the keyword `update` (the pre-update snapshot passes it). `verify_snapshot`
+refuses a link, a special file, an unlisted file or folder, a changed file or a folder of a store not carried, with
+the code `secret-store-manifest-mismatch` (a `ConfigurationError`, so exit codes are unchanged). An older engine
+verifies and restores `data/` alone and ignores `external/`; so does this release's `full restore`, which does not
+write the store into place yet (the restore side is part 2). New workspace state: `store/raw/secret-store-carry.json`,
+owner-only, written atomically after each snapshot the backups keep or export when a store is external (`at`,
+`kind`, `file`, `state`, `reason`, `files`, `size`, `not_carried`, `sweep_failed`; never a value), read by doctor
+since OBS-349 (doctor's `last_carry` gains `not_carried` and `sweep_failed`); a write that fails is said on stderr and as `carry_record_error`. The
+daily run's maintenance record gains `snapshot.secret_store` (`state`, `reason`); the snapshot answer gains
+`secret_store` (`state`, `reason`, `files`, `size`, `kept_here`, `not_carried`, or `{"state": "not-applicable"}`).
+The machine bundle skips any path inside a store the snapshot carries (`skipped`, reason `carried encrypted in the
+workspace snapshot (sources.<setting>)`), and its `inventories/observatory.json` gains `secret_store` (`external`,
+`carried_in`, `newest_snapshot_carried`; or `carried_in: null` with `reason` for a store no snapshot carries).
+Slot metadata gains `this_machine_only` (`why`, `at`), set by `full vault-digests keep-here PROJECT ENV NAME --why
+TEXT` and cleared by `unkeep-here`; a `vault-digests/1` manifest row may carry `"this_machine_only": true`, which an
+older reader ignores and this one refuses with any other value; the view's cell may carry
+`"on_purpose": "this-machine-only"` (a string, where a difference on purpose carries an object).
 
 ## Workspace state: the daily learning review (OBS-331 part a, the release after 0.33.1)
 
@@ -553,9 +591,10 @@ Each family below is new; no earlier file changes shape. An upgrade creates none
 appears the first time its command or collector runs. A downgrade leaves them in place, unread by
 the older engine. `secrets/` here means the configured `sources.secret_store`, `secrets/` in the
 workspace by default; `node/` is `OBSERVATORY_NODE`, the workspace's `node/` by default. A workspace
-snapshot carries a family only while it lives inside the workspace (the defaults): a secret store or
-node folder configured elsewhere is a reference, as the rollback rules above say for external
-stores, and needs its own backup. Restoring a snapshot taken before the upgrade drops these files, as
+snapshot carries a family only while it lives inside the workspace (the defaults): a node folder
+configured elsewhere is a reference and needs its own backup; a secret store configured elsewhere is
+carried by an encrypted snapshot from the release after 0.33.1 (OBS-350) and is a reference for any
+other snapshot, as the rollback rules above say. Restoring a snapshot taken before the upgrade drops these files, as
 for every later observation. The repository's `StateFamilies` test refuses a family the code writes
 that is not classified, and one from 0.26.0 on that has no row here; it finds the families from the
 code's path constants, so a path built another way is not seen (OBS-182).

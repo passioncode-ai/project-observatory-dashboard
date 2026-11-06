@@ -1614,7 +1614,8 @@ class Transaction:
                 if self.has_ws:
                     wait_idle(self.base, self.deps.idle_timeout)
                     receipt = workspace_upgrade.snapshot(
-                        self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True)
+                        self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True,
+                        update=True)
                     snapshot = Path(receipt["snapshot"])
                     before = state(self.base)
                     self.step("snapshot", files=receipt["files"])

@@ -518,5 +518,82 @@ class CompareIsPure(unittest.TestCase):
         self.assertEqual(view["degraded"][0]["code"], "duplicate-machine")
 
 
+
+class ThisMachineOnly(TwoMachines):
+    """OBS-350 (spec 3.2a): a slot kept on one machine on purpose reads as such from both sides, and is
+    no difference for the exit code."""
+
+    def keep(self, machine, name="ROOT_SEED"):
+        machine.digests("keep-here", "alpha-web", "prod", name, "--why", "root seed, one home")
+
+    def test_a_peers_kept_slot_reads_only_on_that_machine_on_purpose(self):
+        self.share_key()
+        for m in (self.a, self.b):
+            m.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.put("alpha-web", "prod", "ROOT_SEED", VALUE_B)
+        self.keep(self.b)
+        self.deliver_b()
+        self.assertIs(json.loads(self.b.manifest.read_text())["slots"]["alpha-web/prod/ROOT_SEED"]["this_machine_only"],
+                      True)
+        view = self.view_a(check=0)
+        cell = self.cell(view, "alpha-web/prod/ROOT_SEED")
+        self.assertEqual(cell, {"state": "missing", "on_purpose": "this-machine-only"})
+        self.assertTrue(view["all_match"])
+        self.assertIn("1 kept on one machine on purpose", view["summary"])
+        # Without the mark the same slot is a difference.
+        self.b.digests("unkeep-here", "alpha-web", "prod", "ROOT_SEED")
+        self.deliver_b()
+        self.assertEqual(self.cell(self.view_a(check=1), "alpha-web/prod/ROOT_SEED"), {"state": "missing"})
+
+    def test_a_slot_kept_here_reads_only_here_on_purpose(self):
+        self.share_key()
+        for m in (self.a, self.b):
+            m.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.a.put("alpha-web", "prod", "ROOT_SEED", VALUE_C)
+        self.a.put("alpha-web", "prod", "ADMIN_TOKEN", VALUE_B)
+        self.keep(self.a)
+        self.deliver_b()
+        view = self.view_a(check=1)   # ADMIN_TOKEN is only here and not marked: still a difference
+        self.assertEqual(self.cell(view, "alpha-web/prod/ROOT_SEED"),
+                         {"state": "only here", "on_purpose": "this-machine-only"})
+        text = self.a.digests("view", check=1).stdout
+        self.assertIn("alpha-web/prod/ROOT_SEED  machine-b: only here on purpose", text)
+        self.assertIn("alpha-web/prod/ADMIN_TOKEN  machine-b: only here", text)
+        self.keep(self.a, "ADMIN_TOKEN")
+        self.assertTrue(self.view_a(check=0)["all_match"])
+        movements = self.a.run("vault.py", "movements").stdout
+        self.assertIn("mark-this-machine-only", movements)
+
+    def test_the_text_view_names_the_machine_a_peer_keeps_it_on(self):
+        self.share_key()
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.put("alpha-web", "prod", "API_TOKEN", VALUE_B)   # a real difference keeps the rows printed
+        self.b.put("alpha-web", "prod", "ROOT_SEED", VALUE_C)
+        self.keep(self.b)
+        self.deliver_b()
+        text = self.a.digests("view", check=1).stdout
+        self.assertIn("alpha-web/prod/ROOT_SEED  only on machine-b on purpose", text)
+
+    def test_keep_here_refusals_exit_2(self):
+        self.a.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        p = self.a.digests("keep-here", "alpha-web", "prod", "ABSENT", "--why", "never stored here", check=2)
+        self.assertIn("nothing at", p.stderr)
+        self.a.digests("keep-here", "alpha-web", "prod", "API_TOKEN", "--why", "one home only", check=0)
+        self.a.digests("keep-here", "alpha-web", "prod", "API_TOKEN", "--why", "short", check=2)
+        self.a.digests("unkeep-here", "alpha-web", "prod", "API_TOKEN")
+        self.a.digests("unkeep-here", "alpha-web", "prod", "API_TOKEN", check=2)
+
+    def test_a_malformed_flag_in_a_peer_manifest_is_refused(self):
+        import vault_digests as vd
+        self.b.put("alpha-web", "prod", "API_TOKEN", VALUE_A)
+        self.b.digests("write")
+        doc = json.loads(self.b.manifest.read_text())
+        doc["slots"]["alpha-web/prod/API_TOKEN"]["this_machine_only"] = "yes"
+        bad = self.peers_a / "machine-b.json"
+        bad.write_text(json.dumps(doc))
+        with self.assertRaises(vd.Refused):
+            vd.read_manifest(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -858,6 +858,11 @@ def _snapshot_with_jobs_stopped(base: Path, state: dict, at: datetime.datetime, 
                           "file": Path(result["snapshot"]).name}
                 if result.get("export_error"):
                     record["detail"] = result["export_error"][:300]
+                # What the snapshot did with a secret store kept outside the workspace (OBS-350): its
+                # state and reason only, so doctor and Health can say whether the newest daily carried it.
+                store = result.get("secret_store") or {}
+                if store.get("state") and store.get("state") != "not-applicable":
+                    record["secret_store"] = {"state": store["state"], "reason": store.get("reason")}
                 state["snapshot"] = record
                 state.pop("snapshot_failure", None)
                 return {"result": "taken", "encrypted": record["encrypted"]}

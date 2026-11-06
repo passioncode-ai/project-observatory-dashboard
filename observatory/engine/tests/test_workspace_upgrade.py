@@ -3,10 +3,13 @@
 from __future__ import annotations
 import contextlib
 import importlib
+import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 import unittest
@@ -17,6 +20,10 @@ sys.path.insert(0,str(ROOT))
 import configuration as config
 import workspace
 import workspace_upgrade as upgrade
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from secret_store_fixture import VALUES, all_values, make_external_store  # noqa: E402
+
+PASSPHRASE='correct horse battery staple'
 
 #: The machine a snapshot is taken on, and another one it is restored on (OBS-284).
 ALPHA,BETA='m-machine-alpha-0001','m-machine-beta-0002'
@@ -856,6 +863,408 @@ class HomeRelativeSources(unittest.TestCase):
         self.assertEqual([(r['setting'],r['value'],r['fix']) for r in result['paths']['unresolved']],
                          [('local_folders[1].path',str(self.base/'elsewhere/beta'),
                            'project-observatory full track local-folder PATH')])
+
+
+
+class ExternalSecretStore(unittest.TestCase):
+    """OBS-350: a secret store the settings put outside the workspace travels inside the encrypted
+    snapshot, beside `data/`, and never in a plaintext one."""
+
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.base=Path(self.tmp.name).resolve()
+        self.home=self.base/'private workspace'
+        self.root=self.base/'cloud'/'Backups'
+        self.env=patch.dict(os.environ,{'OBSERVATORY_HOME':str(self.home),'OBSERVATORY_MACHINE_ID':ALPHA,
+                                        'OBSERVATORY_SYSTEM_SETUP':'0','OBSERVATORY_BACKUPS':str(self.root)},clear=True)
+        self.env.start()
+        workspace.initialize(self.home)
+        import paths
+        importlib.reload(paths)
+        import backup_vault
+        self.vault=backup_vault
+        cheap=patch.dict(backup_vault.SCRYPT,{'n':2**12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        self.store=make_external_store(self.base/'external-store')
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc.setdefault('sources',{})['secret_store']=str(self.store)
+        workspace.write_json(file,doc)
+        self.outputs=[]
+
+    def tearDown(self):
+        text='\n'.join(self.outputs)
+        for value in all_values():
+            self.assertNotIn(value,text,'a value reached a manifest, an answer or a record')
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def encrypted(self):
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        result=upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
+        self.outputs.append(json.dumps(result))
+        self.assertTrue(result['encrypted'],result)
+        opened=self.vault.extract_tree(Path(result['snapshot']),self.base/'opened',PASSPHRASE)
+        manifest=config.read_json(opened/'manifest.json')
+        self.outputs.append(json.dumps(manifest))
+        return result,opened,manifest
+
+    def record(self):
+        file=self.home/'store/raw/secret-store-carry.json'
+        self.outputs.append(file.read_text())
+        return json.loads(file.read_text())
+
+    def test_an_external_store_is_carried_into_an_encrypted_snapshot(self):
+        result,opened,manifest=self.encrypted()
+        [entry]=manifest['externals']
+        self.assertEqual((entry['name'],entry['settings_keys'],entry['state'],entry['reason']),
+                         ('secret_store',['secret_store'],'carried',None))
+        self.assertTrue(manifest['external_sources_included'])
+        carried=opened/'external/secret_store'
+        for rel in VALUES:
+            self.assertEqual((carried/rel).read_bytes(),(self.store/rel).read_bytes(),rel)
+        self.assertEqual((carried/'projects/movements.jsonl').read_bytes(),(self.store/'projects/movements.jsonl').read_bytes())
+        listed={row['path'] for row in entry['files']}
+        on_disk={p.relative_to(carried).as_posix() for p in carried.rglob('*') if p.is_file()}
+        self.assertEqual(listed,on_disk,'nothing under external/ is unlisted')
+        self.assertEqual({r['path']:r['mode'] for r in entry['files']}['projects/alpha/prod/API_KEY'],0o600)
+        self.assertEqual(entry['vault_slots'],3)
+        self.assertEqual(entry['kept_here'],0)
+        self.assertFalse((opened/'data'/'external').exists(),'never inside data/')
+        self.assertEqual(result['secret_store']['state'],'carried')
+        self.assertEqual(result['secret_store']['files'],len(entry['files']))
+        upgrade.verify_snapshot(opened)
+        record=self.record()
+        self.assertEqual((record['state'],record['kind'],record['file']),('carried','daily',Path(result['snapshot']).name))
+        self.assertEqual(stat.S_IMODE((self.home/'store/raw/secret-store-carry.json').stat().st_mode),0o600)
+        # Doctor reads that record and stops warning.
+        codes=[i['code'] for i in self.vault.status(self.home)['warning_items']]
+        self.assertNotIn('backups-vault-store-not-carried',codes)
+
+    def test_lock_files_and_temporaries_are_not_carried(self):
+        _,opened,manifest=self.encrypted()
+        listed={row['path'] for row in manifest['externals'][0]['files']}
+        for name in ('projects/.vault.lock','projects/.vault-write-abc123','.openrouter.lock','stash.tmp'):
+            self.assertNotIn(name,listed)
+            self.assertFalse((opened/'external/secret_store'/name).exists(),name)
+
+    def test_a_plaintext_output_never_carries_the_store(self):
+        out=self.base/'plain-snapshot'
+        result=upgrade.snapshot(self.home,out,writers_stopped=True)
+        manifest=config.read_json(out/'manifest.json')
+        self.outputs+= [json.dumps(result),json.dumps(manifest)]
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason']),('not-carried','plaintext-output'))
+        self.assertFalse(manifest['external_sources_included'])
+        self.assertFalse((out/'external').exists())
+        self.assertEqual(result['secret_store']['reason'],'plaintext-output')
+        self.assertFalse((self.home/'store/raw/secret-store-carry.json').exists(),
+                         'a copy by hand never stands for the daily encrypted one')
+
+    def test_without_a_passphrase_the_store_stays_where_it_is(self):
+        result=upgrade.snapshot(self.home,writers_stopped=True)
+        self.outputs.append(json.dumps(result))
+        self.assertFalse(result['encrypted'])
+        local=Path(result['snapshot'])
+        self.assertFalse((local/'external').exists())
+        for path in (self.home/'backups').rglob('*'):
+            if path.is_file():
+                self.assertNotIn(b'fixture-value-001',path.read_bytes(),path)
+        self.assertEqual((self.record()['state'],self.record()['reason']),('not-carried','no-passphrase'))
+
+    def test_a_failed_export_keeps_no_store_in_the_plaintext_copy(self):
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        with patch.object(self.vault,'export_snapshot',side_effect=OSError('the root went away')):
+            result=upgrade.snapshot(self.home,writers_stopped=True)
+        self.outputs.append(json.dumps(result))
+        self.assertFalse(result['encrypted'])
+        local=Path(result['snapshot'])
+        self.assertFalse((local/'external').exists())
+        manifest=config.read_json(local/'manifest.json')
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason']),('not-carried','export-failed'))
+        upgrade.verify_snapshot(local)
+        self.assertEqual(self.record()['reason'],'export-failed')
+
+    def test_the_vault_lock_is_held_while_the_store_is_copied(self):
+        import oslocks
+        import secret_store_carry
+        held=[]
+        real=secret_store_carry._copy_file
+
+        def probe(source,target):
+            fd=os.open(self.store/'projects/.vault.lock',os.O_RDWR)
+            try:
+                oslocks.flock(fd,oslocks.LOCK_EX|oslocks.LOCK_NB)
+                held.append(False)
+            except BlockingIOError:
+                held.append(True)
+            finally:
+                os.close(fd)
+            return real(source,target)
+        with patch.object(secret_store_carry,'_copy_file',probe):
+            self.encrypted()
+        self.assertTrue(held and all(held),'a vault write could have run during the copy')
+
+    def test_a_store_that_changes_during_the_copy_is_named_not_carried(self):
+        import secret_store_carry
+        real=secret_store_carry._copy_file
+        stash=self.store/'openrouter-admin'
+
+        def moving(source,target):
+            out=real(source,target)
+            if source==stash:
+                stash.write_text(stash.read_text()+'x')
+            return out
+        with patch.object(secret_store_carry,'_copy_file',moving):
+            result,opened,manifest=self.encrypted()
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason']),
+                         ('not-carried','changed-during-copy'))
+        self.assertFalse((opened/'external').exists())
+        self.assertEqual(result['secret_store']['state'],'not-carried')
+
+    def test_one_change_is_retried_and_the_second_pass_carries(self):
+        import secret_store_carry
+        real=secret_store_carry._copy_file
+        stash=self.store/'openrouter-admin'
+        changed=[]
+
+        def once(source,target):
+            out=real(source,target)
+            if source==stash and not changed:
+                changed.append(1)
+                stash.write_text('fixture-value-005\n')
+                os.utime(stash,ns=(1,1))
+                stash.write_text('fixture-value-005 \n')
+            return out
+        with patch.object(secret_store_carry,'_copy_file',once):
+            _,opened,manifest=self.encrypted()
+        self.assertEqual(manifest['externals'][0]['state'],'carried')
+        self.assertEqual((opened/'external/secret_store/openrouter-admin').read_bytes(),stash.read_bytes())
+
+    def test_a_link_inside_the_store_is_recorded_and_one_outside_is_named(self):
+        (self.store/'current').symlink_to('projects')
+        (self.store/'outside').symlink_to(self.base)
+        special=[]
+        if hasattr(os,'mkfifo'):
+            os.mkfifo(self.store/'pipe')
+            special.append({'path':'pipe','reason':'special-file'})
+        _,opened,manifest=self.encrypted()
+        entry=manifest['externals'][0]
+        self.assertEqual(entry['state'],'carried')
+        self.assertEqual(entry['links'],[{'path':'current','target':'projects'}])
+        self.assertIn({'path':'outside','reason':'link-outside-store'},entry['not_carried'])
+        for row in special:
+            self.assertIn(row,entry['not_carried'])
+        self.assertFalse(os.path.lexists(opened/'external/secret_store/current'),
+                         'a link is recorded, never written: the encrypted format and older readers refuse links')
+        upgrade.verify_snapshot(opened)
+
+    def test_a_store_over_the_cap_is_named_too_large(self):
+        import secret_store_carry
+        with patch.object(secret_store_carry,'SECRET_STORE_MAX_MB',40/(1024*1024)):
+            result,opened,manifest=self.encrypted()
+        entry=manifest['externals'][0]
+        self.assertEqual((entry['state'],entry['reason']),('not-carried','too-large'))
+        self.assertGreater(entry['size'],40)
+        self.assertFalse((opened/'external').exists())
+
+    def test_verify_refuses_an_unlisted_or_changed_store_file(self):
+        import secret_store_carry
+        _,opened,_=self.encrypted()
+        upgrade.verify_snapshot(opened)
+        # Each damage on its own copy of the opened snapshot.
+        cases={'changed':lambda c,o: (c/'projects/alpha/prod/API_KEY').write_text('fixture-value-009\n'),
+               'unlisted':lambda c,o: (c/'unlisted').write_text('x'),
+               'link':lambda c,o: (c/'a-link').symlink_to('projects'),
+               'stray folder':lambda c,o: (o/'external/other').mkdir(),
+               'missing':lambda c,o: (c/'openrouter-admin').unlink()}
+        for name,damage in cases.items():
+            with self.subTest(name):
+                copy=self.base/('damaged-'+name.replace(' ','-'))
+                shutil.copytree(opened,copy,symlinks=True)
+                damage(copy/'external/secret_store',copy)
+                with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+                    upgrade.verify_snapshot(copy)
+                self.assertEqual(caught.exception.code,'secret-store-manifest-mismatch')
+                self.assertIsInstance(caught.exception,config.ConfigurationError)
+
+    def test_a_restore_by_this_release_restores_the_home_and_leaves_the_store_alone(self):
+        result,_,_=self.encrypted()
+        new=self.base/'restored'
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}):
+            restored=upgrade.restore(Path(result['snapshot']),new)
+        self.outputs.append(json.dumps(restored))
+        self.assertEqual(restored['status'],'restored')
+        self.assertFalse((new/'external').exists(),'the store is never written into the home')
+        self.assertEqual(config.read_json(new/'config/settings.json')['sources']['secret_store'],str(self.store))
+
+    def test_a_store_inside_the_workspace_travels_in_data_as_before(self):
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc['sources'].pop('secret_store')
+        workspace.write_json(file,doc)
+        (self.home/'secrets/demo-slot').write_text('synthetic opaque private value')
+        result,opened,manifest=self.encrypted()
+        self.assertEqual((manifest['externals'],manifest['external_sources_included']),([],False))
+        self.assertEqual(result['secret_store'],{'state':'not-applicable'})
+        self.assertTrue((opened/'data/secrets/demo-slot').is_file())
+        self.assertFalse((opened/'external').exists())
+        self.assertFalse((self.home/'store/raw/secret-store-carry.json').exists())
+
+    def test_the_update_snapshot_never_carries_the_store(self):
+        # The pre-update snapshot (`update=True`, an explicit output) and `upgrade`'s own `_snapshot`
+        # are named for what they are, not as a plaintext copy taken by hand.
+        out=self.home/'backups'/'before-update-test'
+        receipt=upgrade.snapshot(self.home,out,writers_stopped=True,update=True)
+        manifest=config.read_json(out/'manifest.json')
+        self.outputs+= [json.dumps(receipt),json.dumps(manifest)]
+        self.assertEqual(manifest['externals'][0]['reason'],'update-snapshot')
+        self.assertFalse((out/'external').exists())
+        out=self.home/'backups'/'before-upgrade-test'
+        upgrade._snapshot(self.home,out,not_carried='update-snapshot')
+        self.assertEqual(config.read_json(out/'manifest.json')['externals'][0]['reason'],'update-snapshot')
+        self.assertIn("not_carried='update-snapshot'",Path(upgrade.__file__).read_text(),
+                      'upgrade takes its snapshot as an update snapshot')
+
+    def test_the_environment_override_is_named_in_the_manifest(self):
+        with patch.dict(os.environ,{'OBSERVATORY_VAULT_DIR':str(self.base/'elsewhere')}):
+            _,_,manifest=self.encrypted()
+        self.assertEqual([w['code'] for w in manifest['external_warnings']],['secret-store-env-override'])
+        self.assertEqual(manifest['externals'][0]['state'],'carried','the settings\' store is still carried')
+
+    def test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot(self):
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc['sources']['secret_store']=str(self.base)
+        workspace.write_json(file,doc)
+        _,opened,manifest=self.encrypted()
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason']),
+                         ('not-carried','contains-workspace'))
+        self.assertFalse((opened/'external').exists())
+
+    def test_the_daily_maintenance_record_says_whether_the_store_was_carried(self):
+        import datetime
+        import maintenance
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        state={}
+        at=datetime.datetime.now(datetime.timezone.utc)
+        report=maintenance._snapshot_with_jobs_stopped(self.home,state,at,None,sleep=lambda seconds: None)
+        self.assertEqual(report['result'],'taken',report)
+        self.outputs.append(json.dumps(state))
+        self.assertEqual(state['snapshot']['secret_store'],{'state':'carried','reason':None})
+
+    def test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext(self):
+        # SIGTERM (SystemExit) in a maintenance run, ^C, a library that does not import, a bug: each is
+        # raised past `after_snapshot`, and none may leave the store in the plaintext copy that stays.
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        for error in (KeyboardInterrupt(),SystemExit(143),ImportError('cryptography'),ValueError('bug')):
+            with self.subTest(type(error).__name__):
+                with patch.object(self.vault,'encrypt_tree',side_effect=error):
+                    with self.assertRaises(type(error)):
+                        upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
+                left=[p for p in (self.home/'backups').iterdir() if p.name.startswith('daily-')]
+                self.assertTrue(left,'the plaintext copy stays, as before')
+                for copy in left:
+                    self.assertFalse((copy/'external').exists(),copy)
+                    rows=config.read_json(copy/'manifest.json')['externals']
+                    self.assertEqual({r['state'] for r in rows},{'not-carried'})
+                for path in (self.home/'backups').rglob('*'):
+                    if path.is_file():
+                        self.assertNotIn(b'fixture-value-001',path.read_bytes(),path)
+                for copy in left:   # so the next case proves its own path, not the next run's sweep
+                    shutil.rmtree(copy)
+
+    def test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups(self):
+        import secret_store_carry
+        backups=self.home/'backups'
+        killed=backups/'daily-killed'
+        (killed/'external/secret_store/projects').mkdir(parents=True)
+        (killed/'external/secret_store/projects/K').write_text('fixture-value-001')
+        workspace.write_json(killed/'manifest.json',{'externals':[{'name':'secret_store','state':'carried'}],
+                                                     'external_sources_included':True})
+        dead=backups/'.snapshot-dead'
+        (dead/'external').mkdir(parents=True)
+        os.utime(dead,(1,1))
+        fresh=backups/'.snapshot-fresh'
+        fresh.mkdir()
+        upgrade.snapshot(self.home,self.base/'by-hand',writers_stopped=True)
+        self.assertFalse((killed/'external').exists())
+        manifest=config.read_json(killed/'manifest.json')
+        self.assertEqual((manifest['externals'][0]['state'],manifest['externals'][0]['reason'],
+                          manifest['external_sources_included']),('not-carried','export-failed',False))
+        self.assertFalse(dead.exists(),'a stage older than an hour is a dead run\'s')
+        self.assertTrue(fresh.exists(),'a recent stage may be a live run\'s')
+        # A copy whose manifest is gone or broken still loses its store.
+        for broken in ('missing','garbage'):
+            copy=backups/('daily-'+broken)
+            (copy/'external/secret_store').mkdir(parents=True)
+            if broken=='garbage':
+                (copy/'manifest.json').write_text('{not json')
+            self.assertTrue(secret_store_carry.strip(copy,'export-failed'))
+            self.assertFalse((copy/'external').exists())
+
+    def test_a_failed_carry_record_is_said_not_swallowed(self):
+        real=workspace.write_json
+
+        def refuse(path,value):
+            if Path(path).name=='secret-store-carry.json':
+                raise OSError('read-only')
+            return real(path,value)
+        err=io.StringIO()
+        with patch.object(workspace,'write_json',refuse),patch.object(sys,'stderr',err):
+            result,_,_=self.encrypted()
+        self.assertIn('carry record was not written',result['carry_record_error'])
+        self.assertIn('carry record was not written',err.getvalue())
+
+    def test_the_carry_record_counts_what_stayed_behind(self):
+        (self.store/'outside').symlink_to(self.base)
+        result,_,manifest=self.encrypted()
+        count=len(manifest['externals'][0]['not_carried'])
+        self.assertGreaterEqual(count,1)
+        self.assertEqual((self.record()['not_carried'],result['secret_store']['not_carried']),(count,count))
+        self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['not_carried'],count)
+
+    def test_an_undeletable_leftover_is_named_and_the_snapshot_goes_on(self):
+        stuck=self.home/'backups'/'daily-stuck'
+        locked=stuck/'external/secret_store/projects'
+        locked.mkdir(parents=True)
+        (locked/'K').write_text('fixture-value-001')
+        locked.chmod(0o500)
+        self.addCleanup(lambda: locked.exists() and locked.chmod(0o700))
+        if os.access(locked,os.W_OK):
+            self.skipTest('this account can delete inside a 0500 folder')
+        result,_,_=self.encrypted()
+        self.assertEqual(result['secret_store']['state'],'carried','the daily backup is not stopped')
+        self.assertEqual(result['secret_store_sweep'],{'failed':[{'path':'daily-stuck','error':'PermissionError'}]})
+        self.assertEqual(self.record()['sweep_failed'],1)
+        self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['sweep_failed'],1)
+        by_hand=upgrade.snapshot(self.home,self.base/'by-hand-2',writers_stopped=True)
+        self.assertEqual(by_hand['secret_store_sweep']['failed'][0]['path'],'daily-stuck')
+
+    def test_a_failing_strip_never_hides_the_original_interrupt(self):
+        import secret_store_carry
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        with patch.object(self.vault,'encrypt_tree',side_effect=SystemExit(143)), \
+                patch.object(secret_store_carry,'strip',side_effect=OSError('cannot delete')):
+            with self.assertRaises(SystemExit) as caught:
+                upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
+        self.assertEqual(caught.exception.code,143)
+        # The next snapshot's sweep cleans what this one could not.
+        upgrade.snapshot(self.home,self.base/'by-hand-3',writers_stopped=True)
+        for copy in (self.home/'backups').iterdir():
+            self.assertFalse((copy/'external').exists(),copy)
+
+    def test_the_sweep_touches_only_snapshot_folders(self):
+        backups=self.home/'backups'
+        notes=backups/'my-notes'
+        (notes/'external').mkdir(parents=True)
+        (notes/'external/plan.txt').write_text('a person\'s own file')
+        odd=backups/'odd-name'
+        (odd/'external/secret_store').mkdir(parents=True)
+        workspace.write_json(odd/'manifest.json',{'externals':[{'name':'secret_store','state':'carried'}]})
+        upgrade.snapshot(self.home,self.base/'by-hand-4',writers_stopped=True)
+        self.assertTrue((notes/'external/plan.txt').is_file(),'a folder that is not a snapshot is never touched')
+        self.assertFalse((odd/'external').exists(),'a folder whose manifest lists externals is a snapshot')
 
 if __name__=='__main__':
     unittest.main()

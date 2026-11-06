@@ -5,6 +5,8 @@
     project-observatory full vault-digests write [--machine NAME]
     project-observatory full vault-digests mark PROJECT ENV NAME --why TEXT
     project-observatory full vault-digests unmark PROJECT ENV NAME
+    project-observatory full vault-digests keep-here PROJECT ENV NAME --why TEXT
+    project-observatory full vault-digests unkeep-here PROJECT ENV NAME
     project-observatory full vault-digests key status
     project-observatory full vault-digests key import [FILE]
     project-observatory full vault-digests key export FILE
@@ -34,6 +36,12 @@ THE FIVE STATES, per slot and peer, seen from this machine: `same`, `differs`, `
 machine holds it and the peer does not), `missing` (the peer holds it and this machine does not)
 and `unreachable`. A `differs` row says why when it can: `on purpose` (marked here or by the peer
 with `mark`), or `stale` (one side rotated later than the other: the older copy is stale).
+
+SLOTS KEPT ON ONE MACHINE ON PURPOSE (OBS-350). `keep-here` marks a slot whose single home is this
+machine (a root seed, an administrator token): the encrypted workspace snapshot leaves it out
+(`secret_store_carry.py`), the manifest says `this_machine_only`, and the view reads its `only here`
+as `only here on purpose` and a peer's `missing` as `only on <machine> on purpose`. Neither counts as a
+difference for the exit code. `unkeep-here` clears the mark; the next snapshot carries the slot.
 
 Exit codes: 0 done (view: every slot matches); 1 view: something differs, is missing or a peer is
 unreachable; 2 refused before anything changed.
@@ -85,6 +93,9 @@ KEY_ID_LABEL = b"observatory vault-digests key-id/1"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 
 SAME, DIFFERS, ONLY_HERE, MISSING, UNREACHABLE = "same", "differs", "only here", "missing", "unreachable"
+#: The slot metadata key, and the manifest row flag, of a slot kept on one machine on purpose (OBS-350).
+KEEP_HERE = "this_machine_only"
+ON_PURPOSE_KEPT = "this-machine-only"
 
 
 class Refused(Exception):
@@ -257,6 +268,8 @@ def build_manifest(machine: str, key: str) -> dict:
         mark = meta.get("differs_on_purpose")
         if isinstance(mark, dict) and why_problem(mark.get("why")) is None:
             row["on_purpose"] = {"why": str(mark.get("why") or ""), "at": str(mark.get("at") or "")}
+        if isinstance(meta.get(KEEP_HERE), dict):
+            row[KEEP_HERE] = True
         slots[name] = row
     return {"schema": SCHEMA, "machine": machine, "generated_at": now(), "algorithm": ALGORITHM,
             "key_id": key_id(key), "slots": slots}
@@ -302,6 +315,8 @@ def read_manifest(path: pathlib.Path) -> dict:
         if "on_purpose" in row and (not isinstance(row["on_purpose"], dict)
                                     or why_problem(row["on_purpose"].get("why")) is not None):
             raise Refused("a slot row is malformed: its on-purpose reason is not short plain text")
+        if KEEP_HERE in row and row[KEEP_HERE] is not True:
+            raise Refused(f"a slot row is malformed: {KEEP_HERE} is not true")
     return doc
 
 
@@ -384,15 +399,18 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
         rows.append({"slot": name, "here": bool(mine), "holders": holders, "machines": cells})
     total = len(rows)
     agree = all(c["state"] == SAME or (c["state"] == DIFFERS and c.get("on_purpose"))
+                or c.get("on_purpose") == ON_PURPOSE_KEPT
                 for r in rows for c in r["machines"].values())
     all_match = bool(reachable) and not unreachable and not degraded and agree
     stamps = [local["generated_at"], *(p["generated_at"] for p in reachable)]
     newest = max(stamps, key=lambda t: _parse_time(t) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))
-    on_purpose = sum(1 for r in rows if any(c.get("on_purpose") for c in r["machines"].values()))
+    on_purpose = sum(1 for r in rows if any(isinstance(c.get("on_purpose"), dict) for c in r["machines"].values()))
+    kept = sum(1 for r in rows if any(c.get("on_purpose") == ON_PURPOSE_KEPT for c in r["machines"].values()))
     if all_match:
         summary = (f"All {total} slot(s) match on {len(reachable) + 1} machines "
                    f"({here} and {', '.join(sorted(p['machine'] for p in reachable))}; "
                    + (f"{on_purpose} differ on purpose; " if on_purpose else "")
+                   + (f"{kept} kept on one machine on purpose; " if kept else "")
                    + f"newest answer {newest}).")
     elif not machines:
         summary = (f"{total} slot(s) here and no peer manifest to compare with: nothing is known "
@@ -412,9 +430,9 @@ def compare(local: dict, peers: list[dict], *, at: datetime.datetime | None = No
 
 def _cell(mine: dict | None, theirs: dict | None) -> dict:
     if mine and not theirs:
-        return {"state": ONLY_HERE}
+        return {"state": ONLY_HERE, **({"on_purpose": ON_PURPOSE_KEPT} if mine.get(KEEP_HERE) else {})}
     if theirs and not mine:
-        return {"state": MISSING}
+        return {"state": MISSING, **({"on_purpose": ON_PURPOSE_KEPT} if theirs.get(KEEP_HERE) else {})}
     if hmac.compare_digest(mine["digest"], theirs["digest"]):
         return {"state": SAME}
     cell: dict = {"state": DIFFERS}
@@ -482,21 +500,29 @@ def holders_index(machine: str | None = None) -> tuple[dict[str, list[str]], lis
 
 # --- the marks ------------------------------------------------------------------------------
 
-def set_mark(project: str, env: str, name: str, why: str | None) -> None:
-    """Mark a slot as different on purpose on this machine (`why`), or clear the mark (None)."""
+#: Each mark: its metadata key and the movement journal's events for setting and clearing it.
+MARKS = {"differs": ("differs_on_purpose", "mark-differs", "unmark-differs"),
+         "keep-here": (KEEP_HERE, "mark-this-machine-only", "unmark-this-machine-only")}
+
+
+def set_mark(project: str, env: str, name: str, why: str | None, *, kind: str = "differs") -> None:
+    """Set a mark on a slot of this machine (`why`), or clear it (None): `differs`, the copies differ on
+    purpose; `keep-here`, the slot stays on this machine and no snapshot carries it (OBS-350). The vault
+    keeps the metadata over `vault.py put`, so a mark survives a new value."""
+    field, marked, cleared = MARKS[kind]
     with vault._mutation_lock():
         slot = vault._slot(project, env, name)
         if not slot.is_file():
             raise Refused(f"nothing at {project}/{env}/{name} on this machine to mark")
         meta = vault._read_meta(slot)
         if why is None:
-            if "differs_on_purpose" not in meta:
+            if field not in meta:
                 raise Refused(f"{project}/{env}/{name} carries no mark")
-            meta.pop("differs_on_purpose")
-            event = "unmark-differs"
+            meta.pop(field)
+            event = cleared
         else:
-            meta["differs_on_purpose"] = {"why": why, "at": now()}
-            event = "mark-differs"
+            meta[field] = {"why": why, "at": now()}
+            event = marked
         vault._atomic_write(vault._meta_path(slot), json.dumps(meta, indent=1), 0o600)
         vault.journal(event, f"{project}/{env}/{name}", tool="vault_digests.py",
                       **({"why": why} if why else {}))
@@ -504,7 +530,7 @@ def set_mark(project: str, env: str, name: str, why: str | None) -> None:
 
 # --- the CLI --------------------------------------------------------------------------------
 
-def render(view: dict) -> str:
+def render(view: dict, local_flags: dict | None = None) -> str:
     if view["all_match"]:
         return view["summary"]
     lines = [view["summary"]]
@@ -519,6 +545,10 @@ def render(view: dict) -> str:
         parts = []
         for machine, c in row["machines"].items():
             text = c["state"]
+            if c.get("on_purpose") == ON_PURPOSE_KEPT:
+                parts.append(f"{machine}: only here on purpose" if c["state"] == ONLY_HERE
+                             else f"only on {machine} on purpose")
+                continue
             if c.get("on_purpose"):
                 text += f" (on purpose: {c['on_purpose']['why']})"
             elif c.get("stale"):
@@ -528,7 +558,10 @@ def render(view: dict) -> str:
             elif c["state"] == UNREACHABLE:
                 text += f" (last answer {c['last_answer']})"
             parts.append(f"{machine}: {text}")
-        lines.append(f"  {row['slot']}  " + ("; ".join(parts) if parts else "only here, no peer"))
+        if not parts:
+            kept = (local_flags or {}).get(row["slot"])
+            parts = ["only here on purpose, no peer" if kept else "only here, no peer"]
+        lines.append(f"  {row['slot']}  " + "; ".join(parts))
     return "\n".join(lines)
 
 
@@ -536,7 +569,8 @@ def cmd_view(args) -> int:
     local = write_manifest(args.machine)
     peers, bad = read_peers(peers_dir(args.peers))
     view = compare(local, peers, max_age_hours=args.max_age_hours, unreadable=bad)
-    print(json.dumps(view, indent=1) if args.json else render(view))
+    kept = {name for name, row in (local.get("slots") or {}).items() if row.get(KEEP_HERE)}
+    print(json.dumps(view, indent=1) if args.json else render(view, {name: True for name in kept}))
     return 0 if view["all_match"] else 1
 
 
@@ -547,13 +581,18 @@ def cmd_write(args) -> int:
     return 0
 
 
-def cmd_mark(args) -> int:
+def _why(args, what: str) -> str:
     why = (args.why or "").strip()
     if len(why) < 8:
-        raise Refused("--why must say why the copies differ on purpose (at least 8 characters)")
+        raise Refused(f"--why must say why {what} (at least 8 characters)")
     problem = why_problem(why)
     if problem:
         raise Refused(f"--why is refused: {problem}; describe the reason, never a value")
+    return why
+
+
+def cmd_mark(args) -> int:
+    why = _why(args, "the copies differ on purpose")
     set_mark(args.project, args.env, args.name, why)
     print(f"marked {args.project}/{args.env}/{args.name} as different on purpose; "
           f"`{CMD} write` publishes the mark to the manifest")
@@ -563,6 +602,21 @@ def cmd_mark(args) -> int:
 def cmd_unmark(args) -> int:
     set_mark(args.project, args.env, args.name, None)
     print(f"cleared the mark on {args.project}/{args.env}/{args.name}")
+    return 0
+
+
+def cmd_keep_here(args) -> int:
+    why = _why(args, "the slot stays on this machine")
+    set_mark(args.project, args.env, args.name, why, kind="keep-here")
+    print(f"{args.project}/{args.env}/{args.name} stays on this machine on purpose: no workspace snapshot "
+          f"carries it from now on; `{CMD} write` publishes the mark to the manifest")
+    return 0
+
+
+def cmd_unkeep_here(args) -> int:
+    set_mark(args.project, args.env, args.name, None, kind="keep-here")
+    print(f"{args.project}/{args.env}/{args.name} is no longer kept on this machine only: the next encrypted "
+          f"workspace snapshot carries it")
     return 0
 
 
@@ -647,6 +701,11 @@ def parser() -> argparse.ArgumentParser:
     m.add_argument("--why", required=True)
     u = sub.add_parser("unmark", help="clear that mark")
     vault._slot_args(u)
+    kh = sub.add_parser("keep-here", help="keep a slot on this machine only: no snapshot carries it")
+    vault._slot_args(kh)
+    kh.add_argument("--why", required=True)
+    uk = sub.add_parser("unkeep-here", help="clear that mark: the next snapshot carries the slot")
+    vault._slot_args(uk)
     k = sub.add_parser("key", help="the estate key: status, import [FILE] (else stdin), export FILE")
     k.add_argument("action", choices=("status", "import", "export"))
     k.add_argument("file", nargs="?")
@@ -656,7 +715,8 @@ def parser() -> argparse.ArgumentParser:
 
 def arguments(argv: list[str]) -> list[str]:
     """No command, or options alone, mean `view`."""
-    if not argv or argv[0] not in ("view", "write", "mark", "unmark", "key", "-h", "--help"):
+    if not argv or argv[0] not in ("view", "write", "mark", "unmark", "keep-here", "unkeep-here", "key", "-h",
+                                   "--help"):
         return ["view", *argv]
     return list(argv)
 
@@ -664,10 +724,10 @@ def arguments(argv: list[str]) -> list[str]:
 def main(argv: list[str]) -> int:
     args = parser().parse_args(arguments(argv))
     try:
-        if args.command in ("mark", "unmark"):
+        if args.command in ("mark", "unmark", "keep-here", "unkeep-here"):
             vault.validate_names(args.project, args.env, args.name)
         return {"view": cmd_view, "write": cmd_write, "mark": cmd_mark, "unmark": cmd_unmark,
-                "key": cmd_key}[args.command](args)
+                "keep-here": cmd_keep_here, "unkeep-here": cmd_unkeep_here, "key": cmd_key}[args.command](args)
     except (Refused, vault.VaultBoundaryError) as exc:
         print(f"vault-digests: {exc}", file=sys.stderr)
         return 2
