@@ -501,6 +501,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                daily from `maintain` and before each update
   machine-restore [BUNDLE|--latest] [--plan|--apply [--overwrite]] [--packages] [--clone]
                   [--second-machine|--same-machine] [--only|--skip CATEGORY[,...]] [--projects NAME[,...]]
+                  [--passphrase-stdin]
                                put a machine bundle back: the plan by default, per category; --apply
                                writes only what is missing; --overwrite moves a conflict aside first;
                                a bundle from another machine writes no private SSH key and stages its
@@ -513,7 +514,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                against the other machine's facts
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
-                               --latest finds the newest backup a workspace at this path left
+                               --latest finds the newest backup a workspace at this path left;
+                               --passphrase-stdin reads another machine's passphrase once, stored nowhere
   auto-update status|on|off    install each new stable release by itself (on by default); off still
                                announces a newer version once: `full update --apply` installs it
   analytics status|on|off|send  anonymous usage and error data that helps improve the product

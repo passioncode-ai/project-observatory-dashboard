@@ -274,6 +274,14 @@ nothing rather than failing. Each row carries two exact commands: `fix`
 The `projects` source is the exception: the filesystem scan always runs, so a missing
 `projects` source is a row with `fix` and no `disable`.
 
+A path under your home folder is stored home-relative: `configure sources projects ~/src` (or the
+same path written out in full) is saved as `~/src`, and the answer says `"stored_as":
+"home-relative"`. A path outside the home (`/Volumes/Work/src`) is stored as given
+(`"stored_as": "absolute"`). So a workspace restored under another home, another user name or
+another platform's home layout, still finds its sources. `full doctor` names each configured
+source's `form`; a value an earlier release stored absolute is not changed by itself, and
+configuring it again stores it home-relative.
+
 | Source | What it points at | Read by |
 |---|---|---|
 | `projects` | the directory that holds your project checkouts | filesystem scan, events, leak scan |
@@ -2235,7 +2243,8 @@ project-observatory full backups migrate           # move the newest legacy copi
 
 The root is chosen in this order:
 1. `OBSERVATORY_BACKUPS`;
-2. `project-observatory full configure storage backups /absolute/path`;
+2. `project-observatory full configure storage backups /absolute/path` (a path under your home is
+   stored as `~/...`, like a source, and `doctor` names its `form` under `backups`);
 3. the platform default. On macOS that is `~/Documents/Project Observatory/Backups` when
    `~/Documents` exists; iCloud Desktop & Documents can sync it off the machine.
    Elsewhere, or with no `~/Documents`, it is
@@ -2304,8 +2313,10 @@ never as an argument. A passphrase you set yourself is copied there too. One sup
 `OBSERVATORY_BACKUP_PASSPHRASE` is yours to keep and is not copied.
 
 `backup-passphrase show` prints it only to a terminal. Keep a copy off the machine as well:
-restoring on another machine needs it unless iCloud Keychain carries it there, and nothing
-can recover it.
+restoring this machine's backups on another machine needs it unless iCloud Keychain carries it
+there, and nothing can recover it. Each machine keeps its own passphrase: never set this
+machine's on another one to open a backup there (that replaces the other machine's own); give
+it to the restore once instead, as below.
 
 **The kept copy is never written over.** If `secrets/backup-passphrase` is lost while the
 kept copy exists, the job restores the file from it instead of generating a new passphrase.
@@ -2323,10 +2334,59 @@ backup, `init` creates the workspace and prints the backup it found and a comman
 it into another, empty home.
 
 ```sh
-# On another machine: restore asks for the passphrase at a terminal
+# On another machine: restore asks for the first machine's passphrase once, at a terminal
 project-observatory --home NEW_EMPTY_HOME full restore snapshot-….obsnap
 project-observatory full backups decrypt observatory-db-….obsdb ./copy.db
 ```
+
+**Another machine's backup opens with its passphrase given once, and nothing stores it.** A
+restore tries, in order: `OBSERVATORY_BACKUP_PASSPHRASE`, a value read with `--passphrase-stdin`,
+this workspace's own passphrase, the ones this machine's credential store keeps for the backups
+folder's label, and last, at a terminal, one prompt that names the folder
+(`Backup passphrase for <label>: `). A wrong candidate costs one chunk of the file. The value
+that opens it is used for that restore only: it is not written to the workspace, to settings, to
+the Keychain or any other store, to a log or to the answer, which says only where it came from
+(`passphrase_source`: `given`, `environment`, `stdin`, `this-workspace`, `stored`,
+`stored-previous` or `prompt`). `full restore --latest` asks once per backups folder when no
+kept passphrase opens it; `full machine-restore` takes `--passphrase-stdin` too.
+
+`--passphrase-stdin` reads at most 4096 bytes of UTF-8 from a file or a pipe and removes one
+trailing newline. It refuses a terminal (`passphrase-stdin-terminal`: there the prompt is the
+route, and it shows nothing typed), an empty value (`passphrase-stdin-empty`), a longer one
+(`passphrase-stdin-too-long`) and bytes that are not text (`passphrase-stdin-not-text`). When no
+candidate opens the file the refusal is `passphrase-refused` and names the sources it tried, never
+a value. Each is exit 2 before anything is written.
+
+An agent with shell access to the first machine hands the passphrase over without seeing it,
+redirecting the first machine's passphrase file into the second machine's command over SSH
+(never `ssh -t`, so the remote stdin is the file and not a terminal, and never `echo` or an
+argument). The default home is `~/.local/share/project-observatory-full`; use the first
+machine's `OBSERVATORY_HOME` when it set one:
+
+```sh
+ssh SECOND 'project-observatory --home NEW_EMPTY_HOME full restore ~/obs-transfer/daily-XXXX.obsnap --passphrase-stdin' \
+    < ~/.local/share/project-observatory-full/secrets/backup-passphrase
+```
+
+Without such access, the person at the second machine types it once at the prompt.
+
+**A restore under another home rewrites the old home's paths.** A snapshot records the home it
+was taken under (`home_path` in its manifest). Restored under another home, every source and the
+backups root (`config/settings.json`) and every `include` and `roots` entry of
+`config/machine-backup.json` that named the old home become `~/...`, and each folder declared in
+`config/tracked.json` moves to the same place under the new home, still absolute and resolved, as
+`full track` writes it. A home behind a symbolic link is matched as recorded and resolved. A value
+outside the old home is kept as given; `/Users/ann` never matches `/Users/anna`, and a value that
+leaves the home through `..` is outside it. The answer's `paths`
+block lists what was rewritten and, in `unresolved`, every declared folder (with
+`full track local-folder PATH`), source or backups root that does not
+exist afterwards (`reason: missing-after-restore`) with the exact `configure` step that points it
+elsewhere; a declaration file that cannot be read is named there too and left as it is. A missing
+source is not a refusal: the restore completes and `doctor`'s `coverage_warnings` keeps naming it.
+A same-home restore keeps `settings.json` byte for byte. When `restore --latest` finds no backup
+of a workspace at this path but the same workspace left backups under another home (its owner
+file names `<other home>/<the same path under the home>`), the `no-backup` answer lists them under
+`elsewhere`, never chooses one, and `next` names `full restore 'FILE'` for the newest.
 
 A rolled-back update keeps the changed workspace beside the restored one as
 `<home>.failed-update-…`: a full, unencrypted copy with `secrets/`. Nothing removes it;
@@ -2487,7 +2547,16 @@ of that:
   `node/shares/` (a key someone shared with you is sealed to the machine that accepted it, so
   they share it again to the second machine if it needs it; the shares you sent are renewed and
   revoked from the machine that made them), `config/cloud.json` (the second machine deploys its
-  own mailbox with `full cloud deploy` if it sends shares) and `<home>/store/maintenance.json`. It
+  own mailbox with `full cloud deploy` if it sends shares), `<home>/store/maintenance.json` and
+  `secrets/backup-passphrase` (OBS-348: each machine keeps its own backup passphrase; a
+  same-machine restore keeps the snapshot's). Until the second machine makes its own, every
+  snapshot it takes, `secrets/` included, stays unencrypted inside the workspace: run
+  `project-observatory full maintain ensure`, which the restore's `next` names (a `full init` at a
+  terminal does it too; one run over SSH without a terminal does not). Until then `doctor` shows
+  `backups.encrypted: false`, `backups.passphrase: missing` and a warning that names the same step.
+  The first machine's passphrase does not travel either, so its backups, the snapshot just
+  restored included, open only with it: if that machine may be retired, keep its passphrase
+  somewhere off both machines now (the restore answer's `machine.notes` says so). It
   turns `features.scheduler` off, holds off every app enrolled `always_on` (the restore names the
   `full lifecycle policy` step that turns it back on, to run on one machine only) and gives the
   workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
@@ -2510,7 +2579,7 @@ project-observatory full machine-restore --latest --packages
 project-observatory full ssh-keys rekey NAME --fingerprint SHA256:...          # the plan for this machine's own SSH key, as `ssh_keys` names it
 project-observatory full ssh-keys rekey NAME --fingerprint SHA256:... --apply  # before --clone: make it, send it to GitHub and each server, verify
 project-observatory full machine-restore --latest --clone
-project-observatory full restore --latest                         # the workspace, without the node identity
+project-observatory full restore --latest                         # the workspace, without the node identity; asks once for the first machine's passphrase
 project-observatory full node --init                              # this machine's own device id
 project-observatory full machine-move show                        # this machine's id and the staged jobs
 ```
