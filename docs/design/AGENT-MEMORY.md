@@ -455,6 +455,25 @@ should keep — will have an export path to Fabric project memory once that memo
 store is its source, and the seam is the lesson record as written here (its body, its state and
 its corroboration). Nothing exports a lesson today, and nothing here moves project memory.
 
+**The daily review (OBS-331).** Once a UTC day, `learning_review.py` (the tick's step
+`learning-review`, or `full learning-review run`) reads every revision of every unerased lesson
+and places each on the UTC day of its `created_at`: `lesson-new`, `lesson-revised` (a later
+revision of the same record), `lesson-replaced` (an archived revision and the proposal that
+replaced it, a new commit), `lesson-promoted` (a revision the lesson corroborator moved to
+`observed`) and `observation-invalidated` (a replacement by revalidation, the same commit). A
+class whose current lessons come from two or more distinct origin keys is `class-repeated`,
+with the corroborator's outcome for it. The review promotes nothing by a rule of its own: it
+calls `corroborate_lessons` unchanged, for real when the corroborator's receipt is absent or
+older than yesterday (no tick that refreshed the registry ran it within a day), else dry. A
+lesson's project is named only through a registered clone that carries its key and the
+project that clone's repository implements; otherwise `project: null`. Every lesson field is
+scrubbed again (`memory_redact`) before it enters the report, because the known-value list
+grows after a lesson is written. The report and its page stay under
+`<state>/learning-review/`: no ledger row, wiki page, board message or Fabric call is written.
+`tests/test_learning_review.py` (`Lessons`, `Privacy`) verifies the codes, the promotion rule
+and the scrub. An identical repeat writes nothing (`store/lessons.py`), so the review cannot
+count it, and the report says so.
+
 ## MCP tools
 
 | Tool | Writes | Notes |

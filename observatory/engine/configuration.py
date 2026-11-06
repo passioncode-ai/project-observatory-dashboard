@@ -131,6 +131,11 @@ STORAGE_SETTINGS = ("backups",)
 #: reads the key.
 UPDATE_SETTINGS = ("auto", "scheduled")
 
+#: What `learning_review` in settings.json may hold (learning_review.py, OBS-331), each an hour of the day in UTC:
+#: `settle_hour_utc`, the hour of D+1 at which the daily learning review of day D is due (6 when absent). An older
+#: reader never reads the section.
+LEARNING_REVIEW_SETTINGS = ("settle_hour_utc",)
+
 #: Every switch and source the engine reads. `configure` refuses any other name:
 #: a typo used to be answered "configured" and then did nothing. The workspace
 #: suite derives the names the code actually reads (`enabled(...)`, `source_path`,
@@ -271,6 +276,15 @@ def load(base: Path | None = None) -> dict:
             raise ConfigurationError(f"Unknown updates setting: {key}")
         if type(value) is not bool:
             raise ConfigurationError(f"Updates {key} must be true or false")
+    # LEARNING_REVIEW is optional and ignored by releases before OBS-331 (they never read it).
+    review = doc.get("learning_review", {})
+    if not isinstance(review, dict):
+        raise ConfigurationError("Configuration learning_review must be an object")
+    for key, value in review.items():
+        if key not in LEARNING_REVIEW_SETTINGS:
+            raise ConfigurationError(f"Unknown learning_review setting: {key}")
+        if type(value) is not int or not 0 <= value <= 23:
+            raise ConfigurationError(f"learning_review {key} must be a whole hour from 0 to 23")
     required = doc.get("must_understand", [])
     if not isinstance(required, list) or required:
         raise ConfigurationError("Configuration requires unsupported capabilities")

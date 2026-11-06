@@ -714,7 +714,8 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
+                                                 "learning_review", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -899,6 +900,13 @@ def main(argv: list[str]) -> int:
                 if not value.is_absolute():
                     raise config.ConfigurationError("Storage path must be absolute")
                 value = str(value)
+            elif a.section == "learning_review":
+                if a.name not in config.LEARNING_REVIEW_SETTINGS:
+                    raise config.ConfigurationError(f"Unknown learning_review setting: {a.name}; known: "
+                                                    f"{', '.join(config.LEARNING_REVIEW_SETTINGS)}")
+                if not (a.value.isascii() and a.value.isdigit() and len(a.value) <= 2 and int(a.value) <= 23):
+                    raise config.ConfigurationError("learning_review settle_hour_utc is a whole hour from 0 to 23")
+                value = int(a.value)
             elif a.section == "interface":
                 choices = config.INTERFACE_SETTINGS.get(a.name)
                 if choices is None:
