@@ -334,6 +334,10 @@ one that names another machine, or none (taken before 0.30.1), as a second machi
 key and stages its jobs, and a snapshot leaves out `node/device/`, `node/orgs/`, `node/records/` and
 `<home>/store/maintenance.json`, turns `features.scheduler` off and writes a new `instance_id` into `workspace.json`.
 `--same-machine` at a terminal restores either whole, as before. An update's own rollback restores its snapshot whole.
+From the release after 0.33.1 (OBS-348) a second-machine restore also leaves out `secrets/backup-passphrase`: each
+machine keeps its own backup passphrase, and the second machine makes its own with `full maintain ensure`, which the
+answer's `machine.next` names, beside `machine.notes` (keep the other machine's passphrase off both machines if it
+may be retired). This is a behaviour change for second-machine restores only; a same-machine restore keeps the file.
 
 These files live outside the workspace, in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/` on every
 platform, so neither a machine bundle nor a workspace snapshot carries them:
@@ -345,6 +349,40 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/restore.json` | 0.31.0 | schema `observatory-machine-restore/1`: `machine`, `updatedAt` and one part per step that wrote (`apply`, `packages`, `clone`), each with its `at`, the bundle's name, counts and failures; `apply` adds `mode`, `taken_on`, `this_machine`, `only`, `skip`, `left_out` and `other_keys[]` of `key`, `fingerprint` and `in_ssh` (the public fingerprints of the keys a second-machine restore withheld; `in_ssh`, added after 0.31.0, is true when the key sat directly in `~/.ssh`, and only such an entry gets a `rekey` step in status, so an entry written by 0.31.0, without it, gets none); owner-only, written atomically; written by `full machine-restore`, read by `full machine-move status` (OBS-282, OBS-286) | an older engine neither reads nor writes it; one that is not this schema reads as `unknown` in status; deleting it makes the restore item `unknown` |
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
+
+## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, the release after 0.33.1)
+
+Additive, with no new file, table or migration. A workspace snapshot's `manifest.json` gains `home_path`, the home
+folder it was taken under (`str(Path.home())`); an older engine ignores it. `full configure sources NAME PATH` and
+`full configure storage backups PATH` store a path that is the home or lies under it as `~` or `~/<rel>`; every
+release reads that form, because the loader has accepted any value whose `expanduser()` is absolute since sources and
+the backups root exist (`configuration.load`). A path outside the home is stored as given, and a value already stored
+is never migrated. The `configure` answer gains `stored_as` (`home-relative` or `absolute`), and `doctor` gains `form`
+for each configured source and, when `storage.backups` is set, under `backups`.
+
+The manifest also gains `home_path_resolved` (the same home with its links resolved), because `config/tracked.json`
+keeps resolved paths; both forms are matched, and a value is normalised lexically first, so one that leaves the home
+through `..` is outside it. A restore whose snapshot names another home than this one rewrites, in the restored copy before it is checked, every
+`sources.*` and `storage.backups` value and every `include` and `roots` entry of `config/machine-backup.json` that is
+that home or under it to `~/<rel>`, and every `path` of `config/tracked.json` (`local_folders` and
+`dismissed_local_folders`) to the same place under this home, absolute and resolved as `full track` writes it; a
+declared folder that does not exist afterwards is named in `unresolved` with `full track local-folder PATH`. Paths are compared part by part, as
+Windows parts when the recorded home is a Windows path. A value outside the recorded home is kept; a snapshot without
+`home_path` (an older engine's, or one taken by a process with no home folder, such as a Windows service without
+USERPROFILE) rewrites nothing, and neither does a restore run without a home. A file is written only when something in it changed, so a same-home
+restore is byte for byte as before. The restore answer gains `paths` (`home_from`, `home_to`, `rewritten[]` of
+`file`, `setting`, `to`, and `unresolved[]`: every source or backups root that does not exist afterwards, with
+`value`, `exists`, `reason` `missing-after-restore` and its `fix`, or `{file, reason: unreadable}` for a declaration
+that does not read) and `passphrase_source` for an encrypted file. `full restore --latest` answers `no-backup` with
+`elsewhere[]` (`label`, `owner_home_relative`, `newest`, `snapshots`) and a `next` step when the same workspace left
+backups under another home; nothing is chosen.
+
+`full restore` and `full machine-restore` gain `--passphrase-stdin`. A restore tries `OBSERVATORY_BACKUP_PASSPHRASE`,
+the stdin value, this workspace's own passphrase, the OS store's passphrases for the backups folder's label, then
+one terminal prompt; the value that opens the file is kept nowhere. The refusals `passphrase-refused`,
+`passphrase-stdin-empty`, `passphrase-stdin-too-long`, `passphrase-stdin-not-text` and `passphrase-stdin-terminal`
+exit 2 before any write (`backup_vault.BackupError.code`). `full restore --latest` asks once per backups folder at a
+terminal when no kept passphrase opens it; `full init` never asks, and names the backups and the steps as before.
 
 ## Workflow memory: a session Fabric starts for a board request (OBS-323, the release after 0.33.1)
 

@@ -621,6 +621,33 @@ class WorkspaceUpgrade(unittest.TestCase):
                 self.assertEqual(upgrade.main(['restore',str(source),'--same-machine']),0)
         self.assertTrue((dest/'workspace.json').is_file())
 
+    def test_a_second_machine_never_takes_the_snapshots_backup_passphrase(self):
+        """OBS-348 (D2): each machine keeps its own backup passphrase; a second machine makes its own."""
+        import backup_vault
+        backup_vault.set_passphrase(self.home,'a synthetic passphrase of the first machine')
+        source=self.base/'explicit snapshot'
+        upgrade.snapshot(self.home,source,writers_stopped=True)
+        dest=self.base/'second machine'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=upgrade.restore(source,dest)
+        self.assertFalse((dest/'secrets/backup-passphrase').exists())
+        self.assertIn('secrets/backup-passphrase',result['machine']['left_out'])
+        # Until this machine makes its own, every snapshot stays unencrypted: the answer names the step.
+        self.assertTrue(any(step.startswith('project-observatory full maintain ensure ')
+                            for step in result['machine']['next']),result['machine']['next'])
+        # The first machine's passphrase no longer travels: a fixed sentence says to keep it, never a value.
+        self.assertEqual(result['machine']['notes'],[upgrade.OTHER_PASSPHRASE_NOTE])
+        self.assertNotIn('a synthetic passphrase of the first machine',json.dumps(result))
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUPS':str(self.base/'roots')}):
+            report=backup_vault.status(dest)
+        self.assertEqual((report['encrypted'],report['passphrase']),(False,'missing'))
+        self.assertIn('project-observatory full maintain ensure',' '.join(report['warnings']))
+        self.assertEqual((dest/'secrets/demo-slot').read_text(),'synthetic opaque private value','the vault moves')
+        same=self.base/'same machine'
+        upgrade.restore(source,same)
+        self.assertEqual((same/'secrets/backup-passphrase').read_bytes(),(self.home/'secrets/backup-passphrase').read_bytes(),
+                         'a same-machine restore keeps the snapshot\'s passphrase as before')
+
     def test_vector_database_integrity_when_extension_installed(self):
         try:
             import sqlite_vec
@@ -637,6 +664,198 @@ class WorkspaceUpgrade(unittest.TestCase):
         snapshot=self.snapshot()
         upgrade.verify_snapshot(snapshot)
         self.assertTrue((snapshot/'data/store/vector-fixture.db').exists())
+
+
+class HomeRelativeSources(unittest.TestCase):
+    """OBS-347: a workspace restored under another home folder still finds its sources, its backups
+    root and its declared folders, and the answer says what it rewrote and what it could not find."""
+    setUp=WorkspaceUpgrade.setUp
+    tearDown=WorkspaceUpgrade.tearDown
+    snapshot=WorkspaceUpgrade.snapshot
+
+    def homes(self):
+        self.ann,self.bob=self.base/'Users'/'ann',self.base/'Users'/'bob'
+        for home in (self.ann,self.bob):
+            home.mkdir(parents=True)
+        return self.ann,self.bob
+
+    def settings(self,sources=None,backups=None):
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc.setdefault('sources',{}).update(sources or {})
+        if backups:
+            doc.setdefault('storage',{})['backups']=backups
+        workspace.write_json(file,doc)
+
+    def snapshot_as(self,home):
+        with patch.dict(os.environ,{'HOME':str(home),'USERPROFILE':str(home)}):
+            return self.snapshot()
+
+    def restore_as(self,home,source,dest):
+        with patch.dict(os.environ,{'HOME':str(home),'USERPROFILE':str(home)}):
+            return upgrade.restore(source,dest)
+
+    def test_a_snapshot_names_its_home(self):
+        ann,_=self.homes()
+        self.assertEqual(config.read_json(self.snapshot_as(ann)/'manifest.json')['home_path'],str(ann))
+
+    def test_restore_under_another_home_rewrites_settings_backup_and_tracked_paths(self):
+        ann,bob=self.homes()
+        self.settings({'secret_store':str(ann/'.config/example/secrets'),'projects':str(ann/'code'),
+                       'harness_root':str(ann),'wiki':'~/notes'},backups=str(ann/'Backups'))
+        workspace.write_json(self.home/'config/machine-backup.json',
+                             {'include':[str(ann/'.zshrc'),'~/.gitconfig'],'roots':[str(ann/'code')],'extra':'kept'})
+        workspace.write_json(self.home/'config/tracked.json',
+                             {'schema_version':1,'local_folders':[{'path':str(ann/'src/alpha'),'by':'operator','future':1}],
+                              'dismissed_local_folders':[{'path':str(ann/'src/old')}]})
+        source=self.snapshot_as(ann)
+        for rel in ('.config/example/secrets','src/alpha','Backups','notes'):
+            (bob/rel).mkdir(parents=True)
+        dest=self.base/'restored for bob'
+        result=self.restore_as(bob,source,dest)
+        paths=result['paths']
+        self.assertEqual((paths['home_from'],paths['home_to']),(str(ann),str(bob)))
+        doc=config.read_json(dest/'config/settings.json')
+        self.assertEqual(doc['sources'],{'secret_store':'~/.config/example/secrets','projects':'~/code',
+                                         'harness_root':'~','wiki':'~/notes'})
+        self.assertEqual(doc['storage']['backups'],'~/Backups')
+        machine=config.read_json(dest/'config/machine-backup.json')
+        self.assertEqual(machine,{'include':['~/.zshrc','~/.gitconfig'],'roots':['~/code'],'extra':'kept'})
+        tracked=config.read_json(dest/'config/tracked.json')
+        self.assertEqual(tracked['local_folders'],[{'path':str(bob/'src/alpha'),'by':'operator','future':1}],
+                         'a declared folder stays absolute, under the new home, with its other fields')
+        self.assertEqual(tracked['dismissed_local_folders'],[{'path':str(bob/'src/old')}])
+        rewritten={(row['file'],row['setting']):row['to'] for row in paths['rewritten']}
+        self.assertEqual(rewritten[('config/settings.json','sources.secret_store')],'~/.config/example/secrets')
+        self.assertEqual(rewritten[('config/settings.json','storage.backups')],'~/Backups')
+        self.assertEqual(rewritten[('config/machine-backup.json','roots[0]')],'~/code')
+        self.assertEqual(rewritten[('config/tracked.json','local_folders[0].path')],str(bob/'src/alpha'))
+        self.assertNotIn(('config/settings.json','sources.wiki'),rewritten,'a home-relative value is left as it is')
+        with patch.dict(os.environ,{'HOME':str(bob)}):
+            for row in paths['rewritten']:
+                if row['file']=='config/settings.json':
+                    self.assertTrue(str(Path(row['to']).expanduser()).startswith(str(bob)),row)
+        # `code` was not made under bob's home: it is named, with the step that points it elsewhere.
+        self.assertEqual([(r['setting'],r['reason'],r['fix']) for r in paths['unresolved']],
+                         [('sources.projects','missing-after-restore',
+                           'project-observatory full configure sources projects PATH')])
+        for file in dest.rglob('*'):
+            self.assertEqual(file.stat().st_mode & 0o777,0o700 if file.is_dir() else 0o600,str(file))
+
+    def test_a_value_outside_the_old_home_is_kept_and_named_when_missing(self):
+        ann,bob=self.homes()
+        volume=self.base/'Volumes'/'Work'/'src'
+        self.settings({'projects':str(volume)},backups=str(self.base/'Volumes'/'Backups'))
+        source=self.snapshot_as(ann)
+        result=self.restore_as(bob,source,self.base/'restored')
+        self.assertEqual(result['paths']['rewritten'],[])
+        doc=config.read_json(self.base/'restored/config/settings.json')
+        self.assertEqual(doc['sources']['projects'],str(volume))
+        unresolved={r['setting']:r for r in result['paths']['unresolved']}
+        self.assertEqual(unresolved['sources.projects'],
+                         {'file':'config/settings.json','setting':'sources.projects','value':str(volume),'exists':False,
+                          'reason':'missing-after-restore','fix':'project-observatory full configure sources projects PATH'})
+        self.assertEqual(unresolved['storage.backups']['fix'],'project-observatory full configure storage backups PATH')
+
+    def test_a_prefix_by_string_only_is_not_rewritten(self):
+        ann,bob=self.homes()
+        anna=self.base/'Users'/'anna'
+        self.settings({'projects':str(anna/'src')})
+        result=self.restore_as(bob,self.snapshot_as(ann),self.base/'restored')
+        self.assertEqual(config.read_json(self.base/'restored/config/settings.json')['sources']['projects'],str(anna/'src'))
+        self.assertEqual(result['paths']['rewritten'],[])
+
+    def test_the_same_home_restores_settings_byte_for_byte(self):
+        ann,_=self.homes()
+        self.settings({'projects':str(ann/'src')})
+        (ann/'src').mkdir()
+        before=(self.home/'config/settings.json').read_bytes()
+        result=self.restore_as(ann,self.snapshot_as(ann),self.base/'restored')
+        self.assertEqual((self.base/'restored/config/settings.json').read_bytes(),before)
+        self.assertEqual((result['paths']['rewritten'],result['paths']['unresolved']),([],[]))
+
+    def test_an_older_snapshot_without_a_home_rewrites_nothing_and_names_what_is_missing(self):
+        ann,bob=self.homes()
+        self.settings({'projects':str(ann/'src')})
+        source=self.snapshot_as(ann)
+        manifest=config.read_json(source/'manifest.json')
+        del manifest['home_path']
+        workspace.write_json(source/'manifest.json',manifest)
+        result=self.restore_as(bob,source,self.base/'restored')
+        self.assertIsNone(result['paths']['home_from'])
+        self.assertEqual(result['paths']['rewritten'],[])
+        self.assertEqual(config.read_json(self.base/'restored/config/settings.json')['sources']['projects'],str(ann/'src'))
+        self.assertEqual([r['setting'] for r in result['paths']['unresolved']],['sources.projects'])
+
+    def test_an_unreadable_declaration_is_named_and_the_restore_completes(self):
+        ann,bob=self.homes()
+        (self.home/'config/tracked.json').write_text('{not json')
+        result=self.restore_as(bob,self.snapshot_as(ann),self.base/'restored')
+        self.assertEqual(result['status'],'restored')
+        self.assertIn({'file':'config/tracked.json','reason':'unreadable'},result['paths']['unresolved'])
+        self.assertEqual((self.base/'restored/config/tracked.json').read_text(),'{not json','left as it is')
+
+    def test_without_a_home_a_snapshot_and_a_restore_still_work(self):
+        # Windows has no home without USERPROFILE (a service account, a task without a profile):
+        # `Path.home()` raises there, and a snapshot or a restore must not fail for it.
+        ann,_=self.homes()
+        self.settings({'projects':str(ann/'code')})
+        with patch.object(upgrade.Path,'home',side_effect=RuntimeError('Could not determine home directory.')):
+            source=self.snapshot()
+            self.assertNotIn('home_path',config.read_json(source/'manifest.json'))
+            result=upgrade.restore(source,self.base/'restored')
+        self.assertEqual((result['paths']['home_from'],result['paths']['home_to'],result['paths']['rewritten']),
+                         (None,None,[]))
+        self.assertEqual([r['setting'] for r in result['paths']['unresolved']],['sources.projects'])
+        self.assertEqual(upgrade.rewrite_home_paths(self.base/'restored',old_home=str(ann),new_home=None)['rewritten'],[],
+                         'with no home to rewrite into, nothing is rewritten')
+
+    def test_a_windows_home_is_compared_part_by_part(self):
+        rewrite=upgrade.relative_to_home
+        self.assertEqual(rewrite('C:\\Users\\ann\\src\\alpha','C:\\Users\\ann'),'~/src/alpha')
+        self.assertEqual(rewrite('c:\\users\\ANN','C:\\Users\\ann'),'~')
+        self.assertIsNone(rewrite('C:\\Users\\anna\\src','C:\\Users\\ann'))
+        self.assertIsNone(rewrite('D:\\Work','C:\\Users\\ann'))
+        self.assertEqual(rewrite('/srv/people/ann/src','/srv/people/ann'),'~/src')
+        self.assertIsNone(rewrite('/srv/people/anna/src','/srv/people/ann'))
+        self.assertIsNone(rewrite('~/src','/srv/people/ann'),'already home-relative')
+        self.assertIsNone(rewrite('/anything','/'),'a root is no home')
+        # Normalised lexically first: a value that leaves the old home through `..` is outside it.
+        self.assertIsNone(rewrite('/srv/people/ann/../bob/x','/srv/people/ann'))
+        self.assertIsNone(rewrite('/srv/people/ann/..','/srv/people/ann'))
+        self.assertEqual(rewrite('/srv/people/ann/src/../x','/srv/people/ann'),'~/x')
+        self.assertIsNone(rewrite('C:\\Users\\ann\\..\\bob','C:\\Users\\ann'))
+        self.assertEqual(rewrite('/srv/linked/ann/x','/srv/people/ann','/srv/linked/ann'),'~/x','either form of the home')
+
+    @unittest.skipIf(os.name=='nt','a home behind a symbolic link is a POSIX layout')
+    def test_a_home_behind_a_link_matches_the_resolved_paths_tracked_json_keeps(self):
+        real_ann,real_bob=self.base/'real'/'ann',self.base/'real'/'bob'
+        for home in (real_ann,real_bob):
+            home.mkdir(parents=True)
+        (self.base/'Users').mkdir()
+        ann,bob=self.base/'Users'/'ann',self.base/'Users'/'bob'
+        ann.symlink_to(real_ann,target_is_directory=True)
+        bob.symlink_to(real_bob,target_is_directory=True)
+        self.settings({'projects':str(ann/'code')})
+        # `full track local-folder` writes resolved paths (`tracked.canonical`).
+        workspace.write_json(self.home/'config/tracked.json',
+                             {'schema_version':1,'local_folders':[{'path':str(real_ann/'src/alpha')},
+                                                                   {'path':str(self.base/'elsewhere/beta')}],
+                              'dismissed_local_folders':[]})
+        source=self.snapshot_as(ann)
+        manifest=config.read_json(source/'manifest.json')
+        self.assertEqual((manifest['home_path'],manifest['home_path_resolved']),(str(ann),str(real_ann)))
+        (real_bob/'src/alpha').mkdir(parents=True)
+        (real_bob/'code').mkdir()
+        result=self.restore_as(bob,source,self.base/'restored')
+        tracked=config.read_json(self.base/'restored/config/tracked.json')
+        self.assertEqual([r['path'] for r in tracked['local_folders']],
+                         [str(real_bob/'src/alpha'),str(self.base/'elsewhere/beta')],
+                         'written in tracked.json\'s canonical form, under the new home')
+        self.assertEqual(config.read_json(self.base/'restored/config/settings.json')['sources']['projects'],'~/code')
+        self.assertEqual([(r['setting'],r['value'],r['fix']) for r in result['paths']['unresolved']],
+                         [('local_folders[1].path',str(self.base/'elsewhere/beta'),
+                           'project-observatory full track local-folder PATH')])
 
 if __name__=='__main__':
     unittest.main()

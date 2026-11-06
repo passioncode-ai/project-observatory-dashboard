@@ -87,6 +87,61 @@ class WorkspaceTests(unittest.TestCase):
         warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
         self.assertTrue(any(w['source'] == 'sessions' and 'does not exist' in w['problem'] for w in warnings))
 
+    # --- OBS-347: a path under the home is stored home-relative, so another home finds it ------
+
+    def configure(self, *args) -> dict:
+        return json.loads(self.run_cli('configure', *args).stdout)
+
+    def test_configure_stores_a_path_under_the_home_as_home_relative(self):
+        self.run_cli('init')
+        (self.user / 'src').mkdir()
+        self.assertEqual(self.configure('sources', 'projects', str(self.user / 'src'))['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('storage', 'backups', str(self.user / 'Backups'))['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('sources', 'wiki', '~/notes')['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('sources', 'harness_root', str(self.user))['stored_as'], 'home-relative')
+        doc = json.loads((self.home / 'config/settings.json').read_text())
+        self.assertEqual(doc['sources']['projects'], '~/src')
+        self.assertEqual(doc['sources']['wiki'], '~/notes')
+        self.assertEqual(doc['sources']['harness_root'], '~')
+        self.assertEqual(doc['storage']['backups'], '~/Backups')
+        doctor = json.loads(self.run_cli('doctor').stdout)
+        self.assertTrue(doctor['sources']['projects']['exists'], 'every reader expands the stored form')
+        self.assertNotIn('projects', {w['source'] for w in doctor['coverage_warnings']})
+
+    def test_configure_keeps_a_path_outside_the_home_absolute(self):
+        self.run_cli('init')
+        outside = self.base / 'elsewhere'
+        # A sibling whose name only begins with the home's name is outside it.
+        lookalike = self.base / (self.user.name + 'name')
+        for folder in (outside, lookalike):
+            folder.mkdir()
+        self.assertEqual(self.configure('sources', 'projects', str(outside))['stored_as'], 'absolute')
+        self.assertEqual(self.configure('sources', 'wiki', str(lookalike))['stored_as'], 'absolute')
+        self.assertEqual(self.configure('storage', 'backups', str(outside / 'Backups'))['stored_as'], 'absolute')
+        doc = json.loads((self.home / 'config/settings.json').read_text())
+        self.assertEqual(doc['sources']['projects'], str(outside))
+        self.assertEqual(doc['sources']['wiki'], str(lookalike))
+        self.assertEqual(doc['storage']['backups'], str(outside / 'Backups'))
+
+    def test_doctor_names_each_sources_form(self):
+        self.run_cli('init')
+        (self.user / 'src').mkdir()
+        self.configure('sources', 'projects', str(self.user / 'src'))
+        self.configure('sources', 'sessions', str(self.base))
+        # A value an older release stored, absolute though it is under the home, is not migrated.
+        file = self.home / 'config/settings.json'
+        doc = json.loads(file.read_text())
+        doc['sources']['wiki'] = str(self.user / 'notes')
+        file.write_text(json.dumps(doc))
+        doctor = json.loads(self.run_cli('doctor').stdout)
+        self.assertEqual(doctor['sources']['projects']['form'], 'home-relative')
+        self.assertEqual(doctor['sources']['sessions']['form'], 'absolute')
+        self.assertEqual(doctor['sources']['wiki']['form'], 'absolute')
+        self.assertNotIn('form', doctor['sources']['secret_store'], 'an unconfigured source has no form')
+        self.assertNotIn('form', doctor['backups'], 'no storage.backups setting, no form')
+        self.configure('storage', 'backups', str(self.user / 'Backups'))
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['backups']['form'], 'home-relative')
+
     def test_doctor_names_an_unset_or_missing_projects_source(self):
         # The base scan reads `sources.projects`; with it unset, `full local` used to
         # end in a FileNotFoundError traceback while doctor reported no gap at all.
