@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 9,
-    "contentHash": "sha256:a26d4720adacf7a3a0da35f202b50015d1b0b3000b4a7b0f2b38cdda6ab9aee9",
+    "revision": 10,
+    "contentHash": "sha256:a12f9118e6b727f7b8d958f086ed7b233fe6d750873d6703edccd105b8681d1f",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -402,6 +402,47 @@
         ]
       },
       "description": "The meter (fabric-agent-contract DEC-0037/0039/0041, Fabric ADR-0144): before a call that spends, a callee presents the onward delegation token the hub minted for project-observatory (scope grant.check) in Authorization: Bearer and asks whether the amount may be spent. The token travels only over HTTP: the same tool is served on the memory-http door (`project-observatory full memory-http`, loopback), where the token sits in Authorization; over stdio no token travels and the answer is principal-unproven. Answers allowed with a receipt and the reservation, or denied with the code, the level and the window. On the operator's own machine no token is demanded for anything else (ADR-0144 amendment 4); this capability answers principal-unproven without one, because a reservation needs the grant the token names."
+    },
+    {
+      "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/ops.digest.record",
+      "name": "ops.digest.record",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/schemas/ops-digest-record-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/schemas/ops-digest-record-output.schema.json",
+      "effect": "draft",
+      "idempotency": "supported",
+      "dataClasses": [
+        "project-internal"
+      ],
+      "profile": {
+        "kind": "mcp",
+        "protocolRevision": "2026-07-28",
+        "connection": {
+          "mode": "stdio",
+          "executableRef": "observatory-install:mcp-server",
+          "args": [
+            "--stdio"
+          ]
+        },
+        "requiredFeatures": [
+          "tool:ops.digest.record"
+        ],
+        "probes": [
+          {
+            "id": "ops-digest-record-needs-a-binding",
+            "description": "A bounded probe against an explicitly selected synthetic fixture workspace, its stdio server started without an access binding.",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/fixtures/ops-digest-record-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.34.0/observatory/engine/fabric/schemas/ops-digest-record-output.schema.json",
+            "timeoutMs": 30000,
+            "sideEffectCeiling": "none",
+            "assertions": [
+              "result validates against ops-digest-record-output.schema.json",
+              "a stdio server started without an access binding refuses the line with binding-required",
+              "no line is kept: the digest store is unchanged after the call"
+            ]
+          }
+        ]
+      },
+      "description": "A product's daily operations digest (fabric-agent-contract DEC-0153, release tag v0.1.0+2026-11-06.1): one ops.digest.daily@1 line as a JSON object, its source label (default app) and optionally the Fabric service {id, instance} it came from, checked against the contract's closed schema, FAC-SEM-166, FAC-SEM-167 and the source clause of FAC-SEM-168. The project is never an argument: over stdio it is the one project of the access binding the server runs under (--binding-token-file, a binding with the scope ops.digest.record and the effect propose), without one the answer is binding-required; on the memory-http door it is the project claim of a delegation token the hub minted for project-observatory with the scope ops.digest.record, without one delegation-required. One record per project, service, source and UTC day: the same body again changes nothing (repeated true), a different one is the next revision, and a reader reads the first. Counts only, kept 400 days."
     }
   ]
 }

@@ -3,6 +3,70 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.34.0 (2026-11-06)
+
+This release prepares a workspace to move to another computer and to run on a computer other accounts share. Local
+servers now refuse a connection from another account on the same computer before reading it. A workspace restored on
+another computer keeps paths under the home folder, and its backup passphrase is asked once and never stored there. A
+secret store kept outside the workspace travels inside the encrypted snapshot, and `full doctor` gives one verdict
+that names a store no snapshot carries. Products can send their daily operations digests (`ops.digest.record`), and a
+daily learning review reports new lessons and failures on the rise. With automatic updates off, a newer version is
+still announced once. Nothing needs you after installing. On a computer with more than one person's account the check
+of the connecting account turns itself on.
+
+### Added
+
+- **Another account's connection refused before it is read** (OBS-355 part 1, #451, `docs/design/ACCESS.md` rule
+  10, `docs/COMPATIBILITY.md` "Servers: another OS account's connection refused"). The local server, memory over HTTP
+  and the keyserver find the account that owns the connecting process and answer `403 peer-foreign-account` for
+  another account, root or launchd, and `403 peer-unverified` when the owner cannot be read, on every path. The check
+  is on when the computer has more than one person's account, or with `config/local.json`
+  `{"loopback": {"peerCheck": "always"}}`; clients check the listener the same way before they send a token.
+  `peer_owner.py` is one standard-library file other projects copy as it is.
+- **A secret store outside the workspace is carried encrypted** (OBS-350 part 1, #453, `docs/COMPATIBILITY.md`
+  "Workspace snapshot: an external secret store carried encrypted"). A snapshot with a passphrase carries the store the
+  settings name under `external/<name>/`, with every file's digest in the manifest; `full vault-digests keep-here`
+  keeps a slot on this computer only, and `unkeep-here` lets it travel again. The restore side follows in a later
+  release: `full restore` does not write the store into place yet.
+- **Products' daily operations digests** (OBS-330, #447, `fabric/FABRIC-CONFORMANCE.md` "Operations digests"). The
+  capability `ops.digest.record` takes one `ops.digest.daily@1` line of the Fabric agent contract (DEC-0153), checked
+  against its closed schema and rules, and keeps the first revision of each project, service, source and day for 400
+  days. The project comes from the access binding (scope `ops.digest.record`) or the delegation token, never from the
+  caller. The manifest declares it as revision 10.
+- **The daily learning review** (OBS-331 part a, #450, `full learning-review show|list|run`). Once a day, after the day
+  settles (06:00 UTC by default, `full configure learning_review settle_hour_utc`), a local JSON report and page list
+  the lessons minted, revised, replaced, promoted or invalidated, the classes held by two or more origins, failures
+  rising in products' digests, and retro-after-work as asked and answered.
+- **One doctor verdict** (OBS-349 part 1, #445). `full doctor` answers `clean` and the rows that need attention; it
+  names an external secret store and whether the newest snapshot carried it, and `observatory_machine` with
+  `section: "move"` returns the move checklist to agents.
+- **A newer version is announced with automatic updates off** (OBS-333, #432). The five-minute check keeps reading
+  the newest release while updates are off, records it as `available` and says it once per version in `full maintain
+  status`, `full doctor`, Health and Home; it never downloads or installs anything.
+- **Observatory declares the connections it makes** (OBS-326, #436; OBS-339 to OBS-342, #442). The well-known document
+  carries `extensions/connections/0.1`: the hub, the release feed and each integration that is on, with a state read
+  from its last receipt; an old receipt reads as stale, and the offline switch applies.
+
+### Changed
+
+- **Paths under the home folder survive another home** (OBS-347, #446). `configure sources` and `configure storage
+  backups` store such a path as `~/...` and answer `stored_as`; a restore rewrites the settings, the machine bundle's
+  folders and tracked folders to the new home and lists what it could not resolve.
+- **Another computer's backup passphrase is asked once and never stored** (OBS-348, #446). `restore` and
+  `machine-restore` take `--passphrase-stdin`; a second-computer restore leaves out `secrets/backup-passphrase`.
+- **A session Fabric starts for a board request gets only its packet's keys** (OBS-323, #437; OBS-343, OBS-344,
+  #440). A dispatch packet is read from a workflow's first revision only, and the lease file is checked on its open
+  descriptor.
+
+### Fixed
+
+- **A Git repository above the installed engine is not its source checkout** (#444). A home folder made into a
+  repository no longer made `use_secret.py` refuse every workspace under it.
+- **Test budgets** (OBS-335, #434; OBS-278, #449): `test_session_reload` gets 300 seconds; `workflow_memory`'s timeout
+  on Windows is a known outcome.
+
+The plugin stays 0.30.0.
+
 ## 0.33.1 (2026-11-05)
 
 A patch release. This build carries the analytics App-Key, so the anonymous usage and error data that 0.33.0 turned
