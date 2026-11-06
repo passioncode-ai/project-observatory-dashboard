@@ -368,7 +368,8 @@ that home or under it to `~/<rel>`, and every `path` of `config/tracked.json` (`
 `dismissed_local_folders`) to the same place under this home, absolute and resolved as `full track` writes it; a
 declared folder that does not exist afterwards is named in `unresolved` with `full track local-folder PATH`. Paths are compared part by part, as
 Windows parts when the recorded home is a Windows path. A value outside the recorded home is kept; a snapshot without
-`home_path` (an older engine's) rewrites nothing. A file is written only when something in it changed, so a same-home
+`home_path` (an older engine's, or one taken by a process with no home folder, such as a Windows service without
+USERPROFILE) rewrites nothing, and neither does a restore run without a home. A file is written only when something in it changed, so a same-home
 restore is byte for byte as before. The restore answer gains `paths` (`home_from`, `home_to`, `rewritten[]` of
 `file`, `setting`, `to`, and `unresolved[]`: every source or backups root that does not exist afterwards, with
 `value`, `exists`, `reason` `missing-after-restore` and its `fix`, or `{file, reason: unreadable}` for a declaration

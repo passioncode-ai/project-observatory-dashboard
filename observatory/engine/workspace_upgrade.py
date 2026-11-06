@@ -293,10 +293,11 @@ def _snapshot(base: Path, output: Path) -> dict:
                     'machine_id':machine_identity.machine_id(),
                     # The home the paths in settings were written under (OBS-347): a restore under
                     # another home rewrites that prefix. Additive; an older reader ignores it.
-                    'home_path':str(Path.home()),
-                    # The same home with its links resolved: `tracked.json` keeps resolved paths
-                    # (`tracked.canonical`), so a home behind a link is matched in both forms.
-                    'home_path_resolved':str(Path.home().resolve()),
+                    # Absent when this process has no home (`this_home`): nothing is rewritten then.
+                    **({'home_path':str(home),
+                        # The same home with its links resolved: `tracked.json` keeps resolved paths
+                        # (`tracked.canonical`), so a home behind a link is matched in both forms.
+                        'home_path_resolved':_canonical(home)} if (home := this_home()) else {}),
                     'files':entries, 'directories':sorted(before_dirs), 'external_sources_included':False,
                     'excluded':['backup collections', 'runtime locks', 'Git metadata', 'Python environments/caches']}
         workspace.write_json(stage / 'manifest.json', manifest)
@@ -517,6 +518,26 @@ def _path_settings(doc: dict):
         yield 'storage.backups', storage['backups']
 
 
+def this_home() -> Path | None:
+    """This process's home folder, or None when it has none.
+
+    `Path.home()` raises on Windows when neither USERPROFILE nor HOMEDRIVE and HOMEPATH are set
+    (a service account, a scheduled task without a profile, a test environment built from
+    scratch); a snapshot or a restore must not fail for it, it only cannot rewrite home paths."""
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def _exists(value: str) -> bool:
+    """Whether a stored path exists here; `~/...` with no home to expand into does not."""
+    try:
+        return Path(value).expanduser().exists()
+    except (RuntimeError, KeyError, OSError):
+        return False
+
+
 def _canonical(path: Path) -> str:
     """A declared folder in `tracked.json`'s own form (`tracked.canonical`: resolved, not strict)."""
     try:
@@ -525,7 +546,7 @@ def _canonical(path: Path) -> str:
         return str(path)
 
 
-def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path,
+def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path | None,
                        old_home_resolved: str | None = None) -> dict:
     """Make a restored workspace's paths resolve under THIS home (OBS-347).
 
@@ -552,8 +573,8 @@ def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path,
     A file is written only when something in it changed, so a same-home restore keeps every
     byte. `unresolved` names every source and backups root that does not exist afterwards,
     whatever the home did, with its `configure` step; a missing one is not a refusal."""
-    new = str(new_home)
-    rewrite = bool(old_home) and old_home != new
+    new = str(new_home) if new_home is not None else None
+    rewrite = bool(old_home) and new is not None and old_home != new
     homes = tuple(dict.fromkeys(h for h in (old_home, old_home_resolved) if isinstance(h, str) and h))
     rewritten, unresolved = [], []
 
@@ -584,7 +605,7 @@ def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path,
         if changed:
             workspace.write_json(file, doc)
         for setting, value in _path_settings(doc):
-            if isinstance(value, str) and value and not Path(value).expanduser().exists():
+            if isinstance(value, str) and value and not _exists(value):
                 unresolved.append({'file': PATH_FILES['settings'], 'setting': setting, 'value': value,
                                    'exists': False, 'reason': 'missing-after-restore', 'fix': fix_for(setting)})
     if rewrite:
@@ -622,7 +643,7 @@ def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path,
         # A declared folder this home does not hold (outside the old home, or not cloned yet) reads nothing.
         for i, row in enumerate(doc.get('local_folders') if isinstance(doc.get('local_folders'), list) else []):
             value = row.get('path') if isinstance(row, dict) else None
-            if isinstance(value, str) and value and not Path(value).expanduser().exists():
+            if isinstance(value, str) and value and not _exists(value):
                 unresolved.append({'file': PATH_FILES['tracked'], 'setting': f'local_folders[{i}].path',
                                    'value': value, 'exists': False, 'reason': 'missing-after-restore',
                                    'fix': 'project-observatory full track local-folder PATH'})
@@ -695,7 +716,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
                     raise config.ConfigurationError('Restored file hash mismatch')
             machine = _as_another_machine(stage) if another else None
             # The same in either mode: the rewrite depends on the home, never on the machine.
-            paths = rewrite_home_paths(stage, old_home=manifest.get('home_path'), new_home=Path.home(),
+            paths = rewrite_home_paths(stage, old_home=manifest.get('home_path'), new_home=this_home(),
                                        old_home_resolved=manifest.get('home_path_resolved'))
             preflight(stage)
             sync_tree(stage)

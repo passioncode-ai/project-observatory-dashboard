@@ -795,6 +795,21 @@ class HomeRelativeSources(unittest.TestCase):
         self.assertIn({'file':'config/tracked.json','reason':'unreadable'},result['paths']['unresolved'])
         self.assertEqual((self.base/'restored/config/tracked.json').read_text(),'{not json','left as it is')
 
+    def test_without_a_home_a_snapshot_and_a_restore_still_work(self):
+        # Windows has no home without USERPROFILE (a service account, a task without a profile):
+        # `Path.home()` raises there, and a snapshot or a restore must not fail for it.
+        ann,_=self.homes()
+        self.settings({'projects':str(ann/'code')})
+        with patch.object(upgrade.Path,'home',side_effect=RuntimeError('Could not determine home directory.')):
+            source=self.snapshot()
+            self.assertNotIn('home_path',config.read_json(source/'manifest.json'))
+            result=upgrade.restore(source,self.base/'restored')
+        self.assertEqual((result['paths']['home_from'],result['paths']['home_to'],result['paths']['rewritten']),
+                         (None,None,[]))
+        self.assertEqual([r['setting'] for r in result['paths']['unresolved']],['sources.projects'])
+        self.assertEqual(upgrade.rewrite_home_paths(self.base/'restored',old_home=str(ann),new_home=None)['rewritten'],[],
+                         'with no home to rewrite into, nothing is rewritten')
+
     def test_a_windows_home_is_compared_part_by_part(self):
         rewrite=upgrade.relative_to_home
         self.assertEqual(rewrite('C:\\Users\\ann\\src\\alpha','C:\\Users\\ann'),'~/src/alpha')

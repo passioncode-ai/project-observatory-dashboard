@@ -545,9 +545,34 @@ def stdin_of(data: bytes):
     return io.TextIOWrapper(io.BytesIO(data), encoding='utf-8')
 
 
-class Typed(io.TextIOWrapper):
-    def isatty(self):
-        return True
+class PassphraseStdin(unittest.TestCase):
+    """OBS-348: what `--passphrase-stdin` accepts and refuses. No workspace and no backup, so it runs
+    wherever Python does, Windows included."""
+
+    def test_stdin_is_refused_when_it_is_a_terminal_empty_or_too_long(self):
+        read = vault.read_passphrase_stdin
+        self.assertEqual(read(stdin_of(b'a value from a file\n')), 'a value from a file')
+        self.assertEqual(read(stdin_of(b'a value from windows\r\n')), 'a value from windows')
+        self.assertEqual(read(stdin_of(b' kept as typed \n\n')), ' kept as typed \n', 'only one newline goes')
+        self.assertEqual(read(stdin_of(b'x' * vault.STDIN_LIMIT + b'\n')), 'x' * vault.STDIN_LIMIT)
+        for data, code in ((b'', 'passphrase-stdin-empty'), (b'\n', 'passphrase-stdin-empty'),
+                           (b'x' * (vault.STDIN_LIMIT + 1), 'passphrase-stdin-too-long'),
+                           (b'\xff\xfe', 'passphrase-stdin-not-text')):
+            with self.subTest(code=code), self.assertRaises(vault.BackupError) as caught:
+                read(stdin_of(data))
+            self.assertEqual(caught.exception.code, code)
+        # A terminal: `osprivacy.is_terminal` decides (a real console on Windows, `isatty` elsewhere).
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                self.assertRaises(vault.BackupError) as caught:
+            read(stdin_of(b'typed\n'))
+        self.assertEqual(caught.exception.code, 'passphrase-stdin-terminal')
+        closed = stdin_of(b'never read\n')
+        closed.close()
+        for stream in (None, closed):   # no standard input at all, or one already closed: a typed refusal
+            with self.subTest(stream=stream), patch.object(sys, 'stdin', None), \
+                    self.assertRaises(vault.BackupError) as caught:
+                read(stream)
+            self.assertEqual(caught.exception.code, 'passphrase-stdin-empty')
 
 
 class ForeignPassphrase(Base):
@@ -657,28 +682,7 @@ class ForeignPassphrase(Base):
             vault.open_with(enc, base=None, label=None, given=PASS)
         self.assertIsNone(caught.exception.code)
 
-    def test_stdin_is_refused_when_it_is_a_terminal_empty_or_too_long(self):
-        read = vault.read_passphrase_stdin
-        self.assertEqual(read(stdin_of(b'a value from a file\n')), 'a value from a file')
-        self.assertEqual(read(stdin_of(b'a value from windows\r\n')), 'a value from windows')
-        self.assertEqual(read(stdin_of(b' kept as typed \n\n')), ' kept as typed \n', 'only one newline goes')
-        self.assertEqual(read(stdin_of(b'x' * vault.STDIN_LIMIT + b'\n')), 'x' * vault.STDIN_LIMIT)
-        for data, code in ((b'', 'passphrase-stdin-empty'), (b'\n', 'passphrase-stdin-empty'),
-                           (b'x' * (vault.STDIN_LIMIT + 1), 'passphrase-stdin-too-long'),
-                           (b'\xff\xfe', 'passphrase-stdin-not-text')):
-            with self.subTest(code=code), self.assertRaises(vault.BackupError) as caught:
-                read(stdin_of(data))
-            self.assertEqual(caught.exception.code, code)
-        with self.assertRaises(vault.BackupError) as caught:
-            read(Typed(io.BytesIO(b'typed\n'), encoding='utf-8'))
-        self.assertEqual(caught.exception.code, 'passphrase-stdin-terminal')
-        closed = stdin_of(b'never read\n')
-        closed.close()
-        for stream in (None, closed):   # no standard input at all, or one already closed: a typed refusal
-            with self.subTest(stream=stream), patch.object(sys, 'stdin', None), \
-                    self.assertRaises(vault.BackupError) as caught:
-                read(stream)
-            self.assertEqual(caught.exception.code, 'passphrase-stdin-empty')
+    def test_the_command_line_refuses_an_empty_stdin_and_restores_with_a_value(self):
         # From the command line: refused before any write, exit 2, the code named.
         dest = self.base / 'never made'
         err = io.StringIO()
