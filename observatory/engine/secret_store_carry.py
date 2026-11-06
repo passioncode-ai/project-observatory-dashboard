@@ -610,32 +610,54 @@ def strip(snapshot: Path, reason: str) -> bool:
     return had
 
 
+def _is_snapshot(folder: Path) -> bool:
+    """A folder the engine wrote as a snapshot: named `<kind>-...` for a snapshot kind (`daily-`,
+    `snapshot-`, `before-update-`, `before-upgrade-`), or holding a manifest with `externals`. Anything else
+    under the backups folder is a person's own and is never touched."""
+    if any(folder.name.startswith(kind + "-") for kind in backup_vault.SNAPSHOT_KINDS):
+        return True
+    manifest = folder / "manifest.json"
+    try:
+        doc = json.loads(osprivacy.read_regular(manifest, 64 * 1024 * 1024).decode("utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return False
+    return isinstance(doc, dict) and "externals" in doc
+
+
 def sweep(backups: Path, *, stage_age_seconds: float = 3600) -> dict:
     """Before a snapshot: no plaintext copy under the workspace's backups keeps an external store. Every
     snapshot folder there loses its `external/` (a copy an interrupted export left, or one an older run
     of this release left after a kill), and every `.snapshot-*` stage older than `stage_age_seconds` is
     removed whole (a stage is renamed or removed by the run that made it, so an old one is a dead run's).
-    Runs under the workspace's operation lock, so no snapshot of this workspace is being written."""
+    Runs under the workspace's operation lock, so no snapshot of this workspace is being written.
+
+    Never raises for a folder it cannot clean: one undeletable entry must not stop the daily backup or an
+    update's snapshot. Each folder it could not clean is named in `failed` (folder name and error class),
+    and the next snapshot tries again."""
     stripped, stages = 0, 0
+    failed: list[dict] = []
     if backups.is_symlink() or not backups.is_dir():
-        return {"stripped": 0, "stages_removed": 0}
+        return {"stripped": 0, "stages_removed": 0, "failed": []}
     now = time.time()
-    for child in backups.iterdir():
-        if child.is_symlink() or not child.is_dir():
-            continue
-        if child.name.startswith(".snapshot-"):
-            try:
-                old = now - child.lstat().st_mtime > stage_age_seconds
-            except OSError:
+    try:
+        children = sorted(backups.iterdir())
+    except OSError as exc:
+        return {"stripped": 0, "stages_removed": 0, "failed": [{"path": ".", "error": type(exc).__name__}]}
+    for child in children:
+        try:
+            if child.is_symlink() or not child.is_dir():
                 continue
-            if old:
-                shutil.rmtree(child, ignore_errors=True)
-                stages += 1
-            continue
-        if os.path.lexists(child / EXTERNAL):
-            strip(child, "export-failed")
-            stripped += 1
-    return {"stripped": stripped, "stages_removed": stages}
+            if child.name.startswith(".snapshot-"):
+                if now - child.lstat().st_mtime > stage_age_seconds:
+                    shutil.rmtree(child)
+                    stages += 1
+                continue
+            if os.path.lexists(child / EXTERNAL) and _is_snapshot(child):
+                strip(child, "export-failed")
+                stripped += 1
+        except OSError as exc:
+            failed.append({"path": child.name, "error": type(exc).__name__})
+    return {"stripped": stripped, "stages_removed": stages, "failed": failed}
 
 
 def summary(rows: list[dict]) -> dict:

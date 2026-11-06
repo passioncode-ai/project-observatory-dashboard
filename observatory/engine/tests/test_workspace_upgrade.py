@@ -1224,5 +1224,47 @@ class ExternalSecretStore(unittest.TestCase):
         self.assertEqual((self.record()['not_carried'],result['secret_store']['not_carried']),(count,count))
         self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['not_carried'],count)
 
+    def test_an_undeletable_leftover_is_named_and_the_snapshot_goes_on(self):
+        stuck=self.home/'backups'/'daily-stuck'
+        locked=stuck/'external/secret_store/projects'
+        locked.mkdir(parents=True)
+        (locked/'K').write_text('fixture-value-001')
+        locked.chmod(0o500)
+        self.addCleanup(lambda: locked.exists() and locked.chmod(0o700))
+        if os.access(locked,os.W_OK):
+            self.skipTest('this account can delete inside a 0500 folder')
+        result,_,_=self.encrypted()
+        self.assertEqual(result['secret_store']['state'],'carried','the daily backup is not stopped')
+        self.assertEqual(result['secret_store_sweep'],{'failed':[{'path':'daily-stuck','error':'PermissionError'}]})
+        self.assertEqual(self.record()['sweep_failed'],1)
+        self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['sweep_failed'],1)
+        by_hand=upgrade.snapshot(self.home,self.base/'by-hand-2',writers_stopped=True)
+        self.assertEqual(by_hand['secret_store_sweep']['failed'][0]['path'],'daily-stuck')
+
+    def test_a_failing_strip_never_hides_the_original_interrupt(self):
+        import secret_store_carry
+        self.vault.set_passphrase(self.home,PASSPHRASE)
+        with patch.object(self.vault,'encrypt_tree',side_effect=SystemExit(143)), \
+                patch.object(secret_store_carry,'strip',side_effect=OSError('cannot delete')):
+            with self.assertRaises(SystemExit) as caught:
+                upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
+        self.assertEqual(caught.exception.code,143)
+        # The next snapshot's sweep cleans what this one could not.
+        upgrade.snapshot(self.home,self.base/'by-hand-3',writers_stopped=True)
+        for copy in (self.home/'backups').iterdir():
+            self.assertFalse((copy/'external').exists(),copy)
+
+    def test_the_sweep_touches_only_snapshot_folders(self):
+        backups=self.home/'backups'
+        notes=backups/'my-notes'
+        (notes/'external').mkdir(parents=True)
+        (notes/'external/plan.txt').write_text('a person\'s own file')
+        odd=backups/'odd-name'
+        (odd/'external/secret_store').mkdir(parents=True)
+        workspace.write_json(odd/'manifest.json',{'externals':[{'name':'secret_store','state':'carried'}]})
+        upgrade.snapshot(self.home,self.base/'by-hand-4',writers_stopped=True)
+        self.assertTrue((notes/'external/plan.txt').is_file(),'a folder that is not a snapshot is never touched')
+        self.assertFalse((odd/'external').exists(),'a folder whose manifest lists externals is a snapshot')
+
 if __name__=='__main__':
     unittest.main()

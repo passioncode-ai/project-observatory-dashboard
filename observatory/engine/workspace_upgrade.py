@@ -348,10 +348,13 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
     with operation_lock(base):
         # No plaintext copy under the workspace's backups keeps an external store: a run killed
         # between the copy and the encryption left one; this one removes it first (OBS-350).
-        secret_store_carry.sweep(base / 'backups')
+        swept = secret_store_carry.sweep(base / 'backups')
+        # A folder the sweep could not clean is said, never a reason to stop the backup.
+        unswept = {'secret_store_sweep': {'failed': swept['failed']}} if swept['failed'] else {}
         if explicit:
             result = _snapshot(base, output, not_carried='update-snapshot' if update else 'plaintext-output')
             result['encrypted'] = False
+            result.update(unswept)
             return result
         # The store is carried only into a snapshot about to be encrypted: the condition
         # `after_snapshot` encrypts on (OBS-350).
@@ -366,8 +369,11 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
         except BaseException:
             # Interrupted or failed inside the encryption (a signal, a missing library, a bug):
             # the plaintext copy that stays must not keep the store. Then the failure goes on.
-            if staged.is_dir():
-                secret_store_carry.strip(staged, 'export-failed')
+            try:
+                if staged.is_dir():
+                    secret_store_carry.strip(staged, 'export-failed')
+            except Exception:  # noqa: BLE001 - the original failure goes on; the next run's sweep retries
+                pass
             raise
         if not result.get('encrypted') and result['secret_store'].get('state') == 'carried':
             # The export failed and the copy stays plaintext under the workspace's backups:
@@ -376,14 +382,16 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
             result['secret_store'] = {**result['secret_store'], 'state': 'not-carried', 'reason': 'export-failed',
                                       'files': 0, 'size': 0}
             result['external_sources_included'] = False
-        if result['secret_store'].get('state') != 'not-applicable':
-            problem = _record_carry(base, kind, Path(result['snapshot']).name, result['secret_store'])
+        result.update(unswept)
+        if result['secret_store'].get('state') != 'not-applicable' or unswept:
+            problem = _record_carry(base, kind, Path(result['snapshot']).name, result['secret_store'],
+                                    len(swept['failed']))
             if problem:
                 result['carry_record_error'] = problem
         return result
 
 
-def _record_carry(base: Path, kind: str, file: str, store: dict) -> str | None:
+def _record_carry(base: Path, kind: str, file: str, store: dict, sweep_failed: int = 0) -> str | None:
     """`store/raw/secret-store-carry.json`: what the newest exported or kept snapshot did with the
     external secret store (names, counts, times; never a value), the record doctor reads (OBS-349).
     Written only for snapshots `backup_vault` keeps or exports, never for an explicit `--output`, so a
@@ -391,7 +399,9 @@ def _record_carry(base: Path, kind: str, file: str, store: dict) -> str | None:
     record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'kind':kind,
               'file':file, 'state':store.get('state'), 'reason':store.get('reason'),
               'files':store.get('files', 0), 'size':store.get('size', 0),
-              'not_carried':store.get('not_carried', 0)}
+              'not_carried':store.get('not_carried', 0),
+              # Copies under the workspace's backups the sweep could not clean of an external store.
+              'sweep_failed':sweep_failed}
     try:
         workspace.write_json(base.joinpath(*backup_vault.CARRY_RECORD), record)
     except (OSError, config.ConfigurationError) as exc:

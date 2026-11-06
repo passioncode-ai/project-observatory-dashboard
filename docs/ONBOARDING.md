@@ -2288,8 +2288,11 @@ that stays plaintext never holds it: `--output DIR` (reason `plaintext-output`),
 (`no-passphrase`), an export that failed or was interrupted and left the copy in the workspace
 (`export-failed`: the store is removed from that copy before the failure goes on), and the snapshots an
 update takes before it installs and upgrades (`update-snapshot`). Each snapshot first removes the store
-from any copy a killed run left under the workspace's `backups/`, and removes that run's unfinished
-`.snapshot-*` folders once they are an hour old. Nor is a store carried when it is over 256 MB
+from any snapshot copy a killed run left under the workspace's `backups/` (a folder named for a snapshot
+kind, or whose manifest lists `externals`; a folder of your own there is never touched), and removes that
+run's unfinished `.snapshot-*` folders once they are an hour old. A copy it cannot clean (an entry it may
+not delete) stops nothing: the snapshot goes on, its answer names the folder under `secret_store_sweep`,
+the carry record counts it as `sweep_failed`, and the next snapshot tries again. Nor is a store carried when it is over 256 MB
 (`too-large`), kept changing during two copies (`changed-during-copy`), cannot be read (`unreadable`,
 `missing`), or holds the workspace itself (`contains-workspace`): each is named in the manifest and the
 snapshot itself still succeeds. Lock files, temporaries, a link leaving the store, a socket and a slot kept

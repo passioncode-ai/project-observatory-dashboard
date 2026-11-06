@@ -1145,7 +1145,10 @@ Coverage: `tests/test_workspace_upgrade.py` ExternalSecretStore (`test_an_extern
 `test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext`,
 `test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups`,
 `test_a_failed_carry_record_is_said_not_swallowed`, `test_the_carry_record_counts_what_stayed_behind`,
-`test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot`); `tests/test_backup_vault.py`
+`test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot`,
+`test_an_undeletable_leftover_is_named_and_the_snapshot_goes_on`,
+`test_a_failing_strip_never_hides_the_original_interrupt`, `test_the_sweep_touches_only_snapshot_folders`);
+`tests/test_backup_vault.py`
 ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
 `test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
 `tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore. Status: built

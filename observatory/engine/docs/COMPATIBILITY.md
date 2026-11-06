@@ -470,15 +470,18 @@ a store outside the workspace exists and every one was carried; external source 
 are never carried. A carried store sits in `<snapshot>/external/<name>/` beside `data/`, files 0600 and folders
 0700, only inside an `OBSENC1` artifact: an explicit `--output`, a snapshot without a passphrase, a failed or
 interrupted export kept in the workspace and the update's snapshots never hold it. Each `snapshot()` first strips
-`external/` from every copy under the workspace's `backups/` and removes `.snapshot-*` stages older than an hour;
+`external/` from every snapshot copy under the workspace's `backups/` (named `<kind>-` for a snapshot kind, or with a
+manifest listing `externals`) and removes `.snapshot-*` stages older than an hour; a folder it cannot clean is named
+in the answer's `secret_store_sweep.failed` (folder name, error class) and counted in the carry record's
+`sweep_failed`, and never stops the snapshot;
 `workspace_upgrade.snapshot` gains the keyword `update` (the pre-update snapshot passes it). `verify_snapshot`
 refuses a link, a special file, an unlisted file or folder, a changed file or a folder of a store not carried, with
 the code `secret-store-manifest-mismatch` (a `ConfigurationError`, so exit codes are unchanged). An older engine
 verifies and restores `data/` alone and ignores `external/`; so does this release's `full restore`, which does not
 write the store into place yet (the restore side is part 2). New workspace state: `store/raw/secret-store-carry.json`,
 owner-only, written atomically after each snapshot the backups keep or export when a store is external (`at`,
-`kind`, `file`, `state`, `reason`, `files`, `size`, `not_carried`; never a value), read by doctor since OBS-349
-(doctor's `last_carry` gains `not_carried`); a write that fails is said on stderr and as `carry_record_error`. The
+`kind`, `file`, `state`, `reason`, `files`, `size`, `not_carried`, `sweep_failed`; never a value), read by doctor
+since OBS-349 (doctor's `last_carry` gains `not_carried` and `sweep_failed`); a write that fails is said on stderr and as `carry_record_error`. The
 daily run's maintenance record gains `snapshot.secret_store` (`state`, `reason`); the snapshot answer gains
 `secret_store` (`state`, `reason`, `files`, `size`, `kept_here`, `not_carried`, or `{"state": "not-applicable"}`).
 The machine bundle skips any path inside a store the snapshot carries (`skipped`, reason `carried encrypted in the

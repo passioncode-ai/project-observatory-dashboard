@@ -1034,6 +1034,10 @@ class ThisMachineOnly(Base):
                              ('not an object', lambda: meta.write_text('[]')),
                              ('a folder', lambda: (meta.unlink(), meta.mkdir()))):
             with self.subTest(name):
+                # Five snapshots in one second: rotation orders same-second names by their random
+                # suffix, so the newest could be rotated away. Each case starts with an empty root.
+                for old in vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX):
+                    old.unlink()
                 if meta.is_dir():
                     meta.rmdir()
                 damage()
