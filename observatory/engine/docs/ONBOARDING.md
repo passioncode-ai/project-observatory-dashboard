@@ -2279,7 +2279,39 @@ Each of those sentences has a code under `backups.warning_items`, with its step 
 `backups-root-unusable` or `backups-passphrase-unreadable` when the root or the passphrase file is refused).
 
 **A secret store outside the workspace** (`sources.secret_store`, else `sources.secrets`, when either names a
-folder outside the workspace) is not part of the workspace, so a snapshot of the workspace does not hold it.
+folder outside the workspace) is not part of the workspace, so it travels beside it: an encrypted workspace
+snapshot (the daily one, `full workspace-backup` without `--output`, with a backup passphrase set) carries
+it in `external/<setting>/`, next to the home in `data/`. Every slot, the movement journal, the leak
+register, the estate digest key and the doors' stashes go with it, copied under the vault's own lock and
+listed in the snapshot's manifest by relative path, size, mode and SHA-256, never by value. A snapshot
+that stays plaintext never holds it: `--output DIR` (reason `plaintext-output`), no passphrase
+(`no-passphrase`), an export that failed and left the copy in the workspace (`export-failed`), and the
+snapshot an update takes before it upgrades. Nor does a store over 256 MB (`too-large`), one that kept
+changing during two copies (`changed-during-copy`), one that cannot be read (`unreadable`, `missing`), or a
+folder that holds the workspace itself (`contains-workspace`):
+each is named in the manifest and the snapshot itself still succeeds. Lock files, temporaries, a link
+leaving the store, a socket and a slot kept here on purpose (below) stay behind; a link inside the store
+is recorded, not followed. Each snapshot the backups keep or export leaves
+`store/raw/secret-store-carry.json` (when, which file, carried or not and why, how many files and bytes),
+the record doctor reads; the daily run also keeps the state in its maintenance record. The machine bundle
+skips the store, naming it in its `skipped` list, so no second copy can drift. Putting it back on another
+machine (`full restore --secret-store POLICY`, `--secret-store-only`) is the next part of this work; until
+then this release restores the home and leaves the carried store in the snapshot: `full backups decrypt
+FILE DIR` opens it, and `DIR/external/secret_store/` is the store to copy into place.
+
+**A slot that stays on this machine on purpose** (a root seed, an administrator token whose single home is
+this machine) is marked once, and no snapshot carries it from then on:
+
+```sh
+project-observatory full vault-digests keep-here PROJECT ENV NAME --why "..."   # why, 8 to 200 characters
+project-observatory full vault-digests unkeep-here PROJECT ENV NAME            # the next snapshot carries it again
+```
+
+The mark lives in the slot's metadata, survives a new value, and is journaled; the snapshot names the slot
+with the reason `this-machine-only` and still reads as carried. `full vault-digests` shows it as `only here
+on purpose` here and `only on <machine> on purpose` on the other machine, neither of which counts as a
+difference.
+
 `backups.secret_store` in `full doctor` and `full backups status` names it (`path`, `settings_keys`, `exists`) and
 the newest record of a snapshot carrying it (`last_carry`, read from `store/raw/secret-store-carry.json`), and three
 warnings follow from it:
@@ -2290,9 +2322,8 @@ warnings follow from it:
 | `backups-secret-store-missing` | the folder the settings name does not exist on this machine | `full configure sources secret_store PATH` (or `secrets`, the setting that names it) |
 | `backups-secret-store-env-override` | the environment moves the vault away from the folder the settings choose: `OBSERVATORY_VAULT_DIR` names another slot folder than `<store>/projects`, or `OBSERVATORY_SECRETS` names another folder while `sources.secret_store` is unset (with it set, `OBSERVATORY_SECRETS` moves nothing) | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
 
-This release reads the carry record and writes none: until a release that carries the store, an external store
-reads `backups-vault-store-not-carried` with the reason "no snapshot has carried it yet" and the step to copy it to
-the other machine yourself. A store inside the workspace reads `{"external": false}` and is carried with it. With no
+Until the first snapshot taken by this release, an external store reads `backups-vault-store-not-carried` with the
+reason "no snapshot has carried it yet" and the step `full workspace-backup --writers-stopped`. A store inside the workspace reads `{"external": false}` and is carried with it. With no
 setting naming a store and `OBSERVATORY_SECRETS` pointing outside the workspace, the section reports that folder
 as external, with `settings_keys: []` and `environment: "OBSERVATORY_SECRETS"`, and only the env-override row. These
 codes, except the two a maintenance row already says (no passphrase, unencrypted local copies), join `full maintain
@@ -2425,7 +2456,8 @@ A symbolic link is recorded as a link with its target, never followed. Left out 
 and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
 (`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
 Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
-belong in the vault, which the workspace snapshot carries.
+belong in the vault, which the encrypted workspace snapshot carries, inside the workspace or outside it
+(a secret store kept outside the workspace is skipped here and named in `skipped`).
 
 The caps, each a key of `limits` (below): `file_mb` 16 MB (one file), `entry_mb` 128 MB (one
 entry, such as `~/.claude/skills`), `total_mb` 320 MB (every file copy together), `bundle_mb`
@@ -2562,7 +2594,9 @@ of that:
   workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
   the backups root and never rotate the first machine's. The vault and everything else, the CLI
   logins the machine bundle carries included, are restored: they are your own credentials and
-  work on both machines.
+  work on both machines. A vault kept outside the workspace is carried in the encrypted snapshot
+  but not yet written into place by `full restore` (see "A secret store outside the workspace"
+  above), and a slot marked `keep-here` never leaves the first machine.
 - **Which machine is which.** Each machine has an id derived from its platform identifier (never
   written). A snapshot or bundle that names another machine, or names none, is restored the
   second-machine way; `--same-machine` at a terminal restores one whole. `full init` on an empty
@@ -2822,7 +2856,8 @@ project-observatory full vault-digests write                          # on each:
 Until machines exchange manifests by themselves (OBS-194, step 2), copy the second machine's
 `<state>/vault-digests/local.json` into the first machine's `<state>/vault-digests/peers/` under the
 second machine's name, for example `machine-b.json`. A slot meant to differ is marked with
-`full vault-digests mark PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
+`full vault-digests mark PROJECT ENV NAME --why "..."`, and a slot meant to stay on one machine with
+`full vault-digests keep-here PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
 machines' copies read as stale. `observatory_credentials` names, for each vault row, the machines
 that hold it. The design: [docs/design/VAULT-DIGESTS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/VAULT-DIGESTS.md).
 

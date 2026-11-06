@@ -24,6 +24,7 @@ import uuid
 import backup_vault
 import configuration as config
 import machine_identity
+import secret_store_carry
 import workspace
 from store import compatibility
 
@@ -251,7 +252,14 @@ def volatile(name: str, databases: set[str]) -> bool:
     return path.suffix in LOG_SUFFIXES or (tail.isdigit() and PurePosixPath(stem).suffix in LOG_SUFFIXES)
 
 
-def _snapshot(base: Path, output: Path) -> dict:
+def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
+              not_carried: str = 'plaintext-output') -> dict:
+    """Copy the home into a new snapshot directory at `output`.
+
+    `carry_stores` copies each secret store the settings name outside the workspace into
+    `external/<name>/` (OBS-350); only `snapshot()` asks for it, and only for a snapshot it is
+    about to encrypt. Every other snapshot records each such store as not carried, with
+    `not_carried` as the reason: a plaintext copy of an external store is never written."""
     marker = preflight(base)
     workspace.reject_symlinks(output)
     output = output.resolve()
@@ -287,6 +295,11 @@ def _snapshot(base: Path, output: Path) -> dict:
         steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
         if steady(before) != steady(inventory(base)) or before_dirs != directories(base):
             raise config.ConfigurationError('Workspace changed during snapshot; stop all writers and retry')
+        # The secret stores the settings name outside the workspace (OBS-350): beside `data/`,
+        # never inside it, so an older engine verifies and restores the home alone. A store is
+        # never a reason for the snapshot to fail: one that cannot be carried says why.
+        externals = secret_store_carry.carry_into(stage, secret_store_carry.plan(
+            base, carry_now=carry_stores, why_not=None if carry_stores else not_carried))
         manifest = {'format_version':SNAPSHOT_FORMAT, 'application_version':config.VERSION,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -298,7 +311,12 @@ def _snapshot(base: Path, output: Path) -> dict:
                         # The same home with its links resolved: `tracked.json` keeps resolved paths
                         # (`tracked.canonical`), so a home behind a link is matched in both forms.
                         'home_path_resolved':_canonical(home)} if (home := this_home()) else {}),
-                    'files':entries, 'directories':sorted(before_dirs), 'external_sources_included':False,
+                    'files':entries, 'directories':sorted(before_dirs),
+                    # True only when a store outside the workspace was named and every one was carried:
+                    # external source folders (`sources.projects`, checkouts) are never carried.
+                    'external_sources_included':bool(externals) and all(e['state'] == 'carried' for e in externals),
+                    'externals':externals,
+                    'external_warnings':secret_store_carry.external_warnings(base),
                     'excluded':['backup collections', 'runtime locks', 'Git metadata', 'Python environments/caches']}
         workspace.write_json(stage / 'manifest.json', manifest)
         verify_snapshot(stage)
@@ -306,7 +324,8 @@ def _snapshot(base: Path, output: Path) -> dict:
         os.rename(stage, output)
         sync_directory(output.parent)
         return {'status':'snapshot-created','snapshot':str(output),'files':len(entries),
-                'external_sources_included':False}
+                'external_sources_included':manifest['external_sources_included'],
+                'secret_store':secret_store_carry.summary(externals)}
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)
         raise
@@ -326,12 +345,43 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
         raise config.ConfigurationError(f'Unknown snapshot kind: {kind}')
     output = output or base / 'backups' / (f'{kind}-' + uuid.uuid4().hex)
     with operation_lock(base):
-        result = _snapshot(base, output)
         if explicit:
+            result = _snapshot(base, output, not_carried='plaintext-output')
             result['encrypted'] = False
             return result
-        result.update(backup_vault.after_snapshot(base, Path(result['snapshot']), kind))
+        # The store is carried only into a snapshot about to be encrypted: the condition
+        # `after_snapshot` encrypts on (OBS-350).
+        try:
+            secret = backup_vault.passphrase(base)
+        except backup_vault.BackupError:
+            secret = None
+        result = _snapshot(base, output, carry_stores=bool(secret), not_carried='no-passphrase')
+        staged = Path(result['snapshot'])
+        result.update(backup_vault.after_snapshot(base, staged, kind))
+        if not result.get('encrypted') and result['secret_store'].get('state') == 'carried':
+            # The export failed and the copy stays plaintext under the workspace's backups:
+            # it must not keep the external store.
+            secret_store_carry.strip(staged, 'export-failed')
+            result['secret_store'] = {**result['secret_store'], 'state': 'not-carried', 'reason': 'export-failed',
+                                      'files': 0, 'size': 0}
+            result['external_sources_included'] = False
+        if result['secret_store'].get('state') != 'not-applicable':
+            _record_carry(base, kind, Path(result['snapshot']).name, result['secret_store'])
         return result
+
+
+def _record_carry(base: Path, kind: str, file: str, store: dict) -> None:
+    """`store/raw/secret-store-carry.json`: what the newest exported or kept snapshot did with the
+    external secret store (names, counts, times; never a value), the record doctor reads (OBS-349).
+    Written only for snapshots `backup_vault` keeps or exports, never for an explicit `--output`, so a
+    plaintext copy taken by hand never hides whether the daily encrypted one carried the store."""
+    record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'kind':kind,
+              'file':file, 'state':store.get('state'), 'reason':store.get('reason'),
+              'files':store.get('files', 0), 'size':store.get('size', 0)}
+    try:
+        workspace.write_json(base.joinpath(*backup_vault.CARRY_RECORD), record)
+    except (OSError, config.ConfigurationError):
+        pass  # doctor then reads the previous record, or none, and keeps warning
 
 
 def safe_relative(value: object) -> str:
@@ -393,6 +443,8 @@ def verify_snapshot(source: Path) -> dict:
         raise config.ConfigurationError('Snapshot contains missing or unlisted directories')
     if expected != actual or 'workspace.json' not in expected or 'config/settings.json' not in expected:
         raise config.ConfigurationError('Snapshot contains missing or unlisted workspace files')
+    # The secret stores carried beside `data/` (OBS-350): listed, digested, nothing more.
+    secret_store_carry.verify(source, manifest)
     preflight(source / 'data')
     return manifest
 

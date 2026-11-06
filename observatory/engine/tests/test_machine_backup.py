@@ -435,6 +435,53 @@ class Taking(Machine):
         self.assertEqual((listed['count'], listed['newest']), (MB.KEEP, found[-1].name))
 
 
+class ExternalSecretStore(Base):
+    """OBS-350: a secret store kept outside the workspace travels encrypted in the workspace snapshot, so
+    the machine bundle never carries a second copy that could drift, even when an include names it."""
+
+    def setUp(self):
+        super().setUp()
+        from secret_store_fixture import make_external_store, all_values
+        self.values = all_values()
+        vault.set_passphrase(self.ws, PASS)
+        self.store = make_external_store(self.user / '.config' / 'example-store')
+        self.write('.config/example-agent/agent.toml', 'operator extra\n')
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc.setdefault('sources', {})['secret_store'] = str(self.store)
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.settings({'include': ['~/.config'], 'roots': []})
+
+    def test_an_include_inside_the_external_store_is_skipped_with_its_reason(self):
+        self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        self.assertIn({'source': '~/.config/example-store',
+                       'reason': 'carried encrypted in the workspace snapshot (sources.secret_store)'},
+                      manifest['skipped'])
+        carried = [p for p in stage.rglob('*') if p.is_file()]
+        self.assertTrue(any(p.name == 'agent.toml' for p in carried), 'the rest of the include travels')
+        for path in carried:
+            self.assertNotIn('example-store', path.as_posix())
+            for value in self.values:
+                self.assertNotIn(value.encode(), path.read_bytes(), path)
+
+    def test_the_workspace_pointer_names_where_the_store_travels(self):
+        pointer = MB.workspace_pointer(self.ws, self.user)
+        self.assertEqual(pointer['secret_store'],
+                         {'external': True, 'carried_in': 'workspace snapshot', 'newest_snapshot_carried': None})
+        record = self.ws / 'store' / 'raw' / 'secret-store-carry.json'
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({'at': '2026-11-06T00:00:00Z', 'kind': 'daily', 'file': 'daily-x.obsnap',
+                                      'state': 'carried', 'reason': None, 'files': 9, 'size': 120}))
+        self.assertTrue(MB.workspace_pointer(self.ws, self.user)['secret_store']['newest_snapshot_carried'])
+        record.write_text(json.dumps({'at': '2026-11-06T00:00:00Z', 'state': 'not-carried', 'reason': 'no-passphrase'}))
+        self.assertFalse(MB.workspace_pointer(self.ws, self.user)['secret_store']['newest_snapshot_carried'])
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc['sources'].pop('secret_store')
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.assertEqual(MB.workspace_pointer(self.ws, self.user)['secret_store'], {'external': False})
+
+
 class Refusals(Base):
     def test_without_a_passphrase_nothing_is_written_anywhere(self):
         self.write('.ssh/id_example', SECRET_MARKER, 0o600)
