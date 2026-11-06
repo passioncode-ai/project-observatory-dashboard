@@ -11,7 +11,12 @@ stateless JSON, Host/Origin checked, 4 MiB bodies.
 What this file adds is the door in front of it, and the order of its checks is the
 design:
 
-1. **Host and Origin** first. A request naming another host (DNS rebinding) is refused
+0. **The peer's OS account** first, on a host with several accounts (or with
+   `loopback.peerCheck` `always`): another account's or the system's process is answered 403
+   `peer-foreign-account`, an owner that cannot be read 403 `peer-unverified`, with
+   `Connection: close` (`peer_check.py`, OBS-355). uvicorn has parsed the request line and
+   headers by then; this check uses none of them, reads no body and resolves no bearer.
+1. **Host and Origin** next. A request naming another host (DNS rebinding) is refused
    421 and one from a foreign browser origin 403, before anything about it is read.
 2. **The binding** next. The bearer in `Authorization` is hashed at once and resolved
    against `config/access-bindings.json` (access-bindings/1, N-007/N-008). No bearer, no
@@ -95,11 +100,14 @@ async def _answer(send, status: int, body: dict, extra: list[tuple[bytes, bytes]
 
 
 class BindingGate:
-    """The ASGI door: Host/Origin, then the binding, then the rate, then the channel."""
+    """The ASGI door: the peer's account, Host/Origin, then the binding, the rate, the channel."""
 
-    def __init__(self, app, *, port: int, rate: int, audience: str | None = None) -> None:
+    def __init__(self, app, *, port: int, rate: int, audience: str | None = None, peers=None) -> None:
         import memory_access as MA
+        import peer_check
         self.MA = MA
+        #: The peer check (OBS-355): this process's gate unless a test injects one.
+        self.peers = peers or peer_check.GATE
         self.app = app
         self.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
@@ -119,6 +127,14 @@ class BindingGate:
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        # OBS-355: another OS account's peer, before Host, Origin and the bearer. The socket table is read
+        # off the event loop; on a one-account host `active()` is a clock comparison and nothing is read.
+        if self.peers.active():
+            import asyncio
+            refused = await asyncio.get_running_loop().run_in_executor(
+                None, self.peers.check_addresses, scope.get("server"), scope.get("client"))
+            if refused:
+                return await _answer(send, 403, {"error": refused}, [(b"connection", b"close")])
         headers = {k.decode("latin-1").lower(): v.decode("latin-1")
                    for k, v in scope.get("headers", [])}
         if headers.get("host") not in self.hosts:

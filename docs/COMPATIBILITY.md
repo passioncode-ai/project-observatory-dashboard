@@ -398,6 +398,21 @@ code. Each write drops days older than 400. An older engine ignores the folder; 
 `ok` of a host's `retro-after-work` operation counts the retro requests a retro the host saw written answered (RW-4),
 never the retros written.
 
+## Servers: another OS account's connection refused (OBS-355 part 1, the release after 0.33.1)
+
+A behaviour change on hosts with more than one person's OS account only. There, the local server, memory over HTTP
+and the keyserver answer a connection from another account's (or root's, or launchd's) process
+`403 {"error":"peer-foreign-account"}`, and one whose owner cannot be read `403 {"error":"peer-unverified"}`, both with
+`Connection: close` and before reading the request, on every path including the dashboard pages and
+`/.well-known/fabric-service`. A client of another account that used to read this account's pages, `/health` or the
+well-known document gets the 403 instead. A one-account host (`host_accounts.count()` is 1) answers exactly as before
+and reads no socket table. `config/local.json` may set `{"loopback": {"peerCheck": "always"}}` to switch the check on
+with one account; `auto` is the default, there is no `off`, and any other value reads as `always`. Nothing writes that
+file yet (the `full configure loopback` section arrives with the per-account settings file); an older engine ignores
+it. Additive elsewhere: the receipt `store/raw/serverd.json` gains `peer` (`setting`, `active`, `accountsOnHost`,
+`method`, `refused` with a count per code and `since`), outside its change comparison, and `full doctor` gains
+`loopback` (the same without `refused`, plus `serverRefused` read from that receipt). The relay is unchanged.
+
 ## Doctor: one verdict and the secret store (OBS-349, the release after 0.33.1)
 
 Additive, with no migration. `full doctor` gains `attention` (rows `{area, code, severity, text, step}`, area

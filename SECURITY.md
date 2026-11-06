@@ -114,6 +114,16 @@ them as a multi-tenant service. The always-on dashboard server's events feed
 `Authorization: Bearer`; its pages and its `/.well-known/fabric-service` identity
 document stay open to local reads. See [the service design](docs/design/FABRIC-SERVICE.md).
 
+Loopback is one per machine, not one per OS account. On a host with more than one
+person's account (or with `loopback.peerCheck` set to `always` in `config/local.json`),
+the dashboard server, memory over HTTP and the keyserver read the connecting peer's
+account from the host's socket table and refuse any other account's (and root's)
+connection with `403 peer-foreign-account`, or `403 peer-unverified` when the owner
+cannot be read, before reading its request, on every path. The relay is exempt: its
+admission is signed. On a one-account host nothing changes. Clients of this engine do
+not yet check whose listener they send a bearer to (OBS-355 part 2). See
+[the access model](docs/design/ACCESS.md), rule 10.
+
 The meter and the vault-slot and keyserver doors accept a Fabric delegation token only from the estate issuer
 `config/meter.json` names (or the issuer the hub's `hub.json` names beside its own keys), checked in the order of
 the contract's verifier table with its DEC-0045 rules: an Ed25519 key of small order is never used to verify

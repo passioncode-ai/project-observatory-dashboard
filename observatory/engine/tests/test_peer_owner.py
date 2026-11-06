@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""`peer_owner.py` and `host_accounts.py`: who owns each end of a loopback connection, and how
+many people's accounts the host has (OBS-355 part 1, docs/design/ACCESS.md rule 10).
+
+The parsers run over captured-format fixtures (`peer_owner_fixtures.py`), the selection over a
+faked table, and one live case per platform over a real loopback pair, so the macOS record
+layout and the Linux table are checked on every CI row that runs this suite.
+"""
+from __future__ import annotations
+
+import ast
+import http.server
+import os
+import pathlib
+import socket
+import sys
+import threading
+import unittest
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+import host_accounts  # noqa: E402
+import peer_owner as P  # noqa: E402
+import peer_owner_fixtures as F  # noqa: E402
+
+SERVER = ("127.0.0.1", F.SERVER_PORT)
+
+
+class FakeSocket:
+    def __init__(self, name, peer):
+        self.name, self.peer = name, peer
+
+    def getsockname(self):
+        return self.name
+
+    def getpeername(self):
+        return self.peer
+
+
+def ps_from_fixture(argv):
+    return F.PS_UID[int(argv[-1])]
+
+
+class Parsers(unittest.TestCase):
+    def test_netstat_rows_with_spaced_process_names(self):
+        rows = P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT)
+        self.assertEqual(len(rows), 9)
+        client = [r for r in rows if r.local == F.OWN_CLIENT][0]
+        self.assertEqual((client.pid, client.uid, client.listening), (F.OWN_CLIENT_PID, None, False))
+        listeners = {r.local: r.pid for r in rows if r.listening}
+        self.assertEqual(listeners, {SERVER: F.SERVER_PID, ("::1", 47070): 4400, ("127.0.0.1", 8021): 1,
+                                     ("*", 47555): 300})
+
+    def test_netstat_without_the_process_column_is_unreadable(self):
+        with self.assertRaises(P.TableUnreadable):
+            P.parse_netstat(F.NETSTAT_NO_PROCESS)
+
+    def test_ps_uid(self):
+        self.assertEqual(P.parse_ps_uid(F.PS_UID[F.FOREIGN_CLIENT_PID]), F.OTHER_UID)
+        self.assertIsNone(P.parse_ps_uid(""))
+
+    def test_proc_net_tcp_carries_each_rows_uid(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP_MULTI, family=socket.AF_INET, byteorder="little")
+        by = {(r.local, r.remote): r for r in rows}
+        self.assertEqual(by[(F.FOREIGN_CLIENT, SERVER)].uid, F.OTHER_UID)
+        self.assertEqual(by[(F.OWN_CLIENT, SERVER)].uid, F.OWN_UID)
+        self.assertTrue(by[(SERVER, ("*", 0))].listening)
+        self.assertEqual(by[(("127.0.0.1", 8021), ("*", 0))].uid, 0)
+
+    def test_proc_net_tcp6(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP6_MULTI, family=socket.AF_INET6, byteorder="little")
+        self.assertIn((("::1", 50002), ("::1", F.SERVER_PORT), F.OTHER_UID),
+                      [(r.local, r.remote, r.uid) for r in rows])
+
+    def test_pcblist_n_pairs_each_socket_with_its_owner(self):
+        rows = P.parse_pcblist_n(F.pcblist_n(F.PCBLIST_MULTI_ROWS))
+        got = sorted((r.local, r.remote, r.uid, r.pid, r.listening) for r in rows)
+        want = sorted((tuple(l), ("*", 0) if r == ("*", 0) else tuple(r), u, p, r == ("*", 0))
+                      for l, r, u, p in F.PCBLIST_MULTI_ROWS)
+        self.assertEqual(got, want)
+
+    def test_pcblist_n_refuses_an_unknown_header(self):
+        with self.assertRaises(P.TableUnreadable):
+            P.parse_pcblist_n(b"\xff" * 64)
+
+    def test_windows_tables(self):
+        rows = P.parse_windows_tcp_table(F.windows_table(F.WINDOWS_MULTI_ROWS, socket.AF_INET), socket.AF_INET)
+        self.assertEqual([(r.local, r.remote, r.listening, r.pid) for r in rows],
+                         [(SERVER, ("*", 0), True, F.SERVER_PID), (SERVER, F.FOREIGN_CLIENT, False, F.SERVER_PID),
+                          (F.FOREIGN_CLIENT, SERVER, False, F.FOREIGN_CLIENT_PID)])
+        v6 = [(("::1", 47311), ("::", 0), True, 7), (("::1", 50003), ("::1", 47311), False, 8)]
+        rows6 = P.parse_windows_tcp_table(F.windows_table(v6, socket.AF_INET6), socket.AF_INET6)
+        self.assertEqual([(r.local, r.remote, r.listening, r.pid) for r in rows6],
+                         [(("::1", 47311), ("*", 0), True, 7), (("::1", 50003), ("::1", 47311), False, 8)])
+
+    def test_addresses_have_one_spelling(self):
+        self.assertEqual(P.norm_host("::ffff:127.0.0.1"), "127.0.0.1")
+        self.assertEqual(P.norm_host("0.0.0.0"), "*")
+        self.assertEqual(P.norm_host("::"), "*")
+        self.assertEqual(P.norm_host("localhost"), "127.0.0.1")
+
+
+class Classification(unittest.TestCase):
+    def test_pid_one_and_uid_zero_are_system(self):
+        self.assertEqual(P.classify(0, 300, method="x", own_uid=501).kind, P.SYSTEM)
+        self.assertEqual(P.classify(501, 1, method="x", own_uid=501).kind, P.SYSTEM)
+        self.assertEqual(P.classify(501, 9, method="x", own_uid=501).kind, P.THIS_ACCOUNT)
+        self.assertEqual(P.classify(502, 9, method="x", own_uid=501).kind, P.ANOTHER_ACCOUNT)
+
+    def test_windows_sids(self):
+        own = "S-1-5-21-1-2-3-1001"
+        self.assertEqual(P.classify_sid(own, 50, own_sid=own).kind, P.THIS_ACCOUNT)
+        self.assertEqual(P.classify_sid("S-1-5-21-1-2-3-1002", 50, own_sid=own).kind, P.ANOTHER_ACCOUNT)
+        self.assertEqual(P.classify_sid("S-1-5-18", 50, own_sid=own).kind, P.SYSTEM)
+        self.assertEqual(P.classify_sid(None, 4, own_sid=own).kind, P.SYSTEM)
+        unknown = P.classify_sid(None, 50, own_sid=own)
+        self.assertEqual((unknown.kind, unknown.reason), (P.UNKNOWN, "process-not-readable"))
+
+
+class Selection(unittest.TestCase):
+    """The question picks the right row of a table that holds both ends of every connection."""
+
+    def table(self, text=F.NETSTAT_MULTI_ACCOUNT):
+        return mock.patch.object(P, "read_table", return_value=(P.parse_netstat(text), "netstat"))
+
+    def setUp(self):
+        self.own_uid = mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True)
+        self.own_uid.start()
+        self.ps = mock.patch.object(P, "_run", side_effect=ps_from_fixture)
+        self.ps.start()
+        P._LISTENERS.clear()
+
+    def tearDown(self):
+        self.ps.stop()
+        self.own_uid.stop()
+        P._LISTENERS.clear()
+
+    def test_peer_picks_the_client_socket(self):
+        with self.table():
+            foreign = P.peer(FakeSocket(SERVER, F.FOREIGN_CLIENT))
+            own = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
+        self.assertEqual((foreign.kind, foreign.uid, foreign.pid),
+                         (P.ANOTHER_ACCOUNT, F.OTHER_UID, F.FOREIGN_CLIENT_PID))
+        self.assertEqual((own.kind, own.pid), (P.THIS_ACCOUNT, F.OWN_CLIENT_PID))
+
+    def test_server_end_picks_the_accepted_socket_not_the_listener(self):
+        with self.table():
+            owner = P.server_end(FakeSocket(F.FOREIGN_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.pid), (P.THIS_ACCOUNT, F.SERVER_PID))
+
+    def test_peer_at_takes_ipv4_mapped_addresses(self):
+        with self.table():
+            owner = P.peer_at(("::ffff:127.0.0.1", F.SERVER_PORT, 0, 0), ("::ffff:127.0.0.1", 50002, 0, 0))
+        self.assertEqual(owner.kind, P.ANOTHER_ACCOUNT)
+
+    def test_no_row_is_unknown(self):
+        with self.table():
+            owner = P.peer(FakeSocket(SERVER, ("127.0.0.1", 59999)))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-row"))
+
+    def test_unreadable_table_is_unknown_with_a_reason(self):
+        with mock.patch.object(P, "read_table", side_effect=P.TableUnreadable("netstat: exit 1")):
+            owner = P.peer(FakeSocket(SERVER, F.FOREIGN_CLIENT))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "netstat: exit 1"))
+
+    def test_a_gone_process_is_unknown(self):
+        rows = [P.Row(F.FOREIGN_CLIENT, SERVER, False, None, 9999)]
+        with mock.patch.object(P, "read_table", return_value=(rows, "netstat")):
+            owner = P.peer(FakeSocket(SERVER, F.FOREIGN_CLIENT))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "process-gone"))
+
+    def test_launchd_socket_is_system_without_a_ps(self):
+        with self.table():
+            owner = P.listener(8021)
+        self.assertEqual(owner.kind, P.SYSTEM)
+
+    def test_listener_prefers_the_exact_bind_then_the_wildcard_then_none(self):
+        with self.table():
+            self.assertEqual(P.listener(F.SERVER_PORT).pid, F.SERVER_PID)
+            self.assertEqual(P.listener(47555).kind, P.SYSTEM)          # root's 0.0.0.0 listener
+            self.assertEqual(P.listener(47070).kind, P.THIS_ACCOUNT)    # ::1
+            self.assertEqual(P.listener(1).kind, P.NONE)
+
+    def test_listener_is_cached_briefly(self):
+        with self.table() as read:
+            P.listener(F.SERVER_PORT)
+            P.listener(F.SERVER_PORT)
+        self.assertEqual(read.call_count, 1)
+
+
+class OwnConnection(unittest.TestCase):
+    """The client check: refused before a byte of the request is sent."""
+
+    def setUp(self):
+        self.received = []
+        outer = self
+
+        class Recorder(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                outer.received.append(self.headers.get("Authorization"))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+    def send(self, owner, expect_pid=None):
+        with mock.patch.object(P, "server_end", return_value=owner):
+            conn = P.own_connection(self.port, expect_pid=expect_pid, timeout=3)
+        conn.request("GET", "/", headers={"Authorization": "Bearer synthetic"})
+        status = conn.getresponse().status
+        conn.close()
+        return status
+
+    def test_refusals_send_nothing(self):
+        cases = [(P.Owner(P.ANOTHER_ACCOUNT, 502, 9, "x"), None, P.SERVER_NOT_OWN),
+                 (P.Owner(P.SYSTEM, 0, 1, "x"), None, P.SERVER_NOT_OWN),
+                 (P.Owner(P.UNKNOWN, None, None, "x", "no-row"), None, P.SERVER_UNVERIFIED),
+                 (P.Owner(P.THIS_ACCOUNT, 501, 9, "x"), 10, P.SERVER_NOT_THIS_WORKSPACE)]
+        for owner, pid, code in cases:
+            with self.subTest(code=code, kind=owner.kind):
+                with self.assertRaises(P.ListenerRefused) as caught:
+                    self.send(owner, pid)
+                self.assertEqual(caught.exception.code, code)
+        self.assertEqual(self.received, [])
+
+    def test_this_accounts_server_gets_the_request(self):
+        self.assertEqual(self.send(P.Owner(P.THIS_ACCOUNT, 501, 9, "x"), 9), 204)
+        self.assertEqual(self.received, ["Bearer synthetic"])
+
+
+@unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "a POSIX socket table")
+class Live(unittest.TestCase):
+    """A real loopback pair in this process: both ends are this account's, on the primary method."""
+
+    def test_both_ends_of_a_real_pair_are_this_account(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client = socket.create_connection(listener.getsockname())
+        accepted, _ = listener.accept()
+        try:
+            want = "sysctl" if sys.platform == "darwin" else "proc"
+            self.assertEqual(P.method(), want, "the macOS record layout failed calibration on this host")
+            for owner in (P.peer(accepted), P.server_end(client), P.listener(listener.getsockname()[1])):
+                self.assertEqual((owner.kind, owner.uid, owner.method), (P.THIS_ACCOUNT, os.getuid(), want))
+            if sys.platform == "darwin":
+                self.assertEqual(P.peer(accepted).pid, os.getpid())
+        finally:
+            for s in (client, accepted, listener):
+                s.close()
+
+    @unittest.skipUnless(sys.platform == "darwin", "the fallback is macOS's")
+    def test_the_netstat_fallback_agrees(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client = socket.create_connection(listener.getsockname())
+        accepted, _ = listener.accept()
+        try:
+            with mock.patch.object(P, "method", return_value="netstat"):
+                owner = P.peer(accepted)
+            self.assertEqual((owner.kind, owner.pid, owner.method), (P.THIS_ACCOUNT, os.getpid(), "netstat"))
+        finally:
+            for s in (client, accepted, listener):
+                s.close()
+
+
+class SelfContained(unittest.TestCase):
+    """Other projects vendor peer_owner.py by commit: standard library only, a version in its header."""
+
+    def test_imports_only_the_standard_library(self):
+        tree = ast.parse((ROOT / "peer_owner.py").read_text(encoding="utf-8"))
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                names.add((node.module or "").split(".")[0])
+        names.discard("__future__")
+        self.assertTrue(names <= set(sys.stdlib_module_names), names - set(sys.stdlib_module_names))
+
+    def test_names_and_version(self):
+        self.assertRegex(P.VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertIn(f"peer_owner {P.VERSION}", P.__doc__)
+        for name in ("listener", "server_end", "peer", "Owner", "own_connection"):
+            self.assertTrue(callable(getattr(P, name)), name)
+        self.assertEqual(P.KINDS, ("this-account", "another-account", "system", "unknown", "none"))
+
+
+class HostAccounts(unittest.TestCase):
+    def test_dscl_counts_people_from_501(self):
+        self.assertEqual(host_accounts.parse_dscl("_www 70\nnobody -2\nroot 0\nalpha 501\n"), 1)
+        self.assertEqual(host_accounts.parse_dscl("alpha 501\nbeta 502\nhidden 503\n"), 3)
+
+    def test_linux_people_who_can_log_in(self):
+        lo, hi = host_accounts.parse_login_defs("# comment\nUID_MIN 1000\nUID_MAX 60000\n")
+        pw = [SimpleNamespace(pw_uid=1000, pw_shell="/bin/bash"), SimpleNamespace(pw_uid=1001, pw_shell="/usr/sbin/nologin"),
+              SimpleNamespace(pw_uid=65534, pw_shell="/bin/sh"), SimpleNamespace(pw_uid=1002, pw_shell="/bin/zsh")]
+        self.assertEqual(host_accounts.count_passwd(pw, lo, hi), 2)
+
+    def test_windows_profiles(self):
+        self.assertEqual(host_accounts.count_profiles(["S-1-5-18", "S-1-5-21-1-2-3-500", "S-1-5-21-1-2-3-1001",
+                                                       "S-1-5-21-1-2-3-1002"]), 2)
+
+    def test_count_is_cached_and_unreadable_is_none(self):
+        host_accounts._CACHE[:] = [None, None]
+        with mock.patch.object(host_accounts, "_read", return_value=None) as read:
+            self.assertIsNone(host_accounts.count())
+            self.assertIsNone(host_accounts.count())
+        self.assertEqual(read.call_count, 1)
+        host_accounts._CACHE[:] = [None, None]
+
+
+if __name__ == "__main__":
+    unittest.main()

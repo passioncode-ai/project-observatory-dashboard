@@ -495,6 +495,14 @@ def _switches(doc: dict, section: str) -> dict:
     return {name: found.get(name) is True for name in names}
 
 
+def _loopback(base: Path) -> dict:
+    try:
+        import peer_check
+        return peer_check.status(base)
+    except Exception as exc:  # noqa: BLE001 - doctor reports, it never fails on one block
+        return {"error": f"{type(exc).__name__}"}
+
+
 def doctor(base: Path) -> dict:
     runtime = require_runtime()
     config.validate_workspace(base, required=True)
@@ -542,6 +550,10 @@ def doctor(base: Path) -> dict:
             "vector_namespaces": _vector_namespaces(base),
             # PB-137 N-008: who may reach memory over HTTP besides the local stdio agent.
             "access_bindings": _access_bindings(base),
+            # OBS-355: loopback is one per machine. How many people's accounts the host has, whether the
+            # servers' peer check is on (`config/local.json` loopback.peerCheck: auto or always) and how many
+            # connections of another OS account the local server refused before reading them.
+            "loopback": _loopback(base),
             # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
             # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
             "meter": _meter_readiness(base),

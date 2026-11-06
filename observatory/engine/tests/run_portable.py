@@ -305,6 +305,9 @@ BOUNDARY += ('relay_server',)
 # OBS-330: `ops.digest.record`, products' daily operations digests (contract DEC-0153): the engine's port over the
 # contract's vectors and fixtures, and the capability over stdio under a binding and on the HTTP door with a token.
 BOUNDARY += ('ops_digest', 'ops_digest_record')
+# OBS-355 part 1: who owns each end of a loopback connection (peer_owner.py over captured tables and a live pair),
+# and the servers refusing another OS account's connection before reading it (peer_check.py).
+BOUNDARY += ('peer_owner', 'peer_check')
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -341,6 +344,8 @@ HELPERS += ('ask_why_transcript.json',)
 # The DigitalOcean door's account half and collector (OBS-155): run from `test_digitalocean_door.py`,
 # the `test-digitalocean` step, so one step covers one door.
 HELPERS += ('test_digitalocean_account.py',)
+# Captured-format socket tables for peer_owner.py, reusable by projects that vendor it (OBS-355).
+HELPERS += ('peer_owner_fixtures.py',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -359,6 +364,8 @@ ROOT_FILES = (
     'machine_identity.py', 'machine_move.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
+    # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
+    'peer_owner.py', 'host_accounts.py', 'peer_check.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.

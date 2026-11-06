@@ -9,7 +9,8 @@ proves it. A rule without a test is written as a gap, not as a guarantee.
 Project Observatory runs on one machine for one operator. Reaching it at all means being local, and
 **authority comes from something a remote party cannot obtain**:
 
-- a loopback socket;
+- a loopback socket of this OS account (on a host with several accounts the servers check the
+  peer's account, rule 10; loopback itself is one per machine, not one per account);
 - a token file at mode 600 in the workspace;
 - the operator's own terminal.
 
@@ -20,8 +21,9 @@ a referer are labels at most.
 
 | Surface | Reached by | Authority | What it can do | Checks |
 |---|---|---|---|---|
-| Dashboard server (`tools/serverd.py`, 127.0.0.1) | a browser or `curl` on this machine; a local Fabric host | none for the pages and `/.well-known/fabric-service`; the workspace's `service.token` (600) as `Authorization: Bearer` for `/fabric/v1/events` | GET pages, `/health`, `/remote`, `/leaks`, `/skills`, the well-known document, the events feed | loopback bind; `Host` names this server; `Origin`, when sent, is this server; `Sec-Fetch-Site: cross-site` refused; POST answered 405; one copy per workspace (instance lock) — see [FABRIC-SERVICE.md](FABRIC-SERVICE.md) |
-| Keyserver (`tools/keyserver.py`, 127.0.0.1) | the dashboard page it serves, or a local client | the workspace token (`X-Observatory-Token`), handed to a page the keyserver itself served, or read from the 600 token file | mint, limit, revoke, leak, reveal, annotate, disable, enable, rotate-key | loopback bind only; exact `Host`; exact same-origin `Origin` when present; one token header compared with `compare_digest`; bounded JSON body; `put` and `rotate` refused, because values travel only on stdin |
+| Dashboard server (`tools/serverd.py`, 127.0.0.1) | a browser or `curl` on this machine; a local Fabric host | none for the pages and `/.well-known/fabric-service`; the workspace's `service.token` (600) as `Authorization: Bearer` for `/fabric/v1/events` | GET pages, `/health`, `/remote`, `/leaks`, `/skills`, the well-known document, the events feed | loopback bind; `Host` names this server; `Origin`, when sent, is this server; `Sec-Fetch-Site: cross-site` refused; POST answered 405; one copy per workspace (instance lock), see [FABRIC-SERVICE.md](FABRIC-SERVICE.md); before all of them, on a host with several OS accounts, the peer's account (rule 10) |
+| Keyserver (`tools/keyserver.py`, 127.0.0.1) | the dashboard page it serves, or a local client | the workspace token (`X-Observatory-Token`), handed to a page the keyserver itself served, or read from the 600 token file | mint, limit, revoke, leak, reveal, annotate, disable, enable, rotate-key | loopback bind only; on a host with several OS accounts the peer's account (rule 10) before the handler runs; exact `Host`; exact same-origin `Origin` when present; one token header compared with `compare_digest`; bounded JSON body; `put` and `rotate` refused, because values travel only on stdin |
+| Memory over HTTP (`mcp/http_service.py`, 127.0.0.1) | an agent or service holding an access binding | the binding's bearer, or a Fabric delegation token for the meter | the memory tools of the binding's scope | the peer's OS account (rule 10) first, then `Host`, `Origin`, the bearer, the rate |
 | MCP server (`mcp/server.py`, stdio) | an agent the operator started | the process was started by the operator | the reads; `observatory_record` and `observatory_propose` append to the ledger; the workflow tools write checkpoints, handoff packs and executor leases ([AGENT-MEMORY.md](AGENT-MEMORY.md)) | every note or proposal lands `proposed` with confidence below 1, and nothing here can promote it; a checkpoint needs the workflow's lease token; every workflow write is redacted before it is stored |
 | CLI (`observatory.py`, `tools/*.py`) | the operator's shell | the operator | everything the tools do | values only on stdin (`vault.py put`, `install_key.py`); destinations enumerated, not taken from input |
 
@@ -66,11 +68,38 @@ a referer are labels at most.
    - `test_install_writes_the_descriptor_then_the_plist`.
 8. **Errors don't reflect secrets.** An unexpected failure answers with a fixed sentence.
    - `test_unexpected_exception_does_not_reflect_sensitive_detail`.
+9. **(Reserved for the client side, OBS-355 part 2: a bearer leaves only for a listener of this
+   account and this workspace.)**
+10. **On a host with several OS accounts another account's connection is refused before it is
+    read.** Loopback is one per machine: every account's processes reach every port any account
+    listens on. When the host has more than one person's account (`host_accounts.count()`; an
+    unreadable count counts as several) or `config/local.json` sets `{"loopback": {"peerCheck":
+    "always"}}`, the local server, memory over HTTP and the keyserver find the OS account of each
+    connecting peer from the host's socket table (`peer_owner.py`) and answer anything but this
+    account with `403 {"error":"peer-foreign-account"}` (another account, root, launchd) or
+    `403 {"error":"peer-unverified"}` (the owner could not be read), `Connection: close`, on every
+    path, the dashboard pages and `/.well-known/fabric-service` included. Nothing of the request is
+    read or logged; memory over HTTP gets the request line and headers parsed by uvicorn first and
+    uses none of them. On a one-account host nothing changes and no table is read. Each refused
+    connection writes one JSON line on the server's stderr (at most one per peer uid and code a
+    minute) and is counted in the receipt `store/raw/serverd.json` (`peer`) and in `full doctor`
+    (`loopback`).
+    - `test_foreign_and_unverified_are_refused_before_the_request_line`;
+    - `test_foreign_refused_before_host_origin_and_bearer`;
+    - `test_foreign_is_refused_before_the_handler_exists`;
+    - `test_one_account_serves_as_before`, `test_one_account_and_auto_never_reads_the_table`;
+    - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`.
 
 ## Gaps, stated
 
-- **Local users are trusted.** Any process running as the operator's user can read the token file.
-  The model separates this machine from the web, not one local process from another.
+- **Local processes of the same account are trusted.** Any process running as the operator's user can
+  read the token file. The model separates this machine from the web and, since rule 10, one OS
+  account from another; not one process of an account from another.
+- **The relay is exempt from rule 10.** Its admission is cryptographic (the estate record's
+  signatures), and behind a TLS terminator every peer is the terminator's process, which may run as
+  another account or root.
+- **Rule 10 is the servers' half.** A client of this engine still sends its bearer to whatever
+  listens on the port it was given (OBS-355 part 2 checks the server end first).
 - **The MCP server has no per-tool scope.** An agent that can start it can call all eighteen tools. Its
   writes are bounded by rule 5, not by who the agent is.
 - **The dashboard server's GET data is visible to any local process.** It holds names and verdicts,

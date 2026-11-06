@@ -26,7 +26,10 @@ sign-ins, consents, payments, secrets typed into hidden prompts.
 So on the operator's machines the meter and the doors never demand a token. They verify one when it is
 presented, for attribution and narrowing. `slotsRequireGrant` stays `when-token` and
 `keyserverRequiresDelegation` stays `off` (M5, M6). The strict settings (`always`, `agents`) are for a machine
-that serves T2 callers. Observatory's services listen on loopback only, so every caller they see today is T0.
+that serves T2 callers. Observatory's services listen on loopback only, and "under the operator's account" is
+checked, not assumed: on a host with several OS accounts, memory over HTTP (where the meter's `grant.check` is served),
+the local server and the keyserver refuse another account's connection before reading it (OBS-355,
+[ACCESS.md](ACCESS.md) rule 10), so every caller they serve is T0.
 
 ## M1 — Who may ask
 

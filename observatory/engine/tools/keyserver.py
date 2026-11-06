@@ -43,6 +43,9 @@ by hand. So the page is served here instead, same-origin with a small API.
 WHAT GUARDS THE API:
 
   bound to 127.0.0.1  never a routable address, and refused if asked for one
+  the peer's account on a host with several OS accounts, another account's
+                     connection is answered 403 and closed before its request is
+                     read (`peer_check.py`, OBS-355)
   a token            in a file at mode 600, required on every API call in a
                      custom header — which also forces a CORS preflight, so a
                      page on another origin cannot post to it blind
@@ -83,6 +86,7 @@ import delegation  # noqa: E402
 sys.path.insert(0, str(ROOT / "collectors"))
 import credential_shape
 import paths              
+import peer_check  # noqa: E402  OBS-355: another OS account's connection refused before it is read
 
 import stat
 from runtime_identity import IdentityError, load as load_identity
@@ -860,6 +864,17 @@ class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
         sock, address = super().get_request()
         sock.settimeout(10)
         return sock, address
+
+    def finish_request(self, request, client_address):
+        """OBS-355: on a host with several OS accounts, another account's connection is answered 403 and
+        closed before the handler exists, so not a byte of its request is read (`peer_check.py`). Here and
+        not in `get_request`: this runs on the request's own thread, so a slow socket-table read or the
+        refusal's lingering close never holds up the accept loop."""
+        refused = peer_check.GATE.check_socket(request)
+        if refused:
+            peer_check.refuse(request, refused)
+            return
+        super().finish_request(request, client_address)
 
 
 def main(argv: list[str]) -> int:
