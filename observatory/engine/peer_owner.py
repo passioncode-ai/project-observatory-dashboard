@@ -85,7 +85,8 @@ import sys
 import threading
 import time
 
-VERSION = "1.1.0"
+# This file's own version, for projects that copy it; not the engine's (that is configuration.VERSION).
+PEER_OWNER_VERSION = "1.1.0"
 
 THIS_ACCOUNT = "this-account"
 ANOTHER_ACCOUNT = "another-account"

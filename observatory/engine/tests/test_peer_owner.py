@@ -346,8 +346,8 @@ class SelfContained(unittest.TestCase):
         self.assertTrue(names <= set(sys.stdlib_module_names), names - set(sys.stdlib_module_names))
 
     def test_names_and_version(self):
-        self.assertRegex(P.VERSION, r"^\d+\.\d+\.\d+$")
-        self.assertIn(f"peer_owner {P.VERSION}", P.__doc__)
+        self.assertRegex(P.PEER_OWNER_VERSION, r"^\d+\.\d+\.\d+$")
+        self.assertIn(f"peer_owner {P.PEER_OWNER_VERSION}", P.__doc__)
         for name in ("listener", "server_end", "peer", "Owner", "own_connection"):
             self.assertTrue(callable(getattr(P, name)), name)
         self.assertEqual(P.KINDS, ("this-account", "another-account", "system", "unknown", "none"))

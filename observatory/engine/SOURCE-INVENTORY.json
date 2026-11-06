@@ -3575,8 +3575,8 @@
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3a441ccf6c25664289a7a613fd5ee3a1dae1774c00d0da7ecb447ba2a51bf46a",
-      "bytes": 36260
+      "export_sha256": "28ba4d0e20992054fc511ed7cd73cc53ef078d6b1841e4248ad405e9eb9895bd",
+      "bytes": 36375
     },
     {
       "path": "plugins/README.md",
@@ -5753,8 +5753,8 @@
       "path": "tests/test_peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2514f1bc91bfabdc615577817c0407358f3b3bcd2620f72776b681f526e7756",
-      "bytes": 20466
+      "export_sha256": "dd7353e889a205869a327434c04daabce48fcff1ce9f362f30f19c937b6f220a",
+      "bytes": 20488
     },
     {
       "path": "tests/test_pipeline.py",
