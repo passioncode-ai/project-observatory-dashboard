@@ -478,7 +478,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   init / onboard / configure   prepare your private workspace
   migrate-local SOURCE [--apply --writers-stopped]  copy an original full-engine
                                installation into a new workspace; previews without --apply
-  version / doctor             the engine version; workspace health, sources and backups
+  version / doctor             the engine version; workspace health and one verdict (clean)
   configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
   configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
   local                        filesystem → registry → events → findings → dashboard

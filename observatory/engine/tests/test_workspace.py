@@ -103,6 +103,79 @@ class WorkspaceTests(unittest.TestCase):
         (self.base / 'gone-projects').mkdir()
         self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
 
+    # OBS-349: one verdict a person and an agent read without walking every section.
+    def test_doctor_attention_unions_maintenance_items_and_coverage_by_code(self):
+        self.run_cli('init')
+        doc = json.loads(self.run_cli('doctor').stdout)
+        attention = doc['attention']
+        for row in attention:
+            self.assertEqual(set(row), {'area', 'code', 'severity', 'text', 'step'}, row)
+            self.assertIn(row['severity'], ('warning', 'info'))
+        source = next(r for r in attention if r['code'] == 'source-missing')
+        self.assertEqual(source['area'], 'sources')
+        self.assertEqual(source['step'], 'project-observatory full configure sources projects PATH')
+        self.assertIn('projects', source['text'])
+        codes = [r['code'] for r in attention]
+        for item in doc['maintenance']['warning_items']:
+            self.assertIn(item['code'], codes)
+        self.assertFalse(doc['clean'])
+        # Existing keys stay as they were.
+        self.assertIn('coverage_warnings', doc)
+        self.assertIn('warnings', doc['maintenance'])
+
+    def test_doctor_attention_takes_each_code_once_from_its_first_area(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        report = {'backups': {'warning_items': [{'code': 'backups-vault-store-not-carried', 'text': 'b',
+                                                 'step': 'project-observatory full workspace-backup --writers-stopped'}]},
+                  'machine_backup': {'warning_items': [{'code': 'machine-backup-missing', 'text': 'm'}]},
+                  'maintenance': {'warning_items': [
+                      {'code': 'no-backup', 'text': 'n'},
+                      {'code': 'machine-backup-missing', 'text': 'm'},
+                      {'code': 'backups-vault-store-not-carried', 'text': 'b',
+                       'step': 'project-observatory full workspace-backup --writers-stopped'},
+                      {'code': 'no-backup', 'text': 'n again'}]},
+                  'coverage_warnings': [
+                      {'collector': 'filesystem', 'source': 'projects', 'problem': 'not configured',
+                       'fix': 'project-observatory full configure sources projects PATH'},
+                      {'integration': 'sessions', 'source': 'sessions', 'problem': 'gone',
+                       'fix': 'project-observatory full configure sources sessions PATH'}]}
+        verdict = workspace.verdict(report)
+        rows = [(r['area'], r['code']) for r in verdict['attention']]
+        self.assertEqual(rows, [('maintenance', 'no-backup'), ('machine_backup', 'machine-backup-missing'),
+                                ('backups', 'backups-vault-store-not-carried'),
+                                ('sources', 'source-missing'), ('sources', 'source-missing')])
+        self.assertEqual(verdict['attention'][2]['step'], 'project-observatory full workspace-backup --writers-stopped')
+        self.assertIsNone(verdict['attention'][0]['step'])
+        self.assertFalse(verdict['clean'])
+
+    def test_doctor_is_clean_with_only_info_items(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        info = [{'code': code, 'text': code} for code in ('update-available', 'auto-off', 'deferred', 'schedule-off')]
+        verdict = workspace.verdict({'maintenance': {'warning_items': info}, 'coverage_warnings': []})
+        self.assertTrue(verdict['clean'])
+        self.assertEqual({r['severity'] for r in verdict['attention']}, {'info'})
+        self.assertEqual(len(verdict['attention']), 4)
+        verdict = workspace.verdict({'maintenance': {'warning_items': info + [{'code': 'no-backup', 'text': 'n'}]}})
+        self.assertFalse(verdict['clean'])
+        self.assertTrue(workspace.verdict({})['clean'], 'nothing to say is clean')
+
+    def test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        for verdict in ('interrupted', 'stale', 'running-long'):
+            out = workspace.verdict({'tick': {'verdict': verdict, 'why': 'synthetic reason'}})
+            self.assertFalse(out['clean'], verdict)
+            row = out['attention'][0]
+            self.assertEqual((row['area'], row['code'], row['severity']), ('tick', f'tick-{verdict}', 'warning'))
+            self.assertIn('synthetic reason', row['text'])
+        for verdict in ('never', 'disabled', 'running', 'ok'):
+            self.assertTrue(workspace.verdict({'tick': {'verdict': verdict}})['clean'], verdict)
+
     def configure_projects(self):
         projects = self.base / 'projects'
         projects.mkdir(exist_ok=True)

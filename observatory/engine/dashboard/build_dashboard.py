@@ -2379,6 +2379,16 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     hb.push([T("installed"), T("engine {v}", {v: V.engine}) + (V.app ? ", " + T("app {v}", {v: V.app}) : ""), status]);
   // Every warning the job raised, in the reader's language, each its own row (A14) —
   // except what a row above or below already says (A14 review: every problem twice).
+  // A step doctor names as `project-observatory full …` becomes this workspace's command; a
+  // step in words (a copy by hand) keeps the fallback command.
+  // The step is the engine's own sentence, already checked where it is written (backup_vault.py), so
+  // it is prefixed with this workspace as fullCommand does, not passed through fullCommand: the
+  // handed-command check reads fullCommand's arguments as literal commands.
+  const fromStep = (step, fallback) => {
+    const words = typeof step === "string" ? step.split(" ") : [];
+    return words.length > 2 && words[0] === "project-observatory" && words[1] === "full"
+      ? (RUNTIME.home ? "OBSERVATORY_HOME=" + shellArg(RUNTIME.home) + " " : "") + step : fallback;
+  };
   const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "update-available", "no-backup", "not-encrypted", "passphrase",
                         "machine-backup-missing"]);
   const WARN = {
@@ -2409,6 +2419,21 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
                                         fullCommand("machine-backup status")],
     "machine-backup-settings": w => [T("the machine backup settings are refused: {detail}", {detail: w.detail || ""}),
                                      fullCommand("machine-backup status")],
+    // The backups' own warnings no row above says (OBS-349), each with the step doctor names.
+    "backups-vault-store-not-carried": w => [T("the secret store {path} is outside the workspace and the newest encrypted snapshot did not carry it; another machine restored from these backups would not get its keys", {path: w.path || ""}),
+                                             fromStep(w.step, fullCommand("backups status"))],
+    "backups-secret-store-missing": w => [T("the configured secret store {path} does not exist on this machine",
+                                            {path: w.path || ""}), fromStep(w.step, fullCommand("backups status"))],
+    "backups-secret-store-env-override": w => [T("the vault folder comes from the environment ({names}), which the daily job may not share; only the folder the settings name is carried",
+                                                 {names: w.names || ""}),
+                                               fullCommand("configure sources secret_store PATH")],
+    "backups-failed-update-copy": w => [T("unencrypted copies of this workspace left by a rolled-back update remain beside it: {count}; they hold secrets/. Delete them once the restored workspace is confirmed", {count: w.count || 0}), fullCommand("backups status")],
+    "backups-root-inside-workspace": () => [T("the backups root is inside the workspace, beside the key that opens the copies; point it at another disk or a synced folder"),
+                                            fullCommand("configure storage backups /absolute/path")],
+    "backups-root-unusable": w => [T("the backups root is refused: {detail}", {detail: w.text || ""}),
+                                   fullCommand("backups status")],
+    "backups-passphrase-unreadable": w => [T("the backup passphrase does not read: {detail}", {detail: w.text || ""}),
+                                           fullCommand("backup-passphrase set")],
   };
   const items = (MT.warning_items || []).length ? MT.warning_items : (MT.warnings || []).map(text => ({text}));
   items.filter(w => !SAID.has(w.code)).forEach(w => {

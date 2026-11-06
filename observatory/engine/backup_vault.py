@@ -948,21 +948,214 @@ def migrate(base: Path) -> dict:
     return report
 
 
+# --- the secret store the settings name (OBS-349) -----------------------------
+
+#: The record a workspace snapshot leaves of what it did with an external secret store
+#: (names, counts, times; never a value), in the workspace's own state folder.
+CARRY_RECORD = ("store", "raw", "secret-store-carry.json")
+#: A carry older than this proves nothing about the store as it is now: two daily snapshots.
+CARRY_FRESH = datetime.timedelta(hours=48)
+CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size")
+#: The environment can point the vault somewhere the settings do not; the maintenance job does
+#: not share a person's shell, so only the folder the settings name can be carried.
+VAULT_DIR_ENV, SECRETS_ENV = "OBSERVATORY_VAULT_DIR", "OBSERVATORY_SECRETS"
+
+
+def _display(path: Path) -> str:
+    try:
+        return "~/" + path.relative_to(Path.home().resolve()).as_posix()
+    except (ValueError, RuntimeError):
+        return str(path)
+
+
+def _within(path: Path, folder: Path) -> bool:
+    return path == folder or folder in path.parents
+
+
+def secret_store_carrier() -> bool:
+    """Whether this release's workspace snapshot carries an external secret store at all.
+
+    A release without the carrier must not send a person to take another snapshot to fix a
+    store no snapshot carries: the step names the copy by hand instead."""
+    import importlib.util
+    return importlib.util.find_spec("secret_store_carry") is not None
+
+
+def _settings_stores(base: Path, doc: dict) -> tuple[Path, list[dict]]:
+    """(the folder the vault's tools use, the external stores among the settings' candidates).
+
+    The tools read `sources.secret_store`, falling back to `sources.secrets`, then to
+    `<home>/secrets`. A candidate inside the workspace is carried with it, so only one outside
+    is external; two nested external candidates are one store, named by both settings."""
+    home = base.resolve()
+    sources = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+    candidates = []
+    for key in ("secret_store", "secrets"):
+        value = sources.get(key)
+        if isinstance(value, str) and value:
+            candidates.append((key, Path(value).expanduser().resolve()))
+    effective = candidates[0][1] if candidates else home / "secrets"
+    stores: list[dict] = []
+    for key, path in candidates:
+        if _within(path, home):
+            continue
+        for store in stores:
+            if _within(path, store["path"]) or _within(store["path"], path):
+                store["settings_keys"].append(key)
+                store["path"] = min(path, store["path"], key=lambda p: len(p.parts))
+                break
+        else:
+            stores.append({"settings_keys": [key], "path": path})
+    return effective, stores
+
+
+def _env_override(effective: Path, doc: dict) -> tuple[list[str], Path | None]:
+    """(the environment names that move the vault away from the folder the settings name, the store
+    root the environment chose when it chose one).
+
+    The vault's precedence (`paths.SECRETS`, `tools/vault.py` STORE): the slots live in
+    `OBSERVATORY_VAULT_DIR`, else `<root>/projects`; the root is `sources.secret_store`, else
+    `OBSERVATORY_SECRETS`, else `sources.secrets`, else `<home>/secrets`. So `OBSERVATORY_SECRETS`
+    moves nothing while `sources.secret_store` is set, and either variable moves the vault only when it
+    names another folder than the one the settings choose (the one a snapshot can carry)."""
+    sources = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+    moved, root = [], None
+    value = os.environ.get(SECRETS_ENV)
+    if value and not sources.get("secret_store"):
+        chosen = Path(value).expanduser().resolve()
+        if chosen != effective:
+            moved.append(SECRETS_ENV)
+            root = chosen
+    value = os.environ.get(VAULT_DIR_ENV)
+    if value and Path(value).expanduser().resolve() != effective / "projects":
+        moved.append(VAULT_DIR_ENV)
+    return moved, root
+
+
+def _last_carry(base: Path) -> dict | None:
+    """The newest carry record, or None before any; `{"state": "unknown"}` when it does not read."""
+    file = base.joinpath(*CARRY_RECORD)
+    if not file.exists() and not file.is_symlink():
+        return None
+    try:
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            raise ValueError("not a plain record")
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("state"), str):
+            raise ValueError("no state")
+    except (OSError, ValueError):
+        return {"state": "unknown"}
+    return {key: doc.get(key) if isinstance(doc.get(key), (str, int)) and not isinstance(doc.get(key), bool)
+            else None for key in CARRY_FIELDS}
+
+
+def _parse_at(text) -> datetime.datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=datetime.timezone.utc)
+
+
+def secret_store(base: Path) -> tuple[dict, list[dict]]:
+    """(doctor's `secret_store` section, its warning items). Reads the settings, the store's
+    existence and the carry record; never walks the store, never reads a value."""
+    try:
+        doc = config.load(base)
+    except config.ConfigurationError:
+        doc = {}
+    effective, stores = _settings_stores(base, doc)
+    moved, env_root = _env_override(effective, doc)
+    items: list[dict] = []
+
+    def warn(code: str, text: str, step: str | None, **params) -> None:
+        items.append({"code": code, "text": text, "step": step, **params})
+
+    if moved:
+        names = ", ".join(moved)
+        warn("backups-secret-store-env-override",
+             f"the vault folder comes from the environment ({names}), which the daily job may not share; "
+             "only the folder the settings name is carried",
+             "project-observatory full configure sources secret_store PATH", names=names)
+    if not stores:
+        if env_root is not None and not _within(env_root, base.resolve()):
+            # No setting names a store outside the workspace, but the environment does: the vault's keys
+            # live there and no snapshot carries them. The env-override row above says what to do.
+            return {"external": True, "path": _display(env_root), "settings_keys": [], "environment": SECRETS_ENV,
+                    "exists": env_root.is_dir(), "env_override": True, "last_carry": _last_carry(base)}, items
+        return {"external": False}, items
+    # One store is the answer's subject: the tools read the first candidate, so it is the one
+    # whose keys another machine needs.
+    store = stores[0]
+    path, keys = store["path"], store["settings_keys"]
+    shown = _display(path)
+    exists = path.is_dir()
+    last = _last_carry(base)
+    section = {"external": True, "path": shown, "settings_keys": keys, "exists": exists,
+               "env_override": bool(moved), "last_carry": last}
+    if not exists:
+        source = keys[0]
+        warn("backups-secret-store-missing", f"the configured secret store {shown} does not exist on this machine",
+             f"project-observatory full configure sources {source} PATH", path=shown)
+        return section, items
+    at = _parse_at((last or {}).get("at"))
+    if last is None:
+        reason = "no snapshot has carried it yet"
+    elif last.get("state") == "unknown":
+        reason = "the carry record does not read"
+    elif last.get("state") != "carried":
+        reason = str(last.get("reason") or last.get("state"))
+    elif at is None or datetime.datetime.now(datetime.timezone.utc) - at > CARRY_FRESH:
+        reason = "the newest snapshot that carried it is more than 48 hours old"
+    else:
+        return section, items
+    if (last or {}).get("reason") == "no-passphrase":
+        step = "project-observatory full backup-passphrase set"
+    elif secret_store_carrier():
+        step = "project-observatory full workspace-backup --writers-stopped"
+    else:
+        step = (f"copy {shown} to the other machine yourself: the snapshots of this release do not carry a "
+                "secret store kept outside the workspace")
+    warn("backups-vault-store-not-carried",
+         f"the secret store at {shown} is outside the workspace and the newest encrypted snapshot did not carry "
+         f"it ({reason}); another machine restored from these backups would not get these keys",
+         step, path=shown, reason=reason)
+    return section, items
+
+
 def status(base: Path) -> dict:
-    """For doctor: where, whether encrypted, what exists. Never a value."""
-    warnings = []
+    """For doctor: where, whether encrypted, what exists. Never a value.
+
+    `warnings` keeps its sentences in their order; `warning_items` carries each with a code
+    and its step (OBS-349), so doctor's verdict and Health can name it without parsing text."""
+    items: list[dict] = []
+
+    def warn(code: str, text: str, step: str | None = None, **params) -> None:
+        items.append({"code": code, "text": text, "step": step, **params})
+
+    store, store_items = secret_store(base)
+
+    def answer(**fields) -> dict:
+        every = items + store_items
+        return {**fields, "secret_store": store, "warnings": [i["text"] for i in every], "warning_items": every}
+
     try:
         info = root_info(base)
     except config.ConfigurationError as exc:
-        return {"encrypted": False, "warnings": [str(exc)]}
+        warn("backups-root-unusable", str(exc), "project-observatory full configure storage backups /absolute/path")
+        return answer(encrypted=False)
     try:
         configured = passphrase(base) is not None
     except BackupError as exc:
-        configured, warnings = False, [str(exc)]
+        configured = False
+        warn("backups-passphrase-unreadable", str(exc), "project-observatory full backup-passphrase set")
     root = info["path"]
     if not configured:
-        warnings.append("no backup passphrase: copies stay inside the workspace, unencrypted, on this "
-                        "disk only; run `project-observatory full backup-passphrase set`")
+        warn("backups-no-passphrase", "no backup passphrase: copies stay inside the workspace, unencrypted, on this "
+                                      "disk only; run `project-observatory full backup-passphrase set`",
+             "project-observatory full backup-passphrase set")
     if configured and info["inside_workspace"]:
         # Encryption protects a copy that leaves this disk; a root inside the
         # workspace never leaves it. The fallback root (<home>/backups, chosen when
@@ -970,27 +1163,31 @@ def status(base: Path) -> dict:
         # it puts the copies in the same tree as the key that opens them.
         beside = (f"beside the passphrase in {passphrase_file(base)}" if os.environ.get(PASS_ENV) is None
                   else f"on the same disk as the workspace ({PASS_ENV} supplies the passphrase)")
-        warnings.append(f"the backups root {root} is inside the workspace, {beside}: a lost or stolen disk "
-                        "takes the copies and their key together. Point it at another disk or a synced "
-                        "folder: `project-observatory full configure storage backups /absolute/path` "
-                        f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
+        warn("backups-root-inside-workspace",
+             f"the backups root {root} is inside the workspace, {beside}: a lost or stolen disk "
+             "takes the copies and their key together. Point it at another disk or a synced "
+             "folder: `project-observatory full configure storage backups /absolute/path` "
+             f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand",
+             "project-observatory full configure storage backups /absolute/path", root=str(root))
     legacy = [path for kind in SNAPSHOT_KINDS for path in local_snapshots(base, kind)]
     # A rolled-back update keeps the changed workspace beside the restored one: a full,
     # UNENCRYPTED copy, secrets/ included, that nothing removes (audit A18).
     failed = sorted(p for p in base.parent.glob(f"{base.name}.failed-update-*") if p.is_dir())
     if failed:
-        warnings.append(f"{len(failed)} unencrypted copy(ies) of this workspace from a rolled-back update "
-                        f"remain beside it ({failed[0].name}…); they hold secrets/. Delete them once the "
-                        "restored workspace is confirmed")
+        warn("backups-failed-update-copy",
+             f"{len(failed)} unencrypted copy(ies) of this workspace from a rolled-back update "
+             f"remain beside it ({failed[0].name}…); they hold secrets/. Delete them once the "
+             "restored workspace is confirmed", None, count=len(failed), folder=failed[0].name)
     if configured and legacy:
-        warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
-                        "run `project-observatory full backups migrate`")
+        warn("backups-unencrypted-local", f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
+                                          "run `project-observatory full backups migrate`",
+             "project-observatory full backups migrate", count=len(legacy))
     latest = {}
     for kind, suffix in ((DB_KIND, DB_SUFFIX), *((k, SNAPSHOT_SUFFIX) for k in SNAPSHOT_KINDS),
                          (MACHINE_KIND, MACHINE_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
-    return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],
-            "encrypted": configured,
-            "passphrase": "configured" if configured else "missing", "keep_per_kind": KEEP,
-            "artifacts": latest, "local_unencrypted_snapshots": len(legacy), "warnings": warnings}
+    return answer(root=str(root), root_source=info["source"], inside_workspace=info["inside_workspace"],
+                  encrypted=configured,
+                  passphrase="configured" if configured else "missing", keep_per_kind=KEEP,
+                  artifacts=latest, local_unencrypted_snapshots=len(legacy))
