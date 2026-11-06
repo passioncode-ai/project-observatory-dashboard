@@ -43,12 +43,18 @@ def _code_roots(here: Path) -> tuple[Path, ...]:
     The code directory, the installed ``observatory`` package that contains it,
     and the Git work tree of a source checkout. Data there is deleted by an
     upgrade or uninstall, or ends up one ``git add`` away from being published.
+
+    An installed engine (under ``site-packages`` or ``dist-packages``) has no source checkout: the walk for a
+    ``.git`` stops there, so a repository that happens to sit above the environment (a home folder someone
+    made a repository) never refuses every home under it.
     """
     roots = [here]
     package = here if here.name == "observatory" else here.parent
     if package.name == "observatory" and (package / "__init__.py").is_file():
         roots.append(package)
     for parent in (here, *here.parents):
+        if parent.name in ("site-packages", "dist-packages"):
+            break
         if (parent / ".git").exists():
             roots.append(parent)
             break
