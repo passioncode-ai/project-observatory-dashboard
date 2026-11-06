@@ -302,6 +302,9 @@ BOUNDARY += ('node_lifecycle_helper',)
 # OBS-287: the interim relay (fabric-relay/0.1, the relay project's RLY-04) over the contract's `admit` vectors, and
 # the node's own client against it on loopback: admission, mailboxes and their refusals, expiry, revocation.
 BOUNDARY += ('relay_server',)
+# OBS-330: `ops.digest.record`, products' daily operations digests (contract DEC-0153): the engine's port over the
+# contract's vectors and fixtures, and the capability over stdio under a binding and on the HTTP door with a token.
+BOUNDARY += ('ops_digest', 'ops_digest_record')
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -364,7 +367,7 @@ ROOT_FILES = (
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
     'ed25519_order.py',
-    'fabric_service.py', 'dispatch_packet.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -409,7 +412,9 @@ def source_files() -> list[Path]:
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')
     selected.add(ROOT / 'fabric/delegation-vectors/README.md')
+    selected.add(ROOT / 'fabric/ops-digest/README.md')        # its digests, and the release tag it was copied at
     selected.add(ROOT / 'fabric/memory-provider.json')
+    selected.add(ROOT / 'fabric/unreleased-capabilities.json')   # OBS-330: served before its release declares it
     selected.add(ROOT / 'store/schema.sql')
     # The lifecycle broker's NSWorkspace helper, compiled from source by the macOS adapter's suite (OBS-79 L2).
     selected.add(ROOT / 'node/lifecycle/native_app.swift')
@@ -434,6 +439,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/repair').rglob('*.json'))     # OBS-193: the repair vectors and schemas
     selected |= set((ROOT / 'fabric/node-vectors/peer').rglob('*.json'))       # OBS-264: fabric-peer-share/1
     selected |= set((ROOT / 'fabric/node-vectors/actions').rglob('*.json'))    # OBS-291: actionDecision's vectors
+    selected |= set((ROOT / 'fabric/ops-digest').rglob('*.json'))              # OBS-330: DEC-0153's schemas and vectors
     selected |= set((ROOT / 'cloud').glob('*.mjs'))                            # OBS-263: the mailbox Worker
     out = []
     for source in sorted(selected):

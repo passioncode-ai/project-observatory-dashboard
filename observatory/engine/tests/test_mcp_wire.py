@@ -57,6 +57,8 @@ GOLDEN_TOOLS = [
     "memory.search", "memory.workflow.list",
     # the meter (OBS-55): a delegation token over HTTP, principal-unproven over stdio (1)
     "grant.check",
+    # products' daily operations digests (OBS-330): a binding over stdio, a delegation token over HTTP (1)
+    "ops.digest.record",
 ]
 FAILURES: list[str] = []
 

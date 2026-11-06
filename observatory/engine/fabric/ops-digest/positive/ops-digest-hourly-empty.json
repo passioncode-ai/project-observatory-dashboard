@@ -1,0 +1,12 @@
+{
+  "schema": "ops.digest.hourly@1",
+  "from": "2026-11-04T03:00:00Z",
+  "to": "2026-11-04T04:00:00Z",
+  "ops": [],
+  "total": {
+    "ok": 0,
+    "failed": 0,
+    "unknown": 0
+  },
+  "risen": []
+}

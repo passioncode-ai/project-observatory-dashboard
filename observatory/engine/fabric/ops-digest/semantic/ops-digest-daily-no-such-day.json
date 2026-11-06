@@ -1,0 +1,44 @@
+{
+  "description": "A day of a thirteenth month: FAC-SEM-166 (DEC-0153).",
+  "kind": "ops-digest-daily",
+  "expect": [
+    "FAC-SEM-166"
+  ],
+  "input": {
+    "schema": "ops.digest.daily@1",
+    "day": "2026-13-01",
+    "hours": 2,
+    "ops": [
+      {
+        "op": "retro-after-work",
+        "ok": 3,
+        "failed": 0,
+        "unknown": 1
+      },
+      {
+        "op": "x",
+        "ok": 0,
+        "failed": 42,
+        "unknown": 0
+      },
+      {
+        "op": "y",
+        "ok": 1,
+        "failed": 0,
+        "unknown": 0
+      }
+    ],
+    "total": {
+      "ok": 4,
+      "failed": 42,
+      "unknown": 1
+    },
+    "risen": [
+      {
+        "op": "x",
+        "hours": 2,
+        "failed": 42
+      }
+    ]
+  }
+}

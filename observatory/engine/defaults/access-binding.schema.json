@@ -111,7 +111,8 @@
                 "memory.search",
                 "memory.record",
                 "memory.checkpoint",
-                "memory.handoff"
+                "memory.handoff",
+                "ops.digest.record"
               ]
             }
           },

@@ -46,9 +46,9 @@ No locale, device model, host name or user name is sent.
 | Event | Status | Added | Sent from (surface, file:line) | Properties |
 |---|---|---|---|---|
 | `command_run` | live | 2026-11-04 | cli: `observatory/engine/observatory.py:1733` | `surface` (`cli`), `command`, `outcome`, `exit_code`, `duration_ms` |
-| `mcp_tool_called` | live | 2026-11-04 | mcp: `observatory/engine/mcp/capability_tools.py:363` | `surface` (`mcp`), `tool`, `outcome`, `duration_ms` |
+| `mcp_tool_called` | live | 2026-11-04 | mcp: `observatory/engine/mcp/capability_tools.py:366` | `surface` (`mcp`), `tool`, `outcome`, `duration_ms` |
 | `tick_finished` | live | 2026-11-04 | tick: `observatory/engine/tools/tick.py:513` | `surface` (`tick`), `outcome`, `steps_failed`, `duration_ms` |
-| `error_raised` | live | 2026-11-04 | cli: `observatory/engine/observatory.py:1737`; mcp: `observatory/engine/mcp/capability_tools.py:366`; tick: `observatory/engine/tools/tick.py:516` | `surface` (`cli`, `mcp`, `tick`), `kind` |
+| `error_raised` | live | 2026-11-04 | cli: `observatory/engine/observatory.py:1737`; mcp: `observatory/engine/mcp/capability_tools.py:369`; tick: `observatory/engine/tools/tick.py:516` | `surface` (`cli`, `mcp`, `tick`), `kind` |
 | `analytics_notice_shown` | live | 2026-11-04 | cli and dashboard: `observatory/engine/usage_analytics.py:711` (reached from `observatory/engine/observatory.py:1738` at a person's terminal, and from `observatory/engine/tools/serverd.py:693` when the local server serves Home) | `surface` (`cli`, `dashboard`) |
 
 ## Properties

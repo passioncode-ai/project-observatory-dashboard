@@ -322,6 +322,19 @@ class RegistryRules(Case):
         self.assertEqual(proposal(curated)["status"], "proposed", "a name curated for another target")
         self.assertEqual(proposal(measured)["status"], "proposed", "a name measured on another project")
 
+    def test_a_fabric_alias_waits_for_the_operator(self):
+        """OBS-330 review M2: a `fabric:` name is Fabric's own id for a project, and a curated alias overrides
+        Fabric's attribution, so an alias for one is never accepted by the policy, alone or beside a clean one."""
+        alone = propose({"aliases": [{"id": "fabric:00000000-0000-4000-8000-000000000001", "owner": "agent:x",
+                                      "source": "a host"}]})
+        mixed = propose({"aliases": [{"id": "store:example-3", "owner": "agent:store", "source": "a store"},
+                                     {"id": "FABRIC:00000000-0000-4000-8000-000000000002", "owner": "agent:x",
+                                      "source": "a host"}]})
+        run_policy()
+        self.assertEqual((proposal(alone)["status"], proposal(mixed)["status"]), ("proposed", "proposed"))
+        table = read("config/identifiers.json").get("aliases") or {}
+        self.assertFalse(any(k.casefold().startswith("fabric:") or k == "store:example-3" for k in table))
+
     def test_description_organization_and_local_folders_wait_for_a_person(self):
         ids = [propose({"description": "x"}), propose({"organization": "external"}, target=TOOL)]
         receipt = run_policy()
