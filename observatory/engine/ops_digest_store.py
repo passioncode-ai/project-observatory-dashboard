@@ -446,16 +446,27 @@ def prune(today: date | None = None) -> int:
         return _prune_locked(today or today_utc())
 
 
+def first_lines_of(project: str, month: str) -> list[dict]:
+    """The line of each (day, service, source) of one month a reader takes: its FIRST revision (OD-6), with how many
+    came and when the first arrived (`receivedAt`, which tells the daily learning review a day sent late). [] for a
+    month with no file; a damaged file raises StoreUnreadable, so one bad month never hides the others."""
+    doc = _read(_project_dir(project) / f"{month}.json") or {"lines": []}
+    out = []
+    for x in doc["lines"]:
+        if x.get("revisions"):
+            first = x["revisions"][0]
+            out.append({"day": x["day"], "service": x.get("service"), "source": x.get("source"),
+                        "revisions": len(x["revisions"]), "receivedAt": first.get("receivedAt"),
+                        "digest": first.get("digest")})
+    return out
+
+
 def first_lines(project: str) -> list[dict]:
     """The line of each (day, service, source) a reader takes: its FIRST revision (OD-6), with how many came."""
     folder = _project_dir(project)
     out = []
     for path in sorted(folder.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].json")) if folder.is_dir() else []:
-        doc = _read(path) or {"lines": []}
-        for x in doc["lines"]:
-            if x.get("revisions"):
-                out.append({"day": x["day"], "service": x["service"], "source": x["source"],
-                            "revisions": len(x["revisions"]), "digest": x["revisions"][0]["digest"]})
+        out += first_lines_of(project, path.stem)
     return out
 
 

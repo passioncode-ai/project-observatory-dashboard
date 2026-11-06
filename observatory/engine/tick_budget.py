@@ -118,10 +118,11 @@ def priority(row: dict | None) -> int:
 # region tail: the time the steps after the collectors need, measured (OBS-220)
 
 #: THE TAIL, in the order `tools/tick.py` runs it. `tests/test_tick_budget.py` reads the tick's own
-#: step calls and fails when the two disagree.
+#: step and probe calls and fails when the two disagree.
 TAIL_ORDER: tuple[str, ...] = (
     "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "index",
-    "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "plugins", "rollup", "agent", "findings",
+    "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "plugins", "rollup",
+    "learning-review-due", "learning-review", "agent", "findings",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault", "projection",
     "links", "logs",
 )
