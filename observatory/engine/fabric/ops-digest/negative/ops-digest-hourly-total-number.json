@@ -1,0 +1,39 @@
+{
+  "schema": "ops.digest.hourly@1",
+  "from": "2026-11-04T17:00:00.000Z",
+  "to": "2026-11-04T18:00:00.000Z",
+  "ops": [
+    {
+      "op": "board.tick",
+      "ok": 3,
+      "failed": 2,
+      "unknown": 0
+    },
+    {
+      "op": "cycle.receipt",
+      "ok": 40,
+      "failed": 12,
+      "unknown": 0
+    },
+    {
+      "op": "ipc.work:home",
+      "ok": 5,
+      "failed": 0,
+      "unknown": 0
+    },
+    {
+      "op": "mcp.unparsed",
+      "ok": 0,
+      "failed": 0,
+      "unknown": 1
+    }
+  ],
+  "total": 63,
+  "risen": [
+    {
+      "op": "cycle.receipt",
+      "failed": 12,
+      "previous": 5
+    }
+  ]
+}

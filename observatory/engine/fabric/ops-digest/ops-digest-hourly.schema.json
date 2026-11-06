@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/ops-digest-hourly.schema.json",
+  "title": "ops.digest.hourly@1 (DEC-0153): one closed hour of a product's operations log, counted by operation and outcome",
+  "description": "One line of hourly-YYYY-MM.jsonl. Counts only: no log line, no path, no identifier, no free text. FAC-SEM-166: from and to are whole UTC hours one hour apart, each op once in ops and at most once in risen, total each counter's sum over ops, every rise an op of ops with the hour's failures and a rise by OD-4. FAC-SEM-167: no op shaped like a credential or holding a home folder.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "from",
+    "to",
+    "ops",
+    "total",
+    "risen"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ops.digest.hourly@1"
+    },
+    "from": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00(\\.000)?Z$",
+      "description": "The hour's start, a whole UTC hour in RFC 3339 with Z (Date.prototype.toISOString's .000 fraction allowed)."
+    },
+    "to": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00(\\.000)?Z$",
+      "description": "The hour's end, exclusive: from plus one hour (FAC-SEM-166)."
+    },
+    "ops": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/opCount"
+      },
+      "description": "Every operation recorded in the hour, once each; an hour the product observed itself running in, with nothing recorded, has none."
+    },
+    "total": {
+      "$ref": "#/$defs/counters"
+    },
+    "risen": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "failed",
+          "previous"
+        ],
+        "properties": {
+          "op": {
+            "$ref": "#/$defs/op"
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "The hour's failures of op, as ops counts them."
+          },
+          "previous": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "The failures of op in the hour just before, 0 when none were recorded or that hour was not closed (a gap)."
+          }
+        }
+      },
+      "description": "Each operation whose failures rose against the hour before (OD-4)."
+    }
+  },
+  "$defs": {
+    "op": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][A-Za-z0-9_]*(?:[.:/-][A-Za-z0-9_]+)*$",
+      "description": "An operation's name (OD-2): a lower-case letter, then letters, digits and underscores in segments joined by '.', ':', '/' or '-' (mcp.tools/list), at most 64 characters. No absolute path, URL, space, empty segment, '.' or '..' fits; a credential's shape or a home folder is FAC-SEM-167."
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok",
+        "failed",
+        "unknown"
+      ],
+      "properties": {
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "opCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "ok",
+        "failed",
+        "unknown"
+      ],
+      "properties": {
+        "op": {
+          "$ref": "#/$defs/op"
+        },
+        "ok": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}

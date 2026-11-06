@@ -150,6 +150,7 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 | `observatory/engine/tests/check_service.py`, `observatory/engine/tests/fabric_interop.py` | the same commit, `scripts/check_service.py` and `scripts/fabric_interop.py` (the probe imports it) |
 | `observatory/engine/fabric/interop-schemas/service-connections-extension.schema.json` | the contract pin, by `tools/vendor_contract_schemas.py` with the folder's other schemas: the connections declaration (DEC-0096) is checked against it before it is published (`service_connections.check`, OBS-326). The kit's `fabric_connections` module is not vendored: its secret detector's docstrings hold sample credential URLs the public release scan refuses |
 | `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `7931c1d`, `schemas/`; not at the contract pin until OBS-212 (the folder's README says why and records the digests) |
+| `observatory/engine/fabric/ops-digest/` | `passioncode-ai/fabric-agent-contract` at its release tag `v0.1.0+2026-11-06.1` (DEC-0153): the two digest schemas, the folds' vectors and the hourly and daily fixtures, which `ops.digest.record` (OBS-330) reads every line with; not at the contract pin, which predates them (the folder's README records the commit and the digests) |
 
 Never edit them here: update upstream, copy again, and the digest test says whether the copy is
 whole.
