@@ -1096,8 +1096,9 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
     section = {"external": True, "path": shown, "settings_keys": keys, "exists": exists,
                "env_override": bool(moved), "last_carry": last}
     if not exists:
+        source = keys[0]
         warn("backups-secret-store-missing", f"the configured secret store {shown} does not exist on this machine",
-             f"project-observatory full configure sources {keys[0]} PATH", path=shown)
+             f"project-observatory full configure sources {source} PATH", path=shown)
         return section, items
     at = _parse_at((last or {}).get("at"))
     if last is None:

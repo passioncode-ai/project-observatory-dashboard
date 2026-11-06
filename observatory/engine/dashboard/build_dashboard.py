@@ -2381,8 +2381,14 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
   // except what a row above or below already says (A14 review: every problem twice).
   // A step doctor names as `project-observatory full …` becomes this workspace's command; a
   // step in words (a copy by hand) keeps the fallback command.
-  const fromStep = (step, fallback) => typeof step === "string" && step.startsWith("project-observatory full ")
-    ? fullCommand(step.slice("project-observatory full ".length)) : fallback;
+  // The step is the engine's own sentence, already checked where it is written (backup_vault.py), so
+  // it is prefixed with this workspace as fullCommand does, not passed through fullCommand: the
+  // handed-command check reads fullCommand's arguments as literal commands.
+  const fromStep = (step, fallback) => {
+    const words = typeof step === "string" ? step.split(" ") : [];
+    return words.length > 2 && words[0] === "project-observatory" && words[1] === "full"
+      ? (RUNTIME.home ? "OBSERVATORY_HOME=" + shellArg(RUNTIME.home) + " " : "") + step : fallback;
+  };
   const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "update-available", "no-backup", "not-encrypted", "passphrase",
                         "machine-backup-missing"]);
   const WARN = {
