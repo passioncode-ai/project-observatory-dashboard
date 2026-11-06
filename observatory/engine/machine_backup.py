@@ -91,6 +91,7 @@ import configuration as config
 import machine_identity
 import osprivacy
 import oslocks
+import secret_store_carry
 
 KIND, SUFFIX = backup_vault.MACHINE_KIND, backup_vault.MACHINE_SUFFIX
 FORMAT = "observatory-machine/1"
@@ -319,6 +320,16 @@ class Collection:
         self.entry_root: Path | None = None
         self.groups: dict[tuple[str, str], dict] = {}
         self.seen: set[str] = set()
+        # The secret stores the workspace snapshot carries encrypted (OBS-350): never a second copy here.
+        self.store_roots: list[tuple[Path, dict]] = []
+
+    def carried_elsewhere(self, path: Path) -> bool:
+        """Skip `path` when it lies in a secret store the workspace snapshot carries, saying where it travels."""
+        store = secret_store_carry.inside(path, self.store_roots)
+        if store is None:
+            return False
+        self.skip(path, f"carried encrypted in the workspace snapshot (sources.{store['settings_keys'][0]})")
+        return True
 
     def mb(self, key: str) -> int:
         return int(self.limits[key] * 1024 * 1024)
@@ -406,6 +417,8 @@ class Collection:
         if entry.skip:
             self.skip(root, entry.skip)
             return
+        if self.carried_elsewhere(root):
+            return
         patterns = (*excludes, *(f"{display(root, self.home)}/{p}" for p in entry.exclude),
                     *(p for p in entry.exclude if "/" not in p))
         if _excluded(root, self.home, excludes):
@@ -430,6 +443,8 @@ class Collection:
                     path = here / name
                     if _excluded(path, self.home, patterns):
                         self.skip(path, "excluded")
+                    elif self.carried_elsewhere(path):
+                        pass
                     elif path.is_symlink():
                         self.link(path, category)
                     elif entry.recurse:
@@ -442,6 +457,8 @@ class Collection:
                         continue
                     if _excluded(path, self.home, patterns):
                         self.skip(path, "excluded")
+                    elif self.carried_elsewhere(path):
+                        pass
                     elif path.is_symlink():
                         self.link(path, category)
                     elif path.is_file():
@@ -1101,9 +1118,20 @@ def workspace_pointer(base: Path, home: Path) -> dict:
         newest = snaps[-1].name if snaps else None
     except (config.ConfigurationError, OSError):
         root = None
+    # Where the secret store kept outside the workspace travels (OBS-350): inside the workspace's
+    # encrypted snapshot, never in this bundle. `newest_snapshot_carried` is the carry record's word.
+    stores = secret_store_carry.plan(base, carry_now=True, why_not=None)
+    if stores and stores[0]["reason"]:
+        store = {"external": True, "carried_in": None, "reason": stores[0]["reason"]}
+    elif stores:
+        last = backup_vault._last_carry(base)
+        carried = None if not last or last.get("state") == "unknown" else last.get("state") == "carried"
+        store = {"external": True, "carried_in": "workspace snapshot", "newest_snapshot_carried": carried}
+    else:
+        store = {"external": False}
     return {"workspace": display(base, home), "engine_version": config.VERSION,
             "instance_id": marker.get("instance_id"), "backups_root": display(root, home) if root else None,
-            "newest_snapshot": newest,
+            "newest_snapshot": newest, "secret_store": store,
             "restore": "project-observatory full restore --latest (or full restore <snapshot>.obsnap)"}
 
 
@@ -1145,6 +1173,10 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                           f"{limits['min_free_gb']} GB a machine backup leaves (limits.min_free_gb in "
                           f"config/{CONFIG_NAME}); the disk holds {root}")
     col = Collection(home, limits)
+    # Only a store the encrypted workspace snapshot carries is left to it (OBS-350): one it would never
+    # carry (a folder that holds the workspace itself) is walked like any other path the entries name.
+    col.store_roots = secret_store_carry.store_roots(
+        [s for s in secret_store_carry.plan(base, carry_now=True, why_not=None) if not s["reason"]], home)
     excludes = tuple(settings["exclude"])
     for entry in builtin_entries(home, transcripts=settings["transcripts"]):
         col.walk(entry, excludes)

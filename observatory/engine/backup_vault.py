@@ -1173,7 +1173,7 @@ def migrate(base: Path) -> dict:
 CARRY_RECORD = ("store", "raw", "secret-store-carry.json")
 #: A carry older than this proves nothing about the store as it is now: two daily snapshots.
 CARRY_FRESH = datetime.timedelta(hours=48)
-CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size")
+CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size", "not_carried", "sweep_failed")
 #: The environment can point the vault somewhere the settings do not; the maintenance job does
 #: not share a person's shell, so only the folder the settings name can be carried.
 VAULT_DIR_ENV, SECRETS_ENV = "OBSERVATORY_VAULT_DIR", "OBSERVATORY_SECRETS"

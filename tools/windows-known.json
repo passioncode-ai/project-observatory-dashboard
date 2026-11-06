@@ -263,7 +263,12 @@
         "Snapshots.test_without_passphrase_stays_local_and_rotates",
         "StoreCopies.test_encrypted_daily_copy_and_rotation",
         "StoreCopies.test_encrypted_stamp_older_than_the_kept_window_is_refused",
-        "StoreCopies.test_if_due_skips_a_fresh_copy"
+        "StoreCopies.test_if_due_skips_a_fresh_copy",
+        "ThisMachineOnly.test_a_mark_that_does_not_read_keeps_the_slot_here",
+        "ThisMachineOnly.test_a_marked_slot_is_left_out_and_named",
+        "ThisMachineOnly.test_a_rotated_kept_slot_leaves_its_archives_behind_too",
+        "ThisMachineOnly.test_the_mark_survives_a_new_value",
+        "ThisMachineOnly.test_unmarking_carries_the_slot_in_the_next_snapshot"
       ]
     },
     "checkout_inventory": {
@@ -1686,6 +1691,9 @@
         "ReviewFindings.test_m3_a_future_answer_is_unreachable_naming_the_clock",
         "ReviewFindings.test_m4_deeply_nested_json_is_refused",
         "ReviewFindings.test_r2_1_an_extreme_rotation_time_never_crashes_the_view",
+        "ThisMachineOnly.test_a_peers_kept_slot_reads_only_on_that_machine_on_purpose",
+        "ThisMachineOnly.test_a_slot_kept_here_reads_only_here_on_purpose",
+        "ThisMachineOnly.test_the_text_view_names_the_machine_a_peer_keeps_it_on",
         "VaultDigestsTests.test_a_rotation_marks_the_other_copies_stale",
         "VaultDigestsTests.test_a_slot_marked_different_on_purpose",
         "VaultDigestsTests.test_all_matching_is_one_line",

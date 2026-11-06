@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-100`
+**Next free OSS id:** `OSS-101`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -1103,3 +1103,53 @@ Coverage: `tests/test_workspace.py` (`test_doctor_attention_unions_maintenance_i
 (the move section is the CLI's checklist and writes nothing); `tests/test_dashboard_render.py`
 `test_the_health_page_names_versions_kinds_and_dollars` (the secret store row in Russian). Status: built (OBS-349
 part 1); the restore and CLI sign-in items wait for parts 2 and 3; product outcome unobserved.
+
+## The secret store travels with the encrypted snapshot (OBS-350 part 1, 2026-11-06)
+
+### OSS-100: my keys kept outside the workspace reach my other machine in the same backup, except the ones I keep here
+
+Trigger: the vault lives outside the workspace (`sources.secret_store`), and I am about to set up a second machine
+from this one's backups; or a slot (a root seed, an administrator token) must never leave this machine.
+
+Funnel: the daily encrypted snapshot, or `full workspace-backup --writers-stopped` with a passphrase, carries the
+store in `external/secret_store/` beside the home, under the vault's own lock, listed by relative path, size, mode and
+digest; doctor's `backups.secret_store.last_carry` reads `carried` and the not-carried warning goes away. `full
+vault-digests keep-here PROJECT ENV NAME --why "..."` keeps one slot here: the snapshot names it
+`this-machine-only` and still reads as carried, and `full vault-digests` shows `only here on purpose` here and
+`only on <machine> on purpose` on the other machine, neither of which is a difference. `unkeep-here` lets the next
+snapshot carry it. The machine bundle skips the store and says it travels in the workspace snapshot.
+
+Failure paths: a plaintext `--output` snapshot, no passphrase, a failed export, the pre-update snapshot, a store over
+256 MB, one that changed during two copies, or one that cannot be read is never carried, and the snapshot, the carry
+record and doctor name the reason; the snapshot itself never fails because of the store. An interrupt inside
+the encryption, or a run killed there, never leaves the store in the plaintext copy: it is removed at once, or
+by the next snapshot. A kept slot's rotation archives stay with it, and a slot whose metadata does not read
+stays here (`unreadable`). A link leaving the store,
+a socket and lock files stay behind; a link inside it is recorded, never followed or written. A damaged or unlisted
+carried file is refused at verification (`secret-store-manifest-mismatch`). Marking a slot this machine does not
+hold, or clearing a mark that is not there, exits 2. Writing the store into place on the other machine is part 2:
+until then `full backups decrypt` opens it and the person copies `external/secret_store/`.
+
+Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace
+travels in `data/` exactly as before; an older engine restores the home and ignores `external/`.
+Coverage: `tests/test_workspace_upgrade.py` ExternalSecretStore (`test_an_external_store_is_carried_into_an_encrypted_snapshot`,
+`test_lock_files_and_temporaries_are_not_carried`, `test_a_plaintext_output_never_carries_the_store`,
+`test_without_a_passphrase_the_store_stays_where_it_is`, `test_a_failed_export_keeps_no_store_in_the_plaintext_copy`,
+`test_the_vault_lock_is_held_while_the_store_is_copied`, `test_a_store_that_changes_during_the_copy_is_named_not_carried`,
+`test_one_change_is_retried_and_the_second_pass_carries`, `test_a_link_inside_the_store_is_recorded_and_one_outside_is_named`,
+`test_a_store_over_the_cap_is_named_too_large`, `test_verify_refuses_an_unlisted_or_changed_store_file`,
+`test_a_restore_by_this_release_restores_the_home_and_leaves_the_store_alone`,
+`test_a_store_inside_the_workspace_travels_in_data_as_before`, `test_the_update_snapshot_never_carries_the_store`,
+`test_the_environment_override_is_named_in_the_manifest`,
+`test_the_daily_maintenance_record_says_whether_the_store_was_carried`,
+`test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext`,
+`test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups`,
+`test_a_failed_carry_record_is_said_not_swallowed`, `test_the_carry_record_counts_what_stayed_behind`,
+`test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot`,
+`test_an_undeletable_leftover_is_named_and_the_snapshot_goes_on`,
+`test_a_failing_strip_never_hides_the_original_interrupt`, `test_the_sweep_touches_only_snapshot_folders`);
+`tests/test_backup_vault.py`
+ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
+`test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
+`tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore. Status: built
+(OBS-350 part 1); the restore side waits for part 2; product outcome unobserved.

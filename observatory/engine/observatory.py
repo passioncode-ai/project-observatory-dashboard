@@ -569,9 +569,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                each copy is behind its source, and the steps to carry one forward
                                (its builder at both commits, diff, `git apply --3way` on
                                sync/<sha12>, audits); prints only, nothing is synced
-  vault-digests [view|write|mark|unmark|key]   every vault slot per machine (same, differs, only
-                               here, missing, unreachable), compared by keyed HMAC-SHA-256 digests under
-                               the estate key, never values; mark a slot different on purpose; peers'
+  vault-digests [view|write|mark|unmark|keep-here|unkeep-here|key]   every vault slot per machine (same,
+                               differs, only here, missing, unreachable), compared by keyed HMAC-SHA-256
+                               digests under the estate key, never values; mark a slot different on purpose,
+                               or keep it on this machine only (no workspace snapshot carries it); peers'
                                manifests are read from <state>/vault-digests/peers
   share create|list|status|confirm|differ|revoke|provider-ended|accept|sync   share a vault key with another
                                person's Observatory (fabric-peer-share/1): sealed to their machine, the link

@@ -32,7 +32,13 @@ On the release branch before #453 joined it: `tools/fabric_hash.py --check` cont
 `tools/check_manifest_urls.py` 0 problems; `tools/publish_contract.py --local` bundled references valid;
 `tests/test_ops_digest_record.py`, `tests/test_docs_current.py`, `tests/test_conformance_receipt.py` OK;
 `observatory/engine/tools/check_docs.py` current; `tools/sync_engine_docs.py --check` stale none;
-`tools/check_backlog.py` 0 problems. The release suites and the full gate run after #453 is merged in.
+`tools/check_backlog.py` 0 problems. After #453 was merged in (`66e56d6e`): the root release suites
+(`test_version_consistency`, `test_desktop_app`, `test_plugin_manifests`, `test_changelog_releases`,
+`test_backlog_board`, `test_docs_drift`, `test_engine_doc_copies`, `test_release_boundaries`, `test_licensing`,
+`test_analytics_catalogue`) OK; the three manifest tests OK again; `fabric_hash.py --check` contentHash OK;
+`check_manifest_urls.py` 0 problems; `check_paths.py` 0 violations; `check_docs.py` current; the source inventory
+check passed. `docs/COMPATIBILITY.md` sections that read "the release after 0.33.0" also name 0.34.0, because
+0.33.1 carried no code. Backlog row OBS-377 (authority levels, board thread `eefa7959`) rides in this PR.
 
 ## After the release
 

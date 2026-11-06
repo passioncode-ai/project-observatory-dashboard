@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -917,6 +918,134 @@ class ForeignPassphrase(Base):
         with patch.object(vault.osprivacy, 'is_terminal', return_value=False):
             out = maintenance.restore_latest(self.home, store=foreign, stdin_value=PASS)
         self.assertEqual((out['status'], out['passphrase_source']), ('restored', 'stdin'))
+
+
+
+class ThisMachineOnly(Base):
+    """OBS-350 (spec 3.2a): a slot marked with `full vault-digests keep-here` stays on this machine; the
+    encrypted snapshot carries the rest of the store and names it."""
+
+    SLOT = 'projects/alpha/prod/API_KEY'
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from secret_store_fixture import make_external_store, all_values
+        self.values = all_values()
+        self.store = make_external_store(self.base / 'external-store')
+        file = self.home / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {})['secret_store'] = str(self.store)
+        file.write_text(json.dumps(doc))
+        vault.set_passphrase(self.home, PASS)
+        self.outputs = []
+
+    def tearDown(self):
+        text = '\n'.join(self.outputs)
+        for value in self.values:
+            self.assertNotIn(value, text, 'a value reached an answer, a manifest or a command\'s output')
+        super().tearDown()
+
+    def tool(self, name, *args, value=None):
+        env = {**os.environ, 'OBSERVATORY_VAULT_DIR': str(self.store / 'projects')}
+        run = subprocess.run([sys.executable, str(ROOT / 'tools' / name), *args], input=value, text=True,
+                             capture_output=True, env=env, timeout=60)
+        self.outputs.append(run.stdout + run.stderr)
+        return run
+
+    def carried(self):
+        result = upgrade.snapshot(self.home, writers_stopped=True, kind='daily')
+        opened = vault.extract_tree(Path(result['snapshot']), self.base / 'opened', PASS)
+        self.addCleanup(__import__('shutil').rmtree, opened, True)
+        manifest = config.read_json(opened / 'manifest.json')
+        self.outputs += [json.dumps(result), json.dumps(manifest)]
+        return opened / 'external' / 'secret_store', manifest['externals'][0]
+
+    def test_a_marked_slot_is_left_out_and_named(self):
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY', '--why', 'root seed, one home')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        meta = json.loads((self.store / (self.SLOT + '.meta.json')).read_text())
+        self.assertEqual(meta['this_machine_only']['why'], 'root seed, one home')
+        store, entry = self.carried()
+        self.assertEqual(entry['state'], 'carried', 'a slot kept here does not make the store not carried')
+        self.assertFalse((store / self.SLOT).exists())
+        self.assertFalse((store / (self.SLOT + '.meta.json')).exists())
+        self.assertIn({'path': self.SLOT, 'reason': 'this-machine-only'}, entry['not_carried'])
+        self.assertNotIn(self.SLOT, {f['path'] for f in entry['files']})
+        self.assertEqual((entry['kept_here'], entry['vault_slots']), (1, 2))
+        self.assertTrue((store / 'projects/alpha/stage/DB_PASSWORD').is_file(), 'the other slots travel')
+        moves = (self.store / 'projects' / 'movements.jsonl').read_text()
+        self.assertIn('mark-this-machine-only', moves)
+
+    def test_unmarking_carries_the_slot_in_the_next_snapshot(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault_digests.py', 'unkeep-here', 'alpha', 'prod', 'API_KEY')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('unmark-this-machine-only', (self.store / 'projects' / 'movements.jsonl').read_text())
+        store, entry = self.carried()
+        self.assertEqual((store / self.SLOT).read_bytes(), (self.store / self.SLOT).read_bytes())
+        self.assertEqual(entry['kept_here'], 0)
+        # Clearing a mark that is not there is refused.
+        self.assertEqual(self.tool('vault_digests.py', 'unkeep-here', 'alpha', 'prod', 'API_KEY').returncode, 2)
+
+    def test_marking_a_slot_this_machine_does_not_hold_is_refused(self):
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'ABSENT', '--why', 'root seed, one home')
+        self.assertEqual(run.returncode, 2)
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY', '--why', 'short')
+        self.assertEqual(run.returncode, 2, 'a reason of at least 8 characters, as mark asks')
+
+    def test_the_mark_survives_a_new_value(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault.py', 'put', 'alpha', 'prod', 'API_KEY', '--force', value='fixture-value-008')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        meta = json.loads((self.store / (self.SLOT + '.meta.json')).read_text())
+        self.assertIn('this_machine_only', meta)
+        store, entry = self.carried()
+        self.assertFalse((store / self.SLOT).exists())
+
+
+    def test_a_rotated_kept_slot_leaves_its_archives_behind_too(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault.py', 'rotate', 'alpha', 'prod', 'API_KEY', value='fixture-value-008')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        retired = sorted(p.name for p in (self.store / 'projects/alpha/prod').iterdir() if '.retired-' in p.name)
+        self.assertTrue(retired, 'rotate archives the old value beside the slot')
+        store, entry = self.carried()
+        carried = [f['path'] for f in entry['files']]
+        self.assertFalse([p for p in carried if p.startswith(self.SLOT)], carried)
+        self.assertFalse([p for p in store.rglob('*') if p.name.startswith('API_KEY')])
+        held = {r['path'] for r in entry['not_carried'] if r['reason'] == 'this-machine-only'}
+        self.assertEqual(held, {self.SLOT, self.SLOT + '.meta.json',
+                                *(f'projects/alpha/prod/{name}' for name in retired)})
+
+    def test_a_mark_that_does_not_read_keeps_the_slot_here(self):
+        # Fail closed: a metadata file that may carry a keep-here mark but does not read is not a reason
+        # to carry the slot.
+        meta = self.store / (self.SLOT + '.meta.json')
+        for name, damage in (('not json', lambda: meta.write_text('{not json')),
+                             ('not utf-8', lambda: meta.write_bytes(b'\xff\xfe{}')),
+                             ('too large', lambda: meta.write_text('{"x": "' + 'a' * 70000 + '"}')),
+                             ('not an object', lambda: meta.write_text('[]')),
+                             ('a folder', lambda: (meta.unlink(), meta.mkdir()))):
+            with self.subTest(name):
+                # Five snapshots in one second: rotation orders same-second names by their random
+                # suffix, so the newest could be rotated away. Each case starts with an empty root.
+                for old in vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX):
+                    old.unlink()
+                if meta.is_dir():
+                    meta.rmdir()
+                damage()
+                store, entry = self.carried()
+                self.assertFalse((store / self.SLOT).exists())
+                self.assertIn({'path': self.SLOT, 'reason': 'unreadable'}, entry['not_carried'])
+                self.assertEqual(entry['state'], 'carried')
+                __import__('shutil').rmtree(self.base / 'opened', True)
 
 
 if __name__ == '__main__':
