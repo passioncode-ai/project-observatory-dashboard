@@ -34,9 +34,30 @@ On the release branch after rebasing on `2180235c`: the root release suites, `to
 `tools/check_backlog.py`, `observatory/engine/tools/check_docs.py`, `check_paths.py` and the inventory check (results in
 the release PR).
 
+## Receipts
+
+- Release PR #461 merged as `fbf991d1`. Its `check.yml` run on main (`42360355093`) passed every job, Windows included.
+  Tag `v0.35.0` (annotated, object `14ef3d59`) on `fbf991d1`. The background step that was to push the tag failed
+  only because the landing script had already removed the release worktree; the tag was pushed by hand from another
+  checkout of the same remote after the run read `success`.
+- Release run `42363475717` passed every job on its first attempt (guard, wheel, manifest, Linux x64 and arm64,
+  Windows x64 and arm64, macOS, feed, publish); the `check.yml` run the tag started (`42363475453`) passed too.
+  Published 2026-11-07T11:07:52Z, 19 assets.
+- Verified after publishing: `shasum -a 256 -c SHA256SUMS --ignore-missing` OK on every downloaded asset (0 failures);
+  `gpg --verify SHA256SUMS.asc SHA256SUMS`: good signature, key `63B30DC324BD697487AA31944FAFB8AEC803B6A7` (the
+  PassionCode.ai releases key); `gh attestation verify` on the wheel with `--signer-repo passioncode-ai/.github`:
+  exit 0; the wheel carries `analytics-app-key`.
+- Installed on the operator's Mac with `project-observatory full update --version 0.35.0 --apply`; `full doctor` reports
+  0.35.0 and the service `project-observatory.default` answers 0.35.0 on its well-known document. Doctor's verdict:
+  `clean: false` with the same two warnings as 0.34.0 (`machine-backup-not-carried`, `backups-vault-store-not-carried`).
+  `loopback`: one person's account on this host, so the peer check is `auto` and inactive.
+- Told: the agents waiting for the release (board thread `c1a45468`, message `7e02410a`), Fabric (thread `f7758225`,
+  `2a1494b6`), Fabric Dashboards (thread `5d2a61f1`, `e2583be8`), Workspace with the Studio steps (thread `0159c474`,
+  `f485a6e0`), and the session that runs the Studio's `apply`.
+
 ## State now
 
-- Open: the release PR, then the tag `v0.35.0`, its run, verification and the local install; then the administrator's
-  real `apply` on the computer whose dry run is recorded above.
-- Waits: none beyond the release run (watched by this session).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here.
+- Open: the administrator's real `apply` of `tools/space_daemons.py` on the computer whose dry run is recorded above,
+  after that computer's spaces update to 0.35.0 (its own session runs it).
+- Waits: none in this repository.
+- Next task: none for this release; the move's remaining steps are on the board (OBS-361 part 2).
