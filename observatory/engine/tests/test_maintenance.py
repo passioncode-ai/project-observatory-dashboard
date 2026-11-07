@@ -505,6 +505,35 @@ class Passphrase(Base):
         self.assertEqual(vault.ensure_passphrase(self.home, store)["passphrase"], "recovered")
         self.assertEqual(vault.passphrase(self.home), file.read_text().rstrip("\n"))
 
+    def test_a_copy_the_file_kept_moves_into_the_keychain_once_it_answers(self):
+        # OBS-391 review: one unlock dialog that timed out must not leave the passphrase in a file
+        # for good. Once the Keychain takes it, the copy moves there and the file goes.
+        state = {"refuses": True}
+        items = {}
+
+        def run(argv, input=None, **kw):
+            if argv[:2] == ["security", "find-generic-password"]:
+                label = argv[argv.index("-a") + 1]
+                if label in items:
+                    return subprocess.CompletedProcess(argv, 0, items[label] + "\n", "")
+                return subprocess.CompletedProcess(argv, 44, "", "not found")
+            if argv == ["security", "-i"]:
+                if state["refuses"]:
+                    return subprocess.CompletedProcess(argv, 125, "", "TimeoutExpired")
+                label, value = re.search(r'-a "([^"]*)" .* -w (\S+)', input).groups()
+                items[label] = value
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(argv)
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        first = vault.ensure_passphrase(self.home, store)
+        self.assertEqual(first["kept_outside"], "file")
+        self.assertTrue(self.fallback_file(first["label"]).is_file())
+        state["refuses"] = False
+        second = vault.ensure_passphrase(self.home, store)
+        self.assertEqual(second["kept_outside"], "keychain", second)
+        self.assertFalse(self.fallback_file(first["label"]).exists(), "the file copy goes once the Keychain holds it")
+        self.assertEqual(len(items), 1)
+
     def test_a_keychain_that_takes_it_is_still_named_the_keychain(self):
         store, items, _ = self.keychain(refuses=False)
         out = vault.ensure_passphrase(self.home, store)

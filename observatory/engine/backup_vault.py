@@ -637,10 +637,25 @@ def ensure_passphrase(base: Path, store: SecretStore | None = None) -> dict:
             # Where the copy IS, not the store this machine tries first: a Keychain that
             # took nothing left it in the owner-only file (OBS-391).
             kind = (getattr(store, "held_in", None) or {}).get(label) or store.kind()
+            if kind == "file" and store.kind() != "file":
+                kind = _move_into_store(store, label, current)
     except (BackupError, OSError) as exc:
         return {"passphrase": state, "kept_outside": None,
                 "warning": f"the passphrase is only in {passphrase_file(base)}: {exc}"}
     return {"passphrase": state, "kept_outside": kind, "label": label}
+
+
+def _move_into_store(store: "SecretStore", label: str, value: str) -> str:
+    """A copy the owner-only file kept because the Keychain (or keyring) once took nothing, moved
+    into it once it does: one timed-out unlock dialog must not leave the passphrase in a file for
+    good (OBS-391 review). The file goes only after the store holds the item; any refusal keeps it."""
+    try:
+        kind = store.put(label, value)
+    except (BackupError, OSError):
+        return "file"
+    if kind != "file":
+        store._file(label).unlink(missing_ok=True)
+    return kind
 
 
 def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
@@ -1112,10 +1127,15 @@ def artifacts(root: Path, kind: str, suffix: str) -> list[Path]:
     return order_artifacts(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
 
 
-def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP) -> list[str]:
+def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP, protect: Path | None = None) -> list[str]:
+    """Keep the `keep` newest. `protect`, the backup just written, is never dropped: a clock set back
+    names it older than the ones before it, and its source is already gone (OBS-388 review)."""
     found = artifacts(root, kind, suffix)
+    if protect is not None and protect in found:
+        found.remove(protect)
+        keep -= 1
     dropped = []
-    for old in found[:-keep] if len(found) > keep else []:
+    for old in (found[:-keep] if keep > 0 else found) if len(found) > keep else []:
         old.unlink()
         dropped.append(old.name)
     return dropped
@@ -1163,7 +1183,7 @@ def export_snapshot(base: Path, directory: Path, kind: str, secret: str) -> Path
     dest = root / f"{kind}-{_snapshot_stamp(directory)}-{uuid.uuid4().hex[:8]}{SNAPSHOT_SUFFIX}"
     encrypt_tree(directory, dest, secret, kind=kind)
     shutil.rmtree(directory)
-    rotate(root, kind, SNAPSHOT_SUFFIX)
+    rotate(root, kind, SNAPSHOT_SUFFIX, protect=dest)
     return dest
 
 

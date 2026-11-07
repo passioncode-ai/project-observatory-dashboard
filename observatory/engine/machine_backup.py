@@ -1276,7 +1276,7 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
         backup_vault._mark_owner(root, base)
         dest = root / f"{KIND}-{at.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}{SUFFIX}"
         backup_vault.encrypt_stream(dest, fill, secret, kind=KIND, content="tar+gzip")
-        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP)
+        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP, protect=dest)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     settle_not_carried(col)

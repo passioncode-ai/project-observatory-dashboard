@@ -73,8 +73,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "17659f7503a98f32d4f57abd2b10e37ffc789d85545f40484d0fabeddcef9197",
-      "bytes": 71452
+      "export_sha256": "b6db536e06066e422aac5867decf52b06bbf42368bffbc9034147f55ad65aa52",
+      "bytes": 72507
     },
     {
       "path": "cache_coverage.py",
@@ -3146,8 +3146,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a4f61b36997379225d7bbb20ce56cb8ffc6ba88fd436f4b434e6be074176ec4c",
-      "bytes": 152688
+      "export_sha256": "798a2a9e520602b39868f166ab4a9a5cd306f97340aed85c1e725d980e7112c0",
+      "bytes": 152702
     },
     {
       "path": "machine_identity.py",
@@ -4523,8 +4523,8 @@
       "path": "tests/test_backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a68af795ab1e6f91aff248c4fd7fe55bcf86541cb12b822b0fe525db5560946c",
-      "bytes": 62537
+      "export_sha256": "ce99cd80c64b4cdfed594d4d4f49c04ee61219fce5b2a0ed681f91b0ebb6b8bc",
+      "bytes": 63633
     },
     {
       "path": "tests/test_blank_page.py",
@@ -5422,8 +5422,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e27d920e4c9f825c245ef04c5dfa7d33869add2bfbdaf454af95118ab8ce974",
-      "bytes": 153339
+      "export_sha256": "65b40fccd1a375245bed9ae79cc07a68068ebe12fd93bb6d3b222452287b63a6",
+      "bytes": 155028
     },
     {
       "path": "tests/test_manifest_urls.py",

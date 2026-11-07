@@ -755,6 +755,21 @@ class RotationOrder(Base):
         self.assertEqual(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX), files[-vault.KEEP:])
         self.assertTrue(files[-1].exists(), 'the newest backup is kept')
 
+    def test_a_clock_set_back_never_drops_the_backup_just_written(self):
+        # OBS-388 review: three backups stamped in the future, then a new one stamped today. By
+        # their stamps the new one is the oldest, and its source folder is already gone.
+        future = []
+        for tail in ('aaaaaaaa', 'bbbbbbbb', 'cccccccc'):
+            dest = self.target() / f'daily-20991231T000000Z-{tail}{vault.SNAPSHOT_SUFFIX}'
+            vault.encrypt_stream(dest, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+            future.append(dest)
+        new = self.target() / f'daily-{self.STAMP}-dddddddd{vault.SNAPSHOT_SUFFIX}'
+        vault.encrypt_stream(new, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+        dropped = vault.rotate(self.target(), 'daily', vault.SNAPSHOT_SUFFIX, keep=3, protect=new)
+        self.assertTrue(new.exists(), 'the backup just written is kept')
+        self.assertEqual(dropped, [future[0].name])
+        self.assertEqual(len(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX)), 3)
+
     def test_a_restore_offers_the_newest_first(self):
         files = self.make()
         self.assertEqual([c['snapshot'] for c in vault.candidates(self.home)], files[::-1])
