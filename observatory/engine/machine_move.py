@@ -310,7 +310,9 @@ def stale_paths(definition: Path) -> list[str]:
     if not isinstance(doc, dict):
         return []
     args = doc.get("ProgramArguments")
-    named = [doc.get("Program"), args[0] if isinstance(args, list) and args else None, doc.get("WorkingDirectory")]
+    # With Program set, launchd runs it and ProgramArguments[0] is only argv[0]: checked when Program is absent.
+    first = args[0] if isinstance(args, list) and args and "Program" not in doc else None
+    named = [doc.get("Program"), first, doc.get("WorkingDirectory")]
     missing: list[str] = []
     for value in named:
         if isinstance(value, str) and value and os.path.isabs(value) and value not in missing \
