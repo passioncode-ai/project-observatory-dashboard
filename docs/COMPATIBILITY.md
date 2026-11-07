@@ -358,7 +358,7 @@ fails and puts the plist back. It runs the same checks, moves the plist into
 `~/.local/share/project-observatory/background/LaunchAgents/` (owner-only; group and other write bits cleared),
 removes the job from `elsewhere`, and answers with new fields: `domain` (`system`), `state` (`waiting-for-root`,
 or `complete` once root loaded it), `load` `waiting-for-root` or `loaded`, `human_steps` and `next` naming
-`sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`. Any other
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`. Any other
 answer of `launchctl print gui/<uid>` (0, or a code the engine does not know) keeps the earlier path and answer,
 byte for byte. Such an account with a custom `XDG_DATA_HOME` is refused before anything moves (part 1). `machine-move
 show` gains `background[]` of `label`, `file`, `daemon` (`loaded`, `registered`, `waiting-for-root`); `leave` refuses
@@ -366,12 +366,18 @@ while root's daemon of the job runs and names `... remove --user ACCOUNT --label
 the background folder's jobs as defined here (M4) and adds one evidence line for each.
 
 `tools/space_daemons.py` (`SPACE_DAEMONS_VERSION` 1.0.0) is new: standard library only, Python 3.9 (macOS's
-`/usr/bin/python3`), run by an administrator from a root-owned copy. It writes files outside any workspace:
+`/usr/bin/python3`), run by an administrator from a root-owned copy and only in Python's isolated mode,
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons ...`: without `-I`, `apply` and `remove` refuse
+(`not-isolated`), so no module from the script's folder, the user's site-packages or a `PYTHON*` variable runs as
+root. A daemon's logs never go where the plist said (`plan` notes `logs-moved`): launchd may open them with root's
+rights after the check, so they go to `/Library/Logs/ProjectObservatory/<user>/<label>.out.log` and `.err.log`.
+It writes files outside any workspace:
 
 | Path | What | Older engines, removal |
 |---|---|---|
 | `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
-| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER, LOGNAME; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
+| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups`, HOME, USER, LOGNAME and the two log paths below; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
+| `/Library/Logs/ProjectObservatory/<user>/` | the daemons' `<label>.out.log` and `<label>.err.log`; the folder root:wheel 0700 under a root:wheel 0755 `ProjectObservatory`, with one inherited ACL entry (`<user> allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit`) so the account reads its logs; `apply` refuses, installing nothing, when either folder exists as a link or is not root's | `remove` leaves the logs; deleting the folder loses them, and the next `apply` makes it again |
 | `/Library/Application Support/ProjectObservatory/space-daemons.json` | the registry of what `apply` wrote, a stable interface (below); root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
 
 **The registry is a stable interface** that other tools (Fabric Dashboards among them) read without root. Its
@@ -390,6 +396,12 @@ definition `apply` read and `sourceSha256` its bytes' SHA-256; `written` the abs
 `writtenSha256` the SHA-256 of what was written; `at` when, RFC 3339 in UTC. One entry per label, sorted by label;
 the file is replaced whole (written to a temporary file, synced, renamed). A reader treats a missing file as no
 entries, and a different `schema` as a format it does not know. A field is added only under a new schema name.
+
+**Accepted residual.** The program and `WorkingDirectory` are checked when `apply` runs, and launchd uses them
+later. The program runs as the account, so a program swapped after the check gives the account only what it already
+has, and the account changing its own program is expected (it is the account's job); the program must be owned by
+root or the account, in folders nobody else can write, so no third account can swap it. The log paths, which launchd
+may open with root's rights, are root's own folder and not the account's to change.
 
 One copy only: `apply` refuses a label loaded as an agent in that account's own GUI domain (`launchctl print
 gui/<uid>/<label>` exit 0, problem `loaded-in-gui`), and a label another account's entry holds

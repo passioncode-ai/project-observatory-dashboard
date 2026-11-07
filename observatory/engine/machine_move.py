@@ -32,8 +32,8 @@ such a "space" could never start as an agent. When `launchctl print gui/<uid>` a
 not exist (exit 112, "could not find domain"), `cutover` runs every check as before, then moves the
 definition into the background folder (`machine_identity.background_dir`) instead of
 ~/Library/LaunchAgents and answers `waiting-for-root` with the one command an administrator runs:
-`sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`
-(`tools/space_daemons.py`, installed once as a root-owned copy). That writes the job to
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`
+(`tools/space_daemons.py`, installed once as a root-owned copy, run in Python's isolated mode). That writes the job to
 /Library/LaunchDaemons with `UserName` set to this account: it runs as this account, never as root, and
 starts again after a reboot with nobody logged in. Any other answer of `launchctl print gui/<uid>` (0, or a
 code this does not know) keeps today's path. `leave` refuses while such a daemon runs (root removes it
@@ -163,7 +163,8 @@ def account_name(uid: int) -> str:
 
 
 def root_step(verb: str, label: str, uid: int) -> str:
-    return f"sudo /usr/bin/python3 {SPACE_DAEMONS_COPY} {verb} --user {account_name(uid)} --label {label}"
+    """The administrator's command for LABEL: isolated mode (`-I`), so root imports nothing the account wrote."""
+    return f"sudo /usr/bin/python3 -I {SPACE_DAEMONS_COPY} {verb} --user {account_name(uid)} --label {label}"
 
 
 def _loaded(runner, system: str, label: str, uid: int) -> bool:

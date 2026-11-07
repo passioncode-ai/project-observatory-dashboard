@@ -1162,7 +1162,7 @@ and nobody ever signs in to it graphically, so it has no `gui/<uid>` launchd dom
 Funnel: in that account, `full machine-move cutover LABEL` runs its checks as always, finds `launchctl print gui/<uid>`
 answering "could not find domain", moves the plist into `~/.local/share/project-observatory/background/LaunchAgents/`
 and answers `state: waiting-for-root` with the one command an administrator runs:
-`sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
 installing that root-owned copy once from a verified release). The job then runs as a system daemon with `UserName`
 set to the account, never as root, and starts again after every reboot with nobody logged in. A second `cutover`
 answers `state: complete`; `machine-move show` lists it under `background` as `loaded`.
@@ -1171,8 +1171,11 @@ Failure paths: a plist with a key that would act with root's reach (`UserName`, 
 program or a path someone else could change, a label under `com.apple.`, a symlinked, oversized or group-writable
 plist, or a folder others can write is refused and named by `plan` and `apply`, never partly installed; a file in
 `/Library/LaunchDaemons` the tool did not write, a label someone else loaded, and another account's daemon are never
-replaced; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only); a failed load puts back what was there. `apply` and `remove` refuse without root and from a copy that is
-not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
+replaced; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only);
+the plist's own log paths are ignored (`logs-moved`) and the logs go to root's
+`/Library/Logs/ProjectObservatory/ACCOUNT/` (0700, read ACL for the account), refused when that folder is a link or
+not root's; a failed load puts back what was there. `apply` and `remove` refuse without root, outside Python's isolated mode
+(`not-isolated`) and from a copy that is not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
 `XDG_DATA_HOME` is refused before anything moves (part 1).
 
 Acceptance: an account with a GUI session moves its jobs exactly as before; the engine never writes a system file and

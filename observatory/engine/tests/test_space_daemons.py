@@ -44,6 +44,10 @@ class Launchctl:
         self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
 
     def __call__(self, argv, **kw):
+        if os.path.basename(argv[0]) == "chmod":
+            self.calls.append(["chmod"] + list(argv[1:]))
+            code = self.codes.get("chmod", 0)
+            return subprocess.CompletedProcess(argv, code, "", "synthetic refusal" if code else "")
         self.calls.append(list(argv[1:]))
         verb = argv[1]
         if verb == "print" and argv[2].startswith("gui/"):
@@ -124,8 +128,13 @@ class Pure(unittest.TestCase):
     def test_the_daemon_runs_as_the_account(self):
         account = sd.Account("space", 600, 20, "staff", "/var/empty/example-space")
         doc = {"Label": LABEL, "ProgramArguments": ["/bin/sh"], "LimitLoadToSessionType": "Aqua",
-               "EnvironmentVariables": {"HOME": "/elsewhere", "PATH": "/usr/bin:/bin", "USER": "root"}}
+               "EnvironmentVariables": {"HOME": "/elsewhere", "PATH": "/usr/bin:/bin", "USER": "root"},
+               "StandardOutPath": "/var/empty/example-space/out.log", "StandardErrorPath": "/etc/err.log"}
         daemon = sd.daemon_plist(doc, account)
+        self.assertEqual((daemon["StandardOutPath"], daemon["StandardErrorPath"]),
+                         (f"/Library/Logs/ProjectObservatory/space/{LABEL}.out.log",
+                          f"/Library/Logs/ProjectObservatory/space/{LABEL}.err.log"),
+                         "logs go to root's folder for the account, never where the definition said")
         self.assertEqual(daemon["Label"], LABEL)
         self.assertEqual((daemon["UserName"], daemon["GroupName"], daemon["InitGroups"]), ("space", "staff", True))
         self.assertEqual(daemon["EnvironmentVariables"], {"HOME": "/var/empty/example-space", "USER": "space",
@@ -152,9 +161,13 @@ class Base(unittest.TestCase):
         self.owner_calls = []
         self.launchctl = Launchctl()
 
-    def system(self, euid=0, self_check=lambda: []):
+    def system(self, euid=0, self_check=lambda: [], isolated=True, owner_uid=None):
         return sd.System(root=str(self.sysroot), runner=self.launchctl, euid=euid, set_owner=self.owner_calls.append,
-                         self_check=self_check, owner_uid=os.getuid())
+                         self_check=self_check, owner_uid=os.getuid() if owner_uid is None else owner_uid,
+                         isolated=isolated)
+
+    def logs(self):
+        return self.sysroot / sd.LOGS_DIR / "space"
 
     def define(self, doc=None, name=None, mode=0o644, **extra):
         doc = dict(doc or {"Label": LABEL, "ProgramArguments": [ROOT_OWNED_PROGRAM, "-c", "true"]}, **extra)
@@ -257,14 +270,22 @@ class Rules(Base):
         (self.home / "logs").symlink_to(outside)
         (self.home / "out.log").symlink_to(outside / "out.log")
         for key, value, code in (("WorkingDirectory", str(self.base), "path_outside_home"),
-                                 ("StandardOutPath", "job.log", "path_not_absolute"),
-                                 ("StandardOutPath", str(self.home / "logs" / "job.log"), "path_outside_home"),
-                                 ("StandardErrorPath", str(self.home / "out.log"), "path_symlink"),
-                                 ("StandardErrorPath", str(self.home / ".." / "x.log"), "path_outside_home"),
+                                 ("WorkingDirectory", "work", "path_not_absolute"),
+                                 ("WorkingDirectory", str(self.home / "logs"), "path_symlink"),
+                                 ("WorkingDirectory", str(self.home / ".." / "x"), "path_outside_home"),
                                  ("WorkingDirectory", 3, "bad_value")):
             with self.subTest(key=key, value=value):
                 self.assertEqual(self.problems(**{key: value})[0], [code])
-        self.assertEqual(self.problems(StandardOutPath=str(self.home / "fresh.log"))[0], [])
+        self.assertEqual(self.problems(WorkingDirectory=str(self.home / "fresh"))[0], [])
+
+    def test_the_definitions_log_paths_are_ignored_not_trusted(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        (self.home / "out.log").symlink_to(outside / "out.log")
+        codes, daemon = self.problems(StandardOutPath=str(self.home / "out.log"), StandardErrorPath="relative.log")
+        self.assertEqual(codes, [], "ignored, so neither a link nor a relative path matters")
+        self.assertEqual(daemon["StandardOutPath"], f"/Library/Logs/ProjectObservatory/space/{LABEL}.out.log")
+        self.assertEqual(daemon["StandardErrorPath"], f"/Library/Logs/ProjectObservatory/space/{LABEL}.err.log")
 
 
 class Reading(Base):
@@ -279,6 +300,13 @@ class Reading(Base):
         self.assertIsNone(by["org.example.bad"]["daemon"])
         self.assertEqual(self.launchctl.calls, [])
         self.assertEqual(sd.plan(self.account, labels=["org.example.none"])["not_found"], ["org.example.none"])
+
+    def test_plan_says_the_logs_moved(self):
+        self.define(StandardOutPath=str(self.home / "job.log"))
+        self.define({"Label": "org.example.quiet", "ProgramArguments": [ROOT_OWNED_PROGRAM]})
+        by = {d["label"]: d for d in sd.plan(self.account, system=self.system())["definitions"]}
+        self.assertEqual((by[LABEL]["notes"], by["org.example.quiet"]["notes"]), (["logs-moved"], []))
+        self.assertEqual(by[LABEL]["daemon"]["StandardOutPath"], str(self.logs() / f"{LABEL}.out.log"))
 
     def test_plan_reads_the_staged_folder_on_request(self):
         staged = Path(self.account.staged_dir())
@@ -389,6 +417,57 @@ class Applying(Base):
         self.assertEqual(stat.S_IMODE((self.sysroot / sd.REGISTRY_DIR / sd.REGISTRY_NAME).stat().st_mode), 0o644)
         self.assertIn(["bootstrap", "system", str(path)], self.launchctl.calls)
 
+    def test_apply_makes_roots_log_folder_with_the_accounts_read_acl(self):
+        self.define(StandardOutPath=str(self.home / "job.log"))
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"])
+        logs = self.logs()
+        self.assertEqual(stat.S_IMODE(logs.parent.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE(logs.stat().st_mode), 0o700)
+        self.assertIn(str(logs.parent), self.owner_calls)
+        self.assertIn(str(logs), self.owner_calls)
+        self.assertIn(["chmod", "+a", "space allow list,search,read,readattr,readextattr,readsecurity,"
+                                      "file_inherit,directory_inherit", str(logs)], self.launchctl.calls)
+        doc = plistlib.loads(self.daemon().read_bytes())
+        self.assertEqual((doc["StandardOutPath"], doc["StandardErrorPath"]),
+                         (str(logs / f"{LABEL}.out.log"), str(logs / f"{LABEL}.err.log")))
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"], "a second apply reuses root's folder")
+
+    def test_a_log_folder_that_is_a_link_or_not_roots_is_refused_and_nothing_installed(self):
+        self.define()
+        logs = self.logs()
+        logs.parent.mkdir(parents=True)
+        elsewhere = self.base / "elsewhere"
+        elsewhere.mkdir(mode=0o700)
+        logs.symlink_to(elsewhere)
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "link or not a folder"):
+            sd.apply(self.system(), self.account)
+        self.assertFalse(self.daemon().exists())
+        logs.unlink()
+        logs.mkdir(mode=0o700)
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "not owned by root"):
+            sd.ensure_log_dir(self.system(owner_uid=os.getuid() + 1), self.account)
+        self.assertFalse(self.daemon().exists())
+        self.assertNotIn("bootstrap", [c[0] for c in self.launchctl.calls])
+        self.assertNotIn("chmod", [c[0] for c in self.launchctl.calls], "no ACL on a folder that is not root's")
+
+    def test_a_failed_acl_is_refused_and_nothing_installed(self):
+        self.define()
+        self.launchctl.codes["chmod"] = 1
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "read access"):
+            sd.apply(self.system(), self.account)
+        self.assertFalse(self.daemon().exists())
+
+    def test_apply_and_remove_refuse_outside_isolated_mode(self):
+        self.define()
+        for call in (lambda: sd.apply(self.system(isolated=False), self.account),
+                     lambda: sd.remove(self.system(isolated=False), self.account, LABEL)):
+            with self.assertRaises(sd.SpaceDaemonsError) as caught:
+                call()
+            self.assertEqual(caught.exception.code, "not-isolated")
+            self.assertIn("sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons", str(caught.exception))
+        self.assertFalse(self.daemon().exists())
+        self.assertEqual(self.launchctl.calls, [])
+
     def test_a_refused_definition_is_skipped_and_nothing_of_it_is_written(self):
         self.define({"Label": LABEL, "ProgramArguments": [ROOT_OWNED_PROGRAM], "UserName": "root"})
         result = sd.apply(self.system(), self.account)
@@ -399,7 +478,7 @@ class Applying(Base):
 
     def test_apply_needs_root_and_the_root_owned_copy(self):
         self.define()
-        with self.assertRaisesRegex(sd.SpaceDaemonsError, "needs root: sudo /usr/bin/python3 "
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "needs root: sudo /usr/bin/python3 -I "
                                     "/usr/local/libexec/observatory-space-daemons apply --user space"):
             sd.apply(self.system(euid=os.getuid() or 501), self.account)
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "root-owned copy: the copy x is not owned by root"):
@@ -567,10 +646,17 @@ class CommandLine(Base):
                 self.assertEqual(json.loads(out.stdout)["definitions"][0]["verdict"], "ok")
                 out = self.run_tool("apply", python=python)
                 self.assertEqual(out.returncode, 2)
-                self.assertIn("needs root", json.loads(out.stdout)["error"])
+                self.assertIn("needs root: sudo /usr/bin/python3 -I", json.loads(out.stdout)["error"])
+                self.assertEqual(json.loads(out.stdout)["code"], "not-root")
                 out = self.run_tool("status", python=python)
                 self.assertEqual((out.returncode, json.loads(out.stdout)["daemons"]), (0, []))
         self.assertFalse((self.sysroot / "Library").exists(), "nothing was written")
+
+    def test_help_names_the_isolated_command(self):
+        out = subprocess.run([sys.executable, "-I", str(TOOL), "--help"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply",
+                      " ".join(out.stdout.split()))
 
 
 if __name__ == "__main__":

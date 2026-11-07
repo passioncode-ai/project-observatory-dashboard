@@ -2786,7 +2786,7 @@ group and others) instead of `~/Library/LaunchAgents`, removes the job from `els
 runs:
 
 ```sh
-sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
 ```
 
 That command writes the job to `/Library/LaunchDaemons/LABEL.plist` with `UserName` and `GroupName`
@@ -2801,11 +2801,13 @@ sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observ
 /usr/local/libexec/observatory-space-daemons --version     # the version and the sha256 to compare
 ```
 
-`apply` and `remove` refuse to run from a copy that is not root's alone (owned by root, not writable
-by group or others, not a link, in folders only root can write). Check the folder before the copy
-goes in (`ls -ld /usr/local /usr/local/libexec`: owned by root, not writable by group or others),
-because Python reads modules from the script's folder before the tool's own check runs; where a
-package manager owns `/usr/local`, use another root-only folder and the same command with its path. `plan --user ACCOUNT [--from
+The `-I` in the command is required: in isolated mode Python leaves the script's folder and the user's
+site-packages out of its module path and ignores every `PYTHON*` variable, so nothing the account
+wrote is imported as root. `apply` and `remove` refuse without it (`not-isolated`, naming the command)
+and from a copy that is not root's alone (owned by root, not writable by group or others, not a link,
+in folders only root can write). Still check the folder before the copy goes in (`ls -ld /usr/local
+/usr/local/libexec`: owned by root, not writable by group or others); where a package manager owns
+`/usr/local`, use another root-only folder and the same command with its path. `plan --user ACCOUNT [--from
 background|staged] [--json]` shows what `apply` would write for each plist and why one is refused,
 and loads nothing; `status --user ACCOUNT` lists the daemons it wrote, loaded or not, and whether the
 file is still as written. A plist is refused, never partly installed, unless it keeps to the allowed
@@ -2813,7 +2815,16 @@ keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables`, `WorkingDi
 `KeepAlive`, `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
 `ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
 `AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
-account in folders nobody else can write, and its paths stay inside the account's home. A file in
+account in folders nobody else can write, and its `WorkingDirectory` stays inside the account's home.
+**Logs** go to a folder root owns, never where the plist said: launchd may open
+`StandardOutPath` and `StandardErrorPath` with root's rights, and a link in a folder the account
+controls could make root write elsewhere. The daemon writes
+`/Library/Logs/ProjectObservatory/ACCOUNT/LABEL.out.log` and `LABEL.err.log`; `apply` makes
+`/Library/Logs/ProjectObservatory` root:wheel 0755 and `ACCOUNT` in it root:wheel 0700 with one
+inherited ACL entry that lets the account read (`/bin/chmod +a "ACCOUNT allow
+list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), and refuses,
+installing nothing, when such a folder exists as a link or is not root's. `plan` notes `logs-moved`
+for a plist that named its own log paths. A file in
 `/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
 `/Library/Application Support/ProjectObservatory/space-daemons.json` (a stable interface, readable
 without root; its format is in COMPATIBILITY.md). One copy only: a label already loaded as an agent in

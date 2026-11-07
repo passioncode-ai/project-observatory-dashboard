@@ -1731,7 +1731,7 @@ class HeadlessSpace(Base):
         self.assertFalse(staged.exists())
         self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
         self.assertNotIn('bootstrap', [c[1] for c in run.calls], 'no agent load is tried in a domain that is absent')
-        step = (f'sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user space '
+        step = (f'sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user space '
                 f'--label {JOB_LABEL}')
         self.assertEqual((result['state'], result['load'], result['domain']),
                          ('waiting-for-root', 'waiting-for-root', 'system'))
@@ -1790,7 +1790,7 @@ class HeadlessSpace(Base):
         self.register()
         run = Launchd(system={JOB_LABEL})
         self.cutover(run)
-        with self.assertRaisesRegex(MM.MachineMoveError, 'only root stops: sudo /usr/bin/python3 '
+        with self.assertRaisesRegex(MM.MachineMoveError, 'only root stops: sudo /usr/bin/python3 -I '
                                     '/usr/local/libexec/observatory-space-daemons remove --user space '
                                     f'--label {JOB_LABEL}'):
             MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)

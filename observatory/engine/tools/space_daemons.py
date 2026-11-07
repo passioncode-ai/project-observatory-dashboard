@@ -11,7 +11,11 @@ root) and comes back after a reboot by itself.
 
 WHO RUNS IT. An administrator, once per job, with sudo:
 
-    sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+    sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+
+`-I` (isolated mode) is part of the command: Python then leaves the script's folder and the user's
+site-packages out of its module path and ignores every PYTHON* variable, so no module the space's
+account planted is imported as root. `apply` and `remove` refuse to run without it (`not-isolated`).
 
 Root must never run a file the space's account can write, so this script is not run from the engine's
 folder. The administrator installs a root-owned copy once, from the verified release:
@@ -20,9 +24,9 @@ folder. The administrator installs a root-owned copy once, from the verified rel
 
 `apply` and `remove` refuse to run from a copy that is not owned by root, is writable by group or
 others, is a symbolic link, or sits in a folder anyone but root can write. `plan`, `status` and
-`--version` work from any copy. That check runs after Python has read this file's imports, and Python
-reads modules from the script's own folder first: the folder must be root's alone before the copy goes
-in, which the administrator checks (`ls -ld /usr/local /usr/local/libexec`).
+`--version` work from any copy. That check runs after Python has read this file's imports: with `-I`
+the script's folder is not searched for modules, and the folder must still be root's alone before the
+copy goes in, which the administrator checks (`ls -ld /usr/local /usr/local/libexec`).
 
     space_daemons.py --version                       the version and the sha256 of this file
     space_daemons.py plan   --user NAME [--from background|staged] [--label L ...] [--json]
@@ -38,7 +42,7 @@ reads a definition only when the folder and the file are the account's own and w
 else, the file is a regular file opened without following a link, and it is at most 64 KiB.
 
 WHAT IT WRITES. Only a definition that passes every rule of `validate`: the allowed keys, a program the
-account or root owns in folders nobody else can write, paths inside the account's home. The daemon
+account or root owns in folders nobody else can write, a WorkingDirectory inside the account's home. The daemon
 plist is those keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER and LOGNAME in its
 environment, written atomically to /Library/LaunchDaemons/<label>.plist (root:wheel 0644), then loaded
 with `launchctl bootstrap system`. A file it did not write is never replaced: what it wrote is recorded
@@ -46,6 +50,13 @@ in /Library/Application Support/ProjectObservatory/space-daemons.json (root:whee
 interface other tools read without root: {"schema": "observatory-space-daemons/1", "entries": [{label,
 user, uid, source, sourceSha256, written, writtenSha256, at}]}. One copy only: a label loaded as an agent
 in the account's `gui/<uid>` domain (`loaded-in-gui`), or held by another account's entry, is refused.
+
+LOGS. launchd may open a daemon's StandardOutPath and StandardErrorPath with root's rights, after
+this tool's check: a path in a folder the account controls could be swapped for a link and make root
+write elsewhere. So the definition's own log paths are ignored (`plan` notes `logs-moved`) and the
+daemon writes to /Library/Logs/ProjectObservatory/<user>/<label>.out.log and .err.log, a folder root
+owns (root:wheel 0700, under a root:wheel 0755 one) with one inherited ACL entry that lets the account
+read it. WorkingDirectory stays as validated (inside the home, its final component not a link).
 
 Standard library only, and Python 3.9 (macOS's /usr/bin/python3): nothing here imports the engine.
 
@@ -77,7 +88,14 @@ DAEMONS_DIR = "Library/LaunchDaemons"
 REGISTRY_DIR = "Library/Application Support/ProjectObservatory"
 REGISTRY_NAME = "space-daemons.json"
 INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
+#: The only way root runs the copy: isolated mode, so nothing from the script's folder, the user's
+#: site-packages or a PYTHON* variable is imported or honoured.
+INSTALLED_COMMAND = "/usr/bin/python3 -I " + INSTALLED_COPY
 LAUNCHCTL = "/bin/launchctl"
+CHMOD = "/bin/chmod"
+LOGS_DIR = "Library/Logs/ProjectObservatory"
+#: The one ACL entry the account's log folder carries: read, inherited by every log inside.
+LOG_ACL = "%s allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"
 #: The account's data folder as root sees it: `machine_identity.data_dir` without XDG_DATA_HOME.
 DATA_PARTS = (".local", "share", "project-observatory")
 BACKGROUND_PARTS = ("background", "LaunchAgents")
@@ -106,11 +124,18 @@ ALLOWED_KEYS = ("Label", "ProgramArguments", "Program", "EnvironmentVariables", 
                 "AbandonProcessGroup", "LimitLoadToSessionType")
 #: Allowed, and left out of the daemon: a session type does not apply in the system domain.
 DROPPED_KEYS = ("LimitLoadToSessionType",)
-PATH_KEYS = ("WorkingDirectory", "StandardOutPath", "StandardErrorPath")
+#: Checked inside the home. The log paths are not: they are replaced by a root-owned folder's (LOGS).
+PATH_KEYS = ("WorkingDirectory",)
+LOG_KEYS = ("StandardOutPath", "StandardErrorPath")
 
 
 class SpaceDaemonsError(Exception):
-    """The command was refused before anything changed. The message names why and what to do."""
+    """The command was refused before anything changed. The message names why and what to do; `code`
+    names the refusal for a reader of --json."""
+
+    def __init__(self, message, code=None):
+        Exception.__init__(self, message)
+        self.code = code
 
 
 class Account(object):
@@ -135,11 +160,14 @@ class System(object):
     `root` prefixes /Library/LaunchDaemons and the registry; `runner` stands in for subprocess.run;
     `euid` for os.geteuid(); `set_owner(fd or path)` makes a written file or folder root:wheel; `self_check()` answers
     the problems of the copy being run (an empty list when it is the root-owned one); `owner_uid` is
-    who must own the system folders it writes into (root; a test's own uid in a temporary root)."""
+    who must own the system folders it writes into (root; a test's own uid in a temporary root);
+    `isolated` whether Python runs in isolated mode (`-I`)."""
 
     def __init__(self, root="/", runner=None, euid=None, set_owner=None, self_check=None, launchctl=LAUNCHCTL,
-                 owner_uid=0):
+                 owner_uid=0, isolated=None, chmod=CHMOD):
         self.root = root
+        self.isolated = (sys.flags.isolated == 1) if isolated is None else isolated
+        self.chmod = chmod
         self.owner_uid = owner_uid
         self.runner = runner or subprocess.run
         if euid is None:
@@ -161,11 +189,17 @@ class System(object):
     def registry_path(self):
         return os.path.join(self.registry_dir(), REGISTRY_NAME)
 
+    def log_dir(self, user):
+        return os.path.join(self.root, LOGS_DIR, user)
+
     def run(self, args):
         """launchctl with ARGS: (exit code, last line of its error). A launchctl that is not there answers 127."""
+        return self.command([self.launchctl] + list(args))
+
+    def command(self, argv):
+        """ARGV through the runner: (exit code, last line of its error); 127 when it could not start."""
         try:
-            p = self.runner([self.launchctl] + list(args), capture_output=True, text=True, timeout=60,
-                            stdin=subprocess.DEVNULL)
+            p = self.runner(list(argv), capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.SubprocessError) as exc:
             return 127, type(exc).__name__
         tail = ((p.stderr or "").strip().splitlines() or [""])[-1][:200]
@@ -353,8 +387,9 @@ def _read_one(path, account):
         os.close(fd)
 
 
-def read_definitions(folder, account, labels=None):
-    """Every `*.plist` in FOLDER, each with its label, file, problems and the daemon it would become."""
+def read_definitions(folder, account, labels=None, log_dir=None):
+    """Every `*.plist` in FOLDER, each with its label, file, problems and the daemon it would become, its
+    logs in LOG_DIR (default the production one) and `notes` (`logs-moved` when it named its own)."""
     if not _check_folder(folder, account):
         return []
     out = []
@@ -374,15 +409,18 @@ def read_definitions(folder, account, labels=None):
                 if not isinstance(doc, dict):
                     problems.append(_problem("not_a_dictionary"))
                     doc = None
+        notes = []
         if doc is not None:
-            found, daemon = validate(doc, name, account)
+            found, daemon = validate(doc, name, account, log_dir)
             problems.extend(found)
+            if any(key in doc for key in LOG_KEYS):
+                notes.append("logs-moved")
         label = doc.get("Label") if isinstance(doc, dict) and isinstance(doc.get("Label"), str) else name[:-6]
         if labels and label not in labels:
             continue
         out.append({"label": label, "file": path, "source_sha256": source,
                     "verdict": "ok" if not problems else sorted(set(p["code"] for p in problems)),
-                    "problems": problems, "daemon": None if problems else daemon})
+                    "problems": problems, "daemon": None if problems else daemon, "notes": notes})
     return out
 
 
@@ -479,7 +517,7 @@ def _check_calendar(value):
     return True
 
 
-def validate(doc, file_name, account):
+def validate(doc, file_name, account, log_dir=None):
     """(problems, daemon) for one agent definition: every problem a named code, and the daemon plist
     only when there is none."""
     problems = []
@@ -524,12 +562,20 @@ def validate(doc, file_name, account):
             problems.extend(_check_path(key, doc[key], account))
     if problems:
         return problems, None
-    return [], daemon_plist(doc, account)
+    return [], daemon_plist(doc, account, log_dir)
 
 
-def daemon_plist(doc, account):
-    """The daemon for a definition that passed `validate`: its keys, run as ACCOUNT."""
+def default_log_dir(user):
+    return os.path.join("/", LOGS_DIR, user)
+
+
+def daemon_plist(doc, account, log_dir=None):
+    """The daemon for a definition that passed `validate`: its keys, run as ACCOUNT, logging into the
+    root-owned LOG_DIR (the definition's own log paths are ignored)."""
     daemon = dict((k, v) for k, v in doc.items() if k in ALLOWED_KEYS and k not in DROPPED_KEYS)
+    log_dir = log_dir or default_log_dir(account.name)
+    daemon["StandardOutPath"] = os.path.join(log_dir, doc["Label"] + ".out.log")
+    daemon["StandardErrorPath"] = os.path.join(log_dir, doc["Label"] + ".err.log")
     env = dict(doc.get("EnvironmentVariables") or {})
     env.update({"HOME": account.home, "USER": account.name, "LOGNAME": account.name})
     daemon["EnvironmentVariables"] = env
@@ -639,13 +685,62 @@ class _Lock(object):
 
 def _require_root(system, verb, account_name):
     if system.euid != 0:
-        raise SpaceDaemonsError("%s writes /Library/LaunchDaemons and needs root: sudo /usr/bin/python3 %s %s "
-                                "--user %s ..." % (verb, INSTALLED_COPY, verb, account_name))
+        raise SpaceDaemonsError("%s writes /Library/LaunchDaemons and needs root: sudo %s %s --user %s ..."
+                                % (verb, INSTALLED_COMMAND, verb, account_name), "not-root")
+    if not system.isolated:
+        raise SpaceDaemonsError("not-isolated: %s runs only in Python's isolated mode, so no module from the "
+                                "script's folder, the user's site-packages or a PYTHON* variable is used as root: "
+                                "sudo %s %s --user %s ..." % (verb, INSTALLED_COMMAND, verb, account_name),
+                                "not-isolated")
     problems = system.self_check()
     if problems:
         raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once with `sudo install "
                                 "-o root -g wheel -m 0755 <space_daemons.py from the verified release> %s` and run "
-                                "that" % (verb, "; ".join(problems), INSTALLED_COPY))
+                                "`sudo %s %s ...`" % (verb, "; ".join(problems), INSTALLED_COPY, INSTALLED_COMMAND,
+                                                     verb), "not-root-owned-copy")
+
+
+def _check_root_dir(path, system, mode=None):
+    """PATH is a real folder (not a link) that root owns and nobody else can write; with MODE, exactly it."""
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise SpaceDaemonsError("the log folder %s cannot be read (%s)" % (path, type(exc).__name__), "log-folder")
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise SpaceDaemonsError("the log folder %s is a link or not a folder: move it aside" % path, "log-folder")
+    if info.st_uid != system.owner_uid:
+        raise SpaceDaemonsError("the log folder %s is not owned by root: move it aside" % path, "log-folder")
+    if mode is not None and stat.S_IMODE(info.st_mode) != mode:
+        raise SpaceDaemonsError("the log folder %s has mode %o, not %o" % (path, stat.S_IMODE(info.st_mode), mode),
+                                "log-folder")
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise SpaceDaemonsError("the log folder %s is writable by group or others: move it aside" % path,
+                                "log-folder")
+
+
+def ensure_log_dir(system, account):
+    """/Library/Logs/ProjectObservatory (root:wheel 0755) and <user> in it (root:wheel 0700) with one
+    inherited ACL entry that lets the account read its logs. A folder already there is used only when it is
+    root's own real folder; its owner and mode are checked before and after."""
+    user_dir = system.log_dir(account.name)
+    base = os.path.dirname(user_dir)
+    for path, mode in ((base, 0o755), (user_dir, 0o700)):
+        if os.path.lexists(path):
+            _check_root_dir(path, system)
+        else:
+            parent = os.path.dirname(path)
+            if not os.path.isdir(parent):
+                os.makedirs(parent, 0o755)
+            os.mkdir(path, mode)
+            system.set_owner(path)
+        os.chmod(path, mode)
+        _check_root_dir(path, system, mode)
+    code, tail = system.command([system.chmod, "+a", LOG_ACL % account.name, user_dir])
+    if code != 0:
+        raise SpaceDaemonsError("the account's read access to %s could not be added (chmod +a: exit %d %s); nothing "
+                                "was installed" % (user_dir, code, tail), "log-folder")
+    _check_root_dir(user_dir, system, 0o700)
+    return user_dir
 
 
 def _file_sha(path):
@@ -661,9 +756,10 @@ def _file_sha(path):
 # --- the commands ----------------------------------------------------------------------------------------
 
 
-def plan(account, source="background", labels=None):
+def plan(account, source="background", labels=None, system=None):
     folder = account.background_dir() if source == "background" else account.staged_dir()
-    defs = read_definitions(folder, account, labels)
+    system = system or system_from_environment()
+    defs = read_definitions(folder, account, labels, system.log_dir(account.name))
     found = set(d["label"] for d in defs)
     missing = [label for label in (labels or []) if label not in found]
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
@@ -751,12 +847,15 @@ def _install_one(system, account, definition, entries):
 def apply(system, account, labels=None):
     _require_root(system, "apply", account.name)
     folder = account.background_dir()
-    defs = read_definitions(folder, account, labels)
+    logs = system.log_dir(account.name)
+    defs = read_definitions(folder, account, labels, logs)
     found = set(d["label"] for d in defs)
     results = [{"label": label, "outcome": "not-found", "problems": [_problem("not_found", folder)]}
                for label in (labels or []) if label not in found]
     with _Lock(system):
         entries = read_registry(system)
+        if any(not d["problems"] for d in defs):
+            ensure_log_dir(system, account)
         for definition in defs:
             if definition["problems"]:
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "skipped",
@@ -764,7 +863,7 @@ def apply(system, account, labels=None):
                 continue
             results.append(_install_one(system, account, definition, entries))
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
-            "folder": folder, "results": results,
+            "folder": folder, "logs": logs, "results": results,
             "ok": all(r["outcome"] == "loaded" for r in results)}
 
 
@@ -816,7 +915,9 @@ def version_line():
 def parser():
     ap = argparse.ArgumentParser(prog="observatory-space-daemons",
                                  description="run a headless space's background jobs as system-domain daemons "
-                                             "that run as that account (UserName), never as root")
+                                             "that run as that account (UserName), never as root",
+                                 epilog="apply and remove run as root, only in isolated mode, from the root-owned "
+                                        "copy: sudo %s apply --user ACCOUNT --label LABEL" % INSTALLED_COMMAND)
     ap.add_argument("--version", action="store_true", help="the version and the sha256 of this file")
     sub = ap.add_subparsers(dest="command")
     p = sub.add_parser("plan", help="what apply would write, for each definition; loads nothing")
@@ -845,7 +946,8 @@ def _render(command, result):
         for d in result["definitions"]:
             verdict = "ok" if d["verdict"] == "ok" else "refused: " + ", ".join(
                 "%s (%s)" % (p["code"], p["detail"]) if p["detail"] else p["code"] for p in d["problems"])
-            lines.append("  %s  %s" % (d["label"], verdict))
+            notes = (" (%s)" % ", ".join(d.get("notes") or [])) if d.get("notes") else ""
+            lines.append("  %s  %s%s" % (d["label"], verdict, notes))
         for label in result["not_found"]:
             lines.append("  %s  not found" % label)
     elif command == "apply":
@@ -877,7 +979,7 @@ def main(argv=None, system=None):
     try:
         account = lookup_account(args.user)
         if args.command == "plan":
-            result = plan(account, args.source, args.label)
+            result = plan(account, args.source, args.label, system)
             ok = all(d["verdict"] == "ok" for d in result["definitions"]) and not result["not_found"]
         elif args.command == "apply":
             result = apply(system, account, args.label)
@@ -890,7 +992,7 @@ def main(argv=None, system=None):
             ok = True
     except SpaceDaemonsError as exc:
         if getattr(args, "json", False):
-            print(json.dumps({"error": str(exc)}, indent=2))
+            print(json.dumps({"error": str(exc), "code": exc.code}, indent=2))
         else:
             print("space-daemons: %s" % exc, file=sys.stderr)
         return 2
