@@ -31,6 +31,8 @@ import workspace
 import workspace_upgrade
 import backup_vault as vault
 import maintenance as M
+#: The real session-kind check; every test pins it (Base.setUp), this one tests it.
+REAL_HEADLESS = M.LaunchdSchedule.headless
 import app_update as A
 import release_signature
 import update_events
@@ -146,6 +148,10 @@ class Base(unittest.TestCase):
         conn.close()
         (self.home / "secrets" / "demo-slot").write_text(SECRET_MARK)
         self.store = FakeStore()
+        # A test names the session kind it means: detection would ask this machine's launchctl (OBS-361 part 2).
+        pin = patch.object(M.LaunchdSchedule, "headless", lambda sched: bool(sched._headless))
+        pin.start()
+        self.addCleanup(pin.stop)
 
     def tearDown(self):
         self.env.stop()
@@ -1736,6 +1742,101 @@ class Schedule(Base):
         self.assertFalse(sched.install()["changed"], "an identical, loaded job is left as it is")
         sched.uninstall()
         self.assertFalse(sched.plist.exists())
+
+    def headless(self, loaded=False):
+        """A schedule in an account with no GUI session (OBS-361 part 2); `loaded` is root's daemon."""
+        sched = M.LaunchdSchedule(self.home, headless=True)
+        self.bootstraps = []
+        self.daemon = {"loaded": loaded}
+        for name, fn in (("start_job", lambda plist: (self.bootstraps.append(plist), (False, "125"))[1]),
+                         ("job_loaded", lambda label: False)):
+            patcher = patch.object(sched.launch, name, fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        import machine_move
+        patcher = patch.object(machine_move, "_system_daemon_loaded",
+                               lambda runner, label, uid: self.daemon["loaded"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        Path.home().mkdir(parents=True, exist_ok=True)
+        return sched
+
+    def test_headless_the_job_goes_to_the_background_folder_and_waits_for_root(self):
+        import machine_identity
+        sched = self.headless()
+        out = sched.install()
+        target = machine_identity.background_dir(Path.home()) / f"{sched.label}.plist"
+        self.assertEqual(Path(out["definition"]), target)
+        self.assertEqual(plistlib.loads(target.read_bytes()), sched.document())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        self.assertFalse(sched.plist.exists(), "nothing in ~/Library/LaunchAgents")
+        self.assertEqual(self.bootstraps, [], "no `bootstrap gui/<uid>`: it fails with 125 there")
+        self.assertEqual((out["domain"], out["load"]), ("system", "waiting-for-root"))
+        self.assertEqual(len(out["next"]), 1)
+        self.assertIn(f"apply --user ", out["next"][0])
+        self.assertIn(f"--label {sched.label}", out["next"][0])
+        self.assertTrue(sched.installed())
+
+    def test_headless_a_copy_left_in_launchagents_is_removed(self):
+        sched = self.headless()
+        sched.plist.parent.mkdir(parents=True, exist_ok=True)
+        sched.plist.write_bytes(plistlib.dumps(sched.document()))
+        out = sched.install()
+        self.assertFalse(sched.plist.exists(), "a sign-in at the screen would start it a second time")
+        self.assertEqual(out["removed_agent_copy"], str(sched.plist))
+
+    def test_headless_a_loaded_daemon_with_the_same_definition_is_left_alone(self):
+        sched = self.headless(loaded=True)
+        first = sched.install()
+        self.assertEqual(first["next"][0].split()[4], "remove", "a new definition replaces the loaded one")
+        self.assertIn(" apply ", first["next"][1])
+        again = sched.install()
+        self.assertEqual((again["changed"], again["load"]), (False, "loaded"))
+        self.assertNotIn("next", again)
+
+    def test_headless_ensure_is_scheduled_not_unscheduled(self):
+        sched = self.headless()
+        out = M.ensure(self.home, schedule=M.Schedules(sched, self.headless()), store=self.store)
+        self.assertNotEqual(out["schedule"].get("result"), "unscheduled")
+        self.assertEqual(out["schedule"]["load"], "waiting-for-root")
+
+    def test_headless_uninstall_names_roots_remove_for_a_loaded_daemon(self):
+        sched = self.headless(loaded=True)
+        sched.install()
+        out = sched.uninstall()
+        self.assertFalse(sched.installed())
+        self.assertIn(" remove ", out["next"][0])
+        self.assertEqual(sched.status()["domain"], "system")
+
+    def test_headless_definition_uses_only_keys_root_accepts(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import space_daemons
+        finally:
+            sys.path.remove(str(ROOT / "tools"))
+        for job in ("maintain", "check"):
+            doc = M.LaunchdSchedule(self.home, headless=True, job=job).document()
+            self.assertLessEqual(set(doc), set(space_daemons.ALLOWED_KEYS) - set(space_daemons.DROPPED_KEYS), job)
+
+    def test_the_session_kind_is_read_from_launchctl_once(self):
+        calls = []
+
+        def runner(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, self.code, "", "")
+        with patch.object(M.sys, "platform", "darwin"), patch.object(M.shutil, "which", lambda name: "/bin/launchctl"):
+            for code, headless in ((125, True), (112, True), (0, False), (113, False)):
+                self.code = calls.clear() or code
+                sched = M.LaunchdSchedule(self.home, runner=runner)
+                self.assertEqual(REAL_HEADLESS(sched), headless, code)
+                REAL_HEADLESS(sched)
+                self.assertEqual(len(calls), 1, "asked once per schedule")
+
+            def broken(argv, **kw):
+                raise OSError("no launchctl")
+            self.assertFalse(REAL_HEADLESS(M.LaunchdSchedule(self.home, runner=broken)))
+        with patch.object(M.sys, "platform", "linux"):
+            self.assertFalse(REAL_HEADLESS(M.LaunchdSchedule(self.home, runner=runner)))
 
     def test_a_changed_job_is_never_booted_out_from_inside_a_pass(self):
         # Review F1: the update a pass runs asks for the schedule; booting the job out
