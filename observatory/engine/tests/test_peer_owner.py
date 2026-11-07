@@ -236,8 +236,8 @@ class Selection(unittest.TestCase):
 class LinuxListener(unittest.TestCase):
     """Linux prints a connection the server has not accept()ed yet with uid 0 and inode 0. Read as
     it stands, a client refused its own server and a root client read another account's listener as
-    its own uid. So on Linux the server end is always its listener's (state 0A), never the
-    connection row's (peer_owner 1.2.0, the contract's DEC-0154 HA-2 as amended)."""
+    its own uid. So on Linux an accepted row (inode set) answers with its own uid, and only a row
+    with inode 0 answers through its listener (state 0A) (peer_owner 1.2.0)."""
 
     def setUp(self):
         self.uid = F.OWN_UID
@@ -278,17 +278,36 @@ class LinuxListener(unittest.TestCase):
         self.assertIsNone(P.refusal(owner, F.SERVER_PORT))
         self.assertEqual(read.call_count, 1)                            # one read, no waiting for accept()
 
-    def test_the_connection_rows_own_uid_is_ignored_entirely(self):
-        # Unaccepted (uid 0, inode 0), or accepted with any uid and an inode: the listener answers.
-        for server_row in ((0, 0), (0, 77), (F.OTHER_UID, 78), (F.OWN_UID, 79)):
-            with self.subTest(server_row=server_row):
-                with self.proc(self.table((SERVER, F.OTHER_UID), server_row=server_row)):
-                    self.assertEqual((self.end().kind, self.end().uid), (P.ANOTHER_ACCOUNT, F.OTHER_UID))
-                with self.proc(self.table((SERVER, F.OWN_UID), server_row=server_row)):
-                    self.assertEqual(self.end().kind, P.THIS_ACCOUNT)
-        # Without its connection row at all, the listener still answers.
+    def test_an_inode_zero_row_falls_back_to_the_listener(self):
+        # Its printed uid 0 is ignored entirely: the listener answers, ours or another account's.
+        with self.proc(self.table((SERVER, F.OTHER_UID))):
+            self.assertEqual((self.end().kind, self.end().uid), (P.ANOTHER_ACCOUNT, F.OTHER_UID))
+        with self.proc(self.table((SERVER, F.OWN_UID))):
+            self.assertEqual((self.end().kind, self.end().uid), (P.THIS_ACCOUNT, F.OWN_UID))
+
+    def test_an_accepted_row_of_another_uid_refuses_even_with_our_listener(self):
+        """The race: another account listened while our server restarted, accepted the client,
+        closed its listener, and ours bound again before the client read the table. The accepted
+        row carries the accepting process's uid, and it decides, not the listener now there."""
+        with self.proc(self.table((SERVER, F.OWN_UID), server_row=(F.OTHER_UID, 78))):
+            owner = self.end()
+        self.assertEqual((owner.kind, owner.uid), (P.ANOTHER_ACCOUNT, F.OTHER_UID))
+        self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_NOT_OWN)
+        with self.proc(self.table((SERVER, F.OWN_UID), server_row=(0, 77))):        # root accepted it
+            self.assertEqual(P.refusal(self.end(), F.SERVER_PORT)[0], P.SERVER_NOT_OWN)
+
+    def test_an_accepted_row_of_ours_passes(self):
+        for listeners in (((SERVER, F.OWN_UID),), ((SERVER, F.OTHER_UID),), ()):
+            with self.subTest(listeners=listeners):
+                with self.proc(self.table(*listeners, server_row=(F.OWN_UID, 79))):
+                    owner = self.end()
+                self.assertEqual((owner.kind, owner.uid), (P.THIS_ACCOUNT, F.OWN_UID))
+
+    def test_no_connection_row_is_unknown_even_beside_our_listener(self):
+        # A listener swap shows as no row, never as our listener.
         with self.proc([P.Row(SERVER, ("*", 0), True, F.OWN_UID, None, False, 5)]):
-            self.assertEqual(self.end().kind, P.THIS_ACCOUNT)
+            owner = self.end()
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-row"))
 
     def test_a_root_client_refuses_another_accounts_slow_listener(self):
         self.uid = 0
@@ -303,6 +322,8 @@ class LinuxListener(unittest.TestCase):
             owner = self.end()
         self.assertEqual((owner.kind, owner.uid), (P.THIS_ACCOUNT, 0))
         self.assertIsNone(P.refusal(owner, F.SERVER_PORT))
+        with self.proc(self.table((SERVER, 0), server_row=(0, 81))):            # and once accepted
+            self.assertEqual(self.end().kind, P.THIS_ACCOUNT)
         self.uid = F.OWN_UID                                            # an ordinary client: root's is the system's
         with self.proc(self.table((SERVER, 0))):
             self.assertEqual(P.refusal(self.end(), F.SERVER_PORT)[0], P.SERVER_NOT_OWN)
@@ -335,7 +356,7 @@ class LinuxListener(unittest.TestCase):
         self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_UNVERIFIED)
 
     def test_no_listener_is_unknown(self):
-        with self.proc(self.table((("127.0.0.1", 1), F.OWN_UID), server_row=(F.OWN_UID, 80))):
+        with self.proc(self.table((("127.0.0.1", 1), F.OWN_UID))):
             owner = self.end()
         self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-listener"))
         self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_UNVERIFIED)
@@ -425,18 +446,31 @@ class OwnConnection(unittest.TestCase):
         self.assertEqual(self.send(P.Owner(P.THIS_ACCOUNT, 501, 9, "x"), 9), 204)
         self.assertEqual(self.received, ["Bearer synthetic"])
 
-    def test_on_linux_the_listener_decides_before_anything_is_sent(self):
-        listener = lambda uid: [P.Row(("127.0.0.1", self.port), ("*", 0), True, uid, None, False, 42)]
+    def linux_table(self, server_row, listener_uid):
+        """`server_end` over a Linux table built from the real connection: its server end as
+        (uid, inode) and the test server's listener of `listener_uid`."""
+        real = P.server_end
+
+        def checked(sock):
+            client = P._address(sock.getsockname())
+            rows = [P.Row(("127.0.0.1", self.port), client, False, server_row[0], None, False, server_row[1]),
+                    P.Row(("127.0.0.1", self.port), ("*", 0), True, listener_uid, None, False, 42)]
+            with mock.patch.object(P, "read_table", return_value=(rows, "proc")):
+                return real(sock)
+        return mock.patch.object(P, "server_end", side_effect=checked)
+
+    def test_on_linux_an_unaccepted_server_end_is_checked_through_its_listener(self):
         with mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True):
-            with mock.patch.object(P, "read_table", return_value=(listener(F.OWN_UID), "proc")):
+            with self.linux_table((0, 0), F.OWN_UID):
                 conn = P.own_connection(self.port, timeout=3)
                 conn.request("GET", "/", headers={"Authorization": "Bearer synthetic"})
                 self.assertEqual(conn.getresponse().status, 204)
                 conn.close()
-            with mock.patch.object(P, "read_table", return_value=(listener(F.OTHER_UID), "proc")):
-                with self.assertRaises(P.ListenerRefused) as caught:
-                    P.own_connection(self.port, timeout=3)
-        self.assertEqual(caught.exception.code, P.SERVER_NOT_OWN)
+            for server_row, listener_uid in (((0, 0), F.OTHER_UID), ((F.OTHER_UID, 43), F.OWN_UID)):
+                with self.subTest(server_row=server_row), self.linux_table(server_row, listener_uid):
+                    with self.assertRaises(P.ListenerRefused) as caught:
+                        P.own_connection(self.port, timeout=3)
+                    self.assertEqual(caught.exception.code, P.SERVER_NOT_OWN)
         self.assertEqual(self.received, ["Bearer synthetic"])
 
     def test_the_reconnect_after_connection_close_is_checked_again(self):

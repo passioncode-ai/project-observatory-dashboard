@@ -11,7 +11,8 @@ loopback socket proves nothing about who is on the other end. This module answer
 question from the host's socket table, read without privileges:
 
     listener(port) -> Owner       who listens on 127.0.0.1:<port> (also 0.0.0.0, ::1, ::)
-    server_end(sock) -> Owner     for a client's connected socket: who accepted it (Linux: who listens)
+    server_end(sock) -> Owner     for a client's connected socket: who accepted it (Linux, before
+                                  accept(): who listens)
     peer(sock) -> Owner           for a server's accepted socket: who connected
     peer_at(server, client)       the same as `peer`, from two (host, port) addresses
     own_connection(port, ...)     a CheckedHTTPConnection, connected: every connect, the first and
@@ -60,14 +61,19 @@ addresses are `unknown` (`several-rows`), never a guess.
   socket has no `struct socket` until then, and the kernel falls back to root. A client that asks
   right after `connect()` meets such a row often (reproduced on Linux 6.8: 68 of 100 connections
   to a busy server), and read as it stands it refused its own server, or, running as root, took
-  another account's slow listener for its own uid. So on Linux `server_end` never reads the
-  connection's own row, whatever its inode: the owner is the listener's (state 0A) on the
-  connection's server address and port, the exact bind first, else the wildcard, the order the
-  kernel delivers in (the Fabric agent contract's DEC-0154 HA-2, as amended). Listener rows of one
-  uid (a SO_REUSEPORT group, or one process's IPv4 and IPv6 sockets) count as that uid; rows of
-  different uids, a listener row without its own inode, or none, are `unknown`. `peer` still
-  reads the client's row, whose socket has an inode once open; a client row with inode 0 is a
-  socket its process already closed and is `unknown` (`no-socket`).
+  another account's slow listener for its own uid. So on Linux `server_end` is a hybrid. A
+  connection row with an inode carries the accepting process's uid (the kernel grafts the socket
+  onto that process at `accept()`), and it decides: that is what stops another account that
+  listened while our server restarted, accepted, closed its listener and let ours bind again from
+  passing for us. Only a row with inode 0 answers through its listener (state 0A) on the server
+  address and port, the exact bind first, else the wildcard, the order the kernel delivers in.
+  That fallback is sound: a queued connection dies with its listener, two uids cannot listen on
+  one address and port at once, and the table prints the listening sockets first, so a swap
+  shows as `no-row`, never as our listener. Listener rows of one uid (a SO_REUSEPORT group, or one
+  process's IPv4 and IPv6 sockets) count as that uid; rows of different uids, a listener row
+  without its own inode, or none, are `unknown`. `peer` reads the client's row, whose socket has
+  an inode once open; a client row with inode 0 is a socket its process already closed and is
+  `unknown` (`no-socket`).
 - Windows (`iphlpapi`): `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` gives each row's owning
   pid; `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`, `OpenProcessToken(TOKEN_QUERY)` and
   `GetTokenInformation(TokenUser)` give its account SID, compared with this process's. A process
@@ -664,13 +670,13 @@ def find(rows: list[Row], local: tuple[str, int], remote: tuple[str, int]) -> li
 
 
 def listener_owner(rows: list[Row], local: tuple[str, int], how: str) -> Owner:
-    """Linux: the owner of a connection's server end, which is its listener's: the listener rows
-    (state 0A) on the exact server address and port, else on the wildcard, the order the kernel
-    delivers a connection in. The connection's own row is never read: until `accept()` the kernel
-    prints it with uid 0 and inode 0. Listener rows of one uid count as that uid (a SO_REUSEPORT
-    group, which the kernel keeps to one uid, or one process's IPv4 and IPv6 sockets); rows of
-    different uids, a listener row without its own inode, or none at all, are `unknown`, which
-    every caller refuses."""
+    """Linux: the owner of a server end the server has not accepted yet (its row has inode 0 and
+    a uid 0 that is no owner), which is its listener's: the listener rows (state 0A) on the exact
+    server address and port, else on the wildcard, the order the kernel delivers a connection in.
+    A queued connection dies with its listener, so the listener found is the one that holds it.
+    Listener rows of one uid count as that uid (a SO_REUSEPORT group, which the kernel keeps to
+    one uid, or one process's IPv4 and IPv6 sockets); rows of different uids, a listener row
+    without its own inode, or none at all, are `unknown`, which every caller refuses."""
     host, port = local
     hits: list[Row] = []
     for bind in (host, "*"):
@@ -689,21 +695,22 @@ def listener_owner(rows: list[Row], local: tuple[str, int], how: str) -> Owner:
 
 def _owner_of(local: tuple[str, int], remote: tuple[str, int], *, server_end_of: bool = False) -> Owner:
     """The owner of the socket at `local` connected to `remote`: the one live row with those
-    addresses. `server_end_of`: `local` is a server's address, and on Linux (`proc`) its listener
-    answers instead of the row (`listener_owner`). A row Linux prints with inode 0 has no socket,
-    so its uid 0 is no owner: `unknown` (`no-socket`)."""
+    addresses. A row Linux prints with inode 0 has no socket, so its uid 0 is no owner. A server
+    end (`server_end_of`) in that state is a connection not accepted yet and answers through its
+    listener (`listener_owner`); a client end in it is a socket its process closed: `unknown`
+    (`no-socket`). A row with an inode always answers with its own uid."""
     try:
         rows, how = read_table()
     except TableUnreadable as exc:
         return Owner(UNKNOWN, None, None, method(), str(exc))
-    if server_end_of and how == "proc":
-        return listener_owner(rows, local, how)
     found = find(rows, local, remote)
     if not found:
         return Owner(UNKNOWN, None, None, how, "no-row")
     if len(found) > 1:
         return Owner(UNKNOWN, None, None, how, "several-rows")
     if found[0].inode == 0:
+        if server_end_of:
+            return listener_owner(rows, local, how)
         return Owner(UNKNOWN, None, None, how, "no-socket")
     return resolve(found[0], how)
 
@@ -728,8 +735,8 @@ def server_end(sock: socket.socket) -> Owner:
     """For a client's connected socket: who accepted it. The row whose local address is the
     server's and whose remote address is this socket's own, which is the server process's
     accepted socket, so a listener swapped after `listen` cannot pass for the one that answers.
-    On Linux the connection's row carries no owner until the server accepts it, so the listener
-    on the server's address answers there, always (`listener_owner`)."""
+    On Linux that row carries no owner until the server accepts it (inode 0), and only a row in
+    that state answers through the listener on the server's address (`listener_owner`)."""
     try:
         own, server = sock.getsockname(), sock.getpeername()
     except OSError as exc:

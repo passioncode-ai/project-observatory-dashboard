@@ -92,11 +92,15 @@ a referer are labels at most.
     local server's refusals are counted in its receipt `store/raw/serverd.json` (`peer`) and shown
     by `full doctor` (`loopback.refused`); memory over HTTP and the keyserver count in their own
     process only. On Linux the table prints a connection the server has not accepted yet with uid 0
-    and inode 0, which is not its owner, so a client takes the server end's owner only from the
-    listener rows (state 0A) on the server's address and port, never from the connection's row:
-    the exact bind, else the wildcard; rows of one uid count as that uid, rows of different uids or
-    none are `unknown` (the Fabric agent contract's DEC-0154 HA-2, as amended). A server reading a
-    client end without its inode (a socket its process closed) answers `peer-unverified`. An
+    and inode 0, which is not its owner. A client therefore reads the server end's row while it
+    has an inode: from `accept()` on it carries the accepting process's uid and decides, so another
+    account that accepted during our server's restart and gave the port back is still refused.
+    Only a row with inode 0 takes the owner of the listener rows (state 0A) on the server's address
+    and port: the exact bind, else the wildcard; rows of one uid count as that uid, rows of
+    different uids or none are `unknown`. A queued connection dies with its listener and two uids
+    cannot listen on one address and port at once, so a swapped listener shows as `no-row`, never
+    as ours. A server reading a client end without its inode (a socket its process closed) answers
+    `peer-unverified`. An
     owner's uid is compared with this process's before uid 0 reads as the system's, so a process
     running as root owns root's sockets; pid 1 stays the system's (`peer_owner.py` 1.2.0).
     - `test_foreign_and_unverified_are_refused_before_the_request_line`;
@@ -107,13 +111,15 @@ a referer are labels at most.
     - `test_one_account_serves_as_before`, `test_one_account_and_auto_never_reads_the_table`;
     - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`;
     - `test_an_unaccepted_row_whose_listener_is_ours_reads_as_ours`,
-      `test_the_connection_rows_own_uid_is_ignored_entirely`,
+      `test_an_inode_zero_row_falls_back_to_the_listener`,
+      `test_an_accepted_row_of_another_uid_refuses_even_with_our_listener`,
+      `test_an_accepted_row_of_ours_passes`,
       `test_a_root_client_refuses_another_accounts_slow_listener`,
       `test_a_root_client_owns_its_own_root_listener`,
       `test_listener_rows_of_one_uid_count_as_that_uid`,
       `test_two_listeners_with_different_uids_are_unknown`, `test_no_listener_is_unknown`,
       `test_the_server_reading_a_client_row_without_a_socket_fails_closed`,
-      `test_on_linux_the_listener_decides_before_anything_is_sent`,
+      `test_on_linux_an_unaccepted_server_end_is_checked_through_its_listener`,
       `test_a_connection_not_accepted_yet_is_this_accounts`.
 
 ## Gaps, stated

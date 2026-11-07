@@ -350,27 +350,49 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
-## Linux: a client reads its server's owner from the listener (peer_owner 1.2.0, the release after 0.34.0)
+## Linux: a server end not accepted yet reads its listener's owner (peer_owner 1.2.0, the release after 0.34.0)
 
 A fix on Linux, and one rule change on every POSIX host. `/proc/net/tcp` and `tcp6` print a connection the server has
 not `accept()`ed yet with uid 0 and inode 0, because its socket has no owner until then. A client that checks the
 server end right after connecting (OBS-355) read that row as root's and refused its own account's server
 (`server-not-own`), on a busy server for most connections; a client running as root could take another account's slow
-listener for its own uid. Now, on Linux, the client takes the server end's owner only from the listener rows (state
-`0A`) on the server's address and port, never from the connection's own row, whatever its inode: the exact bind first,
-else the wildcard (`0.0.0.0`, `::`, IPv4-mapped included). Rows of one uid (a `SO_REUSEPORT` group, or one process's
-IPv4 and IPv6 sockets) count as that uid; rows of different uids, a listener row without its inode, or no listener read
-as `unknown` (`listeners-disagree`, `listener-no-socket`, `no-listener`), which the client refuses as
-`server-unverified`. This is the Fabric agent contract's DEC-0154 HA-2, as amended. macOS and Windows still read the
-accepting process's own socket. On the server side a client end with inode 0 is a socket its process already closed:
-it reads as `unknown` (`no-socket`) and is refused `403 peer-unverified` instead of `403 peer-foreign-account`; an open
-client end always has its inode, so nothing else changes there.
+listener for its own uid.
+
+Now, on Linux, the client reads the server end with a hybrid rule:
+
+- A connection row with an inode answers with its own uid, as before. From `accept()` on it carries the accepting
+  process's uid, and it is what refuses another account that listened while our server restarted, accepted the
+  client, closed its listener and let our server bind again before the client read the table: the row is still the
+  other account's, whatever listens on the port now.
+- Only a row with inode 0 takes the owner of the listener rows (state `0A`) on the server's address and port: the
+  exact bind first, else the wildcard (`0.0.0.0`, `::`, IPv4-mapped included). Rows of one uid (a `SO_REUSEPORT`
+  group, or one process's IPv4 and IPv6 sockets) count as that uid; rows of different uids, a listener row without its
+  inode, or no listener read as `unknown` (`listeners-disagree`, `listener-no-socket`, `no-listener`), which the
+  client refuses as `server-unverified`. The fallback is sound because a queued connection dies with its listener, two
+  uids cannot listen on one address and port at once, and the table prints the listening sockets first, so a swapped
+  listener shows as `no-row`, never as ours.
+
+macOS and Windows still read the accepting process's own socket. On the server side a client end with inode 0 is a
+socket its process already closed: it reads as `unknown` (`no-socket`) and is refused `403 peer-unverified` instead
+of `403 peer-foreign-account`; an open client end always has its inode, so nothing else changes there.
 
 The rule change: an owner's uid is now compared with this process's uid before uid 0 reads as the system's, so a
-process running as root owns root's sockets. A server or client running as root now admits its own root peer or listener as `this-account`
-where it refused it as `system`; pid 1 (launchd's socket-activated jobs) stays `system`. An ordinary account still refuses root's
-sockets. `peer_owner.Row` gains `inode` (Linux only, None elsewhere) as its last field, so positional construction is
-unchanged. A project that vendors `peer_owner.py` takes this file's 1.2.0 to get the fix.
+process running as root owns root's sockets. A server or client running as root now admits its own root peer or
+listener as `this-account` where it refused it as `system`; pid 1 (launchd's socket-activated jobs) stays `system`. An
+ordinary account still refuses root's sockets. `peer_owner.Row` gains `inode` (Linux only, None elsewhere) as its last
+field, so positional construction is unchanged. A project that vendors `peer_owner.py` takes this file's 1.2.0 to get
+the fix.
+
+Known limits of the Linux listener fallback, each failing closed or left as it was:
+
+- `SO_BINDTODEVICE` is not visible in the table's rows, so two listeners on one address and port bound to different
+  devices look alike: rows of one uid count as that uid, rows of different uids are `unknown`.
+- The wildcard is family-blind: `0.0.0.0` and `::` both read as the wildcard, so another account's IPv6-only `::`
+  listener beside our `0.0.0.0` one on the same port makes a not-yet-accepted connection `unknown`, and the client
+  refuses it.
+- A systemd system socket unit creates its listener as root and hands it to the `User=` service: before `accept()` the
+  connection reads as root's (`system`), so even a client of the service's own account refuses it until the service
+  accepts; once accepted, the row carries the service's uid.
 
 ## Machine move: a space with nobody logged in (OBS-361 part 1, the release after 0.34.0)
 
