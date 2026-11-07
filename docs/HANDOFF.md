@@ -21,7 +21,8 @@ expectation. It changes test evidence and documentation, not the published engin
 0.30.0): `machine-move cutover` also reads `launchctl print gui/<uid>` exit 125 as an account with nobody signed in
 (OBS-361 part 1), which macOS 26.6 answers there; 0.35.0 tried an agent load that launchd refused.
 
-Next: tag `v0.35.1`, verify and install (receipts in the record).
+Released: tag `v0.35.1` on `4575bdfc`, verified, installed and announced (receipts in the record). Next: OBS-361
+part 2 after the shared source of truth.
 
 [2026-11-07: release 0.35.0](runs/2026-11-07-release-0.35.0/README.md): engine 0.35.0 (`observatory-log` stays
 0.30.0): jobs of a macOS account with nobody signed in run as system daemons the administrator installs (OBS-361 part
