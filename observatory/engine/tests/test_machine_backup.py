@@ -1549,6 +1549,61 @@ class MachineMove(Base):
             MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501, confirm=YES)
         self.assertEqual(live.read_bytes(), b'mine')
 
+    # OBS-390: a definition staged by a restore days ago may name a release folder that a newer release
+    # has since replaced; cutover refuses it by name instead of loading a job that cannot start.
+    def test_a_stale_staged_plist_is_refused_before_anything_moves(self):
+        import plistlib
+        gone = self.base / 'releases' / 'old-release' / 'bin' / 'run'
+        cases = {'program': ({'ProgramArguments': [str(gone), '--serve']}, str(gone)),
+                 'Program key': ({'Program': str(gone), 'ProgramArguments': [str(gone)]}, str(gone)),
+                 'working directory': ({'ProgramArguments': ['/usr/bin/true'],
+                                        'WorkingDirectory': str(self.base / 'releases' / 'old-release')},
+                                       str(self.base / 'releases' / 'old-release'))}
+        for name, (doc, missing) in cases.items():
+            with self.subTest(name):
+                staged = self.stage(data=plistlib.dumps({'Label': JOB_LABEL, **doc}))
+                run = Recorder({('launchctl', 'print'): 113})
+                asked = []
+                with self.allow, self.assertRaises(MM.MachineMoveError) as caught:
+                    MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501,
+                               confirm=lambda *a: asked.append(a) or True)
+                message = str(caught.exception)
+                self.assertIn('staged-plist-stale', message)
+                self.assertIn(missing, message)
+                self.assertIn(str(MI.staging_dir(self.home)), message, 'the remedy names the staging folder')
+                self.assertIn('cutover again', message)
+                self.assertEqual(asked, [], 'refused before the person is asked')
+                self.assertTrue(staged.is_file(), 'the staged definition stays where it was')
+                self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
+                self.assertNotIn('bootstrap', [c[1] for c in run.calls])
+                self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+                staged.unlink()
+
+    def test_a_fresh_staged_plist_whose_paths_exist_is_loaded(self):
+        import plistlib
+        release = self.base / 'releases' / 'new-release'
+        (release / 'bin').mkdir(parents=True)
+        program = release / 'bin' / 'run'
+        program.write_text('#!/bin/sh\n')
+        program.chmod(0o755)
+        data = plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(program)], 'WorkingDirectory': str(release)})
+        self.stage(data=data)
+        run = Recorder({('launchctl', 'print'): 113})
+        with self.allow:
+            result = MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        self.assertEqual(result['load'], 'loaded')
+        self.assertEqual((self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist').read_bytes(), data)
+
+    def test_a_definition_already_in_the_job_folder_is_not_judged_as_staged(self):
+        # Only a staged copy can be days old; this machine's own definition keeps today's path.
+        import plistlib
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(self.base / 'absent')]}))
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': ALPHA, 'by': 'machine-restore'}], self.home)
+        result = MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501, confirm=YES)
+        self.assertEqual(result['definition'], str(live))
+
     def test_leave_stops_the_job_stages_it_and_names_where_it_runs(self):
         live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
         live.parent.mkdir(parents=True)
@@ -1826,6 +1881,22 @@ class HeadlessSpace(Base):
         (folder / f'{colon}.plist').write_bytes(plistlib.dumps({'Label': colon, 'ProgramArguments': ['/usr/bin/true']}))
         with self.assertRaisesRegex(MM.MachineMoveError, 'label_shape'):
             MM.cutover(colon, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_a_stale_staged_plist_never_waits_for_root(self):
+        # OBS-390: root's tool would answer program_missing; cutover names the stale staged copy first.
+        import plistlib
+        gone = self.base / 'releases' / 'old-release' / 'bin' / 'run'
+        staged = self.stage()
+        staged.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(gone)]}))
+        with self.assertRaises(MM.MachineMoveError) as caught:
+            self.cutover(Launchd())
+        message = str(caught.exception)
+        self.assertIn('staged-plist-stale', message)
+        self.assertIn(str(gone), message)
+        self.assertNotIn('program_missing', message)
+        self.assertTrue(staged.is_file(), 'it stays where it was')
+        self.assertFalse(MI.background_dir(self.home).exists())
+        self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
 
     def test_cutover_parses_and_trusts_as_root_will(self):
         folder = MI.staging_dir(self.home)

@@ -15,6 +15,13 @@ then moves one at a time, the old machine first:
     on either:                      project-observatory full machine-move show
         this machine's id (what `--to` takes), the placement file and the staged jobs
 
+A STAGED COPY CAN BE STALE (OBS-390). A restore stages the other machine's definitions, possibly days
+before `cutover`; a service released anew since then lives in a new release folder. Before a staged
+launchd definition moves, `cutover` checks that its `Program`, `ProgramArguments[0]` and `WorkingDirectory`
+exist here, and refuses that label as `staged-plist-stale`, naming the missing path and the remedy (write
+the job's current definition into the staging folder, then cutover again), before anything moves or the
+person is asked. A definition already in the job folder is this machine's own and is not judged.
+
 Nothing here reads the other machine: the person runs `leave` there, and `cutover` says so. A load
 that fails puts the definition back into the staging folder, so a failed cutover never leaves a job
 that would start at the next login. `OBSERVATORY_SYSTEM_SETUP=0` (a test, a sandbox) moves files
@@ -284,6 +291,44 @@ def ask_left(label: str, me: str) -> bool:
     return typed.strip() == label
 
 
+#: The definition keys whose path must exist before a staged job is moved here (OBS-390).
+STALE_KEYS = ("Program", "ProgramArguments", "WorkingDirectory")
+
+
+def stale_paths(definition: Path) -> list[str]:
+    """The paths a staged launchd definition names that do not exist on this machine (OBS-390).
+
+    A restore stages the other machine's definitions; a service released anew since then lives in a new
+    release folder, so the staged copy may name a program or a working directory that is gone. Checked:
+    `Program`, `ProgramArguments[0]` and `WorkingDirectory`, each only when it is an absolute path (a bare
+    program name is launchd's PATH lookup; root's own tool refuses it by its own rule). A definition that
+    does not parse is left to the checks that follow, which name it."""
+    try:
+        doc = plistlib.loads(definition.read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError):
+        return []
+    if not isinstance(doc, dict):
+        return []
+    args = doc.get("ProgramArguments")
+    named = [doc.get("Program"), args[0] if isinstance(args, list) and args else None, doc.get("WorkingDirectory")]
+    missing: list[str] = []
+    for value in named:
+        if isinstance(value, str) and value and os.path.isabs(value) and value not in missing \
+                and not os.path.exists(value):
+            missing.append(value)
+    return missing
+
+
+def _refuse_stale(label: str, staged: Path, staging: Path) -> None:
+    missing = stale_paths(staged)
+    if missing:
+        raise MachineMoveError(
+            f"staged-plist-stale: the staged {staged.name} names a path missing on this machine: "
+            f"{', '.join(missing)} (a restore staged it, and its service has since moved, for example to a new "
+            f"release folder). Write the job's current definition into {staging} (replacing {staged.name}), then "
+            f"run cutover again: `{PROG} machine-move cutover {label}`; nothing moved")
+
+
 def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sys.platform,
             uid: int | None = None, confirm=None) -> dict:
     """Move one staged job here: into the job folder, enabled and loaded, and out of `elsewhere`.
@@ -303,6 +348,9 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     if staged is None and live is None and background is None:
         raise MachineMoveError(f"no job {label} is staged here ({staging}) or defined here ({folder}); "
                                "`full machine-move show` lists the staged ones")
+    if staged is not None and system == "launchd":
+        # OBS-390: a staged copy can be days old; one naming a path gone from here never moves.
+        _refuse_stale(label, staged, staging)
     if headless:
         default = home / ".local" / "share" / mi.FOLDER
         if mi.data_dir(home) != default:
