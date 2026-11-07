@@ -5422,8 +5422,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "55f8c19f5dd3a35902d18412588f8223962955a7aa915b35d07ed94e4b669d75",
-      "bytes": 149184
+      "export_sha256": "08962562b64a222d10e912d43517f0386b36f9925e9b6803ab55a481c48efe51",
+      "bytes": 149294
     },
     {
       "path": "tests/test_manifest_urls.py",
