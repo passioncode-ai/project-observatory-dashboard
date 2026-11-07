@@ -46,5 +46,9 @@ process sees only its own sockets in the kernel's connection table; then tag, ve
   another uid) are fixed at `cde87e39`. The confirming round there passed: 135 tests OK; eight mutations (the uid selector, the calibration ignored or skipped, the setuid refusal removed, the old restricted rule, either deadline dropped) each turn one test red; live again on both computers. Its two low points were wording, fixed on the release branch: the docstrings now say the libproc path also reads the effective uid (only to refuse a setuid context), and that `listener` and a first calibration each have a deadline of their own. L4 (several processes skip `expect_pid`), L5
   (root with `SO_REUSEPORT` and the exact-bind rule) and L6 (non-`TableUnreadable` ctypes errors; one transient
   calibration failure disables libproc for the process) are filed after the pause.
+- The first CI run of the release PR failed on Linux in two tests the review round added: they mark the platform
+  darwin, and on glibc `sysctlbyname` is no symbol, so ctypes raised `AttributeError` instead of `TableUnreadable`
+  (the review's L6). Fixed in the module: a missing libc or libproc symbol now reads as an unreadable table, so the
+  question answers `unknown`. `test_peer_owner` OK on Linux in containers with Python 3.11 and 3.13, and on macOS.
 - On the release branch: the root release suites, `tools/sync_engine_docs.py --check`, `tools/check_backlog.py`,
   `observatory/engine/tools/check_docs.py`, `check_paths.py` and the inventory check (results in the release PR).

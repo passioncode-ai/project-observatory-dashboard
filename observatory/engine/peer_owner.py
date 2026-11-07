@@ -547,7 +547,10 @@ def _sysctl_blob(name: bytes = b"net.inet.tcp.pcblist_n") -> bytes:
         libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
     except OSError as exc:
         raise TableUnreadable(f"sysctl: libc: {type(exc).__name__}") from None
-    fn = libc.sysctlbyname
+    try:
+        fn = libc.sysctlbyname
+    except AttributeError:                                           # a libc without it (glibc): unreadable
+        raise TableUnreadable("sysctl: no sysctlbyname") from None
     fn.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p,
                    ctypes.c_size_t]
     fn.restype = ctypes.c_int
@@ -612,9 +615,12 @@ def _libproc_sockets(deadline: float) -> list[tuple[int, tuple[str, int], tuple[
         lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
     except OSError as exc:
         raise TableUnreadable(f"libproc: {type(exc).__name__}") from None
-    lib.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
-    lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
-    lib.proc_pidfdinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    try:
+        lib.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidfdinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    except AttributeError as exc:                                    # a missing symbol answers nothing
+        raise TableUnreadable(f"libproc: missing {exc.args[0] if exc.args else 'symbol'}"[:120]) from None
     for fn in (lib.proc_listpids, lib.proc_pidinfo, lib.proc_pidfdinfo):
         fn.restype = ctypes.c_int
     uid = _posix_uid()

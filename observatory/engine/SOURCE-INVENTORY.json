@@ -3582,8 +3582,8 @@
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bf13b79d4938f8416ecb4108dec52dd9c7ef77b8f13c47af39c06ea9467f98b1",
-      "bytes": 56009
+      "export_sha256": "3c39ae1c5ae5c3243699aba5d1d4d9141acd06d5cf4475ec8e5f384a6b79e9ab",
+      "bytes": 56430
     },
     {
       "path": "plugins/README.md",
