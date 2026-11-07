@@ -2776,6 +2776,52 @@ second machine's `elsewhere`; a load that fails puts the plist back in staging. 
 on the old machine needs nothing: on the second machine it stays staged and named as running
 elsewhere.
 
+**An account nobody logs in to** (macOS, OBS-361 part 1). An OS account with no graphical login, such
+as a second "space" on a shared computer, has no `gui/<uid>` launchd domain, and launchd refuses its
+agents even when root asks. When `launchctl print gui/<uid>` answers that the domain does not exist,
+`cutover` runs the same checks, then moves the plist into
+`~/.local/share/project-observatory/background/LaunchAgents/` (owner-only, the plist made unwritable by
+group and others) instead of `~/Library/LaunchAgents`, removes the job from `elsewhere`, and answers
+`"state": "waiting-for-root"` with `human_steps` and `next` naming the one command an administrator
+runs:
+
+```sh
+sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+```
+
+That command writes the job to `/Library/LaunchDaemons/LABEL.plist` with `UserName` and `GroupName`
+set to the account (launchd.plist(5): they apply only in the system domain), so it runs as that
+account, never as root, and starts again after a reboot with nobody logged in. Root never runs a file
+the account can write, so the administrator first installs a root-owned copy once per computer, from
+a release they verified (the wheel's `tools/space_daemons.py`; `--version` prints
+its sha256, which matches that file's `export_sha256` in the release's `SOURCE-INVENTORY.json`):
+
+```sh
+sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
+/usr/local/libexec/observatory-space-daemons --version     # the version and the sha256 to compare
+```
+
+`apply` and `remove` refuse to run from a copy that is not root's alone (owned by root, not writable
+by group or others, not a link, in folders only root can write). Check the folder before the copy
+goes in (`ls -ld /usr/local /usr/local/libexec`: owned by root, not writable by group or others),
+because Python reads modules from the script's folder before the tool's own check runs; where a
+package manager owns `/usr/local`, use another root-only folder and the same command with its path. `plan --user ACCOUNT [--from
+background|staged] [--json]` shows what `apply` would write for each plist and why one is refused,
+and loads nothing; `status --user ACCOUNT` lists the daemons it wrote, loaded or not, and whether the
+file is still as written. A plist is refused, never partly installed, unless it keeps to the allowed
+keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables`, `WorkingDirectory`, `RunAtLoad`,
+`KeepAlive`, `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
+`ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
+`AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
+account in folders nobody else can write, and its paths stay inside the account's home. A file in
+`/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
+`/Library/Application Support/ProjectObservatory/space-daemons.json`. Once root loaded the job, a
+second `cutover` answers `"state": "complete"`, and `machine-move show` lists it under `background`
+as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-root` before).
+`leave` refuses while that daemon runs and names `sudo ... remove --user ACCOUNT --label LABEL`;
+after it, `leave` stages the plist from the background folder as usual. Root cannot see the account's
+`XDG_DATA_HOME`, so `cutover` refuses, before moving anything, in such an account with a custom one.
+
 **The placement file**, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`,
 owner-only and written atomically, says which jobs this machine holds for another one, until the
 estate record carries placement:

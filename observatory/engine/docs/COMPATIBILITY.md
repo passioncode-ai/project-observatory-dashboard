@@ -350,6 +350,30 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Machine move: a space with nobody logged in (OBS-361 part 1, the release after 0.34.0)
+
+On macOS, `full machine-move cutover LABEL` in an account whose `launchctl print gui/<uid>` answers
+"could not find domain" (exit 112: nobody is logged in graphically) no longer tries to load an agent there,
+fails and puts the plist back. It runs the same checks, moves the plist into
+`~/.local/share/project-observatory/background/LaunchAgents/` (owner-only; group and other write bits cleared),
+removes the job from `elsewhere`, and answers with new fields: `domain` (`system`), `state` (`waiting-for-root`,
+or `complete` once root loaded it), `load` `waiting-for-root` or `loaded`, `human_steps` and `next` naming
+`sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`. Any other
+answer of `launchctl print gui/<uid>` (0, or a code the engine does not know) keeps the earlier path and answer,
+byte for byte. Such an account with a custom `XDG_DATA_HOME` is refused before anything moves (part 1). `machine-move
+show` gains `background[]` of `label`, `file`, `daemon` (`loaded`, `registered`, `waiting-for-root`); `leave` refuses
+while root's daemon of the job runs and names `... remove --user ACCOUNT --label LABEL`; `machine-move status` counts
+the background folder's jobs as defined here (M4) and adds one evidence line for each.
+
+`tools/space_daemons.py` (`SPACE_DAEMONS_VERSION` 1.0.0) is new: standard library only, Python 3.9 (macOS's
+`/usr/bin/python3`), run by an administrator from a root-owned copy. It writes files outside any workspace:
+
+| Path | What | Older engines, removal |
+|---|---|---|
+| `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
+| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER, LOGNAME; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
+| `/Library/Application Support/ProjectObservatory/space-daemons.json` | schema `observatory-space-daemons/1`: `updatedAt`, `daemons[]` of `label`, `user`, `uid`, `source_sha256`, `written_sha256`, `at`; root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
+
 ## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, 0.34.0)
 
 Additive, with no new file, table or migration. A workspace snapshot's `manifest.json` gains `home_path`, the home

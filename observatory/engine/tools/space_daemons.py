@@ -1,0 +1,893 @@
+#!/usr/bin/python3
+"""Run a headless space's background jobs as system-domain daemons that run as that account (OBS-361 part 1).
+
+WHY. On macOS an OS account with no graphical login has no `gui/<uid>` launchd domain, and
+`launchctl bootstrap user/<uid> PLIST` refuses agents (exit 5) even as root. So a job staged for such
+an account (a second-machine restore into a "space" nobody logs in to) can never start as an agent,
+and asking a person to sign in after every boot is a human gate per reboot. launchd.plist(5) gives
+the way out: `UserName` and `GroupName` apply in the privileged system domain, so the same job, written
+to /Library/LaunchDaemons with `UserName` set to the space's account, runs as that account (never as
+root) and comes back after a reboot by itself.
+
+WHO RUNS IT. An administrator, once per job, with sudo:
+
+    sudo /usr/bin/python3 /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+
+Root must never run a file the space's account can write, so this script is not run from the engine's
+folder. The administrator installs a root-owned copy once, from the verified release:
+
+    sudo install -o root -g wheel -m 0755 <this file from the verified release> /usr/local/libexec/observatory-space-daemons
+
+`apply` and `remove` refuse to run from a copy that is not owned by root, is writable by group or
+others, is a symbolic link, or sits in a folder anyone but root can write. `plan`, `status` and
+`--version` work from any copy. That check runs after Python has read this file's imports, and Python
+reads modules from the script's own folder first: the folder must be root's alone before the copy goes
+in, which the administrator checks (`ls -ld /usr/local /usr/local/libexec`).
+
+    space_daemons.py --version                       the version and the sha256 of this file
+    space_daemons.py plan   --user NAME [--from background|staged] [--label L ...] [--json]
+    space_daemons.py apply  --user NAME [--label L ...] [--json]          (root)
+    space_daemons.py remove --user NAME --label L [--json]                (root)
+    space_daemons.py status --user NAME [--json]
+
+WHAT IT READS. The account's background folder, `<home>/.local/share/project-observatory/background/
+LaunchAgents/` (`full machine-move cutover` puts a job there when the account has no GUI session), or,
+for `plan --from staged`, the staging folder `.../machine-move/LaunchAgents/`. Root cannot see the
+account's XDG_DATA_HOME, so a space with a custom XDG_DATA_HOME is not supported here (part 1). Root
+reads a definition only when the folder and the file are the account's own and writable by nobody
+else, the file is a regular file opened without following a link, and it is at most 64 KiB.
+
+WHAT IT WRITES. Only a definition that passes every rule of `validate`: the allowed keys, a program the
+account or root owns in folders nobody else can write, paths inside the account's home. The daemon
+plist is those keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER and LOGNAME in its
+environment, written atomically to /Library/LaunchDaemons/<label>.plist (root:wheel 0644), then loaded
+with `launchctl bootstrap system`. A file it did not write is never replaced: what it wrote is recorded
+in /Library/Application Support/ProjectObservatory/space-daemons.json (root:wheel 0644).
+
+Standard library only, and Python 3.9 (macOS's /usr/bin/python3): nothing here imports the engine.
+
+Exit codes: 0 done; 1 a definition was refused or a step failed (each is named); 2 refused before
+anything changed (not root, not the root-owned copy, an unknown account, an unreadable folder).
+"""
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import plistlib
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+try:
+    import fcntl
+    import grp
+    import pwd
+except ImportError:  # Windows: the module still imports, so its pure rules can be tested there.
+    fcntl = grp = pwd = None
+
+SPACE_DAEMONS_VERSION = "1.0.0"
+REGISTRY_SCHEMA = "observatory-space-daemons/1"
+DAEMONS_DIR = "Library/LaunchDaemons"
+REGISTRY_DIR = "Library/Application Support/ProjectObservatory"
+REGISTRY_NAME = "space-daemons.json"
+INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
+LAUNCHCTL = "/bin/launchctl"
+#: The account's data folder as root sees it: `machine_identity.data_dir` without XDG_DATA_HOME.
+DATA_PARTS = (".local", "share", "project-observatory")
+BACKGROUND_PARTS = ("background", "LaunchAgents")
+STAGED_PARTS = ("machine-move", "LaunchAgents")
+MAX_DEFINITION_BYTES = 64 * 1024
+FIRST_PERSON_UID = 500
+
+#: Test seams. They take effect only when the switch is "1" AND the process is not root, so no
+#: ordinary environment variable can redirect a root write in production.
+TEST_SWITCH = "OBSERVATORY_SPACE_DAEMONS_FOR_TESTS"
+TEST_ROOT = "OBSERVATORY_SPACE_DAEMONS_TEST_ROOT"
+TEST_HOME = "OBSERVATORY_SPACE_DAEMONS_TEST_HOME"
+TEST_LAUNCHCTL = "OBSERVATORY_SPACE_DAEMONS_TEST_LAUNCHCTL"
+
+LABEL_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PROCESS_TYPES = ("Background", "Standard", "Adaptive", "Interactive")
+CALENDAR_KEYS = ("Minute", "Hour", "Day", "Weekday", "Month")
+KEEPALIVE_BOOLS = ("SuccessfulExit", "Crashed", "AfterInitialDemand")
+KEEPALIVE_DICTS = ("OtherJobEnabled", "PathState")
+#: Keys copied from an agent definition. Everything else (UserName, GroupName, InitGroups, Umask,
+#: SessionCreate, LaunchEvents, MachServices, Sockets, WatchPaths, QueueDirectories, RootDirectory,
+#: resource limits, ...) is refused: in the system domain they would act with root's reach.
+ALLOWED_KEYS = ("Label", "ProgramArguments", "Program", "EnvironmentVariables", "WorkingDirectory",
+                "RunAtLoad", "KeepAlive", "StartInterval", "StartCalendarInterval", "StandardOutPath",
+                "StandardErrorPath", "ThrottleInterval", "ProcessType", "Nice", "LowPriorityIO", "ExitTimeOut",
+                "AbandonProcessGroup", "LimitLoadToSessionType")
+#: Allowed, and left out of the daemon: a session type does not apply in the system domain.
+DROPPED_KEYS = ("LimitLoadToSessionType",)
+PATH_KEYS = ("WorkingDirectory", "StandardOutPath", "StandardErrorPath")
+
+
+class SpaceDaemonsError(Exception):
+    """The command was refused before anything changed. The message names why and what to do."""
+
+
+class Account(object):
+    """The space's OS account as root sees it: name, uid, primary gid and its group's name, home."""
+
+    def __init__(self, name, uid, gid, group, home):
+        self.name, self.uid, self.gid, self.group, self.home = name, uid, gid, group, home
+
+    def data_dir(self):
+        return os.path.join(self.home, *DATA_PARTS)
+
+    def background_dir(self):
+        return os.path.join(self.data_dir(), *BACKGROUND_PARTS)
+
+    def staged_dir(self):
+        return os.path.join(self.data_dir(), *STAGED_PARTS)
+
+
+class System(object):
+    """Where the system's files live and how commands run; every seam a test needs, injected.
+
+    `root` prefixes /Library/LaunchDaemons and the registry; `runner` stands in for subprocess.run;
+    `euid` for os.geteuid(); `set_owner(fd or path)` makes a written file or folder root:wheel; `self_check()` answers
+    the problems of the copy being run (an empty list when it is the root-owned one); `owner_uid` is
+    who must own the system folders it writes into (root; a test's own uid in a temporary root)."""
+
+    def __init__(self, root="/", runner=None, euid=None, set_owner=None, self_check=None, launchctl=LAUNCHCTL,
+                 owner_uid=0):
+        self.root = root
+        self.owner_uid = owner_uid
+        self.runner = runner or subprocess.run
+        if euid is None:
+            euid = os.geteuid() if hasattr(os, "geteuid") else -1
+        self.euid = euid
+        self.set_owner = set_owner or _own_root
+        self.self_check = self_check or (lambda: check_own_copy(os.path.abspath(__file__)))
+        self.launchctl = launchctl
+
+    def daemons_dir(self):
+        return os.path.join(self.root, DAEMONS_DIR)
+
+    def daemon_path(self, label):
+        return os.path.join(self.daemons_dir(), label + ".plist")
+
+    def registry_dir(self):
+        return os.path.join(self.root, REGISTRY_DIR)
+
+    def registry_path(self):
+        return os.path.join(self.registry_dir(), REGISTRY_NAME)
+
+    def run(self, args):
+        """launchctl with ARGS: (exit code, last line of its error). A launchctl that is not there answers 127."""
+        try:
+            p = self.runner([self.launchctl] + list(args), capture_output=True, text=True, timeout=60,
+                            stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 127, type(exc).__name__
+        tail = ((p.stderr or "").strip().splitlines() or [""])[-1][:200]
+        return p.returncode, tail
+
+    def loaded(self, label):
+        return self.run(["print", "system/" + label])[0] == 0
+
+
+def _own_root(target):
+    if isinstance(target, int):
+        os.fchown(target, 0, 0)
+    else:
+        os.chown(target, 0, 0)
+
+
+def _testing():
+    return os.environ.get(TEST_SWITCH) == "1" and hasattr(os, "geteuid") and os.geteuid() != 0
+
+
+def system_from_environment():
+    """The production System, or, only under the test switch in a process that is not root, one whose
+    system root and launchctl the tests chose."""
+    if _testing():
+        return System(root=os.environ.get(TEST_ROOT) or "/",
+                      launchctl=os.environ.get(TEST_LAUNCHCTL) or LAUNCHCTL)
+    return System()
+
+
+def registry_path():
+    """Where the registry is, for a reader (the engine's `machine-move`) that never writes it."""
+    return system_from_environment().registry_path()
+
+
+def _sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# --- the account ------------------------------------------------------------------------------------
+
+
+def lookup_account(name, getpwnam=None, getgrgid=None):
+    """The account NAME, refused when it is root or a system account (uid below 500)."""
+    if pwd is None and getpwnam is None:
+        raise SpaceDaemonsError("this tool runs on macOS: there is no account database here")
+    getpwnam = getpwnam or pwd.getpwnam
+    getgrgid = getgrgid or grp.getgrgid
+    try:
+        entry = getpwnam(name)
+    except KeyError:
+        raise SpaceDaemonsError("no account named %r on this computer" % name)
+    if entry.pw_uid == 0:
+        raise SpaceDaemonsError("%s is root: a space's jobs never run as root" % name)
+    if entry.pw_uid < FIRST_PERSON_UID:
+        raise SpaceDaemonsError("%s is a system account (uid %d, below %d): only a person's or a space's account "
+                                "takes jobs" % (name, entry.pw_uid, FIRST_PERSON_UID))
+    try:
+        group = getgrgid(entry.pw_gid).gr_name
+    except KeyError:
+        raise SpaceDaemonsError("the primary group (gid %d) of %s has no name" % (entry.pw_gid, name))
+    home = entry.pw_dir
+    if _testing() and os.environ.get(TEST_HOME):
+        home = os.environ[TEST_HOME]
+    if not os.path.isabs(home):
+        raise SpaceDaemonsError("the home of %s is not an absolute path" % name)
+    return Account(name, entry.pw_uid, entry.pw_gid, group, home)
+
+
+# --- the copy being run -------------------------------------------------------------------------------
+
+
+def _writable_by_others(info, allowed_uids):
+    """Whether someone other than ALLOWED_UIDS (and root's group) can change what INFO describes. A
+    world- or group-writable folder with the sticky bit lets nobody replace another owner's entry."""
+    mode = info.st_mode
+    if info.st_uid not in allowed_uids:
+        return True
+    sticky = bool(mode & stat.S_ISVTX) and stat.S_ISDIR(mode)
+    if mode & stat.S_IWOTH and not sticky:
+        return True
+    if mode & stat.S_IWGRP and not sticky and info.st_gid != 0:
+        return True
+    return False
+
+
+def _folders_up(path):
+    """PATH's folders from its parent up to /."""
+    out, current = [], os.path.dirname(path)
+    while True:
+        out.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            return out
+        current = parent
+
+
+def check_own_copy(path):
+    """The problems of the copy at PATH as one root may run: [] when it is a regular root-owned file,
+    writable only by root, in folders only root can write."""
+    problems = []
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        return ["the copy %s cannot be read (%s)" % (path, type(exc).__name__)]
+    if stat.S_ISLNK(info.st_mode):
+        return ["the copy %s is a symbolic link" % path]
+    if not stat.S_ISREG(info.st_mode):
+        problems.append("the copy %s is not a regular file" % path)
+    if info.st_uid != 0:
+        problems.append("the copy %s is not owned by root" % path)
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        problems.append("the copy %s is writable by group or others" % path)
+    for folder in _folders_up(os.path.realpath(path)):
+        try:
+            finfo = os.stat(folder)
+        except OSError:
+            problems.append("the folder %s cannot be read" % folder)
+            continue
+        if finfo.st_uid != 0 or finfo.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            problems.append("the folder %s can be written by an account other than root" % folder)
+    return problems
+
+
+# --- reading definitions -------------------------------------------------------------------------------
+
+
+def _problem(code, detail=""):
+    return {"code": code, "detail": detail}
+
+
+def _check_folder(folder, account):
+    try:
+        info = os.lstat(folder)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise SpaceDaemonsError("the folder %s cannot be read (%s)" % (folder, type(exc).__name__))
+    if not stat.S_ISDIR(info.st_mode):
+        raise SpaceDaemonsError("%s is not a folder (a link is refused)" % folder)
+    if info.st_uid != account.uid:
+        raise SpaceDaemonsError("the folder %s is not owned by %s" % (folder, account.name))
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise SpaceDaemonsError("the folder %s is writable by group or others: `chmod go-w` it as %s"
+                                % (folder, account.name))
+    return True
+
+
+def _read_one(path, account):
+    """(bytes, problems) of one definition file, opened without following a link."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        if os.path.islink(path):
+            return None, [_problem("symlink", "a definition is never read through a link")]
+        return None, [_problem("unreadable", type(exc).__name__)]
+    try:
+        info = os.fstat(fd)
+        problems = []
+        if not stat.S_ISREG(info.st_mode):
+            problems.append(_problem("not_regular_file"))
+        if info.st_uid != account.uid:
+            problems.append(_problem("not_owned_by_account", "owner uid %d" % info.st_uid))
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            problems.append(_problem("writable_by_others"))
+        if info.st_size > MAX_DEFINITION_BYTES:
+            problems.append(_problem("too_large", "%d bytes, at most %d" % (info.st_size, MAX_DEFINITION_BYTES)))
+        if problems:
+            return None, problems
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_DEFINITION_BYTES:
+                return None, [_problem("too_large", "grew while read")]
+            chunks.append(chunk)
+        return b"".join(chunks), []
+    finally:
+        os.close(fd)
+
+
+def read_definitions(folder, account, labels=None):
+    """Every `*.plist` in FOLDER, each with its label, file, problems and the daemon it would become."""
+    if not _check_folder(folder, account):
+        return []
+    out = []
+    for name in sorted(os.listdir(folder)):
+        if name.startswith(".") or not name.endswith(".plist"):
+            continue
+        path = os.path.join(folder, name)
+        data, problems = _read_one(path, account)
+        doc, daemon, source = None, None, None
+        if data is not None:
+            source = _sha256_bytes(data)
+            try:
+                doc = plistlib.loads(data)
+            except Exception:  # plistlib raises several types for a file that is not a plist.
+                problems.append(_problem("unreadable_plist"))
+            else:
+                if not isinstance(doc, dict):
+                    problems.append(_problem("not_a_dictionary"))
+                    doc = None
+        if doc is not None:
+            found, daemon = validate(doc, name, account)
+            problems.extend(found)
+        label = doc.get("Label") if isinstance(doc, dict) and isinstance(doc.get("Label"), str) else name[:-6]
+        if labels and label not in labels:
+            continue
+        out.append({"label": label, "file": path, "source_sha256": source,
+                    "verdict": "ok" if not problems else sorted(set(p["code"] for p in problems)),
+                    "problems": problems, "daemon": None if problems else daemon})
+    return out
+
+
+# --- the rules -------------------------------------------------------------------------------------
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _str_dict(value, values=str):
+    return isinstance(value, dict) and all(isinstance(k, str) and isinstance(v, values) for k, v in value.items())
+
+
+def _inside(path, home):
+    home = os.path.realpath(home)
+    return path == home or path.startswith(home.rstrip(os.sep) + os.sep)
+
+
+def _check_program(program, account):
+    problems = []
+    if not os.path.isabs(program):
+        return [_problem("program_not_absolute", program)]
+    real = os.path.realpath(program)
+    try:
+        info = os.stat(real)
+    except OSError:
+        return [_problem("program_missing", program)]
+    if not stat.S_ISREG(info.st_mode):
+        return [_problem("program_not_regular_file", program)]
+    allowed = (0, account.uid)
+    if info.st_uid not in allowed:
+        problems.append(_problem("program_owner", "%s is owned by uid %d" % (real, info.st_uid)))
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        problems.append(_problem("program_writable_by_others", real))
+    # Both the path as written and the file it resolves to: a link in a folder someone else can write
+    # could be pointed elsewhere after this check.
+    seen = set()
+    for folder in _folders_up(program) + _folders_up(real):
+        if folder in seen:
+            continue
+        seen.add(folder)
+        try:
+            finfo = os.stat(folder)
+        except OSError:
+            problems.append(_problem("program_dir_unreadable", folder))
+            continue
+        if _writable_by_others(finfo, allowed):
+            problems.append(_problem("program_dir_writable", folder))
+    return problems
+
+
+def _check_path(key, value, account):
+    if not isinstance(value, str) or not value:
+        return [_problem("bad_value", key)]
+    if not os.path.isabs(value):
+        return [_problem("path_not_absolute", key)]
+    parent = os.path.realpath(os.path.dirname(os.path.normpath(value)))
+    final = os.path.join(parent, os.path.basename(os.path.normpath(value)))
+    if not _inside(final, account.home):
+        return [_problem("path_outside_home", "%s: %s" % (key, value))]
+    if os.path.islink(final):
+        return [_problem("path_symlink", "%s: %s" % (key, value))]
+    return []
+
+
+def _check_keepalive(value):
+    if isinstance(value, bool):
+        return True
+    if not isinstance(value, dict):
+        return False
+    for k, v in value.items():
+        if k in KEEPALIVE_BOOLS:
+            if not isinstance(v, bool):
+                return False
+        elif k in KEEPALIVE_DICTS:
+            if not _str_dict(v, bool):
+                return False
+        else:
+            return False
+    return True
+
+
+def _check_calendar(value):
+    entries = value if isinstance(value, list) else [value]
+    if not entries:
+        return False
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry:
+            return False
+        for k, v in entry.items():
+            if k not in CALENDAR_KEYS or not _is_int(v) or v < 0:
+                return False
+    return True
+
+
+def validate(doc, file_name, account):
+    """(problems, daemon) for one agent definition: every problem a named code, and the daemon plist
+    only when there is none."""
+    problems = []
+    for key in sorted(doc):
+        if key not in ALLOWED_KEYS:
+            problems.append(_problem("key_not_allowed", key))
+    label = doc.get("Label")
+    if not isinstance(label, str) or not LABEL_SHAPE.match(label):
+        problems.append(_problem("label_shape", "letters, digits, then . _ - (at most 128)"))
+    else:
+        if file_name != label + ".plist":
+            problems.append(_problem("file_name", "the file is %s, the label asks for %s.plist" % (file_name, label)))
+        if label.startswith("com.apple."):
+            problems.append(_problem("label_reserved", "com.apple. is the system's"))
+    args = doc.get("ProgramArguments")
+    if not isinstance(args, list) or not args or not all(isinstance(a, str) for a in args):
+        problems.append(_problem("program_arguments", "a non-empty list of strings"))
+    else:
+        if "Program" in doc and doc["Program"] != args[0]:
+            problems.append(_problem("program_mismatch", "Program differs from ProgramArguments[0]"))
+        problems.extend(_check_program(args[0], account))
+    checks = {
+        "EnvironmentVariables": lambda v: _str_dict(v),
+        "RunAtLoad": lambda v: isinstance(v, bool),
+        "LowPriorityIO": lambda v: isinstance(v, bool),
+        "AbandonProcessGroup": lambda v: isinstance(v, bool),
+        "KeepAlive": _check_keepalive,
+        "StartInterval": lambda v: _is_int(v) and v > 0,
+        "ThrottleInterval": lambda v: _is_int(v) and v >= 0,
+        "ExitTimeOut": lambda v: _is_int(v) and v >= 0,
+        "StartCalendarInterval": _check_calendar,
+        "ProcessType": lambda v: v in PROCESS_TYPES,
+        "Nice": lambda v: _is_int(v) and 0 <= v <= 20,
+        "LimitLoadToSessionType": lambda v: isinstance(v, str) or (isinstance(v, list) and
+                                                                  all(isinstance(s, str) for s in v)),
+    }
+    for key, ok in sorted(checks.items()):
+        if key in doc and not ok(doc[key]):
+            problems.append(_problem("bad_value", key))
+    for key in PATH_KEYS:
+        if key in doc:
+            problems.extend(_check_path(key, doc[key], account))
+    if problems:
+        return problems, None
+    return [], daemon_plist(doc, account)
+
+
+def daemon_plist(doc, account):
+    """The daemon for a definition that passed `validate`: its keys, run as ACCOUNT."""
+    daemon = dict((k, v) for k, v in doc.items() if k in ALLOWED_KEYS and k not in DROPPED_KEYS)
+    env = dict(doc.get("EnvironmentVariables") or {})
+    env.update({"HOME": account.home, "USER": account.name, "LOGNAME": account.name})
+    daemon["EnvironmentVariables"] = env
+    daemon.setdefault("WorkingDirectory", account.home)
+    daemon["UserName"] = account.name
+    daemon["GroupName"] = account.group
+    daemon["InitGroups"] = True
+    return daemon
+
+
+# --- writing --------------------------------------------------------------------------------------------
+
+
+def write_atomic(path, data, system, mode=0o644):
+    """DATA at PATH, whole or not at all: a temporary file in the same folder, its mode and owner set,
+    synced, then renamed over the name; the folder synced after."""
+    folder = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", suffix=".tmp", dir=folder)
+    try:
+        os.fchmod(fd, mode)
+        system.set_owner(fd)
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+        os.close(fd)
+        fd = None
+        os.rename(tmp, path)
+        tmp = None
+        dfd = os.open(folder, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if tmp is not None and os.path.lexists(tmp):
+            os.unlink(tmp)
+
+
+def _ensure_system_dir(path, system):
+    """A root-owned 0755 folder (created when absent); a link or a file in its place is refused."""
+    if not os.path.lexists(path):
+        os.makedirs(path, 0o755)
+        system.set_owner(path)
+        os.chmod(path, 0o755)
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode):
+        raise SpaceDaemonsError("%s is not a folder (a link is refused)" % path)
+    if system.euid == 0 and (info.st_uid != system.owner_uid or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise SpaceDaemonsError("%s is not root's alone: make it root:wheel 0755 first" % path)
+
+
+def read_registry(system):
+    """The registry's entries ({label, user, uid, source_sha256, written_sha256, at}); [] when absent. One
+    that does not read is refused by name, never replaced."""
+    path = system.registry_path()
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise SpaceDaemonsError("the registry %s cannot be read (%s)" % (path, type(exc).__name__))
+    try:
+        with os.fdopen(fd, "rb") as stream:
+            fd = None
+            doc = json.loads(stream.read(4 * 1024 * 1024).decode("utf-8"))
+    except (ValueError, OSError):
+        raise SpaceDaemonsError("the registry %s is not a %s file: move it aside" % (path, REGISTRY_SCHEMA))
+    finally:
+        if fd is not None:
+            os.close(fd)
+    if not isinstance(doc, dict) or doc.get("schema") != REGISTRY_SCHEMA or not isinstance(doc.get("daemons"), list):
+        raise SpaceDaemonsError("the registry %s is not a %s file: move it aside" % (path, REGISTRY_SCHEMA))
+    return [e for e in doc["daemons"] if isinstance(e, dict) and isinstance(e.get("label"), str)]
+
+
+def write_registry(system, entries):
+    _ensure_system_dir(system.registry_dir(), system)
+    doc = {"schema": REGISTRY_SCHEMA, "updatedAt": _now(),
+           "daemons": sorted(entries, key=lambda e: e["label"])}
+    write_atomic(system.registry_path(), (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8"), system)
+
+
+class _Lock(object):
+    """One writer of the registry at a time (two administrators, two terminals)."""
+
+    def __init__(self, system):
+        self.system, self.fd = system, None
+
+    def __enter__(self):
+        if fcntl is None:
+            return self
+        _ensure_system_dir(self.system.registry_dir(), self.system)
+        path = os.path.join(self.system.registry_dir(), ".lock")
+        self.fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o644)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc):
+        if self.fd is not None:
+            os.close(self.fd)
+        return False
+
+
+def _require_root(system, verb, account_name):
+    if system.euid != 0:
+        raise SpaceDaemonsError("%s writes /Library/LaunchDaemons and needs root: sudo /usr/bin/python3 %s %s "
+                                "--user %s ..." % (verb, INSTALLED_COPY, verb, account_name))
+    problems = system.self_check()
+    if problems:
+        raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once with `sudo install "
+                                "-o root -g wheel -m 0755 <space_daemons.py from the verified release> %s` and run "
+                                "that" % (verb, "; ".join(problems), INSTALLED_COPY))
+
+
+def _file_sha(path):
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as stream:
+        return _sha256_bytes(stream.read())
+
+
+# --- the commands ----------------------------------------------------------------------------------------
+
+
+def plan(account, source="background", labels=None):
+    folder = account.background_dir() if source == "background" else account.staged_dir()
+    defs = read_definitions(folder, account, labels)
+    found = set(d["label"] for d in defs)
+    missing = [label for label in (labels or []) if label not in found]
+    return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
+            "from": source, "folder": folder, "definitions": defs, "not_found": missing}
+
+
+def _install_one(system, account, definition, entries):
+    """Write and load one daemon; on a failure put back what was there. Answers its outcome."""
+    label = definition["label"]
+    target = system.daemon_path(label)
+    mine = [e for e in entries if e["label"] == label]
+    entry = mine[0] if mine else None
+    result = {"label": label, "file": definition["file"], "daemon": target}
+    if entry is not None and entry.get("user") != account.name:
+        result.update(outcome="refused", problems=[_problem("owned_by_other_account", str(entry.get("user")))])
+        return result
+    previous = None
+    if os.path.lexists(target):
+        if os.path.islink(target) or not os.path.isfile(target):
+            result.update(outcome="refused", problems=[_problem("not_written_by_this_tool", "not a regular file")])
+            return result
+        if entry is None:
+            result.update(outcome="refused", problems=[_problem(
+                "not_written_by_this_tool", "%s exists and the registry does not name it" % target)])
+            return result
+        current = _file_sha(target)
+        if current != entry.get("written_sha256"):
+            result.update(outcome="refused", problems=[_problem(
+                "changed_since_written", "%s differs from what this tool wrote" % target)])
+            return result
+        with open(target, "rb") as stream:
+            previous = stream.read()
+    elif entry is None and system.loaded(label):
+        result.update(outcome="refused", problems=[_problem(
+            "label_taken", "system/%s is loaded and this tool did not load it" % label)])
+        return result
+    data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
+    _ensure_system_dir(system.daemons_dir(), system)
+    write_atomic(target, data, system)
+    new_entry = {"label": label, "user": account.name, "uid": account.uid,
+                 "source_sha256": definition["source_sha256"], "written_sha256": _sha256_bytes(data), "at": _now()}
+    others = [e for e in entries if e["label"] != label]
+    write_registry(system, others + [new_entry])
+
+    def put_back(problem):
+        if previous is not None:
+            write_atomic(target, previous, system)
+            write_registry(system, others + [entry])
+            if not system.loaded(label):
+                system.run(["bootstrap", "system", target])
+            note = "the previous daemon is back"
+        else:
+            if os.path.lexists(target):
+                os.unlink(target)
+            write_registry(system, others)
+            note = "nothing is left in /Library/LaunchDaemons"
+        result.update(outcome="failed", problems=[problem], put_back=note)
+        return result
+
+    if system.loaded(label):
+        code, tail = system.run(["bootout", "system/" + label])
+        if code != 0 and system.loaded(label):
+            # Still the old job: put the old file back (or none, as before) and leave it running.
+            if previous is not None:
+                write_atomic(target, previous, system)
+            elif os.path.lexists(target):
+                os.unlink(target)
+            write_registry(system, others + ([entry] if entry is not None else []))
+            result.update(outcome="failed", problems=[_problem("bootout_failed", "exit %d %s" % (code, tail))])
+            return result
+    code, tail = system.run(["bootstrap", "system", target])
+    if code != 0:
+        return put_back(_problem("bootstrap_failed", ("exit %d %s" % (code, tail)).strip()))
+    entries[:] = others + [new_entry]
+    result.update(outcome="loaded", written_sha256=new_entry["written_sha256"])
+    return result
+
+
+def apply(system, account, labels=None):
+    _require_root(system, "apply", account.name)
+    folder = account.background_dir()
+    defs = read_definitions(folder, account, labels)
+    found = set(d["label"] for d in defs)
+    results = [{"label": label, "outcome": "not-found", "problems": [_problem("not_found", folder)]}
+               for label in (labels or []) if label not in found]
+    with _Lock(system):
+        entries = read_registry(system)
+        for definition in defs:
+            if definition["problems"]:
+                results.append({"label": definition["label"], "file": definition["file"], "outcome": "skipped",
+                                "problems": definition["problems"]})
+                continue
+            results.append(_install_one(system, account, definition, entries))
+    return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
+            "folder": folder, "results": results,
+            "ok": all(r["outcome"] == "loaded" for r in results)}
+
+
+def remove(system, account, label):
+    _require_root(system, "remove", account.name)
+    with _Lock(system):
+        entries = read_registry(system)
+        mine = [e for e in entries if e["label"] == label and e.get("user") == account.name]
+        if not mine:
+            raise SpaceDaemonsError("the registry names no daemon %s of %s: this tool removes only what it wrote "
+                                    "(`status --user %s` lists them)" % (label, account.name, account.name))
+        if system.loaded(label):
+            code, tail = system.run(["bootout", "system/" + label])
+            if code != 0 and system.loaded(label):
+                return {"label": label, "user": account.name, "outcome": "failed",
+                        "problems": [_problem("bootout_failed", ("exit %d %s" % (code, tail)).strip())], "ok": False}
+        target = system.daemon_path(label)
+        if os.path.lexists(target):
+            os.unlink(target)
+        write_registry(system, [e for e in entries if e["label"] != label])
+    return {"label": label, "user": account.name, "outcome": "removed", "ok": True}
+
+
+def status(system, account):
+    rows = []
+    for entry in read_registry(system):
+        if entry.get("user") != account.name:
+            continue
+        target = system.daemon_path(entry["label"])
+        sha = _file_sha(target)
+        rows.append({"label": entry["label"], "uid": entry.get("uid"), "at": entry.get("at"),
+                     "daemon": target, "present": sha is not None,
+                     "matches": sha is not None and sha == entry.get("written_sha256"),
+                     "loaded": system.loaded(entry["label"])})
+    return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name,
+            "registry": system.registry_path(), "daemons": rows}
+
+
+# --- the command line ------------------------------------------------------------------------------------
+
+
+def version_line():
+    path = os.path.abspath(__file__)
+    with open(path, "rb") as stream:
+        digest = _sha256_bytes(stream.read())
+    return "space-daemons %s sha256 %s %s" % (SPACE_DAEMONS_VERSION, digest, path)
+
+
+def parser():
+    ap = argparse.ArgumentParser(prog="observatory-space-daemons",
+                                 description="run a headless space's background jobs as system-domain daemons "
+                                             "that run as that account (UserName), never as root")
+    ap.add_argument("--version", action="store_true", help="the version and the sha256 of this file")
+    sub = ap.add_subparsers(dest="command")
+    p = sub.add_parser("plan", help="what apply would write, for each definition; loads nothing")
+    p.add_argument("--user", required=True)
+    p.add_argument("--from", dest="source", choices=("background", "staged"), default="background")
+    p.add_argument("--label", action="append")
+    p.add_argument("--json", action="store_true")
+    a = sub.add_parser("apply", help="write and load the daemons (root, from the root-owned copy)")
+    a.add_argument("--user", required=True)
+    a.add_argument("--label", action="append")
+    a.add_argument("--json", action="store_true")
+    r = sub.add_parser("remove", help="unload one daemon this tool wrote and delete it (root)")
+    r.add_argument("--user", required=True)
+    r.add_argument("--label", required=True)
+    r.add_argument("--json", action="store_true")
+    s = sub.add_parser("status", help="the daemons this tool wrote for the account, loaded or not")
+    s.add_argument("--user", required=True)
+    s.add_argument("--json", action="store_true")
+    return ap
+
+
+def _render(command, result):
+    lines = []
+    if command == "plan":
+        lines.append("%d definition(s) in %s" % (len(result["definitions"]), result["folder"]))
+        for d in result["definitions"]:
+            verdict = "ok" if d["verdict"] == "ok" else "refused: " + ", ".join(
+                "%s (%s)" % (p["code"], p["detail"]) if p["detail"] else p["code"] for p in d["problems"])
+            lines.append("  %s  %s" % (d["label"], verdict))
+        for label in result["not_found"]:
+            lines.append("  %s  not found" % label)
+    elif command == "apply":
+        for r in result["results"]:
+            detail = "; ".join(p["code"] + (" (%s)" % p["detail"] if p["detail"] else "")
+                               for p in r.get("problems", []))
+            lines.append("  %s  %s%s" % (r["label"], r["outcome"], ": " + detail if detail else ""))
+        if not result["results"]:
+            lines.append("nothing to apply in %s" % result["folder"])
+    elif command == "remove":
+        lines.append("  %s  %s" % (result["label"], result["outcome"]))
+    else:
+        lines.append("%d daemon(s) of %s in %s" % (len(result["daemons"]), result["user"], result["registry"]))
+        for d in result["daemons"]:
+            lines.append("  %s  %s, %s" % (d["label"], "loaded" if d["loaded"] else "not loaded",
+                                          "as written" if d["matches"] else "changed or missing"))
+    return "\n".join(lines)
+
+
+def main(argv=None, system=None):
+    args = parser().parse_args(argv)
+    if args.version:
+        print(version_line())
+        return 0
+    if not args.command:
+        parser().print_usage(sys.stderr)
+        return 2
+    system = system or system_from_environment()
+    try:
+        account = lookup_account(args.user)
+        if args.command == "plan":
+            result = plan(account, args.source, args.label)
+            ok = all(d["verdict"] == "ok" for d in result["definitions"]) and not result["not_found"]
+        elif args.command == "apply":
+            result = apply(system, account, args.label)
+            ok = result["ok"]
+        elif args.command == "remove":
+            result = remove(system, account, args.label)
+            ok = result["ok"]
+        else:
+            result = status(system, account)
+            ok = True
+    except SpaceDaemonsError as exc:
+        if getattr(args, "json", False):
+            print(json.dumps({"error": str(exc)}, indent=2))
+        else:
+            print("space-daemons: %s" % exc, file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True) if args.json else _render(args.command, result))
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
