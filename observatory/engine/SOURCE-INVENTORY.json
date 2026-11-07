@@ -947,8 +947,8 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "ae5ffd94cb5781271368d0235d8a04f8e3c56225eaf19db4c976b940500b8218",
-      "bytes": 16707,
+      "export_sha256": "0d7ffbbd38264b275585598d910435b60060db78fbca75d1514f6d1f785c4270",
+      "bytes": 16889,
       "upstream_modified": true
     },
     {
@@ -3160,8 +3160,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5221873680c3713dccef2ea89c9407ef3d339ce10daaaad3184622704e81ceac",
-      "bytes": 74748
+      "export_sha256": "381ec1d95ead154f818a687d41400f3b0a4462d4bcac0d089fdcc40cdcffe7d1",
+      "bytes": 74904
     },
     {
       "path": "machine_view.py",
@@ -5394,8 +5394,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "64c94935a8356a9515d43eb916eebd21e744f30e54aa2674e8e785e216bda1ba",
-      "bytes": 166728
+      "export_sha256": "5d99af0ffe6f542e6d10d3fe8521bdf5f6ce9da82a824ea4a58850cb20afa97a",
+      "bytes": 167290
     },
     {
       "path": "tests/test_machine_findings.py",
@@ -6642,8 +6642,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "ded213a1823982b1aaa100abd9524d635f23786a4791e876ebc8c10e0d72086b",
-      "bytes": 74750,
+      "export_sha256": "c4d298414615f737344ca135890057eb520212749b6cd8734795923512e947ce",
+      "bytes": 76030,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -7665,8 +7665,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "6952a205c074a57dbef25e6b6aefea35bec6642a0d63f7802dba7d30689e8cfd",
-      "bytes": 62084,
+      "export_sha256": "f688cf868a2d34f876a40d4b9fe06463e9acacfef06dac6bfc7528969ea3f8f6",
+      "bytes": 62987,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

@@ -340,21 +340,33 @@ def secret_stores_inside(base: Path) -> list[str]:
     is never copied into a plaintext snapshot (`plaintext-output`) and is not listed. Locks and
     temporaries (`secret_store_carry.SKIPPED`) are not secrets; an empty store is not listed."""
     home = base.resolve()
+    unreadable = []
     try:
         doc = config.load(base)
     except config.ConfigurationError:
-        doc = {}
+        # The settings that name the stores cannot be read: an explicit plaintext copy fails closed.
+        doc, unreadable = {}, ['config/settings.json (unreadable: the secret stores it names are unknown)']
     sources = doc.get('sources') if isinstance(doc.get('sources'), dict) else {}
     values = [sources.get('secret_store'), sources.get('secrets'),
               os.environ.get(backup_vault.SECRETS_ENV), os.environ.get(backup_vault.VAULT_DIR_ENV)]
     candidates = [home / 'secrets']
+    # The node's private keys sit outside every vault store (review of OBS-389): the device keys, each
+    # organization's keys and the owner's share key, under OBSERVATORY_NODE or <home>/node.
+    node = Path(os.environ.get('OBSERVATORY_NODE') or home / 'node').expanduser().resolve()
+    if node == home / 'node' or home in node.parents:
+        candidates += [node / 'device', node / 'shares' / 'owner']
+        orgs = node / 'orgs'
+        if orgs.is_dir() and not orgs.is_symlink():
+            candidates += sorted(org / 'keys' for org in orgs.iterdir() if org.is_dir() and not org.is_symlink())
     for value in values:
         if isinstance(value, str) and value:
             path = Path(value).expanduser().resolve()
             if home in path.parents:
                 candidates.append(path)
-    found: list[str] = []
+    found: list[str] = list(unreadable)
     for store in candidates:
+        if not store.is_dir() or store.is_symlink():
+            continue
         rel = store.relative_to(home).as_posix()
         if rel in found or any(rel.startswith(f + '/') for f in found) or excluded(PurePosixPath(rel)):
             continue

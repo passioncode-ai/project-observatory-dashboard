@@ -1537,6 +1537,15 @@ class MachineMove(Base):
 
     # OBS-390: a definition staged by a restore days ago may name a release folder that a newer release
     # has since replaced; cutover refuses it by name instead of loading a job that cannot start.
+    def test_with_program_set_argv0_is_only_a_name(self):
+        # Review of OBS-390: launchd runs Program; ProgramArguments[0] is then only argv[0], so a cosmetic
+        # absolute argv0 that does not exist is no reason to refuse the definition.
+        import plistlib
+        plist = self.base / 'argv0.plist'
+        plist.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'Program': '/usr/bin/true',
+                                          'ProgramArguments': [str(self.base / 'no-such' / 'argv0')]}))
+        self.assertEqual(MM.stale_paths(plist), [])
+
     def test_a_stale_staged_plist_is_refused_before_anything_moves(self):
         import plistlib
         gone = self.base / 'releases' / 'old-release' / 'bin' / 'run'

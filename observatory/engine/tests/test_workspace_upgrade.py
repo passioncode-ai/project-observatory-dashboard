@@ -5,6 +5,7 @@ import contextlib
 import importlib
 import io
 import json
+from pathlib import PurePosixPath
 import os
 from pathlib import Path
 import shutil
@@ -187,6 +188,27 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertEqual(result['encrypted'],False)
         self.assertNotIn('warnings',result)
         self.assertTrue((out/'manifest.json').is_file())
+
+    def test_the_nodes_private_keys_count_with_no_vault_inside(self):
+        # Review of OBS-389: with the vault outside the home, the device, organization and owner keys
+        # under node/ were still copied in plaintext with no refusal.
+        (self.home/'secrets/demo-slot').unlink()
+        for rel in ('node/device/sig.pem','node/orgs/demo-org/keys/kem.pem','node/shares/owner/sig.pem'):
+            key=self.home/rel
+            key.parent.mkdir(parents=True,exist_ok=True)
+            key.write_text('synthetic key material')
+            self.assertEqual(upgrade.secret_stores_inside(self.home)[-1],str(PurePosixPath(rel).parent),rel)
+            key.unlink()
+        (self.home/'node/shares/owner/sig.pem').write_text('synthetic key material')
+        out=self.base/'plain copy'
+        with self.assertRaisesRegex(config.ConfigurationError,'node/shares/owner'):
+            upgrade.snapshot(self.home,out,writers_stopped=True)
+        self.assertFalse(out.exists())
+
+    def test_unreadable_settings_fail_closed(self):
+        (self.home/'secrets/demo-slot').unlink()
+        (self.home/'config/settings.json').write_text('{not json')
+        self.assertTrue(any('unreadable' in s for s in upgrade.secret_stores_inside(self.home)))
 
     def test_a_store_the_settings_put_inside_the_workspace_counts(self):
         (self.home/'secrets/demo-slot').unlink()
