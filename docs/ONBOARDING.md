@@ -2815,7 +2815,9 @@ keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables`, `WorkingDi
 `AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
 account in folders nobody else can write, and its paths stay inside the account's home. A file in
 `/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
-`/Library/Application Support/ProjectObservatory/space-daemons.json`. Once root loaded the job, a
+`/Library/Application Support/ProjectObservatory/space-daemons.json` (a stable interface, readable
+without root; its format is in COMPATIBILITY.md). One copy only: a label already loaded as an agent in
+the account's GUI domain (`loaded-in-gui`), or held by another account's entry, is refused. Once root loaded the job, a
 second `cutover` answers `"state": "complete"`, and `machine-move show` lists it under `background`
 as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-root` before).
 `leave` refuses while that daemon runs and names `sudo ... remove --user ACCOUNT --label LABEL`;

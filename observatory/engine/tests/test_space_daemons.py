@@ -37,16 +37,18 @@ ROOT_OWNED_PROGRAM = "/bin/sh"
 
 
 class Launchctl:
-    """A fake launchctl: records each call, answers `print system/LABEL` from `loaded` and every other
-    verb from `codes` (0 by default)."""
+    """A fake launchctl: records each call, answers `print system/LABEL` from `loaded`, `print
+    gui/UID/LABEL` from `agents`, and every other verb from `codes` (0 by default)."""
 
-    def __init__(self, loaded=(), codes=None):
-        self.calls, self.loaded, self.codes = [], set(loaded), dict(codes or {})
+    def __init__(self, loaded=(), codes=None, agents=()):
+        self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
 
     def __call__(self, argv, **kw):
         self.calls.append(list(argv[1:]))
         verb = argv[1]
-        if verb == "print":
+        if verb == "print" and argv[2].startswith("gui/"):
+            code = 0 if argv[2].rsplit("/", 1)[-1] in self.agents else 113
+        elif verb == "print":
             code = 0 if argv[2][len("system/"):] in self.loaded else 113
         else:
             code = self.codes.get(verb, 0)
@@ -120,18 +122,18 @@ class Pure(unittest.TestCase):
                 self.assertEqual(sd._writable_by_others(st, (0, 501)), expected)
 
     def test_the_daemon_runs_as_the_account(self):
-        account = sd.Account("space", 600, 20, "staff", "/Users/example")
+        account = sd.Account("space", 600, 20, "staff", "/var/empty/example-space")
         doc = {"Label": LABEL, "ProgramArguments": ["/bin/sh"], "LimitLoadToSessionType": "Aqua",
                "EnvironmentVariables": {"HOME": "/elsewhere", "PATH": "/usr/bin:/bin", "USER": "root"}}
         daemon = sd.daemon_plist(doc, account)
         self.assertEqual(daemon["Label"], LABEL)
         self.assertEqual((daemon["UserName"], daemon["GroupName"], daemon["InitGroups"]), ("space", "staff", True))
-        self.assertEqual(daemon["EnvironmentVariables"], {"HOME": "/Users/example", "USER": "space",
+        self.assertEqual(daemon["EnvironmentVariables"], {"HOME": "/var/empty/example-space", "USER": "space",
                                                           "LOGNAME": "space", "PATH": "/usr/bin:/bin"})
-        self.assertEqual(daemon["WorkingDirectory"], "/Users/example")
+        self.assertEqual(daemon["WorkingDirectory"], "/var/empty/example-space")
         self.assertNotIn("LimitLoadToSessionType", daemon)
-        self.assertEqual(sd.daemon_plist(dict(doc, WorkingDirectory="/Users/example/w"), account)["WorkingDirectory"],
-                         "/Users/example/w")
+        self.assertEqual(sd.daemon_plist(dict(doc, WorkingDirectory="/var/empty/example-space/w"), account)["WorkingDirectory"],
+                         "/var/empty/example-space/w")
 
 
 @unittest.skipUnless(POSIX, "accounts, owners and launchd are POSIX")
@@ -332,7 +334,7 @@ class Reading(Base):
 
 class Accounts(unittest.TestCase):
     class Entry:
-        def __init__(self, uid, gid=20, home="/Users/example"):
+        def __init__(self, uid, gid=20, home="/var/empty/example-space"):
             self.pw_uid, self.pw_gid, self.pw_dir = uid, gid, home
 
     class Group:
@@ -354,9 +356,9 @@ class Accounts(unittest.TestCase):
     def test_a_space_account(self):
         account = self.lookup("space", self.Entry(600))
         self.assertEqual((account.name, account.uid, account.group, account.home),
-                         ("space", 600, "staff", "/Users/example"))
+                         ("space", 600, "staff", "/var/empty/example-space"))
         self.assertEqual(account.background_dir(),
-                         "/Users/example/.local/share/project-observatory/background/LaunchAgents")
+                         "/var/empty/example-space/.local/share/project-observatory/background/LaunchAgents")
 
 
 class Applying(Base):
@@ -372,11 +374,18 @@ class Applying(Base):
         self.assertTrue(any(isinstance(c, int) for c in self.owner_calls), "the written file is made root's")
         self.assertIn(str(self.sysroot / sd.REGISTRY_DIR), self.owner_calls, "the registry folder is made root's")
         self.assertEqual(stat.S_IMODE((self.sysroot / sd.REGISTRY_DIR).stat().st_mode), 0o755)
-        entry = self.registry()["daemons"][0]
-        self.assertEqual({k: entry[k] for k in ("label", "user", "uid")}, {"label": LABEL, "user": "space",
-                                                                             "uid": os.getuid()})
-        self.assertEqual(entry["source_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
-        self.assertEqual(entry["written_sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        doc = self.registry()
+        self.assertEqual(sorted(doc), ["entries", "schema"])
+        self.assertEqual(doc["schema"], "observatory-space-daemons/1")
+        entry = doc["entries"][0]
+        self.assertEqual(sorted(entry), ["at", "label", "source", "sourceSha256", "uid", "user", "written",
+                                         "writtenSha256"], "the registry is a stable interface: exactly these")
+        self.assertEqual({k: entry[k] for k in ("label", "user", "uid", "source", "written")},
+                         {"label": LABEL, "user": "space", "uid": os.getuid(), "source": str(source),
+                          "written": str(path)})
+        self.assertEqual(entry["sourceSha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(entry["writtenSha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        self.assertRegex(entry["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertEqual(stat.S_IMODE((self.sysroot / sd.REGISTRY_DIR / sd.REGISTRY_NAME).stat().st_mode), 0o644)
         self.assertIn(["bootstrap", "system", str(path)], self.launchctl.calls)
 
@@ -429,10 +438,30 @@ class Applying(Base):
         self.assertEqual(result["results"][0]["problems"][0]["code"], "label_taken")
         self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls])
 
+    def test_a_label_loaded_as_an_agent_in_the_accounts_gui_domain_is_refused(self):
+        self.define()
+        self.launchctl.agents.add(LABEL)
+        result = sd.apply(self.system(), self.account)
+        self.assertEqual(result["results"][0]["problems"][0]["code"], "loaded-in-gui")
+        self.assertIn(["print", f"gui/{os.getuid()}/{LABEL}"], self.launchctl.calls)
+        self.assertFalse(self.daemon().exists(), "one copy only: nothing is written")
+        self.assertNotIn("bootstrap", [c[0] for c in self.launchctl.calls])
+
+    def test_a_label_another_accounts_entry_holds_is_refused(self):
+        self.define()
+        sd.write_registry(self.system(), [{"label": LABEL, "user": "other", "uid": os.getuid() + 1,
+                                           "source": "/var/empty/other/x.plist", "sourceSha256": "0",
+                                           "written": str(self.daemon()), "writtenSha256": "0",
+                                           "at": "2026-11-07T00:00:00Z"}])
+        result = sd.apply(self.system(), self.account)
+        self.assertEqual(result["results"][0]["problems"][0]["code"], "owned_by_other_account")
+        self.assertFalse(self.daemon().exists())
+        self.assertEqual(self.registry()["entries"][0]["user"], "other", "the other account's entry stays")
+
     def test_another_accounts_daemon_and_a_changed_file_are_refused(self):
         self.define()
         sd.apply(self.system(), self.account)
-        entries = self.registry()["daemons"]
+        entries = self.registry()["entries"]
         entries[0]["user"] = "other"
         sd.write_registry(self.system(), entries)
         self.assertEqual(sd.apply(self.system(), self.account)["results"][0]["problems"][0]["code"],
@@ -460,7 +489,7 @@ class Applying(Base):
         self.assertEqual(result["results"][0]["outcome"], "failed")
         self.assertEqual(result["results"][0]["problems"][0]["code"], "bootstrap_failed")
         self.assertFalse(self.daemon().exists())
-        self.assertEqual(self.registry()["daemons"], [])
+        self.assertEqual(self.registry()["entries"], [])
 
     def test_a_failed_bootstrap_puts_the_previous_daemon_back(self):
         self.define()
@@ -471,7 +500,7 @@ class Applying(Base):
         result = sd.apply(self.system(), self.account)
         self.assertEqual(result["results"][0]["put_back"], "the previous daemon is back")
         self.assertEqual(self.daemon().read_bytes(), before)
-        self.assertEqual(self.registry()["daemons"][0]["written_sha256"], hashlib.sha256(before).hexdigest())
+        self.assertEqual(self.registry()["entries"][0]["writtenSha256"], hashlib.sha256(before).hexdigest())
 
     def test_remove_takes_only_its_own_entries(self):
         self.define()
@@ -487,7 +516,7 @@ class Applying(Base):
         self.assertEqual(result["outcome"], "removed")
         self.assertIn(["bootout", f"system/{LABEL}"], self.launchctl.calls)
         self.assertFalse(self.daemon().exists())
-        self.assertEqual(self.registry()["daemons"], [])
+        self.assertEqual(self.registry()["entries"], [])
 
     def test_status_says_what_is_loaded_and_unchanged(self):
         self.define()

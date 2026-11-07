@@ -1712,8 +1712,9 @@ class HeadlessSpace(Base):
     def register(self, uid=UID, label=JOB_LABEL):
         path = self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json'
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({'schema': 'observatory-space-daemons/1', 'daemons': [
-            {'label': label, 'user': 'space', 'uid': uid, 'source_sha256': '0', 'written_sha256': '0',
+        path.write_text(json.dumps({'schema': 'observatory-space-daemons/1', 'entries': [
+            {'label': label, 'user': 'space', 'uid': uid, 'source': '/var/empty/space/x.plist', 'sourceSha256': '0',
+             'written': f'/Library/LaunchDaemons/{label}.plist', 'writtenSha256': '0',
              'at': '2026-11-07T00:00:00Z'}]}))
 
     def cutover(self, run):

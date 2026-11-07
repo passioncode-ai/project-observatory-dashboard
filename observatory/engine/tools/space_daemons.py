@@ -42,7 +42,10 @@ account or root owns in folders nobody else can write, paths inside the account'
 plist is those keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER and LOGNAME in its
 environment, written atomically to /Library/LaunchDaemons/<label>.plist (root:wheel 0644), then loaded
 with `launchctl bootstrap system`. A file it did not write is never replaced: what it wrote is recorded
-in /Library/Application Support/ProjectObservatory/space-daemons.json (root:wheel 0644).
+in /Library/Application Support/ProjectObservatory/space-daemons.json (root:wheel 0644), a stable
+interface other tools read without root: {"schema": "observatory-space-daemons/1", "entries": [{label,
+user, uid, source, sourceSha256, written, writtenSha256, at}]}. One copy only: a label loaded as an agent
+in the account's `gui/<uid>` domain (`loaded-in-gui`), or held by another account's entry, is refused.
 
 Standard library only, and Python 3.9 (macOS's /usr/bin/python3): nothing here imports the engine.
 
@@ -582,7 +585,8 @@ def _ensure_system_dir(path, system):
 
 
 def read_registry(system):
-    """The registry's entries ({label, user, uid, source_sha256, written_sha256, at}); [] when absent. One
+    """The registry's entries ({label, user, uid, source, sourceSha256, written, writtenSha256, at}); [] when
+    absent. One
     that does not read is refused by name, never replaced."""
     path = system.registry_path()
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -601,15 +605,14 @@ def read_registry(system):
     finally:
         if fd is not None:
             os.close(fd)
-    if not isinstance(doc, dict) or doc.get("schema") != REGISTRY_SCHEMA or not isinstance(doc.get("daemons"), list):
+    if not isinstance(doc, dict) or doc.get("schema") != REGISTRY_SCHEMA or not isinstance(doc.get("entries"), list):
         raise SpaceDaemonsError("the registry %s is not a %s file: move it aside" % (path, REGISTRY_SCHEMA))
-    return [e for e in doc["daemons"] if isinstance(e, dict) and isinstance(e.get("label"), str)]
+    return [e for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("label"), str)]
 
 
 def write_registry(system, entries):
     _ensure_system_dir(system.registry_dir(), system)
-    doc = {"schema": REGISTRY_SCHEMA, "updatedAt": _now(),
-           "daemons": sorted(entries, key=lambda e: e["label"])}
+    doc = {"schema": REGISTRY_SCHEMA, "entries": sorted(entries, key=lambda e: e["label"])}
     write_atomic(system.registry_path(), (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8"), system)
 
 
@@ -674,8 +677,13 @@ def _install_one(system, account, definition, entries):
     mine = [e for e in entries if e["label"] == label]
     entry = mine[0] if mine else None
     result = {"label": label, "file": definition["file"], "daemon": target}
-    if entry is not None and entry.get("user") != account.name:
+    if entry is not None and (entry.get("user") != account.name or entry.get("uid") != account.uid):
         result.update(outcome="refused", problems=[_problem("owned_by_other_account", str(entry.get("user")))])
+        return result
+    # One copy only: a job this account already runs as an agent is never started a second time as a daemon.
+    if system.run(["print", "gui/%d/%s" % (account.uid, label)])[0] == 0:
+        result.update(outcome="refused", problems=[_problem(
+            "loaded-in-gui", "gui/%d/%s is loaded; unload the agent first" % (account.uid, label))])
         return result
     previous = None
     if os.path.lexists(target):
@@ -687,7 +695,7 @@ def _install_one(system, account, definition, entries):
                 "not_written_by_this_tool", "%s exists and the registry does not name it" % target)])
             return result
         current = _file_sha(target)
-        if current != entry.get("written_sha256"):
+        if current != entry.get("writtenSha256"):
             result.update(outcome="refused", problems=[_problem(
                 "changed_since_written", "%s differs from what this tool wrote" % target)])
             return result
@@ -700,8 +708,9 @@ def _install_one(system, account, definition, entries):
     data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
     _ensure_system_dir(system.daemons_dir(), system)
     write_atomic(target, data, system)
-    new_entry = {"label": label, "user": account.name, "uid": account.uid,
-                 "source_sha256": definition["source_sha256"], "written_sha256": _sha256_bytes(data), "at": _now()}
+    new_entry = {"label": label, "user": account.name, "uid": account.uid, "source": definition["file"],
+                 "sourceSha256": definition["source_sha256"], "written": target,
+                 "writtenSha256": _sha256_bytes(data), "at": _now()}
     others = [e for e in entries if e["label"] != label]
     write_registry(system, others + [new_entry])
 
@@ -735,7 +744,7 @@ def _install_one(system, account, definition, entries):
     if code != 0:
         return put_back(_problem("bootstrap_failed", ("exit %d %s" % (code, tail)).strip()))
     entries[:] = others + [new_entry]
-    result.update(outcome="loaded", written_sha256=new_entry["written_sha256"])
+    result.update(outcome="loaded", written_sha256=new_entry["writtenSha256"])
     return result
 
 
@@ -788,7 +797,7 @@ def status(system, account):
         sha = _file_sha(target)
         rows.append({"label": entry["label"], "uid": entry.get("uid"), "at": entry.get("at"),
                      "daemon": target, "present": sha is not None,
-                     "matches": sha is not None and sha == entry.get("written_sha256"),
+                     "matches": sha is not None and sha == entry.get("writtenSha256"),
                      "loaded": system.loaded(entry["label"])})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name,
             "registry": system.registry_path(), "daemons": rows}

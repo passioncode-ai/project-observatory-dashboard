@@ -1171,7 +1171,7 @@ Failure paths: a plist with a key that would act with root's reach (`UserName`, 
 program or a path someone else could change, a label under `com.apple.`, a symlinked, oversized or group-writable
 plist, or a folder others can write is refused and named by `plan` and `apply`, never partly installed; a file in
 `/Library/LaunchDaemons` the tool did not write, a label someone else loaded, and another account's daemon are never
-replaced; a failed load puts back what was there. `apply` and `remove` refuse without root and from a copy that is
+replaced; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only); a failed load puts back what was there. `apply` and `remove` refuse without root and from a copy that is
 not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
 `XDG_DATA_HOME` is refused before anything moves (part 1).
 

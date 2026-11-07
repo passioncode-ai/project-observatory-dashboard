@@ -372,7 +372,28 @@ the background folder's jobs as defined here (M4) and adds one evidence line for
 |---|---|---|
 | `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
 | `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups` and HOME, USER, LOGNAME; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
-| `/Library/Application Support/ProjectObservatory/space-daemons.json` | schema `observatory-space-daemons/1`: `updatedAt`, `daemons[]` of `label`, `user`, `uid`, `source_sha256`, `written_sha256`, `at`; root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
+| `/Library/Application Support/ProjectObservatory/space-daemons.json` | the registry of what `apply` wrote, a stable interface (below); root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
+
+**The registry is a stable interface** that other tools (Fabric Dashboards among them) read without root. Its
+format, `observatory-space-daemons/1`, is exactly:
+
+```json
+{"schema": "observatory-space-daemons/1",
+ "entries": [{"label": "org.example.agent", "user": "space", "uid": 501,
+              "source": "/var/empty/space/.local/share/project-observatory/background/LaunchAgents/org.example.agent.plist",
+              "sourceSha256": "<hex>", "written": "/Library/LaunchDaemons/org.example.agent.plist",
+              "writtenSha256": "<hex>", "at": "2026-11-07T12:00:00Z"}]}
+```
+
+`label` is the launchd label; `user` and `uid` the account the daemon runs as; `source` the absolute path of the
+definition `apply` read and `sourceSha256` its bytes' SHA-256; `written` the absolute path of the daemon plist and
+`writtenSha256` the SHA-256 of what was written; `at` when, RFC 3339 in UTC. One entry per label, sorted by label;
+the file is replaced whole (written to a temporary file, synced, renamed). A reader treats a missing file as no
+entries, and a different `schema` as a format it does not know. A field is added only under a new schema name.
+
+One copy only: `apply` refuses a label loaded as an agent in that account's own GUI domain (`launchctl print
+gui/<uid>/<label>` exit 0, problem `loaded-in-gui`), and a label another account's entry holds
+(`owned_by_other_account`), and writes nothing for it.
 
 ## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, 0.34.0)
 
