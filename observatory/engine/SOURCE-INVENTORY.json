@@ -4024,8 +4024,8 @@
     {
       "path": "store/migrate.py",
       "source_sha256": "7f7ab93c500f075433b15d2d10e370b9de915271e0bc0ca6f8945beba4835443",
-      "export_sha256": "2668ecef0ca8febb7ab93a2dd6e22499f20de2308956476687553ed516da6e5a",
-      "bytes": 24184,
+      "export_sha256": "6d38688b9727c688906b4144aa2866510bbe9fdb698ee7cc4833871b7ca8b843",
+      "bytes": 33664,
       "python_comments_removed": 18,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -6118,8 +6118,8 @@
     {
       "path": "tests/test_schema_compatibility.py",
       "source_sha256": "3eb243e9cce5d649fe169aafc0d1537d04fb639c6ed33fcc618e251250ca30ec",
-      "export_sha256": "d9344aedf7f6bd77461f52b885ecb57b6e74c867e0700a59417e36af05a648ed",
-      "bytes": 14950,
+      "export_sha256": "a35c0dac27edd8ab8a4c968815c99299ecebe02a96f8217e5813bf85bbcaa97a",
+      "bytes": 21723,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

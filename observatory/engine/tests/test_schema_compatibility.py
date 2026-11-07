@@ -54,6 +54,44 @@ class _Changed:
         return "created"
 
 
+class _SameLineA:
+    @staticmethod
+    def migration(conn): "Doc."; conn.execute("DROP TABLE a")
+
+
+class _SameLineB:
+    @staticmethod
+    def migration(conn): "Doc."; conn.execute("DROP TABLE everything")
+
+
+class _Sql:
+    @staticmethod
+    def migration(conn):
+        conn.execute("""CREATE TABLE t (
+            id TEXT)""")
+
+
+class _SqlWithBlankLine:
+    @staticmethod
+    def migration(conn):
+        conn.execute("""CREATE TABLE t (
+
+            id TEXT)""")
+
+
+class _SqlWithTrailingSpaces:
+    @staticmethod
+    def migration(conn):
+        conn.execute("""CREATE TABLE t (   
+            id TEXT)""")
+
+class _Edited:
+    @staticmethod
+    def migration(conn):
+        conn.execute("DELETE FROM events")
+        return "edited"
+
+
 #: The version-stable digests (OBS-387) of the migrations this release ships,
 #: written out: a run under any interpreter that computes another value fails,
 #: which is the property the digest exists for.
@@ -393,12 +431,40 @@ class MigrationChecksums(unittest.TestCase):
         if not (3, 11) <= sys.version_info[:2] <= (3, 15):
             self.skipTest("the legacy table lists Python 3.11 to 3.15")
         for mid, fn in self.migrate.MIGRATIONS:
-            self.assertIn(self.migrate.ast_checksum(fn), self.migrate.LEGACY_AST_CHECKSUMS[mid], mid)
+            self.assertIn(self.migrate.ast_checksum(fn), self.migrate.LEGACY_AST_CHECKSUMS[mid][1], mid)
 
     def test_comments_docstrings_and_blank_lines_do_not_count(self):
         plain = self.migrate.checksum(_Plain.migration)
         self.assertEqual(plain, self.migrate.checksum(_Documented.migration))
         self.assertNotEqual(plain, self.migrate.checksum(_Changed.migration))
+
+    def test_the_pins_are_the_stable_digests(self):
+        self.assertEqual({mid: pin for mid, (pin, _) in self.migrate.LEGACY_AST_CHECKSUMS.items()},
+                         STABLE_CHECKSUMS)
+
+    def test_a_docstring_on_the_def_line_leaves_the_code_counted(self):
+        self.assertNotEqual(self.migrate.checksum(_SameLineA.migration),
+                            self.migrate.checksum(_SameLineB.migration))
+
+    def test_a_blank_line_inside_a_literal_counts(self):
+        self.assertNotEqual(self.migrate.checksum(_Sql.migration),
+                            self.migrate.checksum(_SqlWithBlankLine.migration))
+
+    def test_trailing_spaces_inside_a_literal_count(self):
+        self.assertNotEqual(self.migrate.checksum(_Sql.migration),
+                            self.migrate.checksum(_SqlWithTrailingSpaces.migration))
+
+    def test_an_edited_migration_is_refused_by_a_database_an_older_release_wrote(self):
+        conn = self.db.connect(self.target)
+        mid = '0001-events-occurred-at-utc'
+        old = next(iter(self.migrate.LEGACY_AST_CHECKSUMS[mid][1]))
+        conn.execute('UPDATE migration_checksums SET checksum=? WHERE id=?', (old, mid))
+        conn.commit()
+        conn.close()
+        edited = [(m, _Edited.migration if m == mid else fn) for m, fn in self.migrate.MIGRATIONS]
+        with patch.object(self.migrate, 'MIGRATIONS', edited):
+            with self.assertRaises(self.migrate.CompatibilityError):
+                self.db.connect(self.target)
 
     def test_a_fresh_store_records_the_stable_digest(self):
         conn = self.db.connect(self.target)
@@ -412,7 +478,7 @@ class MigrationChecksums(unittest.TestCase):
         for mid, fn in self.migrate.MIGRATIONS:
             # A digest another interpreter recorded: never this one's, so only the table admits it.
             own = self.migrate.ast_checksum(fn)
-            digest = next(d for d in sorted(self.migrate.LEGACY_AST_CHECKSUMS[mid]) if d != own)
+            digest = next(d for d in sorted(self.migrate.LEGACY_AST_CHECKSUMS[mid][1]) if d != own)
             foreign[mid] = digest
             conn.execute('UPDATE migration_checksums SET checksum=? WHERE id=?', (digest, mid))
         conn.commit()
@@ -426,7 +492,7 @@ class MigrationChecksums(unittest.TestCase):
 
     def test_a_listed_digest_of_another_migration_is_refused(self):
         conn = self.db.connect(self.target)
-        other = sorted(self.migrate.LEGACY_AST_CHECKSUMS['0002-drop-events-outside-the-estate'])[0]
+        other = sorted(self.migrate.LEGACY_AST_CHECKSUMS['0002-drop-events-outside-the-estate'][1])[0]
         conn.execute("UPDATE migration_checksums SET checksum=? WHERE id='0001-events-occurred-at-utc'", (other,))
         conn.commit()
         conn.close()
