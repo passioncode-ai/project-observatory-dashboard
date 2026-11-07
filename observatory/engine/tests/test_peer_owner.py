@@ -406,6 +406,7 @@ class RestrictedMacTable(unittest.TestCase):
 
     def setUp(self):
         self.patches = [mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True),
+                        mock.patch.object(P.os, "geteuid", return_value=F.OWN_UID, create=True),
                         mock.patch.object(P.os, "getpid", return_value=OWN_PID),
                         mock.patch.object(P.sys, "platform", "darwin"),
                         mock.patch.object(P.time, "sleep")]
@@ -456,9 +457,70 @@ class RestrictedMacTable(unittest.TestCase):
                                 P.Row(F.OWN_CLIENT, SERVER, False, F.OWN_UID, 12)])
 
     def test_a_table_with_only_this_process_or_nothing_is_restricted(self):
-        self.assertTrue(P.restricted([], OWN_PID))
-        self.assertTrue(P.restricted([self.row(SERVER, ("*", 0), OWN_PID, True)], OWN_PID))
-        self.assertFalse(P.restricted(P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT), OWN_PID))
+        self.assertTrue(P.restricted([], OWN_PID, F.OWN_UID))
+        self.assertTrue(P.restricted([self.row(SERVER, ("*", 0), OWN_PID, True)], OWN_PID, F.OWN_UID))
+        self.assertFalse(P.restricted(P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT), OWN_PID, F.OWN_UID))
+
+    def test_a_table_filtered_to_this_uid_is_restricted_too(self):
+        """A future filter by uid, not by pid: other processes of this uid only, no root socket."""
+        own_uid_only = [self.row(SERVER, ("*", 0), 4100, True), self.row(F.OWN_CLIENT, SERVER, 4300)]
+        self.assertTrue(P.restricted(own_uid_only, OWN_PID, F.OWN_UID))
+        self.assertFalse(P.restricted(own_uid_only + [P.Row(("127.0.0.1", 8021), ("*", 0), True, 0, 1)],
+                                      OWN_PID, F.OWN_UID))
+        with mock.patch.object(P, "read_own_sockets", return_value=[]):
+            with mock.patch.object(P, "read_table", return_value=(own_uid_only, "sysctl")):
+                owner = P.listener(47999)                               # another account's port, filtered out
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "table-restricted"))
+
+    def test_libproc_lists_only_this_uids_processes(self):
+        calls = []
+
+        def listpids(*args):
+            calls.append(args[:2])
+            return 0 if args[2] is not None else 8
+
+        lib = SimpleNamespace(proc_listpids=listpids, proc_pidinfo=lambda *a: 0, proc_pidfdinfo=lambda *a: 0)
+        with mock.patch.object(P.ctypes, "CDLL", return_value=lib):
+            with self.assertRaises(P.TableUnreadable):
+                P._libproc_sockets(P.time.monotonic() + 1)
+        self.assertEqual(calls, [(P.PROC_UID_ONLY, F.OWN_UID), (P.PROC_UID_ONLY, F.OWN_UID)])
+        self.assertEqual(P.PROC_UID_ONLY, 4)
+
+    def test_a_failed_libproc_calibration_answers_nothing(self):
+        saved = P._LIBPROC_OK[0]
+        P._LIBPROC_OK[0] = None
+        try:
+            with mock.patch.object(P, "_calibrate_libproc", return_value=False) as calibrate, \
+                    mock.patch.object(P, "_libproc_sockets", side_effect=AssertionError("read without calibration")):
+                with self.assertRaises(P.TableUnreadable):
+                    P.read_own_sockets()
+                with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
+                    answers = [P.peer(FakeSocket(SERVER, F.OWN_CLIENT)), P.server_end(FakeSocket(F.OWN_CLIENT, SERVER)),
+                               P.listener(F.SERVER_PORT)]
+            self.assertEqual(calibrate.call_count, 1)
+            for owner in answers:
+                self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "libproc: layout failed calibration"))
+        finally:
+            P._LIBPROC_OK[0] = saved
+
+    def test_a_setuid_context_is_refused_the_libproc_path(self):
+        with mock.patch.object(P.os, "geteuid", return_value=0), \
+                mock.patch.object(P, "_libproc_sockets", side_effect=AssertionError("read in a setuid context")):
+            with self.assertRaises(P.TableUnreadable) as raised:
+                P.read_own_sockets()
+            with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
+                owner = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
+        self.assertEqual(str(raised.exception), "setuid-context")
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "setuid-context"))
+
+    def test_one_deadline_bounds_every_libproc_read_of_a_question(self):
+        deadlines = []
+        reads = iter([[], [], [self.row(SERVER, F.OWN_CLIENT)]])
+        with mock.patch.object(P, "read_table", return_value=([], "sysctl")), \
+                mock.patch.object(P, "read_own_sockets", side_effect=lambda d=None: deadlines.append(d) or next(reads)):
+            P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        self.assertEqual(len(set(deadlines)), 1)
+        self.assertIsNotNone(deadlines[0])
 
     # answers, for both restricted shapes
 

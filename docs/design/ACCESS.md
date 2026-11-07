@@ -105,11 +105,15 @@ a referer are labels at most.
     running as root owns root's sockets; pid 1 stays the system's (`peer_owner.py` 1.2.0).
     On macOS 27 a process that is not Apple's own binary (Homebrew's or uv's Python) sees the
     socket table empty, or holding only its own rows. Such a restricted table (no row of another
-    pid, or unreadable) proves nothing absent, so the owner is read from this account's own
-    processes instead (`libproc`: `proc_listpids` for this uid, then each process's socket
+    uid, or of another pid where the table shows only pids, or unreadable) proves nothing absent,
+    so the owner is read from this account's own processes instead (`libproc`: `proc_listpids` for this uid, then each process's socket
     descriptors), which another account's processes refuse: a socket found there is this
     account's, anything else is `unknown` (`table-restricted`) and refused `peer-unverified`, never
-    `peer-foreign-account`; `listener` answers only for this account's exact 127.0.0.1 bind and
+    `peer-foreign-account`. The proof is that a process of this account holds the descriptor, not
+    the socket's own credential, so a socket another account passed in with SCM_RIGHTS to a process
+    of ours that takes foreign descriptors would read as ours; a client that knows the server's pid
+    closes that with `expect_pid`. A process whose real and effective uids differ is refused this
+    path (`setuid-context`). `listener` answers only for this account's exact 127.0.0.1 bind and
     never `none`; a client reads the server's accepted socket again for up to half a second, until
     the server has called `accept()` (`peer_owner.py` 1.3.0).
     - `test_foreign_and_unverified_are_refused_before_the_request_line`;
