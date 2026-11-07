@@ -375,9 +375,10 @@ def _check_as_root_will(path: Path, home: Path, uid: int) -> str:
         data = path.read_bytes()
     except OSError as exc:
         raise MachineMoveError(f"{path} cannot be read ({type(exc).__name__}); nothing moved") from None
-    doc, code = sd.parse_plist(data)
+    doc, code, detail = sd.parse_plist_detail(data)
     if code is not None:
-        raise MachineMoveError(f"the administrator's tool would refuse {path}: {code}. It stays where it was")
+        raise MachineMoveError(f"the administrator's tool would refuse {path}: {code}"
+                               + (f" ({detail})" if detail else "") + ". It stays where it was")
     label = doc.get("Label")
     name = f"{label}.plist" if isinstance(label, str) else path.name
     account = _space_account(home, uid)

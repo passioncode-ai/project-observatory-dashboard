@@ -44,9 +44,18 @@ class Launchctl:
         self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
         #: path -> ACL entries as `ls -lde` prints them; `stray` is an entry someone else left on every folder.
         self.acl, self.stray = {}, None
+        #: the members of admin as dsmemberutil answers; `ds_code` set makes it fail to answer.
+        self.admins, self.ds_code = set(), None
 
     def __call__(self, argv, **kw):
         tool = os.path.basename(argv[0])
+        if tool == "dsmemberutil":
+            self.calls.append(["dsmemberutil"] + list(argv[1:]))
+            if self.ds_code is not None:
+                return subprocess.CompletedProcess(argv, self.ds_code, "", "synthetic failure")
+            name = argv[argv.index("-U") + 1]
+            answer = sd.DS_MEMBER if name in self.admins else sd.DS_NOT_MEMBER
+            return subprocess.CompletedProcess(argv, 0, answer + "\n", "")
         if tool == "chmod":
             self.calls.append(["chmod"] + list(argv[1:]))
             code = self.codes.get("chmod " + argv[1], self.codes.get("chmod", 0))
@@ -443,6 +452,20 @@ class Reading(Base):
         self.assertEqual(sd.parse_plist(data), ({"Label": LABEL, "Note": "<!-- not a comment -->"}, None))
         self.assertEqual(sd.parse_plist(b"\x00\x01 not a plist"), (None, "unreadable_plist"))
 
+    def test_comments_beside_a_cdata_section_are_refused(self):
+        self.write_xml(b"<!-- run with --install-launchd --><key>Note</key><string><![CDATA[a <!-- b]]></string>")
+        d = sd.plan(self.account)["definitions"][0]
+        self.assertEqual(d["verdict"], ["xml_comment"])
+        self.assertIn("CDATA", d["problems"][0]["detail"])
+
+    def test_many_unclosed_comments_end_fast(self):
+        import time
+        data = b"<?xml version='1.0'?><plist><dict>" + b"<!--" * 16000
+        started = time.monotonic()
+        self.assertEqual(sd.parse_plist(data), (None, "xml_comment"))
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(sd.strip_xml_comments(b"a<!--x-->b<!---->c"), (b"abc", True))
+
     def test_a_comment_that_does_not_close_is_named(self):
         self.write_xml(b"<!-- run with --install-launchd ")
         self.assertEqual(sd.plan(self.account)["definitions"][0]["verdict"], ["xml_comment"])
@@ -516,6 +539,7 @@ class Trusting(Base):
         self.space = sd.Account("space", os.getuid() + 1, os.getgid(), "staff", str(self.home))
         self.users = {"hostadmin": os.getuid(), "space": os.getuid() + 1}
         self.groups = {"staff": os.getgid(), "admin": os.getgid()}
+        self.launchctl.admins = {"hostadmin", "space"}
         self.program = self.home / "opt" / "bin" / "python3"
         self.program.parent.mkdir(parents=True)
         self.program.write_text("#!/bin/sh\n")
@@ -598,13 +622,53 @@ class Trusting(Base):
         self.assertNotIn(self.space.uid, trust.uids)
         self.assertIn("space account itself", trust.warnings[0])
 
+    def test_only_wheel_admin_and_current_admins_are_trusted_when_read(self):
+        self.users["helper"] = os.getuid() + 3
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin", "helper"],
+                         "groups": ["admin", "staff", "everyone"]})
+        trust = self.trust()
+        self.assertEqual((trust.owners, trust.groups), (["hostadmin"], ["admin"]))
+        joined = " ".join(trust.warnings)
+        for part in ("helper is not a member of admin", "staff is not wheel or admin",
+                     "everyone is not wheel or admin"):
+            self.assertIn(part, joined)
+        self.launchctl.admins.discard("hostadmin")  # demoted since the file was written
+        trust = self.trust()
+        self.assertEqual(trust.owners, [])
+        self.assertEqual(self.codes(trust), ["program_dir_writable", "program_owner"], "trust stops at once")
+        self.launchctl.admins.add("hostadmin")
+        self.launchctl.ds_code = 127
+        trust = self.trust()
+        self.assertEqual(trust.owners, [])
+        self.assertIn("unknown admin membership", " ".join(trust.warnings))
+
+    def test_trust_set_refuses_what_is_not_root_equivalent(self):
+        self.users["helper"] = os.getuid() + 3
+        for owners, groups, code in ((["helper"], [], "not-admin"), ([], ["staff"], "group-not-allowed"),
+                                     ([], ["everyone"], "group-not-allowed")):
+            with self.subTest(owners=owners, groups=groups), self.assertRaises(sd.SpaceDaemonsError) as caught:
+                sd.write_trust(self.system(), owners, groups, self.getpwnam, self.getgrnam)
+            self.assertEqual(caught.exception.code, code)
+        self.launchctl.ds_code = 1
+        with self.assertRaises(sd.SpaceDaemonsError) as caught:
+            sd.write_trust(self.system(), ["hostadmin"], [], self.getpwnam, self.getgrnam)
+        self.assertEqual(caught.exception.code, "not-admin")
+        self.assertIn("unknown admin membership", str(caught.exception))
+        self.assertIn(["dsmemberutil", "checkmembership", "-U", "hostadmin", "-G", "admin"], self.launchctl.calls)
+        self.assertFalse((self.sysroot / sd.REGISTRY_DIR / sd.TRUST_NAME).exists())
+
     def test_trust_set_writes_the_file_as_root_only(self):
-        with self.assertRaisesRegex(sd.SpaceDaemonsError, "needs root"):
+        with self.assertRaises(sd.SpaceDaemonsError) as caught:
             sd.write_trust(self.system(euid=os.getuid() or 501), ["hostadmin"], [], self.getpwnam, self.getgrnam)
+        self.assertIn("trust set writes the root-owned trust file and needs root: sudo /usr/bin/python3 -I "
+                      "/usr/local/libexec/observatory-space-daemons trust set --owner", str(caught.exception))
+        self.assertNotIn("--user", str(caught.exception))
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "no account named"):
             sd.write_trust(self.system(), ["ghost"], [], self.getpwnam, self.getgrnam)
-        with self.assertRaisesRegex(sd.SpaceDaemonsError, "no group named"):
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "only wheel or admin"):
             sd.write_trust(self.system(), [], ["ghosts"], self.getpwnam, self.getgrnam)
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "no group named"):
+            sd.write_trust(self.system(), [], ["wheel"], self.getpwnam, self.getgrnam)
         result = sd.write_trust(self.system(), ["hostadmin"], ["admin"], self.getpwnam, self.getgrnam)
         path = self.sysroot / sd.REGISTRY_DIR / sd.TRUST_NAME
         self.assertEqual(json.loads(path.read_text()), {"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"],

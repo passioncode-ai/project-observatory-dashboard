@@ -55,9 +55,12 @@ copy goes in, which the administrator checks (`ls -ld /usr/local /usr/local/libe
 TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
 owned by the host's admin account and group-writable by `admin`, the administrator lists those in the
 root-owned trust file /Library/Application Support/ProjectObservatory/space-daemons-trust.json,
-{"schema": "observatory-space-daemons-trust/1", "owners": [...], "groups": [...]}. Only accounts that
-already hold root through sudo, and groups whose members all do, belong there. A file that is not
-root's alone is ignored with a warning; the space account itself is never trusted for its own jobs.
+{"schema": "observatory-space-daemons-trust/1", "owners": [...], "groups": [...]}. Only root-equivalents
+belong there: groups wheel or admin, owners that are members of admin (dsmemberutil, checked when set and
+again at every read). Any process running as a trusted admin, even without its sudo password, can replace
+those programs and so run code as every space that uses them: trust only when spaces are less trusted than
+the admin. A file that is not root's alone is ignored with a warning; the space account itself is never
+trusted for its own jobs.
 
 WHAT IT READS. The account's background folder, `<home>/.local/share/project-observatory/background/
 LaunchAgents/` (`full machine-move cutover` puts a job there when the account has no GUI session), or,
@@ -120,6 +123,11 @@ REGISTRY_NAME = "space-daemons.json"
 #: `admin`). Root-owned, beside the registry.
 TRUST_SCHEMA = "observatory-space-daemons-trust/1"
 TRUST_NAME = "space-daemons-trust.json"
+#: The only groups a trust file may name: their members hold root through sudo already.
+TRUSTED_GROUPS = ("wheel", "admin")
+DSMEMBERUTIL = "/usr/sbin/dsmemberutil"
+DS_MEMBER = "user is a member of the group"
+DS_NOT_MEMBER = "user is not a member of the group"
 MAX_TRUST_BYTES = 64 * 1024
 INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
 #: The organization's release key, pinned: the engine's `release_signature.PINNED` holds the same one (a
@@ -484,9 +492,9 @@ def read_definitions(folder, account, labels=None, log_dir=None, trust=None):
         doc, daemon, source = None, None, None
         if data is not None:
             source = _sha256_bytes(data)
-            doc, code = parse_plist(data)
+            doc, code, detail = parse_plist_detail(data)
             if code is not None:
-                problems.append(_problem(code))
+                problems.append(_problem(code, detail))
         notes = []
         if doc is not None:
             found, daemon = validate(doc, name, account, log_dir, trust)
@@ -501,32 +509,56 @@ def read_definitions(folder, account, labels=None, log_dir=None, trust=None):
     return out
 
 
-XML_COMMENT = re.compile(br"<!--.*?-->", re.DOTALL)
+def strip_xml_comments(data):
+    """(DATA without its XML comments, whether every comment closed), in one linear pass: find `<!--`, then
+    `-->` from there, keep the text between comments. A comment that never closes stops the pass at once."""
+    out, i = [], 0
+    while True:
+        start = data.find(b"<!--", i)
+        if start < 0:
+            out.append(data[i:])
+            return b"".join(out), True
+        out.append(data[i:start])
+        end = data.find(b"-->", start + 4)
+        if end < 0:
+            return b"".join(out), False
+        i = end + 3
 
 
-def parse_plist(data):
-    """(the definition as a dict, None) or (None, a problem code) from bytes already read once from the fd.
+def parse_plist_detail(data):
+    """(the definition as a dict, None, "") or (None, a problem code, why) from bytes already read once.
 
     launchd and plutil accept an XML comment holding `--` (`<!-- run with --install-launchd -->`), which XML
-    forbids and expat refuses. So an XML plist plistlib refuses is parsed once more with every comment
-    removed (non-greedy, on the bytes): a comment's text is never parsed, so nothing inside one becomes a key.
-    The daemon written is regenerated from what was parsed, never these bytes; `sourceSha256` stays the hash of
-    the original bytes. A binary plist is parsed as it is. Codes: `unreadable_plist`, `xml_comment` (a comment
-    that does not close), `not_a_dictionary`."""
+    forbids and expat refuses. So an XML plist plistlib refuses is parsed once more with its comments removed
+    (strip_xml_comments, on the bytes): a comment's text is never parsed, so nothing inside one becomes a key.
+    This is close to launchd's reading, not proven identical, so a plist that also holds a CDATA section (where
+    `<!--` is text, not a comment) is refused rather than guessed. The daemon written is regenerated from what was
+    parsed, never these bytes; `sourceSha256` stays the hash of the original bytes. A binary plist is parsed as
+    it is. Codes: `unreadable_plist`, `xml_comment` (a comment that does not close, or comments beside CDATA),
+    `not_a_dictionary`."""
     try:
         doc = plistlib.loads(data)
     except Exception:  # plistlib raises several types for a file that is not a plist
-        stripped_start = data.lstrip(b"\xef\xbb\xbf \t\r\n")
-        if not stripped_start.startswith(b"<"):
-            return None, "unreadable_plist"
-        without = XML_COMMENT.sub(b"", data)
+        if not data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<"):
+            return None, "unreadable_plist", ""
+        if b"<!--" in data and b"<![CDATA[" in data:
+            return None, "xml_comment", "XML comments had to be removed and the plist holds a CDATA section"
+        without, closed = strip_xml_comments(data)
+        if not closed:
+            return None, "xml_comment", "an XML comment does not close"
         try:
             doc = plistlib.loads(without)
         except Exception:  # still not a plist
-            return None, "xml_comment" if b"<!--" in without else "unreadable_plist"
+            return None, "unreadable_plist", ""
     if not isinstance(doc, dict):
-        return None, "not_a_dictionary"
-    return doc, None
+        return None, "not_a_dictionary", ""
+    return doc, None, ""
+
+
+def parse_plist(data):
+    """(the definition, None) or (None, a problem code): parse_plist_detail without the why."""
+    doc, code, _detail = parse_plist_detail(data)
+    return doc, code
 
 
 def definition_notes(doc):
@@ -576,6 +608,18 @@ def _read_root_file(path, folder, system, max_bytes):
         os.close(fd)
 
 
+def admin_member(system, name):
+    """Whether account NAME is a member of `admin` now (True or False), or None when it cannot be told:
+    `dsmemberutil checkmembership -U NAME -G admin` through the runner, its exact answer."""
+    code, out, _tail = system.output([DSMEMBERUTIL, "checkmembership", "-U", name, "-G", "admin"])
+    answer = (out or "").strip()
+    if code == 0 and answer == DS_MEMBER:
+        return True
+    if code == 0 and answer == DS_NOT_MEMBER:
+        return False
+    return None
+
+
 def read_trust(system, account=None, getpwnam=None, getgrnam=None):
     """The trust file for ACCOUNT, read only: an absent file trusts nobody; a file that fails root's checks,
     or does not read as the schema, is ignored with a warning, never trusted. An owner that is ACCOUNT
@@ -601,6 +645,12 @@ def read_trust(system, account=None, getpwnam=None, getgrnam=None):
         except (KeyError, TypeError):
             trust.warnings.append("trusted owner %s is not an account on this computer: left out" % name)
             continue
+        member = admin_member(system, name)
+        if member is not True:
+            # Checked at every read: a demotion, or a name added by hand, stops being trusted at once.
+            trust.warnings.append("trusted owner %s is %s: left out" % (
+                name, "not a member of admin" if member is False else "of unknown admin membership"))
+            continue
         if account is not None and uid == account.uid:
             trust.warnings.append("trusted owner %s is the space account itself: never trusted for its own jobs"
                                   % name)
@@ -608,6 +658,9 @@ def read_trust(system, account=None, getpwnam=None, getgrnam=None):
         trust.uids.add(uid)
         trust.owners.append(name)
     for name in doc.get("groups", []):
+        if name not in TRUSTED_GROUPS:
+            trust.warnings.append("trusted group %s is not wheel or admin: left out" % name)
+            continue
         try:
             gid = getgrnam(name).gr_gid
         except (KeyError, TypeError):
@@ -619,8 +672,10 @@ def read_trust(system, account=None, getpwnam=None, getgrnam=None):
 
 
 def write_trust(system, owners, groups, getpwnam=None, getgrnam=None):
-    """Replace the trust file (root, isolated, the root-owned copy): every name must exist here."""
-    _require_root(system, "trust set", "ACCOUNT")
+    """Replace the trust file (root, isolated, the root-owned copy): owners that exist and are members of
+    admin now, groups wheel or admin only."""
+    _require_root(system, "trust set", what="the root-owned trust file",
+                  usage="trust set --owner ADMIN --group admin")
     getpwnam = getpwnam or (pwd.getpwnam if pwd else None)
     getgrnam = getgrnam or (grp.getgrnam if grp else None)
     for name in owners:
@@ -631,7 +686,16 @@ def write_trust(system, owners, groups, getpwnam=None, getgrnam=None):
         if uid == 0:
             raise SpaceDaemonsError("root is always trusted; name the admin account that holds root through sudo",
                                     "unknown-owner")
+        member = admin_member(system, name)
+        if member is not True:
+            raise SpaceDaemonsError("%s is %s: only an account that already holds root through sudo (a member of "
+                                    "admin) may be trusted" % (name, "not a member of admin" if member is False
+                                                               else "of unknown admin membership (dsmemberutil did "
+                                                                    "not answer)"), "not-admin")
     for name in groups:
+        if name not in TRUSTED_GROUPS:
+            raise SpaceDaemonsError("only wheel or admin may be trusted, not %s: their members already hold root"
+                                    % name, "group-not-allowed")
         try:
             getgrnam(name)
         except (KeyError, TypeError):
@@ -950,15 +1014,15 @@ class _Lock(object):
         return False
 
 
-def _require_root(system, verb, account_name):
+def _require_root(system, verb, account_name=None, what="/Library/LaunchDaemons", usage=None):
+    usage = usage or "%s --user %s ..." % (verb, account_name)
     if system.euid != 0:
-        raise SpaceDaemonsError("%s writes /Library/LaunchDaemons and needs root: sudo %s %s --user %s ..."
-                                % (verb, INSTALLED_COMMAND, verb, account_name), "not-root")
+        raise SpaceDaemonsError("%s writes %s and needs root: sudo %s %s" % (verb, what, INSTALLED_COMMAND, usage),
+                                "not-root")
     if not system.isolated:
         raise SpaceDaemonsError("not-isolated: %s runs only in Python's isolated mode, so no module from the "
                                 "script's folder, the user's site-packages or a PYTHON* variable is used as root: "
-                                "sudo %s %s --user %s ..." % (verb, INSTALLED_COMMAND, verb, account_name),
-                                "not-isolated")
+                                "sudo %s %s" % (verb, INSTALLED_COMMAND, usage), "not-isolated")
     problems = system.self_check()
     if problems:
         raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once from the release, "
@@ -967,9 +1031,9 @@ def _require_root(system, verb, account_name):
                                 "(gpg is not on macOS by default), `gpg --status-fd 1 --verify SHA256SUMS.asc "
                                 "SHA256SUMS | grep -q \"VALIDSIG %s\"`, unzip -p the wheel's "
                                 "observatory/engine/tools/space_daemons.py; then `sudo install -o root -g wheel -m 0755 "
-                                "space_daemons.py %s` and run `sudo %s %s ...`"
+                                "space_daemons.py %s` and run `sudo %s %s`"
                                 % (verb, "; ".join(problems), RELEASE_KEY_URL, RELEASE_KEY_FINGERPRINT, INSTALLED_COPY,
-                                   INSTALLED_COMMAND, verb), "not-root-owned-copy")
+                                   INSTALLED_COMMAND, usage), "not-root-owned-copy")
 
 
 def _check_root_dir(path, system, mode=None):

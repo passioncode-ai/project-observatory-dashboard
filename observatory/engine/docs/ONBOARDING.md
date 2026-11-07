@@ -2876,9 +2876,10 @@ as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-
 as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
 entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
 `missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's.
-An XML comment holding `--` (which launchd and plutil accept and XML forbids) is read the way launchd
-reads it: the comments are removed from the bytes and the plist parsed again, so nothing inside a
-comment becomes a key; a comment that never closes is `xml_comment`.
+An XML comment holding `--` (which launchd and plutil accept and XML forbids) is tolerated: the
+comments are removed from the bytes in one pass and the plist parsed again, so nothing inside a comment
+becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
+or comments beside a CDATA section, are refused as `xml_comment`.
 
 **Trusted owners** (space daemons 1.1.0). On a Mac where Homebrew's prefix is owned by the host's admin
 account and its folders are group-writable by `admin`, every program there would be refused
@@ -2890,9 +2891,14 @@ sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust set 
 /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust show --user ACCOUNT
 ```
 
-Only accounts that already hold root through sudo, and groups whose members all do (`admin`), belong
-there: anything they can write, root could run as the space account. A folder writable by everyone
-is still refused unless sticky. The space account is never trusted for its own jobs (that entry is
+Only accounts that already hold root through sudo, and groups whose members all do, belong there:
+`trust set` takes only `wheel` or `admin` as groups and only owners that are members of `admin`
+(`dsmemberutil checkmembership -U NAME -G admin`), and refuses when membership cannot be told. Every
+read checks the same again, so a demoted owner, or a name or group added by hand, stops being trusted at
+once, with a warning. **What trusting costs:** any process running as that admin account, even without
+its sudo password, can replace the programs in those folders and so run code as every space that uses
+them. Trust the admin only when the spaces are less trusted than the admin. A folder writable by
+everyone is still refused unless sticky. The space account is never trusted for its own jobs (that entry is
 left out, with a warning). A trust file that is not root's alone (owner root, not writable by group or
 others, a real file in a root-only folder, at most 64 KiB) is ignored with a warning, never trusted.
 `cutover` reads the same file, read-only, so it accepts what `apply` will. One
