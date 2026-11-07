@@ -2837,8 +2837,11 @@ keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables` without `DY
 `KeepAlive` (a bool, or `SuccessfulExit`, `Crashed`, `AfterInitialDemand`, and `PathState` with paths
 inside the home; not `OtherJobEnabled`), `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
 `ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
-`AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
-account in folders nobody else can write, its `WorkingDirectory` stays inside the account's home,
+`AbandonProcessGroup`, `Umask` of 0 to 0777, `SoftResourceLimits` of launchd's limit names to
+non-negative integers; `LimitLoadToSessionType` and `AssociatedBundleIdentifiers` are dropped, `plan`
+noting `stripped`; `HardResourceLimits` stays refused), its program is owned by root, the account or a
+trusted owner, in folders nobody else can write, its `WorkingDirectory` stays inside the account's home
+(a `WorkingDirectory` of `/` becomes the home, `plan` noting `working-directory-home`),
 every integer fits 0 to 2147483647, and the daemon it would become writes as a plist. Its label is
 letters and digits, then `. _ @ -` (at most 128; `com.apple.` refused), carried by no other plist in
 `/Library/LaunchDaemons` or `/System/Library/LaunchDaemons`; `cutover` checks the same rules before it
@@ -2872,7 +2875,33 @@ as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-
 ... remove --user ACCOUNT --label LABEL`; after it, `leave` stages the plist from the background folder
 as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
 entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
-`missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's. One
+`missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's.
+An XML comment holding `--` (which launchd and plutil accept and XML forbids) is tolerated: the
+comments are removed from the bytes in one pass and the plist parsed again, so nothing inside a comment
+becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
+or comments beside a CDATA section, are refused as `xml_comment`.
+
+**Trusted owners** (space daemons 1.1.0). On a Mac where Homebrew's prefix is owned by the host's admin
+account and its folders are group-writable by `admin`, every program there would be refused
+(`program_owner`, `program_dir_writable`). The administrator may name, in a root-owned trust file,
+the accounts and groups whose files and folders a program path may belong to besides root:
+
+```sh
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust set --owner ADMIN --group admin
+/usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust show --user ACCOUNT
+```
+
+Only accounts that already hold root through sudo, and groups whose members all do, belong there:
+`trust set` takes only `wheel` or `admin` as groups and only owners that are members of `admin`
+(`dsmemberutil checkmembership -U NAME -G admin`), and refuses when membership cannot be told. Every
+read checks the same again, so a demoted owner, or a name or group added by hand, stops being trusted at
+once, with a warning. **What trusting costs:** any process running as that admin account, even without
+its sudo password, can replace the programs in those folders and so run code as every space that uses
+them. Trust the admin only when the spaces are less trusted than the admin. A folder writable by
+everyone is still refused unless sticky. The space account is never trusted for its own jobs (that entry is
+left out, with a warning). A trust file that is not root's alone (owner root, not writable by group or
+others, a real file in a root-only folder, at most 64 KiB) is ignored with a warning, never trusted.
+`cutover` reads the same file, read-only, so it accepts what `apply` will. One
 definition that fails in `apply` is reported as `failed` with its error, and the others go on. Root cannot see the account's
 `XDG_DATA_HOME`, so `cutover` refuses, before moving anything, in such an account with a custom one.
 

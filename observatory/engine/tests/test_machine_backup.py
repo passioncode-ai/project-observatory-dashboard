@@ -1813,6 +1813,26 @@ class HeadlessSpace(Base):
         with self.assertRaisesRegex(MM.MachineMoveError, 'label_shape'):
             MM.cutover(colon, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
 
+    def test_cutover_parses_and_trusts_as_root_will(self):
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        (folder / 'renamed.plist').write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>'
+            b'<!-- run with --install-launchd --><key>Label</key><string>' + JOB_LABEL.encode() +
+            b'</string><key>ProgramArguments</key><array><string>/usr/bin/true</string></array></dict></plist>\n')
+        sd = MM._space_daemons_module()
+        with patch.object(sd, 'read_trust', wraps=sd.read_trust) as read_trust:
+            result = MM.cutover('renamed.plist', self.home, runner=Launchd(), platform='darwin', uid=self.UID,
+                                confirm=YES)
+        self.assertTrue(read_trust.called, 'the trust file is read, read-only')
+        self.assertEqual(result['state'], 'waiting-for-root')
+        self.assertEqual(result['definition'], str(MI.background_dir(self.home) / f'{JOB_LABEL}.plist'),
+                         'named after the Label the comment-tolerant parse found')
+        (folder / 'open.plist').write_bytes(b'<?xml version="1.0"?><plist><dict><!-- never closed </dict></plist>')
+        with self.assertRaisesRegex(MM.MachineMoveError, 'xml_comment'):
+            MM.cutover('open.plist', self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+        self.assertTrue((folder / 'open.plist').is_file())
+
     def test_a_homebrew_label_moves_and_is_named_after_its_label(self):
         import plistlib
         label = 'homebrew.mxcl.postgresql@14'
