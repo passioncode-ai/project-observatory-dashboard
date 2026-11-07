@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-07: release 0.35.2](runs/2026-11-07-release-0.35.2/README.md): engine 0.35.2 (`observatory-log` stays
+0.30.0): the loopback owner check works on macOS 27, where a process sees only its own sockets (`peer_owner` 1.3.0,
+OBS-384, #465); a full table answers as before.
+
+Next: tag `v0.35.2`, verify and install (receipts in the record).
+
 [2026-11-07: release 0.35.1](runs/2026-11-07-release-0.35.1/README.md): engine 0.35.1 (`observatory-log` stays
 0.30.0): `machine-move cutover` also reads `launchctl print gui/<uid>` exit 125 as an account with nobody signed in
 (OBS-361 part 1), which macOS 26.6 answers there; 0.35.0 tried an agent load that launchd refused.

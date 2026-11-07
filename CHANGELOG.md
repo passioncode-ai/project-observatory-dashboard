@@ -3,6 +3,26 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.2 (2026-11-07)
+
+A security-check fix for macOS 27. There a process sees only its own sockets in the kernel's connection table, so the
+check that a local server or client belongs to your own account could read no owner at all and refused every loopback
+connection, your own included: services that run the check (on a computer with several accounts) stopped answering.
+Now the check finds the connection among your account's own processes instead. Another account's or the system's
+connection is still refused. Nothing needs you after installing.
+
+### Fixed
+
+- **The loopback owner check on macOS 27** (OBS-384, `peer_owner` 1.3.0, `docs/design/ACCESS.md` rule 10,
+  `docs/COMPATIBILITY.md` "macOS 27: a restricted connection table"). When the table a process reads (`sysctl
+  net.inet.tcp.pcblist_n`, or `netstat`, which on macOS 27.2 no longer prints `process:pid`) holds no row of another
+  account, `peer_owner` reads this account's own processes' sockets through libproc. A connection found there is
+  this account's; anything else is `unknown` (`table-restricted`) and refused, never another account's, the system's
+  or "nothing listens". A server end the server has not accepted yet is read again for up to half a second. The path
+  is refused to a process whose real and effective uids differ. A full table (macOS 26 and earlier) answers exactly
+  as before and never reads libproc. Measured on macOS 27.2 (own connections answer this account; every listener of
+  root and of three other accounts answers `table-restricted`) and on macOS 26.6.2.
+
 ## 0.35.1 (2026-11-07)
 
 A fix for 0.35.0: an account nobody has signed in to at the screen answers in a second way that it has no graphical
